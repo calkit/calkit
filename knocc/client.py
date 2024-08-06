@@ -32,7 +32,7 @@ def get_token() -> str:
     return token
 
 
-def get_headers(headers: dict | None) -> dict:
+def get_headers(headers: dict | None = None) -> dict:
     base_headers = {"Authorization": f"Bearer {get_token()}"}
     if headers is not None:
         return base_headers | headers

@@ -1,5 +1,11 @@
 """The command line interface."""
 
+import typer
+
 
 def main() -> None:
-    pass
+    print("Hey")
+
+
+def run() -> None:
+    typer.run(main)

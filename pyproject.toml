@@ -16,7 +16,16 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
+dependencies = [
+    "typer",
+    "keyring",
+    "pyjwt",
+    "requests",
+]
 
 [project.urls]
 Homepage = "https://github.com/knocc-dev/knocc"
 Issues = "https://github.com/knocc-dev/knocc/issues"
+
+[project.scripts]
+knocc = "knocc.cli:run"

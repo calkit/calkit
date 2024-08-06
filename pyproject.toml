@@ -17,12 +17,13 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "typer",
+    "dvc",
     "keyring",
     "pydantic[email]",
     "pydantic-settings",
     "pyjwt",
     "requests",
+    "typer",
 ]
 
 [project.urls]

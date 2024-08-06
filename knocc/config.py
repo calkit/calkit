@@ -4,7 +4,7 @@ import os
 
 import keyring
 import yaml
-from pydantic import EmailStr
+from pydantic import EmailStr, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     )
     username: EmailStr
 
+    @computed_field
     @property
     def password(self) -> str:
         return keyring.get_password(__package__, self.username)
@@ -28,8 +29,11 @@ class Settings(BaseSettings):
     def write(self) -> None:
         base_dir = os.path.dirname(self.model_config["yaml_file"])
         os.makedirs(base_dir, exist_ok=True)
+        cfg = self.model_dump()
+        # Remove password
+        _ = cfg.pop("password")
         with open(self.model_config["yaml_file"], "w") as f:
-            yaml.dump(self.model_dump(), f, Dumper=yaml.SafeDumper)
+            yaml.safe_dump(cfg, f)
 
 
 def read() -> Settings:

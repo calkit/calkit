@@ -11,9 +11,11 @@ app.add_typer(config_app, name="config")
 
 @config_app.command(name="set")
 def set_config_value(key: str, value: str):
-    cfg = config.read().model_dump()
-    cfg[key] = value
-    cfg = config.Settings.model_validate(cfg)
+    try:
+        cfg = config.read()
+        cfg = config.Settings.model_validate(cfg.model_dump() | {key: value})
+    except FileNotFoundError:
+        cfg = config.Settings.model_validate({key: value})
     cfg.write()
 
 

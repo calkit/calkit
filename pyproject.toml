@@ -19,6 +19,8 @@ classifiers = [
 dependencies = [
     "typer",
     "keyring",
+    "pydantic[email]",
+    "pydantic-settings",
     "pyjwt",
     "requests",
 ]

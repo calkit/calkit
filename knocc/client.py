@@ -33,7 +33,7 @@ def auth() -> str:
     base_url = get_base_url()
     resp = requests.post(
         base_url + "/login/access-token",
-        data=dict(username=cfg["username"], password=cfg["password"]),
+        data=dict(username=cfg.username, password=cfg.password),
     )
     token = resp.json()["access_token"]
     _tokens[base_url] = token

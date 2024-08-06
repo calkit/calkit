@@ -1,8 +1,8 @@
 """The command line interface."""
 
-from . import config
-
 import typer
+
+from . import config
 
 app = typer.Typer()
 config_app = typer.Typer()

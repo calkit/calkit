@@ -1,0 +1,6 @@
+# Keep MS office files out of Git, but still version them
+# maybe they are synced via Dropbox or something, but we still track if
+# they've changed?
+*.docx
+*.xls
+*.xlsx

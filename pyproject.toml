@@ -18,6 +18,7 @@ classifiers = [
 ]
 dependencies = [
     "dvc",
+    "gitpython",
     "keyring",
     "pydantic[email]",
     "pydantic-settings",

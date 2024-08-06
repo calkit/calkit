@@ -1,5 +1,7 @@
 """The REST API client."""
 
+import os
+
 import requests
 
 from . import config
@@ -13,7 +15,9 @@ def get_base_url() -> str:
 
     TODO: Use production, but respect env variable.
     """
-    return "http://localhost"
+    urls = {"local": "http://localhost", "prod": "TODO"}
+    default_env = "local"
+    return urls[os.getenv(__package__.upper() + "_ENV") or default_env]
 
 
 def get_token() -> str:

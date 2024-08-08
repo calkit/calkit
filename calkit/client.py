@@ -1,6 +1,8 @@
 """The REST API client."""
 
 import os
+from functools import partial
+from typing import Literal
 
 import requests
 
@@ -53,7 +55,8 @@ def auth() -> str:
     return token
 
 
-def get(
+def _request(
+    kind: Literal["get", "post", "put", "patch", "delete"],
     path: str,
     params: dict | None = None,
     json: dict | None = None,
@@ -62,7 +65,8 @@ def get(
     as_json=True,
     **kwargs,
 ):
-    resp = requests.get(
+    func = getattr(requests, kind)
+    resp = func(
         get_base_url() + path,
         params=params,
         json=json,
@@ -75,6 +79,13 @@ def get(
         return resp.json()
     else:
         return resp
+
+
+get = partial(_request, "get")
+post = partial(_request, "post")
+patch = partial(_request, "patch")
+put = partial(_request, "put")
+delete = partial(_request, "delete")
 
 
 def get_current_user() -> dict:

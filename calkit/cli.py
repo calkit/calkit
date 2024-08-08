@@ -18,6 +18,9 @@ def set_config_value(key: str, value: str):
         # Types have been validated above, so this won't hurt to do again
         setattr(cfg, key, value)
     except FileNotFoundError:
+        # TODO: This fails if we try to set password before any config has
+        # been written
+        # Username is fine
         cfg = config.Settings.model_validate({key: value})
     cfg.write()
 

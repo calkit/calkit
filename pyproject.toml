@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "knocc"
+name = "calkit"
 version = "0.0.1"
 authors = [
   { name="Pete Bachant", email="petebachant@gmail.com" },
@@ -28,8 +28,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/knocc-dev/knocc"
-Issues = "https://github.com/knocc-dev/knocc/issues"
+Homepage = "https://github.com/calkit/calkit"
+Issues = "https://github.com/calkit/calkit/issues"
 
 [project.scripts]
-knocc = "knocc.cli:run"
+calkit = "calkit.cli:run"

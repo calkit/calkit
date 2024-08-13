@@ -3,14 +3,16 @@
 import os
 import pty
 import subprocess
+import sys
 
 import typer
+from typing_extensions import Annotated, Optional
 
 from . import config
 
 app = typer.Typer()
 config_app = typer.Typer()
-app.add_typer(config_app, name="config")
+app.add_typer(config_app, name="config", help="Configure Calkit.")
 
 
 @config_app.command(name="set")
@@ -53,6 +55,36 @@ def get_status():
         print()
         print_sep("Data")
         pty.spawn(["dvc", "status"], lambda fd: os.read(fd, 1024))
+
+
+@app.command(name="add")
+def add(paths: list[str]):
+    """Add paths to the repo.
+
+    Code will be added to Git and data will be added to DVC.
+    """
+    dvc_extensions = [".png", ".h5", ".parquet", ".pickle"]
+    dvc_size_thresh_bytes = 1_000_000
+    dvc_folders = ["data", "figures"]
+    if "." in paths:
+        print("ERROR: Cannot add '.' with calkit; use git or dvc")
+        sys.exit(1)
+    for path in paths:
+        if os.path.isdir(path):
+            print("ERROR: Cannot add directories with calkit; use git or dvc")
+            sys.exit(1)
+        # Detect if this file should be tracked with Git or DVC
+        # TODO: Add to whatever
+
+
+@app.command(name="commit")
+def commit(
+    all: Annotated[Optional[bool], typer.Option("--all", "-a")] = False,
+    message: Annotated[Optional[str], typer.Option("--message", "-m")] = None,
+):
+    """Commit a change to the repo."""
+    print(all, message)
+    raise NotImplementedError
 
 
 def run() -> None:

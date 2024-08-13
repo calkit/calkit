@@ -89,4 +89,4 @@ delete = partial(_request, "delete")
 
 
 def get_current_user() -> dict:
-    return get("/users/me")
+    return get("/user")

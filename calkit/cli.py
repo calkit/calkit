@@ -9,6 +9,7 @@ import typer
 from typing_extensions import Annotated, Optional
 
 from . import config
+from .dvc import configure_remote
 
 app = typer.Typer()
 config_app = typer.Typer()
@@ -35,6 +36,11 @@ def set_config_value(key: str, value: str):
 def get_config_value(key: str) -> None:
     cfg = config.read()
     print(getattr(cfg, key))
+
+
+@config_app.command(name="setup-remote")
+def setup_remote():
+    configure_remote()
 
 
 @app.command(name="status")

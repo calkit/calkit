@@ -9,7 +9,7 @@ import typer
 from typing_extensions import Annotated, Optional
 
 from . import config
-from .dvc import configure_remote
+from .dvc import configure_remote, set_remote_auth
 
 app = typer.Typer()
 config_app = typer.Typer()
@@ -41,6 +41,7 @@ def get_config_value(key: str) -> None:
 @config_app.command(name="setup-remote")
 def setup_remote():
     configure_remote()
+    set_remote_auth()
 
 
 @app.command(name="status")

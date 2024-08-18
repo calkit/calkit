@@ -94,5 +94,12 @@ def commit(
     raise NotImplementedError
 
 
+@app.command(name="server")
+def run_server():
+    import uvicorn
+
+    uvicorn.run("calkit.server:app", port=8866, host="localhost", reload=True)
+
+
 def run() -> None:
     app()

@@ -18,6 +18,7 @@ classifiers = [
 ]
 dependencies = [
     "dvc",
+    "fastapi",
     "gitpython",
     "keyring",
     "pydantic[email]",

@@ -1,3 +1,3 @@
 from . import git
 from . import dvc
-from .client import *
+from . import cloud

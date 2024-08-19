@@ -37,6 +37,8 @@ def write_data(
 
     If the dataset path is a directory, the filename must be specified.
 
+    If the path is not a Calkit dataset, it will be created.
+
     If ``commit`` is specified, create a commit for the dataset update.
     """
     pass

@@ -21,6 +21,8 @@ dependencies = [
     "fastapi",
     "gitpython",
     "keyring",
+    "pandas",
+    "polars",
     "pydantic[email]",
     "pydantic-settings",
     "pyjwt",

@@ -1,6 +1,7 @@
 """Configuration."""
 
 import os
+from typing import Literal
 
 import keyring
 import yaml
@@ -16,6 +17,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
     username: EmailStr
+    dataframe_engine: Literal["pandas", "polars"] = "pandas"
 
     @computed_field
     @property

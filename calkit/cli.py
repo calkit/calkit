@@ -98,7 +98,13 @@ def commit(
 def run_server():
     import uvicorn
 
-    uvicorn.run("calkit.server:app", port=8866, host="localhost", reload=True)
+    uvicorn.run(
+        "calkit.server:app",
+        port=8866,
+        host="localhost",
+        reload=True,
+        reload_dirs=[os.path.dirname(__file__)],
+    )
 
 
 def run() -> None:

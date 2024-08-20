@@ -25,7 +25,13 @@ def read_data(
     first.
 
     If the dataset path includes a user and project name, we add it to the
-    project as an imported dataset?
+    project as an imported dataset, and therefore DVC import it?
+
+    For example: someuser/someproject:data/somefile.parquet
+
+    We can run a DVC import command if it needs to be imported. We will need to
+    find the Git repo and path within it? Maybe we should require an explicit
+    import of the data.
     """
     pass
 

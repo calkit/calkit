@@ -23,6 +23,9 @@ def read_data(
 
     If the dataset doesn't exist locally, but is a DVC object, download it
     first.
+
+    If the dataset path includes a user and project name, we add it to the
+    project as an imported dataset?
     """
     pass
 

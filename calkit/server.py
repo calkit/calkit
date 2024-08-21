@@ -3,8 +3,8 @@
 import os
 import subprocess
 
-import git
 import dvc
+import git
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 

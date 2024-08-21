@@ -69,3 +69,8 @@ def get_status():
     # }
     dvc_status = dvc.repo.status.status(dvc_repo)
     # TODO: Structure this in an intelligent way and return something
+
+
+@app.post("/open/vscode")
+def open_vscode() -> int:
+    return os.system("code .")

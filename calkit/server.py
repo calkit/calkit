@@ -30,8 +30,19 @@ def get_cwd() -> str:
 
 
 @app.get("/ls")
-def get_ls(dir: str = "."):
-    return subprocess.check_output(["ls", dir]).decode()
+def get_ls(dir: str = ".") -> list[dict]:
+    repo = git.Repo()
+    contents = os.listdir(dir)
+    resp = []
+    for item in contents:
+        if item == ".git" or repo.ignored(item):
+            continue
+        if os.path.isfile(os.path.join(dir, item)):
+            kind = "file"
+        else:
+            kind = "dir"
+        resp.append(dict(name=item, type=kind))
+    return sorted(resp, key=lambda item: (item["type"], item["name"]))
 
 
 @app.post("/git/{command}")

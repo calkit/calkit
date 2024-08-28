@@ -9,7 +9,7 @@ REMOTE_NAME = "local"  # TODO: Use package name
 
 def configure_remote():
     project_name = calkit.git.detect_project_name()
-    base_url = calkit.get_base_url()
+    base_url = calkit.cloud.get_base_url()
     remote_url = f"{base_url}/projects/{project_name}/dvc"
     subprocess.call(
         ["dvc", "remote", "add", "-d", "-f", REMOTE_NAME, remote_url]
@@ -21,7 +21,7 @@ def set_remote_auth():
     """Get a token and set it in the local config so we can interact with
     the API.
     """
-    token = calkit.auth()
+    token = calkit.cloud.auth()
     subprocess.call(
         [
             "dvc",

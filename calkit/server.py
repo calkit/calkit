@@ -90,5 +90,5 @@ def open_vscode() -> int:
 
 
 @app.get("/jupyter/servers")
-def get_jupyter_servers() -> list[calkit.jupyter.Servers]:
+def get_jupyter_servers() -> list[calkit.jupyter.Server]:
     return calkit.jupyter.get_servers()

@@ -8,6 +8,8 @@ import git
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
+import calkit
+
 app = FastAPI(title="calkit-server")
 
 app.add_middleware(
@@ -85,3 +87,8 @@ def get_status():
 @app.post("/open/vscode")
 def open_vscode() -> int:
     return os.system("code .")
+
+
+@app.get("/jupyter/servers")
+def get_jupyter_servers() -> list[calkit.jupyter.Servers]:
+    return calkit.jupyter.get_servers()

@@ -8,6 +8,8 @@ import sys
 import typer
 from typing_extensions import Annotated, Optional
 
+import calkit
+
 from . import config
 from .dvc import configure_remote, set_remote_auth
 
@@ -98,6 +100,12 @@ def commit(
 def run_server():
     import uvicorn
 
+    # Start jupyter server in this directory if one doesn't exist
+    # We need to enable all origins so we can embed it in an iframe
+    servers = calkit.jupyter.get_servers()
+    wdirs = [server.wdir for server in servers]
+    if os.getcwd() not in wdirs:
+        calkit.jupyter.start_server()
     uvicorn.run(
         "calkit.server:app",
         port=8866,

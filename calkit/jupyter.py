@@ -25,3 +25,20 @@ def get_servers() -> list[Server]:
             token = url.split("?token=")[-1]
             resp.append(Server(url=url, wdir=wdir, token=token))
     return resp
+
+
+def start_server():
+    subprocess.Popen(
+        [
+            "jupyter",
+            "lab",
+            "-y",
+            "--no-browser",
+            "--NotebookApp.allow_origin='*'",
+            (
+                "--NotebookApp.tornado_settings="
+                "{'headers':{'Access-Control-Allow-Origin':'*',"
+                "'Content-Security-Policy':'frame-ancestors *;'}}"
+            ),
+        ]
+    )

@@ -1,11 +1,11 @@
 """A local server for interacting with project repos."""
 
 import os
-import subprocess
 
 import dvc
 import git
 from fastapi import FastAPI
+from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 
 import calkit
@@ -24,6 +24,42 @@ app.add_middleware(
 @app.get("/health")
 def get_health() -> str:
     return "All good!"
+
+
+class RootResponse(BaseModel):
+    owner_name: str
+    project_name: str
+    cwd: str
+    jupyter_url: str | None
+    jupyter_token: str | None
+
+
+@app.get("/")
+def get_root() -> RootResponse:
+    """Return information about the current running server.
+
+    - The project owner
+    - The project name
+    - The current working directory
+    - A Jupyter server running here, if applicable
+    """
+    project = calkit.git.detect_project_name()
+    owner, name = project.split("/")
+    servers = calkit.jupyter.get_servers()
+    cwd = os.getcwd()
+    url = token = None
+    for server in servers:
+        if server.wdir == cwd:
+            url = server.url
+            token = server.token
+            break
+    return RootResponse(
+        owner_name=owner,
+        project_name=name,
+        cwd=cwd,
+        jupyter_token=token,
+        jupyter_url=url,
+    )
 
 
 @app.get("/cwd")

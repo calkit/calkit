@@ -28,17 +28,24 @@ def get_servers() -> list[Server]:
 
 
 def start_server():
+    """Start a Jupyter server in the current directory.
+
+    TODO: Set the origins appropriately for running from the main Calkit
+    website.
+    """
     subprocess.Popen(
         [
             "jupyter",
             "lab",
             "-y",
             "--no-browser",
-            "--NotebookApp.allow_origin='*'",
+            "--NotebookApp.allow_origin='http://localhost:*'",
             (
                 "--NotebookApp.tornado_settings="
-                "{'headers':{'Access-Control-Allow-Origin':'*',"
-                "'Content-Security-Policy':'frame-ancestors *;'}}"
+                "{'headers':{'Access-Control-Allow-Origin'"
+                ":'http://localhost:*',"
+                "'Content-Security-Policy'"
+                ":'frame-ancestors http://localhost:*;'}}"
             ),
         ]
     )

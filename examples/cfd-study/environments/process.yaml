@@ -1,3 +1,0 @@
-kind: conda
-params:
-  environment-file: environment.yml

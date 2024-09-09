@@ -1,0 +1,9 @@
+questions:
+  - What is the drag coefficient of this shape?
+environments:
+  - path: sim/Dockerfile
+    name: cfd
+    kind: docker
+  - path: environment.yml
+    name: processing
+    kind: conda

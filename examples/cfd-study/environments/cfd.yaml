@@ -1,4 +1,0 @@
-kind: docker
-name: cfd
-params:
-  dockerfile: dockerfiles/cfd/Dockerfile

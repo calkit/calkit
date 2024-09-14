@@ -17,7 +17,7 @@ def get_base_url() -> str:
 
     TODO: Use production, but respect env variable.
     """
-    urls = {"local": "http://localhost/api/v1", "prod": "TODO"}
+    urls = {"local": "http://api.localhost", "prod": "TODO"}
     default_env = "local"
     return urls[os.getenv(__package__.upper() + "_ENV") or default_env]
 

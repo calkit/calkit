@@ -28,6 +28,9 @@ def get_token() -> str:
     Automatically reauthenticate if the token doesn't exist or has expired.
     """
     token = _tokens.get(get_base_url())
+    if token is None:
+        token = config.read().token
+        _tokens[get_base_url()] = token
     # TODO: Check for expiration
     if token is None:
         return auth()

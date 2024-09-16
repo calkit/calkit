@@ -21,11 +21,10 @@ def configure_remote():
 def set_remote_auth():
     """Get a token and set it in the local config so we can interact with
     the API.
-
-    # TODO: This should probably create a longer-lived token and perhaps not
-    # use a stored password, despite it being stored in the system keyring.
     """
-    token = calkit.cloud.auth()
+    token = calkit.cloud.post(
+        "/user/tokens", json=dict(expires_days=365, scope="dvc")
+    )["access_token"]
     subprocess.call(
         [
             "dvc",

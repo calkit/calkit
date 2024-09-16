@@ -13,13 +13,13 @@ _tokens = {}
 
 
 def get_base_url() -> str:
-    """Get the API base URL.
-
-    TODO: Use production, but respect env variable.
-    """
-    urls = {"local": "http://api.localhost", "prod": "TODO"}
-    default_env = "local"
-    return urls[os.getenv(__package__.upper() + "_ENV") or default_env]
+    """Get the API base URL."""
+    urls = {
+        "local": "http://api.localhost",
+        "staging": "https://api.staging.calkit.io",
+        "production": "https://api.calkit.io",
+    }
+    return urls[config.get_env()]
 
 
 def get_token() -> str:

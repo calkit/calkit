@@ -37,7 +37,11 @@ def set_config_value(key: str, value: str):
 @config_app.command(name="get")
 def get_config_value(key: str) -> None:
     cfg = config.read()
-    print(getattr(cfg, key))
+    val = getattr(cfg, key)
+    if val is not None:
+        print(val)
+    else:
+        print()
 
 
 @config_app.command(name="setup-remote")

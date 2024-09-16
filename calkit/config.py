@@ -38,7 +38,8 @@ class Settings(BaseSettings):
         ),
         extra="ignore",
     )
-    username: EmailStr
+    username: EmailStr | None = None
+    token: str | None = None
     dataframe_engine: Literal["pandas", "polars"] = "pandas"
 
     @computed_field
@@ -63,5 +64,7 @@ class Settings(BaseSettings):
 def read() -> Settings:
     """Read the config."""
     fpath = Settings.model_config["yaml_file"]
+    if not os.path.isfile(fpath):
+        return Settings()
     with open(fpath) as f:
         return Settings.model_validate(yaml.safe_load(f))

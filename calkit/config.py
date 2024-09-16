@@ -9,10 +9,32 @@ from pydantic import EmailStr, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def get_env() -> Literal["local", "staging", "production"]:
+    return os.getenv(f"{__package__.upper()}_ENV", "production")
+
+
+def set_env(name: Literal["local", "staging", "production"]) -> None:
+    if name not in ["local", "staging", "production"]:
+        raise ValueError(f"{name} is not a valid environment name")
+    os.environ[f"{__package__.upper()}_ENV"] = name
+
+
+def get_env_suffix() -> str:
+    if get_env() != "production":
+        return "-" + get_env()
+    return ""
+
+
+def get_app_name() -> str:
+    return __package__ + get_env_suffix()
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         yaml_file=os.path.join(
-            os.path.expanduser("~"), "." + __package__, "config.yaml"
+            os.path.expanduser("~"),
+            "." + __package__,
+            f"config{get_env_suffix()}.yaml",
         ),
         extra="ignore",
     )
@@ -22,11 +44,11 @@ class Settings(BaseSettings):
     @computed_field
     @property
     def password(self) -> str:
-        return keyring.get_password(__package__, self.username)
+        return keyring.get_password(get_app_name(), self.username)
 
     @password.setter
     def password(self, value: str) -> None:
-        keyring.set_password(__package__, self.username, value)
+        keyring.set_password(get_app_name(), self.username, value)
 
     def write(self) -> None:
         base_dir = os.path.dirname(self.model_config["yaml_file"])

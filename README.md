@@ -1,22 +1,22 @@
-# Knoki: The knowledge creation kit
+# Calkit
 
-Knoki makes reproducibility automatic, because reproducibility means
+Calkit makes reproducibility automatic, because reproducibility means
 productivity.
 
-Like Git/GitHub, you don't need a cloud server or host to use knoki,
+Like Git/GitHub, you don't need a cloud server or host to use Calkit,
 but it unlocks
 some nice features,
 such as the ability to backup your work,
 offload simulation and/or data processing,
 and of course collaborate with others.
 
-In fact, Knoki works as a layer on top of Git,
+In fact, Calkit works as a layer on top of Git,
 so the main structure of the project is a Git repo.
 The layer on top provides for data and software environment handling.
 
 ## Data connectors
 
-Knoki's data storage model takes advantage of the user's local machine when
+Calkit's data storage model takes advantage of the user's local machine when
 desired,
 and automatically syncs with other storage locations as needed.
 The goal is to be able to process data locally or in the cloud with
@@ -32,7 +32,7 @@ pushed to the cloud repository for post-processing, backup, or sharing.
 
 ## Building on someone else's work
 
-1. Fork their project on knoki.io.
+1. Fork their project on calkit.io.
 2. Import someone's figure into your project. You will be able to update.
 
 ## Features
@@ -40,7 +40,7 @@ pushed to the cloud repository for post-processing, backup, or sharing.
 Sometimes we may have Jupyter Notebooks with large outputs we want to be able
 to save, but not in Git.
 We strip output before putting into version control,
-but allow the output to be pushed to the Knoki repo and pulled down.
+but allow the output to be pushed to the Calkit repo and pulled down.
 So, if the notebook was run by a collaborator, or in the cloud,
 you can view the output without needing to regenerate it,
 and of course, it's not inflating the Git repo.

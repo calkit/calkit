@@ -27,8 +27,8 @@ def get_servers() -> list[Server]:
     return resp
 
 
-def start_server():
-    """Start a Jupyter server in the current directory.
+def start_server(wdir=None):
+    """Start a Jupyter server.
 
     TODO: Set the origins appropriately for running from the main Calkit
     website.
@@ -47,5 +47,6 @@ def start_server():
                 "'Content-Security-Policy'"
                 ":'frame-ancestors http://localhost:*;'}}"
             ),
-        ]
+        ],
+        cwd=wdir,
     )

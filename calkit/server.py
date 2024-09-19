@@ -4,7 +4,7 @@ import os
 
 import dvc
 import git
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 
@@ -109,15 +109,16 @@ def get_cwd() -> str:
     return os.getcwd()
 
 
-@app.get("/ls")
-def get_ls(dir: str = ".") -> list[dict]:
-    repo = git.Repo()
-    contents = os.listdir(dir)
+@app.get("/projects/{owner_name}/{project_name}/ls")
+def get_ls(owner_name: str, project_name: str) -> list[dict]:
+    project = get_local_project(owner_name, project_name)
+    repo = git.Repo(project.wdir)
+    contents = os.listdir(project.wdir)
     resp = []
     for item in contents:
         if item == ".git" or repo.ignored(item):
             continue
-        if os.path.isfile(os.path.join(dir, item)):
+        if os.path.isfile(os.path.join(project.wdir, item)):
             kind = "file"
         else:
             kind = "dir"
@@ -125,27 +126,31 @@ def get_ls(dir: str = ".") -> list[dict]:
     return sorted(resp, key=lambda item: (item["type"], item["name"]))
 
 
-@app.post("/git/{command}")
-def run_git_command(command: str, params: dict = {}):
-    func = getattr(git.Repo().git, command)
+@app.post("/projects/{owner_name}/{project_name}/git/{command}")
+def run_git_command(
+    owner_name: str, project_name: str, command: str, params: dict = {}
+):
+    project = get_local_project(owner_name, project_name)
+    func = getattr(git.Repo(project.wdir).git, command)
     return func(**params)
 
 
 @app.get("/diff")
 def get_diff():
     """Get differences in working directory, from both Git and DVC."""
-    pass
+    raise HTTPException(501)
 
 
-@app.get("/status")
-def get_status():
+@app.get("/projects/{owner_name}/{project_name}/status")
+def get_status(owner_name: str, project_name: str):
     """Get status in working directory, from both Git and DVC."""
-    git_repo = git.Repo()
+    project = get_local_project(owner_name, project_name)
+    git_repo = git.Repo(project.wdir)
     untracked_git_files = git_repo.untracked_files
     # Get a list of diffs of the working tree to the index
     git_diff = git_repo.index.diff(None)
     git_diff_files = [d.a_path for d in git_diff]
-    dvc_repo = dvc.repo.Repo()
+    dvc_repo = dvc.repo.Repo(project.wdir)
     # Get a dictionary of DVC artifacts that have changed, keyed by the DVC
     # file, where values are a list, which may include a dict with a
     # 'changed outs' key, e.g.,
@@ -162,9 +167,10 @@ def get_status():
     # TODO: Structure this in an intelligent way and return something
 
 
-@app.post("/open/vscode")
-def open_vscode() -> int:
-    return os.system("code .")
+@app.post("/projects/{owner_name}/{project_name}/open/vscode")
+def open_vscode(owner_name: str, project_name: str) -> int:
+    project = get_local_project(owner_name, project_name)
+    return os.system(f"code {project.wdir}")
 
 
 @app.get("/jupyter/servers")

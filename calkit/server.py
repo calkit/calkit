@@ -3,6 +3,7 @@
 import os
 
 import dvc
+import dvc.repo
 import git
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -163,7 +164,11 @@ def get_status(owner_name: str, project_name: str):
     #     ]
     # }
     dvc_status = dvc.repo.status.status(dvc_repo)
-    # TODO: Structure this in an intelligent way and return something
+    # TODO: Structure this in an intelligent way
+    return {
+        "dvc": dvc_status,
+        "git": {"untracked": untracked_git_files, "diff": git_diff_files},
+    }
 
 
 @app.post("/projects/{owner_name}/{project_name}/open/vscode")

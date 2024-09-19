@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 
 import calkit
+import calkit.jupyter
 
 app = FastAPI(title="calkit-server")
 
@@ -68,7 +69,9 @@ def get_root() -> list[LocalProject]:
 
 
 @app.get("/projects/{owner_name}/{project_name}")
-def get_local_project(owner_name: str, project_name: str) -> LocalProject:
+def get_local_project(
+    owner_name: str, project_name: str
+) -> LocalProject | None:
     all_projects = get_root()
     for project in all_projects:
         if (
@@ -76,6 +79,29 @@ def get_local_project(owner_name: str, project_name: str) -> LocalProject:
             and project.project_name == project_name
         ):
             return project
+
+
+@app.get("/projects/{owner_name}/{project_name}/jupyter-server")
+def get_project_jupyter_server(
+    owner_name: str, project_name: str, autostart=False
+) -> calkit.jupyter.Server | None:
+    project = get_local_project(
+        owner_name=owner_name, project_name=project_name
+    )
+    if project is None:
+        return
+    if project.jupyter_url is not None:
+        return calkit.jupyter.Server(
+            url=project.jupyter_url,
+            token=project.jupyter_token,
+            wdir=project.wdir,
+        )
+    if autostart:
+        calkit.jupyter.start_server(project.wdir)
+        servers = calkit.jupyter.get_servers()
+        for server in servers:
+            if server.wdir == project.wdir:
+                return server
 
 
 @app.get("/cwd")

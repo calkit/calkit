@@ -26,16 +26,16 @@ def get_health() -> str:
     return "All good!"
 
 
-class RootResponse(BaseModel):
+class LocalProject(BaseModel):
     owner_name: str
     project_name: str
-    cwd: str
+    wdir: str
     jupyter_url: str | None
     jupyter_token: str | None
 
 
 @app.get("/")
-def get_root() -> RootResponse:
+def get_root() -> list[LocalProject]:
     """Return information about the current running server.
 
     - The project owner
@@ -43,23 +43,28 @@ def get_root() -> RootResponse:
     - The current working directory
     - A Jupyter server running here, if applicable
     """
-    project = calkit.git.detect_project_name()
-    owner, name = project.split("/")
+    resp = []
+    project_dirs = calkit.find_project_dirs()
     servers = calkit.jupyter.get_servers()
-    cwd = os.getcwd()
-    url = token = None
-    for server in servers:
-        if server.wdir == cwd:
-            url = server.url
-            token = server.token
-            break
-    return RootResponse(
-        owner_name=owner,
-        project_name=name,
-        cwd=cwd,
-        jupyter_token=token,
-        jupyter_url=url,
-    )
+    for pdir in project_dirs:
+        project = calkit.git.detect_project_name(path=pdir)
+        owner, name = project.split("/")
+        url = token = None
+        for server in servers:
+            if server.wdir == pdir:
+                url = server.url
+                token = server.token
+                break
+        resp.append(
+            LocalProject(
+                owner_name=owner,
+                project_name=name,
+                wdir=os.path.abspath(pdir),
+                jupyter_token=token,
+                jupyter_url=url,
+            )
+        )
+    return resp
 
 
 @app.get("/cwd")

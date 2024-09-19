@@ -3,14 +3,10 @@
 import git
 
 
-def detect_project_name() -> str:
+def detect_project_name(path=None) -> str:
     """Read the project owner and name from the remote.
 
     TODO: Currently only works with GitHub remotes.
     """
-    url = git.Repo().remote().url
-    return (
-        url.removeprefix("git@github.com:")
-        .removeprefix("https://github.com/")
-        .removesuffix(".git")
-    )
+    url = git.Repo(path=path).remote().url
+    return url.split("github.com")[-1][1:].removesuffix(".git")

@@ -69,9 +69,7 @@ def get_root() -> list[LocalProject]:
 
 
 @app.get("/projects/{owner_name}/{project_name}")
-def get_local_project(
-    owner_name: str, project_name: str
-) -> LocalProject | None:
+def get_local_project(owner_name: str, project_name: str) -> LocalProject:
     all_projects = get_root()
     for project in all_projects:
         if (
@@ -79,6 +77,7 @@ def get_local_project(
             and project.project_name == project_name
         ):
             return project
+    raise HTTPException(404)
 
 
 @app.get("/projects/{owner_name}/{project_name}/jupyter-server")

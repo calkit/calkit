@@ -67,6 +67,17 @@ def get_root() -> list[LocalProject]:
     return resp
 
 
+@app.get("/projects/{owner_name}/{project_name}")
+def get_local_project(owner_name: str, project_name: str) -> LocalProject:
+    all_projects = get_root()
+    for project in all_projects:
+        if (
+            project.owner_name == owner_name
+            and project.project_name == project_name
+        ):
+            return project
+
+
 @app.get("/cwd")
 def get_cwd() -> str:
     return os.getcwd()

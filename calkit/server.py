@@ -16,7 +16,12 @@ app = FastAPI(title="calkit-server")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: Allow localhost and Calkit website only?
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost",
+        "https://calkit.io",
+        "https://staging.calkit.io",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

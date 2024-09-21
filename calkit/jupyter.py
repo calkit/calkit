@@ -4,6 +4,8 @@ import subprocess
 
 from pydantic import BaseModel
 
+import calkit
+
 
 class Server(BaseModel):
     url: str
@@ -33,19 +35,25 @@ def start_server(wdir=None):
     TODO: Set the origins appropriately for running from the main Calkit
     website.
     """
+    origins = dict(
+        local="http://localhost:*",
+        production="https://calkit.io",
+        staging="https://staging.calkit.io",
+    )
+    allow_origin = origins[calkit.config.get_env()]
     subprocess.Popen(
         [
             "jupyter",
             "lab",
             "-y",
             "--no-browser",
-            "--NotebookApp.allow_origin='http://localhost:*'",
+            f"--ServerApp.allow_origin='{allow_origin}'",
             (
-                "--NotebookApp.tornado_settings="
+                "--ServerApp.tornado_settings="
                 "{'headers':{'Access-Control-Allow-Origin'"
-                ":'http://localhost:*',"
+                f":'{allow_origin}',"
                 "'Content-Security-Policy'"
-                ":'frame-ancestors http://localhost:*;'}}"
+                f":'frame-ancestors {allow_origin};'}}}}"
             ),
         ],
         cwd=wdir,

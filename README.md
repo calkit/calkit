@@ -11,7 +11,7 @@ single repository.
 Simply run
 
 ```sh
-pip install calkit
+pip install calkit-python
 ```
 
 ## Cloud integration

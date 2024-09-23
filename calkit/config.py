@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     )
     username: EmailStr | None = None
     token: str | None = None
+    dvc_token: str | None = None
     dataframe_engine: Literal["pandas", "polars"] = "pandas"
 
     @computed_field

@@ -1,9 +1,13 @@
 """Working with DVC."""
 
+import logging
 import subprocess
 
 import calkit
 from calkit.config import get_app_name
+
+logger = logging.getLogger(__package__)
+logger.setLevel(logging.INFO)
 
 
 def configure_remote():
@@ -19,12 +23,17 @@ def configure_remote():
 
 
 def set_remote_auth():
-    """Get a token and set it in the local config so we can interact with
-    the API.
+    """Get a token and set it in the local DVC config so we can interact with
+    the cloud as an HTTP remote.
     """
-    token = calkit.cloud.post(
-        "/user/tokens", json=dict(expires_days=365, scope="dvc")
-    )["access_token"]
+    settings = calkit.config.read()
+    if settings.dvc_token is None:
+        logger.info("Creating token for DVC scope")
+        token = calkit.cloud.post(
+            "/user/tokens", json=dict(expires_days=365, scope="dvc")
+        )["access_token"]
+        settings.dvc_token = token
+        settings.write()
     subprocess.call(
         [
             "dvc",
@@ -44,6 +53,6 @@ def set_remote_auth():
             "--local",
             get_app_name(),
             "password",
-            f"Bearer {token}",
+            f"Bearer {settings.dvc_token}",
         ]
     )

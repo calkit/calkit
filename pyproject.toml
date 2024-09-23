@@ -8,7 +8,7 @@ dynamic = ["version"]
 authors = [
   { name="Pete Bachant", email="petebachant@gmail.com" },
 ]
-description = "Reproducibility made easy"
+description = "Reproducibility made easy."
 readme = "README.md"
 requires-python = ">=3.8"
 classifiers = [

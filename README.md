@@ -1,52 +1,50 @@
 # Calkit
 
-Calkit makes reproducibility automatic, because reproducibility means
-productivity.
+[Calkit](https://calkit.io) makes reproducible research easy,
+acting as a layer on top of
+[Git](https://git-scm.com/) and [DVC](https://dvc.org/), such that all
+all materials involved in the research process can be fully described in a
+single repository.
 
-Like Git/GitHub, you don't need a cloud server or host to use Calkit,
-but it unlocks
-some nice features,
-such as the ability to backup your work,
-offload simulation and/or data processing,
-and of course collaborate with others.
+## Installation
 
-In fact, Calkit works as a layer on top of Git,
-so the main structure of the project is a Git repo.
-The layer on top provides for data and software environment handling.
+Simply run
 
-## Data connectors
+```sh
+pip install calkit
+```
 
-Calkit's data storage model takes advantage of the user's local machine when
-desired,
-and automatically syncs with other storage locations as needed.
-The goal is to be able to process data locally or in the cloud with
-the same amount of effort, e.g.,
-to test a pipeline locally but export to the cloud once it's
-trustworthy,
-maybe a small chunk of data is processed.
+## Cloud integration
 
-As it's needed, data is cached lazily in the local repository.
+The Calkit cloud platform (https://calkit.io) serves as a project
+management interface and a DVC remote for easily storing all versions of your
+data/code/figures/publications, interacting with your collaborators,
+reusing others' research artifacts, etc.
 
-Similarly, if new data is created, e.g., from simulations, it can be
-pushed to the cloud repository for post-processing, backup, or sharing.
+After signing up, visit the [settings](https://calkit.io/settings) page
+and create a token.
+Then run
 
-## Building on someone else's work
+```sh
+calkit config set token ${YOUR_TOKEN_HERE}
+```
 
-1. Fork their project on calkit.io.
-2. Import someone's figure into your project. You will be able to update.
+Then, inside a project repo you'd like to connect to the cloud, run
 
-## Features
+```sh
+calkit config setup-remote
+```
 
-Sometimes we may have Jupyter Notebooks with large outputs we want to be able
-to save, but not in Git.
-We strip output before putting into version control,
-but allow the output to be pushed to the Calkit repo and pulled down.
-So, if the notebook was run by a collaborator, or in the cloud,
-you can view the output without needing to regenerate it,
-and of course, it's not inflating the Git repo.
+This will setup the Calkit DVC remote, such that commands like `dvc push` will
+allow you to push versions of your data or pipeline outputs to the cloud
+for safe storage and sharing with your collaborators.
 
-### Parameter sweeps that generate lots of data
+## How it works
 
-For example, doing CFD simulations.
-Do we want to be able to restore a full dataset from one run?
-Or do we only want to have post-processed data?
+Calkit creates a simple human-readable "database" inside the `calkit.yaml`
+file, which serves as a way to store important information about the project,
+e.g., what question(s) it seeks to answer,
+what files should be considered datasets, figures, publications, etc.
+The Calkit cloud reads this database and registers the various entities
+as part of the entire ecosystem such that if a project is made public,
+other researchers can find and reuse your work to accelerate their own.

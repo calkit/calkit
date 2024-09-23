@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "calkit"
-version = "0.0.1"
+dynamic = ["version"]
 authors = [
   { name="Pete Bachant", email="petebachant@gmail.com" },
 ]
@@ -36,3 +36,6 @@ Issues = "https://github.com/calkit/calkit/issues"
 
 [project.scripts]
 calkit = "calkit.cli:run"
+
+[tool.hatch.version]
+path = "calkit/__init__.py"

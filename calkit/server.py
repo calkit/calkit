@@ -1,5 +1,7 @@
 """A local server for interacting with project repos."""
 
+from __future__ import annotations
+
 import os
 
 import dvc

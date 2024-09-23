@@ -1,5 +1,7 @@
 """Functionality for working with datasets."""
 
+from __future__ import annotations
+
 from typing import Literal, Union
 
 import pandas as pd

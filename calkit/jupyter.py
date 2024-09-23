@@ -29,32 +29,14 @@ def get_servers() -> list[Server]:
     return resp
 
 
-def start_server(wdir=None):
-    """Start a Jupyter server.
-
-    TODO: Set the origins appropriately for running from the main Calkit
-    website.
-    """
-    origins = dict(
-        local="http://localhost:*",
-        production="https://calkit.io",
-        staging="https://staging.calkit.io",
-    )
-    allow_origin = origins[calkit.config.get_env()]
+def start_server(wdir=None, no_browser=False):
+    """Start a Jupyter server."""
     subprocess.Popen(
         [
             "jupyter",
             "lab",
             "-y",
-            "--no-browser",
-            f"--ServerApp.allow_origin='{allow_origin}'",
-            (
-                "--ServerApp.tornado_settings="
-                "{'headers':{'Access-Control-Allow-Origin'"
-                f":'{allow_origin}',"
-                "'Content-Security-Policy'"
-                f":'frame-ancestors {allow_origin};'}}}}"
-            ),
+            "--no-browser" if no_browser else "",
         ],
         cwd=wdir,
     )

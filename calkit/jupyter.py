@@ -4,8 +4,6 @@ import subprocess
 
 from pydantic import BaseModel
 
-import calkit
-
 
 class Server(BaseModel):
     url: str
@@ -40,3 +38,9 @@ def start_server(wdir=None, no_browser=False):
         ],
         cwd=wdir,
     )
+
+
+def stop_server(url: str):
+    # Extract the port from the URL
+    port = url.split(":")[2][:4]
+    subprocess.call(["jupyter", "server", "stop", port])

@@ -88,7 +88,10 @@ def get_local_project(owner_name: str, project_name: str) -> LocalProject:
 
 @app.get("/projects/{owner_name}/{project_name}/jupyter-server")
 def get_project_jupyter_server(
-    owner_name: str, project_name: str, autostart=False
+    owner_name: str,
+    project_name: str,
+    autostart=False,
+    no_browser=False,
 ) -> calkit.jupyter.Server | None:
     project = get_local_project(
         owner_name=owner_name, project_name=project_name
@@ -102,11 +105,22 @@ def get_project_jupyter_server(
             wdir=project.wdir,
         )
     if autostart:
-        calkit.jupyter.start_server(project.wdir)
+        calkit.jupyter.start_server(project.wdir, no_browser=no_browser)
         servers = calkit.jupyter.get_servers()
         for server in servers:
             if server.wdir == project.wdir:
                 return server
+
+
+@app.delete("/projects/{owner_name}/{project_name}/jupyter-server")
+def stop_project_jupyter_server(owner_name: str, project_name: str) -> None:
+    project = get_local_project(
+        owner_name=owner_name, project_name=project_name
+    )
+    if project is None:
+        return
+    if project.jupyter_url is not None:
+        calkit.jupyter.stop_server(url=project.jupyter_url)
 
 
 @app.get("/cwd")

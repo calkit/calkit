@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import glob
+import logging
 import os
 
+import ruamel.yaml
 from git import Repo
 from git.exc import InvalidGitRepositoryError
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__package__)
+
+ryaml = ruamel.yaml.YAML()
+ryaml.indent(mapping=2, sequence=4, offset=2)
+ryaml.preserve_quotes = True
+ryaml.width = 70
 
 
 def find_project_dirs(relative=False, max_depth=3) -> list[str]:

@@ -1,4 +1,9 @@
-"""Functionality for working with datasets."""
+"""Functionality for working with datasets.
+
+Since the dependencies here are optional, we need to ensure this isn't imported
+by default, or otherwise ensure ``import calkit`` works when the data
+dependencies are not installed.
+"""
 
 from __future__ import annotations
 

@@ -245,8 +245,7 @@ def new_notebook(
 
 @notebooks_app.command("clean")
 def clean_notebook_outputs(path: str):
-    """Clean notebook and place a copy in the Calkit cleaned notebooks
-    directory.
+    """Clean notebook and place a copy in the cleaned notebooks directory.
 
     This can be useful to use as a preprocessing DVC stage to use a clean
     notebook as a dependency for a stage that caches and executed notebook.
@@ -272,8 +271,7 @@ def clean_notebook_outputs(path: str):
 
 @notebooks_app.command("execute")
 def execute_notebook(path: str):
-    """Execute notebook and place a copy in the Calkit executed notebooks
-    directory.
+    """Execute notebook and place a copy in the executed notebooks directory.
 
     This can be useful to use as a preprocessing DVC stage to use a clean
     notebook as a dependency for a stage that caches and executed notebook.

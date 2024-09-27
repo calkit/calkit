@@ -22,10 +22,14 @@ app = typer.Typer(
     no_args_is_help=True,
     context_settings=dict(help_option_names=["-h", "--help"]),
 )
-config_app = typer.Typer()
-new_app = typer.Typer()
+config_app = typer.Typer(no_args_is_help=True)
+new_app = typer.Typer(no_args_is_help=True)
+notebooks_app = typer.Typer(no_args_is_help=True)
 app.add_typer(config_app, name="config", help="Configure Calkit.")
-app.add_typer(new_app, name="new", help="Add new Calkit object.")
+app.add_typer(
+    new_app, name="new", help="Add new Calkit object (to calkit.yaml)."
+)
+app.add_typer(notebooks_app, name="nb", help="Work with Jupyter notebooks.")
 
 
 @app.callback()
@@ -152,7 +156,7 @@ def new_figure(
     description: Annotated[str, typer.Option("--desc")] = None,
     commit: Annotated[bool, typer.Option("--commit")] = False,
 ):
-    """Add a new figure to ``calkit.yaml``."""
+    """Add a new figure."""
     if os.path.isfile("calkit.yaml"):
         with open("calkit.yaml") as f:
             ck_info = ryaml.load(f)
@@ -180,6 +184,7 @@ def new_question(
     question: str,
     commit: Annotated[bool, typer.Option("--commit")] = False,
 ):
+    """Add a new question."""
     if os.path.isfile("calkit.yaml"):
         with open("calkit.yaml") as f:
             ck_info = ryaml.load(f)
@@ -198,6 +203,98 @@ def new_question(
         repo = git.Repo()
         repo.git.add("calkit.yaml")
         repo.git.commit(["-m", "Add question"])
+
+
+@new_app.command("notebook")
+def new_notebook(
+    path: Annotated[str, typer.Argument(help="Notebook path (relative)")],
+    title: Annotated[str, typer.Option("--title")],
+    description: Annotated[str, typer.Option("--desc")] = None,
+    commit: Annotated[bool, typer.Option("--commit")] = False,
+):
+    """Add a new notebook."""
+    if os.path.isabs(path):
+        raise ValueError("Path must be relative")
+    if not os.path.isfile(path):
+        raise ValueError("Path is not a file")
+    if not path.endswith(".ipynb"):
+        raise ValueError("Path does not have .ipynb extension")
+    # TODO: Add option to create stages that run `calkit nb clean` and
+    # `calkit nb execute`
+    if os.path.isfile("calkit.yaml"):
+        with open("calkit.yaml") as f:
+            ck_info = ryaml.load(f)
+    else:
+        ck_info = {}
+    notebooks = ck_info.get("notebooks", [])
+    paths = [f.get("path") for f in notebooks]
+    if path in paths:
+        raise ValueError(f"Notebook at path {path} already exists")
+    obj = dict(path=path, title=title)
+    if description is not None:
+        obj["description"] = description
+    notebooks.append(obj)
+    ck_info["notebooks"] = notebooks
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    if commit:
+        repo = git.Repo()
+        repo.git.add("calkit.yaml")
+        repo.git.commit(["-m", f"Add notebook {path}"])
+
+
+@notebooks_app.command("clean")
+def clean_notebook_outputs(path: str):
+    """Clean notebook and place a copy in the Calkit cleaned notebooks
+    directory.
+
+    This can be useful to use as a preprocessing DVC stage to use a clean
+    notebook as a dependency for a stage that caches and executed notebook.
+    """
+    if os.path.isabs(path):
+        raise ValueError("Path must be relative")
+    fpath_out = os.path.join(".calkit", "notebooks", "cleaned", path)
+    folder = os.path.dirname(fpath_out)
+    os.makedirs(folder, exist_ok=True)
+    subprocess.call(
+        [
+            "jupyter",
+            "nbconvert",
+            path,
+            "--clear-output",
+            "--to",
+            "notebook",
+            "--output",
+            fpath_out,
+        ]
+    )
+
+
+@notebooks_app.command("execute")
+def execute_notebook(path: str):
+    """Execute notebook and place a copy in the Calkit executed notebooks
+    directory.
+
+    This can be useful to use as a preprocessing DVC stage to use a clean
+    notebook as a dependency for a stage that caches and executed notebook.
+    """
+    if os.path.isabs(path):
+        raise ValueError("Path must be relative")
+    fpath_out = os.path.join(".calkit", "notebooks", "executed", path)
+    folder = os.path.dirname(fpath_out)
+    os.makedirs(folder, exist_ok=True)
+    subprocess.call(
+        [
+            "jupyter",
+            "nbconvert",
+            path,
+            "--execute",
+            "--to",
+            "notebook",
+            "--output",
+            fpath_out,
+        ]
+    )
 
 
 @app.command(name="server", help="Run the local server.")

@@ -270,7 +270,9 @@ def clean_notebook_outputs(path: str):
 
 
 @notebooks_app.command("execute")
-def execute_notebook(path: str):
+def execute_notebook(
+    path: str, html: Annotated[bool, typer.Option("--html")] = False
+):
     """Execute notebook and place a copy in the executed notebooks directory.
 
     This can be useful to use as a preprocessing DVC stage to use a clean
@@ -278,7 +280,15 @@ def execute_notebook(path: str):
     """
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
-    fpath_out = os.path.join(".calkit", "notebooks", "executed", path)
+    if html:
+        subdir = "html"
+        out_type = "html"
+        fname_out = path.removesuffix(".ipynb") + ".html"
+    else:
+        subdir = "executed"
+        fname_out = path
+        out_type = "notebook"
+    fpath_out = os.path.join(".calkit", "notebooks", subdir, fname_out)
     folder = os.path.dirname(fpath_out)
     os.makedirs(folder, exist_ok=True)
     subprocess.call(
@@ -288,7 +298,7 @@ def execute_notebook(path: str):
             path,
             "--execute",
             "--to",
-            "notebook",
+            out_type,
             "--output",
             fpath_out,
         ]

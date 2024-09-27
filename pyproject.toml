@@ -17,6 +17,7 @@ dependencies = [
   "fastapi",
   "gitpython",
   "keyring",
+  "nbconvert",
   "pydantic[email]",
   "pydantic-settings",
   "pyjwt",

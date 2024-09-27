@@ -11,16 +11,33 @@ import git
 import typer
 from typing_extensions import Annotated, Optional
 
+import calkit
 from calkit.core import ryaml
 
 from . import config
 from .dvc import configure_remote, set_remote_auth
 
-app = typer.Typer()
+app = typer.Typer(
+    invoke_without_command=True,
+    no_args_is_help=True,
+    context_settings=dict(help_option_names=["-h", "--help"]),
+)
 config_app = typer.Typer()
 new_app = typer.Typer()
 app.add_typer(config_app, name="config", help="Configure Calkit.")
 app.add_typer(new_app, name="new", help="Add new Calkit object.")
+
+
+@app.callback()
+def main(
+    version: Annotated[
+        bool,
+        typer.Option("--version", help="Show version and exit."),
+    ] = False,
+):
+    if version:
+        typer.echo(calkit.__version__)
+        raise typer.Exit()
 
 
 @config_app.command(name="set")

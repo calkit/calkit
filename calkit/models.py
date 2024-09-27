@@ -60,6 +60,12 @@ class Software(BaseModel):
     description: str
 
 
+class Notebook(_CalkitObject):
+    """A Jupyter notebook."""
+
+    pass
+
+
 class ProjectInfo(BaseModel):
     """All of the project's information or metadata, written to the
     ``calkit.yaml`` file.
@@ -72,3 +78,4 @@ class ProjectInfo(BaseModel):
     references: list[ReferenceCollection] = []
     environments: list[Environment] = []
     software: list[Software] = []
+    notebooks: list[Notebook] = []

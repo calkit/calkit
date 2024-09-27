@@ -29,7 +29,10 @@ app.add_typer(config_app, name="config", help="Configure Calkit.")
 app.add_typer(
     new_app, name="new", help="Add new Calkit object (to calkit.yaml)."
 )
-app.add_typer(notebooks_app, name="nb", help="Work with Jupyter notebooks.")
+app.add_typer(
+    notebooks_app, name="notebooks", help="Work with Jupyter notebooks."
+)
+app.add_typer(notebooks_app, name="nb", help="Alias for 'calkit notebooks'.")
 
 
 @app.callback()

@@ -1,10 +1,29 @@
 # Calkit
 
-[Calkit](https://calkit.io) makes reproducible research easy,
+[Calkit](https://calkit.io) simplifies reproducibility,
 acting as a layer on top of
-[Git](https://git-scm.com/) and [DVC](https://dvc.org/), such that all
-all materials involved in the research process can be fully described in a
+[Git](https://git-scm.com/), [DVC](https://dvc.org/),
+[Zenodo](https://zenodo.org), and more,
+such that all all aspects of the research process can be fully described in a
 single repository.
+
+## Why does reproducibility matter?
+
+If your work is reproducible, that means that someone else can "run" it and
+get the same results or outputs.
+This is a major step towards addressing
+[the replication crisis](https://en.wikipedia.org/wiki/Replication_crisis)
+and has some major benefits for both you as an individual and the research
+community:
+
+1. You will avoid mistakes caused by, e.g., running an old version of a script
+   and including a figure that wasn't created after fixing a bug in the data
+   processing pipeline.
+2. Since your project is "runnable," it's more likely that someone else will be
+   able to reuse part of your work to run it in a different context, thereby
+   producing a bigger impact and accelerating the pace of discovery.
+   If someone can take what you've done and use it to calculate a
+   prediction, you have just produced truly useful knowledge.
 
 ## Installation
 

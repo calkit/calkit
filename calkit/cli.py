@@ -82,7 +82,6 @@ def get_status():
     run_cmd(["dvc", "status"])
 
 
-
 @app.command(name="add")
 def add(paths: list[str]):
     """Add paths to the repo.
@@ -116,7 +115,7 @@ def commit(
 @app.command(name="pull", help="Pull with both Git and DVC.")
 def pull():
     typer.echo("Git pulling")
-    git.Repo().git.pull()
+    subprocess.call(["git", "pull"])
     typer.echo("DVC pulling")
     subprocess.call(["dvc", "pull"])
 
@@ -124,7 +123,7 @@ def pull():
 @app.command(name="push", help="Push with both Git and DVC.")
 def push():
     typer.echo("Pushing to Git remote")
-    git.Repo().git.push()
+    subprocess.call(["git", "push"])
     typer.echo("Pushing to DVC remote")
     subprocess.call(["dvc", "push"])
 

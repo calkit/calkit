@@ -60,19 +60,27 @@ def get_status():
     """Get a unified Git and DVC status."""
 
     def print_sep(name: str):
-        print(f"------------ {name} ------------")
+        width = 66
+        txt_width = len(name) + 2
+        buffer_width = (width - txt_width) // 2
+        buffer = "-" * buffer_width
+        typer.echo(f"{buffer} {name} {buffer}")
 
-    print_sep("Code")
-    if os.name == "nt":
-        subprocess.call(["git", "status"])
-        print()
-        print_sep("data")
-        subprocess.call(["dvc", "status"])
-    else:
-        pty.spawn(["git", "status"], lambda fd: os.read(fd, 1024))
-        print()
-        print_sep("Data")
-        pty.spawn(["dvc", "status"], lambda fd: os.read(fd, 1024))
+    def run_cmd(cmd: list[str]):
+        if os.name == "nt":
+            subprocess.call(cmd)
+        else:
+            pty.spawn(cmd, lambda fd: os.read(fd, 1024))
+
+    print_sep("Code (Git)")
+    run_cmd(["git", "status"])
+    typer.echo()
+    print_sep("Data (DVC)")
+    run_cmd(["dvc", "data", "status"])
+    typer.echo()
+    print_sep("Pipeline (DVC)")
+    run_cmd(["dvc", "status"])
+
 
 
 @app.command(name="add")
@@ -103,6 +111,22 @@ def commit(
     """Commit a change to the repo."""
     print(all, message)
     raise NotImplementedError
+
+
+@app.command(name="pull", help="Pull with both Git and DVC.")
+def pull():
+    typer.echo("Git pulling")
+    git.Repo().git.pull()
+    typer.echo("DVC pulling")
+    subprocess.call(["dvc", "pull"])
+
+
+@app.command(name="push", help="Push with both Git and DVC.")
+def push():
+    typer.echo("Pushing to Git remote")
+    git.Repo().git.push()
+    typer.echo("Pushing to DVC remote")
+    subprocess.call(["dvc", "push"])
 
 
 @new_app.command(name="figure")

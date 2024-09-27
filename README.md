@@ -25,6 +25,18 @@ community:
    If someone can take what you've done and use it to calculate a
    prediction, you have just produced truly useful knowledge.
 
+## Why another tool/platform?
+
+Git, GitHub, DVC, Zenodo et al. are amazing tools/platforms, but their
+use involves multiple fairly difficult learning curves.
+Our goal is to provide a single tool and platform to unify all of these so
+that there is a single, gentle learning curve.
+However, it is not our goal to hide these underlying components.
+Advanced users can use them directly, but new users aren't forced to, which
+helps them get up and running with less effort and training.
+Calkit should help users understand what is going on under the hood without
+forcing them to work at that lower level of abstraction.
+
 ## Installation
 
 Simply run

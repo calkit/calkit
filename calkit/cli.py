@@ -160,7 +160,7 @@ def new_question(
         repo.git.commit(["-m", "Add question"])
 
 
-@app.command(name="server")
+@app.command(name="server", help="Run the local server.")
 def run_server():
     import uvicorn
 
@@ -171,6 +171,73 @@ def run_server():
         reload=True,
         reload_dirs=[os.path.dirname(__file__)],
     )
+
+
+@app.command(
+    name="run",
+    add_help_option=False,
+    help="Run DVC pipeline (a wrapper for `dvc repro`).",
+)
+def run_dvc_repro(
+    targets: Optional[list[str]] = typer.Argument(default=None),
+    help: Annotated[bool, typer.Option("-h", "--help")] = False,
+    quiet: Annotated[bool, typer.Option("-q", "--quiet")] = False,
+    verbose: Annotated[bool, typer.Option("-v", "--verbose")] = False,
+    force: Annotated[bool, typer.Option("-f", "--force")] = False,
+    interactive: Annotated[bool, typer.Option("-i", "--interactive")] = False,
+    single_item: Annotated[bool, typer.Option("-s", "--single-item")] = False,
+    pipeline: Annotated[
+        Optional[str], typer.Option("-p", "--pipeline")
+    ] = None,
+    all_pipelines: Annotated[
+        bool, typer.Option("-P", "--all-pipelines")
+    ] = False,
+    recursive: Annotated[bool, typer.Option("-R", "--recursive")] = False,
+    downstream: Annotated[
+        Optional[list[str]], typer.Option("--downstream")
+    ] = None,
+    force_downstream: Annotated[
+        bool, typer.Option("--force-downstream")
+    ] = False,
+    pull: Annotated[bool, typer.Option("--pull")] = False,
+    allow_missing: Annotated[bool, typer.Option("--allow-missing")] = False,
+    dry: Annotated[bool, typer.Option("--dry")] = False,
+    keep_going: Annotated[bool, typer.Option("--keep-going", "-k")] = False,
+    ignore_errors: Annotated[bool, typer.Option("--ignore-errors")] = False,
+    glob: Annotated[bool, typer.Option("--glob")] = False,
+    no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
+    no_run_cache: Annotated[bool, typer.Option("--no-run-cache")] = False,
+):
+    """A simple wrapper for ``dvc repro``."""
+    if targets is None:
+        targets = []
+    args = targets
+    # Extract any boolean args
+    for name in [
+        "help",
+        "quiet",
+        "verbose",
+        "force",
+        "interactive",
+        "single-item",
+        "all-pipelines",
+        "recursive",
+        "pull",
+        "allow-missing",
+        "dry",
+        "keep-going",
+        "force-downstream",
+        "glob",
+        "no-commit",
+        "no-run-cache",
+    ]:
+        if locals()[name.replace("-", "_")]:
+            args.append("--" + name)
+    if pipeline is not None:
+        args += ["--pipeline", pipeline]
+    if downstream is not None:
+        args += downstream
+    subprocess.call(["dvc", "repro"] + args)
 
 
 def run() -> None:

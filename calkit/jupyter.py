@@ -1,5 +1,7 @@
 """Functionality for working with Jupyter."""
 
+from __future__ import annotations
+
 import subprocess
 
 from pydantic import BaseModel
@@ -27,25 +29,20 @@ def get_servers() -> list[Server]:
     return resp
 
 
-def start_server():
-    """Start a Jupyter server in the current directory.
-
-    TODO: Set the origins appropriately for running from the main Calkit
-    website.
-    """
+def start_server(wdir=None, no_browser=False):
+    """Start a Jupyter server."""
     subprocess.Popen(
         [
             "jupyter",
             "lab",
             "-y",
-            "--no-browser",
-            "--NotebookApp.allow_origin='http://localhost:*'",
-            (
-                "--NotebookApp.tornado_settings="
-                "{'headers':{'Access-Control-Allow-Origin'"
-                ":'http://localhost:*',"
-                "'Content-Security-Policy'"
-                ":'frame-ancestors http://localhost:*;'}}"
-            ),
-        ]
+            "--no-browser" if no_browser else "",
+        ],
+        cwd=wdir,
     )
+
+
+def stop_server(url: str):
+    # Extract the port from the URL
+    port = url.split(":")[2][:4]
+    subprocess.call(["jupyter", "server", "stop", port])

@@ -1,21 +1,26 @@
 """The command line interface."""
 
+from __future__ import annotations
+
 import os
 import pty
 import subprocess
 import sys
 
+import git
 import typer
 from typing_extensions import Annotated, Optional
 
-import calkit
+from calkit.core import ryaml
 
 from . import config
 from .dvc import configure_remote, set_remote_auth
 
 app = typer.Typer()
 config_app = typer.Typer()
+new_app = typer.Typer()
 app.add_typer(config_app, name="config", help="Configure Calkit.")
+app.add_typer(new_app, name="new", help="Add new Calkit object.")
 
 
 @config_app.command(name="set")
@@ -100,16 +105,65 @@ def commit(
     raise NotImplementedError
 
 
+@new_app.command(name="figure")
+def new_figure(
+    path: str,
+    title: Annotated[str, typer.Option("--title")],
+    description: Annotated[str, typer.Option("--desc")] = None,
+    commit: Annotated[bool, typer.Option("--commit")] = False,
+):
+    """Add a new figure to ``calkit.yaml``."""
+    if os.path.isfile("calkit.yaml"):
+        with open("calkit.yaml") as f:
+            ck_info = ryaml.load(f)
+    else:
+        ck_info = {}
+    figures = ck_info.get("figures", [])
+    paths = [f.get("path") for f in figures]
+    if path in paths:
+        raise ValueError(f"Figure at path {path} already exists")
+    obj = dict(path=path, title=title)
+    if description is not None:
+        obj["description"] = description
+    figures.append(obj)
+    ck_info["figures"] = figures
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    if commit:
+        repo = git.Repo()
+        repo.git.add("calkit.yaml")
+        repo.git.commit(["-m", f"Add figure {path}"])
+
+
+@new_app.command("question")
+def new_question(
+    question: str,
+    commit: Annotated[bool, typer.Option("--commit")] = False,
+):
+    if os.path.isfile("calkit.yaml"):
+        with open("calkit.yaml") as f:
+            ck_info = ryaml.load(f)
+    else:
+        ck_info = {}
+    questions = ck_info.get("questions", [])
+    if question in questions:
+        raise ValueError("Question already exists")
+    if not question.endswith("?"):
+        raise ValueError("Questions must end with a question mark")
+    questions.append(question)
+    ck_info["questions"] = questions
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    if commit:
+        repo = git.Repo()
+        repo.git.add("calkit.yaml")
+        repo.git.commit(["-m", "Add question"])
+
+
 @app.command(name="server")
 def run_server():
     import uvicorn
 
-    # Start jupyter server in this directory if one doesn't exist
-    # We need to enable all origins so we can embed it in an iframe
-    servers = calkit.jupyter.get_servers()
-    wdirs = [server.wdir for server in servers]
-    if os.getcwd() not in wdirs:
-        calkit.jupyter.start_server()
     uvicorn.run(
         "calkit.server:app",
         port=8866,

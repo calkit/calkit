@@ -1,33 +1,38 @@
 [build-system]
-requires = ["hatchling"]
 build-backend = "hatchling.build"
+requires = ["hatchling"]
 
 [project]
-name = "calkit"
-version = "0.0.1"
 authors = [
-  { name="Pete Bachant", email="petebachant@gmail.com" },
+  {name = "Pete Bachant", email = "petebachant@gmail.com"},
 ]
-description = "Reproducibility made easy"
-readme = "README.md"
-requires-python = ">=3.8"
 classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
 ]
 dependencies = [
-    "dvc",
-    "fastapi",
-    "gitpython",
-    "keyring",
-    "pandas",
-    "polars",
-    "pydantic[email]",
-    "pydantic-settings",
-    "pyjwt",
-    "requests",
-    "typer",
+  "dvc",
+  "eval-type-backport; python_version < '3.10'",
+  "fastapi",
+  "gitpython",
+  "keyring",
+  "pydantic[email]",
+  "pydantic-settings",
+  "pyjwt",
+  "requests",
+  "typer",
+]
+description = "Reproducibility simplified."
+dynamic = ["version"]
+name = "calkit-python"
+readme = "README.md"
+requires-python = ">=3.8"
+
+[project.optional-dependencies]
+data = [
+  "pandas",
+  "polars",
 ]
 
 [project.urls]
@@ -36,3 +41,9 @@ Issues = "https://github.com/calkit/calkit/issues"
 
 [project.scripts]
 calkit = "calkit.cli:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["calkit"]
+
+[tool.hatch.version]
+path = "calkit/__init__.py"

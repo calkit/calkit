@@ -1,7 +1,7 @@
 # MS Office user
 
 This example reflects the "non-hacker" researcher who uses Microsoft
-Office for a lot of their work.
+Office (or similar) for a lot of their work.
 Note that there is nothing wrong with this workflow,
 but it is inherently harder for collaboration and reproducibility,
 since version control for MS Office files is tougher.

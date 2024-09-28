@@ -6,6 +6,7 @@ import os
 import pty
 import subprocess
 import sys
+from typing import Literal
 
 import git
 import typer
@@ -271,23 +272,26 @@ def clean_notebook_outputs(path: str):
 
 @notebooks_app.command("execute")
 def execute_notebook(
-    path: str, html: Annotated[bool, typer.Option("--html")] = False
+    path: str,
+    to: Annotated[
+        str, typer.Option("--to", help="Output format ('html' or 'notebook').")
+    ] = "notebook",
 ):
-    """Execute notebook and place a copy in the executed notebooks directory.
+    """Execute notebook and place a copy in the relevant directory.
 
     This can be useful to use as a preprocessing DVC stage to use a clean
     notebook as a dependency for a stage that caches and executed notebook.
     """
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
-    if html:
+    if to == "html":
         subdir = "html"
-        out_type = "html"
         fname_out = path.removesuffix(".ipynb") + ".html"
-    else:
+    elif to == "notebook":
         subdir = "executed"
         fname_out = path
-        out_type = "notebook"
+    else:
+        raise ValueError(f"Invalid output format: '{to}'")
     fpath_out = os.path.join(".calkit", "notebooks", subdir, fname_out)
     folder = os.path.dirname(fpath_out)
     os.makedirs(folder, exist_ok=True)
@@ -298,7 +302,7 @@ def execute_notebook(
             path,
             "--execute",
             "--to",
-            out_type,
+            to,
             "--output",
             fpath_out,
         ]

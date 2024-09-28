@@ -6,7 +6,6 @@ import os
 import pty
 import subprocess
 import sys
-from typing import Literal
 
 import git
 import typer

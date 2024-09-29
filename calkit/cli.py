@@ -21,6 +21,7 @@ app = typer.Typer(
     invoke_without_command=True,
     no_args_is_help=True,
     context_settings=dict(help_option_names=["-h", "--help"]),
+    pretty_exceptions_show_locals=False,
 )
 config_app = typer.Typer(no_args_is_help=True)
 new_app = typer.Typer(no_args_is_help=True)
@@ -104,33 +105,108 @@ def get_status():
 
 
 @app.command(name="add")
-def add(paths: list[str]):
+def add(
+    paths: list[str],
+    commit_message: Annotated[
+        str,
+        typer.Option(
+            "-m",
+            "--commit-message",
+            help="Automatically commit and use this as a message.",
+        ),
+    ] = None,
+    push_commit: Annotated[
+        bool, typer.Option("--push", help="Push after committing.")
+    ] = False,
+    to: Annotated[
+        str,
+        typer.Option(
+            "--to", "-t", help="System with which to add (git or dvc)."
+        ),
+    ] = None,
+):
     """Add paths to the repo.
 
     Code will be added to Git and data will be added to DVC.
+
+    Note: This will enable the 'autostage' feature of DVC, automatically
+    adding any .dvc files to Git when adding to DVC.
     """
-    dvc_extensions = [".png", ".h5", ".parquet", ".pickle"]
-    dvc_size_thresh_bytes = 1_000_000
-    dvc_folders = ["data", "figures"]
-    if "." in paths:
-        print("ERROR: Cannot add '.' with calkit; use git or dvc")
-        sys.exit(1)
-    for path in paths:
-        if os.path.isdir(path):
-            print("ERROR: Cannot add directories with calkit; use git or dvc")
-            sys.exit(1)
-        # Detect if this file should be tracked with Git or DVC
-        # TODO: Add to whatever
+    if to is not None and to not in ["git", "dvc"]:
+        typer.echo(f"Invalid option for 'to': {to}")
+        raise typer.Exit(1)
+    # Ensure autostage is enabled for DVC
+    subprocess.call(["dvc", "config", "core.autostage", "true"])
+    subprocess.call(["git", "add", ".dvc/config"])
+    if to is not None:
+        subprocess.call([to, "add"] + paths)
+    else:
+        dvc_extensions = [
+            ".png",
+            ".h5",
+            ".parquet",
+            ".pickle",
+            ".mp4",
+            ".avi",
+            ".webm",
+            ".pdf",
+        ]
+        dvc_size_thresh_bytes = 1_000_000
+        if "." in paths and to is None:
+            typer.echo("Cannot add '.' with calkit; use git or dvc")
+            raise typer.Exit(1)
+        if to is None:
+            for path in paths:
+                if os.path.isdir(path):
+                    typer.echo("Cannot auto-add directories; use git or dvc")
+                    raise typer.Exit(1)
+        for path in paths:
+            # Detect if this file should be tracked with Git or DVC
+            if os.path.splitext(path)[-1] in dvc_extensions:
+                typer.echo(f"Adding {path} to DVC per its extension")
+                subprocess.call(["dvc", "add", path])
+                continue
+            if os.path.getsize(path) > dvc_size_thresh_bytes:
+                typer.echo(
+                    f"Adding {path} to DVC since it's greater than 1 MB"
+                )
+                subprocess.call(["dvc", "add", path])
+                continue
+            typer.echo(f"Adding {path} to Git")
+            subprocess.call(["git", "add", path])
+    if commit_message is not None:
+        subprocess.call(["git", "commit", "-m", commit_message])
+    if push_commit:
+        push()
 
 
 @app.command(name="commit")
 def commit(
-    all: Annotated[Optional[bool], typer.Option("--all", "-a")] = False,
-    message: Annotated[Optional[str], typer.Option("--message", "-m")] = None,
+    all: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--all", "-a", help="Automatically stage all changed files."
+        ),
+    ] = False,
+    message: Annotated[
+        Optional[str], typer.Option("--message", "-m", help="Commit message.")
+    ] = None,
+    push_commit: Annotated[
+        bool,
+        typer.Option(
+            "--push", help="Push to both Git and DVC after committing."
+        ),
+    ] = False,
 ):
     """Commit a change to the repo."""
-    print(all, message)
-    raise NotImplementedError
+    cmd = ["git", "commit"]
+    if all:
+        cmd.append("-a")
+    if message:
+        cmd += ["-m", message]
+    subprocess.call(cmd)
+    if push_commit:
+        push()
 
 
 @app.command(name="pull", help="Pull with both Git and DVC.")

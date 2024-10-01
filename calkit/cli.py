@@ -77,31 +77,41 @@ def setup_remote():
     set_remote_auth()
 
 
+def _print_sep(name: str):
+    width = 66
+    txt_width = len(name) + 2
+    buffer_width = (width - txt_width) // 2
+    buffer = "-" * buffer_width
+    typer.echo(f"{buffer} {name} {buffer}")
+
+
+def _run_cmd(cmd: list[str]):
+    if os.name == "nt":
+        subprocess.call(cmd)
+    else:
+        pty.spawn(cmd, lambda fd: os.read(fd, 1024))
+
+
 @app.command(name="status")
 def get_status():
     """Get a unified Git and DVC status."""
-
-    def print_sep(name: str):
-        width = 66
-        txt_width = len(name) + 2
-        buffer_width = (width - txt_width) // 2
-        buffer = "-" * buffer_width
-        typer.echo(f"{buffer} {name} {buffer}")
-
-    def run_cmd(cmd: list[str]):
-        if os.name == "nt":
-            subprocess.call(cmd)
-        else:
-            pty.spawn(cmd, lambda fd: os.read(fd, 1024))
-
-    print_sep("Code (Git)")
-    run_cmd(["git", "status"])
+    _print_sep("Code (Git)")
+    _run_cmd(["git", "status"])
     typer.echo()
-    print_sep("Data (DVC)")
-    run_cmd(["dvc", "data", "status"])
+    _print_sep("Data (DVC)")
+    _run_cmd(["dvc", "data", "status"])
     typer.echo()
-    print_sep("Pipeline (DVC)")
-    run_cmd(["dvc", "status"])
+    _print_sep("Pipeline (DVC)")
+    _run_cmd(["dvc", "status"])
+
+
+@app.command(name="diff")
+def diff():
+    """Get a unified Git and DVC diff."""
+    _print_sep("Code (Git)")
+    _run_cmd(["git", "diff"])
+    _print_sep("Pipeline (DVC)")
+    _run_cmd(["dvc", "diff"])
 
 
 @app.command(name="add")

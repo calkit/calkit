@@ -262,8 +262,8 @@ def run_dvc_repro(
     subprocess.call(["dvc", "repro"] + args)
 
 
-@app.command(name="run-manual", help="Execute a manual step.")
-def run_manual(
+@app.command(name="manual-step", help="Execute a manual step.")
+def manual_step(
     message: Annotated[
         str,
         typer.Option(

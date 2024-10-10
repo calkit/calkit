@@ -273,6 +273,13 @@ def manual_step(
         ),
     ],
     cmd: Annotated[str, typer.Option("--cmd", help="Command to run.")] = None,
+    shell: Annotated[
+        bool,
+        typer.Option(
+            "--shell",
+            help="Whether or not to execute the command in shell mode.",
+        ),
+    ] = False,
     show_stdout: Annotated[
         bool, typer.Option("--show-stdout", help="Show stdout.")
     ] = False,
@@ -283,9 +290,10 @@ def manual_step(
     if cmd is not None:
         typer.echo(f"Running command: {cmd}")
         subprocess.Popen(
-            cmd.split(),
+            cmd.split() if not shell else cmd,
             stderr=subprocess.PIPE if not show_stderr else None,
             stdout=subprocess.PIPE if not show_stdout else None,
+            shell=shell,
         )
     input(message + " (press enter to confirm): ")
     typer.echo("Done")

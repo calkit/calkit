@@ -230,7 +230,9 @@ def run_dvc_repro(
     no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
     no_run_cache: Annotated[bool, typer.Option("--no-run-cache")] = False,
 ):
-    """A simple wrapper for ``dvc repro``."""
+    """A simple wrapper for ``dvc repro`` that will automatically create any
+    necessary Calkit objects from stage metadata.
+    """
     if targets is None:
         targets = []
     args = targets
@@ -260,6 +262,63 @@ def run_dvc_repro(
     if downstream is not None:
         args += downstream
     subprocess.call(["dvc", "repro"] + args)
+    # Now parse stage metadata for calkit objects
+    if not os.path.isfile("dvc.yaml"):
+        typer.echo("No dvc.yaml file found")
+        raise typer.Exit(1)
+    objects = []
+    with open("dvc.yaml") as f:
+        pipeline = calkit.ryaml.load(f)
+        for stage_name, stage_info in pipeline.get("stages", {}).items():
+            ckmeta = stage_info.get("meta", {}).get("calkit")
+            if ckmeta is not None:
+                if not isinstance(ckmeta, dict):
+                    typer.echo(
+                        f"Calkit metadata for {stage_name} is not a dictionary"
+                    )
+                    typer.Exit(1)
+                # Stage must have a single output
+                outs = stage_info.get("outs", [])
+                if len(outs) != 1:
+                    typer.echo(
+                        f"Stage {stage_name} does not have exactly one output"
+                    )
+                    raise typer.Exit(1)
+                cktype = ckmeta.get("type")
+                if cktype not in ["figure", "dataset", "publication"]:
+                    typer.echo(f"Invalid Calkit output type '{cktype}'")
+                    raise typer.Exit(1)
+                objects.append(
+                    dict(path=outs[0]) | ckmeta | dict(stage=stage_name)
+                )
+    # Now that we've extracted Calkit objects from stage metadata, we can put
+    # them into the calkit.yaml file, overwriting objects with the same path
+    if os.path.isfile("calkit.yaml"):
+        with open("calkit.yaml") as f:
+            ck_info = calkit.ryaml.load(f)
+    else:
+        ck_info = {}
+    for obj in objects:
+        cktype = obj.pop("type")
+        cktype_plural = cktype + "s"
+        existing = ck_info.get(cktype_plural, [])
+        new = []
+        added = False
+        for ex_obj in existing:
+            if ex_obj.get("path") == obj["path"]:
+                typer.echo(f"Updating {cktype} {ex_obj['path']}")
+                new.append(obj)
+                added = True
+            else:
+                new.append(ex_obj)
+        if not added:
+            typer.echo(f"Adding new {cktype} {obj['path']}")
+            new.append(obj)
+        ck_info[cktype_plural] = new
+    if not dry:
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        run_cmd(["git", "add", "calkit.yaml"])
 
 
 @app.command(name="manual-step", help="Execute a manual step.")

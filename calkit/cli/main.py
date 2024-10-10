@@ -260,3 +260,32 @@ def run_dvc_repro(
     if downstream is not None:
         args += downstream
     subprocess.call(["dvc", "repro"] + args)
+
+
+@app.command(name="run-manual", help="Execute a manual step.")
+def run_manual(
+    message: Annotated[
+        str,
+        typer.Option(
+            "--message",
+            "-m",
+            help="Message to display as a prompt.",
+        ),
+    ],
+    cmd: Annotated[str, typer.Option("--cmd", help="Command to run.")] = None,
+    show_stdout: Annotated[
+        bool, typer.Option("--show-stdout", help="Show stdout.")
+    ] = False,
+    show_stderr: Annotated[
+        bool, typer.Option("--show-stderr", help="Show stderr.")
+    ] = False,
+) -> None:
+    if cmd is not None:
+        typer.echo(f"Running command: {cmd}")
+        subprocess.Popen(
+            cmd.split(),
+            stderr=subprocess.PIPE if not show_stderr else None,
+            stdout=subprocess.PIPE if not show_stdout else None,
+        )
+    input(message + " (press enter to confirm): ")
+    typer.echo("Done")

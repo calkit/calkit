@@ -1,21 +1,18 @@
-"""The command line interface."""
+"""Main CLI app."""
 
 from __future__ import annotations
 
 import os
-import pty
 import subprocess
-import sys
 
-import git
 import typer
 from typing_extensions import Annotated, Optional
 
 import calkit
-from calkit.core import ryaml
-
-from . import config
-from .dvc import configure_remote, set_remote_auth
+from calkit.cli import print_sep, run_cmd
+from calkit.cli.config import config_app
+from calkit.cli.new import new_app
+from calkit.cli.notebooks import notebooks_app
 
 app = typer.Typer(
     invoke_without_command=True,
@@ -23,9 +20,6 @@ app = typer.Typer(
     context_settings=dict(help_option_names=["-h", "--help"]),
     pretty_exceptions_show_locals=False,
 )
-config_app = typer.Typer(no_args_is_help=True)
-new_app = typer.Typer(no_args_is_help=True)
-notebooks_app = typer.Typer(no_args_is_help=True)
 app.add_typer(config_app, name="config", help="Configure Calkit.")
 app.add_typer(
     new_app, name="new", help="Add new Calkit object (to calkit.yaml)."
@@ -45,73 +39,26 @@ def main(
         raise typer.Exit()
 
 
-@config_app.command(name="set")
-def set_config_value(key: str, value: str):
-    try:
-        cfg = config.read()
-        cfg = config.Settings.model_validate(cfg.model_dump() | {key: value})
-        # Kind of a hack for setting the password computed field
-        # Types have been validated above, so this won't hurt to do again
-        setattr(cfg, key, value)
-    except FileNotFoundError:
-        # TODO: This fails if we try to set password before any config has
-        # been written
-        # Username is fine
-        cfg = config.Settings.model_validate({key: value})
-    cfg.write()
-
-
-@config_app.command(name="get")
-def get_config_value(key: str) -> None:
-    cfg = config.read()
-    val = getattr(cfg, key)
-    if val is not None:
-        print(val)
-    else:
-        print()
-
-
-@config_app.command(name="setup-remote")
-def setup_remote():
-    configure_remote()
-    set_remote_auth()
-
-
-def _print_sep(name: str):
-    width = 66
-    txt_width = len(name) + 2
-    buffer_width = (width - txt_width) // 2
-    buffer = "-" * buffer_width
-    typer.echo(f"{buffer} {name} {buffer}")
-
-
-def _run_cmd(cmd: list[str]):
-    if os.name == "nt":
-        subprocess.call(cmd)
-    else:
-        pty.spawn(cmd, lambda fd: os.read(fd, 1024))
-
-
 @app.command(name="status")
 def get_status():
     """Get a unified Git and DVC status."""
-    _print_sep("Code (Git)")
-    _run_cmd(["git", "status"])
+    print_sep("Code (Git)")
+    run_cmd(["git", "status"])
     typer.echo()
-    _print_sep("Data (DVC)")
-    _run_cmd(["dvc", "data", "status"])
+    print_sep("Data (DVC)")
+    run_cmd(["dvc", "data", "status"])
     typer.echo()
-    _print_sep("Pipeline (DVC)")
-    _run_cmd(["dvc", "status"])
+    print_sep("Pipeline (DVC)")
+    run_cmd(["dvc", "status"])
 
 
 @app.command(name="diff")
 def diff():
     """Get a unified Git and DVC diff."""
-    _print_sep("Code (Git)")
-    _run_cmd(["git", "diff"])
-    _print_sep("Pipeline (DVC)")
-    _run_cmd(["dvc", "diff"])
+    print_sep("Code (Git)")
+    run_cmd(["git", "diff"])
+    print_sep("Pipeline (DVC)")
+    run_cmd(["dvc", "diff"])
 
 
 @app.command(name="add")
@@ -235,165 +182,6 @@ def push():
     subprocess.call(["dvc", "push"])
 
 
-@new_app.command(name="figure")
-def new_figure(
-    path: str,
-    title: Annotated[str, typer.Option("--title")],
-    description: Annotated[str, typer.Option("--desc")] = None,
-    commit: Annotated[bool, typer.Option("--commit")] = False,
-):
-    """Add a new figure."""
-    if os.path.isfile("calkit.yaml"):
-        with open("calkit.yaml") as f:
-            ck_info = ryaml.load(f)
-    else:
-        ck_info = {}
-    figures = ck_info.get("figures", [])
-    paths = [f.get("path") for f in figures]
-    if path in paths:
-        raise ValueError(f"Figure at path {path} already exists")
-    obj = dict(path=path, title=title)
-    if description is not None:
-        obj["description"] = description
-    figures.append(obj)
-    ck_info["figures"] = figures
-    with open("calkit.yaml", "w") as f:
-        ryaml.dump(ck_info, f)
-    if commit:
-        repo = git.Repo()
-        repo.git.add("calkit.yaml")
-        repo.git.commit(["-m", f"Add figure {path}"])
-
-
-@new_app.command("question")
-def new_question(
-    question: str,
-    commit: Annotated[bool, typer.Option("--commit")] = False,
-):
-    """Add a new question."""
-    if os.path.isfile("calkit.yaml"):
-        with open("calkit.yaml") as f:
-            ck_info = ryaml.load(f)
-    else:
-        ck_info = {}
-    questions = ck_info.get("questions", [])
-    if question in questions:
-        raise ValueError("Question already exists")
-    if not question.endswith("?"):
-        raise ValueError("Questions must end with a question mark")
-    questions.append(question)
-    ck_info["questions"] = questions
-    with open("calkit.yaml", "w") as f:
-        ryaml.dump(ck_info, f)
-    if commit:
-        repo = git.Repo()
-        repo.git.add("calkit.yaml")
-        repo.git.commit(["-m", "Add question"])
-
-
-@new_app.command("notebook")
-def new_notebook(
-    path: Annotated[str, typer.Argument(help="Notebook path (relative)")],
-    title: Annotated[str, typer.Option("--title")],
-    description: Annotated[str, typer.Option("--desc")] = None,
-    commit: Annotated[bool, typer.Option("--commit")] = False,
-):
-    """Add a new notebook."""
-    if os.path.isabs(path):
-        raise ValueError("Path must be relative")
-    if not os.path.isfile(path):
-        raise ValueError("Path is not a file")
-    if not path.endswith(".ipynb"):
-        raise ValueError("Path does not have .ipynb extension")
-    # TODO: Add option to create stages that run `calkit nb clean` and
-    # `calkit nb execute`
-    if os.path.isfile("calkit.yaml"):
-        with open("calkit.yaml") as f:
-            ck_info = ryaml.load(f)
-    else:
-        ck_info = {}
-    notebooks = ck_info.get("notebooks", [])
-    paths = [f.get("path") for f in notebooks]
-    if path in paths:
-        raise ValueError(f"Notebook at path {path} already exists")
-    obj = dict(path=path, title=title)
-    if description is not None:
-        obj["description"] = description
-    notebooks.append(obj)
-    ck_info["notebooks"] = notebooks
-    with open("calkit.yaml", "w") as f:
-        ryaml.dump(ck_info, f)
-    if commit:
-        repo = git.Repo()
-        repo.git.add("calkit.yaml")
-        repo.git.commit(["-m", f"Add notebook {path}"])
-
-
-@notebooks_app.command("clean")
-def clean_notebook_outputs(path: str):
-    """Clean notebook and place a copy in the cleaned notebooks directory.
-
-    This can be useful to use as a preprocessing DVC stage to use a clean
-    notebook as a dependency for a stage that caches and executed notebook.
-    """
-    if os.path.isabs(path):
-        raise ValueError("Path must be relative")
-    fpath_out = os.path.join(".calkit", "notebooks", "cleaned", path)
-    folder = os.path.dirname(fpath_out)
-    os.makedirs(folder, exist_ok=True)
-    subprocess.call(
-        [
-            "jupyter",
-            "nbconvert",
-            path,
-            "--clear-output",
-            "--to",
-            "notebook",
-            "--output",
-            fpath_out,
-        ]
-    )
-
-
-@notebooks_app.command("execute")
-def execute_notebook(
-    path: str,
-    to: Annotated[
-        str, typer.Option("--to", help="Output format ('html' or 'notebook').")
-    ] = "notebook",
-):
-    """Execute notebook and place a copy in the relevant directory.
-
-    This can be useful to use as a preprocessing DVC stage to use a clean
-    notebook as a dependency for a stage that caches and executed notebook.
-    """
-    if os.path.isabs(path):
-        raise ValueError("Path must be relative")
-    if to == "html":
-        subdir = "html"
-        fname_out = path.removesuffix(".ipynb") + ".html"
-    elif to == "notebook":
-        subdir = "executed"
-        fname_out = path
-    else:
-        raise ValueError(f"Invalid output format: '{to}'")
-    fpath_out = os.path.join(".calkit", "notebooks", subdir, fname_out)
-    folder = os.path.dirname(fpath_out)
-    os.makedirs(folder, exist_ok=True)
-    subprocess.call(
-        [
-            "jupyter",
-            "nbconvert",
-            path,
-            "--execute",
-            "--to",
-            to,
-            "--output",
-            fpath_out,
-        ]
-    )
-
-
 @app.command(name="server", help="Run the local server.")
 def run_server():
     import uvicorn
@@ -472,7 +260,3 @@ def run_dvc_repro(
     if downstream is not None:
         args += downstream
     subprocess.call(["dvc", "repro"] + args)
-
-
-def run() -> None:
-    app()

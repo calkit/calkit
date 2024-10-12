@@ -11,6 +11,7 @@ from typing_extensions import Annotated, Optional
 import calkit
 from calkit.cli import print_sep, run_cmd
 from calkit.cli.config import config_app
+from calkit.cli.list import list_app
 from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
 
@@ -25,6 +26,7 @@ app.add_typer(
     new_app, name="new", help="Add new Calkit object (to calkit.yaml)."
 )
 app.add_typer(notebooks_app, name="nb", help="Work with Jupyter notebooks.")
+app.add_typer(list_app, name="list", help="List Calkit objects.")
 
 
 @app.callback()
@@ -293,11 +295,7 @@ def run_dvc_repro(
                 )
     # Now that we've extracted Calkit objects from stage metadata, we can put
     # them into the calkit.yaml file, overwriting objects with the same path
-    if os.path.isfile("calkit.yaml"):
-        with open("calkit.yaml") as f:
-            ck_info = calkit.ryaml.load(f)
-    else:
-        ck_info = {}
+    ck_info = calkit.load_calkit_info()
     for obj in objects:
         cktype = obj.pop("type")
         cktype_plural = cktype + "s"

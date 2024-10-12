@@ -66,12 +66,18 @@ class Notebook(_CalkitObject):
     pass
 
 
+class ProcedureStep(BaseModel):
+    summary: str
+    details: str | None = None
+    cmd: str | None = None
+
+
 class Procedure(BaseModel):
     """A procedure, typically executed by a human."""
 
-    name: str
+    title: str
     description: str
-    steps: list[str]
+    steps: list[ProcedureStep]
     imported_from: str | None = None
 
 
@@ -88,4 +94,4 @@ class ProjectInfo(BaseModel):
     environments: list[Environment] = []
     software: list[Software] = []
     notebooks: list[Notebook] = []
-    procedures: list[Procedure] = []
+    procedures: dict[str, Procedure] = {}

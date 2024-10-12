@@ -8,6 +8,7 @@ import git
 import typer
 from typing_extensions import Annotated
 
+import calkit
 from calkit.core import ryaml
 
 new_app = typer.Typer(no_args_is_help=True)
@@ -21,11 +22,7 @@ def new_figure(
     commit: Annotated[bool, typer.Option("--commit")] = False,
 ):
     """Add a new figure."""
-    if os.path.isfile("calkit.yaml"):
-        with open("calkit.yaml") as f:
-            ck_info = ryaml.load(f)
-    else:
-        ck_info = {}
+    ck_info = calkit.load_calkit_info()
     figures = ck_info.get("figures", [])
     paths = [f.get("path") for f in figures]
     if path in paths:
@@ -49,11 +46,7 @@ def new_question(
     commit: Annotated[bool, typer.Option("--commit")] = False,
 ):
     """Add a new question."""
-    if os.path.isfile("calkit.yaml"):
-        with open("calkit.yaml") as f:
-            ck_info = ryaml.load(f)
-    else:
-        ck_info = {}
+    ck_info = calkit.load_calkit_info()
     questions = ck_info.get("questions", [])
     if question in questions:
         raise ValueError("Question already exists")
@@ -85,11 +78,7 @@ def new_notebook(
         raise ValueError("Path does not have .ipynb extension")
     # TODO: Add option to create stages that run `calkit nb clean` and
     # `calkit nb execute`
-    if os.path.isfile("calkit.yaml"):
-        with open("calkit.yaml") as f:
-            ck_info = ryaml.load(f)
-    else:
-        ck_info = {}
+    ck_info = calkit.load_calkit_info()
     notebooks = ck_info.get("notebooks", [])
     paths = [f.get("path") for f in notebooks]
     if path in paths:

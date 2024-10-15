@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 
+import git
 import typer
 from typing_extensions import Annotated, Optional
 
@@ -119,8 +120,16 @@ def add(
                 if os.path.isdir(path):
                     typer.echo("Cannot auto-add directories; use git or dvc")
                     raise typer.Exit(1)
+        repo = git.Repo()
         for path in paths:
             # Detect if this file should be tracked with Git or DVC
+            # First see if it's in Git
+            if repo.git.ls_files(path):
+                typer.echo(
+                    f"Adding {path} to Git since it's already in the repo"
+                )
+                subprocess.call(["git", "add", path])
+                continue
             if os.path.splitext(path)[-1] in dvc_extensions:
                 typer.echo(f"Adding {path} to DVC per its extension")
                 subprocess.call(["dvc", "add", path])

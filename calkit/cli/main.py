@@ -168,6 +168,50 @@ def commit(
         push()
 
 
+@app.command(name="save")
+def save(
+    paths: Annotated[
+        Optional[list[str]],
+        typer.Argument(
+            help=(
+                "Paths to add and commit. If not provided, will default to "
+                "any changed files that have been added previously."
+            ),
+        ),
+    ] = None,
+    all: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--all", "-a", help="Automatically stage all changed files."
+        ),
+    ] = False,
+    message: Annotated[
+        Optional[str], typer.Option("--message", "-m", help="Commit message.")
+    ] = None,
+    to: Annotated[
+        str,
+        typer.Option(
+            "--to", "-t", help="System with which to add (git or dvc)."
+        ),
+    ] = None,
+    no_push: Annotated[
+        bool,
+        typer.Option(
+            "--no-push", help="Do not push to Git and DVC after committing."
+        ),
+    ] = False,
+):
+    """Save paths by committing and pushing.
+
+    This is essentially git/dvc add, commit, and push in one step.
+    """
+    if paths is not None:
+        add(paths, to=to)
+    commit(all=True if paths is None else False, message=message)
+    if not no_push:
+        push()
+
+
 @app.command(name="pull", help="Pull with both Git and DVC.")
 def pull():
     typer.echo("Git pulling")

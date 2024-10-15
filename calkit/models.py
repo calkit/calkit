@@ -66,6 +66,21 @@ class Notebook(_CalkitObject):
     pass
 
 
+class ProcedureStep(BaseModel):
+    summary: str
+    details: str | None = None
+    cmd: str | None = None
+
+
+class Procedure(BaseModel):
+    """A procedure, typically executed by a human."""
+
+    title: str
+    description: str
+    steps: list[ProcedureStep]
+    imported_from: str | None = None
+
+
 class ProjectInfo(BaseModel):
     """All of the project's information or metadata, written to the
     ``calkit.yaml`` file.
@@ -79,3 +94,4 @@ class ProjectInfo(BaseModel):
     environments: list[Environment] = []
     software: list[Software] = []
     notebooks: list[Notebook] = []
+    procedures: dict[str, Procedure] = {}

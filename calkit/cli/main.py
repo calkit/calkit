@@ -407,3 +407,67 @@ def manual_step(
         )
     input(message + " (press enter to confirm): ")
     typer.echo("Done")
+
+
+@app.command(name="run-env", help="Run a command in an environment.")
+def run_in_env(
+    cmd: Annotated[
+        list[str], typer.Argument(help="Command to run in the environment.")
+    ],
+    env_name: Annotated[
+        str,
+        typer.Option(
+            "--env",
+            "-e",
+            help=(
+                "Environment name in which to run. "
+                "Only necessary if there are multiple in this project."
+            ),
+        ),
+    ] = None,
+):
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if not envs:
+        typer.echo("No environments defined in calkit.yaml", err=True)
+        raise typer.Exit(1)
+    if isinstance(envs, list):
+        typer.echo(
+            "Error: Environments should be a dict, not a list", err=True
+        )
+        raise typer.Exit(1)
+    if len(envs) > 1 and env_name is None:
+        typer.echo(
+            "Environment must be specified if there are multiple",
+            err=True,
+        )
+        raise typer.Exit(1)
+    if env_name is None:
+        env_name = list(envs.keys())[0]
+    env = envs[env_name]
+    cwd = os.getcwd()
+    image_name = env.get("image", env_name)
+    wdir = env.get("wdir", "/work")
+    if env["kind"] == "docker":
+        cmd = " ".join(cmd)
+        cmd = [
+            "docker",
+            "run",
+            "-it",
+            "--rm",
+            "-w",
+            wdir,
+            "-v",
+            f"{cwd}:{wdir}",
+            image_name,
+            "bash",
+            "-c",
+            f"{cmd}",
+        ]
+        subprocess.call(cmd)
+    elif env["kind"] == "conda":
+        cmd = ["conda", "run", "-n", env_name] + cmd
+        subprocess.call(cmd)
+    else:
+        typer.echo("Environment kind not supported", err=True)
+        raise typer.Exit(1)

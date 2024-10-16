@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 
 import git
 import typer
@@ -453,7 +454,7 @@ def run_in_env(
         cmd = [
             "docker",
             "run",
-            "-it",
+            "-it" if sys.stdin.isatty() else "-i",
             "--rm",
             "-w",
             wdir,

@@ -114,7 +114,7 @@ def new_docker_env(
     layers: Annotated[
         list[str],
         typer.Option(
-            "--layers", help="Layers to add (options: mambaforge, foampy)."
+            "--add-layer", help="Add a layer (options: mambaforge, foampy)."
         ),
     ] = [],
     wdir: Annotated[

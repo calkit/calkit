@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 
 import git
 import typer
@@ -10,6 +11,7 @@ from typing_extensions import Annotated
 
 import calkit
 from calkit.core import ryaml
+from calkit.docker import LAYERS
 
 new_app = typer.Typer(no_args_is_help=True)
 
@@ -94,3 +96,100 @@ def new_notebook(
         repo = git.Repo()
         repo.git.add("calkit.yaml")
         repo.git.commit(["-m", f"Add notebook {path}"])
+
+
+@new_app.command("docker-env")
+def new_docker_env(
+    name: Annotated[str, typer.Option("--name")],
+    base: Annotated[str, typer.Option("--base")],
+    path: Annotated[str, typer.Option("--path")] = "Dockerfile",
+    create_stage: Annotated[
+        str,
+        typer.Option(
+            "--create-stage", help="Create a DVC stage with this name."
+        ),
+    ] = None,
+    layers: Annotated[
+        list[str],
+        typer.Option(
+            "--layers", help="Layers to add (options: mambaforge, foampy)."
+        ),
+    ] = [],
+    wdir: Annotated[
+        str, typer.Option("--wdir", help="Working directory.")
+    ] = "/work",
+    description: Annotated[
+        str, typer.Option("--description", help="Description.")
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite any existing environment with this name.",
+        ),
+    ] = False,
+):
+    """Create a new Docker environment."""
+    if os.path.isfile(path) and not overwrite:
+        typer.echo("Output path already exists (use -f to overwrite)")
+        raise typer.Exit(1)
+    txt = "FROM " + base + "\n\n"
+    for layer in layers:
+        if layer not in LAYERS:
+            typer.echo(f"Unknown layer type '{layer}'")
+            raise typer.Exit(1)
+        txt += LAYERS[layer] + "\n\n"
+    txt += f"RUN mkdir {wdir}\n"
+    txt += f"WORKDIR {wdir}\n"
+    with open(path, "w") as f:
+        f.write(txt)
+    # Add environment to Calkit info
+    ck_info = calkit.load_calkit_info()
+    # If environments is a list instead of a dict, reformulate it
+    envs = ck_info.get("environments", {})
+    if isinstance(envs, list):
+        envs = {env.pop("name"): env for env in envs}
+    if name in envs and not overwrite:
+        typer.echo(
+            f"Environment with name {name} already exists "
+            "(use -f to overwrite)"
+        )
+        raise typer.Exit(1)
+    typer.echo("Adding environment to calkit.yaml")
+    env = dict(
+        kind="docker",
+        path=path,
+        wdir=wdir,
+    )
+    if create_stage is not None:
+        env["stage"] = create_stage
+    if description is not None:
+        env["description"] = description
+    if layers:
+        env["layers"] = layers
+    envs[name] = env
+    ck_info["environments"] = envs
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    # If we're creating a stage, do so with DVC
+    if create_stage:
+        typer.echo(f"Creating DVC stage {create_stage}")
+        subprocess.call(
+            [
+                "dvc",
+                "stage",
+                "add",
+                "-f",
+                "-n",
+                create_stage,
+                "-d",
+                path,
+                "--outs-no-cache",
+                path + ".digest",
+                (
+                    f"docker build -t {name} . && docker inspect --format "
+                    f"'{{{{.Id}}}}' {name} > Dockerfile.digest"
+                ),
+            ]
+        )

@@ -4,6 +4,8 @@ import subprocess
 
 import pytest
 
+from calkit.core import ryaml
+
 
 def test_run_in_env(tmp_dir):
     subprocess.check_call("git init", shell=True)
@@ -39,6 +41,11 @@ def test_run_in_env(tmp_dir):
         "--description 'This is a test image 2'",
         shell=True,
     )
+    with open("dvc.yaml") as f:
+        pipeline = ryaml.load(f)
+    stg = pipeline["stages"]["build-image-2"]
+    cmd = stg["cmd"]
+    assert "-f Dockerfile.2" in cmd
     subprocess.check_call("calkit run", shell=True)
     with pytest.raises(subprocess.CalledProcessError):
         out = (

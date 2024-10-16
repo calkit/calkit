@@ -190,7 +190,8 @@ def new_docker_env(
                 "--outs-no-cache",
                 path + ".digest",
                 (
-                    f"docker build -t {name} . && docker inspect --format "
+                    f"docker build -t {name} -f {path} . "
+                    "&& docker inspect --format "
                     f"'{{{{.Id}}}}' {name} > Dockerfile.digest"
                 ),
             ]

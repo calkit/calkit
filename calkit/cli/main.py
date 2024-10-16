@@ -38,7 +38,7 @@ def main(
     ] = False,
 ):
     if version:
-        typer.echo(calkit.__version__)
+        typer.echo(f"Calkit {calkit.__version__}")
         raise typer.Exit()
 
 

@@ -4,6 +4,7 @@ import subprocess
 
 import pytest
 
+import calkit
 from calkit.core import ryaml
 
 
@@ -85,3 +86,6 @@ def test_run_in_env(tmp_dir):
         .strip()
     )
     assert out == "Python 3.10.15"
+    ck_info = calkit.load_calkit_info()
+    env = ck_info["environments"]["py3.10"]
+    assert env.get("path") is None

@@ -104,7 +104,9 @@ def new_docker_env(
     base: Annotated[
         str, typer.Option("--from", help="Base image, e.g., ubuntu.")
     ],
-    path: Annotated[str, typer.Option("--path")] = "Dockerfile",
+    path: Annotated[
+        str, typer.Option("--path", help="Dockerfile path.")
+    ] = "Dockerfile",
     create_stage: Annotated[
         str,
         typer.Option(

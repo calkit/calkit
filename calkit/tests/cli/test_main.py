@@ -15,7 +15,6 @@ def test_run_in_env(tmp_dir):
         "calkit new docker-env "
         "--name my-image "
         "--create-stage build-image "
-        "--path Dockerfile "
         "--from ubuntu "
         "--add-layer mambaforge "
         "--description 'This is a test image'",

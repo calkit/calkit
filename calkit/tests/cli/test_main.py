@@ -55,9 +55,11 @@ def test_run_in_env(tmp_dir):
         )
     out = (
         subprocess.check_output(
-            "calkit run-env -e my-image-2 echo sup", shell=True
+            "calkit run-env -e my-image-2 \"python -c "
+            "'import foampy; print(foampy.__version__)'\"",
+            shell=True,
         )
         .decode()
         .strip()
     )
-    assert out == "sup"
+    assert out == "0.0.5"

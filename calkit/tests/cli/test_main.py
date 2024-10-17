@@ -55,12 +55,33 @@ def test_run_in_env(tmp_dir):
         )
     out = (
         subprocess.check_output(
-            "calkit run-env -e env2 \"python -c "
-            "'import foampy; print(foampy.__version__)'\"",
-            shell=True,
+            [
+                "calkit",
+                "run-env",
+                "-n",
+                "env2",
+                "python",
+                "-c",
+                '"import foampy; print(foampy.__version__)"',
+            ]
         )
         .decode()
         .strip()
     )
     assert out == "0.0.5"
     # Test that we can create a Docker env with no build stage
+    subprocess.check_call(
+        "calkit new docker-env "
+        "--name py3.10 "
+        "--image-name python:3.10.15-bookworm "
+        "--description 'Just Python.'",
+        shell=True,
+    )
+    out = (
+        subprocess.check_output(
+            "calkit run-env -n py3.10 python --version", shell=True
+        )
+        .decode()
+        .strip()
+    )
+    assert out == "Python 3.10.15"

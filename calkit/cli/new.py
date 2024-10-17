@@ -149,7 +149,7 @@ def new_docker_env(
     ] = False,
 ):
     """Create a new Docker environment."""
-    if os.path.isfile(path) and not overwrite:
+    if base and os.path.isfile(path) and not overwrite:
         typer.echo(
             "Output path already exists (use -f to overwrite)", err=True
         )
@@ -221,7 +221,7 @@ def new_docker_env(
                 (
                     f"docker build -t {image_name} -f {path} . "
                     "&& docker inspect --format "
-                    f"'{{{{.Id}}}}' {name} > Dockerfile.digest"
+                    f"'{{{{.Id}}}}' {image_name} > {path}.digest"
                 ),
             ]
         )

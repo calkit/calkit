@@ -410,7 +410,11 @@ def manual_step(
     typer.echo("Done")
 
 
-@app.command(name="run-env", help="Run a command in an environment.")
+@app.command(
+    name="run-env",
+    help="Run a command in an environment.",
+    context_settings={"ignore_unknown_options": True},
+)
 def run_in_env(
     cmd: Annotated[
         list[str], typer.Argument(help="Command to run in the environment.")
@@ -418,14 +422,17 @@ def run_in_env(
     env_name: Annotated[
         str,
         typer.Option(
-            "--env",
-            "-e",
+            "--name",
+            "-n",
             help=(
                 "Environment name in which to run. "
                 "Only necessary if there are multiple in this project."
             ),
         ),
     ] = None,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
+    ] = False,
 ):
     ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
@@ -465,9 +472,13 @@ def run_in_env(
             "-c",
             f"{cmd}",
         ]
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
         subprocess.call(cmd)
     elif env["kind"] == "conda":
         cmd = ["conda", "run", "-n", env_name] + cmd
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
         subprocess.call(cmd)
     else:
         typer.echo("Environment kind not supported", err=True)

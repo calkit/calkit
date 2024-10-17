@@ -178,6 +178,7 @@ def new_docker_env(
     # If environments is a list instead of a dict, reformulate it
     envs = ck_info.get("environments", {})
     if isinstance(envs, list):
+        typer.echo("Converting environments from list to dict")
         envs = {env.pop("name"): env for env in envs}
     if name in envs and not overwrite:
         typer.echo(

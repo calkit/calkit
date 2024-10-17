@@ -31,7 +31,8 @@ def test_run_in_env(tmp_dir):
     # name when trying to run
     subprocess.check_call(
         "calkit new docker-env "
-        "--name my-image-2 "
+        "--name env2 "
+        "--image-name my-image-2 "
         "--create-stage build-image-2 "
         "--path Dockerfile.2 "
         "--from ubuntu "
@@ -54,7 +55,7 @@ def test_run_in_env(tmp_dir):
         )
     out = (
         subprocess.check_output(
-            "calkit run-env -e my-image-2 \"python -c "
+            "calkit run-env -e env2 \"python -c "
             "'import foampy; print(foampy.__version__)'\"",
             shell=True,
         )
@@ -62,3 +63,4 @@ def test_run_in_env(tmp_dir):
         .strip()
     )
     assert out == "0.0.5"
+    # Test that we can create a Docker env with no build stage

@@ -100,10 +100,24 @@ def new_notebook(
 
 @new_app.command("docker-env")
 def new_docker_env(
-    name: Annotated[str, typer.Option("--name")],
+    name: Annotated[str, typer.Option("--name", help="Environment name.")],
+    image_name: Annotated[
+        str,
+        typer.Option(
+            "--image-name",
+            help=(
+                "Image name. Should be unique and descriptive. "
+                "Will default to environment name if not specified."
+            ),
+        ),
+    ] = None,
     base: Annotated[
-        str, typer.Option("--from", help="Base image, e.g., ubuntu.")
-    ],
+        str,
+        typer.Option(
+            "--from",
+            help="Base image, e.g., 'ubuntu', if creating a Dockerfile.",
+        ),
+    ] = None,
     path: Annotated[
         str, typer.Option("--path", help="Dockerfile path.")
     ] = "Dockerfile",
@@ -136,18 +150,29 @@ def new_docker_env(
 ):
     """Create a new Docker environment."""
     if os.path.isfile(path) and not overwrite:
-        typer.echo("Output path already exists (use -f to overwrite)")
+        typer.echo(
+            "Output path already exists (use -f to overwrite)", err=True
+        )
         raise typer.Exit(1)
-    txt = "FROM " + base + "\n\n"
-    for layer in layers:
-        if layer not in LAYERS:
-            typer.echo(f"Unknown layer type '{layer}'")
-            raise typer.Exit(1)
-        txt += LAYERS[layer] + "\n\n"
-    txt += f"RUN mkdir {wdir}\n"
-    txt += f"WORKDIR {wdir}\n"
-    with open(path, "w") as f:
-        f.write(txt)
+    if create_stage and not base:
+        typer.echo(
+            "--from must be specified when creating a build stage", err=True
+        )
+        raise typer.Exit(1)
+    if image_name is None:
+        typer.echo("No image name specified; using environment name")
+        image_name = name
+    if base:
+        txt = "FROM " + base + "\n\n"
+        for layer in layers:
+            if layer not in LAYERS:
+                typer.echo(f"Unknown layer type '{layer}'")
+                raise typer.Exit(1)
+            txt += LAYERS[layer] + "\n\n"
+        txt += f"RUN mkdir {wdir}\n"
+        txt += f"WORKDIR {wdir}\n"
+        with open(path, "w") as f:
+            f.write(txt)
     # Add environment to Calkit info
     ck_info = calkit.load_calkit_info()
     # If environments is a list instead of a dict, reformulate it
@@ -163,9 +188,11 @@ def new_docker_env(
     typer.echo("Adding environment to calkit.yaml")
     env = dict(
         kind="docker",
-        path=path,
+        image=image_name,
         wdir=wdir,
     )
+    if base is not None:
+        env["path"] = path
     if create_stage is not None:
         env["stage"] = create_stage
     if description is not None:
@@ -192,7 +219,7 @@ def new_docker_env(
                 "--outs-no-cache",
                 path + ".digest",
                 (
-                    f"docker build -t {name} -f {path} . "
+                    f"docker build -t {image_name} -f {path} . "
                     "&& docker inspect --format "
                     f"'{{{{.Id}}}}' {name} > Dockerfile.digest"
                 ),

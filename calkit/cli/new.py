@@ -100,7 +100,9 @@ def new_notebook(
 
 @new_app.command("docker-env")
 def new_docker_env(
-    name: Annotated[str, typer.Option("--name", help="Environment name.")],
+    name: Annotated[
+        str, typer.Option("--name", "-n", help="Environment name.")
+    ],
     image_name: Annotated[
         str,
         typer.Option(

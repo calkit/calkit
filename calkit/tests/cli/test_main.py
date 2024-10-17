@@ -32,7 +32,7 @@ def test_run_in_env(tmp_dir):
     # name when trying to run
     subprocess.check_call(
         "calkit new docker-env "
-        "--name env2 "
+        "-n env2 "
         "--image-name my-image-2 "
         "--create-stage build-image-2 "
         "--path Dockerfile.2 "

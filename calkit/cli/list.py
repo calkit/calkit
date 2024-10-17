@@ -68,3 +68,12 @@ def list_publications():
 @list_app.command(name="references")
 def list_references():
     _list_objects("references")
+
+
+@list_app.command(name="environments")
+def list_environments():
+    envs = calkit.load_calkit_info().get("environments", {})
+    for name, env in envs.items():
+        typer.echo(name + ":")
+        for k, v in env.items():
+            typer.echo(f"    {k}: {v}")

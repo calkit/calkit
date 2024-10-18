@@ -107,3 +107,22 @@ def test_new_figure(tmp_dir):
     assert stage["cmd"] == "python plot.py"
     assert set(stage["deps"]) == set(["plot.py", "data.csv"])
     assert stage["outs"] == ["myfigure2.png"]
+    # Test that we can use outs from stage
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "figure",
+            "myfigure3.png",
+            "--title",
+            "This is a cool figure 3",
+            "--stage",
+            "create-figure3",
+            "--cmd",
+            "python plot.py",
+            "--deps-from-stage-outs",
+            "create-figure",
+        ]
+    )
+    pipeline = calkit.dvc.read_pipeline()
+    assert pipeline["stages"]["create-figure3"]["deps"] == ["myfigure2.png"]

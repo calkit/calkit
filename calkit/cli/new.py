@@ -52,6 +52,13 @@ def new_figure(
             ),
         ),
     ] = [],
+    outs_from_stage: Annotated[
+        str,
+        typer.Option(
+            "--deps-from-stage-outs",
+            help="Stage name from which to add outputs as dependencies.",
+        ),
+    ] = None,
     commit: Annotated[bool, typer.Option("--commit")] = False,
     overwrite: Annotated[
         bool,
@@ -70,9 +77,9 @@ def new_figure(
         _error(f"Figure at path {path} already exists")
     if cmd is not None and stage_name is None:
         _error("Stage name must be provided if command is specified")
-    if (deps or outs) and not cmd:
+    if (deps or outs or outs_from_stage) and not cmd:
         _error("Command must be provided")
-    if (deps or outs) and not stage_name:
+    if (deps or outs or outs_from_stage) and not stage_name:
         _error("Stage name must be provided")
     obj = dict(path=path, title=title)
     if description is not None:
@@ -80,6 +87,12 @@ def new_figure(
     if stage_name is not None:
         obj["stage"] = stage_name
     if cmd:
+        if outs_from_stage:
+            pipeline = calkit.dvc.read_pipeline()
+            stages = pipeline.get("stages", {})
+            if outs_from_stage not in stages:
+                _error(f"Stage {outs_from_stage} does not exist")
+            deps += stages[outs_from_stage].get("outs", [])
         if path not in outs:
             outs.append(path)
         deps_cmd = []

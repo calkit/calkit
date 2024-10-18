@@ -406,7 +406,7 @@ def manual_step(
 
 
 @app.command(
-    name="renv",
+    name="runenv",
     help="Run a command in an environment.",
     context_settings={"ignore_unknown_options": True},
 )

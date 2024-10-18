@@ -23,7 +23,7 @@ def test_run_in_env(tmp_dir):
     )
     subprocess.check_call("calkit run", shell=True)
     out = (
-        subprocess.check_output("calkit run-env echo sup", shell=True)
+        subprocess.check_output("calkit runenv echo sup", shell=True)
         .decode()
         .strip()
     )
@@ -50,7 +50,7 @@ def test_run_in_env(tmp_dir):
     subprocess.check_call("calkit run", shell=True)
     with pytest.raises(subprocess.CalledProcessError):
         out = (
-            subprocess.check_output("calkit run-env echo sup", shell=True)
+            subprocess.check_output("calkit runenv echo sup", shell=True)
             .decode()
             .strip()
         )
@@ -58,7 +58,7 @@ def test_run_in_env(tmp_dir):
         subprocess.check_output(
             [
                 "calkit",
-                "run-env",
+                "runenv",
                 "-n",
                 "env2",
                 "python",
@@ -80,7 +80,7 @@ def test_run_in_env(tmp_dir):
     )
     out = (
         subprocess.check_output(
-            "calkit run-env -n py3.10 python --version", shell=True
+            "calkit runenv -n py3.10 python --version", shell=True
         )
         .decode()
         .strip()

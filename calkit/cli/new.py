@@ -16,22 +16,84 @@ from calkit.docker import LAYERS
 new_app = typer.Typer(no_args_is_help=True)
 
 
+def _error(txt):
+    typer.echo(txt, err=txt)
+    raise typer.Exit(1)
+
+
 @new_app.command(name="figure")
 def new_figure(
     path: str,
     title: Annotated[str, typer.Option("--title")],
-    description: Annotated[str, typer.Option("--desc")] = None,
+    description: Annotated[str, typer.Option("--description")] = None,
+    stage_name: Annotated[
+        str,
+        typer.Option(
+            "--stage",
+            help="Name of the pipeline stage that generates this figure.",
+        ),
+    ] = None,
+    cmd: Annotated[
+        str,
+        typer.Option(
+            "--cmd", help="Command to add to the stage, if specified."
+        ),
+    ] = None,
+    deps: Annotated[
+        list[str], typer.Option("--dep", help="Path to stage dependency.")
+    ] = [],
+    outs: Annotated[
+        list[str],
+        typer.Option(
+            "--out",
+            help=(
+                "Path to stage output. "
+                "Figure path will be added automatically."
+            ),
+        ),
+    ] = [],
     commit: Annotated[bool, typer.Option("--commit")] = False,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite existing figure if one exists.",
+        ),
+    ] = False,
 ):
     """Add a new figure."""
     ck_info = calkit.load_calkit_info()
     figures = ck_info.get("figures", [])
     paths = [f.get("path") for f in figures]
-    if path in paths:
-        raise ValueError(f"Figure at path {path} already exists")
+    if not overwrite and path in paths:
+        _error(f"Figure at path {path} already exists")
+    if cmd is not None and stage_name is None:
+        _error("Stage name must be provided if command is specified")
+    if (deps or outs) and not cmd:
+        _error("Command must be provided")
+    if (deps or outs) and not stage_name:
+        _error("Stage name must be provided")
     obj = dict(path=path, title=title)
     if description is not None:
         obj["description"] = description
+    if stage_name is not None:
+        obj["stage"] = stage_name
+    if cmd:
+        if path not in outs:
+            outs.append(path)
+        deps_cmd = []
+        for dep in deps:
+            deps_cmd += ["-d", dep]
+        outs_cmd = []
+        for out in outs:
+            outs_cmd += ["-o", out]
+        subprocess.check_call(
+            ["dvc", "stage", "add", "-n", stage_name]
+            + deps_cmd
+            + outs_cmd
+            + [cmd]
+        )
     figures.append(obj)
     ck_info["figures"] = figures
     with open("calkit.yaml", "w") as f:
@@ -39,6 +101,8 @@ def new_figure(
     if commit:
         repo = git.Repo()
         repo.git.add("calkit.yaml")
+        if cmd:
+            repo.git.add("dvc.yaml")
         repo.git.commit(["-m", f"Add figure {path}"])
 
 
@@ -68,7 +132,7 @@ def new_question(
 def new_notebook(
     path: Annotated[str, typer.Argument(help="Notebook path (relative)")],
     title: Annotated[str, typer.Option("--title")],
-    description: Annotated[str, typer.Option("--desc")] = None,
+    description: Annotated[str, typer.Option("--description")] = None,
     commit: Annotated[bool, typer.Option("--commit")] = False,
 ):
     """Add a new notebook."""
@@ -271,7 +335,7 @@ def new_foreach_stage(
             cmd=cmd.replace("{var}", "${item}"),
             outs=[out.replace("{var}", "${item}") for out in outs],
             deps=[dep.replace("{var}", "${item}") for dep in deps],
-        )
+        ),
     )
     with open("dvc.yaml", "w") as f:
         calkit.ryaml.dump(pipeline, f)

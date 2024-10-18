@@ -3,6 +3,10 @@
 import os
 import subprocess
 
+import pytest
+
+import calkit
+
 
 def test_new_foreach_stage(tmp_dir):
     subprocess.check_call(["git", "init"])
@@ -46,3 +50,60 @@ def test_new_foreach_stage(tmp_dir):
     )
     subprocess.check_call(["calkit", "run"])
     assert os.path.isfile("two-2.txt")
+
+
+def test_new_figure(tmp_dir):
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["dvc", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "figure",
+            "--title",
+            "This is a cool figure",
+            "--description",
+            "This is a cool description",
+            "myfigure.png",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert "myfigure.png" in [fig["path"] for fig in ck_info["figures"]]
+    # Check that we won't overwrite a figure
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(
+            [
+                "calkit",
+                "new",
+                "figure",
+                "--title",
+                "This is a cool figure",
+                "--description",
+                "This is a cool description",
+                "myfigure.png",
+            ]
+        )
+    # Check that we can create a stage
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "figure",
+            "--title",
+            "This is a cool figure 2",
+            "myfigure2.png",
+            "--stage",
+            "create-figure",
+            "--cmd",
+            "python plot.py",
+            "--dep",
+            "plot.py",
+            "--dep",
+            "data.csv",
+        ]
+    )
+    pipeline = calkit.dvc.read_pipeline()
+    stage = pipeline["stages"]["create-figure"]
+    assert stage["cmd"] == "python plot.py"
+    assert set(stage["deps"]) == set(["plot.py", "data.csv"])
+    assert stage["outs"] == ["myfigure2.png"]

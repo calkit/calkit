@@ -59,7 +59,7 @@ def new_figure(
             help="Stage name from which to add outputs as dependencies.",
         ),
     ] = None,
-    commit: Annotated[bool, typer.Option("--commit")] = False,
+    no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
     overwrite: Annotated[
         bool,
         typer.Option(
@@ -111,7 +111,7 @@ def new_figure(
     ck_info["figures"] = figures
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
-    if commit:
+    if not no_commit:
         repo = git.Repo()
         repo.git.add("calkit.yaml")
         if cmd:
@@ -183,9 +183,9 @@ def new_docker_env(
     image_name: Annotated[
         str,
         typer.Option(
-            "--image-name",
+            "--image",
             help=(
-                "Image name. Should be unique and descriptive. "
+                "Image identifier. Should be unique and descriptive. "
                 "Will default to environment name if not specified."
             ),
         ),
@@ -200,10 +200,10 @@ def new_docker_env(
     path: Annotated[
         str, typer.Option("--path", help="Dockerfile path.")
     ] = "Dockerfile",
-    create_stage: Annotated[
+    stage: Annotated[
         str,
         typer.Option(
-            "--create-stage", help="Create a DVC stage with this name."
+            "--stage", help="DVC pipeline stage name, if built in one."
         ),
     ] = None,
     layers: Annotated[
@@ -226,6 +226,9 @@ def new_docker_env(
             help="Overwrite any existing environment with this name.",
         ),
     ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
 ):
     """Create a new Docker environment."""
     if base and os.path.isfile(path) and not overwrite:
@@ -233,7 +236,7 @@ def new_docker_env(
             "Output path already exists (use -f to overwrite)", err=True
         )
         raise typer.Exit(1)
-    if create_stage and not base:
+    if stage and not base:
         typer.echo(
             "--from must be specified when creating a build stage", err=True
         )
@@ -241,6 +244,7 @@ def new_docker_env(
     if image_name is None:
         typer.echo("No image name specified; using environment name")
         image_name = name
+    repo = git.Repo()
     if base:
         txt = "FROM " + base + "\n\n"
         for layer in layers:
@@ -265,6 +269,8 @@ def new_docker_env(
             "(use -f to overwrite)"
         )
         raise typer.Exit(1)
+    if base:
+        repo.git.add(path)
     typer.echo("Adding environment to calkit.yaml")
     env = dict(
         kind="docker",
@@ -273,8 +279,8 @@ def new_docker_env(
     )
     if base is not None:
         env["path"] = path
-    if create_stage is not None:
-        env["stage"] = create_stage
+    if stage is not None:
+        env["stage"] = stage
     if description is not None:
         env["description"] = description
     if layers:
@@ -284,8 +290,8 @@ def new_docker_env(
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     # If we're creating a stage, do so with DVC
-    if create_stage:
-        typer.echo(f"Creating DVC stage {create_stage}")
+    if stage:
+        typer.echo(f"Creating DVC stage {stage}")
         subprocess.call(
             [
                 "dvc",
@@ -293,18 +299,19 @@ def new_docker_env(
                 "add",
                 "-f",
                 "-n",
-                create_stage,
+                stage,
+                "--always-changed",
                 "-d",
                 path,
-                "--outs-no-cache",
-                path + ".digest",
-                (
-                    f"docker build -t {image_name} -f {path} . "
-                    "&& docker inspect --format "
-                    f"'{{{{.Id}}}}' {image_name} > {path}.digest"
-                ),
+                "--outs-persist-no-cache",
+                f"{path}-lock.json",
+                f"calkit build-docker {image_name} -i {path}",
             ]
         )
+    repo.git.add("calkit.yaml")
+    repo.git.add("dvc.yaml")
+    if not no_commit and repo.git.diff("--staged"):
+        repo.git.commit(["-m", f"Add Docker environment {name}"])
 
 
 @new_app.command(name="foreach-stage")
@@ -330,6 +337,9 @@ def new_foreach_stage(
             "--overwrite", "-f", help="Overwrite stage if one already exists."
         ),
     ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
 ):
     """Create a new DVC 'foreach' stage.
 
@@ -352,3 +362,7 @@ def new_foreach_stage(
     )
     with open("dvc.yaml", "w") as f:
         calkit.ryaml.dump(pipeline, f)
+    repo = git.Repo()
+    repo.git.add("dvc.yaml")
+    if not no_commit and repo.git.diff("--staged"):
+        repo.git.commit(["-m", f"Add foreach stage {name}"])

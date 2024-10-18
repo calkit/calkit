@@ -15,7 +15,7 @@ def test_run_in_env(tmp_dir):
     subprocess.check_call(
         "calkit new docker-env "
         "--name my-image "
-        "--create-stage build-image "
+        "--stage build-image "
         "--from ubuntu "
         "--add-layer mambaforge "
         "--description 'This is a test image'",
@@ -23,7 +23,7 @@ def test_run_in_env(tmp_dir):
     )
     subprocess.check_call("calkit run", shell=True)
     out = (
-        subprocess.check_output("calkit run-env echo sup", shell=True)
+        subprocess.check_output("calkit runenv echo sup", shell=True)
         .decode()
         .strip()
     )
@@ -33,8 +33,8 @@ def test_run_in_env(tmp_dir):
     subprocess.check_call(
         "calkit new docker-env "
         "-n env2 "
-        "--image-name my-image-2 "
-        "--create-stage build-image-2 "
+        "--image my-image-2 "
+        "--stage build-image-2 "
         "--path Dockerfile.2 "
         "--from ubuntu "
         "--add-layer mambaforge "
@@ -46,11 +46,11 @@ def test_run_in_env(tmp_dir):
         pipeline = ryaml.load(f)
     stg = pipeline["stages"]["build-image-2"]
     cmd = stg["cmd"]
-    assert "-f Dockerfile.2" in cmd
+    assert "-i Dockerfile.2" in cmd
     subprocess.check_call("calkit run", shell=True)
     with pytest.raises(subprocess.CalledProcessError):
         out = (
-            subprocess.check_output("calkit run-env echo sup", shell=True)
+            subprocess.check_output("calkit runenv echo sup", shell=True)
             .decode()
             .strip()
         )
@@ -58,7 +58,7 @@ def test_run_in_env(tmp_dir):
         subprocess.check_output(
             [
                 "calkit",
-                "run-env",
+                "runenv",
                 "-n",
                 "env2",
                 "python",
@@ -74,13 +74,13 @@ def test_run_in_env(tmp_dir):
     subprocess.check_call(
         "calkit new docker-env "
         "--name py3.10 "
-        "--image-name python:3.10.15-bookworm "
+        "--image python:3.10.15-bookworm "
         "--description 'Just Python.'",
         shell=True,
     )
     out = (
         subprocess.check_output(
-            "calkit run-env -n py3.10 python --version", shell=True
+            "calkit runenv -n py3.10 python --version", shell=True
         )
         .decode()
         .strip()
@@ -89,3 +89,25 @@ def test_run_in_env(tmp_dir):
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["py3.10"]
     assert env.get("path") is None
+
+
+def test_check_call():
+    out = (
+        subprocess.check_output(
+            ["calkit", "check-call", "echo sup", "--if-error", "echo yo"]
+        )
+        .decode()
+        .strip()
+        .split("\n")
+    )
+    assert "sup" in out
+    assert "yo" not in out
+    out = (
+        subprocess.check_output(
+            ["calkit", "check-call", "sup", "--if-error", "echo yo"]
+        )
+        .decode()
+        .strip()
+        .split("\n")
+    )
+    assert "yo" in out

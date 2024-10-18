@@ -518,7 +518,7 @@ def check_call(
 def build_docker(
     tag: Annotated[str, typer.Argument(help="Image tag.")],
     fpath: Annotated[
-        str, typer.Option("-f", "--file", help="Path to Dockerfile.")
+        str, typer.Option("-i", "--input", help="Path to input Dockerfile.")
     ] = "Dockerfile",
 ):
     def get_docker_inspect():

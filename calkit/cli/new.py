@@ -286,13 +286,6 @@ def new_docker_env(
     # If we're creating a stage, do so with DVC
     if create_stage:
         typer.echo(f"Creating DVC stage {create_stage}")
-        inspect_out = f"{path}-inspect.json"
-        inspect_cmd = f"docker image inspect {image_name} > {inspect_out}"
-        build_cmd = f"docker build -t {image_name} -f {path} ."
-        check_cmd = (
-            f"calkit check-call '{inspect_cmd}' "
-            f"--if-error '{build_cmd} && {inspect_cmd}'"
-        )
         subprocess.call(
             [
                 "dvc",
@@ -304,9 +297,9 @@ def new_docker_env(
                 "--always-changed",
                 "-d",
                 path,
-                "--outs-no-cache",
-                inspect_out,
-                check_cmd,
+                "--outs-persist-no-cache",
+                f"{path}-lock.json",
+                f"calkit build-docker {image_name} -i {path}",
             ]
         )
 

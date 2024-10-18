@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from typing import Annotated, Literal
+from typing import Annotated
 
 import git
 import typer
@@ -60,6 +60,7 @@ def import_dataset(
         datasets = [ds for ds in datasets if ds["path"] != dest_path]
     repo = git.Repo()
     # Obtain, save, and commit the .dvc file for the dataset
+    typer.echo("Fetching import info")
     resp = calkit.cloud.get(
         f"/projects/{owner_name}/{project_name}/datasets/{path}"
     )
@@ -68,27 +69,35 @@ def import_dataset(
     dvc_fpath = dest_path + ".dvc"
     dvc_dir = os.path.dirname(dvc_fpath)
     os.makedirs(dvc_dir, exist_ok=True)
+    # Update path in .dvc file if necessary
+    dvc_import = resp["dvc_import"]
+    dvc_import["outs"][0]["path"] = os.path.basename(dest_path)
+    typer.echo("Saving .dvc file")
     with open(dvc_fpath, "w") as f:
-        calkit.ryaml.dump(resp["dvc_import"], f)
+        calkit.ryaml.dump(dvc_import, f)
     repo.git.add(dvc_fpath)
     # Ensure we have a DVC remote corresponding to this project, and that we
     # have a token set for that remote
+    typer.echo("Adding new DVC remote")
     calkit.dvc.add_external_remote(
         owner_name=owner_name, project_name=project_name
     )
     repo.git.add(".dvc/config")
     # Add to .gitignore
+    typer.echo("Checking .gitignore")
     if os.path.isfile(".gitignore"):
         with open(".gitignore") as f:
             gitignore = f.read()
     else:
         gitignore = ""
     if dest_path not in gitignore.split("\n"):
+        typer.echo(f"Adding {dest_path} to .gitignore")
         gitignore = gitignore.rstrip() + "\n" + dest_path + "\n"
         with open(".gitignore", "w") as f:
             f.write(gitignore)
         repo.git.add(".gitignore")
     # Add to datasets in calkit.yaml
+    typer.echo("Adding dataset to calkit.yaml")
     new_ds = calkit.models.ImportedDataset(
         path=dest_path,
         title=resp.get("title"),
@@ -96,7 +105,7 @@ def import_dataset(
         stage=None,
         imported_from=calkit.models._ImportedFromProject(
             project=f"{owner_name}/{project_name}",
-            path=src_path,
+            path=path,
             git_rev=None,  # TODO?
         ),
     )
@@ -106,6 +115,8 @@ def import_dataset(
         calkit.ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
     # Commit any necessary changes
+    typer.echo("Committing changes")
     repo.git.commit(["-m", f"Import dataset {src_path}"])
     # Run dvc pull
+    typer.echo("Running dvc pull")
     subprocess.call(["dvc", "pull", dest_path])

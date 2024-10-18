@@ -364,5 +364,5 @@ def new_foreach_stage(
         calkit.ryaml.dump(pipeline, f)
     repo = git.Repo()
     repo.git.add("dvc.yaml")
-    if not no_commit:
+    if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add foreach stage {name}"])

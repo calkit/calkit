@@ -200,10 +200,10 @@ def new_docker_env(
     path: Annotated[
         str, typer.Option("--path", help="Dockerfile path.")
     ] = "Dockerfile",
-    create_stage: Annotated[
+    stage: Annotated[
         str,
         typer.Option(
-            "--create-stage", help="Create a DVC stage with this name."
+            "--stage", help="DVC pipeline stage name, if built in one."
         ),
     ] = None,
     layers: Annotated[
@@ -233,7 +233,7 @@ def new_docker_env(
             "Output path already exists (use -f to overwrite)", err=True
         )
         raise typer.Exit(1)
-    if create_stage and not base:
+    if stage and not base:
         typer.echo(
             "--from must be specified when creating a build stage", err=True
         )
@@ -273,8 +273,8 @@ def new_docker_env(
     )
     if base is not None:
         env["path"] = path
-    if create_stage is not None:
-        env["stage"] = create_stage
+    if stage is not None:
+        env["stage"] = stage
     if description is not None:
         env["description"] = description
     if layers:
@@ -284,8 +284,8 @@ def new_docker_env(
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     # If we're creating a stage, do so with DVC
-    if create_stage:
-        typer.echo(f"Creating DVC stage {create_stage}")
+    if stage:
+        typer.echo(f"Creating DVC stage {stage}")
         subprocess.call(
             [
                 "dvc",
@@ -293,7 +293,7 @@ def new_docker_env(
                 "add",
                 "-f",
                 "-n",
-                create_stage,
+                stage,
                 "--always-changed",
                 "-d",
                 path,

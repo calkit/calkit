@@ -15,7 +15,7 @@ def test_run_in_env(tmp_dir):
     subprocess.check_call(
         "calkit new docker-env "
         "--name my-image "
-        "--create-stage build-image "
+        "--stage build-image "
         "--from ubuntu "
         "--add-layer mambaforge "
         "--description 'This is a test image'",
@@ -34,7 +34,7 @@ def test_run_in_env(tmp_dir):
         "calkit new docker-env "
         "-n env2 "
         "--image-name my-image-2 "
-        "--create-stage build-image-2 "
+        "--stage build-image-2 "
         "--path Dockerfile.2 "
         "--from ubuntu "
         "--add-layer mambaforge "

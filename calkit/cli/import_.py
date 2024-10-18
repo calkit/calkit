@@ -51,11 +51,13 @@ def import_dataset(
         dest_path = path
     ck_info = calkit.load_calkit_info()
     datasets = ck_info.get("datasets", [])
-    ds_paths = [ds.get["path"] for ds in datasets]
+    ds_paths = [ds["path"] for ds in datasets]
     if not overwrite and dest_path in ds_paths:
         raise ValueError(
             "A dataset already exists in this project at this path"
         )
+    elif overwrite and dest_path in ds_paths:
+        datasets = [ds for ds in datasets if ds["path"] != dest_path]
     repo = git.Repo()
     # Obtain, save, and commit the .dvc file for the dataset
     resp = calkit.cloud.get(
@@ -96,6 +98,11 @@ def import_dataset(
             git_rev=None,  # TODO?
         ),
     )
+    datasets.append(new_ds.model_dump())
+    ck_info["datasets"] = datasets
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
     # Commit any necessary changes
     repo.git.commit(["-m", f"Import dataset {src_path}"])
     # Run dvc pull

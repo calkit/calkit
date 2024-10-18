@@ -478,3 +478,33 @@ def run_in_env(
     else:
         typer.echo("Environment kind not supported", err=True)
         raise typer.Exit(1)
+
+
+@app.command(
+    name="check-call",
+    help=(
+        "Check that a call to a command succeeds and run another command "
+        "if there is an error."
+    ),
+)
+def check_call(
+    cmd: Annotated[str, typer.Argument(help="Command to check.")],
+    if_error: Annotated[
+        str,
+        typer.Option(
+            "--if-error", help="Command to run if there is an error."
+        ),
+    ],
+):
+    try:
+        subprocess.check_call(cmd, shell=True)
+        typer.echo("Command succeeded")
+    except subprocess.CalledProcessError:
+        typer.echo("Command failed")
+        try:
+            typer.echo("Attempting fallback call")
+            subprocess.check_call(if_error, shell=True)
+            typer.echo("Fallback call succeeded")
+        except subprocess.CalledProcessError:
+            typer.echo("Fallback call failed", err=True)
+            raise typer.Exit(1)

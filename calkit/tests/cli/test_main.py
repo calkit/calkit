@@ -89,3 +89,25 @@ def test_run_in_env(tmp_dir):
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["py3.10"]
     assert env.get("path") is None
+
+
+def test_check_call():
+    out = (
+        subprocess.check_output(
+            ["calkit", "check-call", "echo sup", "--if-error", "echo yo"]
+        )
+        .decode()
+        .strip()
+        .split("\n")
+    )
+    assert "sup" in out
+    assert "yo" not in out
+    out = (
+        subprocess.check_output(
+            ["calkit", "check-call", "sup", "--if-error", "echo yo"]
+        )
+        .decode()
+        .strip()
+        .split("\n")
+    )
+    assert "yo" in out

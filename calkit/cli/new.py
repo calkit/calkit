@@ -226,6 +226,9 @@ def new_docker_env(
             help="Overwrite any existing environment with this name.",
         ),
     ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
 ):
     """Create a new Docker environment."""
     if base and os.path.isfile(path) and not overwrite:
@@ -241,6 +244,7 @@ def new_docker_env(
     if image_name is None:
         typer.echo("No image name specified; using environment name")
         image_name = name
+    repo = git.Repo()
     if base:
         txt = "FROM " + base + "\n\n"
         for layer in layers:
@@ -265,6 +269,8 @@ def new_docker_env(
             "(use -f to overwrite)"
         )
         raise typer.Exit(1)
+    if base:
+        repo.git.add(path)
     typer.echo("Adding environment to calkit.yaml")
     env = dict(
         kind="docker",
@@ -302,6 +308,10 @@ def new_docker_env(
                 f"calkit build-docker {image_name} -i {path}",
             ]
         )
+    repo.git.add("calkit.yaml")
+    repo.git.add("dvc.yaml")
+    if not no_commit and repo.git.diff("--staged"):
+        repo.git.commit(["-m", f"Add Docker environment {name}"])
 
 
 @new_app.command(name="foreach-stage")

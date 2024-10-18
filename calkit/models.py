@@ -88,6 +88,6 @@ class ProjectInfo(BaseModel):
     figures: list[Figure] = []
     publications: list[Publication] = []
     references: list[ReferenceCollection] = []
-    environments: dict[str, Environment] = {}
+    environments: dict[str, Environment | DockerEnvironment] = {}
     software: list[Software] = []
     notebooks: list[Notebook] = []

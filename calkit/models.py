@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 
-class _ImportedFrom(BaseModel):
+class _ImportedFromProject(BaseModel):
     project: str
     path: str | None = None
     git_rev: str | None = None
@@ -22,6 +22,10 @@ class _CalkitObject(BaseModel):
 
 class Dataset(_CalkitObject):
     pass
+
+
+class ImportedDataset(Dataset):
+    imported_from: _ImportedFromProject
 
 
 class Figure(_CalkitObject):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 
 import git
 import typer
@@ -12,6 +13,7 @@ from typing_extensions import Annotated, Optional
 import calkit
 from calkit.cli import print_sep, run_cmd
 from calkit.cli.config import config_app
+from calkit.cli.import_ import import_app
 from calkit.cli.list import list_app
 from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
@@ -28,6 +30,7 @@ app.add_typer(
 )
 app.add_typer(notebooks_app, name="nb", help="Work with Jupyter notebooks.")
 app.add_typer(list_app, name="list", help="List Calkit objects.")
+app.add_typer(import_app, name="import", help="Import objects.")
 
 
 @app.callback()
@@ -38,7 +41,7 @@ def main(
     ] = False,
 ):
     if version:
-        typer.echo(calkit.__version__)
+        typer.echo(f"Calkit {calkit.__version__}")
         raise typer.Exit()
 
 
@@ -407,3 +410,78 @@ def manual_step(
         )
     input(message + " (press enter to confirm): ")
     typer.echo("Done")
+
+
+@app.command(
+    name="run-env",
+    help="Run a command in an environment.",
+    context_settings={"ignore_unknown_options": True},
+)
+def run_in_env(
+    cmd: Annotated[
+        list[str], typer.Argument(help="Command to run in the environment.")
+    ],
+    env_name: Annotated[
+        str,
+        typer.Option(
+            "--name",
+            "-n",
+            help=(
+                "Environment name in which to run. "
+                "Only necessary if there are multiple in this project."
+            ),
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
+    ] = False,
+):
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if not envs:
+        typer.echo("No environments defined in calkit.yaml", err=True)
+        raise typer.Exit(1)
+    if isinstance(envs, list):
+        typer.echo(
+            "Error: Environments should be a dict, not a list", err=True
+        )
+        raise typer.Exit(1)
+    if len(envs) > 1 and env_name is None:
+        typer.echo(
+            "Environment must be specified if there are multiple",
+            err=True,
+        )
+        raise typer.Exit(1)
+    if env_name is None:
+        env_name = list(envs.keys())[0]
+    env = envs[env_name]
+    cwd = os.getcwd()
+    image_name = env.get("image", env_name)
+    wdir = env.get("wdir", "/work")
+    if env["kind"] == "docker":
+        cmd = " ".join(cmd)
+        cmd = [
+            "docker",
+            "run",
+            "-it" if sys.stdin.isatty() else "-i",
+            "--rm",
+            "-w",
+            wdir,
+            "-v",
+            f"{cwd}:{wdir}",
+            image_name,
+            "bash",
+            "-c",
+            f"{cmd}",
+        ]
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
+        subprocess.call(cmd)
+    elif env["kind"] == "conda":
+        cmd = ["conda", "run", "-n", env_name] + cmd
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
+        subprocess.call(cmd)
+    else:
+        typer.echo("Environment kind not supported", err=True)
+        raise typer.Exit(1)

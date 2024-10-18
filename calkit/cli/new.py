@@ -183,9 +183,9 @@ def new_docker_env(
     image_name: Annotated[
         str,
         typer.Option(
-            "--image-name",
+            "--image",
             help=(
-                "Image name. Should be unique and descriptive. "
+                "Image identifier. Should be unique and descriptive. "
                 "Will default to environment name if not specified."
             ),
         ),

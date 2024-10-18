@@ -33,7 +33,7 @@ def test_run_in_env(tmp_dir):
     subprocess.check_call(
         "calkit new docker-env "
         "-n env2 "
-        "--image-name my-image-2 "
+        "--image my-image-2 "
         "--stage build-image-2 "
         "--path Dockerfile.2 "
         "--from ubuntu "
@@ -74,7 +74,7 @@ def test_run_in_env(tmp_dir):
     subprocess.check_call(
         "calkit new docker-env "
         "--name py3.10 "
-        "--image-name python:3.10.15-bookworm "
+        "--image python:3.10.15-bookworm "
         "--description 'Just Python.'",
         shell=True,
     )

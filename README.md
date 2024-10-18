@@ -82,12 +82,17 @@ other researchers can find and reuse your work to accelerate their own.
 
 ## Design/UX principles
 
+1. Be opinionated. Users should not be forced to make unimportant decisions.
+   However, if they disagree, they should have the ability to change the
+   default behavior. The most common use case should be default.
+   Commands that are commonly executed as groups should be combined, but
+   still available to be run individually if desired.
 1. Commits should ideally be made automatically as part of actions that make
    changes to the project repo. For
    example, if a new object is added via the CLI, a commit should be made
    right then unless otherwise specified. This saves the trouble of running
    multiple commands and encourages atomic commits.
-2. Pushes should require explicit input from the user.
+1. Pushes should require explicit input from the user.
    It is still TBD whether or not a pull should automatically be
    made, though in general we want to encourage trunk-based development, i.e.,
    only working on a single branch. One exception might be for local
@@ -95,12 +100,12 @@ other researchers can find and reuse your work to accelerate their own.
    branch can be a nice way to throw those changes away.
    Multiple branches should probably not live in the cloud, however, except
    for small, quickly merged pull requests.
-3. Idempotency is always a good thing. Unnecessary state is bad. For example,
+1. Idempotency is always a good thing. Unnecessary state is bad. For example,
    we should not encourage caching pipeline outputs for operations that are
    cheap. Caching should happen either for state that is valuable on its
    own, like a figure, or for an intermediate result that is expensive to
    generate.
-4. There should be the smallest number of
+1. There should be the smallest number of
    frequently used commands as possible, and they should require at little
    memorization as possible to know how to execute, e.g., a user should be
    able to keep running `calkit run` and that's all they really need to do

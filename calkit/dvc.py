@@ -67,7 +67,7 @@ def add_external_remote(owner_name: str, project_name: str):
     remote_url = f"{base_url}/projects/{owner_name}/{project_name}/dvc"
     remote_name = f"{get_app_name()}:{owner_name}/{project_name}"
     subprocess.call(
-        ["dvc", "remote", "add", "-d", "-f", remote_name, remote_url]
+        ["dvc", "remote", "add", "-f", remote_name, remote_url]
     )
     subprocess.call(["dvc", "remote", "modify", remote_name, "auth", "custom"])
     set_remote_auth(remote_name)

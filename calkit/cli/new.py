@@ -337,6 +337,9 @@ def new_foreach_stage(
             "--overwrite", "-f", help="Overwrite stage if one already exists."
         ),
     ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
 ):
     """Create a new DVC 'foreach' stage.
 
@@ -359,3 +362,7 @@ def new_foreach_stage(
     )
     with open("dvc.yaml", "w") as f:
         calkit.ryaml.dump(pipeline, f)
+    repo = git.Repo()
+    repo.git.add("dvc.yaml")
+    if not no_commit:
+        repo.git.commit(["-m", f"Add foreach stage {name}"])

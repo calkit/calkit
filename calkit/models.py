@@ -1,5 +1,7 @@
 """Data models."""
 
+from __future__ import annotations
+
 from typing import Literal
 
 from pydantic import BaseModel
@@ -7,7 +9,8 @@ from pydantic import BaseModel
 
 class _ImportedFrom(BaseModel):
     project: str
-    path: str = None
+    path: str | None = None
+    git_rev: str | None = None
 
 
 class _CalkitObject(BaseModel):
@@ -49,9 +52,18 @@ class ReferenceCollection(BaseModel):
 
 
 class Environment(BaseModel):
-    name: str
-    kind: Literal["conda", "docker", "pip", "poetry", "npm", "yarn"]
-    path: str
+    kind: Literal[
+        "conda", "docker", "pip", "poetry", "npm", "yarn", "remote-ssh"
+    ]
+    path: str | None = None
+    description: str | None = None
+    stage: str | None = None
+
+
+class DockerEnvironment(Environment):
+    kind: str = "docker"
+    image: str
+    layers: list[str] | None = None
 
 
 class Software(BaseModel):
@@ -76,6 +88,6 @@ class ProjectInfo(BaseModel):
     figures: list[Figure] = []
     publications: list[Publication] = []
     references: list[ReferenceCollection] = []
-    environments: list[Environment] = []
+    environments: dict[str, Environment] = {}
     software: list[Software] = []
     notebooks: list[Notebook] = []

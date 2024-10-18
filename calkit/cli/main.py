@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -508,3 +509,51 @@ def check_call(
         except subprocess.CalledProcessError:
             typer.echo("Fallback call failed", err=True)
             raise typer.Exit(1)
+
+
+@app.command(
+    name="build-docker",
+    help="Build Docker image if missing or different from lock file.",
+)
+def build_docker(
+    tag: Annotated[str, typer.Argument(help="Image tag.")],
+    fpath: Annotated[
+        str, typer.Option("-f", "--file", help="Path to Dockerfile.")
+    ] = "Dockerfile",
+):
+    def get_docker_inspect():
+        out = json.loads(
+            subprocess.check_output(["docker", "inspect", tag]).decode()
+        )
+        # Remove some keys that can change without the important aspects of
+        # the image changing
+        _ = out[0].pop("Id")
+        _ = out[0].pop("RepoDigests")
+        _ = out[0].pop("Metadata")
+        return out
+
+    typer.echo(f"Checking for existing image with tag {tag}")
+    # First call Docker inspect
+    try:
+        inspect = get_docker_inspect()
+    except subprocess.CalledProcessError:
+        typer.echo(f"No image with tag {tag} found locally")
+        inspect = []
+    lock_fpath = fpath + "-lock.json"
+    rebuild = True
+    if os.path.isfile(lock_fpath):
+        typer.echo(f"Reading lock file: {lock_fpath}")
+        with open(lock_fpath) as f:
+            lock = json.load(f)
+    else:
+        typer.echo(f"Lock file ({lock_fpath}) does not exist")
+        lock = None
+    if inspect and lock:
+        typer.echo("Checking image against lock file")
+        rebuild = inspect[0]["RootFS"]["Layers"] != lock[0]["RootFS"]["Layers"]
+    if rebuild:
+        subprocess.check_call(["docker", "build", "-t", tag, "-f", fpath, "."])
+    # Write the lock file
+    inspect = get_docker_inspect()
+    with open(lock_fpath, "w") as f:
+        json.dump(inspect, f, indent=4)

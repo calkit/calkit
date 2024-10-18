@@ -71,10 +71,12 @@ def import_dataset(
     with open(dvc_fpath, "w") as f:
         calkit.ryaml.dump(resp["dvc_import"], f)
     repo.git.add(dvc_fpath)
-    # Ensure we have a DVC remote corresponding to this project
-    # TODO
-    # Ensure DVC token is set in the local config for this remote
-    # TODO
+    # Ensure we have a DVC remote corresponding to this project, and that we
+    # have a token set for that remote
+    calkit.dvc.add_external_remote(
+        owner_name=owner_name, project_name=project_name
+    )
+    repo.git.add(".dvc/config")
     # Add to .gitignore
     if os.path.isfile(".gitignore"):
         with open(".gitignore") as f:

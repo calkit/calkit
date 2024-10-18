@@ -13,6 +13,10 @@ class _ImportedFromProject(BaseModel):
     git_rev: str | None = None
 
 
+class _ImportedFromUrl(BaseModel):
+    url: str
+
+
 class _CalkitObject(BaseModel):
     path: str
     title: str
@@ -25,7 +29,7 @@ class Dataset(_CalkitObject):
 
 
 class ImportedDataset(Dataset):
-    imported_from: _ImportedFromProject
+    imported_from: _ImportedFromProject | _ImportedFromUrl
 
 
 class Figure(_CalkitObject):

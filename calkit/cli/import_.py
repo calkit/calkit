@@ -29,24 +29,40 @@ def import_dataset(
         str,
         typer.Option("--output", "-o", help="Output path at which to save."),
     ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Force adding the dataset even if it already exists.",
+        ),
+    ] = False,
 ):
     """Import a dataset.
 
     Currently only supports datasets kept in DVC, not Git.
     """
-    repo = git.Repo()
-    # Obtain, save, and commit the .dvc file for the dataset
+    # Ensure we don't already have a dataset at this path
     path_split = src_path.split("/")
     owner_name = path_split[0]
     project_name = path_split[1]
     path = "/".join(path_split[2:])
+    if dest_path is None:
+        dest_path = path
+    ck_info = calkit.load_calkit_info()
+    datasets = ck_info.get("datasets", [])
+    ds_paths = [ds.get["path"] for ds in datasets]
+    if not overwrite and dest_path in ds_paths:
+        raise ValueError(
+            "A dataset already exists in this project at this path"
+        )
+    repo = git.Repo()
+    # Obtain, save, and commit the .dvc file for the dataset
     resp = calkit.cloud.get(
         f"/projects/{owner_name}/{project_name}/datasets/{path}"
     )
     if not "dvc_import" in resp:
         raise ValueError("This file is not available to import with DVC")
-    if dest_path is None:
-        dest_path = path
     dvc_fpath = dest_path + ".dvc"
     dvc_dir = os.path.dirname(dvc_fpath)
     os.makedirs(dvc_dir, exist_ok=True)
@@ -69,7 +85,17 @@ def import_dataset(
             f.write(gitignore)
         repo.git.add(".gitignore")
     # Add to datasets in calkit.yaml
-    # TODO
+    new_ds = calkit.models.ImportedDataset(
+        path=dest_path,
+        title=resp.get("title"),
+        description=resp.get("description"),
+        stage=None,
+        imported_from=calkit.models._ImportedFromProject(
+            project=f"{owner_name}/{project_name}",
+            path=src_path,
+            git_rev=None,  # TODO?
+        ),
+    )
     # Commit any necessary changes
     repo.git.commit(["-m", f"Import dataset {src_path}"])
     # Run dvc pull

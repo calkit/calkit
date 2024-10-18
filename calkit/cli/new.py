@@ -59,7 +59,7 @@ def new_figure(
             help="Stage name from which to add outputs as dependencies.",
         ),
     ] = None,
-    commit: Annotated[bool, typer.Option("--commit")] = False,
+    no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
     overwrite: Annotated[
         bool,
         typer.Option(
@@ -111,7 +111,7 @@ def new_figure(
     ck_info["figures"] = figures
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
-    if commit:
+    if not no_commit:
         repo = git.Repo()
         repo.git.add("calkit.yaml")
         if cmd:

@@ -27,7 +27,7 @@ def import_dataset(
     ],
     dest_path: Annotated[
         str,
-        typer.Option("--output", "-o", help="Output path at which to save."),
+        typer.Argument(help="Output path at which to save."),
     ] = None,
     overwrite: Annotated[
         bool,

@@ -228,3 +228,50 @@ def new_docker_env(
                 ),
             ]
         )
+
+
+@new_app.command(name="foreach-stage")
+def new_foreach_stage(
+    cmd: Annotated[
+        str,
+        typer.Option(
+            "--cmd",
+            help="Command to run. Can include {var} to fill with variable.",
+        ),
+    ],
+    name: Annotated[str, typer.Option("--name", "-n", help="Stage name.")],
+    vals: Annotated[list[str], typer.Argument(help="Values to iterate over")],
+    deps: Annotated[
+        list[str], typer.Option("--dep", help="Path to add as a dependency.")
+    ] = [],
+    outs: Annotated[
+        list[str], typer.Option("--out", help="Path to add as an output.")
+    ] = [],
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite", "-f", help="Overwrite stage if one already exists."
+        ),
+    ] = False,
+):
+    """Create a new DVC 'foreach' stage.
+
+    The list of values must be a simple list. For more complex objects,
+    edit dvc.yaml directly.
+    """
+    pipeline = calkit.dvc.read_pipeline()
+    if name in pipeline and not overwrite:
+        typer.echo("Stage already exists; use -f to overwrite", err=True)
+        raise typer.Exit(1)
+    if "stages" not in pipeline:
+        pipeline["stages"] = {}
+    pipeline["stages"][name] = dict(
+        foreach=vals,
+        do=dict(
+            cmd=cmd.replace("{var}", "${item}"),
+            outs=[out.replace("{var}", "${item}") for out in outs],
+            deps=[dep.replace("{var}", "${item}") for dep in deps],
+        )
+    )
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(pipeline, f)

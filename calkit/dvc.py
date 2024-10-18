@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 
 import calkit
@@ -71,3 +72,10 @@ def add_external_remote(owner_name: str, project_name: str):
     )
     subprocess.call(["dvc", "remote", "modify", remote_name, "auth", "custom"])
     set_remote_auth(remote_name)
+
+
+def read_pipeline() -> dict:
+    if not os.path.isfile("dvc.yaml"):
+        return {}
+    with open("dvc.yaml") as f:
+        return calkit.ryaml.load(f)

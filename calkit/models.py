@@ -90,8 +90,24 @@ class Notebook(_CalkitObject):
 class ProjectInfo(BaseModel):
     """All of the project's information or metadata, written to the
     ``calkit.yaml`` file.
+
+    Attributes
+    ----------
+    parent : str
+        The project's parent project, if applicable. This should be set if
+        the project was created as a copy of another. This is similar to the
+        concept of forking, but unlike a fork, a child project's changes
+        are not meant to be merged back into the parent.
+        The format of this field should be something like
+        {owner_name}/{project_name}, e.g., 'someuser/some-project-name'.
+        Note that individual objects can be imported from other projects, but
+        that doesn't necessarily make them parent projects.
+        This is probably not that important of a distinction.
+        The real use case is being able to trace where things came from and
+        distinguish what has been newly created here.
     """
 
+    parent: str | None = None
     questions: list[str] = []
     datasets: list[Dataset] = []
     figures: list[Figure] = []

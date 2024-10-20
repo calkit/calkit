@@ -228,15 +228,9 @@ def new_docker_env(
 ):
     """Create a new Docker environment."""
     if base and os.path.isfile(path) and not overwrite:
-        typer.echo(
-            "Output path already exists (use -f to overwrite)", err=True
-        )
-        raise typer.Exit(1)
+        raise_error("Output path already exists (use -f to overwrite)")
     if stage and not base:
-        typer.echo(
-            "--from must be specified when creating a build stage", err=True
-        )
-        raise typer.Exit(1)
+        raise_error("--from must be specified when creating a build stage")
     if image_name is None:
         typer.echo("No image name specified; using environment name")
         image_name = name
@@ -245,8 +239,7 @@ def new_docker_env(
         txt = "FROM " + base + "\n\n"
         for layer in layers:
             if layer not in LAYERS:
-                typer.echo(f"Unknown layer type '{layer}'")
-                raise typer.Exit(1)
+                raise_error(f"Unknown layer type '{layer}'")
             txt += LAYERS[layer] + "\n\n"
         txt += f"RUN mkdir {wdir}\n"
         txt += f"WORKDIR {wdir}\n"
@@ -260,11 +253,10 @@ def new_docker_env(
         typer.echo("Converting environments from list to dict")
         envs = {env.pop("name"): env for env in envs}
     if name in envs and not overwrite:
-        typer.echo(
+        raise_error(
             f"Environment with name {name} already exists "
             "(use -f to overwrite)"
         )
-        raise typer.Exit(1)
     if base:
         repo.git.add(path)
     typer.echo("Adding environment to calkit.yaml")
@@ -344,8 +336,7 @@ def new_foreach_stage(
     """
     pipeline = calkit.dvc.read_pipeline()
     if name in pipeline and not overwrite:
-        typer.echo("Stage already exists; use -f to overwrite", err=True)
-        raise typer.Exit(1)
+        raise_error("Stage already exists; use -f to overwrite")
     if "stages" not in pipeline:
         pipeline["stages"] = {}
     pipeline["stages"][name] = dict(

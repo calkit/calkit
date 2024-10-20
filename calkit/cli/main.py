@@ -320,8 +320,7 @@ def run_dvc_repro(
     subprocess.call(["dvc", "repro"] + args)
     # Now parse stage metadata for calkit objects
     if not os.path.isfile("dvc.yaml"):
-        typer.echo("No dvc.yaml file found")
-        raise typer.Exit(1)
+        raise_error("No dvc.yaml file found")
     objects = []
     with open("dvc.yaml") as f:
         pipeline = calkit.ryaml.load(f)
@@ -329,21 +328,18 @@ def run_dvc_repro(
             ckmeta = stage_info.get("meta", {}).get("calkit")
             if ckmeta is not None:
                 if not isinstance(ckmeta, dict):
-                    typer.echo(
+                    raise_error(
                         f"Calkit metadata for {stage_name} is not a dictionary"
                     )
-                    typer.Exit(1)
                 # Stage must have a single output
                 outs = stage_info.get("outs", [])
                 if len(outs) != 1:
-                    typer.echo(
+                    raise_error(
                         f"Stage {stage_name} does not have exactly one output"
                     )
-                    raise typer.Exit(1)
                 cktype = ckmeta.get("type")
                 if cktype not in ["figure", "dataset", "publication"]:
-                    typer.echo(f"Invalid Calkit output type '{cktype}'")
-                    raise typer.Exit(1)
+                    raise_error(f"Invalid Calkit output type '{cktype}'")
                 objects.append(
                     dict(path=outs[0]) | ckmeta | dict(stage=stage_name)
                 )
@@ -506,8 +502,7 @@ def check_call(
             subprocess.check_call(if_error, shell=True)
             typer.echo("Fallback call succeeded")
         except subprocess.CalledProcessError:
-            typer.echo("Fallback call failed", err=True)
-            raise typer.Exit(1)
+            raise_error("Fallback call failed")
 
 
 @app.command(

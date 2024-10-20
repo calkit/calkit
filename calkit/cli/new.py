@@ -65,7 +65,7 @@ def new_figure(
         ),
     ] = False,
 ):
-    """Add a new figure."""
+    """Create a new figure."""
     ck_info = calkit.load_calkit_info()
     figures = ck_info.get("figures", [])
     paths = [f.get("path") for f in figures]

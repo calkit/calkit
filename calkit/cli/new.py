@@ -10,15 +10,11 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
+from calkit.cli import raise_error
 from calkit.core import ryaml
 from calkit.docker import LAYERS
 
 new_app = typer.Typer(no_args_is_help=True)
-
-
-def _error(txt):
-    typer.echo(txt, err=txt)
-    raise typer.Exit(1)
 
 
 @new_app.command(name="figure")
@@ -74,13 +70,13 @@ def new_figure(
     figures = ck_info.get("figures", [])
     paths = [f.get("path") for f in figures]
     if not overwrite and path in paths:
-        _error(f"Figure at path {path} already exists")
+        raise_error(f"Figure at path {path} already exists")
     if cmd is not None and stage_name is None:
-        _error("Stage name must be provided if command is specified")
+        raise_error("Stage name must be provided if command is specified")
     if (deps or outs or outs_from_stage) and not cmd:
-        _error("Command must be provided")
+        raise_error("Command must be provided")
     if (deps or outs or outs_from_stage) and not stage_name:
-        _error("Stage name must be provided")
+        raise_error("Stage name must be provided")
     obj = dict(path=path, title=title)
     if description is not None:
         obj["description"] = description
@@ -91,7 +87,7 @@ def new_figure(
             pipeline = calkit.dvc.read_pipeline()
             stages = pipeline.get("stages", {})
             if outs_from_stage not in stages:
-                _error(f"Stage {outs_from_stage} does not exist")
+                raise_error(f"Stage {outs_from_stage} does not exist")
             deps += stages[outs_from_stage].get("outs", [])
         if path not in outs:
             outs.append(path)

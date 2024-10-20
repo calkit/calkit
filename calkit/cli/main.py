@@ -12,7 +12,7 @@ import typer
 from typing_extensions import Annotated, Optional
 
 import calkit
-from calkit.cli import print_sep, run_cmd
+from calkit.cli import print_sep, raise_error, run_cmd
 from calkit.cli.config import config_app
 from calkit.cli.import_ import import_app
 from calkit.cli.list import list_app
@@ -97,8 +97,7 @@ def add(
     adding any .dvc files to Git when adding to DVC.
     """
     if to is not None and to not in ["git", "dvc"]:
-        typer.echo(f"Invalid option for 'to': {to}")
-        raise typer.Exit(1)
+        raise_error(f"Invalid option for 'to': {to}")
     # Ensure autostage is enabled for DVC
     subprocess.call(["dvc", "config", "core.autostage", "true"])
     subprocess.call(["git", "add", ".dvc/config"])
@@ -117,13 +116,11 @@ def add(
         ]
         dvc_size_thresh_bytes = 1_000_000
         if "." in paths and to is None:
-            typer.echo("Cannot add '.' with calkit; use git or dvc")
-            raise typer.Exit(1)
+            raise_error("Cannot add '.' with calkit; use git or dvc")
         if to is None:
             for path in paths:
                 if os.path.isdir(path):
-                    typer.echo("Cannot auto-add directories; use git or dvc")
-                    raise typer.Exit(1)
+                    raise_error("Cannot auto-add directories; use git or dvc")
         repo = git.Repo()
         for path in paths:
             # Detect if this file should be tracked with Git or DVC
@@ -433,21 +430,24 @@ def run_in_env(
     ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
     if not envs:
-        typer.echo("No environments defined in calkit.yaml", err=True)
-        raise typer.Exit(1)
+        raise_error("No environments defined in calkit.yaml")
     if isinstance(envs, list):
-        typer.echo(
-            "Error: Environments should be a dict, not a list", err=True
-        )
-        raise typer.Exit(1)
-    if len(envs) > 1 and env_name is None:
-        typer.echo(
-            "Environment must be specified if there are multiple",
-            err=True,
-        )
-        raise typer.Exit(1)
+        raise_error("Error: Environments should be a dict, not a list")
     if env_name is None:
-        env_name = list(envs.keys())[0]
+        # See if there's a default env, or only one env defined
+        default_env_name = None
+        for n, e in envs.items():
+            if e.get("default"):
+                if default_env_name is not None:
+                    raise_error(
+                        "Only one default environment can be specified"
+                    )
+                default_env_name = n
+        if default_env_name is None and len(envs) == 1:
+            default_env_name = list(envs.keys())[0]
+        env_name = default_env_name
+    if env_name is None:
+        raise_error("Environment must be specified if there are multiple")
     env = envs[env_name]
     cwd = os.getcwd()
     image_name = env.get("image", env_name)
@@ -477,8 +477,7 @@ def run_in_env(
             typer.echo(f"Running command: {cmd}")
         subprocess.call(cmd)
     else:
-        typer.echo("Environment kind not supported", err=True)
-        raise typer.Exit(1)
+        raise_error("Environment kind not supported")
 
 
 @app.command(

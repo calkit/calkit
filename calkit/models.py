@@ -66,6 +66,7 @@ class Environment(BaseModel):
     path: str | None = None
     description: str | None = None
     stage: str | None = None
+    default: bool | None = None
 
 
 class DockerEnvironment(Environment):

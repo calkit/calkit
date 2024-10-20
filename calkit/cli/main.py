@@ -26,8 +26,11 @@ app = typer.Typer(
     pretty_exceptions_show_locals=False,
 )
 app.add_typer(config_app, name="config", help="Configure Calkit.")
+app.add_typer(new_app, name="new", help="Create a new Calkit object.")
 app.add_typer(
-    new_app, name="new", help="Add new Calkit object (to calkit.yaml)."
+    new_app,
+    name="create",
+    help="Create a new Calkit object (alias for 'new').",
 )
 app.add_typer(notebooks_app, name="nb", help="Work with Jupyter notebooks.")
 app.add_typer(list_app, name="list", help="List Calkit objects.")

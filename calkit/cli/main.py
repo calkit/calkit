@@ -49,6 +49,53 @@ def main(
         raise typer.Exit()
 
 
+@app.command(name="clone")
+def clone(
+    url: Annotated[str, typer.Argument(help="Repo URL.")],
+    location: Annotated[
+        str,
+        typer.Argument(
+            help="Location to clone to (default will be ./{repo_name})"
+        ),
+    ] = None,
+    no_config_remote: Annotated[
+        bool,
+        typer.Option(
+            "--no-config-remote",
+            help="Do not automatically configure Calkit DVC remote.",
+        ),
+    ] = False,
+    no_dvc_pull: Annotated[
+        bool, typer.Option("--no-dvc-pull", help="Do not pull DVC objects.")
+    ] = False,
+):
+    """Clone a Git repo and by default configure and pull from the DVC
+    remote.
+    """
+    # Git clone
+    cmd = ["git", "clone", url]
+    if location is not None:
+        cmd.append(location)
+    try:
+        subprocess.call(cmd)
+    except Exception as e:
+        raise_error(str(e))
+    if location is None:
+        location = url.split("/")[-1].removesuffix(".git")
+    typer.echo(f"Moving into repo dir: {location}")
+    os.chdir(location)
+    # Setup auth for any Calkit remotes
+    if not no_config_remote:
+        remotes = calkit.dvc.get_remotes()
+        for name, url in remotes.items():
+            if name == "calkit" or name.startswith("calkit:"):
+                typer.echo(f"Setting up authentication for DVC remote: {name}")
+                calkit.dvc.set_remote_auth(remote_name=name)
+    # DVC pull
+    if not no_dvc_pull:
+        subprocess.call(["dvc", "pull"])
+
+
 @app.command(name="status")
 def get_status():
     """Get a unified Git and DVC status."""

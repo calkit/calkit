@@ -67,9 +67,7 @@ def add_external_remote(owner_name: str, project_name: str):
     base_url = calkit.cloud.get_base_url()
     remote_url = f"{base_url}/projects/{owner_name}/{project_name}/dvc"
     remote_name = f"{get_app_name()}:{owner_name}/{project_name}"
-    subprocess.call(
-        ["dvc", "remote", "add", "-f", remote_name, remote_url]
-    )
+    subprocess.call(["dvc", "remote", "add", "-f", remote_name, remote_url])
     subprocess.call(["dvc", "remote", "modify", remote_name, "auth", "custom"])
     set_remote_auth(remote_name)
 
@@ -79,3 +77,17 @@ def read_pipeline() -> dict:
         return {}
     with open("dvc.yaml") as f:
         return calkit.ryaml.load(f)
+
+
+def get_remotes() -> dict[str, str]:
+    """Get a dictionary of DVC remotes, keyed by name, with URL as the
+    value.
+    """
+    out = subprocess.check_output(["dvc", "remote", "list"]).decode().strip()
+    if not out:
+        return {}
+    resp = {}
+    for line in out.split("\n"):
+        name, url = line.split("\t")
+        resp[name] = url
+    return resp

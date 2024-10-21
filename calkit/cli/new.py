@@ -10,15 +10,11 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
+from calkit.cli import raise_error
 from calkit.core import ryaml
 from calkit.docker import LAYERS
 
 new_app = typer.Typer(no_args_is_help=True)
-
-
-def _error(txt):
-    typer.echo(txt, err=txt)
-    raise typer.Exit(1)
 
 
 @new_app.command(name="figure")
@@ -69,18 +65,18 @@ def new_figure(
         ),
     ] = False,
 ):
-    """Add a new figure."""
+    """Create a new figure."""
     ck_info = calkit.load_calkit_info()
     figures = ck_info.get("figures", [])
     paths = [f.get("path") for f in figures]
     if not overwrite and path in paths:
-        _error(f"Figure at path {path} already exists")
+        raise_error(f"Figure at path {path} already exists")
     if cmd is not None and stage_name is None:
-        _error("Stage name must be provided if command is specified")
+        raise_error("Stage name must be provided if command is specified")
     if (deps or outs or outs_from_stage) and not cmd:
-        _error("Command must be provided")
+        raise_error("Command must be provided")
     if (deps or outs or outs_from_stage) and not stage_name:
-        _error("Stage name must be provided")
+        raise_error("Stage name must be provided")
     obj = dict(path=path, title=title)
     if description is not None:
         obj["description"] = description
@@ -91,7 +87,7 @@ def new_figure(
             pipeline = calkit.dvc.read_pipeline()
             stages = pipeline.get("stages", {})
             if outs_from_stage not in stages:
-                _error(f"Stage {outs_from_stage} does not exist")
+                raise_error(f"Stage {outs_from_stage} does not exist")
             deps += stages[outs_from_stage].get("outs", [])
         if path not in outs:
             outs.append(path)
@@ -232,15 +228,9 @@ def new_docker_env(
 ):
     """Create a new Docker environment."""
     if base and os.path.isfile(path) and not overwrite:
-        typer.echo(
-            "Output path already exists (use -f to overwrite)", err=True
-        )
-        raise typer.Exit(1)
+        raise_error("Output path already exists (use -f to overwrite)")
     if stage and not base:
-        typer.echo(
-            "--from must be specified when creating a build stage", err=True
-        )
-        raise typer.Exit(1)
+        raise_error("--from must be specified when creating a build stage")
     if image_name is None:
         typer.echo("No image name specified; using environment name")
         image_name = name
@@ -249,8 +239,7 @@ def new_docker_env(
         txt = "FROM " + base + "\n\n"
         for layer in layers:
             if layer not in LAYERS:
-                typer.echo(f"Unknown layer type '{layer}'")
-                raise typer.Exit(1)
+                raise_error(f"Unknown layer type '{layer}'")
             txt += LAYERS[layer] + "\n\n"
         txt += f"RUN mkdir {wdir}\n"
         txt += f"WORKDIR {wdir}\n"
@@ -264,11 +253,10 @@ def new_docker_env(
         typer.echo("Converting environments from list to dict")
         envs = {env.pop("name"): env for env in envs}
     if name in envs and not overwrite:
-        typer.echo(
+        raise_error(
             f"Environment with name {name} already exists "
             "(use -f to overwrite)"
         )
-        raise typer.Exit(1)
     if base:
         repo.git.add(path)
     typer.echo("Adding environment to calkit.yaml")
@@ -348,8 +336,7 @@ def new_foreach_stage(
     """
     pipeline = calkit.dvc.read_pipeline()
     if name in pipeline and not overwrite:
-        typer.echo("Stage already exists; use -f to overwrite", err=True)
-        raise typer.Exit(1)
+        raise_error("Stage already exists; use -f to overwrite")
     if "stages" not in pipeline:
         pipeline["stages"] = {}
     pipeline["stages"][name] = dict(

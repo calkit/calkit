@@ -21,7 +21,7 @@ new_app = typer.Typer(no_args_is_help=True)
 def new_figure(
     path: str,
     title: Annotated[str, typer.Option("--title")],
-    description: Annotated[str, typer.Option("--description")] = None,
+    description: Annotated[str, typer.Option("--description")],
     stage_name: Annotated[
         str,
         typer.Option(

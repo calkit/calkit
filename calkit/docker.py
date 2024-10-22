@@ -1,6 +1,6 @@
 """Functionality for working with Docker."""
 
-MAMBAFORGE_LAYER_TXT = """
+MAMBAFORGE_LAYER_TXT = r"""
 # Install Miniforge
 ARG MINIFORGE_NAME=Mambaforge
 ARG MINIFORGE_VERSION=24.3.0-0

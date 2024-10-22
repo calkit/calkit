@@ -297,7 +297,8 @@ def new_docker_env(
             ]
         )
     repo.git.add("calkit.yaml")
-    repo.git.add("dvc.yaml")
+    if stage:
+        repo.git.add("dvc.yaml")
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add Docker environment {name}"])
 

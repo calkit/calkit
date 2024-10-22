@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -583,6 +584,10 @@ def build_docker(
     except subprocess.CalledProcessError:
         typer.echo(f"No image with tag {tag} found locally")
         inspect = []
+    typer.echo(f"Reading Dockerfile from {fpath}")
+    with open(fpath) as f:
+        dockerfile = f.read()
+    dockerfile_md5 = hashlib.md5(dockerfile.encode()).hexdigest()
     lock_fpath = fpath + "-lock.json"
     rebuild = True
     if os.path.isfile(lock_fpath):
@@ -593,11 +598,14 @@ def build_docker(
         typer.echo(f"Lock file ({lock_fpath}) does not exist")
         lock = None
     if inspect and lock:
-        typer.echo("Checking image against lock file")
-        rebuild = inspect[0]["RootFS"]["Layers"] != lock[0]["RootFS"]["Layers"]
+        typer.echo("Checking image and Dockerfile against lock file")
+        rebuild = inspect[0]["RootFS"]["Layers"] != lock[0]["RootFS"][
+            "Layers"
+        ] or dockerfile_md5 != lock[0].get("DockerfileMD5")
     if rebuild:
         subprocess.check_call(["docker", "build", "-t", tag, "-f", fpath, "."])
     # Write the lock file
     inspect = get_docker_inspect()
+    inspect[0]["DockerfileMD5"] = dockerfile_md5
     with open(lock_fpath, "w") as f:
         json.dump(inspect, f, indent=4)

@@ -40,8 +40,10 @@ RUN apt-get update > /dev/null && \
     echo ". ${CONDA_DIR}/etc/profile.d/conda.sh && conda activate base" >> ~/.bashrc
 """.strip()
 
-FOAMPY_LAYER_TEXT = """
-RUN pip install numpy pandas matplotlib && pip install scipy && pip install foampy
+FOAMPY_LAYER_TEXT = r"""
+RUN pip install --no-cache-dir numpy pandas matplotlib h5py \
+    && pip install --no-cache-dir scipy \
+    && pip install --no-cache-dir foampy
 """.strip()
 
 LAYERS = {

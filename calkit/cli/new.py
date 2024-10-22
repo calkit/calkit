@@ -71,6 +71,8 @@ def new_figure(
     paths = [f.get("path") for f in figures]
     if not overwrite and path in paths:
         raise_error(f"Figure at path {path} already exists")
+    elif overwrite and path in paths:
+        figures = [fig for fig in figures if fig.get("path") != path]
     if cmd is not None and stage_name is None:
         raise_error("Stage name must be provided if command is specified")
     if (deps or outs or outs_from_stage) and not cmd:
@@ -88,7 +90,13 @@ def new_figure(
             stages = pipeline.get("stages", {})
             if outs_from_stage not in stages:
                 raise_error(f"Stage {outs_from_stage} does not exist")
-            deps += stages[outs_from_stage].get("outs", [])
+            stage = stages[outs_from_stage]
+            if "foreach" in stage:
+                for val in stage["foreach"]:
+                    for out in stage.get("do", {}).get("outs", []):
+                        deps.append(out.replace("${item}", val))
+            else:
+                deps += stage.get("outs", [])
         if path not in outs:
             outs.append(path)
         deps_cmd = []
@@ -99,6 +107,7 @@ def new_figure(
             outs_cmd += ["-o", out]
         subprocess.check_call(
             ["dvc", "stage", "add", "-n", stage_name]
+            + (["-f"] if overwrite else [])
             + deps_cmd
             + outs_cmd
             + [cmd]
@@ -112,7 +121,8 @@ def new_figure(
         repo.git.add("calkit.yaml")
         if cmd:
             repo.git.add("dvc.yaml")
-        repo.git.commit(["-m", f"Add figure {path}"])
+        if repo.git.diff("--staged"):
+            repo.git.commit(["-m", f"Add figure {path}"])
 
 
 @new_app.command("question")

@@ -7,6 +7,10 @@ acting as a layer on top of
 such that all all aspects of the research process can be fully described in a
 single repository.
 
+## Tutorials
+
+- [Reproducible OpenFOAM simulations](https://petebachant.me/reproducible-openfoam/)
+
 ## Why does reproducibility matter?
 
 If your work is reproducible, that means that someone else can "run" it and

@@ -3,7 +3,7 @@
 [Calkit](https://calkit.io) simplifies reproducibility,
 acting as a layer on top of
 [Git](https://git-scm.com/), [DVC](https://dvc.org/),
-[Zenodo](https://zenodo.org), and more,
+[Docker](https://docker.com), and more,
 such that all all aspects of the research process can be fully described in a
 single repository.
 
@@ -27,7 +27,7 @@ community:
 
 ## Why another tool/platform?
 
-Git, GitHub, DVC, Zenodo et al. are amazing tools/platforms, but their
+Git, GitHub, DVC, Docker et al. are amazing tools/platforms, but their
 use involves multiple fairly difficult learning curves.
 Our goal is to provide a single tool and platform to unify all of these so
 that there is a single, gentle learning curve.

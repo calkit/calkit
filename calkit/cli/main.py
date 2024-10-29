@@ -164,6 +164,10 @@ def add(
             ".avi",
             ".webm",
             ".pdf",
+            ".xlsx",
+            ".docx",
+            ".xls",
+            ".doc",
         ]
         dvc_size_thresh_bytes = 1_000_000
         if "." in paths and to is None:

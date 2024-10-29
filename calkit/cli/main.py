@@ -157,6 +157,9 @@ def add(
     else:
         dvc_extensions = [
             ".png",
+            ".jpeg",
+            ".jpg",
+            ".gif",
             ".h5",
             ".parquet",
             ".pickle",

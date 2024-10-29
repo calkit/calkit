@@ -21,8 +21,10 @@ dependencies = [
   "pydantic[email]",
   "pydantic-settings",
   "pyjwt",
+  "pywin32; platform_system == 'Windows'",
   "requests",
   "typer",
+  "uvicorn",
 ]
 description = "Reproducibility simplified."
 dynamic = ["version"]

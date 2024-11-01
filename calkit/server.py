@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 import dvc
@@ -13,6 +14,9 @@ from starlette.middleware.cors import CORSMiddleware
 
 import calkit
 import calkit.jupyter
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__package__)
 
 app = FastAPI(title="calkit-server")
 
@@ -56,7 +60,11 @@ def get_root() -> list[LocalProject]:
     project_dirs = calkit.find_project_dirs()
     servers = calkit.jupyter.get_servers()
     for pdir in project_dirs:
-        project = calkit.git.detect_project_name(path=pdir)
+        try:
+            project = calkit.git.detect_project_name(path=pdir)
+        except ValueError:
+            logger.warning(f"Can't detect project name in {pdir}")
+            continue
         owner, name = project.split("/")
         url = token = None
         for server in servers:

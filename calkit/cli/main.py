@@ -305,7 +305,7 @@ def run_server():
         port=8866,
         host="localhost",
         reload=True,
-        reload_dirs=[os.path.dirname(__file__)],
+        reload_dirs=[os.path.dirname(os.path.dirname(__file__))],
     )
 
 

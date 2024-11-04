@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 
 import dvc
 import dvc.config
@@ -193,6 +194,19 @@ def get_status(owner_name: str, project_name: str):
     # Get a list of diffs of the working tree to the index
     git_diff = git_repo.index.diff(None)
     git_diff_files = [d.a_path for d in git_diff]
+    # See if we're ahead and/or behind origin remote
+    # From https://stackoverflow.com/a/52757014/2284865
+    ahead = 0
+    behind = 0
+    # Porcelain v2 is easier to parse, branch shows ahead/behind
+    repo_status = git_repo.git.status(porcelain="v2", branch=True)
+    ahead_behind_match = re.search(
+        r"#\sbranch\.ab\s\+(\d+)\s-(\d+)", repo_status
+    )
+    # If no remotes exist or the HEAD is detached, there is no ahead/behind
+    if ahead_behind_match:
+        ahead = int(ahead_behind_match.group(1))
+        behind = int(ahead_behind_match.group(2))
     # If the DVC remote is not configured properly, we might raise a
     # dvc.config.ConfigError here
     try:
@@ -216,7 +230,12 @@ def get_status(owner_name: str, project_name: str):
     # TODO: Structure this in an intelligent way
     return {
         "dvc": dvc_status,
-        "git": {"untracked": untracked_git_files, "diff": git_diff_files},
+        "git": {
+            "untracked": untracked_git_files,
+            "diff": git_diff_files,
+            "commits_ahead": ahead,
+            "commits_behind": behind,
+        },
         "errors": errors,
     }
 

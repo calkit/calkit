@@ -323,3 +323,20 @@ def run_pipeline(owner_name: str, project_name: str) -> Message:
     project = get_local_project(owner_name, project_name)
     subprocess.call(["calkit", "run"], cwd=project.wdir)
     return Message(message="Success!")
+
+
+class Pipeline(BaseModel):
+    raw_yaml: str | None = None
+    stages: dict
+
+
+@app.get("/projects/{owner_name}/{project_name}/pipeline")
+def get_pipeline(owner_name: str, project_name: str) -> Pipeline:
+    project = get_local_project(owner_name, project_name)
+    fpath = os.path.join(project.wdir, "dvc.yaml")
+    if os.path.isfile(fpath):
+        with open(fpath) as f:
+            raw_yaml = f.read()
+        pipeline = calkit.ryaml.load(raw_yaml)
+        return Pipeline(raw_yaml=raw_yaml, stages=pipeline.get("stages", {}))
+    return Pipeline(raw_yaml=None, stages={})

@@ -18,6 +18,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 import calkit
 import calkit.jupyter
+from calkit.cli.main import run_dvc_repro
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__package__)
@@ -315,3 +316,9 @@ def open_vscode(owner_name: str, project_name: str) -> int:
 @app.get("/jupyter/servers")
 def get_jupyter_servers() -> list[calkit.jupyter.Server]:
     return calkit.jupyter.get_servers()
+
+
+@app.post("/projects/{owner_name}/{project_name}/pipeline/runs")
+def run_pipeline(owner_name: str, project_name: str) -> Message:
+    run_dvc_repro()
+    return Message(message="Success!")

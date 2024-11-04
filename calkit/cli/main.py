@@ -104,7 +104,7 @@ def get_status():
     run_cmd(["git", "status"])
     typer.echo()
     print_sep("Data (DVC)")
-    run_cmd(["dvc", "data", "status", "--not-in-remote"])
+    run_cmd(["dvc", "data", "status"])
     typer.echo()
     print_sep("Pipeline (DVC)")
     run_cmd(["dvc", "status"])

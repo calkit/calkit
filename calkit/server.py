@@ -255,7 +255,7 @@ def get_status(owner_name: str, project_name: str):
         "dvc": dvc_status,
         "git": {
             "untracked": untracked_git_files,
-            "diff": git_diff_files,
+            "changed": git_diff_files,
             "commits_ahead": ahead,
             "commits_behind": behind,
         },

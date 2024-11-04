@@ -35,6 +35,10 @@ app.add_middleware(
 )
 
 
+class Message(BaseModel):
+    message: str
+
+
 @app.get("/health")
 def get_health() -> str:
     return "All good!"
@@ -225,13 +229,15 @@ class GitIgnorePut(BaseModel):
 
 
 @app.put("/projects/{owner_name}/{project_name}/git/ignored")
-def put_git_ignored(owner_name: str, project_name: str, req: GitIgnorePut):
+def put_git_ignored(
+    owner_name: str, project_name: str, req: GitIgnorePut
+) -> Message:
     project = get_local_project(owner_name, project_name)
     git_repo = git.Repo(project.wdir)
     path = req.path
     if git_repo.ignored(path):
         logger.info(f"{path} is already ignored")
-        return
+        return Message(message=f"{path} is already ignored")
     ignore_fpath = os.path.join(git_repo.working_dir, ".gitignore")
     if os.path.isfile(ignore_fpath):
         with open(ignore_fpath) as f:
@@ -250,6 +256,7 @@ def put_git_ignored(owner_name: str, project_name: str, req: GitIgnorePut):
         git_repo.git.commit(["-m", msg])
     if req.push:
         git_repo.git.push(["origin", git_repo.active_branch.name])
+    return Message("Success!")
 
 
 @app.post("/projects/{owner_name}/{project_name}/open/vscode")

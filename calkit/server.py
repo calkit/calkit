@@ -170,6 +170,25 @@ def run_git_command(
     return func(**params)
 
 
+class GitPushPost(BaseModel):
+    remote_name: str = "origin"
+    branch_name: str | None = None
+
+
+@app.post("/projects/{owner_name}/{project_name}/git/push")
+def git_push(owner_name: str, project_name: str, req: GitPushPost) -> Message:
+    logger.info(f"Looking for project {owner_name}/{project_name}")
+    project = get_local_project(owner_name, project_name)
+    logger.info(f"Found project at {project.wdir}")
+    git_repo = git.Repo(project.wdir)
+    branch_name = req.branch_name | git_repo.active_branch.name
+    logger.info(f"Git pushing to {req.remote_name} {branch_name}")
+    git_repo.git.push(
+        [req.remote_name, req.branch_name | git_repo.active_branch.name]
+    )
+    return Message(message="Success!")
+
+
 @app.get("/diff")
 def get_diff():
     """Get differences in working directory, from both Git and DVC."""

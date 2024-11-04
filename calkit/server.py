@@ -6,6 +6,7 @@ import logging
 import os
 
 import dvc
+import dvc.config
 import dvc.repo
 import git
 from fastapi import FastAPI, HTTPException
@@ -170,34 +171,85 @@ def get_diff():
     raise HTTPException(501)
 
 
+class Status(BaseModel):
+    dvc: dict | None
+    git: dict
+    errors: list[dict] | None = None
+
+
 @app.get("/projects/{owner_name}/{project_name}/status")
 def get_status(owner_name: str, project_name: str):
     """Get status in working directory, from both Git and DVC."""
+    errors = []
+    logger.info(f"Looking for project {owner_name}/{project_name}")
     project = get_local_project(owner_name, project_name)
+    logger.info(f"Found project at {project.wdir}")
     git_repo = git.Repo(project.wdir)
     untracked_git_files = git_repo.untracked_files
     # Get a list of diffs of the working tree to the index
     git_diff = git_repo.index.diff(None)
     git_diff_files = [d.a_path for d in git_diff]
-    dvc_repo = dvc.repo.Repo(project.wdir)
-    # Get a dictionary of DVC artifacts that have changed, keyed by the DVC
-    # file, where values are a list, which may include a dict with a
-    # 'changed outs' key, e.g.,
-    # {
-    #     "data/jhtdb-transitional-bl/all-stats.h5.dvc": [
-    #         {
-    #             "changed outs": {
-    #                 "data/jhtdb-transitional-bl/all-stats.h5": "modified"
-    #             }
-    #         }
-    #     ]
-    # }
-    dvc_status = dvc.repo.status.status(dvc_repo)
+    # If the DVC remote is not configured properly, we might raise a
+    # dvc.config.ConfigError here
+    try:
+        dvc_repo = dvc.repo.Repo(project.wdir)
+        # Get a dictionary of DVC artifacts that have changed, keyed by the DVC
+        # file, where values are a list, which may include a dict with a
+        # 'changed outs' key, e.g.,
+        # {
+        #     "data/jhtdb-transitional-bl/all-stats.h5.dvc": [
+        #         {
+        #             "changed outs": {
+        #                 "data/jhtdb-transitional-bl/all-stats.h5": "modified"
+        #             }
+        #         }
+        #     ]
+        # }
+        dvc_status = dvc.repo.status.status(dvc_repo)
+    except dvc.config.ConfigError as e:
+        errors.append(dict(type="dvc.config.ConfigError", info=str(e)))
+        dvc_status = None
     # TODO: Structure this in an intelligent way
     return {
         "dvc": dvc_status,
         "git": {"untracked": untracked_git_files, "diff": git_diff_files},
+        "errors": errors,
     }
+
+
+class GitIgnorePut(BaseModel):
+    path: str
+    commit: bool = True
+    commit_message: str | None = None
+    push: bool = False
+
+
+@app.put("/projects/{owner_name}/{project_name}/git/ignored")
+def put_git_ignored(owner_name: str, project_name: str, req: GitIgnorePut):
+    project = get_local_project(owner_name, project_name)
+    git_repo = git.Repo(project.wdir)
+    path = req.path
+    if git_repo.ignored(path):
+        logger.info(f"{path} is already ignored")
+        return
+    ignore_fpath = os.path.join(git_repo.working_dir, ".gitignore")
+    if os.path.isfile(ignore_fpath):
+        with open(ignore_fpath) as f:
+            txt = f.read()
+    else:
+        txt = ""
+    txt += "\n" + path + "\n"
+    with open(ignore_fpath, "w") as f:
+        f.write(txt)
+    if req.commit:
+        git_repo.git.add(".gitignore")
+        if req.commit_message is None:
+            msg = f"Add {path} to gitignore"
+        else:
+            msg = req.commit_message
+        git_repo.git.commit(["-m", msg])
+    if req.push:
+        git_repo.git.push(["origin", git_repo.active_branch.name])
 
 
 @app.post("/projects/{owner_name}/{project_name}/open/vscode")

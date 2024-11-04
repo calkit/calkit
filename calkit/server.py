@@ -247,7 +247,9 @@ def get_status(owner_name: str, project_name: str):
         #     ]
         # }
         dvc_pipeline_status = dvc.repo.status.status(dvc_repo)
-        dvc_data_status = dvc.repo.data.status(dvc_repo)
+        dvc_data_status = dvc.repo.data.status(
+            dvc_repo, not_in_remote=True, remote_refresh=True
+        )
         dvc_status = dict(pipeline=dvc_pipeline_status, data=dvc_data_status)
     except dvc.config.ConfigError as e:
         errors.append(dict(type="dvc.config.ConfigError", info=str(e)))

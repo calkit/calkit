@@ -215,6 +215,8 @@ def get_status(owner_name: str, project_name: str):
     # Get a list of diffs of the working tree to the index
     git_diff = git_repo.index.diff(None)
     git_diff_files = [d.a_path for d in git_diff]
+    git_staged = git_repo.index.diff("HEAD")
+    git_staged_files = [d.a_path for d in git_staged]
     # See if we're ahead and/or behind origin remote
     # From https://stackoverflow.com/a/52757014/2284865
     ahead = 0
@@ -256,6 +258,7 @@ def get_status(owner_name: str, project_name: str):
         "git": {
             "untracked": untracked_git_files,
             "changed": git_diff_files,
+            "staged": git_staged_files,
             "commits_ahead": ahead,
             "commits_behind": behind,
         },

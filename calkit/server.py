@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import subprocess
 
 import dvc
 import dvc.config
@@ -18,7 +19,6 @@ from starlette.middleware.cors import CORSMiddleware
 
 import calkit
 import calkit.jupyter
-from calkit.cli.main import run_dvc_repro
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__package__)
@@ -320,5 +320,6 @@ def get_jupyter_servers() -> list[calkit.jupyter.Server]:
 
 @app.post("/projects/{owner_name}/{project_name}/pipeline/runs")
 def run_pipeline(owner_name: str, project_name: str) -> Message:
-    run_dvc_repro()
+    project = get_local_project(owner_name, project_name)
+    subprocess.call(["calkit", "run"], cwd=project.wdir)
     return Message(message="Success!")

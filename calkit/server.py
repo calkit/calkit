@@ -367,6 +367,8 @@ def clone_repo(req: GitClonePost) -> Message:
     os.makedirs(parent_dir, exist_ok=True)
     dest_dir = req.git_repo_url.split("/")[-1].removesuffix(".git")
     abs_dest_dir = os.path.join(parent_dir, dest_dir)
+    if os.path.exists(abs_dest_dir):
+        raise HTTPException(400, "Destination directory already exists")
     if req.protocol == "ssh":
         url = req.git_repo_url.replace(
             "https://github.com/", "git@github.com:"

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import os
+import platform
 import re
 import subprocess
+from typing import Literal
 
 import dvc
 import dvc.config
@@ -16,8 +18,6 @@ import git
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
-
-import platform
 
 import calkit
 import calkit.jupyter
@@ -354,3 +354,31 @@ def open_folder(owner_name: str, project_name: str) -> Message:
     cmd.append(project.wdir)
     subprocess.Popen(cmd, cwd=project.wdir)
     return Message(message=f"Opened {project.wdir} with `{cmd[0]}`")
+
+
+class GitClonePost(BaseModel):
+    git_repo_url: str
+    protocol: Literal["https", "ssh"] = "https"
+
+
+@app.post("/git/clone")
+def clone_repo(req: GitClonePost) -> Message:
+    parent_dir = os.path.join(os.path.expanduser("~"), "calkit")
+    os.makedirs(parent_dir, exist_ok=True)
+    dest_dir = req.git_repo_url.split("/")[-1].removesuffix(".git")
+    abs_dest_dir = os.path.join(parent_dir, dest_dir)
+    if req.protocol == "ssh":
+        url = req.git_repo_url.replace(
+            "https://github.com/", "git@github.com:"
+        )
+    else:
+        url = req.git_repo_url
+    if not url.endswith(".git"):
+        url += ".git"
+    cmd = ["calkit", "clone", url]
+    try:
+        subprocess.call(cmd, cwd=parent_dir)
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to clone: {e}")
+        raise HTTPException(500, f"Failed to clone: {e}")
+    return Message(message=f"Successfully cloned into {abs_dest_dir}")

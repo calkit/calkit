@@ -361,7 +361,7 @@ class ClonePost(BaseModel):
     protocol: Literal["https", "ssh"] = "https"
 
 
-@app.post("/actions/clone")
+@app.post("/calkit/clone")
 def clone_repo(req: ClonePost) -> Message:
     parent_dir = os.path.join(os.path.expanduser("~"), "calkit")
     os.makedirs(parent_dir, exist_ok=True)

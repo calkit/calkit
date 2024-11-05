@@ -356,13 +356,13 @@ def open_folder(owner_name: str, project_name: str) -> Message:
     return Message(message=f"Opened {project.wdir} with `{cmd[0]}`")
 
 
-class GitClonePost(BaseModel):
+class ClonePost(BaseModel):
     git_repo_url: str
     protocol: Literal["https", "ssh"] = "https"
 
 
-@app.post("/git/clone")
-def clone_repo(req: GitClonePost) -> Message:
+@app.post("/actions/clone")
+def clone_repo(req: ClonePost) -> Message:
     parent_dir = os.path.join(os.path.expanduser("~"), "calkit")
     os.makedirs(parent_dir, exist_ok=True)
     dest_dir = req.git_repo_url.split("/")[-1].removesuffix(".git")

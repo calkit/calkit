@@ -46,8 +46,11 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
     return final_res
 
 
-def load_calkit_info() -> dict:
-    if os.path.isfile("calkit.yaml"):
-        with open("calkit.yaml") as f:
+def load_calkit_info(wdir=None) -> dict:
+    fpath = "calkit.yaml"
+    if wdir is not None:
+        fpath = os.path.join(wdir, fpath)
+    if os.path.isfile(fpath):
+        with open(fpath) as f:
             return ryaml.load(f)
     return {}

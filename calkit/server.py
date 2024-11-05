@@ -344,6 +344,88 @@ def get_pipeline(owner_name: str, project_name: str) -> Pipeline:
     return Pipeline(raw_yaml=None, stages={})
 
 
+class StageObject(BaseModel):
+    title: str
+    description: str
+
+
+class StagePost(BaseModel):
+    name: str
+    cmd: str
+    deps: list[str] | None
+    outs: list[str] | None
+    calkit_type: Literal["figure", "dataset", "publication"] | None = None
+    calkit_object: StageObject | None = None
+    commit: bool = True
+    push: bool = False
+
+
+@app.post("/projects/{owner_name}/{project_name}/pipeline/stages")
+def post_pipeline_stage(
+    owner_name: str, project_name: str, req: StagePost
+) -> Message:
+    project = get_local_project(owner_name, project_name)
+    dvc_fpath = os.path.join(project.wdir, "dvc.yaml")
+    if req.calkit_type is not None and req.calkit_object is None:
+        raise HTTPException("Calkit object info must be provided")
+    if req.calkit_type is not None:
+        if req.outs is None or len(req.outs) != 1:
+            raise HTTPException(400, "One output must be provided")
+    if os.path.isfile(dvc_fpath):
+        with open(dvc_fpath) as f:
+            pipeline = calkit.ryaml.load(f)
+    else:
+        pipeline = {}
+    stages = pipeline.get("stages", {})
+    stage_names = list(stages.keys())
+    if req.name in stage_names:
+        raise HTTPException(
+            400, "Stage with same name already exists in pipeline"
+        )
+    # Make sure we don't have any conflicting outputs
+    all_outs = []
+    for _, stage in stages.items():
+        all_outs += stage.get("outs", [])
+    if req.outs is not None:
+        for out in req.outs:
+            if out in all_outs:
+                raise HTTPException(
+                    400, "Output is already part of another stage"
+                )
+    new_stage = dict(cmd=req.cmd)
+    if req.deps:
+        new_stage["deps"] = req.deps
+    if req.outs:
+        new_stage["outs"] = req.outs
+    stages[req.name] = new_stage
+    pipeline["stages"] = stages
+    with open(dvc_fpath, "w") as f:
+        calkit.ryaml.dump(pipeline, f)
+    repo = git.Repo(path=project.wdir)
+    repo.git.add("dvc.yaml")
+    # Add Calkit object if applicable
+    if req.calkit_type is not None:
+        ck_info = calkit.load_calkit_info(wdir=project.wdir)
+        ck_objs = ck_info.get(req.calkit_type + "s", [])
+        existing_paths = [obj.get("path") for obj in ck_objs]
+        out = req.outs[0]
+        if out in existing_paths:
+            raise HTTPException(
+                400, f"{req.calkit_type} already exists at {out}"
+            )
+        new_obj = dict(path=out) | req.calkit_object.model_dump()
+        ck_objs.append(new_obj)
+        ck_info[req.calkit_type + "s"] = ck_objs
+        with open(os.path.join(project.wdir, "calkit.yaml"), "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        repo.git.add("calkit.yaml")
+    if req.commit:
+        repo.git.commit(["-m", f"Add new pipeline stage {req.name}"])
+    if req.push:
+        repo.git.push(["origin", repo.active_branch.name])
+    return Message(message="Successfully added stage")
+
+
 @app.post("/projects/{owner_name}/{project_name}/open/folder")
 def open_folder(owner_name: str, project_name: str) -> Message:
     project = get_local_project(owner_name, project_name)

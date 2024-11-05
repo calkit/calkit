@@ -17,6 +17,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 
+import platform
+
 import calkit
 import calkit.jupyter
 
@@ -340,3 +342,15 @@ def get_pipeline(owner_name: str, project_name: str) -> Pipeline:
         pipeline = calkit.ryaml.load(raw_yaml)
         return Pipeline(raw_yaml=raw_yaml, stages=pipeline.get("stages", {}))
     return Pipeline(raw_yaml=None, stages={})
+
+
+@app.post("/projects/{owner_name}/{project_name}/open/folder")
+def open_folder(owner_name: str, project_name: str) -> Message:
+    project = get_local_project(owner_name, project_name)
+    if platform.system() == "Windows":
+        cmd = ["explorer"]
+    else:
+        cmd = ["open"]
+    cmd.append(project.wdir)
+    subprocess.Popen(cmd, cwd=project.wdir)
+    return Message(message=f"Opened {project.wdir} with `{cmd[0]}`")

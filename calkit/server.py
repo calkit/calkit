@@ -413,7 +413,9 @@ def post_pipeline_stage(
             raise HTTPException(
                 400, f"{req.calkit_type} already exists at {out}"
             )
-        new_obj = dict(path=out) | req.calkit_object.model_dump()
+        new_obj = (
+            dict(path=out, stage=req.name) | req.calkit_object.model_dump()
+        )
         ck_objs.append(new_obj)
         ck_info[req.calkit_type + "s"] = ck_objs
         with open(os.path.join(project.wdir, "calkit.yaml"), "w") as f:

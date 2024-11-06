@@ -3,30 +3,32 @@
 from PIL import ImageGrab
 
 
-def excel_charts_to_png(
-    inputExcelFilePath: str, outputPNGImagePath: str, sheet: int = 1
+def excel_chart_to_png(
+    input_fpath: str,
+    output_fpath: str,
+    sheet: int = 1,
+    chart_index: int = 0,
 ):
+    """Export a chart from an Excel sheet to PNG."""
     import win32com
 
     # Open the excel application using win32com
-    o = win32com.client.Dispatch("Excel.Application")
+    excel = win32com.client.Dispatch("Excel.Application")
     # Disable alerts and visibility to the user
-    o.Visible = 0
-    o.DisplayAlerts = 0
+    excel.Visible = 0
+    excel.DisplayAlerts = 0
     # Open workbook
-    wb = o.Workbooks.Open(inputExcelFilePath)
+    wb = excel.Workbooks.Open(input_fpath)
     factor = 1.0
     # Extract sheet
-    sheet = o.Sheets(sheet)
-    for n, shape in enumerate(sheet.Shapes):
-        # Save shape to clipboard, then save what is in the clipboard to the file
-        shape.Copy()
-        image = ImageGrab.grabclipboard()
-        length_x, width_y = image.size
-        size = int(factor * length_x), int(factor * width_y)
-        image_resize = image.resize(size)
-        # Saves the image into the existing png file (overwriting)
-        outputPNGImage = outputPNGImagePath + str(n) + ".png"
-        image_resize.save(outputPNGImage, "png", quality=95, dpi=(300, 300))
+    sheet = excel.Sheets(sheet)
+    shape = sheet.Shapes[chart_index]
+    shape.Copy()
+    image = ImageGrab.grabclipboard()
+    length_x, width_y = image.size
+    size = int(factor * length_x), int(factor * width_y)
+    image_resize = image.resize(size)
+    # Save the image into the existing png file, overwriting if exists
+    image_resize.save(output_fpath, "png", quality=95, dpi=(300, 300))
     wb.Close(True)
-    o.Quit()
+    excel.Quit()

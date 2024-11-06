@@ -7,6 +7,7 @@ import platform
 import typer
 from typing_extensions import Annotated
 
+import calkit
 from calkit.cli import raise_error
 
 office_app = typer.Typer(no_args_is_help=True)
@@ -28,3 +29,13 @@ def excel_chart_to_png(
 ):
     if platform.system() != "Windows":
         raise_error("This command is only available on Windows")
+    typer.echo(
+        f"Exporting chart at index {chart_index} from sheet {sheet} "
+        f"in {input_fpath} to {output_fpath}"
+    )
+    calkit.office.excel_chart_to_png(
+        input_fpath=input_fpath,
+        output_fpath=output_fpath,
+        sheet=sheet,
+        chart_index=chart_index,
+    )

@@ -316,6 +316,35 @@ def put_git_ignored(
     return Message("Success!")
 
 
+class AddPost(BaseModel):
+    paths: list[str]
+    to: Literal["git", "dvc"] | None = None
+    commit: bool = True
+    commit_message: str | None = None
+    push: bool = False
+
+
+@app.post("/projects/{owner_name}/{project_name}/calkit/add")
+def calkit_add(owner_name: str, project_name: str, req: AddPost) -> Message:
+    project = get_local_project(owner_name, project_name)
+    cmd = ["calkit", "add"] + req.paths
+    paths_txt = ", ".join(req.paths)
+    if req.commit:
+        msg = req.commit_message
+        if msg is None:
+            msg = f"Add {paths_txt}"
+        cmd += ["--commit-message", msg]
+    if req.to is not None:
+        cmd += ["--to", req.to]
+    if req.push:
+        cmd += ["--push"]
+    try:
+        subprocess.call(cmd, cwd=project.wdir)
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(500, f"Failed to run {cmd}: {e}")
+    return Message(message=f"Added paths: {paths_txt}")
+
+
 @app.post("/projects/{owner_name}/{project_name}/open/vscode")
 def open_vscode(owner_name: str, project_name: str) -> int:
     project = get_local_project(owner_name, project_name)

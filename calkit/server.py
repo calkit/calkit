@@ -337,6 +337,7 @@ def run_pipeline(owner_name: str, project_name: str) -> Message:
 class Pipeline(BaseModel):
     raw_yaml: str | None = None
     stages: dict
+    mermaid: str | None = None
 
 
 @app.get("/projects/{owner_name}/{project_name}/pipeline")
@@ -347,8 +348,15 @@ def get_pipeline(owner_name: str, project_name: str) -> Pipeline:
         with open(fpath) as f:
             raw_yaml = f.read()
         pipeline = calkit.ryaml.load(raw_yaml)
-        return Pipeline(raw_yaml=raw_yaml, stages=pipeline.get("stages", {}))
-    return Pipeline(raw_yaml=None, stages={})
+        mermaid = subprocess.check_output(
+            ["dvc", "dag", "--mermaid"], cwd=project.wdir
+        ).decode()
+        return Pipeline(
+            raw_yaml=raw_yaml,
+            stages=pipeline.get("stages", {}),
+            mermaid=mermaid,
+        )
+    return Pipeline(raw_yaml=None, stages={}, mermaid=None)
 
 
 class StageObject(BaseModel):

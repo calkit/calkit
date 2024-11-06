@@ -40,7 +40,7 @@ class Settings(BaseSettings):
         ),
         extra="ignore",
     )
-    username: EmailStr | None = None
+    username: str | None = None
     token: str | None = None
     dvc_token: str | None = None
     dataframe_engine: Literal["pandas", "polars"] = "pandas"

@@ -250,6 +250,13 @@ def get_status(owner_name: str, project_name: str):
         #     ]
         # }
         dvc_pipeline_status = dvc.repo.status.status(dvc_repo)
+        # Remove any always changed entries so the pipeline doesn't look
+        # out of date
+        dvc_pipeline_status = {
+            k: v
+            for k, v in dvc_pipeline_status.items()
+            if v != ["always changed"]
+        }
         dvc_data_status = dvc.repo.data.status(
             dvc_repo, not_in_remote=True, remote_refresh=True
         )

@@ -313,7 +313,7 @@ def put_git_ignored(
         git_repo.git.commit(["-m", msg])
     if req.push:
         git_repo.git.push(["origin", git_repo.active_branch.name])
-    return Message("Success!")
+    return Message(message="Success!")
 
 
 class AddPost(BaseModel):

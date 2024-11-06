@@ -39,3 +39,11 @@ def excel_chart_to_png(
         sheet=sheet,
         chart_index=chart_index,
     )
+
+
+@office_app.command(name="word-to-pdf", help="Convert a Word document to PDF.")
+def word_to_pdf(
+    input_fpath: Annotated[str, typer.Argument(help="Input Excel file path.")],
+    output_fpath: Annotated[str, typer.Argument(help="Output PNG file path.")],
+):
+    raise NotImplementedError

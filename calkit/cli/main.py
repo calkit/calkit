@@ -375,7 +375,7 @@ def run_dvc_repro(
         args += ["--pipeline", pipeline]
     if downstream is not None:
         args += downstream
-    subprocess.call(["dvc", "repro"] + args)
+    subprocess.check_call(["dvc", "repro"] + args)
     # Now parse stage metadata for calkit objects
     if not os.path.isfile("dvc.yaml"):
         raise_error("No dvc.yaml file found")

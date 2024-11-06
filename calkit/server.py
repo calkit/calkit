@@ -359,7 +359,10 @@ def get_jupyter_servers() -> list[calkit.jupyter.Server]:
 @app.post("/projects/{owner_name}/{project_name}/pipeline/runs")
 def run_pipeline(owner_name: str, project_name: str) -> Message:
     project = get_local_project(owner_name, project_name)
-    subprocess.call(["calkit", "run"], cwd=project.wdir)
+    try:
+        subprocess.check_call(["calkit", "run"], cwd=project.wdir)
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(500, f"Pipeline failed to run: {e}")
     return Message(message="Success!")
 
 

@@ -582,6 +582,7 @@ def build_docker(
         _ = out[0].pop("Id")
         _ = out[0].pop("RepoDigests")
         _ = out[0].pop("Metadata")
+        _ = out[0].pop("DockerVersion")
         return out
 
     typer.echo(f"Checking for existing image with tag {tag}")

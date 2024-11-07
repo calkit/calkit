@@ -1,5 +1,7 @@
 """Functionality for working with Microsoft Office."""
 
+import os
+
 from PIL import ImageGrab
 
 
@@ -18,7 +20,7 @@ def excel_chart_to_png(
     excel.Visible = 0
     excel.DisplayAlerts = 0
     # Open workbook
-    wb = excel.Workbooks.Open(input_fpath)
+    wb = excel.Workbooks.Open(os.path.abspath(input_fpath))
     factor = 1.0
     # Extract sheet
     sheet = excel.Sheets(sheet)
@@ -29,6 +31,8 @@ def excel_chart_to_png(
     size = int(factor * length_x), int(factor * width_y)
     image_resize = image.resize(size)
     # Save the image into the existing png file, overwriting if exists
-    image_resize.save(output_fpath, "png", quality=95, dpi=(300, 300))
+    image_resize.save(
+        os.path.abspath(output_fpath), "png", quality=95, dpi=(300, 300)
+    )
     wb.Close(True)
     excel.Quit()

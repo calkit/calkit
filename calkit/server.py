@@ -304,7 +304,7 @@ def put_git_ignored(
     txt += "\n" + path + "\n"
     with open(ignore_fpath, "w") as f:
         f.write(txt)
-    if req.commit:
+    if req.commit and git_repo.git.diff():
         git_repo.git.add(".gitignore")
         if req.commit_message is None:
             msg = f"Add {path} to gitignore"

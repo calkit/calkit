@@ -204,6 +204,24 @@ def git_pull(owner_name: str, project_name: str) -> Message:
     return Message(message="Success!")
 
 
+@app.post("/projects/{owner_name}/{project_name}/dvc/pull")
+def dvc_pull(owner_name: str, project_name: str) -> Message:
+    logger.info(f"Looking for project {owner_name}/{project_name}")
+    project = get_local_project(owner_name, project_name)
+    logger.info(f"Found project at {project.wdir}")
+    subprocess.check_call(["dvc", "pull"])
+    return Message(message="Success!")
+
+
+@app.post("/projects/{owner_name}/{project_name}/dvc/push")
+def dvc_push(owner_name: str, project_name: str) -> Message:
+    logger.info(f"Looking for project {owner_name}/{project_name}")
+    project = get_local_project(owner_name, project_name)
+    logger.info(f"Found project at {project.wdir}")
+    subprocess.check_call(["dvc", "push"])
+    return Message(message="Success!")
+
+
 @app.get("/diff")
 def get_diff():
     """Get differences in working directory, from both Git and DVC."""

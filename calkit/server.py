@@ -284,7 +284,7 @@ def get_status(owner_name: str, project_name: str):
         dvc_pipeline_status = {
             k: v
             for k, v in dvc_pipeline_status.items()
-            if v != ["always changed"]
+            if v != ["always changed"] and "dvc.yaml:" in k
         }
         dvc_data_status = dvc.repo.data.status(
             dvc_repo, not_in_remote=True, remote_refresh=True

@@ -209,7 +209,7 @@ def dvc_pull(owner_name: str, project_name: str) -> Message:
     logger.info(f"Looking for project {owner_name}/{project_name}")
     project = get_local_project(owner_name, project_name)
     logger.info(f"Found project at {project.wdir}")
-    subprocess.check_call(["dvc", "pull"])
+    subprocess.check_call(["dvc", "pull"], cwd=project.wdir)
     return Message(message="Success!")
 
 
@@ -218,7 +218,7 @@ def dvc_push(owner_name: str, project_name: str) -> Message:
     logger.info(f"Looking for project {owner_name}/{project_name}")
     project = get_local_project(owner_name, project_name)
     logger.info(f"Found project at {project.wdir}")
-    subprocess.check_call(["dvc", "push"])
+    subprocess.check_call(["dvc", "push"], cwd=project.wdir)
     return Message(message="Success!")
 
 

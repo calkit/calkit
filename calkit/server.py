@@ -289,6 +289,14 @@ def get_status(owner_name: str, project_name: str):
         dvc_data_status = dvc.repo.data.status(
             dvc_repo, not_in_remote=True, remote_refresh=True
         )
+        # Reformat this a bit, since it can be a little hard to understand
+        # DVC calls a path committed when its DVC file is staged
+        dvc_data_status["changed"] = dvc_data_status.get(
+            "uncommitted", {}
+        ).get("modified", [])
+        dvc_data_status["staged"] = dvc_data_status.get("committed", {}).get(
+            "modified", []
+        )
         dvc_status = dict(pipeline=dvc_pipeline_status, data=dvc_data_status)
     except dvc.config.ConfigError as e:
         errors.append(dict(type="dvc.config.ConfigError", info=str(e)))

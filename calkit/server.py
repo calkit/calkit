@@ -242,6 +242,7 @@ def get_status(owner_name: str, project_name: str):
     project = get_local_project(owner_name, project_name)
     logger.info(f"Found project at {project.wdir}")
     git_repo = git.Repo(project.wdir)
+    git_repo.git.fetch()
     untracked_git_files = git_repo.untracked_files
     # Get a list of diffs of the working tree to the index
     git_diff = git_repo.index.diff(None)

@@ -10,7 +10,7 @@ def excel_chart_to_png(
     chart_index: int = 0,
 ):
     """Export a chart from an Excel sheet to PNG."""
-    import win32com
+    import win32com.client
 
     # Open the excel application using win32com
     excel = win32com.client.Dispatch("Excel.Application")

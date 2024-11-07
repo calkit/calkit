@@ -194,6 +194,16 @@ def git_push(owner_name: str, project_name: str, req: GitPushPost) -> Message:
     return Message(message="Success!")
 
 
+@app.post("/projects/{owner_name}/{project_name}/git/pull")
+def git_pull(owner_name: str, project_name: str) -> Message:
+    logger.info(f"Looking for project {owner_name}/{project_name}")
+    project = get_local_project(owner_name, project_name)
+    logger.info(f"Found project at {project.wdir}")
+    git_repo = git.Repo(project.wdir)
+    git_repo.git.pull("--ff-only")
+    return Message(message="Success!")
+
+
 @app.get("/diff")
 def get_diff():
     """Get differences in working directory, from both Git and DVC."""

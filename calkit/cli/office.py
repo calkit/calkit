@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import platform
 
+import docx2pdf
 import typer
 from typing_extensions import Annotated
 
@@ -46,4 +47,4 @@ def word_to_pdf(
     input_fpath: Annotated[str, typer.Argument(help="Input Excel file path.")],
     output_fpath: Annotated[str, typer.Argument(help="Output PNG file path.")],
 ):
-    raise NotImplementedError
+    docx2pdf.convert(input_path=input_fpath, output_path=output_fpath)

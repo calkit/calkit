@@ -431,7 +431,9 @@ def discard_changes(owner_name: str, project_name: str) -> Message:
         changed = dvc_data_status.get("uncommitted", {}).get("modified", [])
         for path in changed:
             logger.info(f"Checking out {path} with DVC")
-            subprocess.check_call(["dvc", "checkout", path], cwd=project.wdir)
+            subprocess.check_call(
+                ["dvc", "checkout", path, "--force"], cwd=project.wdir
+            )
     except dvc.config.ConfigError as e:
         pass
     return Message(message="Changes successfully discarded")

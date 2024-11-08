@@ -1,4 +1,4 @@
-__version__ = "0.2.2"
+__version__ = "0.3.0"
 
 from .core import *
 from . import git
@@ -7,3 +7,4 @@ from . import cloud
 from . import jupyter
 from . import config
 from . import models
+from . import office

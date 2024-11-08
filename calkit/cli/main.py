@@ -19,6 +19,7 @@ from calkit.cli.import_ import import_app
 from calkit.cli.list import list_app
 from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
+from calkit.cli.office import office_app
 
 app = typer.Typer(
     invoke_without_command=True,
@@ -36,6 +37,7 @@ app.add_typer(
 app.add_typer(notebooks_app, name="nb", help="Work with Jupyter notebooks.")
 app.add_typer(list_app, name="list", help="List Calkit objects.")
 app.add_typer(import_app, name="import", help="Import objects.")
+app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 
 
 @app.callback()
@@ -157,6 +159,9 @@ def add(
     else:
         dvc_extensions = [
             ".png",
+            ".jpeg",
+            ".jpg",
+            ".gif",
             ".h5",
             ".parquet",
             ".pickle",
@@ -164,6 +169,10 @@ def add(
             ".avi",
             ".webm",
             ".pdf",
+            ".xlsx",
+            ".docx",
+            ".xls",
+            ".doc",
         ]
         dvc_size_thresh_bytes = 1_000_000
         if "." in paths and to is None:
@@ -298,7 +307,7 @@ def run_server():
         port=8866,
         host="localhost",
         reload=True,
-        reload_dirs=[os.path.dirname(__file__)],
+        reload_dirs=[os.path.dirname(os.path.dirname(__file__))],
     )
 
 
@@ -368,7 +377,7 @@ def run_dvc_repro(
         args += ["--pipeline", pipeline]
     if downstream is not None:
         args += downstream
-    subprocess.call(["dvc", "repro"] + args)
+    subprocess.check_call(["dvc", "repro"] + args)
     # Now parse stage metadata for calkit objects
     if not os.path.isfile("dvc.yaml"):
         raise_error("No dvc.yaml file found")
@@ -575,6 +584,7 @@ def build_docker(
         _ = out[0].pop("Id")
         _ = out[0].pop("RepoDigests")
         _ = out[0].pop("Metadata")
+        _ = out[0].pop("DockerVersion")
         return out
 
     typer.echo(f"Checking for existing image with tag {tag}")

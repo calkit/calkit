@@ -364,3 +364,111 @@ def new_foreach_stage(
     repo.git.add("dvc.yaml")
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add foreach stage {name}"])
+
+
+@new_app.command(name="dataset")
+def new_dataset(
+    path: str,
+    title: Annotated[str, typer.Option("--title")],
+    description: Annotated[str, typer.Option("--description")],
+    stage_name: Annotated[
+        str,
+        typer.Option(
+            "--stage",
+            help="Name of the pipeline stage that generates this dataset.",
+        ),
+    ] = None,
+    cmd: Annotated[
+        str,
+        typer.Option(
+            "--cmd", help="Command to add to the stage, if specified."
+        ),
+    ] = None,
+    deps: Annotated[
+        list[str], typer.Option("--dep", help="Path to stage dependency.")
+    ] = [],
+    outs: Annotated[
+        list[str],
+        typer.Option(
+            "--out",
+            help=(
+                "Path to stage output. "
+                "Dataset path will be added automatically."
+            ),
+        ),
+    ] = [],
+    outs_from_stage: Annotated[
+        str,
+        typer.Option(
+            "--deps-from-stage-outs",
+            help="Stage name from which to add outputs as dependencies.",
+        ),
+    ] = None,
+    no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite existing dataset if one exists.",
+        ),
+    ] = False,
+):
+    """Create a new dataset."""
+    ck_info = calkit.load_calkit_info()
+    datasets = ck_info.get("datasets", [])
+    paths = [f.get("path") for f in datasets]
+    if not overwrite and path in paths:
+        raise_error(f"Dataset at path {path} already exists")
+    elif overwrite and path in paths:
+        datasets = [fig for fig in datasets if fig.get("path") != path]
+    if cmd is not None and stage_name is None:
+        raise_error("Stage name must be provided if command is specified")
+    if (deps or outs or outs_from_stage) and not cmd:
+        raise_error("Command must be provided")
+    if (deps or outs or outs_from_stage) and not stage_name:
+        raise_error("Stage name must be provided")
+    obj = dict(path=path, title=title)
+    if description is not None:
+        obj["description"] = description
+    if stage_name is not None:
+        obj["stage"] = stage_name
+    if cmd:
+        if outs_from_stage:
+            pipeline = calkit.dvc.read_pipeline()
+            stages = pipeline.get("stages", {})
+            if outs_from_stage not in stages:
+                raise_error(f"Stage {outs_from_stage} does not exist")
+            stage = stages[outs_from_stage]
+            if "foreach" in stage:
+                for val in stage["foreach"]:
+                    for out in stage.get("do", {}).get("outs", []):
+                        deps.append(out.replace("${item}", val))
+            else:
+                deps += stage.get("outs", [])
+        if path not in outs:
+            outs.append(path)
+        deps_cmd = []
+        for dep in deps:
+            deps_cmd += ["-d", dep]
+        outs_cmd = []
+        for out in outs:
+            outs_cmd += ["-o", out]
+        subprocess.check_call(
+            ["dvc", "stage", "add", "-n", stage_name]
+            + (["-f"] if overwrite else [])
+            + deps_cmd
+            + outs_cmd
+            + [cmd]
+        )
+    datasets.append(obj)
+    ck_info["datasets"] = datasets
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    if not no_commit:
+        repo = git.Repo()
+        repo.git.add("calkit.yaml")
+        if cmd:
+            repo.git.add("dvc.yaml")
+        if repo.git.diff("--staged"):
+            repo.git.commit(["-m", f"Add dataset {path}"])

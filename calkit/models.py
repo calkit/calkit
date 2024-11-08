@@ -107,6 +107,11 @@ class ProjectInfo(BaseModel):
         distinguish what has been newly created here.
     """
 
+    title: str | None = None
+    owner: str | None = None
+    description: str | None = None
+    name: str | None = None
+    git_repo_url: str | None = None
     parent: str | None = None
     questions: list[str] = []
     datasets: list[Dataset] = []

@@ -414,6 +414,29 @@ def calkit_add_and_commit(
     return Message(message=f"Added and committed paths: {paths_txt}")
 
 
+@app.post("/projects/{owner_name}/{project_name}/actions/discard-changes")
+def discard_changes(owner_name: str, project_name: str) -> Message:
+    project = get_local_project(owner_name, project_name)
+    git_repo = git.Repo(project.wdir)
+    # Stash any git changes
+    git_repo.git.stash()
+    # Checkout any DVC changes
+    # If the DVC remote is not configured properly, we might raise a
+    # dvc.config.ConfigError here
+    try:
+        dvc_repo = dvc.repo.Repo(project.wdir)
+        dvc_data_status = dvc.repo.data.status(dvc_repo)
+        # Get only the changed files since anything will be uncommitted after
+        # the git stash
+        changed = dvc_data_status.get("uncommitted", {}).get("modified", [])
+        for path in changed:
+            logger.info(f"Checking out {path} with DVC")
+            subprocess.check_call(["dvc", "checkout", path], cwd=project.wdir)
+    except dvc.config.ConfigError as e:
+        pass
+    return Message(message="Changes successfully discarded")
+
+
 @app.post("/projects/{owner_name}/{project_name}/open/vscode")
 def open_vscode(owner_name: str, project_name: str) -> int:
     project = get_local_project(owner_name, project_name)

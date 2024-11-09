@@ -23,6 +23,7 @@ def excel_chart_to_png(
     wb = excel.Workbooks.Open(os.path.abspath(input_fpath))
     factor = 1.0
     # Extract sheet
+    # TODO: Close workbook if something fails
     sheet = excel.Sheets(sheet)
     shape = sheet.Shapes[chart_index]
     shape.Copy()
@@ -31,6 +32,9 @@ def excel_chart_to_png(
     size = int(factor * length_x), int(factor * width_y)
     image_resize = image.resize(size)
     # Save the image into the existing png file, overwriting if exists
+    dirname = os.path.dirname(output_fpath)
+    if dirname and not os.path.isdir(dirname):
+        os.makedirs(dirname)
     image_resize.save(
         os.path.abspath(output_fpath), "png", quality=95, dpi=(300, 300)
     )

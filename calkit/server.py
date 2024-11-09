@@ -59,7 +59,7 @@ class LocalProject(BaseModel):
 
 
 @app.get("/")
-def get_root() -> list[LocalProject]:
+def get_root(get_jupyter_servers: bool = True) -> list[LocalProject]:
     """Return information about the current running server.
 
     - The project owner
@@ -68,9 +68,15 @@ def get_root() -> list[LocalProject]:
     - A Jupyter server running here, if applicable
     """
     resp = []
+    logger.info("Finding project directories")
     project_dirs = calkit.find_project_dirs()
-    servers = calkit.jupyter.get_servers()
+    if get_jupyter_servers:
+        logger.info("Getting Jupyter servers")
+        servers = calkit.jupyter.get_servers()
+    else:
+        servers = []
     for pdir in project_dirs:
+        logger.info(f"Inspecting {pdir}")
         try:
             project = calkit.git.detect_project_name(path=pdir)
         except ValueError:
@@ -96,8 +102,10 @@ def get_root() -> list[LocalProject]:
 
 
 @app.get("/projects/{owner_name}/{project_name}")
-def get_local_project(owner_name: str, project_name: str) -> LocalProject:
-    all_projects = get_root()
+def get_local_project(
+    owner_name: str, project_name: str, get_jupyter_server: bool = True
+) -> LocalProject:
+    all_projects = get_root(get_jupyter_servers=get_jupyter_server)
     for project in all_projects:
         if (
             project.owner_name == owner_name
@@ -235,14 +243,22 @@ class Status(BaseModel):
 
 
 @app.get("/projects/{owner_name}/{project_name}/status")
-def get_status(owner_name: str, project_name: str):
+def get_status(
+    owner_name: str,
+    project_name: str,
+    fetch_git: bool = True,
+    fetch_dvc: bool = True,
+):
     """Get status in working directory, from both Git and DVC."""
     errors = []
     logger.info(f"Looking for project {owner_name}/{project_name}")
-    project = get_local_project(owner_name, project_name)
+    project = get_local_project(
+        owner_name, project_name, get_jupyter_server=False
+    )
     logger.info(f"Found project at {project.wdir}")
     git_repo = git.Repo(project.wdir)
-    git_repo.git.fetch()
+    if fetch_git:
+        git_repo.git.fetch()
     untracked_git_files = git_repo.untracked_files
     # Get a list of diffs of the working tree to the index
     git_diff = git_repo.index.diff(None)
@@ -281,13 +297,17 @@ def get_status(owner_name: str, project_name: str):
         dvc_pipeline_status = dvc.repo.status.status(dvc_repo)
         # Remove any always changed entries so the pipeline doesn't look
         # out of date
+        logger.info(f"Raw DVC pipeline status: {dvc_pipeline_status}")
         dvc_pipeline_status = {
-            k: v
+            k.split("dvc.yaml:")[-1]: v
             for k, v in dvc_pipeline_status.items()
-            if v != ["always changed"] and "dvc.yaml:" in k
+            if v != ["always changed"] and not k.endswith(".dvc")
         }
+        logger.info(
+            f"DVC pipeline status after filtering: {dvc_pipeline_status}"
+        )
         dvc_data_status = dvc.repo.data.status(
-            dvc_repo, not_in_remote=True, remote_refresh=True
+            dvc_repo, not_in_remote=fetch_dvc, remote_refresh=fetch_dvc
         )
         # Reformat this a bit, since it can be a little hard to understand
         # DVC calls a path committed when its DVC file is staged

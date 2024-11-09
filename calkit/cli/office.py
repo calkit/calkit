@@ -54,7 +54,7 @@ def word_to_pdf(
             "--output",
             help=(
                 "Output file path. If not specified, "
-                "will be the same as input with a .pdf extension"
+                "will be the same as input with a .pdf extension."
             ),
         ),
     ] = None,

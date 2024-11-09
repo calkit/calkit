@@ -299,7 +299,7 @@ def get_status(
         # out of date
         logger.info(f"Raw DVC pipeline status: {dvc_pipeline_status}")
         dvc_pipeline_status = {
-            k: v
+            k.split("dvc.yaml:")[-1]: v
             for k, v in dvc_pipeline_status.items()
             if v != ["always changed"] and not k.endswith(".dvc")
         }

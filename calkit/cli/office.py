@@ -44,7 +44,19 @@ def excel_chart_to_png(
 
 @office_app.command(name="word-to-pdf", help="Convert a Word document to PDF.")
 def word_to_pdf(
-    input_fpath: Annotated[str, typer.Argument(help="Input Excel file path.")],
-    output_fpath: Annotated[str, typer.Argument(help="Output PNG file path.")],
+    input_fpath: Annotated[
+        str, typer.Argument(help="Input Word document file path.")
+    ],
+    output_fpath: Annotated[
+        str,
+        typer.Option(
+            "-o",
+            "--output",
+            help=(
+                "Output file path. If not specified, "
+                "will be the same as input with a .pdf extension"
+            ),
+        ),
+    ] = None,
 ):
     docx2pdf.convert(input_path=input_fpath, output_path=output_fpath)

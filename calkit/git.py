@@ -10,7 +10,7 @@ def detect_project_name(path=None) -> str:
 
     TODO: Currently only works with GitHub remotes where the GitHub repo
     name is identical to the Calkit project name, which is not guaranteed.
-    We should probably look inside ``calkit.yaml`` in ``project.name``
+    We should probably look inside ``calkit.yaml`` at ``name``
     first, and fallback to the GitHub remote URL if we can't find that.
     """
     url = git.Repo(path=path).remote().url

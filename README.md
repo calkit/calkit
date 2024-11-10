@@ -43,7 +43,14 @@ forcing them to work at that lower level of abstraction.
 
 ## Installation
 
-Simply run
+Python must be installed. We recommend
+[Mambaforge](https://conda-forge.org/miniforge/).
+If you're a Windows user amd decide to install Mambaforge or any other
+Conda-based distribution,
+e.g., Anaconda, you'll probably want to ensure that environment is
+[activated by default in Git Bash](https://discuss.codecademy.com/t/setting-up-conda-in-git-bash/534473).
+
+After Python is installed, run
 
 ```sh
 pip install calkit-python

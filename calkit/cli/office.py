@@ -15,12 +15,14 @@ office_app = typer.Typer(no_args_is_help=True)
 
 
 @office_app.command(
-    name="excel-chart-to-png",
-    help="Extract a chart from Excel and save to PNG.",
+    name="excel-chart-to-image",
+    help="Extract a chart from Excel and save to image.",
 )
-def excel_chart_to_png(
+def excel_chart_to_image(
     input_fpath: Annotated[str, typer.Argument(help="Input Excel file path.")],
-    output_fpath: Annotated[str, typer.Argument(help="Output PNG file path.")],
+    output_fpath: Annotated[
+        str, typer.Argument(help="Output image file path.")
+    ],
     sheet: Annotated[
         int, typer.Option("--sheet", help="Sheet in workbook.")
     ] = 1,
@@ -34,7 +36,7 @@ def excel_chart_to_png(
         f"Exporting chart at index {chart_index} from sheet {sheet} "
         f"in {input_fpath} to {output_fpath}"
     )
-    calkit.office.excel_chart_to_png(
+    calkit.office.excel_chart_to_image(
         input_fpath=input_fpath,
         output_fpath=output_fpath,
         sheet=sheet,

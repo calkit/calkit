@@ -43,7 +43,11 @@ forcing them to work at that lower level of abstraction.
 
 ## Installation
 
-Python must be installed. We recommend
+To install Calkit, [Git](https://git-scm.com) and Python must be installed.
+If you want to use [Docker](https://docker.com) containers,
+which is typically a good idea,
+that should also be installed.
+For Python, we recommend
 [Mambaforge](https://conda-forge.org/miniforge/).
 If you're a Windows user and decide to install Mambaforge or any other
 Conda-based distribution,

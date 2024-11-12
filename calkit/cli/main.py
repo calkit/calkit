@@ -298,8 +298,10 @@ def push():
     subprocess.call(["dvc", "push"])
 
 
-@app.command(name="local", help="Run the local server to interact over HTTP.")
-def run_server():
+@app.command(
+    name="local-server", help="Run the local server to interact over HTTP."
+)
+def run_local_server():
     import uvicorn
 
     uvicorn.run(

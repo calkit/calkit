@@ -1,10 +1,10 @@
 # Calkit
 
-[Calkit](https://calkit.io) simplifies reproducibility,
+[Calkit](https://calkit.io) helps simplify reproducibility,
 acting as a layer on top of
 [Git](https://git-scm.com/), [DVC](https://dvc.org/),
 [Docker](https://docker.com), and more,
-such that all all aspects of the research process can be fully described in a
+such that all aspects of the research process can be fully described in a
 single repository.
 
 ## Tutorials
@@ -15,7 +15,7 @@ single repository.
 ## Why does reproducibility matter?
 
 If your work is reproducible, that means that someone else can "run" it and
-get the same results or outputs.
+calculate the same results or outputs.
 This is a major step towards addressing
 [the replication crisis](https://en.wikipedia.org/wiki/Replication_crisis)
 and has some major benefits for both you as an individual and the research
@@ -33,7 +33,8 @@ community:
 ## Why another tool/platform?
 
 Git, GitHub, DVC, Docker et al. are amazing tools/platforms, but their
-use involves multiple fairly difficult learning curves.
+use involves multiple fairly difficult learning curves,
+and tying them together might mean developing something new for each project.
 Our goal is to provide a single tool and platform to unify all of these so
 that there is a single, gentle learning curve.
 However, it is not our goal to hide or replace these underlying components.

@@ -3,9 +3,10 @@
 [Calkit](https://calkit.io) helps simplify reproducibility,
 acting as a layer on top of
 [Git](https://git-scm.com/), [DVC](https://dvc.org/),
-[Docker](https://docker.com), and more,
+[Docker](https://docker.com),
+and adds a domain-specific data model
 such that all aspects of the research process can be fully described in a
-single repository.
+single repository and therefore easily consumed by others.
 
 ## Tutorials
 

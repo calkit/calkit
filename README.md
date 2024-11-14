@@ -9,6 +9,7 @@ single repository.
 
 ## Tutorials
 
+- [Microsoft Office (Word and Excel)](https://petebachant.me/office-repro/)
 - [Reproducible OpenFOAM simulations](https://petebachant.me/reproducible-openfoam/)
 
 ## Why does reproducibility matter?

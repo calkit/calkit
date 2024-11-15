@@ -7,7 +7,7 @@ from typing import Literal
 
 import keyring
 import yaml
-from pydantic import EmailStr, computed_field
+from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,7 +40,7 @@ class Settings(BaseSettings):
         ),
         extra="ignore",
     )
-    username: EmailStr | None = None
+    username: str | None = None
     token: str | None = None
     dvc_token: str | None = None
     dataframe_engine: Literal["pandas", "polars"] = "pandas"

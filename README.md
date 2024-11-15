@@ -1,16 +1,22 @@
 # Calkit
 
-[Calkit](https://calkit.io) simplifies reproducibility,
+[Calkit](https://calkit.io) helps simplify reproducibility,
 acting as a layer on top of
 [Git](https://git-scm.com/), [DVC](https://dvc.org/),
-[Zenodo](https://zenodo.org), and more,
-such that all all aspects of the research process can be fully described in a
-single repository.
+[Docker](https://docker.com),
+and adds a domain-specific data model
+such that all aspects of the research process can be fully described in a
+single repository and therefore easily consumed by others.
+
+## Tutorials
+
+- [Microsoft Office (Word and Excel)](https://petebachant.me/office-repro/)
+- [Reproducible OpenFOAM simulations](https://petebachant.me/reproducible-openfoam/)
 
 ## Why does reproducibility matter?
 
 If your work is reproducible, that means that someone else can "run" it and
-get the same results or outputs.
+calculate the same results or outputs.
 This is a major step towards addressing
 [the replication crisis](https://en.wikipedia.org/wiki/Replication_crisis)
 and has some major benefits for both you as an individual and the research
@@ -27,8 +33,9 @@ community:
 
 ## Why another tool/platform?
 
-Git, GitHub, DVC, Zenodo et al. are amazing tools/platforms, but their
-use involves multiple fairly difficult learning curves.
+Git, GitHub, DVC, Docker et al. are amazing tools/platforms, but their
+use involves multiple fairly difficult learning curves,
+and tying them together might mean developing something new for each project.
 Our goal is to provide a single tool and platform to unify all of these so
 that there is a single, gentle learning curve.
 However, it is not our goal to hide or replace these underlying components.
@@ -39,7 +46,18 @@ forcing them to work at that lower level of abstraction.
 
 ## Installation
 
-Simply run
+To install Calkit, [Git](https://git-scm.com) and Python must be installed.
+If you want to use [Docker](https://docker.com) containers,
+which is typically a good idea,
+that should also be installed.
+For Python, we recommend
+[Mambaforge](https://conda-forge.org/miniforge/).
+If you're a Windows user and decide to install Mambaforge or any other
+Conda-based distribution,
+e.g., Anaconda, you'll probably want to ensure that environment is
+[activated by default in Git Bash](https://discuss.codecademy.com/t/setting-up-conda-in-git-bash/534473).
+
+After Python is installed, run
 
 ```sh
 pip install calkit-python
@@ -79,3 +97,34 @@ what files should be considered datasets, figures, publications, etc.
 The Calkit cloud reads this database and registers the various entities
 as part of the entire ecosystem such that if a project is made public,
 other researchers can find and reuse your work to accelerate their own.
+
+## Design/UX principles
+
+1. Be opinionated. Users should not be forced to make unimportant decisions.
+   However, if they disagree, they should have the ability to change the
+   default behavior. The most common use case should be default.
+   Commands that are commonly executed as groups should be combined, but
+   still available to be run individually if desired.
+1. Commits should ideally be made automatically as part of actions that make
+   changes to the project repo. For
+   example, if a new object is added via the CLI, a commit should be made
+   right then unless otherwise specified. This saves the trouble of running
+   multiple commands and encourages atomic commits.
+1. Pushes should require explicit input from the user.
+   It is still TBD whether or not a pull should automatically be
+   made, though in general we want to encourage trunk-based development, i.e.,
+   only working on a single branch. One exception might be for local
+   experimentation that has a high likelihood of failure, in which case a
+   branch can be a nice way to throw those changes away.
+   Multiple branches should probably not live in the cloud, however, except
+   for small, quickly merged pull requests.
+1. Idempotency is always a good thing. Unnecessary state is bad. For example,
+   we should not encourage caching pipeline outputs for operations that are
+   cheap. Caching should happen either for state that is valuable on its
+   own, like a figure, or for an intermediate result that is expensive to
+   generate.
+1. There should be the smallest number of
+   frequently used commands as possible, and they should require at little
+   memorization as possible to know how to execute, e.g., a user should be
+   able to keep running `calkit run` and that's all they really need to do
+   to make sure the project is up-to-date.

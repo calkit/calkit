@@ -1,13 +1,20 @@
 """Data models."""
 
+from __future__ import annotations
+
 from typing import Literal
 
 from pydantic import BaseModel
 
 
-class _ImportedFrom(BaseModel):
+class _ImportedFromProject(BaseModel):
     project: str
-    path: str = None
+    path: str | None = None
+    git_rev: str | None = None
+
+
+class _ImportedFromUrl(BaseModel):
+    url: str
 
 
 class _CalkitObject(BaseModel):
@@ -19,6 +26,10 @@ class _CalkitObject(BaseModel):
 
 class Dataset(_CalkitObject):
     pass
+
+
+class ImportedDataset(Dataset):
+    imported_from: _ImportedFromProject | _ImportedFromUrl
 
 
 class Figure(_CalkitObject):
@@ -49,9 +60,19 @@ class ReferenceCollection(BaseModel):
 
 
 class Environment(BaseModel):
-    name: str
-    kind: Literal["conda", "docker", "pip", "poetry", "npm", "yarn"]
-    path: str
+    kind: Literal[
+        "conda", "docker", "pip", "poetry", "npm", "yarn", "remote-ssh"
+    ]
+    path: str | None = None
+    description: str | None = None
+    stage: str | None = None
+    default: bool | None = None
+
+
+class DockerEnvironment(Environment):
+    kind: str = "docker"
+    image: str
+    layers: list[str] | None = None
 
 
 class Software(BaseModel):
@@ -84,14 +105,35 @@ class Procedure(BaseModel):
 class ProjectInfo(BaseModel):
     """All of the project's information or metadata, written to the
     ``calkit.yaml`` file.
+
+    Attributes
+    ----------
+    parent : str
+        The project's parent project, if applicable. This should be set if
+        the project was created as a copy of another. This is similar to the
+        concept of forking, but unlike a fork, a child project's changes
+        are not meant to be merged back into the parent.
+        The format of this field should be something like
+        {owner_name}/{project_name}, e.g., 'someuser/some-project-name'.
+        Note that individual objects can be imported from other projects, but
+        that doesn't necessarily make them parent projects.
+        This is probably not that important of a distinction.
+        The real use case is being able to trace where things came from and
+        distinguish what has been newly created here.
     """
 
+    title: str | None = None
+    owner: str | None = None
+    description: str | None = None
+    name: str | None = None
+    git_repo_url: str | None = None
+    parent: str | None = None
     questions: list[str] = []
     datasets: list[Dataset] = []
     figures: list[Figure] = []
     publications: list[Publication] = []
     references: list[ReferenceCollection] = []
-    environments: list[Environment] = []
+    environments: dict[str, Environment | DockerEnvironment] = {}
     software: list[Software] = []
     notebooks: list[Notebook] = []
     procedures: dict[str, Procedure] = {}

@@ -12,17 +12,21 @@ classifiers = [
   "Operating System :: OS Independent",
 ]
 dependencies = [
+  "docx2pdf",
   "dvc",
   "eval-type-backport; python_version < '3.10'",
   "fastapi",
   "gitpython",
   "keyring",
   "nbconvert",
+  "pillow",
   "pydantic[email]",
   "pydantic-settings",
   "pyjwt",
+  "pywin32; platform_system == 'Windows'",
   "requests",
   "typer",
+  "uvicorn",
 ]
 description = "Reproducibility simplified."
 dynamic = ["version"]

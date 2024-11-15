@@ -1,7 +1,6 @@
 """Core CLI functionality."""
 
 import os
-import pty
 import subprocess
 
 import typer
@@ -19,4 +18,11 @@ def run_cmd(cmd: list[str]):
     if os.name == "nt":
         subprocess.call(cmd)
     else:
+        import pty
+
         pty.spawn(cmd, lambda fd: os.read(fd, 1024))
+
+
+def raise_error(txt):
+    typer.echo(txt, err=txt)
+    raise typer.Exit(1)

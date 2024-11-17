@@ -28,6 +28,8 @@ class Template(BaseModel):
 
 # A registry of available templates, keyed by their kind and subkeyed by their
 # name
+# TODO: Maybe they should just be identified by name, since we may have
+# some that don't fit the mold, e.g., JOSS
 TEMPLATES = {
     "latex": {
         "jfm": Template(

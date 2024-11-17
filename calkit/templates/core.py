@@ -44,5 +44,7 @@ def use_template(kind: Literal["latex"], name: str, dest_dir: str):
     """Copy template files into ``dest_dir``.
 
     The destination directory must be empty if it exists.
+
+    TODO: Have generic .gitignore files as well.
     """
     pass

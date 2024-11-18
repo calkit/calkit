@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 
 import git
@@ -558,8 +559,6 @@ def new_publication(
     else:
         template_type = None
     # Check all of our inputs
-    if path in pub_paths and not overwrite:
-        raise_error(f"Publication with path {path} already exists")
     if template_type not in ["latex"]:
         raise_error(f"Unknown template type '{template_type}'")
     if env_name is not None and template_type != "latex":
@@ -591,6 +590,10 @@ def new_publication(
         )
     else:
         pub_fpath = path
+    if not overwrite and pub_fpath in pub_paths:
+        raise_error(f"Publication with path {pub_fpath} already exists")
+    elif overwrite and pub_fpath in pub_paths:
+        pubs = [p for p in pubs if p.get("path") != pub_fpath]
     pub = dict(
         path=pub_fpath,
         kind=kind,
@@ -622,6 +625,8 @@ def new_publication(
     repo.git.add("calkit.yaml")
     # Copy in template files if applicable
     if template_type == "latex":
+        if overwrite and os.path.exists(path):
+            shutil.rmtree(path)
         calkit.templates.use_template(
             name=template, dest_dir=path, title=title
         )
@@ -652,5 +657,5 @@ def new_publication(
         dvc_cmd.append(cmd)
         subprocess.check_call(dvc_cmd)
         repo.git.add("dvc.yaml")
-    if not no_commit:
+    if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add new publication {pub_fpath}"])

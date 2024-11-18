@@ -1,4 +1,4 @@
-# Adding a LaTeX-based publication built in a Docker environment
+# Adding a new LaTeX-based publication with its own Docker build environment
 
 Have you ever wanted to collaborate with a team on a LaTeX article,
 but have ran into roadblocks getting everyone on the team to install the

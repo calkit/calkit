@@ -6,4 +6,6 @@ GITIGNORE = """
 *.fls
 *.log
 *.pdf
+*.out
+*.DS_Store
 """

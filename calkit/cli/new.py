@@ -544,9 +544,9 @@ def new_publication(
     envs = ck_info.get("environments", {})
     pub_paths = [p.get("path") for p in pubs]
     if template is not None:
-        template_type, template_name = template.split("/")
+        template_type, _ = template.split("/")
     else:
-        template_type = template_name = None
+        template_type = None
     # Check all of our inputs
     if path in pub_paths and not overwrite:
         raise_error(f"Publication with path {path} already exists")

@@ -577,6 +577,7 @@ def new_publication(
     )
     pubs.append(pub)
     ck_info["publications"] = pubs
+    repo = git.Repo()
     # Create environment if applicable
     if env_name is not None and template_type == "latex":
         env_path = f".calkit/environments/{env_name}.yaml"
@@ -592,11 +593,13 @@ def new_publication(
         with open(env_path, "w") as f:
             calkit.ryaml.dump(env_remote, f)
         ck_info["environments"] = envs
+        repo.git.add(env_path)
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
     # Create stage if applicable
     if stage_name is not None and template_type == "latex":
-        cmd = f"latexmk -pdf {template_obj.target}"
+        cmd = f"cd {path} && latexmk -pdf {template_obj.target}"
         if env_name is not None:
             cmd = f'calkit runenv -n {env_name} "{cmd}"'
         target_dep = os.path.join(path, template_obj.target)
@@ -606,7 +609,6 @@ def new_publication(
             "add",
             "-n",
             stage_name,
-            cmd,
             "-o",
             pub_fpath,
             "-d",
@@ -616,8 +618,14 @@ def new_publication(
             dvc_cmd += ["-d", env_path]
         if overwrite:
             dvc_cmd.append("-f")
+        dvc_cmd.append(cmd)
         subprocess.check_call(dvc_cmd)
-    # TODO: Copy in template files if applicable
-    if env_name is None and template_type == "latex":
-        cmd = template_obj.command
-        cmd = "latexmk -pdf"
+        repo.git.add("dvc.yaml")
+    # Copy in template files if applicable
+    if template_type == "latex":
+        calkit.templates.use_template(
+            name=template, dest_dir=path, title=title
+        )
+        repo.git.add(path)
+    if not no_commit:
+        repo.git.commit(["-m", f"Add new publication {pub_fpath}"])

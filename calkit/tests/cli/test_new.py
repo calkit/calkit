@@ -156,12 +156,14 @@ def test_new_publication(tmp_dir):
         ]
     )
     ck_info = calkit.load_calkit_info()
+    print(ck_info)
     assert ck_info["environments"]["my-latex-env"] == {
         "_include": ".calkit/environments/my-latex-env.yaml"
     }
     assert ck_info["publications"][0]["path"] == "my-paper/paper.pdf"
     with open("dvc.yaml") as f:
         dvc_pipeline = calkit.ryaml.load(f)
+    print(dvc_pipeline)
     stage = dvc_pipeline["stages"]["build-latex-article"]
     assert stage["cmd"] == (
         "calkit runenv -n my-latex-env "

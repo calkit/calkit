@@ -507,6 +507,9 @@ def new_publication(
             help="Name of the pipeline stage to build the output file.",
         ),
     ] = None,
+    deps: Annotated[
+        list[str], typer.Option("--dep", help="Path to stage dependency.")
+    ] = [],
     template: Annotated[
         str,
         typer.Option(
@@ -622,6 +625,8 @@ def new_publication(
         ]
         if env_name is not None:
             dvc_cmd += ["-d", env_path]
+        for dep in deps:
+            dvc_cmd += ["-d", dep]
         if overwrite:
             dvc_cmd.append("-f")
         dvc_cmd.append(cmd)

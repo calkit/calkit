@@ -612,6 +612,8 @@ def new_publication(
         ]
         if env_name is not None:
             dvc_cmd += ["-d", env_path]
+        if overwrite:
+            dvc_cmd.append("-f")
         subprocess.check_call(dvc_cmd)
     # TODO: Copy in template files if applicable
     if env_name is None and template_type == "latex":

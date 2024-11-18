@@ -510,6 +510,13 @@ def new_publication(
     deps: Annotated[
         list[str], typer.Option("--dep", help="Path to stage dependency.")
     ] = [],
+    outs_from_stage: Annotated[
+        str,
+        typer.Option(
+            "--deps-from-stage-outs",
+            help="Stage name from which to add outputs as dependencies.",
+        ),
+    ] = None,
     template: Annotated[
         str,
         typer.Option(
@@ -564,6 +571,19 @@ def new_publication(
             template_obj = calkit.templates.get_template(template)
         except ValueError:
             raise_error(f"Template '{template}' does not exist")
+    # Parse outs from stage if specified
+    if outs_from_stage:
+        pipeline = calkit.dvc.read_pipeline()
+        stages = pipeline.get("stages", {})
+        if outs_from_stage not in stages:
+            raise_error(f"Stage {outs_from_stage} does not exist")
+        stage = stages[outs_from_stage]
+        if "foreach" in stage:
+            for val in stage["foreach"]:
+                for out in stage.get("do", {}).get("outs", []):
+                    deps.append(out.replace("${item}", val))
+        else:
+            deps += stage.get("outs", [])
     # Create publication object
     if template_type == "latex":
         pub_fpath = os.path.join(

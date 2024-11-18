@@ -40,3 +40,8 @@ What happens when we do this:
    with the `--dep` and `--deps-from-stage-outs` commands.
 1. A Git commit is made automatically to add all of these files to the repo.
    Note this can be disabled with the `--no-commit` option.
+
+If you need to add more dependencies to the stage later,
+e.g., if you have a `.bib` file for references,
+or add more figures,
+you can add these by editing `dvc.yaml` directly.

@@ -494,6 +494,12 @@ def new_publication(
             "--description", help="A description of the publication."
         ),
     ],
+    kind: Annotated[
+        str,
+        typer.Option(
+            "--kind", help="Kind of the publication, e.g., 'journal-article'."
+        ),
+    ],
     stage_name: Annotated[
         str,
         typer.Option(
@@ -539,6 +545,8 @@ def new_publication(
     pub_paths = [p.get("path") for p in pubs]
     if template is not None:
         template_type, template_name = template.split("/")
+    else:
+        template_type = template_name = None
     # Check all of our inputs
     if path in pub_paths and not overwrite:
         raise_error(f"Publication with path {path} already exists")
@@ -548,11 +556,25 @@ def new_publication(
         raise_error("Environments can only be created for latex templates")
     if env_name is not None and env_name in envs and not overwrite:
         raise_error(f"Environment '{env_name}' already exists")
-    try:
-        template_obj = calkit.templates.get_template(template)
-    except ValueError:
-        raise_error(f"Template '{template}' does not exist")
-    # TODO: Create publication object
+    if template_type is not None:
+        try:
+            template_obj = calkit.templates.get_template(template)
+        except ValueError:
+            raise_error(f"Template '{template}' does not exist")
+    # Create publication object
+    if template_type == "latex":
+        pub_fpath = template_obj.target.removesuffix(".tex") + ".pdf"
+    else:
+        pub_fpath = path
+    pub = dict(
+        path=pub_fpath,
+        kind=kind,
+        title=title,
+        description=description,
+        stage=stage_name,
+    )
+    pubs.append(pub)
+    ck_info["publications"] = pubs
     # Create environment if applicable
     if env_name is not None and template_type == "latex":
         env_path = f".calkit/environments/{env_name}.yaml"
@@ -563,11 +585,14 @@ def new_publication(
             kind="docker",
             image="kjarosh/latex:2024.4",
             description="TeXlive full from kjarosh.",
-            platform="linux/amd64"
+            platform="linux/amd64",
         )
         with open(env_path, "w") as f:
             calkit.ryaml.dump(env_remote, f)
-    # TODO: Create stage if applicable
+        ck_info["environments"] = envs
+    # Create stage if applicable
+    if stage_name is not None and template_type == "latex":
+        cmd = ["dvc", "stage", "add", "-n", stage_name]
     # TODO: Copy in template files if applicable
     if env_name is None and template_type == "latex":
         cmd = template_obj.command

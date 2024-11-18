@@ -73,6 +73,8 @@ class DockerEnvironment(Environment):
     kind: str = "docker"
     image: str
     layers: list[str] | None = None
+    shell: Literal["bash", "sh"] = "sh"
+    platform: str | None = None
 
 
 class Software(BaseModel):

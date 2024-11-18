@@ -481,11 +481,21 @@ def run_in_env(
             ),
         ),
     ] = None,
+    wdir: Annotated[
+        str,
+        typer.Option(
+            "--wdir",
+            help=(
+                "Working directory. "
+                "By default will run current working directory."
+            ),
+        ),
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
 ):
-    ck_info = calkit.load_calkit_info()
+    ck_info = calkit.load_calkit_info(process_includes=True)
     envs = ck_info.get("environments", {})
     if not envs:
         raise_error("No environments defined in calkit.yaml")
@@ -507,33 +517,42 @@ def run_in_env(
     if env_name is None:
         raise_error("Environment must be specified if there are multiple")
     env = envs[env_name]
-    cwd = os.getcwd()
+    if wdir is not None:
+        cwd = os.path.abspath(wdir)
+    else:
+        cwd = os.getcwd()
     image_name = env.get("image", env_name)
-    wdir = env.get("wdir", "/work")
+    docker_wdir = env.get("wdir", "/work")
+    shell = env.get("shell", "sh")
+    platform = env.get("platform")
     if env["kind"] == "docker":
-        cmd = " ".join(cmd)
-        cmd = [
+        shell_cmd = " ".join(cmd)
+        docker_cmd = [
             "docker",
             "run",
+        ]
+        if platform:
+            docker_cmd += ["--platform", platform]
+        docker_cmd += [
             "-it" if sys.stdin.isatty() else "-i",
             "--rm",
             "-w",
-            wdir,
+            docker_wdir,
             "-v",
-            f"{cwd}:{wdir}",
+            f"{cwd}:{docker_wdir}",
             image_name,
-            "bash",
+            shell,
             "-c",
-            f"{cmd}",
+            f"{shell_cmd}",
         ]
         if verbose:
-            typer.echo(f"Running command: {cmd}")
-        subprocess.call(cmd)
+            typer.echo(f"Running command: {docker_cmd}")
+        subprocess.call(docker_cmd, cwd=wdir)
     elif env["kind"] == "conda":
         cmd = ["conda", "run", "-n", env_name] + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")
-        subprocess.call(cmd)
+        subprocess.call(cmd, cwd=wdir)
     else:
         raise_error("Environment kind not supported")
 

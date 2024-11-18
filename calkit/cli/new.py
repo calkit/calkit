@@ -592,6 +592,8 @@ def new_publication(
         with open(env_path, "w") as f:
             calkit.ryaml.dump(env_remote, f)
         ck_info["environments"] = envs
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
     # Create stage if applicable
     if stage_name is not None and template_type == "latex":
         cmd = f"latexmk -pdf {template_obj.target}"

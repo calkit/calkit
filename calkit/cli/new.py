@@ -549,9 +549,26 @@ def new_publication(
     if env_name is not None and env_name in envs and not overwrite:
         raise_error(f"Environment '{env_name}' already exists")
     try:
-        calkit.templates.get_template(template)
+        template_obj = calkit.templates.get_template(template)
     except ValueError:
         raise_error(f"Template '{template}' does not exist")
     # TODO: Create publication object
-    # TODO: Create environment if applicable
+    # Create environment if applicable
+    if env_name is not None and template_type == "latex":
+        env_path = f".calkit/environments/{env_name}.yaml"
+        os.makedirs(".calkit/environments", exist_ok=True)
+        env = {"_include": env_path}
+        envs[env_name] = env
+        env_remote = dict(
+            kind="docker",
+            image="kjarosh/latex:2024.4",
+            description="TeXlive full from kjarosh.",
+            platform="linux/amd64"
+        )
+        with open(env_path, "w") as f:
+            calkit.ryaml.dump(env_remote, f)
     # TODO: Create stage if applicable
+    # TODO: Copy in template files if applicable
+    if env_name is None and template_type == "latex":
+        cmd = template_obj.command
+        cmd = "latexmk -pdf"

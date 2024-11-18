@@ -495,7 +495,7 @@ def run_in_env(
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
 ):
-    ck_info = calkit.load_calkit_info()
+    ck_info = calkit.load_calkit_info(process_includes=True)
     envs = ck_info.get("environments", {})
     if not envs:
         raise_error("No environments defined in calkit.yaml")

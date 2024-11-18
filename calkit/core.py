@@ -46,7 +46,7 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
     return final_res
 
 
-def load_calkit_info(wdir=None, process_includes=True) -> dict:
+def load_calkit_info(wdir=None, process_includes=False) -> dict:
     """Load Calkit project information."""
     info = {}
     fpath = "calkit.yaml"

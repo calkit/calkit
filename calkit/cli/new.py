@@ -563,7 +563,9 @@ def new_publication(
             raise_error(f"Template '{template}' does not exist")
     # Create publication object
     if template_type == "latex":
-        pub_fpath = template_obj.target.removesuffix(".tex") + ".pdf"
+        pub_fpath = os.path.join(
+            path, template_obj.target.removesuffix(".tex") + ".pdf"
+        )
     else:
         pub_fpath = path
     pub = dict(
@@ -592,7 +594,25 @@ def new_publication(
         ck_info["environments"] = envs
     # Create stage if applicable
     if stage_name is not None and template_type == "latex":
-        cmd = ["dvc", "stage", "add", "-n", stage_name]
+        cmd = f"latexmk -pdf {template_obj.target}"
+        if env_name is not None:
+            cmd = f'calkit runenv -n {env_name} "{cmd}"'
+        target_dep = os.path.join(path, template_obj.target)
+        dvc_cmd = [
+            "dvc",
+            "stage",
+            "add",
+            "-n",
+            stage_name,
+            cmd,
+            "-o",
+            pub_fpath,
+            "-d",
+            target_dep,
+        ]
+        if env_name is not None:
+            dvc_cmd += ["-d", env_path]
+        subprocess.check_call(dvc_cmd)
     # TODO: Copy in template files if applicable
     if env_name is None and template_type == "latex":
         cmd = template_obj.command

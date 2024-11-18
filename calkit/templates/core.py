@@ -32,14 +32,32 @@ class Template(BaseModel):
 # some that don't fit the mold, e.g., JOSS
 TEMPLATES = {
     "latex": {
+        "article": Template(
+            kind="latex",
+            name="article",
+            loc="templates/latex/article",
+            filenames=["paper.tex"],
+        ),
         "jfm": Template(
             kind="latex",
             name="jfm",
             loc="templates/latex/jfm",
             filenames=["paper.tex"],
-        )
-    }
+        ),
+    },
+    "project": {},
 }
+
+
+def get_template(name: str) -> Template:
+    """Get a template by name, which should include its namespace or type."""
+    template_type, template_name = name.split("/")
+    if template_name not in TEMPLATES:
+        raise ValueError(f"Unknown template type '{template_type}'")
+    templates = TEMPLATES[template_type]
+    if template_name not in templates:
+        raise ValueError(f"Unknown template name '{template_name}'")
+    return templates[template_name]
 
 
 def use_template(kind: Literal["latex"], name: str, dest_dir: str):

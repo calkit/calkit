@@ -472,3 +472,86 @@ def new_dataset(
             repo.git.add("dvc.yaml")
         if repo.git.diff("--staged"):
             repo.git.commit(["-m", f"Add dataset {path}"])
+
+
+@new_app.command(name="publication", help="Create a new publication.")
+def new_publication(
+    path: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Path for the publication. "
+                "If using a template, this could be a directory."
+            )
+        ),
+    ],
+    title: Annotated[
+        str, typer.Option("--title", help="The title of the publication.")
+    ],
+    description: Annotated[
+        str,
+        typer.Option(
+            "--description", help="A description of the publication."
+        ),
+    ],
+    stage_name: Annotated[
+        str,
+        typer.Option(
+            "--stage",
+            help="Name of the pipeline stage to build the output file.",
+        ),
+    ] = None,
+    template: Annotated[
+        str,
+        typer.Option(
+            "--template",
+            help=(
+                "Template with which to create the source files. "
+                "Should be in the format {type}/{name}."
+            ),
+        ),
+    ] = None,
+    env_name: Annotated[
+        str,
+        typer.Option(
+            "--environment",
+            help="Name of the build environment to create, if desired.",
+        ),
+    ] = None,
+    no_commit: Annotated[
+        bool,
+        typer.Option(
+            "--no-commit", help="Do not commit resulting changes to the repo."
+        ),
+    ] = False,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite existing objects if they already exist.",
+        ),
+    ] = False,
+):
+    ck_info = calkit.load_calkit_info(process_includes=False)
+    pubs = ck_info.get("publications", [])
+    envs = ck_info.get("environments", {})
+    pub_paths = [p.get("path") for p in pubs]
+    if template is not None:
+        template_type, template_name = template.split("/")
+    # Check all of our inputs
+    if path in pub_paths and not overwrite:
+        raise_error(f"Publication with path {path} already exists")
+    if template_type not in ["latex"]:
+        raise_error(f"Unknown template type '{template_type}'")
+    if env_name is not None and template_type != "latex":
+        raise_error("Environments can only be created for latex templates")
+    if env_name is not None and env_name in envs and not overwrite:
+        raise_error(f"Environment '{env_name}' already exists")
+    try:
+        calkit.templates.get_template(template)
+    except ValueError:
+        raise_error(f"Template '{template}' does not exist")
+    # TODO: Create publication object
+    # TODO: Create environment if applicable
+    # TODO: Create stage if applicable

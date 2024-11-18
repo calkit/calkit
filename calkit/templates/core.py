@@ -9,11 +9,6 @@ from pydantic import BaseModel
 from calkit.templates.latex import GITIGNORE as LATEX_GITIGNORE
 
 
-class TemplateStringReplacement(BaseModel):
-    path: str
-    key: str
-
-
 class Template(BaseModel):
     """Model for a template.
 

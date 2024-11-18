@@ -510,6 +510,7 @@ def run_in_env(
     cwd = os.getcwd()
     image_name = env.get("image", env_name)
     wdir = env.get("wdir", "/work")
+    shell = env.get("shell", "sh")
     if env["kind"] == "docker":
         cmd = " ".join(cmd)
         cmd = [
@@ -522,7 +523,7 @@ def run_in_env(
             "-v",
             f"{cwd}:{wdir}",
             image_name,
-            "bash",
+            shell,
             "-c",
             f"{cmd}",
         ]

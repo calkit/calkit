@@ -77,3 +77,10 @@ def list_environments():
         typer.echo(name + ":")
         for k, v in env.items():
             typer.echo(f"    {k}: {v}")
+
+
+@list_app.command(name="templates")
+def list_templates():
+    for kind, tpl_dict in calkit.templates.TEMPLATES.items():
+        for name in tpl_dict:
+            typer.echo(f"{kind}/{name}")

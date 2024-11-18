@@ -597,6 +597,12 @@ def new_publication(
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
+    # Copy in template files if applicable
+    if template_type == "latex":
+        calkit.templates.use_template(
+            name=template, dest_dir=path, title=title
+        )
+        repo.git.add(path)
     # Create stage if applicable
     if stage_name is not None and template_type == "latex":
         cmd = f"cd {path} && latexmk -pdf {template_obj.target}"
@@ -621,11 +627,5 @@ def new_publication(
         dvc_cmd.append(cmd)
         subprocess.check_call(dvc_cmd)
         repo.git.add("dvc.yaml")
-    # Copy in template files if applicable
-    if template_type == "latex":
-        calkit.templates.use_template(
-            name=template, dest_dir=path, title=title
-        )
-        repo.git.add(path)
     if not no_commit:
         repo.git.commit(["-m", f"Add new publication {pub_fpath}"])

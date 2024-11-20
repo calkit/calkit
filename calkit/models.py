@@ -118,6 +118,7 @@ class ProcedureStep(BaseModel):
     wait_before_s: float | None = None
     wait_after_s: float | None = None
     inputs: dict[str, ProcedureInput] | None = None
+    repeat: int | None = None
 
 
 class Procedure(BaseModel):

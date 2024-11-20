@@ -17,9 +17,9 @@ For example, we might define a procedure with 3 steps like:
 title: My important procedure
 description: This is a manual procedure for setting up the experiment.
 steps:
-  - summary: Turn on the machine.
+  - summary: Turn on the machine
     wait_after_s: 10
-  - summary: Record the temperature.
+  - summary: Record the temperature
     details: >
       In the upper right hand corner of the screen you will see a temperature
       value. Record this.
@@ -28,7 +28,7 @@ steps:
       temperature:
         units: Degrees C
         dtype: float
-  - summary: Turn off the machine.
+  - summary: Turn off the machine
     details: Press the power button.
 ```
 

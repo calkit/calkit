@@ -686,6 +686,13 @@ def run_procedure(
     except Exception as e:
         raise_error(f"Procedure '{name}' is invalid: {e}")
     git_repo = git.Repo()
+    # Check to make sure the working tree is clean, so we know we ran the
+    # committed version of the procedure
+    git_status = git_repo.git.status()
+    if not "working tree clean" in git_status:
+        raise_error(
+            f"Cannot execute procedures unless repo is clean:\n\n{git_status}"
+        )
     t_start_overall = calkit.utcnow()
     # Formulate headers for CSV file, which must contain all inputs from all
     # steps

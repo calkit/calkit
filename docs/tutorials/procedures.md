@@ -2,7 +2,14 @@
 
 Not everything can be automated... yet.
 Sometimes we need to perform manual procedures as part of a research
-protocol.
+protocol, e.g.,
+to collect data during an experiment,
+or simply to get the equipment ready.
+These procedures can be potentially complex,
+and in order to be reproducible,
+they should be thoroughly documented and tracked as they're being
+carried out.
+
 To help make this easier,
 it's possible to define and execute procedures with Calkit.
 This will allow you to define it ahead of time and not need to waste
@@ -34,7 +41,7 @@ steps:
 We can save this anywhere, but to follow convention we will save to
 `.calkit/procedures/my-important-procedure.yaml`.
 
-In `calkit.yaml`, we can add to the `procedures` object like:
+In `calkit.yaml`, we can add to the `procedures` like:
 
 ```yaml
 procedures:
@@ -52,16 +59,17 @@ our procedure will start.
 
 After confirming we've completed the first step,
 Calkit is going to wait 5 seconds before asking us to perform the next
-step, since we specified the `wait_after_s` attribute.
+step, since we defined the `wait_after_s` attribute.
 While we wait, we'll see a countdown timer, then once time is up,
 we'll be prompted to complete the next step.
+
+![Running the procedure](img/run-proc.png)
 
 ## Logging
 
 As we run through the procedure, Calkit will be logging each step
 and committing to the Git repo.
-
-These logs will be saved as CSV files with paths like
+These logs will be saved as CSVs with paths like
 `.calkit/procedure-runs/{procedure_name}/{start_date_time}.csv`.
 The CSV file will have columns indicating what step number was performed,
 when it was started, when it was finished, and will have a column
@@ -93,9 +101,11 @@ stages:
 ```
 
 With this pipeline, when we execute `calkit run`,
-if our procedure has never been executed, it will be kicked off.
-After that, our `plot-data` stage will execute.
-If we want to run the procedure again, we can use the `-f` flag to force
+if our procedure has never been executed, it will begin right then.
+After completion, our `plot-data` stage will run.
+
+If the procedure has been run once,
+but we want to run it again, we can use the `-f` flag to force
 it to be called, even though we already data present in
 `.calkit/procedure-runs/my-important-procedure`.
 After that, our `plot-data` stage will run since the procedure log folder

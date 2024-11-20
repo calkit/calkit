@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Literal
 
 from pydantic import BaseModel
@@ -121,6 +122,19 @@ class ProcedureStep(BaseModel):
     repeat: int | None = None
 
 
+class Timedelta(BaseModel):
+    days: float | None = None
+    seconds: float | None = None
+    microseconds: float | None = None
+    milliseconds: float | None = None
+    minutes: float | None = None
+    hours: float | None = None
+    weeks: float | None = None
+
+    def to_py_timedelta(self) -> timedelta:
+        return timedelta(**self.model_dump())
+
+
 class Procedure(BaseModel):
     """A procedure, typically executed by a human."""
 
@@ -128,6 +142,9 @@ class Procedure(BaseModel):
     description: str
     steps: list[ProcedureStep]
     imported_from: str | None = None
+    start: datetime | None = None
+    end: datetime | None = None
+    period: Timedelta | None = None
 
 
 class ProjectInfo(BaseModel):

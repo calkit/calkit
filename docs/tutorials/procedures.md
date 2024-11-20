@@ -92,20 +92,29 @@ stages:
 
 What if we need to run this procedure once-per-day for the duration
 of an experiment?
-We can add some options to the `calkit runproc` command
-and use the `always_changed` option in the stage to ensure DVC always runs it.
+We can add define the procedure's `start`, `end`, and `period` attributes:
+
+```yaml
+title: My important procedure
+description: This is a manual procedure for setting up the experiment.
+start: 2024-11-20
+end: 2024-12-01
+period:
+  days: 1
+steps:
+...
+```
+
+Then we can use the `always_changed` option in the stage to ensure
+DVC always runs it.
 
 ```yaml
 stages:
   run-proc:
-    cmd: >
-      calkit runproc my-important-procedure
-      --freq 1d
-      --start 2024-12-01
-      --end 2024-12-07
+    cmd: calkit runproc my-important-procedure
+    always_changed: true
     outs:
       - .calkit/procedure-runs/my-important-procedure
-    always_changed: true
 ...
 ```
 

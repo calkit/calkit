@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timedelta
 
 import git
 import typer
@@ -640,3 +641,10 @@ def build_docker(
     inspect[0]["DockerfileMD5"] = dockerfile_md5
     with open(lock_fpath, "w") as f:
         json.dump(inspect, f, indent=4)
+
+
+@app.command(name="runproc", help="Run or execute a procedure.")
+def run_procedure(
+    name: Annotated[str, typer.Argument(help="The name of the procedure.")],
+):
+    pass

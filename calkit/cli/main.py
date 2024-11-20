@@ -701,9 +701,17 @@ def run_procedure(
                 if i.units:
                     msg += f" ({i.units})"
                 msg += " and press enter: "
-                val = input(msg)
-                if i.dtype:
-                    val = convert_value(val, i.dtype)
+                success = False
+                while not success:
+                    val = input(msg)
+                    if i.dtype:
+                        try:
+                            val = convert_value(val, i.dtype)
+                            success = True
+                        except ValueError:
+                            typer.echo(f"Invalid {i.dtype} value")
+                    else:
+                        success = True
                 input_vals[input_name] = val
         t_end = datetime.now(tz=UTC)
         # Log step completion

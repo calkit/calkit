@@ -89,48 +89,13 @@ stages:
       - figures/my-plot.png
 ```
 
-What if we need to run this procedure once-per-day for the duration
-of an experiment?
-We can add define the procedure's `start`, `end`, and `period` attributes:
-
-```yaml
-title: My important procedure
-description: This is a manual procedure for setting up the experiment.
-start: 2024-11-20
-end: 2024-12-01
-period:
-  days: 1
-steps:
-...
-```
-
-Then we can use the `always_changed` option in the stage to ensure
-DVC always runs it.
-
-```yaml
-stages:
-  run-proc:
-    cmd: calkit runproc my-important-procedure
-    always_changed: true
-    outs:
-      - .calkit/procedure-runs/my-important-procedure
-...
-```
-
-With the pipeline setup this way, we can go into the lab each day,
-call `calkit run`,
-and our procedure will automatically start, so long as the current date
-falls within our specified `start` and `end`,
-and it hasn't yet been run that day.
-Once it's done, the data will be plotted since the run logs will
-have changed, and those have been defined as a dependency for the
-`plot-data` stage.
-
-To finish up, we can call
-
-```sh
-calkit commit -am "Run the important procedure" --push
-```
-
-This will commit and push our data and the updated figure to the cloud
-for backup and sharing with our collaborators.
+With this pipeline, when we execute `calkit run`,
+if our procedure has never been executed, it will be kicked off.
+After that, our `plot-data` stage will execute.
+If we want to run the procedure again, we can use the `-f` flag to force
+it to be called, even though we already data present in
+`.calkit/procedure-runs/my-important-procedure`.
+After that, our `plot-data` stage will run since the procedure log folder
+was defined as its input.
+So again, with one command we can ensure all of our inputs and outputs are
+consistent.

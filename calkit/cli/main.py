@@ -701,7 +701,7 @@ def run_procedure(
             for iname in step.inputs:
                 if iname not in headers:
                     headers.append(iname)
-    # TODO: Process periodic logic
+    # TODO: Add ability to process periodic logic
     # See if now falls between start and end, and if there is a run with a
     # timestamp corresponding to the period in which now falls
     # If so, exit

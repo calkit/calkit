@@ -141,9 +141,6 @@ class Procedure(BaseModel):
     description: str
     steps: list[ProcedureStep]
     imported_from: str | None = None
-    start: datetime | None = None
-    end: datetime | None = None
-    period: Timedelta | None = None
 
 
 class ProjectInfo(BaseModel):

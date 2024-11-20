@@ -11,7 +11,7 @@ they should be thoroughly documented and tracked as they're being
 carried out.
 
 To help make this easier,
-it's possible to define and execute procedures with Calkit.
+we can define and execute procedures with Calkit.
 This will allow you to define it ahead of time and not need to waste
 time, e.g., during an experiment, figuring out what step you're on.
 

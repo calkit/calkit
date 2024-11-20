@@ -649,6 +649,10 @@ def build_docker(
 @app.command(name="runproc", help="Run or execute a procedure.")
 def run_procedure(
     name: Annotated[str, typer.Argument(help="The name of the procedure.")],
+    no_commit: Annotated[
+        bool,
+        typer.Option("--no-commit", help="Do not commit after each action."),
+    ] = False,
 ):
     def wait(seconds):
         typer.echo(f"Wait {seconds} seconds")
@@ -755,5 +759,15 @@ def run_procedure(
             with open(fpath, "a", newline="") as f:
                 csv.writer(f).writerow(row.values())
             typer.echo(f"Logged step {n}, rep {n_repeat} to {fpath}")
+            if not no_commit:
+                typer.echo("Committing to Git repo")
+                git_repo.git.reset()
+                git_repo.git.add(fpath)
+                git_repo.git.commit(
+                    [
+                        "-m",
+                        f"Execute procedure {name} step {n}, rep {n_repeat}",
+                    ]
+                )
             if step.wait_after_s:
                 wait(step.wait_after_s)

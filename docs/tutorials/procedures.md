@@ -56,6 +56,7 @@ Here we use an `_include` key to reference the other file to help keep
 
 If we run `calkit runproc my-important-procedure` from the command line,
 our procedure will start.
+We will be prompted to perform the first step and press enter to confirm.
 
 After confirming we've completed the first step,
 Calkit is going to wait 5 seconds before asking us to perform the next

@@ -23,10 +23,10 @@ steps:
     details: >
       In the upper right hand corner of the screen you will see a temperature
       value. Record this.
-    repeat: 2
     wait_after_s: 30
     inputs:
       temperature:
+        name: Temperature
         units: Degrees C
         dtype: float
   - summary: Turn off the machine.

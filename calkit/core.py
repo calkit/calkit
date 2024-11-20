@@ -46,11 +46,25 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
     return final_res
 
 
-def load_calkit_info(wdir=None) -> dict:
+def load_calkit_info(wdir=None, process_includes=False) -> dict:
+    """Load Calkit project information."""
+    info = {}
     fpath = "calkit.yaml"
     if wdir is not None:
         fpath = os.path.join(wdir, fpath)
     if os.path.isfile(fpath):
         with open(fpath) as f:
-            return ryaml.load(f)
-    return {}
+            info = ryaml.load(f)
+    # Check for any includes, i.e., entities with an _include key, for which
+    # we should merge in another file
+    # Currently this is only supported with environments because they may need
+    # to be tracked as DVC dependencies
+    if process_includes:
+        if "environments" in info:
+            for env_name, env in info["environments"].items():
+                if "_include" in env:
+                    include_fpath = env.pop("_include")
+                    with open(include_fpath) as f:
+                        include_data = ryaml.load(f)
+                    info["environments"][env_name] |= include_data
+    return info

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 
 import git
@@ -472,3 +473,189 @@ def new_dataset(
             repo.git.add("dvc.yaml")
         if repo.git.diff("--staged"):
             repo.git.commit(["-m", f"Add dataset {path}"])
+
+
+@new_app.command(name="publication", help="Create a new publication.")
+def new_publication(
+    path: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Path for the publication. "
+                "If using a template, this could be a directory."
+            )
+        ),
+    ],
+    title: Annotated[
+        str, typer.Option("--title", help="The title of the publication.")
+    ],
+    description: Annotated[
+        str,
+        typer.Option(
+            "--description", help="A description of the publication."
+        ),
+    ],
+    kind: Annotated[
+        str,
+        typer.Option(
+            "--kind", help="Kind of the publication, e.g., 'journal-article'."
+        ),
+    ],
+    stage_name: Annotated[
+        str,
+        typer.Option(
+            "--stage",
+            help="Name of the pipeline stage to build the output file.",
+        ),
+    ] = None,
+    deps: Annotated[
+        list[str], typer.Option("--dep", help="Path to stage dependency.")
+    ] = [],
+    outs_from_stage: Annotated[
+        str,
+        typer.Option(
+            "--deps-from-stage-outs",
+            help="Stage name from which to add outputs as dependencies.",
+        ),
+    ] = None,
+    template: Annotated[
+        str,
+        typer.Option(
+            "--template",
+            help=(
+                "Template with which to create the source files. "
+                "Should be in the format {type}/{name}."
+            ),
+        ),
+    ] = None,
+    env_name: Annotated[
+        str,
+        typer.Option(
+            "--environment",
+            help="Name of the build environment to create, if desired.",
+        ),
+    ] = None,
+    no_commit: Annotated[
+        bool,
+        typer.Option(
+            "--no-commit", help="Do not commit resulting changes to the repo."
+        ),
+    ] = False,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite existing objects if they already exist.",
+        ),
+    ] = False,
+):
+    ck_info = calkit.load_calkit_info(process_includes=False)
+    pubs = ck_info.get("publications", [])
+    envs = ck_info.get("environments", {})
+    pub_paths = [p.get("path") for p in pubs]
+    if template is not None:
+        template_type, _ = template.split("/")
+    else:
+        template_type = None
+    # Check all of our inputs
+    if template_type not in ["latex"]:
+        raise_error(f"Unknown template type '{template_type}'")
+    if env_name is not None and template_type != "latex":
+        raise_error("Environments can only be created for latex templates")
+    if env_name is not None and env_name in envs and not overwrite:
+        raise_error(f"Environment '{env_name}' already exists")
+    if template_type is not None:
+        try:
+            template_obj = calkit.templates.get_template(template)
+        except ValueError:
+            raise_error(f"Template '{template}' does not exist")
+    # Parse outs from stage if specified
+    if outs_from_stage:
+        pipeline = calkit.dvc.read_pipeline()
+        stages = pipeline.get("stages", {})
+        if outs_from_stage not in stages:
+            raise_error(f"Stage {outs_from_stage} does not exist")
+        stage = stages[outs_from_stage]
+        if "foreach" in stage:
+            for val in stage["foreach"]:
+                for out in stage.get("do", {}).get("outs", []):
+                    deps.append(out.replace("${item}", val))
+        else:
+            deps += stage.get("outs", [])
+    # Create publication object
+    if template_type == "latex":
+        pub_fpath = os.path.join(
+            path, template_obj.target.removesuffix(".tex") + ".pdf"
+        )
+    else:
+        pub_fpath = path
+    if not overwrite and pub_fpath in pub_paths:
+        raise_error(f"Publication with path {pub_fpath} already exists")
+    elif overwrite and pub_fpath in pub_paths:
+        pubs = [p for p in pubs if p.get("path") != pub_fpath]
+    pub = dict(
+        path=pub_fpath,
+        kind=kind,
+        title=title,
+        description=description,
+        stage=stage_name,
+    )
+    pubs.append(pub)
+    ck_info["publications"] = pubs
+    repo = git.Repo()
+    # Create environment if applicable
+    if env_name is not None and template_type == "latex":
+        env_path = f".calkit/environments/{env_name}.yaml"
+        os.makedirs(".calkit/environments", exist_ok=True)
+        env = {"_include": env_path}
+        envs[env_name] = env
+        env_remote = dict(
+            kind="docker",
+            image="kjarosh/latex:2024.4",
+            description="TeXlive full from kjarosh.",
+            platform="linux/amd64",
+        )
+        with open(env_path, "w") as f:
+            calkit.ryaml.dump(env_remote, f)
+        ck_info["environments"] = envs
+        repo.git.add(env_path)
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
+    # Copy in template files if applicable
+    if template_type == "latex":
+        if overwrite and os.path.exists(path):
+            shutil.rmtree(path)
+        calkit.templates.use_template(
+            name=template, dest_dir=path, title=title
+        )
+        repo.git.add(path)
+    # Create stage if applicable
+    if stage_name is not None and template_type == "latex":
+        cmd = f"cd {path} && latexmk -pdf {template_obj.target}"
+        if env_name is not None:
+            cmd = f'calkit runenv -n {env_name} "{cmd}"'
+        target_dep = os.path.join(path, template_obj.target)
+        dvc_cmd = [
+            "dvc",
+            "stage",
+            "add",
+            "-n",
+            stage_name,
+            "-o",
+            pub_fpath,
+            "-d",
+            target_dep,
+        ]
+        if env_name is not None:
+            dvc_cmd += ["-d", env_path]
+        for dep in deps:
+            dvc_cmd += ["-d", dep]
+        if overwrite:
+            dvc_cmd.append("-f")
+        dvc_cmd.append(cmd)
+        subprocess.check_call(dvc_cmd)
+        repo.git.add("dvc.yaml")
+    if not no_commit and repo.git.diff("--staged"):
+        repo.git.commit(["-m", f"Add new publication {pub_fpath}"])

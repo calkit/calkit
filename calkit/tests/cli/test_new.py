@@ -130,3 +130,42 @@ def test_new_figure(tmp_dir):
     )
     pipeline = calkit.dvc.read_pipeline()
     assert pipeline["stages"]["create-figure3"]["deps"] == ["myfigure2.png"]
+
+
+def test_new_publication(tmp_dir):
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["dvc", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "publication",
+            "my-paper",
+            "--template",
+            "latex/article",
+            "--kind",
+            "journal-article",
+            "--title",
+            "This is a cool title",
+            "--description",
+            "This is a cool description.",
+            "--stage",
+            "build-latex-article",
+            "--environment",
+            "my-latex-env",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    print(ck_info)
+    assert ck_info["environments"]["my-latex-env"] == {
+        "_include": ".calkit/environments/my-latex-env.yaml"
+    }
+    assert ck_info["publications"][0]["path"] == "my-paper/paper.pdf"
+    with open("dvc.yaml") as f:
+        dvc_pipeline = calkit.ryaml.load(f)
+    print(dvc_pipeline)
+    stage = dvc_pipeline["stages"]["build-latex-article"]
+    assert stage["cmd"] == (
+        "calkit runenv -n my-latex-env "
+        '"cd my-paper && latexmk -pdf paper.tex"'
+    )

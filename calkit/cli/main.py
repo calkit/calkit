@@ -747,7 +747,11 @@ def run_procedure(
                             val = convert_value(val, i.dtype)
                             success = True
                         except ValueError:
-                            typer.echo(f"Invalid {i.dtype} value")
+                            typer.echo(
+                                typer.style(
+                                    f"Invalid {i.dtype} value", fg="red"
+                                )
+                            )
                     else:
                         success = True
                 input_vals[input_name] = val

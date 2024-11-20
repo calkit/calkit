@@ -707,7 +707,8 @@ def run_procedure(
     # If so, exit
     # If not, continue
     # Create empty CSV if one doesn't exist
-    fpath = f".calkit/procedure-runs/{name}/{t_start_overall.isoformat()}.csv"
+    t_start_overall_str = t_start_overall.isoformat(timespec="seconds")
+    fpath = f".calkit/procedure-runs/{name}/{t_start_overall_str}.csv"
     dirname = os.path.dirname(fpath)
     if not os.path.isdir(dirname):
         os.makedirs(dirname)

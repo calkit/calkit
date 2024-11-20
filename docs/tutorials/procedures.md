@@ -63,6 +63,11 @@ step, since we defined the `wait_after_s` attribute.
 While we wait, we'll see a countdown timer, then once time is up,
 we'll be prompted to complete the next step.
 
+The second step (numbered as step 1, since we're zero-indexed)
+defines an input called `temperature`.
+The user will be prompted to enter a value, and in this case it will need to
+be a valid `float`.
+
 ![Running the procedure](img/run-proc.png)
 
 ## Logging

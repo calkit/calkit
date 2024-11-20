@@ -709,7 +709,7 @@ def run_procedure(
     for n, step in enumerate(proc.steps):
         repeats = step.repeat or 1
         for n_repeat in range(repeats):
-            typer.echo(f"Starting step {n + 1}, rep {n_repeat + 1}")
+            typer.echo(f"Starting step {n}, rep {n_repeat}")
             t_start = datetime.now(tz=UTC)
             if step.wait_before_s:
                 wait(step.wait_before_s)

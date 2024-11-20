@@ -671,8 +671,7 @@ def run_procedure(
             return str(value)
         elif dtype == "bool":
             return bool(value)
-        else:
-            raise ValueError("Invalid typename")
+        return value
 
     ck_info = calkit.load_calkit_info(process_includes="procedures")
     procs = ck_info.get("procedures", {})

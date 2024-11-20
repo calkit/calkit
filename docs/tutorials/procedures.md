@@ -18,12 +18,12 @@ title: My important procedure
 description: This is a manual procedure for setting up the experiment.
 steps:
   - summary: Turn on the machine.
-    wait_after_s: 30
+    wait_after_s: 10
   - summary: Record the temperature.
     details: >
       In the upper right hand corner of the screen you will see a temperature
       value. Record this.
-    wait_after_s: 30
+    wait_after_s: 5
     inputs:
       temperature:
         units: Degrees C

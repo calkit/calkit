@@ -681,7 +681,30 @@ def run_procedure(
         proc = Procedure.model_validate(procs[name])
     except Exception as e:
         raise_error(f"Procedure '{name}' is invalid: {e}")
+    git_repo = git.Repo()
     t_start_overall = datetime.now(tz=UTC)
+    # Formulate headers for CSV file, which must contain all inputs from all
+    # steps
+    headers = [
+        "procedure_name",
+        "step_number",
+        "calkit_version",
+        "start",
+        "end",
+    ]
+    for step in proc.steps:
+        if step.inputs:
+            for iname in step.inputs:
+                if iname not in headers:
+                    headers.append(iname)
+    # Create empty CSV if one doesn't exist
+    fpath = f".calkit/procedure-runs/{name}/{t_start_overall.date()}.csv"
+    dirname = os.path.dirname(fpath)
+    if not os.path.isdir(dirname):
+        os.makedirs(dirname)
+    if not os.path.isfile(fpath):
+        with open(fpath, "w", newline="") as f:
+            csv.writer(f).writerow(headers)
     for n, step in enumerate(proc.steps):
         # TODO: Handle repeats
         typer.echo(f"Starting step {n}")
@@ -693,10 +716,10 @@ def run_procedure(
         inputs = step.inputs
         input_vals = {}
         if not inputs:
-            input("Press enter when complete")
+            input("Press enter when complete: ")
         else:
             for input_name, i in inputs.items():
-                msg = f"Enter {input_name}"
+                msg = f"Enter {i.name}"
                 if i.units:
                     msg += f" ({i.units})"
                 msg += " and press enter: "
@@ -718,19 +741,14 @@ def run_procedure(
             dict(
                 procedure_name=name,
                 step_number=n,
+                calkit_version=calkit.__version__,
                 start=t_start,
                 end=t_end,
             )
             | input_vals
         )
+        row = {k: row.get(k, "") for k in headers}
         # Log this row to CSV
-        fpath = f".calkit/procedure-runs/{name}/{t_start_overall.date()}.csv"
-        dirname = os.path.dirname(fpath)
-        if not os.path.isdir(dirname):
-            os.makedirs(dirname)
-        if not os.path.isfile(fpath):
-            with open(fpath, "w", newline="") as f:
-                csv.writer(f).writerow(row.keys())
         with open(fpath, "a", newline="") as f:
             csv.writer(f).writerow(row.values())
         typer.echo(f"Logged step {n} to {fpath}")

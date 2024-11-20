@@ -84,3 +84,10 @@ def list_templates():
     for kind, tpl_dict in calkit.templates.TEMPLATES.items():
         for name in tpl_dict:
             typer.echo(f"{kind}/{name}")
+
+
+@list_app.command(name="procedures")
+def list_procedures():
+    ck_info = calkit.load_calkit_info()
+    for p in ck_info.get("procedures", {}):
+        typer.echo(p)

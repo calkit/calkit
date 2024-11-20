@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import os
 import subprocess
 import sys
+import time
+from datetime import UTC, datetime, timedelta
 
 import git
 import typer
@@ -20,6 +23,7 @@ from calkit.cli.list import list_app
 from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
+from calkit.models import Procedure
 
 app = typer.Typer(
     invoke_without_command=True,
@@ -495,7 +499,7 @@ def run_in_env(
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
 ):
-    ck_info = calkit.load_calkit_info(process_includes=True)
+    ck_info = calkit.load_calkit_info(process_includes="environments")
     envs = ck_info.get("environments", {})
     if not envs:
         raise_error("No environments defined in calkit.yaml")
@@ -640,3 +644,143 @@ def build_docker(
     inspect[0]["DockerfileMD5"] = dockerfile_md5
     with open(lock_fpath, "w") as f:
         json.dump(inspect, f, indent=4)
+
+
+@app.command(name="runproc", help="Run or execute a procedure.")
+def run_procedure(
+    name: Annotated[str, typer.Argument(help="The name of the procedure.")],
+    no_commit: Annotated[
+        bool,
+        typer.Option("--no-commit", help="Do not commit after each action."),
+    ] = False,
+):
+    def wait(seconds):
+        typer.echo(f"Wait {seconds} seconds")
+        dt = 0.1
+        while seconds >= 0:
+            mins, secs = divmod(seconds, 60)
+            mins, secs = int(mins), int(secs)
+            out = f"Time left: {mins:02d}:{secs:02d}\r"
+            typer.echo(out, nl=False)
+            time.sleep(dt)
+            seconds -= dt
+        typer.echo()
+
+    def convert_value(value, dtype):
+        if dtype == "int":
+            return int(value)
+        elif dtype == "float":
+            return float(value)
+        elif dtype == "str":
+            return str(value)
+        elif dtype == "bool":
+            return bool(value)
+        return value
+
+    ck_info = calkit.load_calkit_info(process_includes="procedures")
+    procs = ck_info.get("procedures", {})
+    if name not in procs:
+        raise_error(f"'{name}' is not defined as a procedure")
+    try:
+        proc = Procedure.model_validate(procs[name])
+    except Exception as e:
+        raise_error(f"Procedure '{name}' is invalid: {e}")
+    git_repo = git.Repo()
+    # Check to make sure the working tree is clean, so we know we ran the
+    # committed version of the procedure
+    git_status = git_repo.git.status()
+    if not "working tree clean" in git_status:
+        raise_error(
+            f"Cannot execute procedures unless repo is clean:\n\n{git_status}"
+        )
+    t_start_overall = calkit.utcnow()
+    # Formulate headers for CSV file, which must contain all inputs from all
+    # steps
+    headers = [
+        "calkit_version",
+        "procedure_name",
+        "step",
+        "start",
+        "end",
+    ]
+    for step in proc.steps:
+        if step.inputs:
+            for iname in step.inputs:
+                if iname not in headers:
+                    headers.append(iname)
+    # TODO: Add ability to process periodic logic
+    # See if now falls between start and end, and if there is a run with a
+    # timestamp corresponding to the period in which now falls
+    # If so, exit
+    # If not, continue
+    # Create empty CSV if one doesn't exist
+    t_start_overall_str = t_start_overall.isoformat(timespec="seconds")
+    fpath = f".calkit/procedure-runs/{name}/{t_start_overall_str}.csv"
+    dirname = os.path.dirname(fpath)
+    if not os.path.isdir(dirname):
+        os.makedirs(dirname)
+    if not os.path.isfile(fpath):
+        with open(fpath, "w") as f:
+            csv.writer(f).writerow(headers)
+    for n, step in enumerate(proc.steps):
+        typer.echo(f"Starting step {n}")
+        t_start = calkit.utcnow()
+        if step.wait_before_s:
+            wait(step.wait_before_s)
+        # Execute the step
+        inputs = step.inputs
+        input_vals = {}
+        if not inputs:
+            input(f"{step.summary} and press enter when complete: ")
+        else:
+            typer.echo(step.summary)
+            for input_name, i in inputs.items():
+                msg = f"Enter {input_name}"
+                if i.units:
+                    msg += f" ({i.units})"
+                msg += " and press enter: "
+                success = False
+                while not success:
+                    val = input(msg)
+                    if i.dtype:
+                        try:
+                            val = convert_value(val, i.dtype)
+                            success = True
+                        except ValueError:
+                            typer.echo(
+                                typer.style(
+                                    f"Invalid {i.dtype} value", fg="red"
+                                )
+                            )
+                    else:
+                        success = True
+                input_vals[input_name] = val
+        t_end = calkit.utcnow()
+        # Log step completion
+        row = (
+            dict(
+                procedure_name=name,
+                step=n,
+                calkit_version=calkit.__version__,
+                start=t_start.isoformat(),
+                end=t_end.isoformat(),
+            )
+            | input_vals
+        )
+        row = {k: row.get(k, "") for k in headers}
+        # Log this row to CSV
+        with open(fpath, "a") as f:
+            csv.writer(f).writerow(row.values())
+        typer.echo(f"Logged step {n} to {fpath}")
+        if not no_commit:
+            typer.echo("Committing to Git repo")
+            git_repo.git.reset()
+            git_repo.git.add(fpath)
+            git_repo.git.commit(
+                [
+                    "-m",
+                    f"Execute procedure {name} step {n}",
+                ]
+            )
+        if step.wait_after_s:
+            wait(step.wait_after_s)

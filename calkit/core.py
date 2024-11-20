@@ -5,6 +5,7 @@ from __future__ import annotations
 import glob
 import logging
 import os
+from datetime import UTC, datetime
 
 import ruamel.yaml
 from git import Repo
@@ -46,8 +47,21 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
     return final_res
 
 
-def load_calkit_info(wdir=None, process_includes=False) -> dict:
-    """Load Calkit project information."""
+def load_calkit_info(
+    wdir=None, process_includes: bool | str | list[str] = False
+) -> dict:
+    """Load Calkit project information.
+
+    Parameters
+    ----------
+    wdir : str
+        Working directory. Defaults to current working directory.
+    process_includes: bool, string or list of strings
+        Whether or not to process any '_include' keys for a given kind of
+        object. If a string is passed, only process includes for that kind.
+        Similarly, if a list of strings is passed, only process those kinds.
+        If True, process all default kinds.
+    """
     info = {}
     fpath = "calkit.yaml"
     if wdir is not None:
@@ -57,14 +71,28 @@ def load_calkit_info(wdir=None, process_includes=False) -> dict:
             info = ryaml.load(f)
     # Check for any includes, i.e., entities with an _include key, for which
     # we should merge in another file
-    # Currently this is only supported with environments because they may need
-    # to be tracked as DVC dependencies
+    default_includes_enabled = ["environments", "procedures"]
     if process_includes:
-        if "environments" in info:
-            for env_name, env in info["environments"].items():
-                if "_include" in env:
-                    include_fpath = env.pop("_include")
-                    with open(include_fpath) as f:
-                        include_data = ryaml.load(f)
-                    info["environments"][env_name] |= include_data
+        if isinstance(process_includes, bool):
+            includes_enabled = default_includes_enabled
+        elif isinstance(process_includes, str):
+            includes_enabled = [process_includes]
+        elif isinstance(process_includes, list):
+            includes_enabled = process_includes
+        for kind in includes_enabled:
+            if kind in info:
+                for obj_name, obj in info[kind].items():
+                    if "_include" in obj:
+                        include_fpath = obj.pop("_include")
+                        with open(include_fpath) as f:
+                            include_data = ryaml.load(f)
+                        info[kind][obj_name] |= include_data
     return info
+
+
+def utcnow(remove_tz=True) -> datetime:
+    """Return now in UTC, optionally stripping timezone information."""
+    dt = datetime.now(UTC)
+    if remove_tz:
+        dt = dt.replace(tzinfo=None)
+    return dt

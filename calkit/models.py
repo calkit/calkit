@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Literal
 
 from pydantic import BaseModel
@@ -89,6 +90,59 @@ class Notebook(_CalkitObject):
     pass
 
 
+class ProcedureInput(BaseModel):
+    """An input that might be entered while running a procedure.
+
+    Attributes
+    ----------
+    name : str
+        The name of the input. This will be displayed to the user at the
+        prompt like 'Enter {name}:'. Note the column name for the log is the
+        key used to identify this input, and they can be different.
+    dtype : 'int', 'bool', 'str', or 'float'
+        The datatype of the input.
+    units : str
+        Units of the input value.
+    description : str
+        Optional longer description of the input.
+    """
+    name: str | None = None
+    dtype: Literal["int", "bool", "str", "float"] = None
+    units: str | None = None
+    description: str | None = None
+
+
+class ProcedureStep(BaseModel):
+    summary: str
+    details: str | None = None
+    cmd: str | None = None
+    wait_before_s: float | None = None
+    wait_after_s: float | None = None
+    inputs: dict[str, ProcedureInput] | None = None
+
+
+class Timedelta(BaseModel):
+    days: float | None = None
+    seconds: float | None = None
+    microseconds: float | None = None
+    milliseconds: float | None = None
+    minutes: float | None = None
+    hours: float | None = None
+    weeks: float | None = None
+
+    def to_py_timedelta(self) -> timedelta:
+        return timedelta(**self.model_dump())
+
+
+class Procedure(BaseModel):
+    """A procedure, typically executed by a human."""
+
+    title: str
+    description: str
+    steps: list[ProcedureStep]
+    imported_from: str | None = None
+
+
 class ProjectInfo(BaseModel):
     """All of the project's information or metadata, written to the
     ``calkit.yaml`` file.
@@ -123,3 +177,4 @@ class ProjectInfo(BaseModel):
     environments: dict[str, Environment | DockerEnvironment] = {}
     software: list[Software] = []
     notebooks: list[Notebook] = []
+    procedures: dict[str, Procedure] = {}

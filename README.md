@@ -10,7 +10,9 @@ single repository and therefore easily consumed by others.
 
 ## Tutorials
 
-- [Microsoft Office (Word and Excel)](https://petebachant.me/office-repro/)
+- [Defining and executing manual procedures](docs/tutorials/procedures.md)
+- [Adding a new LaTeX-based publication with its own Docker build environment](docs/tutorials/adding-latex-pub-docker.md)
+- [A reproducibly workflow using Microsoft Office (Word and Excel)](https://petebachant.me/office-repro/)
 - [Reproducible OpenFOAM simulations](https://petebachant.me/reproducible-openfoam/)
 
 ## Why does reproducibility matter?
@@ -124,7 +126,7 @@ other researchers can find and reuse your work to accelerate their own.
    own, like a figure, or for an intermediate result that is expensive to
    generate.
 1. There should be the smallest number of
-   frequently used commands as possible, and they should require at little
+   frequently used commands as possible, and they should require as little
    memorization as possible to know how to execute, e.g., a user should be
    able to keep running `calkit run` and that's all they really need to do
    to make sure the project is up-to-date.

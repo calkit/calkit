@@ -686,9 +686,10 @@ def run_procedure(
     # Formulate headers for CSV file, which must contain all inputs from all
     # steps
     headers = [
-        "procedure_name",
-        "step_number",
         "calkit_version",
+        "procedure_name",
+        "step",
+        "rep",
         "start",
         "end",
     ]
@@ -706,51 +707,53 @@ def run_procedure(
         with open(fpath, "w", newline="") as f:
             csv.writer(f).writerow(headers)
     for n, step in enumerate(proc.steps):
-        # TODO: Handle repeats
-        typer.echo(f"Starting step {n}")
-        t_start = datetime.now(tz=UTC)
-        if step.wait_before_s:
-            wait(step.wait_before_s)
-        # Execute the step
-        typer.echo(step.summary)
-        inputs = step.inputs
-        input_vals = {}
-        if not inputs:
-            input("Press enter when complete: ")
-        else:
-            for input_name, i in inputs.items():
-                msg = f"Enter {i.name}"
-                if i.units:
-                    msg += f" ({i.units})"
-                msg += " and press enter: "
-                success = False
-                while not success:
-                    val = input(msg)
-                    if i.dtype:
-                        try:
-                            val = convert_value(val, i.dtype)
+        repeats = step.repeat or 1
+        for n_repeat in range(repeats):
+            typer.echo(f"Starting step {n + 1}, rep {n_repeat + 1}")
+            t_start = datetime.now(tz=UTC)
+            if step.wait_before_s:
+                wait(step.wait_before_s)
+            # Execute the step
+            typer.echo(step.summary)
+            inputs = step.inputs
+            input_vals = {}
+            if not inputs:
+                input("Press enter when complete: ")
+            else:
+                for input_name, i in inputs.items():
+                    msg = f"Enter {i.name}"
+                    if i.units:
+                        msg += f" ({i.units})"
+                    msg += " and press enter: "
+                    success = False
+                    while not success:
+                        val = input(msg)
+                        if i.dtype:
+                            try:
+                                val = convert_value(val, i.dtype)
+                                success = True
+                            except ValueError:
+                                typer.echo(f"Invalid {i.dtype} value")
+                        else:
                             success = True
-                        except ValueError:
-                            typer.echo(f"Invalid {i.dtype} value")
-                    else:
-                        success = True
-                input_vals[input_name] = val
-        t_end = datetime.now(tz=UTC)
-        # Log step completion
-        row = (
-            dict(
-                procedure_name=name,
-                step_number=n,
-                calkit_version=calkit.__version__,
-                start=t_start,
-                end=t_end,
+                    input_vals[input_name] = val
+            t_end = datetime.now(tz=UTC)
+            # Log step completion
+            row = (
+                dict(
+                    procedure_name=name,
+                    step=n,
+                    rep=n_repeat,
+                    calkit_version=calkit.__version__,
+                    start=t_start,
+                    end=t_end,
+                )
+                | input_vals
             )
-            | input_vals
-        )
-        row = {k: row.get(k, "") for k in headers}
-        # Log this row to CSV
-        with open(fpath, "a", newline="") as f:
-            csv.writer(f).writerow(row.values())
-        typer.echo(f"Logged step {n} to {fpath}")
-        if step.wait_after_s:
-            wait(step.wait_after_s)
+            row = {k: row.get(k, "") for k in headers}
+            # Log this row to CSV
+            with open(fpath, "a", newline="") as f:
+                csv.writer(f).writerow(row.values())
+            typer.echo(f"Logged step {n}, rep {n_repeat} to {fpath}")
+            if step.wait_after_s:
+                wait(step.wait_after_s)

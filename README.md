@@ -10,7 +10,7 @@ single repository and therefore easily consumed by others.
 
 ## Tutorials
 
-- [Microsoft Office (Word and Excel)](https://petebachant.me/office-repro/)
+- [A reproducibly workflow using Microsoft Office (Word and Excel)](https://petebachant.me/office-repro/)
 - [Reproducible OpenFOAM simulations](https://petebachant.me/reproducible-openfoam/)
 
 ## Why does reproducibility matter?

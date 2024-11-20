@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timedelta
+import time
+from datetime import UTC, datetime, timedelta
 
 import git
 import typer
@@ -21,6 +23,7 @@ from calkit.cli.list import list_app
 from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
+from calkit.models import Procedure
 
 app = typer.Typer(
     invoke_without_command=True,
@@ -647,4 +650,82 @@ def build_docker(
 def run_procedure(
     name: Annotated[str, typer.Argument(help="The name of the procedure.")],
 ):
-    pass
+    def wait(seconds):
+        typer.echo(f"Wait {seconds} seconds")
+        dt = 0.1
+        while seconds >= 0:
+            mins, secs = divmod(seconds, 60)
+            mins, secs = int(mins), int(secs)
+            out = f"Time left: {mins:02d}:{secs:02d}\r"
+            typer.echo(out, nl=False)
+            time.sleep(dt)
+            seconds -= dt
+        typer.echo()
+
+    def convert_value(value, dtype):
+        if dtype == "int":
+            return int(value)
+        elif dtype == "float":
+            return float(value)
+        elif dtype == "str":
+            return str(value)
+        elif dtype == "bool":
+            return bool(value)
+        else:
+            raise ValueError("Invalid typename")
+
+    ck_info = calkit.load_calkit_info(process_includes="procedures")
+    procs = ck_info.get("procedures", {})
+    if name not in procs:
+        raise_error(f"'{name}' is not defined as a procedure")
+    try:
+        proc = Procedure.model_validate(procs[name])
+    except Exception as e:
+        raise_error(f"Procedure '{name}' is invalid: {e}")
+    t_start_overall = datetime.now(tz=UTC)
+    for n, step in enumerate(proc.steps):
+        # TODO: Handle repeats
+        typer.echo(f"Starting step {n}")
+        t_start = datetime.now(tz=UTC)
+        if step.wait_before_s:
+            wait(step.wait_before_s)
+        # Execute the step
+        typer.echo(step.summary)
+        inputs = step.inputs
+        input_vals = {}
+        if not inputs:
+            input("Press enter when complete")
+        else:
+            for input_name, i in inputs.items():
+                msg = f"Enter {input_name}"
+                if i.units:
+                    msg += f" ({i.units})"
+                msg += " and press enter: "
+                val = input(msg)
+                if i.dtype:
+                    val = convert_value(val, i.dtype)
+                input_vals[input_name] = val
+        t_end = datetime.now(tz=UTC)
+        # Log step completion
+        row = (
+            dict(
+                procedure_name=name,
+                step_number=n,
+                start=t_start,
+                end=t_end,
+            )
+            | input_vals
+        )
+        # Log this row to CSV
+        fpath = f".calkit/procedure-runs/{name}/{t_start_overall.date()}.csv"
+        dirname = os.path.dirname(fpath)
+        if not os.path.isdir(dirname):
+            os.makedirs(dirname)
+        if not os.path.isfile(fpath):
+            with open(fpath, "w", newline="") as f:
+                csv.writer(f).writerow(row.keys())
+        with open(fpath, "a", newline="") as f:
+            csv.writer(f).writerow(row.values())
+        typer.echo(f"Logged step {n} to {fpath}")
+        if step.wait_after_s:
+            wait(step.wait_after_s)

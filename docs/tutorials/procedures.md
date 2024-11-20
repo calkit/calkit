@@ -18,12 +18,11 @@ title: My important procedure
 description: This is a manual procedure for setting up the experiment.
 steps:
   - summary: Turn on the machine
-    wait_after_s: 10
+    wait_after_s: 5
   - summary: Record the temperature
     details: >
       In the upper right hand corner of the screen you will see a temperature
       value. Record this.
-    wait_after_s: 5
     inputs:
       temperature:
         units: Degrees C
@@ -52,8 +51,8 @@ If we run `calkit runproc my-important-procedure` from the command line,
 our procedure will start.
 
 After confirming we've completed the first step,
-Calkit is going to wait 30 seconds before asking us to perform the next
-step.
+Calkit is going to wait 5 seconds before asking us to perform the next
+step, since we specified the `wait_after_s` attribute.
 
 ## Logging
 

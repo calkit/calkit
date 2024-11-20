@@ -693,7 +693,6 @@ def run_procedure(
         "calkit_version",
         "procedure_name",
         "step",
-        "rep",
         "start",
         "end",
     ]
@@ -711,63 +710,60 @@ def run_procedure(
         with open(fpath, "w") as f:
             csv.writer(f).writerow(headers)
     for n, step in enumerate(proc.steps):
-        repeats = step.repeat or 1
-        for n_repeat in range(repeats):
-            typer.echo(f"Starting step {n}, rep {n_repeat}")
-            t_start = datetime.now(tz=UTC)
-            if step.wait_before_s:
-                wait(step.wait_before_s)
-            # Execute the step
-            inputs = step.inputs
-            input_vals = {}
-            if not inputs:
-                input(f"{step.summary} and press enter when complete: ")
-            else:
-                typer.echo(step.summary)
-                for input_name, i in inputs.items():
-                    msg = f"Enter {i.name}"
-                    if i.units:
-                        msg += f" ({i.units})"
-                    msg += " and press enter: "
-                    success = False
-                    while not success:
-                        val = input(msg)
-                        if i.dtype:
-                            try:
-                                val = convert_value(val, i.dtype)
-                                success = True
-                            except ValueError:
-                                typer.echo(f"Invalid {i.dtype} value")
-                        else:
+        typer.echo(f"Starting step {n}")
+        t_start = datetime.now(tz=UTC)
+        if step.wait_before_s:
+            wait(step.wait_before_s)
+        # Execute the step
+        inputs = step.inputs
+        input_vals = {}
+        if not inputs:
+            input(f"{step.summary} and press enter when complete: ")
+        else:
+            typer.echo(step.summary)
+            for input_name, i in inputs.items():
+                msg = f"Enter {i.name}"
+                if i.units:
+                    msg += f" ({i.units})"
+                msg += " and press enter: "
+                success = False
+                while not success:
+                    val = input(msg)
+                    if i.dtype:
+                        try:
+                            val = convert_value(val, i.dtype)
                             success = True
-                    input_vals[input_name] = val
-            t_end = datetime.now(tz=UTC)
-            # Log step completion
-            row = (
-                dict(
-                    procedure_name=name,
-                    step=n,
-                    rep=n_repeat,
-                    calkit_version=calkit.__version__,
-                    start=t_start,
-                    end=t_end,
-                )
-                | input_vals
+                        except ValueError:
+                            typer.echo(f"Invalid {i.dtype} value")
+                    else:
+                        success = True
+                input_vals[input_name] = val
+        t_end = datetime.now(tz=UTC)
+        # Log step completion
+        row = (
+            dict(
+                procedure_name=name,
+                step=n,
+                calkit_version=calkit.__version__,
+                start=t_start,
+                end=t_end,
             )
-            row = {k: row.get(k, "") for k in headers}
-            # Log this row to CSV
-            with open(fpath, "a") as f:
-                csv.writer(f).writerow(row.values())
-            typer.echo(f"Logged step {n}, rep {n_repeat} to {fpath}")
-            if not no_commit:
-                typer.echo("Committing to Git repo")
-                git_repo.git.reset()
-                git_repo.git.add(fpath)
-                git_repo.git.commit(
-                    [
-                        "-m",
-                        f"Execute procedure {name} step {n}, rep {n_repeat}",
-                    ]
-                )
-            if step.wait_after_s:
-                wait(step.wait_after_s)
+            | input_vals
+        )
+        row = {k: row.get(k, "") for k in headers}
+        # Log this row to CSV
+        with open(fpath, "a") as f:
+            csv.writer(f).writerow(row.values())
+        typer.echo(f"Logged step {n} to {fpath}")
+        if not no_commit:
+            typer.echo("Committing to Git repo")
+            git_repo.git.reset()
+            git_repo.git.add(fpath)
+            git_repo.git.commit(
+                [
+                    "-m",
+                    f"Execute procedure {name} step {n}",
+                ]
+            )
+        if step.wait_after_s:
+            wait(step.wait_after_s)

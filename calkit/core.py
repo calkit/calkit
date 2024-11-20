@@ -90,6 +90,9 @@ def load_calkit_info(
     return info
 
 
-def utcnow() -> datetime:
-    """Return a timezone-naive timestamp for now in UTC."""
-    return datetime.now(UTC).replace(tzinfo=None)
+def utcnow(remove_tz=True) -> datetime:
+    """Return now in UTC, optionally stripping timezone information."""
+    dt = datetime.now(UTC)
+    if remove_tz:
+        dt = dt.replace(tzinfo=None)
+    return dt

@@ -106,7 +106,7 @@ class ProcedureInput(BaseModel):
     description : str
         Optional longer description of the input.
     """
-    name: str
+    name: str | None = None
     dtype: Literal["int", "bool", "str", "float"] = None
     units: str | None = None
     description: str | None = None

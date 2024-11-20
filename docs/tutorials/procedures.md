@@ -26,7 +26,6 @@ steps:
     wait_after_s: 30
     inputs:
       temperature:
-        name: Temperature
         units: Degrees C
         dtype: float
   - summary: Turn off the machine.

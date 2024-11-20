@@ -727,7 +727,7 @@ def run_procedure(
         else:
             typer.echo(step.summary)
             for input_name, i in inputs.items():
-                msg = f"Enter {i.name}"
+                msg = f"Enter {input_name}"
                 if i.units:
                     msg += f" ({i.units})"
                 msg += " and press enter: "

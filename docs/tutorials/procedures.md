@@ -53,6 +53,8 @@ our procedure will start.
 After confirming we've completed the first step,
 Calkit is going to wait 5 seconds before asking us to perform the next
 step, since we specified the `wait_after_s` attribute.
+While we wait, we'll see a countdown timer, then once time is up,
+we'll be prompted to complete the next step.
 
 ## Logging
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import glob
 import logging
 import os
+from datetime import UTC, datetime
 
 import ruamel.yaml
 from git import Repo
@@ -87,3 +88,8 @@ def load_calkit_info(
                             include_data = ryaml.load(f)
                         info[kind][obj_name] |= include_data
     return info
+
+
+def utcnow() -> datetime:
+    """Return a timezone-naive timestamp for now in UTC."""
+    return datetime.now(UTC).replace(tzinfo=None)

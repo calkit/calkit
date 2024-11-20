@@ -686,7 +686,7 @@ def run_procedure(
     except Exception as e:
         raise_error(f"Procedure '{name}' is invalid: {e}")
     git_repo = git.Repo()
-    t_start_overall = datetime.now(tz=UTC)
+    t_start_overall = calkit.utcnow()
     # Formulate headers for CSV file, which must contain all inputs from all
     # steps
     headers = [
@@ -707,7 +707,7 @@ def run_procedure(
     # If so, exit
     # If not, continue
     # Create empty CSV if one doesn't exist
-    fpath = f".calkit/procedure-runs/{name}/{t_start_overall.date()}.csv"
+    fpath = f".calkit/procedure-runs/{name}/{t_start_overall.isoformat()}.csv"
     dirname = os.path.dirname(fpath)
     if not os.path.isdir(dirname):
         os.makedirs(dirname)
@@ -716,7 +716,7 @@ def run_procedure(
             csv.writer(f).writerow(headers)
     for n, step in enumerate(proc.steps):
         typer.echo(f"Starting step {n}")
-        t_start = datetime.now(tz=UTC)
+        t_start = calkit.utcnow()
         if step.wait_before_s:
             wait(step.wait_before_s)
         # Execute the step
@@ -743,15 +743,15 @@ def run_procedure(
                     else:
                         success = True
                 input_vals[input_name] = val
-        t_end = datetime.now(tz=UTC)
+        t_end = calkit.utcnow()
         # Log step completion
         row = (
             dict(
                 procedure_name=name,
                 step=n,
                 calkit_version=calkit.__version__,
-                start=t_start,
-                end=t_end,
+                start=t_start.isoformat(),
+                end=t_end.isoformat(),
             )
             | input_vals
         )

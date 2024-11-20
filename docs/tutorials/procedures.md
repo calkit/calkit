@@ -80,7 +80,9 @@ stages:
   run-proc:
     cmd: calkit runproc my-important-procedure
     outs:
-      - .calkit/procedure-runs/my-important-procedure
+      - .calkit/procedure-runs/my-important-procedure:
+          cache: false # Track this in Git, not DVC
+          persist: true # Don't delete existing outputs
   plot-data:
     cmd: python scripts/plot-data.py
     deps:

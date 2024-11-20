@@ -61,6 +61,12 @@ step.
 As we run through the procedure, Calkit will be logging each step
 and committing to the Git repo.
 
+These logs will be saved as CSV files with paths like
+`.calkit/procedure-runs/{procedure_name}/{start_date_time}.csv`.
+The CSV file will have columns indicating what step number was performed,
+when it was started, when it was finished, and will have a column
+for each input defined, if applicable.
+
 ## Executing as part of the pipeline
 
 TODO

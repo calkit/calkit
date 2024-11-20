@@ -67,6 +67,62 @@ The CSV file will have columns indicating what step number was performed,
 when it was started, when it was finished, and will have a column
 for each input defined, if applicable.
 
+These logs can be read later for further analysis and/or visualization.
+
 ## Executing as part of the pipeline
 
-TODO
+Let's imagine we want to execute a procedure to collect some data
+and then generate a plot of that data.
+We can define this in our DVC pipeline so we know if/when the procedure
+has been run, and if the plot need to be remade.
+
+```yaml
+stages:
+  run-proc:
+    cmd: calkit runproc my-important-procedure
+    outs:
+      - .calkit/procedure-runs/my-important-procedure
+  plot-data:
+    cmd: python scripts/plot-data.py
+    deps:
+      - .calkit/procedure-runs/my-important-procedure
+    outs:
+      - figures/my-plot.png
+```
+
+But what if we need to run this procedure once-per-day for the duration
+of an experiment?
+We can add some options to the `calkit runproc` command
+and use the `always_changed` option to ensure DVC always runs it.
+
+```yaml
+stages:
+  run-proc:
+    cmd: >
+      calkit runproc my-important-procedure
+      --freq 1d
+      --start 2024-12-01
+      --end 2024-12-07
+    outs:
+      - .calkit/procedure-runs/my-important-procedure
+    always_changed: true
+...
+```
+
+With the pipeline setup this way, we can go into the lab each day,
+call `calkit run`,
+and our procedure will automatically start, so long as the current date
+falls within our specified `start` and `end`,
+and it hasn't yet been run that day.
+Once it's done, the data will be plotted since the run logs will
+have changed, and those have been defined as a dependency for the
+`plot-data` stage.
+
+To finish up, we can call
+
+```sh
+calkit commit -am "Run the important procedure" --push
+```
+
+This will commit and push our data and the updated figure to the cloud
+for backup and sharing with our collaborators.

@@ -708,7 +708,7 @@ def run_procedure(
     if not os.path.isdir(dirname):
         os.makedirs(dirname)
     if not os.path.isfile(fpath):
-        with open(fpath, "w", newline="") as f:
+        with open(fpath, "w") as f:
             csv.writer(f).writerow(headers)
     for n, step in enumerate(proc.steps):
         repeats = step.repeat or 1
@@ -718,12 +718,12 @@ def run_procedure(
             if step.wait_before_s:
                 wait(step.wait_before_s)
             # Execute the step
-            typer.echo(step.summary)
             inputs = step.inputs
             input_vals = {}
             if not inputs:
-                input("Press enter when complete: ")
+                input(f"{step.summary} and press enter when complete: ")
             else:
+                typer.echo(step.summary)
                 for input_name, i in inputs.items():
                     msg = f"Enter {i.name}"
                     if i.units:
@@ -756,7 +756,7 @@ def run_procedure(
             )
             row = {k: row.get(k, "") for k in headers}
             # Log this row to CSV
-            with open(fpath, "a", newline="") as f:
+            with open(fpath, "a") as f:
                 csv.writer(f).writerow(row.values())
             typer.echo(f"Logged step {n}, rep {n_repeat} to {fpath}")
             if not no_commit:

@@ -90,10 +90,10 @@ stages:
       - figures/my-plot.png
 ```
 
-But what if we need to run this procedure once-per-day for the duration
+What if we need to run this procedure once-per-day for the duration
 of an experiment?
 We can add some options to the `calkit runproc` command
-and use the `always_changed` option to ensure DVC always runs it.
+and use the `always_changed` option in the stage to ensure DVC always runs it.
 
 ```yaml
 stages:

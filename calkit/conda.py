@@ -93,7 +93,7 @@ def check_env(
                 version = dep_split[1]
             else:
                 version = None
-            if version is not None and dep not in required_conda_deps:
+            if version is not None and dep not in existing_conda_deps:
                 env_needs_rebuild = True
                 break
             elif version is None:
@@ -110,7 +110,7 @@ def check_env(
                     version = dep_split[1]
                 else:
                     version = None
-                if version is not None and dep not in required_pip_deps:
+                if version is not None and dep not in existing_pip_deps:
                     env_needs_rebuild = True
                     break
                 elif version is None:
@@ -120,7 +120,7 @@ def check_env(
                         env_needs_rebuild = True
     if env_needs_rebuild:
         log_func(f"Rebuilding {env_name} since it does not match spec")
-        subprocess.check_call([conda, "env", "create", "-y" "-f", env_fpath])
+        subprocess.check_call([conda, "env", "create", "-y", "-f", env_fpath])
         env_needs_export = True
     else:
         log_func(f"Environment {env_name} matches spec")

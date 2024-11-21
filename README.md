@@ -13,7 +13,7 @@ single repository and therefore easily consumed by others.
 - [Keeping track of conda environments](docs/tutorials/conda-envs.md)
 - [Defining and executing manual procedures](docs/tutorials/procedures.md)
 - [Adding a new LaTeX-based publication with its own Docker build environment](docs/tutorials/adding-latex-pub-docker.md)
-- [A reproducibly workflow using Microsoft Office (Word and Excel)](https://petebachant.me/office-repro/)
+- [A reproducible workflow using Microsoft Office (Word and Excel)](https://petebachant.me/office-repro/)
 - [Reproducible OpenFOAM simulations](https://petebachant.me/reproducible-openfoam/)
 
 ## Why does reproducibility matter?

@@ -796,6 +796,20 @@ def check_conda_env(
         typer.Option(
             "--file", "-f", help="Path to conda environment YAML file."
         ),
-    ] = "environment.yml"
+    ] = "environment.yml",
+    output_fpath: Annotated[
+        str,
+        typer.Option(
+            "--output",
+            "-o",
+            help=(
+                "Path to which existing environment should be exported. "
+                "If not specified, will have the same filename with '-loc' "
+                "appended to it, keeping the same extension."
+            ),
+        ),
+    ] = None,
 ):
-    calkit.conda.check_env(env_fpath=env_fpath, log_func=typer.echo)
+    calkit.conda.check_env(
+        env_fpath=env_fpath, output_fpath=output_fpath, log_func=typer.echo
+    )

@@ -9,7 +9,10 @@ from calkit import ryaml
 
 
 def check_env(
-    env_fpath: str = "environment.yml", use_mamba=True, log_func=None
+    env_fpath: str = "environment.yml",
+    use_mamba=True,
+    log_func=None,
+    output_fpath: str = None,
 ):
     """Check that a conda environment matches its spec.
 
@@ -149,3 +152,11 @@ def check_env(
         env_check["mtime"] = os.path.getmtime(env_check["prefix"])
         with open(env_check_fpath, "w") as f:
             ryaml.dump(env_check, f)
+    if output_fpath is None:
+        fname, ext = os.path.splitext(env_fpath)
+        output_fpath = fname + "-lock" + ext
+    log_func(f"Exporting lock file to {output_fpath}")
+    with open(output_fpath, "w") as f:
+        _ = env_check.pop("mtime")
+        _ = env_check.pop("prefix")
+        ryaml.dump(env_check, f)

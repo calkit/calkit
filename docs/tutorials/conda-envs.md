@@ -30,6 +30,7 @@ so it is recommended to only put the "top-level" dependencies in
 We can also add an environment check to our DVC pipeline
 so if we're running any stages with that environment, we make sure
 the environment is correct before doing so.
+For example, we could have the following in `dvc.yaml`:
 
 ```yaml
 stages:

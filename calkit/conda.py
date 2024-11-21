@@ -94,13 +94,16 @@ def check_env(
             else:
                 version = None
             if version is not None and dep not in existing_conda_deps:
+                log_func(f"Found missing dependency: {dep}")
                 env_needs_rebuild = True
                 break
             elif version is None:
                 if package not in [
                     d.split("=")[0] for d in existing_conda_deps
                 ]:
+                    log_func(f"Found missing dependency: {dep}")
                     env_needs_rebuild = True
+                    break
         if not env_needs_rebuild:
             log_func("Checking pip dependencies")
             for dep in required_pip_deps:
@@ -112,12 +115,15 @@ def check_env(
                     version = None
                 if version is not None and dep not in existing_pip_deps:
                     env_needs_rebuild = True
+                    log_func(f"Found missing dependency: {dep}")
                     break
                 elif version is None:
                     if package not in [
                         d.split("==")[0] for d in existing_pip_deps
                     ]:
+                        log_func(f"Found missing dependency: {dep}")
                         env_needs_rebuild = True
+                        break
     if env_needs_rebuild:
         log_func(f"Rebuilding {env_name} since it does not match spec")
         subprocess.check_call([conda, "env", "create", "-y", "-f", env_fpath])

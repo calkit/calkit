@@ -126,7 +126,7 @@ def check_env(
         log_func(f"Environment {env_name} matches spec")
     # If the env was rebuilt, export the env check
     if env_needs_export:
-        log_func(f"Exporting existing env to {env_fpath}")
+        log_func(f"Exporting existing env to {env_check_fpath}")
         env_check = json.loads(
             subprocess.check_output(
                 [

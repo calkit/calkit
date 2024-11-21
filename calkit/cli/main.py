@@ -784,3 +784,18 @@ def run_procedure(
             )
         if step.wait_after_s:
             wait(step.wait_after_s)
+
+
+@app.command(
+    name="check-conda-env",
+    help="Check a conda environment and rebuild if necessary.",
+)
+def check_conda_env(
+    env_fpath: Annotated[
+        str,
+        typer.Option(
+            "--file", "-f", help="Path to conda environment YAML file."
+        ),
+    ] = "environment.yml"
+):
+    calkit.conda.check_env(env_fpath=env_fpath, log_func=typer.echo)

@@ -42,9 +42,6 @@ class Calkit(Magics):
                     f"stage_name='{stage}', out_name='{varname}')\n\n"
                 )
         script_txt += cell
-        for out in args.out:
-            if out in self.shell.user_ns:
-                print("Found", out)
         # Add lines that save our outputs to files
         if args.out:
             for out in args.out:

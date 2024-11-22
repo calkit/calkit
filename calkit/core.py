@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import glob
+import json
 import logging
 import os
 import pickle
@@ -100,6 +101,9 @@ def utcnow(remove_tz=True) -> datetime:
     return dt
 
 
+NOTEBOOK_STAGE_OUT_FORMATS = ["pickle", "parquet", "json", "yaml", "csv"]
+
+
 def get_notebook_stage_dir(stage_name: str) -> str:
     return f".calkit/notebook-stages/{stage_name}"
 
@@ -113,22 +117,85 @@ def get_notebook_stage_out_dir(stage_name: str) -> str:
 
 
 def get_notebook_stage_out_path(
-    stage_name: str, out_name: str, fmt: Literal["pickle"] = "pickle"
+    stage_name: str,
+    out_name: str,
+    fmt: Literal["pickle", "parquet", "json", "yaml", "csv"] = "pickle",
 ) -> str:
-    if fmt != "pickle":
-        raise ValueError("Only pickling is currently supported")
+    if fmt not in NOTEBOOK_STAGE_OUT_FORMATS:
+        raise ValueError("Invalid output format")
     return os.path.join(
         get_notebook_stage_out_dir(stage_name), f"{out_name}.{fmt}"
     )
 
 
-def load_notebook_stage_out(stage_name: str, out_name: str):
+def load_notebook_stage_out(
+    stage_name: str,
+    out_name: str,
+    fmt: Literal["pickle", "parquet", "json", "yaml", "csv"] = "pickle",
+    engine: Literal["pandas", "polars"] | None = None,
+):
     fpath = get_notebook_stage_out_path(stage_name, out_name)
-    with open(fpath, "rb") as f:
-        return pickle.load(f)
+    if fmt in ["pickle", "json", "yaml"] and engine is not None:
+        raise ValueError(
+            f"Engine '{engine}' not compatible with format '{fmt}'"
+        )
+    if fmt == "pickle":
+        with open(fpath, "rb") as f:
+            return pickle.load(f)
+    elif fmt == "yaml":
+        with open(fpath) as f:
+            return ryaml.load(f)
+    elif fmt == "json":
+        with open(fpath) as f:
+            return json.load(f)
+    elif fmt == "csv" and engine == "pandas":
+        import pandas as pd
+
+        return pd.read_csv(fpath)
+    elif fmt == "csv" and engine == "polars":
+        import polars as pl
+
+        return pl.read_csv(fpath)
+    elif fmt == "parquet" and engine == "pandas":
+        import pandas as pd
+
+        return pd.read_parquet(fpath)
+    elif fmt == "parquet" and engine == "polars":
+        import polars as pl
+
+        return pl.read_parquet(fpath)
+    raise ValueError(f"Unsupported format '{fmt}' for engine '{engine}'")
 
 
-def save_notebook_stage_out(obj, stage_name: str, out_name: str):
-    fpath = get_notebook_stage_out_path(stage_name, out_name)
-    with open(fpath, "wb") as f:
-        pickle.dump(obj, f)
+def save_notebook_stage_out(
+    obj,
+    stage_name: str,
+    out_name: str,
+    fmt: Literal["pickle", "parquet", "json", "yaml", "csv"],
+    engine: Literal["pandas", "polars"] | None = None,
+):
+    fpath = get_notebook_stage_out_path(stage_name, out_name, fmt=fmt)
+    dirname = os.path.dirname(fpath)
+    os.makedirs(dirname, exist_ok=True)
+    if fmt in ["pickle", "json", "yaml"] and engine is not None:
+        raise ValueError(
+            f"Engine '{engine}' not compatible with format '{fmt}'"
+        )
+    if fmt == "pickle":
+        with open(fpath, "wb") as f:
+            pickle.dump(obj, f)
+    elif fmt == "json":
+        with open(fpath, "w") as f:
+            json.dump(obj, f)
+    elif fmt == "yaml":
+        with open(fpath, "w") as f:
+            ryaml.dump(obj, f)
+    elif fmt == "csv" and engine == "pandas":
+        obj.to_csv(fpath)
+    elif fmt == "parquet" and engine == "pandas":
+        obj.to_parquet(fpath)
+    elif fmt == "csv" and engine == "polars":
+        obj.write_csv(fpath)
+    elif fmt == "parquet" and engine == "polars":
+        obj.write_parquet(fpath)
+    raise ValueError(f"Unsupported format '{fmt}' for engine '{engine}'")

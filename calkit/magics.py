@@ -1,12 +1,13 @@
 """IPython magics."""
 
 import os
-import subprocess
-
 import pickle
+import subprocess
 
 from IPython.core import magic_arguments
 from IPython.core.magic import Magics, cell_magic, magics_class
+
+import calkit
 
 
 @magics_class
@@ -38,7 +39,7 @@ class Calkit(Magics):
                 stage, varname = d.split(":")
                 script_txt += (
                     f"{varname} = calkit.load_notebook_stage_out("
-                    f"'{stage}', '{varname}')\n\n"
+                    f"stage_name='{stage}', out_name='{varname}')\n\n"
                 )
         script_txt += cell
         for out in args.out:
@@ -49,10 +50,10 @@ class Calkit(Magics):
             for out in args.out:
                 script_txt += (
                     f"calkit.save_notebook_stage_out("
-                    f"{out}, stage_name='{args.name}')\n"
+                    f"{out}, stage_name='{args.name}', out_name='{out}')\n"
                 )
         # Save the script to a Python file
-        script_fpath = f".calkit/notebook-stages/{args.name}/script.py"
+        script_fpath = calkit.get_notebook_stage_script_path(args.name)
         script_dir = os.path.dirname(script_fpath)
         os.makedirs(script_dir, exist_ok=True)
         with open(script_fpath, "w") as f:

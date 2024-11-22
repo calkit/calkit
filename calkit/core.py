@@ -5,7 +5,9 @@ from __future__ import annotations
 import glob
 import logging
 import os
+import pickle
 from datetime import UTC, datetime
+from typing import Literal
 
 import ruamel.yaml
 from git import Repo
@@ -96,3 +98,33 @@ def utcnow(remove_tz=True) -> datetime:
     if remove_tz:
         dt = dt.replace(tzinfo=None)
     return dt
+
+
+def get_notebook_stage_dir(stage_name: str) -> str:
+    return f".calkit/notebook-stages/{stage_name}"
+
+
+def get_notebook_stage_script_path(stage_name: str) -> str:
+    return os.path.join(get_notebook_stage_dir(stage_name), "script.py")
+
+
+def get_notebook_stage_out_path(
+    stage_name: str, out_name: str, fmt: Literal["pickle"] = "pickle"
+) -> str:
+    if fmt != "pickle":
+        raise ValueError("Only pickling is currently supported")
+    return os.path.join(
+        get_notebook_stage_dir(stage_name), "outs", f"{out_name}.{fmt}"
+    )
+
+
+def load_notebook_stage_out(stage_name: str, out_name: str):
+    fpath = get_notebook_stage_out_path(stage_name, out_name)
+    with open(fpath, "rb") as f:
+        return pickle.load(f)
+
+
+def save_notebook_stage_out(obj, stage_name: str, out_name: str):
+    fpath = get_notebook_stage_out_path(stage_name, out_name)
+    with open(fpath, "wb") as f:
+        pickle.dump(obj, f)

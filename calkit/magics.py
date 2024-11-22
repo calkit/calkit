@@ -57,7 +57,7 @@ class Calkit(Magics):
         script_dir = os.path.dirname(script_fpath)
         os.makedirs(script_dir, exist_ok=True)
         outs_dir = calkit.get_notebook_stage_out_dir(stage_name=args.name)
-        os.makedirs(outs_dir)
+        os.makedirs(outs_dir, exist_ok=True)
         with open(script_fpath, "w") as f:
             f.write(script_txt)
         # Create a DVC stage that runs the script, defining the appropriate

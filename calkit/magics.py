@@ -41,7 +41,6 @@ class Calkit(Magics):
                     f"'{stage}', '{varname}')\n\n"
                 )
         script_txt += cell
-        self.shell.run_cell(cell)
         for out in args.out:
             if out in self.shell.user_ns:
                 print("Found", out)

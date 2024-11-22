@@ -1,12 +1,31 @@
 # Calkit
 
-[Calkit](https://calkit.io) helps simplify reproducibility,
-acting as a layer on top of
-[Git](https://git-scm.com/), [DVC](https://dvc.org/),
-[Docker](https://docker.com),
-and adds a domain-specific data model
+Calkit is a lightweight framework for doing reproducible research.
+It acts as a top-level layer to integrate and simplify the use of enabling
+technologies such as
+[Git](https://git-scm.com/),
+[DVC](https://dvc.org/),
+[Conda](https://docs.conda.io/en/latest/),
+and [Docker](https://docker.com).
+Calkit also adds a domain-specific data model
 such that all aspects of the research process can be fully described in a
 single repository and therefore easily consumed by others.
+
+Our goal is to make reproducibility easier so it becomes more common.
+To do this, we try to make it easy for users to follow two simple rules:
+
+1. **Keep everything in version control.** This includes large files like
+   datasets, enabled by DVC. The [Calkit cloud](https://calkit.io)
+   serves as a simple default DVC remote storage location for those who do not
+   want to manage their own infrastructure.
+2. **Generate all important artifacts with a single pipeline.** There should be
+   no special instructions required to reproduce a project's artifacts.
+   It should be as simple as calling `calkit run`.
+   The DVC pipeline (in a project's `dvc.yaml` file) is therefore the main
+   thing to "build" throughout a research project.
+   Calkit provides helper functionality to build pipeline stages that
+   keep computational environments up-to-date and label their outputs for
+   convenient reuse.
 
 ## Tutorials
 

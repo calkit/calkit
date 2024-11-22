@@ -118,7 +118,7 @@ def get_notebook_stage_out_path(
     if fmt != "pickle":
         raise ValueError("Only pickling is currently supported")
     return os.path.join(
-        get_notebook_stage_out_dir(stage_name) f"{out_name}.{fmt}"
+        get_notebook_stage_out_dir(stage_name), f"{out_name}.{fmt}"
     )
 
 

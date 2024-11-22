@@ -108,13 +108,17 @@ def get_notebook_stage_script_path(stage_name: str) -> str:
     return os.path.join(get_notebook_stage_dir(stage_name), "script.py")
 
 
+def get_notebook_stage_out_dir(stage_name: str) -> str:
+    return os.path.join(get_notebook_stage_dir(stage_name), "outs")
+
+
 def get_notebook_stage_out_path(
     stage_name: str, out_name: str, fmt: Literal["pickle"] = "pickle"
 ) -> str:
     if fmt != "pickle":
         raise ValueError("Only pickling is currently supported")
     return os.path.join(
-        get_notebook_stage_dir(stage_name), "outs", f"{out_name}.{fmt}"
+        get_notebook_stage_out_dir(stage_name) f"{out_name}.{fmt}"
     )
 
 

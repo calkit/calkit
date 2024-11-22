@@ -85,7 +85,7 @@ class Calkit(Magics):
         Then variables will be loaded back into the user namespace state by
         loading the DVC output.
         """
-        args = magic_arguments.parse_argstring(self.dvc_stage, line)
+        args = magic_arguments.parse_argstring(self.stage, line)
         # If an output object type is specified, make sure we only have one
         # output
         if args.out_type:

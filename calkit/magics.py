@@ -198,6 +198,11 @@ class Calkit(Magics):
                 self.shell.user_ns[out_name] = calkit.load_notebook_stage_out(
                     **kws
                 )
+        # If the last line of the cell has no equals signs, run that command,
+        # since it's probably meant for display
+        last_line = cell.strip().split("\n")[-1]
+        if not "=" in last_line:
+            self.shell.run_cell(last_line)
 
 
 def load_ipython_extension(ipython):

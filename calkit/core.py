@@ -122,7 +122,7 @@ def get_notebook_stage_out_path(
     fmt: Literal["pickle", "parquet", "json", "yaml", "csv"] = "pickle",
 ) -> str:
     if fmt not in NOTEBOOK_STAGE_OUT_FORMATS:
-        raise ValueError("Invalid output format")
+        raise ValueError(f"Invalid output format '{fmt}'")
     return os.path.join(
         get_notebook_stage_out_dir(stage_name), f"{out_name}.{fmt}"
     )
@@ -134,7 +134,7 @@ def load_notebook_stage_out(
     fmt: Literal["pickle", "parquet", "json", "yaml", "csv"] = "pickle",
     engine: Literal["pandas", "polars"] | None = None,
 ):
-    fpath = get_notebook_stage_out_path(stage_name, out_name)
+    fpath = get_notebook_stage_out_path(stage_name, out_name, fmt=fmt)
     if fmt in ["pickle", "json", "yaml"] and engine is not None:
         raise ValueError(
             f"Engine '{engine}' not compatible with format '{fmt}'"
@@ -171,7 +171,7 @@ def save_notebook_stage_out(
     obj,
     stage_name: str,
     out_name: str,
-    fmt: Literal["pickle", "parquet", "json", "yaml", "csv"],
+    fmt: Literal["pickle", "parquet", "json", "yaml", "csv"] = "pickle",
     engine: Literal["pandas", "polars"] | None = None,
 ):
     fpath = get_notebook_stage_out_path(stage_name, out_name, fmt=fmt)
@@ -198,4 +198,5 @@ def save_notebook_stage_out(
         obj.write_csv(fpath)
     elif fmt == "parquet" and engine == "polars":
         obj.write_parquet(fpath)
-    raise ValueError(f"Unsupported format '{fmt}' for engine '{engine}'")
+    else:
+        raise ValueError(f"Unsupported format '{fmt}' for engine '{engine}'")

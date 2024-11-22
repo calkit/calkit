@@ -89,9 +89,9 @@ class Calkit(Magics):
         # Now let's read in and inject the outputs back into the IPython state
         if args.out:
             for out in args.out:
-                fp = f".calkit/notebook-stages/{args.name}/outs/{out}.pickle"
-                with open(fp, "rb") as f:
-                    self.shell.user_ns[out] = pickle.load(f)
+                self.shell.user_ns[out] = calkit.load_notebook_stage_out(
+                    stage_name=args.name, out_name=out
+                )
 
 
 def load_ipython_extension(ipython):

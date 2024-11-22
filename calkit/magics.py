@@ -66,6 +66,7 @@ class Calkit(Magics):
             "dvc",
             "stage",
             "add",
+            "-q",
             "-n",
             args.name,
             "--run",

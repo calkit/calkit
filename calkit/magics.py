@@ -76,7 +76,7 @@ class Calkit(Magics):
         "--out-desc", help="Description for Calkit output object."
     )
     @cell_magic
-    def dvc_stage(self, line, cell):
+    def stage(self, line, cell):
         """Turn a notebook cell into a DVC pipeline stage.
 
         Note that all dependencies must be declared since the cell will be

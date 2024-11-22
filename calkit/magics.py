@@ -56,9 +56,21 @@ class Calkit(Magics):
         script_fpath = f".calkit/notebook-stages/{args.name}/script.py"
         script_dir = os.path.dirname(script_fpath)
         os.makedirs(script_dir, exist_ok=True)
+        with open(script_fpath, "w") as f:
+            f.write(script_txt)
         # Create a DVC stage that runs the script, defining the appropriate
         # dependencies and outputs, and run it
-        cmd = ["dvc", "stage", "add", "-n", args.name, "--run"]
+        cmd = [
+            "dvc",
+            "stage",
+            "add",
+            "-n",
+            args.name,
+            "--run",
+            "--force",
+            "-d",
+            script_fpath,
+        ]
         if args.dep:
             for dep in args.dep:
                 stage, varname = dep.split(":")

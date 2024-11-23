@@ -29,6 +29,7 @@ To do this, we try to make it easy for users to follow two simple rules:
 
 ## Tutorials
 
+- [Jupyter notebook as a DVC pipeline](docs/tutorials/notebook-pipeline.md)
 - [Keeping track of conda environments](docs/tutorials/conda-envs.md)
 - [Defining and executing manual procedures](docs/tutorials/procedures.md)
 - [Adding a new LaTeX-based publication with its own Docker build environment](docs/tutorials/adding-latex-pub-docker.md)

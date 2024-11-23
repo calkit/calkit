@@ -83,16 +83,14 @@ pull in the cache, and the cell will run quickly for them.
 By default, our output variables will be pickled,
 which is not the most portable format.
 Let's instead save our DataFrame to Parquet format.
-To do this, all we need to do is adjust the `--out` value to add the format.
+To do this, all we need to do is adjust the `--out` value to add the format
+and DataFrame library
+(Calkit currently supports both Pandas and Polars DataFrames.)
 So change the call to the magic to be:
 
 ```python
-%%stage --name get-data --out df:parquet
+%%stage --name get-data --out df:parquet:pandas
 ```
-
-Note: Calkit currently supports any DataFrame types that implement a
-`to_parquet` or `write_parquet`,
-which includes both Pandas and Polars.
 
 ## Using the output of one cell as a dependency in another
 

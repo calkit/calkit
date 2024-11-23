@@ -404,7 +404,12 @@ def run_dvc_repro(
                         f"Stage {stage_name} does not have exactly one output"
                     )
                 cktype = ckmeta.get("type")
-                if cktype not in ["figure", "dataset", "publication"]:
+                if cktype not in [
+                    "figure",
+                    "dataset",
+                    "publication",
+                    "notebook",
+                ]:
                     raise_error(f"Invalid Calkit output type '{cktype}'")
                 objects.append(
                     dict(path=outs[0]) | ckmeta | dict(stage=stage_name)

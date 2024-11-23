@@ -4,6 +4,8 @@ import os
 import shutil
 import subprocess
 
+import calkit
+
 
 def test_stage(tmp_dir):
     # Test the stage magic
@@ -18,5 +20,17 @@ def test_stage(tmp_dir):
     subprocess.check_call(
         ["jupyter", "nbconvert", "--execute", "notebook.ipynb", "--to", "html"]
     )
-    # TODO: Check DVC stages make sense
-    # TODO: Check Calkit metadata makes sense
+    # Check DVC stages make sense
+    with open("dvc.yaml") as f:
+        pipeline = calkit.ryaml.load(f)
+    script = ".calkit/notebook-stages/get-data/script.py"
+    deps = pipeline["stages"]["get-data"]["deps"]
+    assert script in deps
+    # Check Calkit metadata makes sense
+    ck_info = calkit.load_calkit_info()
+    figs = ck_info["figures"]
+    fig = figs[0]
+    assert fig["path"] == "figures/plot.png"
+    assert fig["title"] == "A plot of the data"
+    assert fig["description"] == "This is a plot of the data."
+    assert fig["stage"] == "plot-fig"

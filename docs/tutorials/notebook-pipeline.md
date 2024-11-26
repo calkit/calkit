@@ -39,9 +39,8 @@ to strip notebook outputs before we commit to the repo,
 since the important ones will be produced as part of the pipeline
 and cached with DVC.
 
-##
-
-First, let's write a cell to fetch a dataset,
+New let's work through an example.
+First, we'll write a cell to fetch a dataset,
 and let's assume this is expensive,
 maybe because we had to fetch it from a database.
 To simulate that expense we'll use a call to `time.sleep`.

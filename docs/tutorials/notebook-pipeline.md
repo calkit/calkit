@@ -13,16 +13,26 @@ can be cumbersome to invalidate or share between collaborators.
 It's typically recommended to move anything important or production-ready
 out of notebooks and into modules and/or scripts so they can be easily
 version-controlled and run as part of a reproducible pipeline.
-However, Calkit offers a Jupyter
+However, Calkit includes a Jupyter
 cell magic
 to help "productionize" notebook cells as DVC pipeline stages without
 needing to cut/paste anything.
 
-This allows a workflow like:
-
+This enables a workflow like:
 1. Prototype a cell by running whatever commands make sense.
 2. Convert cells that are working and valuable into pipeline
    stages, and delete anything else.
+
+In the process of making notebook cells into pipeline stages,
+we will need to be explicit about what variables our
+cells depend on and which are outputs,
+since the cells will be executed outside of out Jupyter kernel in a
+separate process.
+Those processes won't have access to any state that isn't declared as
+a dependency or created by the code itself,
+thereby negating some of the state management traps
+one can run into if running cells out of order,
+changing cells but forgetting to rerun them, etc.
 
 At the end of this process we should be left with a notebook that runs
 very quickly after it's been run once,
@@ -39,11 +49,11 @@ to strip notebook outputs before we commit to the repo,
 since the important ones will be produced as part of the pipeline
 and cached with DVC.
 
-New let's work through an example.
-First, we'll write a cell to fetch a dataset,
-and let's assume this is expensive,
-maybe because we had to fetch it from a database.
-To simulate that expense we'll use a call to `time.sleep`.
+Now let's work through an example.
+First, we'll write a cell to simulate fetching a dataset.
+To simulate this being an expensive call,
+e.g., if we had to query a database,
+we'll use a call to `time.sleep`.
 
 ```python
 import pandas as pd

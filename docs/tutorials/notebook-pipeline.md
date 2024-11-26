@@ -1,35 +1,45 @@
 # Using a Jupyter Notebook as a reproducible pipeline
 
-Jupyter Notebooks are great tools for exploration,
-but they can cause real headaches when it comes to managing state,
-since they can be executed out-of-order.
-This can lead to bad practices like only running certain cells
-since others are too expensive or failing.
-This means it's very possible for a result from a notebook to be
-non-reproducible.
+Jupyter Notebooks are great tools for exploration and prototyping,
+but they can be troublesome if relied upon to produce permanent
+artifacts like figures, datasets, or machine learning models.
+Their strength for ad hoc work is their weakness for "production" work,
+namely that their cells can be executed in any order,
+and they can be difficult to use with Git,
+hindering their reproducibility.
+Furthermore, expensive cells may inspire home grown caches that
+can be cumbersome to invalidate or share between collaborators.
 
-Here we're going to show how to use Calkit to turn a Jupyter Notebook
-into a DVC pipeline,
-as well as label our artifacts.
+It's typically recommended to move anything important or production-ready
+out of notebooks and into modules and/or scripts so they can be easily
+version-controlled and run as part of a reproducible pipeline.
+However, Calkit offers a Jupyter
+cell magic
+to help "productionize" notebook cells as DVC pipeline stages without
+needing to cut/paste anything.
 
-The natural process would be something like:
+This allows a workflow like:
 
 1. Prototype a cell by running whatever commands make sense.
 2. Convert cells that are working and valuable into pipeline
    stages, and delete anything else.
 
+At the end of this process we should be left with a notebook that runs
+very quickly after it's been run once,
+and all of our important outputs will be cached and pushed to the cloud,
+but kept out of our Git repo.
+Our collaborators will be able to pull everything and similarly
+run the notebook very quickly on the first go,
+and if/when cells are changed,
+DVC will only rerun what is necessary to rerun.
+
+Side note:
 We should also be using [`nbstripout`](https://github.com/kynan/nbstripout)
 to strip notebook outputs before we commit to the repo,
 since the important ones will be produced as part of the pipeline
 and cached with DVC.
 
-At the end of this process we should be left with a notebook that runs
-very quickly after it's been run once,
-and all of our important outputs will be cached and pushed to the cloud,
-but kept out of our Git repo.
-
-Alright, so let's show how to convert a notebook into a reproducible
-DVC pipeline without leaving the notebook interface.
+##
 
 First, let's write a cell to fetch a dataset,
 and let's assume this is expensive,

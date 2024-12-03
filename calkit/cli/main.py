@@ -606,6 +606,9 @@ def build_docker(
     fpath: Annotated[
         str, typer.Option("-i", "--input", help="Path to input Dockerfile.")
     ] = "Dockerfile",
+    platform: Annotated[
+        str, typer.Option("--platform", help="Which platform(s) to build for.")
+    ] = None,
 ):
     def get_docker_inspect():
         out = json.loads(
@@ -645,7 +648,11 @@ def build_docker(
             "Layers"
         ] or dockerfile_md5 != lock[0].get("DockerfileMD5")
     if rebuild:
-        subprocess.check_call(["docker", "build", "-t", tag, "-f", fpath, "."])
+        cmd = ["docker", "build", "-t", tag, "-f", fpath]
+        if platform is not None:
+            cmd += ["--platform", platform]
+        cmd.append(".")
+        subprocess.check_call(cmd)
     # Write the lock file
     inspect = get_docker_inspect()
     inspect[0]["DockerfileMD5"] = dockerfile_md5

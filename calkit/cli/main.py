@@ -818,7 +818,7 @@ def check_conda_env(
             "-o",
             help=(
                 "Path to which existing environment should be exported. "
-                "If not specified, will have the same filename with '-loc' "
+                "If not specified, will have the same filename with '-lock' "
                 "appended to it, keeping the same extension."
             ),
         ),

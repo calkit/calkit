@@ -670,3 +670,104 @@ def new_publication(
         repo.git.add("dvc.yaml")
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add new publication {pub_fpath}"])
+
+
+@new_app.command("conda-env")
+def new_conda_env(
+    packages: Annotated[
+        list[str],
+        typer.Argument(help="Packages to include in the environment."),
+    ],
+    name: Annotated[
+        str, typer.Option("--name", "-n", help="Environment name.")
+    ],
+    path: Annotated[
+        str, typer.Option("--path", help="Environment YAML file path.")
+    ] = "environment.yml",
+    pip_packages: Annotated[
+        list[str], typer.Option("--pip", help="Packages to install with pip.")
+    ] = [],
+    stage: Annotated[
+        str,
+        typer.Option("--stage", help="DVC pipeline stage name for checking."),
+    ] = None,
+    description: Annotated[
+        str, typer.Option("--description", help="Description.")
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite any existing environment with this name.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
+):
+    """Create a new Conda environment."""
+    if os.path.isfile(path) and not overwrite:
+        raise_error("Output path already exists (use -f to overwrite)")
+    repo = git.Repo()
+    # Add environment to Calkit info
+    ck_info = calkit.load_calkit_info()
+    # If environments is a list instead of a dict, reformulate it
+    envs = ck_info.get("environments", {})
+    if isinstance(envs, list):
+        typer.echo("Converting environments from list to dict")
+        envs = {env.pop("name"): env for env in envs}
+    if name in envs and not overwrite:
+        raise_error(
+            f"Environment with name {name} already exists "
+            "(use -f to overwrite)"
+        )
+    # Write environment to path
+    conda_env = dict(
+        name=name, channels=["conda-forge"], dependencies=packages
+    )
+    if pip_packages:
+        conda_env["dependencies"].append(dict(pip=pip_packages))
+    with open(path, "w") as f:
+        ryaml.dump(conda_env, f)
+    repo.git.add(path)
+    typer.echo("Adding environment to calkit.yaml")
+    env = dict(path=path, kind="conda")
+    if stage is not None:
+        env["stage"] = stage
+    if description is not None:
+        env["description"] = description
+    envs[name] = env
+    ck_info["environments"] = envs
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    # If we're creating a stage, do so with DVC
+    if stage:
+        typer.echo(f"Creating DVC stage {stage}")
+        if not os.path.isfile(".dvc/config"):
+            typer.echo(f"Running dvc init")
+            subprocess.check_call(["dvc", "init"])
+        ck_cmd = f"calkit check-conda-env -f {path}"
+        fname, ext = os.path.splitext(path)
+        lock_path = f"{fname}-lock{ext}"
+        subprocess.check_call(
+            [
+                "dvc",
+                "stage",
+                "add",
+                "-f",
+                "-n",
+                stage,
+                "--always-changed",
+                "-d",
+                path,
+                "--outs-persist-no-cache",
+                lock_path,
+                ck_cmd,
+            ]
+        )
+    repo.git.add("calkit.yaml")
+    if stage:
+        repo.git.add("dvc.yaml")
+    if not no_commit and repo.git.diff("--staged"):
+        repo.git.commit(["-m", f"Add Conda environment {name}"])

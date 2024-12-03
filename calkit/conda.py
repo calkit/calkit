@@ -109,6 +109,8 @@ def check_env(
                 env_needs_rebuild = True
                 break
             elif version is None:
+                # TODO: This does not handle specification of only major or
+                # major+minor version
                 if package not in [
                     d.split("=")[0] for d in existing_conda_deps
                 ]:

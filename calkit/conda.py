@@ -84,10 +84,18 @@ def check_env(
                 ryaml.dump(env_check, f)
         # Determine if the env matches
         env_needs_rebuild = False
-        existing_conda_deps = env_check["dependencies"][:-1]
-        existing_pip_deps = env_check["dependencies"][-1]["pip"]
-        required_conda_deps = env_spec["dependencies"][:-1]
-        required_pip_deps = env_spec["dependencies"][-1]["pip"]
+        if "pip" in env_check["dependencies"]:
+            existing_conda_deps = env_check["dependencies"][:-1]
+            existing_pip_deps = env_check["dependencies"][-1]["pip"]
+        else:
+            existing_conda_deps = env_check["dependencies"]
+            existing_pip_deps = []
+        if "pip" in env_spec["dependencies"]:
+            required_conda_deps = env_spec["dependencies"][:-1]
+            required_pip_deps = env_spec["dependencies"][-1]["pip"]
+        else:
+            required_conda_deps = env_spec["dependencies"]
+            required_pip_deps = []
         log_func("Checking conda dependencies")
         for dep in required_conda_deps:
             dep_split = dep.split("=")

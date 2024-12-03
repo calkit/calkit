@@ -291,7 +291,10 @@ def new_docker_env(
     # If we're creating a stage, do so with DVC
     if stage:
         typer.echo(f"Creating DVC stage {stage}")
-        subprocess.call(
+        if not os.path.isfile("dvc.yaml"):
+            typer.echo(f"Running dvc init since no dvc.yaml file is present")
+            subprocess.check_call(["dvc", "init"])
+        subprocess.check_call(
             [
                 "dvc",
                 "stage",

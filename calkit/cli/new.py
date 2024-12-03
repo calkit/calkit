@@ -222,6 +222,9 @@ def new_docker_env(
     wdir: Annotated[
         str, typer.Option("--wdir", help="Working directory.")
     ] = "/work",
+    platform: Annotated[
+        str, typer.Option("--platform", help="Which platform(s) to build for.")
+    ] = None,
     description: Annotated[
         str, typer.Option("--description", help="Description.")
     ] = None,
@@ -284,6 +287,8 @@ def new_docker_env(
         env["description"] = description
     if layers:
         env["layers"] = layers
+    if platform:
+        env["platform"] = platform
     envs[name] = env
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
@@ -294,6 +299,9 @@ def new_docker_env(
         if not os.path.isfile("dvc.yaml"):
             typer.echo(f"Running dvc init since no dvc.yaml file is present")
             subprocess.check_call(["dvc", "init"])
+        ck_cmd = f"calkit build-docker {image_name} -i {path}"
+        if platform:
+            ck_cmd += f" --platform {platform}"
         subprocess.check_call(
             [
                 "dvc",
@@ -307,7 +315,7 @@ def new_docker_env(
                 path,
                 "--outs-persist-no-cache",
                 f"{path}-lock.json",
-                f"calkit build-docker {image_name} -i {path}",
+                ck_cmd,
             ]
         )
     repo.git.add("calkit.yaml")

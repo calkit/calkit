@@ -296,8 +296,8 @@ def new_docker_env(
     # If we're creating a stage, do so with DVC
     if stage:
         typer.echo(f"Creating DVC stage {stage}")
-        if not os.path.isfile("dvc.yaml"):
-            typer.echo(f"Running dvc init since no dvc.yaml file is present")
+        if not os.path.isfile(".dvc/config"):
+            typer.echo(f"Running dvc init")
             subprocess.check_call(["dvc", "init"])
         ck_cmd = f"calkit build-docker {image_name} -i {path}"
         if platform:

@@ -7,7 +7,16 @@ import json
 import logging
 import os
 import pickle
-from datetime import UTC, datetime
+
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone as _timezone
+
+    UTC = _timezone.utc
+
+from datetime import datetime
+
 from typing import Literal
 
 import ruamel.yaml

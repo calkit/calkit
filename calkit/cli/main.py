@@ -9,7 +9,6 @@ import os
 import subprocess
 import sys
 import time
-from datetime import UTC, datetime, timedelta
 
 import git
 import typer

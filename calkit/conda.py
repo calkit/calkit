@@ -71,7 +71,7 @@ def check_env(
             env_check = json.loads(
                 subprocess.check_output(
                     [
-                        conda,
+                        "conda",  # Mamba output is slightly different
                         "env",
                         "export",
                         "-n",
@@ -153,7 +153,7 @@ def check_env(
         env_check = json.loads(
             subprocess.check_output(
                 [
-                    conda,
+                    "conda",  # Mamba output is slightly different
                     "env",
                     "export",
                     "-n",

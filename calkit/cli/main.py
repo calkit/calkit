@@ -9,7 +9,6 @@ import os
 import subprocess
 import sys
 import time
-from datetime import UTC, datetime, timedelta
 
 import git
 import typer
@@ -75,12 +74,17 @@ def clone(
     no_dvc_pull: Annotated[
         bool, typer.Option("--no-dvc-pull", help="Do not pull DVC objects.")
     ] = False,
+    recursive: Annotated[
+        bool, typer.Option("--recursive", help="Recursively clone submodules.")
+    ] = False,
 ):
     """Clone a Git repo and by default configure and pull from the DVC
     remote.
     """
     # Git clone
     cmd = ["git", "clone", url]
+    if recursive:
+        cmd.append("--recursive")
     if location is not None:
         cmd.append(location)
     try:

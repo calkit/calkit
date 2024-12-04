@@ -153,7 +153,7 @@ def check_env(
         env_check = json.loads(
             subprocess.check_output(
                 [
-                    "conda",
+                    conda,
                     "env",
                     "export",
                     "-n",

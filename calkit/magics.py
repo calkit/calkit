@@ -30,6 +30,15 @@ class Calkit(Magics):
         type=_parse_string_arg,
     )
     @magic_arguments.argument(
+        "--env",
+        nargs="?",
+        const=True,
+        help=(
+            "Whether or not this cell should be run in an environment. "
+            "If no environment name is provided, the default will be used."
+        ),
+    )
+    @magic_arguments.argument(
         "--dep",
         "-d",
         help=(
@@ -240,7 +249,13 @@ class Calkit(Magics):
         if args.out_path:
             for path in args.out_path:
                 cmd += ["-o", path]
-        cmd.append(f"python '{script_fpath}'")
+        stage_cmd = f"python '{script_fpath}'"
+        if args.env:
+            runenv = "calkit runenv"
+            if isinstance(args.env, str):
+                runenv += f" -n {args.env}"
+            stage_cmd = runenv + " -- " + stage_cmd
+        cmd.append(stage_cmd)
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:

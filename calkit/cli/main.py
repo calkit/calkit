@@ -560,14 +560,14 @@ def run_in_env(
         ]
         if verbose:
             typer.echo(f"Running command: {docker_cmd}")
-        subprocess.call(docker_cmd, cwd=wdir)
+        subprocess.check_call(docker_cmd, cwd=wdir)
     elif env["kind"] == "conda":
         with open(env["path"]) as f:
             conda_env = calkit.ryaml.load(f)
         cmd = ["conda", "run", "-n", conda_env["name"]] + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")
-        subprocess.call(cmd, cwd=wdir)
+        subprocess.check_call(cmd, cwd=wdir)
     else:
         raise_error("Environment kind not supported")
 

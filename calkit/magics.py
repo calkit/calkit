@@ -262,7 +262,7 @@ class Calkit(Magics):
         if args.out_path:
             for path in args.out_path:
                 cmd += ["-o", _posix_path(path)]
-        stage_cmd = f'python "{script_fpath}"'
+        stage_cmd = f'python "{_posix_path(script_fpath)}"'
         if args.env:
             runenv = "calkit runenv"
             if isinstance(args.env, str):

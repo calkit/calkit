@@ -45,7 +45,7 @@ def check_env(
     if env_name not in existing_env_names:
         log_func(f"Environment {env_name} doesn't exist; creating")
         # Environment doesn't exist, so create it
-        subprocess.check_call([conda, "env", "create", "-f", env_fpath])
+        subprocess.check_call([conda, "env", "create", "-y", "-f", env_fpath])
         env_needs_rebuild = False
         env_needs_export = True
     else:

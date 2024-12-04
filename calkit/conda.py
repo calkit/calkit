@@ -21,14 +21,15 @@ def check_env(
     Note that this only works with exact or no version specification.
     Using greater than and less than operators is not supported.
     """
+    conda = "mamba" if use_mamba else "conda"
     if log_func is None:
         log_func = calkit.logger.info
     log_func(f"Checking conda env defined in {env_fpath}")
     envs = json.loads(
-        subprocess.check_output(["conda", "env", "list", "--json"]).decode()
+        subprocess.check_output([conda, "env", "list", "--json"]).decode()
     )["envs"]
     # Get existing env names, but skip the base environment
-    existing_env_names = [env.split("/")[-1] for env in envs[1:]]
+    existing_env_names = [os.path.basename(env) for env in envs[1:]]
     with open(env_fpath) as f:
         env_spec = ryaml.load(f)
     env_name = env_spec["name"]
@@ -40,7 +41,6 @@ def check_env(
     )
     env_check_dir = os.path.dirname(env_check_fpath)
     os.makedirs(env_check_dir, exist_ok=True)
-    conda = "mamba" if use_mamba else "conda"
     # Check if env even exists
     if env_name not in existing_env_names:
         log_func(f"Environment {env_name} doesn't exist; creating")
@@ -60,7 +60,9 @@ def check_env(
             # If they match, the environment saved in env_check is still
             # valid, so we don't need to re-export
             existing_mtime = env_check["mtime"]
-            current_mtime = os.path.getmtime(env_check["prefix"])
+            current_mtime = os.path.getmtime(
+                os.path.normpath(env_check["prefix"])
+            )
             env_needs_export = existing_mtime != current_mtime
         else:
             env_needs_export = True
@@ -69,7 +71,7 @@ def check_env(
             env_check = json.loads(
                 subprocess.check_output(
                     [
-                        "conda",
+                        conda,
                         "env",
                         "export",
                         "-n",

@@ -62,3 +62,23 @@ Note that this pattern can also be expanded to projects that use multiple
 conda environments.
 For example, if an environment spec is saved to `env-2.yml`,
 we can call `calkit check-conda-env -f env-2.yml`.
+
+## Adding a Conda environment to a Calkit project
+
+If you run something like:
+
+```sh
+calkit new conda-env \
+    -n my-project-py11 \
+    python=3.11 \
+    pip \
+    matplotlib \
+    pandas \
+    jupyter \
+    --pip tensorflow \
+    --stage check-conda-env
+```
+
+Calkit will create an environment definition in `calkit.yaml` for use with
+`calkit runenv`, and since `--stage` was specified, Calkit will also add
+an environment check stage to the pipeline automatically.

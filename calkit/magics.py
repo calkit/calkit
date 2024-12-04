@@ -10,12 +10,24 @@ from IPython.core.magic import Magics, cell_magic, magics_class
 import calkit
 
 
+def _parse_string_arg(val: str):
+    try:
+        return ast.literal_eval(val)
+    except (ValueError, SyntaxError):
+        return val
+    return val
+
+
 @magics_class
 class Calkit(Magics):
 
     @magic_arguments.magic_arguments()
     @magic_arguments.argument(
-        "-n", "--name", help="Stage name.", required=True
+        "-n",
+        "--name",
+        help="Stage name.",
+        required=True,
+        type=_parse_string_arg,
     )
     @magic_arguments.argument(
         "--dep",
@@ -28,6 +40,7 @@ class Calkit(Magics):
             "'my-stage:df:parquet:pandas'."
         ),
         nargs="+",
+        type=_parse_string_arg,
     )
     @magic_arguments.argument(
         "--out",
@@ -39,6 +52,7 @@ class Calkit(Magics):
             "specified like 'df:parquet:polars'."
         ),
         nargs="+",
+        type=_parse_string_arg,
     )
     @magic_arguments.argument(
         "--dep-path",
@@ -48,6 +62,7 @@ class Calkit(Magics):
             "the stage will be rerun."
         ),
         nargs="+",
+        type=_parse_string_arg,
     )
     @magic_arguments.argument(
         "--out-path",
@@ -57,6 +72,7 @@ class Calkit(Magics):
             "if a figure is saved to a file."
         ),
         nargs="+",
+        type=_parse_string_arg,
     )
     @magic_arguments.argument(
         "--out-type",
@@ -68,12 +84,17 @@ class Calkit(Magics):
             "path will be set as the output variable path. "
             "Note that there must only be one output to use this option."
         ),
+        type=_parse_string_arg,
     )
     @magic_arguments.argument(
-        "--out-title", help="Title for Calkit output object."
+        "--out-title",
+        help="Title for Calkit output object.",
+        type=_parse_string_arg,
     )
     @magic_arguments.argument(
-        "--out-desc", help="Description for Calkit output object."
+        "--out-desc",
+        help="Description for Calkit output object.",
+        type=_parse_string_arg,
     )
     @cell_magic
     def stage(self, line, cell):
@@ -102,9 +123,9 @@ class Calkit(Magics):
             # Parse calkit object parameters
             out_params = {}
             if args.out_title:
-                out_params["title"] = ast.literal_eval(args.out_title)
+                out_params["title"] = args.out_title
             if args.out_desc:
-                out_params["description"] = ast.literal_eval(args.out_desc)
+                out_params["description"] = args.out_desc
             # Ensure we have required keys
             # TODO: Use Pydantic here
             if "title" not in out_params:
@@ -204,7 +225,7 @@ class Calkit(Magics):
                 ]
         if args.dep_path:
             for dep in args.dep_path:
-                cmd += ["-d", f"'{dep}'"]
+                cmd += ["-d", dep]
         if args.out:
             for out in args.out:
                 out_split = out.split(":")
@@ -218,7 +239,7 @@ class Calkit(Magics):
                 ]
         if args.out_path:
             for path in args.out_path:
-                cmd += ["-o", f"{path}"]
+                cmd += ["-o", path]
         cmd.append(f"python '{script_fpath}'")
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True)

@@ -115,7 +115,15 @@ class Calkit(Magics):
         Then variables will be loaded back into the user namespace state by
         loading the DVC output.
         """
-        args = magic_arguments.parse_argstring(self.stage, line)
+        # Allow command for this line to continue with backslashes
+        cell_split = cell.split("\n")
+        line_combined = line.strip().removesuffix("\\")
+        while line.strip().endswith("\\"):
+            newline = cell_split.pop(0)
+            line += newline
+            line_combined += " " + newline.strip().removesuffix("\\")
+        cell = "\n".join(cell_split)
+        args = magic_arguments.parse_argstring(self.stage, line_combined)
         # If an output object type is specified, make sure we only have one
         # output
         if args.out_type:

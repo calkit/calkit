@@ -564,7 +564,7 @@ def run_in_env(
     elif env["kind"] == "conda":
         with open(env["path"]) as f:
             conda_env = calkit.ryaml.load(f)
-        cmd = ["mamba", "run", "-n", conda_env["name"]] + cmd
+        cmd = ["conda", "run", "-n", conda_env["name"]] + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")
         subprocess.call(cmd, cwd=wdir)

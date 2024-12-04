@@ -114,7 +114,7 @@ NOTEBOOK_STAGE_OUT_FORMATS = ["pickle", "parquet", "json", "yaml", "csv"]
 
 
 def get_notebook_stage_dir(stage_name: str) -> str:
-    return f".calkit/notebook-stages/{stage_name}"
+    return os.path.join(".calkit", "notebook-stages", stage_name)
 
 
 def get_notebook_stage_script_path(stage_name: str) -> str:

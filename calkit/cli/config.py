@@ -5,7 +5,7 @@ from __future__ import annotations
 import typer
 
 from calkit import config
-from calkit.dvc import configure_remote, set_remote_auth, get_remotes
+from calkit.dvc import configure_remote, get_remotes, set_remote_auth
 
 config_app = typer.Typer(no_args_is_help=True)
 

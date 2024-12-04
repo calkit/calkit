@@ -2,6 +2,7 @@
 
 import ast
 import os
+import pathlib
 import subprocess
 
 from IPython.core import magic_arguments
@@ -16,6 +17,10 @@ def _parse_string_arg(val: str):
     except (ValueError, SyntaxError):
         return val
     return val
+
+
+def _posix_path(path: str):
+    return pathlib.Path(path).as_posix()
 
 
 @magics_class
@@ -226,7 +231,7 @@ class Calkit(Magics):
             "--run",
             "--force",
             "-d",
-            script_fpath,
+            _posix_path(script_fpath),
         ]
         if args.dep:
             for dep in args.dep:
@@ -238,11 +243,11 @@ class Calkit(Magics):
                     kws["fmt"] = dep_split[2]
                 cmd += [
                     "-d",
-                    calkit.get_notebook_stage_out_path(**kws),
+                    _posix_path(calkit.get_notebook_stage_out_path(**kws)),
                 ]
         if args.dep_path:
             for dep in args.dep_path:
-                cmd += ["-d", dep]
+                cmd += ["-d", _posix_path(dep)]
         if args.out:
             for out in args.out:
                 out_split = out.split(":")
@@ -252,11 +257,11 @@ class Calkit(Magics):
                     kws["fmt"] = out_split[1]
                 cmd += [
                     "-o",
-                    calkit.get_notebook_stage_out_path(**kws),
+                    _posix_path(calkit.get_notebook_stage_out_path(**kws)),
                 ]
         if args.out_path:
             for path in args.out_path:
-                cmd += ["-o", path]
+                cmd += ["-o", _posix_path(path)]
         stage_cmd = f'python "{script_fpath}"'
         if args.env:
             runenv = "calkit runenv"

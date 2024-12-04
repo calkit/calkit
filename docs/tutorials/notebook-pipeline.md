@@ -143,7 +143,14 @@ We can add a line that saves the figure and declare an additional output path
 and metadata like (note this requires `plotly` and `kaleido` to be installed):
 
 ```python
-%%stage --name plot --dep get-data:df:parquet:pandas --out fig --out-path figures/plot.png --out-type figure --out-title "A plot of the data" --out-desc "This is a plot of the data."
+%%stage \
+   --name plot \
+   --dep get-data:df:parquet:pandas \
+   --out fig \
+   --out-path figures/plot.png \
+   --out-type figure \
+   --out-title "A plot of the data" \
+   --out-desc "This is a plot of the data."
 
 import os
 

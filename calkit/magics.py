@@ -30,6 +30,15 @@ class Calkit(Magics):
         type=_parse_string_arg,
     )
     @magic_arguments.argument(
+        "--env",
+        nargs="?",
+        const=True,
+        help=(
+            "Whether or not this cell should be run in an environment. "
+            "If no environment name is provided, the default will be used."
+        ),
+    )
+    @magic_arguments.argument(
         "--dep",
         "-d",
         help=(
@@ -106,7 +115,15 @@ class Calkit(Magics):
         Then variables will be loaded back into the user namespace state by
         loading the DVC output.
         """
-        args = magic_arguments.parse_argstring(self.stage, line)
+        # Allow command for this line to continue with backslashes
+        cell_split = cell.split("\n")
+        line_combined = line.strip().removesuffix("\\")
+        while line.strip().endswith("\\"):
+            newline = cell_split.pop(0)
+            line += newline
+            line_combined += " " + newline.strip().removesuffix("\\")
+        cell = "\n".join(cell_split)
+        args = magic_arguments.parse_argstring(self.stage, line_combined)
         # If an output object type is specified, make sure we only have one
         # output
         if args.out_type:
@@ -240,7 +257,13 @@ class Calkit(Magics):
         if args.out_path:
             for path in args.out_path:
                 cmd += ["-o", path]
-        cmd.append(f"python '{script_fpath}'")
+        stage_cmd = f"python '{script_fpath}'"
+        if args.env:
+            runenv = "calkit runenv"
+            if isinstance(args.env, str):
+                runenv += f" -n {args.env}"
+            stage_cmd = runenv + " -- " + stage_cmd
+        cmd.append(stage_cmd)
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:

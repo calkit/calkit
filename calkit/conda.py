@@ -163,7 +163,9 @@ def check_env(
                 ]
             ).decode()
         )
-        env_check["mtime"] = os.path.getmtime(env_check["prefix"])
+        env_check["mtime"] = os.path.getmtime(
+            os.path.normpath(env_check["prefix"])
+        )
         with open(env_check_fpath, "w") as f:
             ryaml.dump(env_check, f)
     if output_fpath is None:

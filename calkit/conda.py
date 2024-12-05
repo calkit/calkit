@@ -4,8 +4,16 @@ import json
 import os
 import subprocess
 
+from pydantic import BaseModel
+
 import calkit
 from calkit import ryaml
+
+
+class EnvCheckResult(BaseModel):
+    env_exists: bool | None = None
+    env_needs_export: bool | None = None
+    env_needs_rebuild: bool | None = None
 
 
 def check_env(
@@ -13,7 +21,7 @@ def check_env(
     use_mamba=True,
     log_func=None,
     output_fpath: str = None,
-):
+) -> EnvCheckResult:
     """Check that a conda environment matches its spec.
 
     If it doesn't match, recreate it.
@@ -25,6 +33,7 @@ def check_env(
     if log_func is None:
         log_func = calkit.logger.info
     log_func(f"Checking conda env defined in {env_fpath}")
+    res = EnvCheckResult()
     envs = json.loads(
         subprocess.check_output([conda, "env", "list", "--json"]).decode()
     )["envs"]
@@ -44,11 +53,13 @@ def check_env(
     # Check if env even exists
     if env_name not in existing_env_names:
         log_func(f"Environment {env_name} doesn't exist; creating")
+        res.env_exists = False
         # Environment doesn't exist, so create it
         subprocess.check_call([conda, "env", "create", "-y", "-f", env_fpath])
         env_needs_rebuild = False
         env_needs_export = True
     else:
+        res.env_exists = True
         env_needs_export = False
         # Environment does exist, so check it
         if os.path.isfile(env_check_fpath):
@@ -67,6 +78,7 @@ def check_env(
         else:
             env_needs_export = True
         if env_needs_export:
+            res.env_needs_export = True
             log_func(f"Exporting existing env to {env_check_fpath}")
             env_check = json.loads(
                 subprocess.check_output(
@@ -142,11 +154,13 @@ def check_env(
                         env_needs_rebuild = True
                         break
     if env_needs_rebuild:
+        res.env_needs_rebuild = True
         log_func(f"Rebuilding {env_name} since it does not match spec")
         subprocess.check_call([conda, "env", "create", "-y", "-f", env_fpath])
         env_needs_export = True
     else:
         log_func(f"Environment {env_name} matches spec")
+        res.env_needs_rebuild = False
     # If the env was rebuilt, export the env check
     if env_needs_export:
         log_func(f"Exporting existing env to {env_check_fpath}")
@@ -176,3 +190,4 @@ def check_env(
         _ = env_check.pop("mtime")
         _ = env_check.pop("prefix")
         ryaml.dump(env_check, f)
+    return res

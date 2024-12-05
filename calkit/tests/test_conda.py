@@ -62,3 +62,32 @@ def test_check_env(tmp_dir, env_name):
     assert res.env_exists
     assert not res.env_needs_export
     assert res.env_needs_rebuild
+    # Check relaxed mode, where we allow dependencies to be in either the pip
+    # or conda section
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "conda-env",
+            "--overwrite",
+            "-n",
+            env_name,
+            "python=3.11",
+            "pip",
+            "sqlalchemy",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "conda",
+            "run",
+            "-n",
+            env_name,
+            "pip",
+            "install",
+            "--upgrade",
+            "sqlalchemy",
+        ]
+    )
+    res = check_env()
+    assert res.env_needs_rebuild

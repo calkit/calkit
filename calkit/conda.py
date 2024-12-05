@@ -195,9 +195,14 @@ def check_env(
     if output_fpath is None:
         fname, ext = os.path.splitext(env_fpath)
         output_fpath = fname + "-lock" + ext
-    log_func(f"Exporting lock file to {output_fpath}")
-    with open(output_fpath, "w") as f:
-        _ = env_check.pop("mtime")
-        _ = env_check.pop("prefix")
-        ryaml.dump(env_check, f)
+    if (
+        not res.env_exists
+        or res.env_needs_rebuild
+        or not os.path.isfile(output_fpath)
+    ):
+        log_func(f"Exporting lock file to {output_fpath}")
+        with open(output_fpath, "w") as f:
+            _ = env_check.pop("mtime")
+            _ = env_check.pop("prefix")
+            ryaml.dump(env_check, f)
     return res

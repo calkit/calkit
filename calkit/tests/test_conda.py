@@ -52,7 +52,7 @@ def test_check_env(tmp_dir, env_name):
             "--overwrite",
             "-n",
             env_name,
-            "python=3.11",
+            "python=3.11.0",
             "pip",
             "--pip",
             "pxl",
@@ -62,6 +62,8 @@ def test_check_env(tmp_dir, env_name):
     assert res.env_exists
     assert not res.env_needs_export
     assert res.env_needs_rebuild
+    res = check_env()
+    assert not res.env_needs_rebuild
     # Check relaxed mode, where we allow dependencies to be in either the pip
     # or conda section
     subprocess.check_call(
@@ -72,7 +74,7 @@ def test_check_env(tmp_dir, env_name):
             "--overwrite",
             "-n",
             env_name,
-            "python=3.11",
+            "python=3.11.0",
             "pip",
             "sqlalchemy",
         ]
@@ -91,3 +93,34 @@ def test_check_env(tmp_dir, env_name):
     )
     res = check_env()
     assert res.env_needs_rebuild
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "conda-env",
+            "--overwrite",
+            "-n",
+            env_name,
+            "python=3.11.0",
+            "pip",
+            "sqlalchemy",
+        ]
+    )
+    res = check_env(relaxed=True)
+    assert not res.env_needs_rebuild
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "conda-env",
+            "--overwrite",
+            "-n",
+            env_name,
+            "python=3.11.0",
+            "pip",
+            "--pip",
+            "sqlalchemy",
+        ]
+    )
+    res = check_env(relaxed=True)
+    assert not res.env_needs_rebuild

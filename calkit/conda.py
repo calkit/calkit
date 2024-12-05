@@ -21,6 +21,7 @@ def check_env(
     use_mamba=True,
     log_func=None,
     output_fpath: str = None,
+    relaxed: bool = False,
 ) -> EnvCheckResult:
     """Check that a conda environment matches its spec.
 
@@ -28,6 +29,9 @@ def check_env(
 
     Note that this only works with exact or no version specification.
     Using greater than and less than operators is not supported.
+
+    If ``relaxed`` is enabled, dependencies can exist in either the conda or
+    pip category.
     """
     conda = "mamba" if use_mamba else "conda"
     if log_func is None:
@@ -112,6 +116,12 @@ def check_env(
         else:
             required_conda_deps = env_spec["dependencies"]
             required_pip_deps = []
+        if relaxed:
+            log_func("Running in relaxed mode; combining pip and conda deps")
+            for dep in existing_pip_deps:
+                existing_conda_deps.append(dep.replace("==", "="))
+            for dep in required_pip_deps:
+                required_conda_deps.append(dep.replace("==", "="))
         log_func("Checking conda dependencies")
         for dep in required_conda_deps:
             dep_split = dep.split("=")
@@ -133,7 +143,7 @@ def check_env(
                     log_func(f"Found missing dependency: {dep}")
                     env_needs_rebuild = True
                     break
-        if not env_needs_rebuild:
+        if not env_needs_rebuild and not relaxed:
             log_func("Checking pip dependencies")
             for dep in required_pip_deps:
                 dep_split = dep.split("==")

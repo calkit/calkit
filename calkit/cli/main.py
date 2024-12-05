@@ -827,7 +827,16 @@ def check_conda_env(
             ),
         ),
     ] = None,
+    relaxed: Annotated[
+        bool,
+        typer.Option(
+            "--relaxed", help="Treat conda and pip dependencies as equivalent."
+        ),
+    ] = False,
 ):
     calkit.conda.check_env(
-        env_fpath=env_fpath, output_fpath=output_fpath, log_func=typer.echo
+        env_fpath=env_fpath,
+        output_fpath=output_fpath,
+        log_func=typer.echo,
+        relaxed=relaxed,
     )

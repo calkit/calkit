@@ -15,7 +15,8 @@ Our goal is to make reproducibility easier so it becomes more common.
 To do this, we try to make it easy for users to follow two simple rules:
 
 1. **Keep everything in version control.** This includes large files like
-   datasets, enabled by DVC. The [Calkit cloud](https://calkit.io)
+   datasets, enabled by DVC.
+   The [Calkit cloud](https://github.com/calkit/calkit-cloud)
    serves as a simple default DVC remote storage location for those who do not
    want to manage their own infrastructure.
 2. **Generate all important artifacts with a single pipeline.** There should be

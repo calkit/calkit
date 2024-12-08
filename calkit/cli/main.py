@@ -579,7 +579,10 @@ def run_in_env(
         ]
         if verbose:
             typer.echo(f"Running command: {docker_cmd}")
-        subprocess.check_call(docker_cmd, cwd=wdir)
+        try:
+            subprocess.check_call(docker_cmd, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in Docker environment")
     elif env["kind"] == "conda":
         with open(env["path"]) as f:
             conda_env = calkit.ryaml.load(f)
@@ -588,12 +591,18 @@ def run_in_env(
         cmd = ["conda", "run", "-n", conda_env["name"]] + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")
-        subprocess.check_call(cmd, cwd=wdir)
+        try:
+            subprocess.check_call(cmd, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in Conda environment")
     elif env["kind"] == "pixi":
         cmd = ["pixi", "run"] + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")
-        subprocess.check_call(cmd, cwd=wdir)
+        try:
+            subprocess.check_call(cmd, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in Pixi environment")
     else:
         raise_error("Environment kind not supported")
 

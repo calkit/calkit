@@ -589,6 +589,9 @@ def run_in_env(
             conda_env = calkit.ryaml.load(f)
         if not no_check:
             check_conda_env(env_fpath=env["path"], relaxed=relaxed_check)
+        # TODO: This only works on *nix-like shells, not Windows command
+        # prompts
+        # We should detect that
         cmd = [
             "conda",
             "run",

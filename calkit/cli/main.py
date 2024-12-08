@@ -504,6 +504,20 @@ def run_in_env(
             ),
         ),
     ] = None,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Don't check the environment is valid before running in it.",
+        ),
+    ] = False,
+    relaxed_check: Annotated[
+        bool,
+        typer.Option(
+            "--relaxed",
+            help="Check the environment in a relaxed way, if applicable.",
+        ),
+    ] = False,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -564,7 +578,14 @@ def run_in_env(
     elif env["kind"] == "conda":
         with open(env["path"]) as f:
             conda_env = calkit.ryaml.load(f)
+        if not no_check:
+            check_conda_env(env_fpath=env["path"], relaxed=relaxed_check)
         cmd = ["conda", "run", "-n", conda_env["name"]] + cmd
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
+        subprocess.check_call(cmd, cwd=wdir)
+    elif env["kind"] == "pixi":
+        cmd = ["pixi", "run"] + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")
         subprocess.check_call(cmd, cwd=wdir)

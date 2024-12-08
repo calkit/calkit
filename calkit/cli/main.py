@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import functools
 import hashlib
 import json
 import os
@@ -588,7 +589,9 @@ def run_in_env(
         with open(env["path"]) as f:
             conda_env = calkit.ryaml.load(f)
         if not no_check:
-            check_conda_env(env_fpath=env["path"], relaxed=relaxed_check)
+            check_conda_env(
+                env_fpath=env["path"], relaxed=relaxed_check, quiet=True
+            )
         # TODO: This only works on *nix-like shells, not Windows command
         # prompts
         # We should detect that
@@ -880,10 +883,21 @@ def check_conda_env(
             "--relaxed", help="Treat conda and pip dependencies as equivalent."
         ),
     ] = False,
+    quiet: Annotated[
+        bool, typer.Option("--quiet", "-q", help="Be quiet.")
+    ] = False,
 ):
+    if quiet:
+
+        def log_func(*args, **kwargs):
+            with open(os.devnull, "w") as f:
+                typer.echo(*args, file=f, **kwargs)
+
+    else:
+        log_func = typer.echo
     calkit.conda.check_env(
         env_fpath=env_fpath,
         output_fpath=output_fpath,
-        log_func=typer.echo,
+        log_func=log_func,
         relaxed=relaxed,
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import functools
 import hashlib
 import json
 import os
@@ -387,7 +388,10 @@ def run_dvc_repro(
         args += ["--pipeline", pipeline]
     if downstream is not None:
         args += downstream
-    subprocess.check_call(["dvc", "repro"] + args)
+    try:
+        subprocess.check_call(["dvc", "repro"] + args)
+    except subprocess.CalledProcessError:
+        raise_error("DVC pipeline failed")
     # Now parse stage metadata for calkit objects
     if not os.path.isfile("dvc.yaml"):
         raise_error("No dvc.yaml file found")
@@ -504,6 +508,20 @@ def run_in_env(
             ),
         ),
     ] = None,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Don't check the environment is valid before running in it.",
+        ),
+    ] = False,
+    relaxed_check: Annotated[
+        bool,
+        typer.Option(
+            "--relaxed",
+            help="Check the environment in a relaxed way, if applicable.",
+        ),
+    ] = False,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -529,6 +547,8 @@ def run_in_env(
         env_name = default_env_name
     if env_name is None:
         raise_error("Environment must be specified if there are multiple")
+    if env_name not in envs:
+        raise_error(f"Environment '{env_name}' does not exist")
     env = envs[env_name]
     if wdir is not None:
         cwd = os.path.abspath(wdir)
@@ -539,6 +559,7 @@ def run_in_env(
     shell = env.get("shell", "sh")
     platform = env.get("platform")
     if env["kind"] == "docker":
+        # TODO: Check Docker image if there's a path property
         shell_cmd = " ".join(cmd)
         docker_cmd = [
             "docker",
@@ -560,14 +581,32 @@ def run_in_env(
         ]
         if verbose:
             typer.echo(f"Running command: {docker_cmd}")
-        subprocess.check_call(docker_cmd, cwd=wdir)
+        try:
+            subprocess.check_call(docker_cmd, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in Docker environment")
     elif env["kind"] == "conda":
         with open(env["path"]) as f:
             conda_env = calkit.ryaml.load(f)
+        if not no_check:
+            check_conda_env(
+                env_fpath=env["path"], relaxed=relaxed_check, quiet=True
+            )
         cmd = ["conda", "run", "-n", conda_env["name"]] + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")
-        subprocess.check_call(cmd, cwd=wdir)
+        try:
+            subprocess.check_call(cmd, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in Conda environment")
+    elif env["kind"] == "pixi":
+        cmd = ["pixi", "run"] + cmd
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
+        try:
+            subprocess.check_call(cmd, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in Pixi environment")
     else:
         raise_error("Environment kind not supported")
 
@@ -833,10 +872,17 @@ def check_conda_env(
             "--relaxed", help="Treat conda and pip dependencies as equivalent."
         ),
     ] = False,
+    quiet: Annotated[
+        bool, typer.Option("--quiet", "-q", help="Be quiet.")
+    ] = False,
 ):
+    if quiet:
+        log_func = functools.partial(typer.echo, file=open(os.devnull, "w"))
+    else:
+        log_func = typer.echo
     calkit.conda.check_env(
         env_fpath=env_fpath,
         output_fpath=output_fpath,
-        log_func=typer.echo,
+        log_func=log_func,
         relaxed=relaxed,
     )

@@ -559,6 +559,7 @@ def run_in_env(
     shell = env.get("shell", "sh")
     platform = env.get("platform")
     if env["kind"] == "docker":
+        # TODO: Check Docker image if there's a path property
         shell_cmd = " ".join(cmd)
         docker_cmd = [
             "docker",

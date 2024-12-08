@@ -546,6 +546,8 @@ def run_in_env(
         env_name = default_env_name
     if env_name is None:
         raise_error("Environment must be specified if there are multiple")
+    if env_name not in envs:
+        raise_error(f"Environment '{env_name}' does not exist")
     env = envs[env_name]
     if wdir is not None:
         cwd = os.path.abspath(wdir)

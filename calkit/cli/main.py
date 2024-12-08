@@ -585,25 +585,13 @@ def run_in_env(
         except subprocess.CalledProcessError:
             raise_error("Failed to run in Docker environment")
     elif env["kind"] == "conda":
-        shell_cmd = " ".join(cmd)
         with open(env["path"]) as f:
             conda_env = calkit.ryaml.load(f)
         if not no_check:
             check_conda_env(
                 env_fpath=env["path"], relaxed=relaxed_check, quiet=True
             )
-        # TODO: This only works on *nix-like shells, not Windows command
-        # prompts
-        # We should detect that
-        cmd = [
-            "conda",
-            "run",
-            "-n",
-            conda_env["name"],
-            "/bin/sh",
-            "-c",
-            f"{shell_cmd}",
-        ]
+        cmd = ["conda", "run", "-n", conda_env["name"]] + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:

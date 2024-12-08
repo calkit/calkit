@@ -888,11 +888,7 @@ def check_conda_env(
     ] = False,
 ):
     if quiet:
-
-        def log_func(*args, **kwargs):
-            with open(os.devnull, "w") as f:
-                typer.echo(*args, file=f, **kwargs)
-
+        log_func = functools.partial(typer.echo, file=open(os.devnull, "w"))
     else:
         log_func = typer.echo
     calkit.conda.check_env(

@@ -508,11 +508,11 @@ def run_in_env(
             ),
         ),
     ] = None,
-    no_check: Annotated[
+    check: Annotated[
         bool,
         typer.Option(
-            "--no-check",
-            help="Don't check the environment is valid before running in it.",
+            "--check",
+            help="Check the environment is valid before running in it.",
         ),
     ] = False,
     relaxed_check: Annotated[
@@ -561,7 +561,7 @@ def run_in_env(
     if env["kind"] == "docker":
         if "image" not in env:
             raise_error("Image must be defined for Docker environments")
-        if "path" in env and not no_check:
+        if "path" in env and check:
             check_docker_env(
                 tag=env["image"],
                 fpath=env["path"],
@@ -596,7 +596,7 @@ def run_in_env(
     elif env["kind"] == "conda":
         with open(env["path"]) as f:
             conda_env = calkit.ryaml.load(f)
-        if not no_check:
+        if check:
             check_conda_env(
                 env_fpath=env["path"], relaxed=relaxed_check, quiet=True
             )
@@ -628,7 +628,7 @@ def run_in_env(
         path = env["path"]
         shell_cmd = " ".join(cmd)
         # Check environment
-        if not no_check:
+        if check:
             if not os.path.isdir(prefix):
                 if verbose:
                     typer.echo(f"Creating uv-venv at {prefix}")

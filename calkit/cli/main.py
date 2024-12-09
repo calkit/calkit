@@ -607,6 +607,36 @@ def run_in_env(
             subprocess.check_call(cmd, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error(f"Failed to run in {env['kind']} environment")
+    elif env["kind"] == "uv-venv":
+        if "prefix" not in env:
+            raise_error("uv-venv environments require a prefix")
+        if "path" not in env:
+            raise_error("uv-venv environments require a path")
+        prefix = env["prefix"]
+        path = env["path"]
+        shell_cmd = " ".join(cmd)
+        # Check environment
+        if not no_check:
+            fname, ext = os.path.splitext(path)
+            lock_fpath = fname + "-lock" + ext
+            check_cmd = (
+                f". {prefix}/bin/activate "
+                f"&& uv pip install -q -r {path} "
+                f"&& uv pip freeze > {lock_fpath} "
+                "&& deactivate"
+            )
+            try:
+                subprocess.check_output(check_cmd, shell=True)
+            except subprocess.CalledProcessError:
+                raise_error("Failed to check uv-venv")
+        # Now run the command
+        cmd = f". {prefix}/bin/activate && {shell_cmd} && deactivate"
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
+        try:
+            subprocess.check_call(cmd, shell=True)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in uv-venv")
     else:
         raise_error("Environment kind not supported")
 

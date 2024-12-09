@@ -608,7 +608,10 @@ def run_in_env(
         except subprocess.CalledProcessError:
             raise_error("Failed to run in Conda environment")
     elif env["kind"] in ["pixi", "uv"]:
-        cmd = [env["kind"], "run"] + cmd
+        env_cmd = []
+        if "name" in env:
+            env_cmd = ["--environment", env["name"]]
+        cmd = [env["kind"], "run"] + env_cmd + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:

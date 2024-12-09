@@ -623,9 +623,8 @@ def new_publication(
         envs[env_name] = env
         env_remote = dict(
             kind="docker",
-            image="kjarosh/latex:2024.4",
-            description="TeXlive full from kjarosh.",
-            platform="linux/amd64",
+            image="texlive/texlive:latest-full",
+            description="TeXlive full.",
         )
         with open(env_path, "w") as f:
             calkit.ryaml.dump(env_remote, f)

@@ -69,16 +69,18 @@ If you run something like:
 
 ```sh
 calkit new conda-env \
-    -n my-project-py11 \
+    -n my-project-py311 \
     python=3.11 \
     pip \
     matplotlib \
     pandas \
     jupyter \
-    --pip tensorflow \
-    --stage check-conda-env
+    --pip tensorflow
 ```
 
-Calkit will create an environment definition in `calkit.yaml` for use with
-`calkit runenv`, and since `--stage` was specified, Calkit will also add
-an environment check stage to the pipeline automatically.
+Calkit will create an environment definition in `calkit.yaml`,
+which enables running a command in this environment with
+`calkit runenv -n my-project-py311 my-command-here`.
+That call will automatically create or update the Conda environment on the fly
+as needed and export a lock file describing the actual environment
+that was created.

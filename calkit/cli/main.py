@@ -627,7 +627,7 @@ def run_in_env(
             fname, ext = os.path.splitext(path)
             lock_fpath = fname + "-lock" + ext
             check_cmd = (
-                f". {prefix}/bin/activate "
+                f"source {prefix}/bin/activate "
                 f"&& uv pip install -q -r {path} "
                 f"&& uv pip freeze > {lock_fpath} "
                 "&& deactivate"
@@ -639,7 +639,7 @@ def run_in_env(
             except subprocess.CalledProcessError:
                 raise_error("Failed to check uv-venv")
         # Now run the command
-        cmd = f". {prefix}/bin/activate && {shell_cmd} && deactivate"
+        cmd = f"source {prefix}/bin/activate && {shell_cmd} && deactivate"
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:

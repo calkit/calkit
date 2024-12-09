@@ -566,6 +566,7 @@ def run_in_env(
                 tag=env["image"],
                 fpath=env["path"],
                 platform=env.get("platform"),
+                quiet=True,
             )
         shell_cmd = " ".join(cmd)
         docker_cmd = [
@@ -699,6 +700,9 @@ def check_docker_env(
     platform: Annotated[
         str, typer.Option("--platform", help="Which platform(s) to build for.")
     ] = None,
+    quiet: Annotated[
+        bool, typer.Option("--quiet", "-q", help="Be quiet.")
+    ] = False,
 ):
     def get_docker_inspect():
         out = json.loads(
@@ -712,28 +716,31 @@ def check_docker_env(
         _ = out[0].pop("DockerVersion")
         return out
 
-    typer.echo(f"Checking for existing image with tag {tag}")
+    outfile = open(os.devnull, "w") if quiet else None
+    typer.echo(f"Checking for existing image with tag {tag}", file=outfile)
     # First call Docker inspect
     try:
         inspect = get_docker_inspect()
     except subprocess.CalledProcessError:
-        typer.echo(f"No image with tag {tag} found locally")
+        typer.echo(f"No image with tag {tag} found locally", file=outfile)
         inspect = []
-    typer.echo(f"Reading Dockerfile from {fpath}")
+    typer.echo(f"Reading Dockerfile from {fpath}", file=outfile)
     with open(fpath) as f:
         dockerfile = f.read()
     dockerfile_md5 = hashlib.md5(dockerfile.encode()).hexdigest()
     lock_fpath = fpath + "-lock.json"
     rebuild = True
     if os.path.isfile(lock_fpath):
-        typer.echo(f"Reading lock file: {lock_fpath}")
+        typer.echo(f"Reading lock file: {lock_fpath}", file=outfile)
         with open(lock_fpath) as f:
             lock = json.load(f)
     else:
-        typer.echo(f"Lock file ({lock_fpath}) does not exist")
+        typer.echo(f"Lock file ({lock_fpath}) does not exist", file=outfile)
         lock = None
     if inspect and lock:
-        typer.echo("Checking image and Dockerfile against lock file")
+        typer.echo(
+            "Checking image and Dockerfile against lock file", file=outfile
+        )
         rebuild = inspect[0]["RootFS"]["Layers"] != lock[0]["RootFS"][
             "Layers"
         ] or dockerfile_md5 != lock[0].get("DockerfileMD5")

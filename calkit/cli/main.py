@@ -599,14 +599,14 @@ def run_in_env(
             subprocess.check_call(cmd, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error("Failed to run in Conda environment")
-    elif env["kind"] == "pixi":
-        cmd = ["pixi", "run"] + cmd
+    elif env["kind"] in ["pixi", "uv"]:
+        cmd = [env["kind"], "run"] + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
             subprocess.check_call(cmd, cwd=wdir)
         except subprocess.CalledProcessError:
-            raise_error("Failed to run in Pixi environment")
+            raise_error(f"Failed to run in {env['kind']} environment")
     else:
         raise_error("Environment kind not supported")
 

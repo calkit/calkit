@@ -559,7 +559,14 @@ def run_in_env(
     shell = env.get("shell", "sh")
     platform = env.get("platform")
     if env["kind"] == "docker":
-        # TODO: Check Docker image if there's a path property
+        if "image" not in env:
+            raise_error("Image must be defined for Docker environments")
+        if "path" in env and not no_check:
+            check_docker_env(
+                tag=env["image"],
+                fpath=env["path"],
+                platform=env.get("platform"),
+            )
         shell_cmd = " ".join(cmd)
         docker_cmd = [
             "docker",
@@ -684,7 +691,7 @@ def check_call(
     name="build-docker",
     help="Build Docker image if missing or different from lock file.",
 )
-def build_docker(
+def check_docker_env(
     tag: Annotated[str, typer.Argument(help="Image tag.")],
     fpath: Annotated[
         str, typer.Option("-i", "--input", help="Path to input Dockerfile.")

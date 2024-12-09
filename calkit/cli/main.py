@@ -618,6 +618,8 @@ def run_in_env(
         # Check environment
         if not no_check:
             if not os.path.isdir(prefix):
+                if verbose:
+                    typer.echo(f"Creating uv-venv at {prefix}")
                 try:
                     subprocess.check_call(["uv", "venv", prefix], cwd=wdir)
                 except subprocess.CalledProcessError:
@@ -631,6 +633,8 @@ def run_in_env(
                 "&& deactivate"
             )
             try:
+                if verbose:
+                    typer.echo(f"Running command: {check_cmd}")
                 subprocess.check_output(check_cmd, shell=True, cwd=wdir)
             except subprocess.CalledProcessError:
                 raise_error("Failed to check uv-venv")

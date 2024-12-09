@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import functools
 import hashlib
 import json
 import os
@@ -387,7 +388,10 @@ def run_dvc_repro(
         args += ["--pipeline", pipeline]
     if downstream is not None:
         args += downstream
-    subprocess.check_call(["dvc", "repro"] + args)
+    try:
+        subprocess.check_call(["dvc", "repro"] + args)
+    except subprocess.CalledProcessError:
+        raise_error("DVC pipeline failed")
     # Now parse stage metadata for calkit objects
     if not os.path.isfile("dvc.yaml"):
         raise_error("No dvc.yaml file found")
@@ -504,6 +508,20 @@ def run_in_env(
             ),
         ),
     ] = None,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Don't check the environment is valid before running in it.",
+        ),
+    ] = False,
+    relaxed_check: Annotated[
+        bool,
+        typer.Option(
+            "--relaxed",
+            help="Check the environment in a relaxed way, if applicable.",
+        ),
+    ] = False,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -529,6 +547,8 @@ def run_in_env(
         env_name = default_env_name
     if env_name is None:
         raise_error("Environment must be specified if there are multiple")
+    if env_name not in envs:
+        raise_error(f"Environment '{env_name}' does not exist")
     env = envs[env_name]
     if wdir is not None:
         cwd = os.path.abspath(wdir)
@@ -539,6 +559,15 @@ def run_in_env(
     shell = env.get("shell", "sh")
     platform = env.get("platform")
     if env["kind"] == "docker":
+        if "image" not in env:
+            raise_error("Image must be defined for Docker environments")
+        if "path" in env and not no_check:
+            check_docker_env(
+                tag=env["image"],
+                fpath=env["path"],
+                platform=env.get("platform"),
+                quiet=True,
+            )
         shell_cmd = " ".join(cmd)
         docker_cmd = [
             "docker",
@@ -560,14 +589,75 @@ def run_in_env(
         ]
         if verbose:
             typer.echo(f"Running command: {docker_cmd}")
-        subprocess.check_call(docker_cmd, cwd=wdir)
+        try:
+            subprocess.check_call(docker_cmd, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in Docker environment")
     elif env["kind"] == "conda":
         with open(env["path"]) as f:
             conda_env = calkit.ryaml.load(f)
+        if not no_check:
+            check_conda_env(
+                env_fpath=env["path"], relaxed=relaxed_check, quiet=True
+            )
         cmd = ["conda", "run", "-n", conda_env["name"]] + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")
-        subprocess.check_call(cmd, cwd=wdir)
+        try:
+            subprocess.check_call(cmd, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in Conda environment")
+    elif env["kind"] in ["pixi", "uv"]:
+        env_cmd = []
+        if "name" in env:
+            env_cmd = ["--environment", env["name"]]
+        cmd = [env["kind"], "run"] + env_cmd + cmd
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
+        try:
+            subprocess.check_call(cmd, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error(f"Failed to run in {env['kind']} environment")
+    elif env["kind"] == "uv-venv":
+        # TODO: This doesn't work on Windows
+        if "prefix" not in env:
+            raise_error("uv-venv environments require a prefix")
+        if "path" not in env:
+            raise_error("uv-venv environments require a path")
+        prefix = env["prefix"]
+        path = env["path"]
+        shell_cmd = " ".join(cmd)
+        # Check environment
+        if not no_check:
+            if not os.path.isdir(prefix):
+                if verbose:
+                    typer.echo(f"Creating uv-venv at {prefix}")
+                try:
+                    subprocess.check_call(["uv", "venv", prefix], cwd=wdir)
+                except subprocess.CalledProcessError:
+                    raise_error(f"Failed to create uv-venv at {prefix}")
+            fname, ext = os.path.splitext(path)
+            lock_fpath = fname + "-lock" + ext
+            check_cmd = (
+                f". {prefix}/bin/activate "
+                f"&& uv pip install -q -r {path} "
+                f"&& uv pip freeze > {lock_fpath} "
+                "&& deactivate"
+            )
+            try:
+                if verbose:
+                    typer.echo(f"Running command: {check_cmd}")
+                subprocess.check_output(check_cmd, shell=True, cwd=wdir)
+            except subprocess.CalledProcessError:
+                raise_error("Failed to check uv-venv")
+        # Now run the command
+        cmd = f". {prefix}/bin/activate && {shell_cmd} && deactivate"
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
+        try:
+            subprocess.check_call(cmd, shell=True, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in uv-venv")
     else:
         raise_error("Environment kind not supported")
 
@@ -605,7 +695,7 @@ def check_call(
     name="build-docker",
     help="Build Docker image if missing or different from lock file.",
 )
-def build_docker(
+def check_docker_env(
     tag: Annotated[str, typer.Argument(help="Image tag.")],
     fpath: Annotated[
         str, typer.Option("-i", "--input", help="Path to input Dockerfile.")
@@ -613,6 +703,9 @@ def build_docker(
     platform: Annotated[
         str, typer.Option("--platform", help="Which platform(s) to build for.")
     ] = None,
+    quiet: Annotated[
+        bool, typer.Option("--quiet", "-q", help="Be quiet.")
+    ] = False,
 ):
     def get_docker_inspect():
         out = json.loads(
@@ -626,28 +719,31 @@ def build_docker(
         _ = out[0].pop("DockerVersion")
         return out
 
-    typer.echo(f"Checking for existing image with tag {tag}")
+    outfile = open(os.devnull, "w") if quiet else None
+    typer.echo(f"Checking for existing image with tag {tag}", file=outfile)
     # First call Docker inspect
     try:
         inspect = get_docker_inspect()
     except subprocess.CalledProcessError:
-        typer.echo(f"No image with tag {tag} found locally")
+        typer.echo(f"No image with tag {tag} found locally", file=outfile)
         inspect = []
-    typer.echo(f"Reading Dockerfile from {fpath}")
+    typer.echo(f"Reading Dockerfile from {fpath}", file=outfile)
     with open(fpath) as f:
         dockerfile = f.read()
     dockerfile_md5 = hashlib.md5(dockerfile.encode()).hexdigest()
     lock_fpath = fpath + "-lock.json"
     rebuild = True
     if os.path.isfile(lock_fpath):
-        typer.echo(f"Reading lock file: {lock_fpath}")
+        typer.echo(f"Reading lock file: {lock_fpath}", file=outfile)
         with open(lock_fpath) as f:
             lock = json.load(f)
     else:
-        typer.echo(f"Lock file ({lock_fpath}) does not exist")
+        typer.echo(f"Lock file ({lock_fpath}) does not exist", file=outfile)
         lock = None
     if inspect and lock:
-        typer.echo("Checking image and Dockerfile against lock file")
+        typer.echo(
+            "Checking image and Dockerfile against lock file", file=outfile
+        )
         rebuild = inspect[0]["RootFS"]["Layers"] != lock[0]["RootFS"][
             "Layers"
         ] or dockerfile_md5 != lock[0].get("DockerfileMD5")
@@ -833,10 +929,17 @@ def check_conda_env(
             "--relaxed", help="Treat conda and pip dependencies as equivalent."
         ),
     ] = False,
+    quiet: Annotated[
+        bool, typer.Option("--quiet", "-q", help="Be quiet.")
+    ] = False,
 ):
+    if quiet:
+        log_func = functools.partial(typer.echo, file=open(os.devnull, "w"))
+    else:
+        log_func = typer.echo
     calkit.conda.check_env(
         env_fpath=env_fpath,
         output_fpath=output_fpath,
-        log_func=typer.echo,
+        log_func=log_func,
         relaxed=relaxed,
     )

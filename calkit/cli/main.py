@@ -617,6 +617,11 @@ def run_in_env(
         shell_cmd = " ".join(cmd)
         # Check environment
         if not no_check:
+            if not os.path.isdir(prefix):
+                try:
+                    subprocess.check_call(["uv", "venv", prefix], cwd=wdir)
+                except subprocess.CalledProcessError:
+                    raise_error(f"Failed to create uv-venv at {prefix}")
             fname, ext = os.path.splitext(path)
             lock_fpath = fname + "-lock" + ext
             check_cmd = (
@@ -626,7 +631,7 @@ def run_in_env(
                 "&& deactivate"
             )
             try:
-                subprocess.check_output(check_cmd, shell=True)
+                subprocess.check_output(check_cmd, shell=True, cwd=wdir)
             except subprocess.CalledProcessError:
                 raise_error("Failed to check uv-venv")
         # Now run the command
@@ -634,7 +639,7 @@ def run_in_env(
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
-            subprocess.check_call(cmd, shell=True)
+            subprocess.check_call(cmd, shell=True, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error("Failed to run in uv-venv")
     else:

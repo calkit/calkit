@@ -303,12 +303,27 @@ def pull():
 
 
 @app.command(name="push")
-def push():
+def push(
+    no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False
+):
     """Push with both Git and DVC."""
     typer.echo("Pushing to Git remote")
-    subprocess.call(["git", "push"])
+    try:
+        subprocess.check_call(["git", "push"])
+    except subprocess.CalledProcessError:
+        raise_error("Git push failed")
     typer.echo("Pushing to DVC remote")
-    subprocess.call(["dvc", "push"])
+    if not no_check_auth:
+        # Check that our dvc remotes all have our DVC token set for them
+        remotes = calkit.dvc.get_remotes()
+        for name, url in remotes.items():
+            if name == "calkit" or name.startswith("calkit:"):
+                typer.echo(f"Checking authentication for DVC remote: {name}")
+                calkit.dvc.set_remote_auth(remote_name=name)
+    try:
+        subprocess.check_call(["dvc", "push"])
+    except subprocess.CalledProcessError:
+        raise_error("DVC push failed")
 
 
 @app.command(name="local-server")

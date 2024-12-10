@@ -167,5 +167,5 @@ def test_new_publication(tmp_dir):
     stage = dvc_pipeline["stages"]["build-latex-article"]
     assert stage["cmd"] == (
         "calkit runenv -n my-latex-env "
-        '"cd my-paper && latexmk -pdf paper.tex"'
+        '"cd my-paper && latexmk -interaction=nonstopmode -pdf paper.tex"'
     )

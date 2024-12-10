@@ -57,3 +57,11 @@ def setup_remote_auth():
         if name == "calkit" or name.startswith("calkit:"):
             typer.echo(f"Setting up authentication for DVC remote: {name}")
             set_remote_auth(remote_name=name)
+
+
+@config_app.command(name="list")
+def list_config_keys():
+    """List keys in the config."""
+    cfg = config.read()
+    for key in cfg.model_dump():
+        typer.echo(key)

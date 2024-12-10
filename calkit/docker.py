@@ -1,9 +1,9 @@
 """Functionality for working with Docker."""
 
-MAMBAFORGE_LAYER_TXT = r"""
+MINIFORGE_LAYER_TXT = r"""
 # Install Miniforge
 ARG MINIFORGE_NAME=Mambaforge
-ARG MINIFORGE_VERSION=24.3.0-0
+ARG MINIFORGE_VERSION=24.9.2-0
 ARG TARGETPLATFORM
 
 ENV CONDA_DIR=/opt/conda
@@ -47,6 +47,7 @@ RUN pip install --no-cache-dir numpy pandas matplotlib h5py \
 """.strip()
 
 LAYERS = {
-    "mambaforge": MAMBAFORGE_LAYER_TXT,
+    "mambaforge": MINIFORGE_LAYER_TXT,
+    "miniforge": MINIFORGE_LAYER_TXT,
     "foampy": FOAMPY_LAYER_TEXT,
 }

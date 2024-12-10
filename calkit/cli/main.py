@@ -294,12 +294,27 @@ def save(
 
 
 @app.command(name="pull")
-def pull():
+def pull(
+    no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False
+):
     """Pull with both Git and DVC."""
     typer.echo("Git pulling")
-    subprocess.call(["git", "pull"])
+    try:
+        subprocess.check_call(["git", "pull"])
+    except subprocess.CalledProcessError:
+        raise_error("Git pull failed")
     typer.echo("DVC pulling")
-    subprocess.call(["dvc", "pull"])
+    if not no_check_auth:
+        # Check that our dvc remotes all have our DVC token set for them
+        remotes = calkit.dvc.get_remotes()
+        for name, url in remotes.items():
+            if name == "calkit" or name.startswith("calkit:"):
+                typer.echo(f"Checking authentication for DVC remote: {name}")
+                calkit.dvc.set_remote_auth(remote_name=name)
+    try:
+        subprocess.check_call(["dvc", "pull"])
+    except subprocess.CalledProcessError:
+        raise_error("DVC pull failed")
 
 
 @app.command(name="push")

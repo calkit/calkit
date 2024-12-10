@@ -23,6 +23,7 @@ from calkit.cli.list import list_app
 from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
+from calkit.cli.update import update_app
 from calkit.models import Procedure
 
 app = typer.Typer(
@@ -42,6 +43,7 @@ app.add_typer(notebooks_app, name="nb", help="Work with Jupyter notebooks.")
 app.add_typer(list_app, name="list", help="List Calkit objects.")
 app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
+app.add_typer(update_app, name="update", help="Update objects.")
 
 
 @app.callback()
@@ -291,26 +293,27 @@ def save(
         push()
 
 
-@app.command(name="pull", help="Pull with both Git and DVC.")
+@app.command(name="pull")
 def pull():
+    """Pull with both Git and DVC."""
     typer.echo("Git pulling")
     subprocess.call(["git", "pull"])
     typer.echo("DVC pulling")
     subprocess.call(["dvc", "pull"])
 
 
-@app.command(name="push", help="Push with both Git and DVC.")
+@app.command(name="push")
 def push():
+    """Push with both Git and DVC."""
     typer.echo("Pushing to Git remote")
     subprocess.call(["git", "push"])
     typer.echo("Pushing to DVC remote")
     subprocess.call(["dvc", "push"])
 
 
-@app.command(
-    name="local-server", help="Run the local server to interact over HTTP."
-)
+@app.command(name="local-server")
 def run_local_server():
+    """Run the local server to interact over HTTP."""
     import uvicorn
 
     uvicorn.run(

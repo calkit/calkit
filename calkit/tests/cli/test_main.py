@@ -17,7 +17,7 @@ def test_run_in_env(tmp_dir):
         "--name my-image "
         "--stage build-image "
         "--from ubuntu "
-        "--add-layer mambaforge "
+        "--add-layer miniforge "
         "--description 'This is a test image'",
         shell=True,
     )
@@ -37,7 +37,7 @@ def test_run_in_env(tmp_dir):
         "--stage build-image-2 "
         "--path Dockerfile.2 "
         "--from ubuntu "
-        "--add-layer mambaforge "
+        "--add-layer miniforge "
         "--add-layer foampy "
         "--description 'This is a test image 2'",
         shell=True,

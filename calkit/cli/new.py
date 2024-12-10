@@ -216,7 +216,7 @@ def new_docker_env(
     layers: Annotated[
         list[str],
         typer.Option(
-            "--add-layer", help="Add a layer (options: mambaforge, foampy)."
+            "--add-layer", help="Add a layer (options: miniforge, foampy)."
         ),
     ] = [],
     wdir: Annotated[
@@ -623,9 +623,8 @@ def new_publication(
         envs[env_name] = env
         env_remote = dict(
             kind="docker",
-            image="kjarosh/latex:2024.4",
-            description="TeXlive full from kjarosh.",
-            platform="linux/amd64",
+            image="texlive/texlive:latest-full",
+            description="TeXlive full.",
         )
         with open(env_path, "w") as f:
             calkit.ryaml.dump(env_remote, f)
@@ -644,7 +643,10 @@ def new_publication(
         repo.git.add(path)
     # Create stage if applicable
     if stage_name is not None and template_type == "latex":
-        cmd = f"cd {path} && latexmk -pdf {template_obj.target}"
+        cmd = (
+            f"cd {path} && latexmk -interaction=nonstopmode "
+            f"-pdf {template_obj.target}"
+        )
         if env_name is not None:
             cmd = f'calkit runenv -n {env_name} "{cmd}"'
         target_dep = os.path.join(path, template_obj.target)

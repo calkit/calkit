@@ -7,5 +7,6 @@ GITIGNORE = """
 *.log
 *.pdf
 *.out
+*.gz
 *.DS_Store
 """

@@ -293,26 +293,27 @@ def save(
         push()
 
 
-@app.command(name="pull", help="Pull with both Git and DVC.")
+@app.command(name="pull")
 def pull():
+    """Pull with both Git and DVC."""
     typer.echo("Git pulling")
     subprocess.call(["git", "pull"])
     typer.echo("DVC pulling")
     subprocess.call(["dvc", "pull"])
 
 
-@app.command(name="push", help="Push with both Git and DVC.")
+@app.command(name="push")
 def push():
+    """Push with both Git and DVC."""
     typer.echo("Pushing to Git remote")
     subprocess.call(["git", "push"])
     typer.echo("Pushing to DVC remote")
     subprocess.call(["dvc", "push"])
 
 
-@app.command(
-    name="local-server", help="Run the local server to interact over HTTP."
-)
+@app.command(name="local-server")
 def run_local_server():
+    """Run the local server to interact over HTTP."""
     import uvicorn
 
     uvicorn.run(

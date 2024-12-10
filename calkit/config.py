@@ -27,9 +27,9 @@ def set_env(name: Literal["local", "staging", "production"]) -> None:
     os.environ[f"{__package__.upper()}_ENV"] = name
 
 
-def get_env_suffix() -> str:
+def get_env_suffix(sep: str = "-") -> str:
     if get_env() != "production":
-        return "-" + get_env()
+        return sep + get_env()
     return ""
 
 
@@ -45,7 +45,7 @@ class Settings(BaseSettings):
             f"config{get_env_suffix()}.yaml",
         ),
         extra="ignore",
-        env_prefix="CALKIT_",
+        env_prefix="CALKIT" + get_env_suffix(sep="_") + "_",
     )
     username: str | None = None
     token: str | None = None

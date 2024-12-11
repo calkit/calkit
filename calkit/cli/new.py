@@ -575,7 +575,12 @@ def new_publication(
     if env_name is not None and template_type != "latex":
         raise_error("Environments can only be created for latex templates")
     if env_name is not None and env_name in envs and not overwrite:
-        raise_error(f"Environment '{env_name}' already exists")
+        typer.echo(
+            typer.style(
+                f"Environment '{env_name}' already exists; overwriting",
+                fg="yellow",
+            )
+        )
     if template_type is not None:
         try:
             template_obj = calkit.templates.get_template(template)

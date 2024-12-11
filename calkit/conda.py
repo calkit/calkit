@@ -42,7 +42,10 @@ def check_env(
         subprocess.check_output([conda, "env", "list", "--json"]).decode()
     )["envs"]
     # Get existing env names, but skip the base environment
-    existing_env_names = [os.path.basename(env) for env in envs[1:]]
+    # Note that this could fail for environments with non-default prefixes
+    existing_env_names = [
+        os.path.basename(env) for env in envs if "envs" in env
+    ]
     with open(env_fpath) as f:
         env_spec = ryaml.load(f)
     env_name = env_spec["name"]

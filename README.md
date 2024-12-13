@@ -30,6 +30,7 @@ To do this, we try to make it easy for users to follow two simple rules:
 
 ## Tutorials
 
+- [LaTeX collaboration with GitHub Codespaces](https://petebachant.me/latex-collab/)
 - [Jupyter notebook as a DVC pipeline](docs/tutorials/notebook-pipeline.md)
 - [Keeping track of conda environments](docs/tutorials/conda-envs.md)
 - [Defining and executing manual procedures](docs/tutorials/procedures.md)

@@ -53,7 +53,7 @@ pip install calkit-python
 
 ## Cloud integration
 
-The Calkit cloud platform (https://calkit.io) serves as a project
+The Calkit Cloud ([calkit.io](https://calkit.io)) serves as a project
 management interface and a DVC remote for easily storing all versions of your
 data/code/figures/publications, interacting with your collaborators,
 reusing others' research artifacts, etc.

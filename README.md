@@ -28,47 +28,6 @@ To do this, we try to make it easy for users to follow two simple rules:
    keep computational environments up-to-date and label their outputs for
    convenient reuse.
 
-## Tutorials
-
-- [LaTeX collaboration with GitHub Codespaces](https://petebachant.me/latex-collab/)
-- [Jupyter notebook as a DVC pipeline](docs/tutorials/notebook-pipeline.md)
-- [Keeping track of conda environments](docs/tutorials/conda-envs.md)
-- [Defining and executing manual procedures](docs/tutorials/procedures.md)
-- [Adding a new LaTeX-based publication with its own Docker build environment](docs/tutorials/adding-latex-pub-docker.md)
-- [A reproducible workflow using Microsoft Office (Word and Excel)](https://petebachant.me/office-repro/)
-- [Reproducible OpenFOAM simulations](https://petebachant.me/reproducible-openfoam/)
-
-## Why does reproducibility matter?
-
-If your work is reproducible, that means that someone else can "run" it and
-calculate the same results or outputs.
-This is a major step towards addressing
-[the replication crisis](https://en.wikipedia.org/wiki/Replication_crisis)
-and has some major benefits for both you as an individual and the research
-community:
-
-1. You will avoid mistakes caused by, e.g., running an old version of a script
-   and including a figure that wasn't created after fixing a bug in the data
-   processing pipeline.
-2. Since your project is "runnable," it's more likely that someone else will be
-   able to reuse part of your work to run it in a different context, thereby
-   producing a bigger impact and accelerating the pace of discovery.
-   If someone can take what you've done and use it to calculate a
-   prediction, you have just produced truly useful knowledge.
-
-## Why another tool/platform?
-
-Git, GitHub, DVC, Docker et al. are amazing tools/platforms, but their
-use involves multiple fairly difficult learning curves,
-and tying them together might mean developing something new for each project.
-Our goal is to provide a single tool and platform to unify all of these so
-that there is a single, gentle learning curve.
-However, it is not our goal to hide or replace these underlying components.
-Advanced users can use them directly, but new users aren't forced to, which
-helps them get up and running with less effort and training.
-Calkit should help users understand what is going on under the hood without
-forcing them to work at that lower level of abstraction.
-
 ## Installation
 
 To install Calkit, [Git](https://git-scm.com) and Python must be installed.
@@ -112,6 +71,47 @@ calkit config setup-remote
 This will setup the Calkit DVC remote, such that commands like `dvc push` will
 allow you to push versions of your data or pipeline outputs to the cloud
 for safe storage and sharing with your collaborators.
+
+## Tutorials
+
+- [LaTeX collaboration with GitHub Codespaces](https://petebachant.me/latex-collab/)
+- [Jupyter notebook as a DVC pipeline](docs/tutorials/notebook-pipeline.md)
+- [Keeping track of conda environments](docs/tutorials/conda-envs.md)
+- [Defining and executing manual procedures](docs/tutorials/procedures.md)
+- [Adding a new LaTeX-based publication with its own Docker build environment](docs/tutorials/adding-latex-pub-docker.md)
+- [A reproducible workflow using Microsoft Office (Word and Excel)](https://petebachant.me/office-repro/)
+- [Reproducible OpenFOAM simulations](https://petebachant.me/reproducible-openfoam/)
+
+## Why does reproducibility matter?
+
+If your work is reproducible, that means that someone else can "run" it and
+calculate the same results or outputs.
+This is a major step towards addressing
+[the replication crisis](https://en.wikipedia.org/wiki/Replication_crisis)
+and has some major benefits for both you as an individual and the research
+community:
+
+1. You will avoid mistakes caused by, e.g., running an old version of a script
+   and including a figure that wasn't created after fixing a bug in the data
+   processing pipeline.
+2. Since your project is "runnable," it's more likely that someone else will be
+   able to reuse part of your work to run it in a different context, thereby
+   producing a bigger impact and accelerating the pace of discovery.
+   If someone can take what you've done and use it to calculate a
+   prediction, you have just produced truly useful knowledge.
+
+## Why another tool/platform?
+
+Git, GitHub, DVC, Docker et al. are amazing tools/platforms, but their
+use involves multiple fairly difficult learning curves,
+and tying them together might mean developing something new for each project.
+Our goal is to provide a single tool and platform to unify all of these so
+that there is a single, gentle learning curve.
+However, it is not our goal to hide or replace these underlying components.
+Advanced users can use them directly, but new users aren't forced to, which
+helps them get up and running with less effort and training.
+Calkit should help users understand what is going on under the hood without
+forcing them to work at that lower level of abstraction.
 
 ## How it works
 

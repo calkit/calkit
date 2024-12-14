@@ -1,6 +1,10 @@
-# Calkit
+<p align="center">
+  <a href="https://calkit.org" target="_blank">
+    <img width="40%" src="docs/img/calkit-no-bg.png" alt="Calkit">
+  </a>
+</p>
 
-Calkit is a lightweight framework for doing reproducible research.
+Calkit is a lightweight framework for reproducible research projects.
 It acts as a top-level layer to integrate and simplify the use of enabling
 technologies such as
 [Git](https://git-scm.com/),

@@ -73,15 +73,11 @@ class Pipeline(BaseModel):
             print("Stage being created from", func)
             print("Other arg:", other_arg)
             func_src = inspect.getsource(func)
-            print("Global deps:", inspect.getclosurevars(func).globals)
 
             module = inspect.getmodule(func)
-            print("Module:", module)
             module_src = inspect.getsource(module)
             module_members = inspect.getmembers(module)
             imports = inspect.getmembers(module, inspect.ismodule)
-            print("Module members:", module_members)
-            print("Imports:", imports)
 
             # Write source code to file
             # Detect any imports, helper functions, or module-level variables
@@ -94,8 +90,6 @@ class Pipeline(BaseModel):
                     started = True
                 if started:
                     func_src += line + "\n"
-
-            print("Func source:", func_src)
 
             script_src = _func_to_script(func)
 
@@ -112,7 +106,9 @@ class Pipeline(BaseModel):
                 if annotation_metadata is not None and isinstance(
                     annotation_metadata[0], Dependency
                 ):
-                    print("Found dependency in signature", name)
+                    print(
+                        "Found dependency in signature", name, param.annotation
+                    )
             # Now outputs -- should we allow multiple?
             # Maybe additional need to be declared in the decorator call
             return_annot_meta = getattr(
@@ -121,7 +117,14 @@ class Pipeline(BaseModel):
             if return_annot_meta is not None and isinstance(
                 return_annot_meta[0], Output
             ):
-                print("Found output", return_annot_meta[0])
+                return_type = sig.return_annotation.__origin__
+                print(
+                    "Found output",
+                    return_annot_meta[0],
+                    sig.return_annotation,
+                    "type",
+                    return_type,
+                )
 
             # Create DVC stage from function name
 

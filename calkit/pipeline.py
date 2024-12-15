@@ -38,7 +38,12 @@ def _get_func_src_no_decorator(func: Callable) -> str:
 
 
 def _func_to_script(func: Callable) -> str:
-    """Create module source code to produce a standalone function."""
+    """Create module source code to produce a standalone function.
+
+    TODO: Needs to parse annotations for necessary imports.
+    Maybe we should just include all module globals.
+    Or the entire module with stage decorators stripped?
+    """
     txt = ""
     func_src = _get_func_src_no_decorator(func)
     module = inspect.getmodule(func)
@@ -106,8 +111,13 @@ class Pipeline(BaseModel):
                 if annotation_metadata is not None and isinstance(
                     annotation_metadata[0], Dependency
                 ):
+                    dep_type = param.annotation.__origin__
                     print(
-                        "Found dependency in signature", name, param.annotation
+                        "Found dependency in signature",
+                        name,
+                        param.annotation,
+                        "type",
+                        dep_type,
                     )
             # Now outputs -- should we allow multiple?
             # Maybe additional need to be declared in the decorator call

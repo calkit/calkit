@@ -101,6 +101,28 @@ class Pipeline(BaseModel):
 
             print("Script source:", script_src)
 
+            # Parse dependencies and outputs
+            sig = inspect.signature(func)
+            print("Signature:", sig)
+            for name, param in sig.parameters.items():
+                # Is param annotated as a dependency?
+                annotation_metadata = getattr(
+                    param.annotation, "__metadata__", None
+                )
+                if annotation_metadata is not None and isinstance(
+                    annotation_metadata[0], Dependency
+                ):
+                    print("Found dependency in signature", name)
+            # Now outputs -- should we allow multiple?
+            # Maybe additional need to be declared in the decorator call
+            return_annot_meta = getattr(
+                sig.return_annotation, "__metadata__", None
+            )
+            if return_annot_meta is not None and isinstance(
+                return_annot_meta[0], Output
+            ):
+                print("Found output", return_annot_meta[0])
+
             # Create DVC stage from function name
 
             # Run the DVC stage and load/return the output

@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import subprocess
+
+import git.exc
 import typer
+import git
 
 from calkit import config
+from calkit.cli.core import raise_error
 from calkit.dvc import configure_remote, get_remotes, set_remote_auth
 
 config_app = typer.Typer(no_args_is_help=True)
@@ -43,8 +48,13 @@ def setup_remote():
     """Setup the Calkit cloud as the default DVC remote and store a token in
     the local config.
     """
-    configure_remote()
-    set_remote_auth()
+    try:
+        configure_remote()
+        set_remote_auth()
+    except subprocess.CalledProcessError:
+        raise_error("DVC remote config failed; have you run `dvc init`?")
+    except git.exc.InvalidGitRepositoryError:
+        raise_error("Current directory is not a Git repository")
 
 
 @config_app.command(name="setup-remote-auth")

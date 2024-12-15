@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import subprocess
 
-import git.exc
 import typer
-import git
+from git.exc import InvalidGitRepositoryError
 
 from calkit import config
 from calkit.cli.core import raise_error
@@ -53,7 +52,7 @@ def setup_remote():
         set_remote_auth()
     except subprocess.CalledProcessError:
         raise_error("DVC remote config failed; have you run `dvc init`?")
-    except git.exc.InvalidGitRepositoryError:
+    except InvalidGitRepositoryError:
         raise_error("Current directory is not a Git repository")
 
 

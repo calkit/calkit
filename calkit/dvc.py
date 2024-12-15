@@ -17,10 +17,10 @@ def configure_remote():
     project_name = calkit.git.detect_project_name()
     base_url = calkit.cloud.get_base_url()
     remote_url = f"{base_url}/projects/{project_name}/dvc"
-    subprocess.call(
+    subprocess.check_call(
         ["dvc", "remote", "add", "-d", "-f", get_app_name(), remote_url]
     )
-    subprocess.call(
+    subprocess.check_call(
         ["dvc", "remote", "modify", get_app_name(), "auth", "custom"]
     )
 
@@ -39,7 +39,7 @@ def set_remote_auth(remote_name: str = None, always_auth: bool = False):
         )["access_token"]
         settings.dvc_token = token
         settings.write()
-    subprocess.call(
+    subprocess.check_call(
         [
             "dvc",
             "remote",
@@ -50,7 +50,7 @@ def set_remote_auth(remote_name: str = None, always_auth: bool = False):
             "Authorization",
         ]
     )
-    subprocess.call(
+    subprocess.check_call(
         [
             "dvc",
             "remote",

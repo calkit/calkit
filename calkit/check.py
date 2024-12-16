@@ -154,7 +154,7 @@ def check_reproducibility(
     for stage_name, stage in stages.items():
         cmd = stage.get("cmd", "")
         if (
-            "calkit runenv" not in cmd
+            "calkit" not in cmd
             and "conda run" not in cmd
             and "mamba run" not in cmd
             and "docker run" not in cmd

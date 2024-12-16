@@ -35,7 +35,8 @@ class ReproCheck(BaseModel):
     n_figures_no_import_or_stage: int
     n_publications: int
     n_publications_no_import_or_stage: int
-    # TODO: Add remotes check
+    n_dvc_remotes: int
+    # TODO: Check calkit remotes are authenticated
 
     @computed_field
     @property
@@ -45,6 +46,11 @@ class ReproCheck(BaseModel):
             return "Since this is not a Git repo, run `git init` next."
         if not self.is_dvc_repo:
             return "DVC has not been initialized. Run `dvc init` next."
+        if not self.n_dvc_remotes:
+            return (
+                "No DVC remotes have been defined. "
+                "Run `calkit config setup-remote` or `dvc remote add` next."
+            )
         if not self.has_pipeline:
             return (
                 "There is no DVC pipeline. "
@@ -71,6 +77,7 @@ class ReproCheck(BaseModel):
         """Format as a nice string to print."""
         txt = f"Is a Git repo: {_bool_to_check_x(self.is_git_repo)}\n"
         txt += f"DVC initialized: {_bool_to_check_x(self.is_dvc_repo)}\n"
+        txt += f"DVC remote defined: {_bool_to_check_x(self.n_dvc_remotes)}\n"
         txt += f"Has pipeline: {_bool_to_check_x(self.has_pipeline)}\n"
         txt += f"Has Calkit info: {_bool_to_check_x(self.has_calkit_info)}\n"
         txt += f"Environments defined: {self.n_environments}\n"
@@ -132,4 +139,7 @@ def check_reproducibility(
         ):
             n_stages_no_env += 1
     res["n_stages_without_env"] = n_stages_no_env
+    # DVC remotes
+    dvc_remotes = calkit.dvc.get_remotes(wdir=wdir)
+    res["n_dvc_remotes"] = len(dvc_remotes)
     return ReproCheck.model_validate(res)

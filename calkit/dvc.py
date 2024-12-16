@@ -80,11 +80,15 @@ def read_pipeline(wdir: str = ".") -> dict:
         return calkit.ryaml.load(f)
 
 
-def get_remotes() -> dict[str, str]:
+def get_remotes(wdir: str = None) -> dict[str, str]:
     """Get a dictionary of DVC remotes, keyed by name, with URL as the
     value.
     """
-    out = subprocess.check_output(["dvc", "remote", "list"]).decode().strip()
+    out = (
+        subprocess.check_output(["dvc", "remote", "list"], cwd=wdir)
+        .decode()
+        .strip()
+    )
     if not out:
         return {}
     resp = {}

@@ -26,6 +26,7 @@ class ReproCheck(BaseModel):
     is_dvc_repo: bool
     is_git_repo: bool
     has_calkit_info: bool
+    has_dev_container: bool
     n_environments: int
     n_stages: int
     n_stages_without_env: int
@@ -37,7 +38,6 @@ class ReproCheck(BaseModel):
     n_publications_no_import_or_stage: int
     n_dvc_remotes: int
     # TODO: Check calkit remotes are authenticated
-    # TODO: Check for dev container
 
     @computed_field
     @property
@@ -82,6 +82,11 @@ class ReproCheck(BaseModel):
                     "Define where they were imported from or create "
                     "stage(s) to produce them."
                 )
+        if not self.has_dev_container:
+            return (
+                "No dev container spec is defined. "
+                "Create one with `calkit update devcontainer`."
+            )
 
     def to_pretty(self) -> str:
         """Format as a nice string to print."""
@@ -90,6 +95,10 @@ class ReproCheck(BaseModel):
         txt += f"DVC remote defined: {_bool_to_check_x(self.n_dvc_remotes)}\n"
         txt += f"Has pipeline: {_bool_to_check_x(self.has_pipeline)}\n"
         txt += f"Has Calkit info: {_bool_to_check_x(self.has_calkit_info)}\n"
+        txt += (
+            f"Has dev container spec: "
+            f"{_bool_to_check_x(self.has_dev_container)}\n"
+        )
         txt += f"Environments defined: {self.n_environments}\n"
         txt += (
             "Pipeline stages run outside environment: "
@@ -121,6 +130,9 @@ def check_reproducibility(
     res["is_dvc_repo"] = os.path.isfile(os.path.join(wdir, ".dvc", "config"))
     res["has_pipeline"] = os.path.isfile(os.path.join(wdir, "dvc.yaml"))
     res["has_calkit_info"] = os.path.isfile(os.path.join(wdir, "calkit.yaml"))
+    res["has_dev_container"] = os.path.isfile(
+        os.path.join(wdir, ".devcontainer", "devcontainer.json")
+    )
     ck_info = calkit.load_calkit_info(wdir=wdir, process_includes=False)
     pipeline = calkit.dvc.read_pipeline(wdir=wdir)
     # Check for non-imported artifacts not produced by the pipeline

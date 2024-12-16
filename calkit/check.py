@@ -11,7 +11,7 @@ import calkit
 
 INSTRUCTIONS_NOTE = (
     "Note that these could be as simple as telling the user to "
-    "execute `calkit run`, `dvc repro`, or `make`, so long as that will "
+    "execute `calkit run`, or `make`, so long as that will "
     "reproduce everything."
 )
 

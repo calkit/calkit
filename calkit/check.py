@@ -115,7 +115,7 @@ class ReproCheck(BaseModel):
                 f"or created by pipeline: {n_bad}/{n}\n"
             )
         txt += f"\nRecommendation: {self.recommendation}\n"
-        return txt
+        return txt.encode("utf-8", errors="replace")
 
 
 def check_reproducibility(

@@ -1,11 +1,13 @@
 """Tests for ``calkit.check``."""
 
+import os
 import subprocess
 
 from calkit.check import check_reproducibility
 
 
-def test_check_reproducibility(tmp_dir):
+def test_check_reproducibility(tmp_path):
+    os.chdir(tmp_path)
     res = check_reproducibility()
     assert not res.is_git_repo
     subprocess.run(["git", "init"])

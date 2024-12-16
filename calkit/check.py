@@ -70,7 +70,7 @@ class ReproCheck(BaseModel):
             return (
                 f"There are {self.n_stages_without_env} stages with commands "
                 "executed outside a defined environment. "
-                "Define the environment for those."
+                "Define the environment for those next."
             )
         for artifact_type in ["datasets", "figures", "publications"]:
             n_bad = getattr(self, f"n_{artifact_type}_no_import_or_stage")

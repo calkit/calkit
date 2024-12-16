@@ -138,7 +138,7 @@ class ReproCheck(BaseModel):
             n_good = getattr(self, f"n_{artifact_type}_with_import_or_stage")
             txt += (
                 f"{artifact_type.capitalize()} imported "
-                f"created by pipeline: {n_bad}/{n} "
+                f"created by pipeline: {n_good}/{n} "
                 f"{_bool_to_check_x(n_bad == 0)}\n"
             )
         txt += f"\nRecommendation: {self.recommendation}\n"

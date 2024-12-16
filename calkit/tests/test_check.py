@@ -14,7 +14,8 @@ def test_check_reproducibility(tmp_path):
     res = check_reproducibility()
     assert res.is_git_repo
     assert not res.is_dvc_repo
-    assert "dvc init" in res.recommendation
+    assert not res.has_readme
+    assert "no README.md" in res.recommendation
     subprocess.run(["dvc", "init"])
     res = check_reproducibility()
     assert res.is_dvc_repo

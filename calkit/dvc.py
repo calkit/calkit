@@ -72,18 +72,23 @@ def add_external_remote(owner_name: str, project_name: str):
     set_remote_auth(remote_name)
 
 
-def read_pipeline() -> dict:
-    if not os.path.isfile("dvc.yaml"):
+def read_pipeline(wdir: str = ".") -> dict:
+    fpath = os.path.join(wdir, "dvc.yaml")
+    if not os.path.isfile(fpath):
         return {}
-    with open("dvc.yaml") as f:
+    with open(fpath) as f:
         return calkit.ryaml.load(f)
 
 
-def get_remotes() -> dict[str, str]:
+def get_remotes(wdir: str = None) -> dict[str, str]:
     """Get a dictionary of DVC remotes, keyed by name, with URL as the
     value.
     """
-    out = subprocess.check_output(["dvc", "remote", "list"]).decode().strip()
+    out = (
+        subprocess.check_output(["dvc", "remote", "list"], cwd=wdir)
+        .decode()
+        .strip()
+    )
     if not out:
         return {}
     resp = {}

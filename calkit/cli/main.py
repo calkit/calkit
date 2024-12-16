@@ -17,6 +17,7 @@ from typing_extensions import Annotated, Optional
 
 import calkit
 from calkit.cli import print_sep, raise_error, run_cmd
+from calkit.cli.check import check_app
 from calkit.cli.config import config_app
 from calkit.cli.import_ import import_app
 from calkit.cli.list import list_app
@@ -44,6 +45,7 @@ app.add_typer(list_app, name="list", help="List Calkit objects.")
 app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(update_app, name="update", help="Update objects.")
+app.add_typer(check_app, name="check", help="Check things.")
 
 
 @app.callback()

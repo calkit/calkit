@@ -72,6 +72,15 @@ class ReproCheck(BaseModel):
                 "executed outside a defined environment. "
                 "Define the environment for those."
             )
+        for artifact_type in ["datasets", "figures", "publications"]:
+            n_bad = getattr(self, f"n_{artifact_type}_no_import_or_stage")
+            if n_bad:
+                return (
+                    f"There are {n_bad} {artifact_type} that are neither "
+                    "Imported nor produced by a pipeline stage. "
+                    "Define where they were imported from or create "
+                    "stage(s) to produce them."
+                )
 
     def to_pretty(self) -> str:
         """Format as a nice string to print."""

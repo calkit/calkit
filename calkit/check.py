@@ -9,6 +9,11 @@ from pydantic import BaseModel
 
 
 def _bool_to_check_x(val: bool) -> str:
+    """Convert a boolean to a checkmark or an X.
+
+    TODO: Need to detect if the terminal can handle these characters so we
+    don't get a UnicodeEncodeError, e.g., on Git Bash.
+    """
     if val:
         return "✅"
     else:

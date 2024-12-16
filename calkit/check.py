@@ -135,9 +135,10 @@ class ReproCheck(BaseModel):
         for artifact_type in ["datasets", "figures", "publications"]:
             n = getattr(self, f"n_{artifact_type}")
             n_bad = getattr(self, f"n_{artifact_type}_no_import_or_stage")
+            n_good = getattr(self, f"n_{artifact_type}_with_import_or_stage")
             txt += (
-                f"{artifact_type.capitalize()} not imported "
-                f"or created by pipeline: {n_bad}/{n} "
+                f"{artifact_type.capitalize()} imported "
+                f"created by pipeline: {n_bad}/{n} "
                 f"{_bool_to_check_x(n_bad == 0)}\n"
             )
         txt += f"\nRecommendation: {self.recommendation}\n"

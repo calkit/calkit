@@ -24,3 +24,8 @@ def test_check_reproducibility(tmp_path):
     assert not res.has_dev_container
     assert not res.has_pipeline
     print(res.to_pretty())
+    with open("README.md", "w") as f:
+        f.write("Simply execute `calkit run` to reproduce.")
+    res = check_reproducibility()
+    assert res.has_readme
+    assert res.instructions_in_readme

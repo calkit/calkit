@@ -10,15 +10,11 @@ import calkit
 
 
 def _bool_to_check_x(val: bool) -> str:
-    """Convert a boolean to a checkmark or an X.
-
-    TODO: Need to detect if the terminal can handle these characters so we
-    don't get a UnicodeEncodeError, e.g., on Git Bash.
-    """
+    """Convert a boolean to a checkmark or an X."""
     if val:
-        return "✅"
+        return "✅".encode("utf-8", errors="replace")
     else:
-        return "❌"
+        return "❌".encode("utf-8", errors="replace")
 
 
 class ReproCheck(BaseModel):
@@ -115,7 +111,7 @@ class ReproCheck(BaseModel):
                 f"or created by pipeline: {n_bad}/{n}\n"
             )
         txt += f"\nRecommendation: {self.recommendation}\n"
-        return txt.encode("utf-8", errors="replace")
+        return txt
 
 
 def check_reproducibility(

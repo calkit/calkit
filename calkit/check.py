@@ -30,6 +30,7 @@ class ReproCheck(BaseModel):
     n_environments: int
     n_stages: int
     n_stages_without_env: int
+    stages_without_env: list[str]
     n_datasets: int
     n_datasets_no_import_or_stage: int
     n_figures: int
@@ -69,7 +70,9 @@ class ReproCheck(BaseModel):
             )
         if self.n_stages_without_env > 0:
             return (
-                f"There are {self.n_stages_without_env} stages with commands "
+                f"There are {self.n_stages_without_env} stages "
+                f"({', '.join(self.stages_without_env)}) "
+                "with commands "
                 "executed outside a defined environment. "
                 "Define the environment for those next."
             )
@@ -150,7 +153,7 @@ def check_reproducibility(
     # Check for stages not run with environments
     stages = pipeline.get("stages", {})
     res["n_stages"] = len(stages)
-    n_stages_no_env = 0
+    stages_no_env = []
     for stage_name, stage in stages.items():
         cmd = stage.get("cmd", "")
         if (
@@ -159,8 +162,9 @@ def check_reproducibility(
             and "mamba run" not in cmd
             and "docker run" not in cmd
         ):
-            n_stages_no_env += 1
-    res["n_stages_without_env"] = n_stages_no_env
+            stages_no_env.append(stage_name)
+    res["n_stages_without_env"] = len(stages_no_env)
+    res["stages_without_env"] = stages_no_env
     # DVC remotes
     dvc_remotes = calkit.dvc.get_remotes(wdir=wdir)
     res["n_dvc_remotes"] = len(dvc_remotes)

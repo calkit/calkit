@@ -9,6 +9,13 @@ from pydantic import BaseModel, computed_field
 import calkit
 
 
+INSTRUCTIONS_NOTE = (
+    "Note that these could be as simple as telling the user to "
+    "execute `calkit run`, `dvc repro`, or `make`, so long as that will "
+    "reproduce everything."
+)
+
+
 def _bool_to_check_x(val: bool) -> str:
     """Convert a boolean to a checkmark or an X."""
     if val:
@@ -19,6 +26,8 @@ def _bool_to_check_x(val: bool) -> str:
 
 class ReproCheck(BaseModel):
     has_pipeline: bool
+    has_readme: bool
+    instructions_in_readme: bool
     is_dvc_repo: bool
     is_git_repo: bool
     has_calkit_info: bool
@@ -42,6 +51,18 @@ class ReproCheck(BaseModel):
         """Formulate a recommendation for the project."""
         if not self.is_git_repo:
             return "Since this is not a Git repo, run `git init` next."
+        if not self.has_readme:
+            return (
+                "There is no README.md file. "
+                "Create one, and ensure it has basic instructions for "
+                "reproducing this project's results. " + INSTRUCTIONS_NOTE
+            )
+        if not self.instructions_in_readme:
+            return (
+                "The README.md file doesn't contain "
+                "basic instructions for reproducing results, "
+                "so these should be added next. " + INSTRUCTIONS_NOTE
+            )
         if not self.is_dvc_repo:
             return "DVC has not been initialized. Run `dvc init` next."
         if not self.n_dvc_remotes:
@@ -115,6 +136,11 @@ class ReproCheck(BaseModel):
     def to_pretty(self) -> str:
         """Format as a nice string to print."""
         txt = f"Is a Git repo: {_bool_to_check_x(self.is_git_repo)}\n"
+        txt += f"Has README.md: {_bool_to_check_x(self.has_readme)}\n"
+        txt += (
+            f"Instructions in README.md: "
+            f"{_bool_to_check_x(self.instructions_in_readme)}\n"
+        )
         txt += f"DVC initialized: {_bool_to_check_x(self.is_dvc_repo)}\n"
         txt += f"DVC remote defined: {_bool_to_check_x(self.n_dvc_remotes)}\n"
         txt += f"Has pipeline: {_bool_to_check_x(self.has_pipeline)}\n"
@@ -163,6 +189,22 @@ def check_reproducibility(
     res["has_dev_container"] = os.path.isfile(
         os.path.join(wdir, ".devcontainer", "devcontainer.json")
     )
+    # Check README for at least minimal instructions
+    readme_path = os.path.join(wdir, "README.md")
+    if os.path.isfile(readme_path):
+        res["has_readme"] = True
+        with open(readme_path) as f:
+            readme_txt = f.read().lower()
+        res["instructions_in_readme"] = (
+            ("getting started" in readme_txt)
+            or ("instructions" in readme_txt)
+            or ("how to run" in readme_txt)
+            or ("how to reproduce" in readme_txt)
+            or ("calkit" in readme_txt)
+        )
+    else:
+        res["has_readme"] = False
+        res["instructions_in_readme"] = False
     ck_info = calkit.load_calkit_info(wdir=wdir, process_includes=False)
     pipeline = calkit.dvc.read_pipeline(wdir=wdir)
     # Check for non-imported artifacts not produced by the pipeline

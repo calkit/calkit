@@ -37,6 +37,7 @@ class ReproCheck(BaseModel):
     n_publications_no_import_or_stage: int
     n_dvc_remotes: int
     # TODO: Check calkit remotes are authenticated
+    # TODO: Check for dev container
 
     @computed_field
     @property

@@ -128,7 +128,7 @@ class ReproCheck(BaseModel):
             f"{_bool_to_check_x(self.n_environments)}\n"
         )
         txt += (
-            "Pipeline stages run inside an environment: "
+            "Pipeline stages run in an environment: "
             f"{self.n_stages_with_env}/{self.n_stages} "
             f"{_bool_to_check_x(self.n_stages_without_env == 0)}\n"
         )

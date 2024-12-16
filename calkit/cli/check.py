@@ -20,4 +20,4 @@ def check_repro(
 ):
     """Check the reproducibility of a project."""
     res = check_reproducibility(wdir=wdir, log_func=typer.echo)
-    typer.echo(res.to_pretty())
+    typer.echo(res.to_pretty().encode("utf-8", errors="replace"))

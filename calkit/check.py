@@ -12,9 +12,9 @@ import calkit
 def _bool_to_check_x(val: bool) -> str:
     """Convert a boolean to a checkmark or an X."""
     if val:
-        return "✅".encode("utf-8", errors="replace")
+        return "✅"
     else:
-        return "❌".encode("utf-8", errors="replace")
+        return "❌"
 
 
 class ReproCheck(BaseModel):

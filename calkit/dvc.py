@@ -72,10 +72,11 @@ def add_external_remote(owner_name: str, project_name: str):
     set_remote_auth(remote_name)
 
 
-def read_pipeline() -> dict:
-    if not os.path.isfile("dvc.yaml"):
+def read_pipeline(wdir: str = ".") -> dict:
+    fpath = os.path.join(wdir, "dvc.yaml")
+    if not os.path.isfile(fpath):
         return {}
-    with open("dvc.yaml") as f:
+    with open(fpath) as f:
         return calkit.ryaml.load(f)
 
 

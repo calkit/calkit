@@ -25,7 +25,7 @@ class ReproCheck(BaseModel):
     has_dev_container: bool
     n_environments: int
     n_stages: int
-    n_stages_without_env: int
+    stages_with_env: list[str]
     stages_without_env: list[str]
     n_datasets: int
     n_datasets_no_import_or_stage: int
@@ -87,6 +87,31 @@ class ReproCheck(BaseModel):
                 "Create one with `calkit update devcontainer`."
             )
 
+    @computed_field
+    @property
+    def n_datasets_with_import_or_stage(self) -> int:
+        return self.n_datasets - self.n_datasets_no_import_or_stage
+
+    @computed_field
+    @property
+    def n_figures_with_import_or_stage(self) -> int:
+        return self.n_figures - self.n_figures_no_import_or_stage
+
+    @computed_field
+    @property
+    def n_publications_with_import_or_stage(self) -> int:
+        return self.n_publications - self.n_publications_no_import_or_stage
+
+    @computed_field
+    @property
+    def n_stages_without_env(self) -> int:
+        return len(self.stages_without_env)
+
+    @computed_field
+    @property
+    def n_stages_with_env(self) -> int:
+        return len(self.stages_with_env)
+
     def to_pretty(self) -> str:
         """Format as a nice string to print."""
         txt = f"Is a Git repo: {_bool_to_check_x(self.is_git_repo)}\n"
@@ -98,17 +123,22 @@ class ReproCheck(BaseModel):
             f"Has dev container spec: "
             f"{_bool_to_check_x(self.has_dev_container)}\n"
         )
-        txt += f"Environments defined: {self.n_environments}\n"
         txt += (
-            "Pipeline stages run outside environment: "
-            f"{self.n_stages_without_env}/{self.n_stages}\n"
+            f"Environments defined: {self.n_environments} "
+            f"{_bool_to_check_x(self.n_environments)}\n"
+        )
+        txt += (
+            "Pipeline stages run inside an environment: "
+            f"{self.n_stages_with_env}/{self.n_stages} "
+            f"{_bool_to_check_x(self.n_stages_without_env == 0)}\n"
         )
         for artifact_type in ["datasets", "figures", "publications"]:
             n = getattr(self, f"n_{artifact_type}")
             n_bad = getattr(self, f"n_{artifact_type}_no_import_or_stage")
             txt += (
                 f"{artifact_type.capitalize()} not imported "
-                f"or created by pipeline: {n_bad}/{n}\n"
+                f"or created by pipeline: {n_bad}/{n} "
+                f"{_bool_to_check_x(n_bad == 0)}\n"
             )
         txt += f"\nRecommendation: {self.recommendation}\n"
         return txt
@@ -150,6 +180,7 @@ def check_reproducibility(
     stages = pipeline.get("stages", {})
     res["n_stages"] = len(stages)
     stages_no_env = []
+    stages_with_env = []
     for stage_name, stage in stages.items():
         cmd = stage.get("cmd", "")
         if (
@@ -159,8 +190,10 @@ def check_reproducibility(
             and "docker run" not in cmd
         ):
             stages_no_env.append(stage_name)
-    res["n_stages_without_env"] = len(stages_no_env)
+        else:
+            stages_with_env.append(stage_name)
     res["stages_without_env"] = stages_no_env
+    res["stages_with_env"] = stages_with_env
     # DVC remotes
     dvc_remotes = calkit.dvc.get_remotes(wdir=wdir)
     res["n_dvc_remotes"] = len(dvc_remotes)

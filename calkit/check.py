@@ -167,7 +167,8 @@ class ReproCheck(BaseModel):
                 f"created by pipeline: {n_good}/{n} "
                 f"{_bool_to_check_x(n_bad == 0)}\n"
             )
-        txt += f"\nRecommendation: {self.recommendation}\n"
+        if self.recommendation:
+            txt += f"\nRecommendation: {self.recommendation}\n"
         return txt
 
 

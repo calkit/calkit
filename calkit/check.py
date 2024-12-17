@@ -78,7 +78,7 @@ class ReproCheck(BaseModel):
         if not self.has_calkit_info:
             return (
                 "There is no `calkit.yaml` file. "
-                "Add some artifacts with `calkit new `."
+                "Add some artifacts with `calkit new`."
             )
         if self.n_environments == 0:
             return (

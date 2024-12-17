@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 import arithmetic_eval
+import requests
 from pydantic import BaseModel, model_validator
 
 
@@ -109,6 +110,39 @@ class LookupTable(Calculation):
     def evaluate(self, **inputs):
         self.check_inputs(**inputs)
         return super().evaluate(**inputs)
+
+
+class HttpRequestParams(BaseModel):
+    url: str
+    inputs_as_params: bool = True  # Otherwise, use body
+    method: Literal["get", "post", "put"] = "get"
+    as_json: bool = True  # Otherwise, return raw text
+
+
+class HttpRequest(Calculation):
+    """Make an HTTP request and return the result.
+
+    This should not be run on a web server since it can be insecure.
+    For example, it could make requests to private services and return
+    sensitive data.
+    """
+
+    kind: str = "http"
+    params: HttpRequestParams
+
+    def evaluate(self, **inputs):
+        super().check_inputs(**inputs)
+        func = getattr(requests, self.params.method)
+        if self.params.inputs_as_params:
+            kws = {"params": inputs}
+        else:
+            kws = {"json", inputs}
+        resp: requests.Response = func(url=self.params.url, **kws)
+        resp.raise_for_status()
+        if self.params.as_json:
+            return resp.json()
+        else:
+            return resp.text
 
 
 def parse(data: dict) -> Calculation:

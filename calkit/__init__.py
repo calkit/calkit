@@ -10,3 +10,5 @@ from . import models
 from . import office
 from . import templates
 from . import conda
+from . import calc
+from . import check

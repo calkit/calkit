@@ -38,7 +38,7 @@ def test_linear():
         params=calkit.calc.LinearParams(
             coeffs=dict(input_voltage=1.1), offset=0.01
         ),
-        inputs=["input_voltage"],
+        inputs=[{"name": "input_voltage", "dtype": "float"}],
         output="load_lbf",
     )
     res = calc.evaluate(input_voltage=1.534)

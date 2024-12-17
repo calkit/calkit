@@ -10,7 +10,7 @@ from pydantic import BaseModel, model_validator
 
 
 class Input(BaseModel):
-    name: str | None = None
+    name: str
     description: str | None = None
     dtype: Literal["int", "float", "str"] = "float"
     min: int | float | None = None
@@ -29,33 +29,49 @@ class Calculation(BaseModel):
     params: dict = {}
     name: str | None = None
     description: str | None = None
-    inputs: dict[str, Input] | list[str]
+    inputs: list[Input] | list[str]
     output: Output | str
     # TODO: Enforce that we don't have any inputs with the same name as the output
+
+    @property
+    def input_names(self) -> list[str]:
+        input_names = []
+        for i in self.inputs:
+            if isinstance(i, Input):
+                input_names.append(i.name)
+            else:
+                input_names.append(i)
+        return input_names
+
+    @property
+    def inputs_dict(self) -> dict[str, Input]:
+        res = {}
+        for i in self.inputs:
+            if isinstance(i, str):
+                res[i] = Input(name=i)
+            else:
+                res[i.name] = i
+        return res
 
     def check_inputs(self, **inputs) -> dict:
         """Check that the supplied inputs match those declared and do type
         coercion.
         """
         dtypes = {"int": int, "float": float, "str": str}
-        for k in self.inputs:
+        inputs_dict = self.inputs_dict
+        for k in inputs_dict:
             if k not in inputs:
                 raise ValueError(f"Missing input {k}")
         for k, v in inputs.items():
-            if k not in self.inputs:
+            if k not in inputs_dict:
                 raise ValueError(f"{k} is not in declared inputs")
-            if isinstance(self.inputs, dict):
-                input_def = self.inputs[k]
-                v = dtypes[input_def.dtype](v)
-                inputs[k] = v
-                if input_def.min is not None and v < input_def.min:
-                    raise ValueError(f"Input value {k} = {v} it too small")
-                if input_def.max is not None and v > input_def.max:
-                    raise ValueError(f"Input value {k} = {v} is too large")
-            else:
-                # Default type is float
-                v = float(v)
-                inputs[k] = v
+            input_def = inputs_dict[k]
+            v = dtypes[input_def.dtype](v)
+            inputs[k] = v
+            if input_def.min is not None and v < input_def.min:
+                raise ValueError(f"Input value {k} = {v} it too small")
+            if input_def.max is not None and v > input_def.max:
+                raise ValueError(f"Input value {k} = {v} is too large")
         return inputs
 
     def evaluate(self, **inputs) -> dict:
@@ -105,12 +121,7 @@ class Linear(Calculation):
 
     @model_validator(mode="after")
     def validate_model(self) -> Linear:
-        input_names = (
-            self.inputs
-            if isinstance(self.inputs, list)
-            else list(self.inputs.keys())
-        )
-        if set(input_names) != set(self.params.coeffs.keys()):
+        if set(self.input_names) != set(self.params.coeffs.keys()):
             raise ValueError("Coefficients must have same keys as input names")
         return self
 

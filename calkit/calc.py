@@ -175,11 +175,6 @@ class LookupTable(Calculation):
     kind: str = "lookup-table"
     params: LookupTableParams
 
-    def check_inputs(self, **inputs) -> dict:
-        if len(inputs) > 1:
-            raise ValueError("Only one input can be provided")
-        return super().check_inputs(**inputs)
-
 
 class HttpRequestParams(BaseModel):
     url: str

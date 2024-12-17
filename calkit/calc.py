@@ -18,6 +18,7 @@ class Output(BaseModel):
 
 class Calculation(BaseModel):
     kind: Literal["formula"]
+    params: dict = {}
     title: str | None = None
     description: str | None = None
     inputs: dict[str, Input] | list[str]
@@ -39,22 +40,50 @@ class Calculation(BaseModel):
                     raise ValueError(f"Input value {k} = {v} is too large")
 
     def evaluate(self, **inputs) -> dict:
+        self.check_inputs(**inputs)
         raise NotImplementedError
+
+
+class FormulaParams(BaseModel):
+    formula: str
 
 
 class Formula(Calculation):
     kind: str = "formula"
-    formula: str
+    params: FormulaParams
 
     def evaluate(self, **inputs):
         self.check_inputs(**inputs)
-        return arithmetic_eval.evaluate(self.formula, inputs)
+        return arithmetic_eval.evaluate(self.params.formula, inputs)
+
+
+class LookupTableParams(BaseModel):
+    x_values: list[float]
+    y_values: list[float]
+    method: Literal["floor", "ceil", "round", "interpolate"] = "interpolate"
+
+
+class LookupTable(Calculation):
+    """A 1-D lookup table."""
+
+    kind: str = "lookup-table"
+    params: LookupTableParams
+
+    def check_inputs(self, **inputs):
+        if len(inputs) > 1:
+            raise ValueError("Only one input can be provided")
+        super().check_inputs(**inputs)
+
+    def evaluate(self, **inputs):
+        self.check_inputs(**inputs)
+        return super().evaluate(**inputs)
 
 
 def parse(data: dict) -> Calculation:
     if isinstance(data, BaseModel):
         data = data.model_dump()
-    kinds = {"formula": Formula}
+    # Automatically take keys not in the `kind` and move them into `params`?
+    kinds = {"formula": Formula, "lookup-table": LookupTable}
     return kinds[data["kind"]].model_validate(data)
 
 

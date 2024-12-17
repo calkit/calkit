@@ -31,7 +31,15 @@ class Calculation(BaseModel):
     description: str | None = None
     inputs: list[Input] | list[str]
     output: Output | str
-    # TODO: Enforce that we don't have any inputs with the same name as the output
+
+    @model_validator(mode="after")
+    def validate_model(self) -> Calculation:
+        input_names = self.input_names
+        if self.output_name in input_names:
+            raise ValueError("Output name must not overlap with input names")
+        if len(set(input_names)) != len(input_names):
+            raise ValueError("Input names must be unique")
+        return self
 
     @property
     def input_names(self) -> list[str]:
@@ -52,6 +60,12 @@ class Calculation(BaseModel):
             else:
                 res[i.name] = i
         return res
+
+    @property
+    def output_name(self) -> str:
+        if isinstance(self.output, Output):
+            return self.output.name
+        return self.output
 
     def check_inputs(self, **inputs) -> dict:
         """Check that the supplied inputs match those declared and do type

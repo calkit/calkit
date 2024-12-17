@@ -20,6 +20,26 @@ def test_formula():
         calc.evaluate(x=5)
     with pytest.raises(ValueError):
         calc.evaluate(z=5)
+    with pytest.raises(ValueError):
+        calc = calkit.calc.Formula(
+            params=dict(formula="0.2151 * x + y**2"),
+            inputs=["x", "x"],
+            output=calkit.calc.Output(
+                name="z",
+                description="The value",
+                template="The value is {z:.1f}.",
+            ),
+        )
+    with pytest.raises(ValueError):
+        calc = calkit.calc.Formula(
+            params=dict(formula="0.2151 * x + y**2"),
+            inputs=["x", "y"],
+            output=calkit.calc.Output(
+                name="x",
+                description="The value",
+                template="The value is {z:.1f}.",
+            ),
+        )
 
 
 def test_lookuptable():

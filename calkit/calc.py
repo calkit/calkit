@@ -60,7 +60,7 @@ class Calculation(BaseModel):
             out_name = self.output
         template = self.output_template
         if template is None:
-            template = "For inputs "
+            template = "For input "
             for input_name in inputs:
                 template += input_name + "={" + input_name + "}, "
             template += "the output is "

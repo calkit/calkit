@@ -21,6 +21,7 @@ class Output(BaseModel):
     name: str
     description: str | None = None
     dtype: Literal["int", "float", "str"] = "float"
+    template: str | None = None
 
 
 class Calculation(BaseModel):
@@ -30,7 +31,6 @@ class Calculation(BaseModel):
     description: str | None = None
     inputs: dict[str, Input] | list[str]
     output: Output | str
-    output_template: str | None = None
     # TODO: Enforce that we don't have any inputs with the same name as the output
 
     def check_inputs(self, **inputs) -> dict:
@@ -66,9 +66,10 @@ class Calculation(BaseModel):
         res = self.evaluate(**inputs)
         if isinstance(self.output, Output):
             out_name = self.output.name
+            template = self.output.template
         else:
             out_name = self.output
-        template = self.output_template
+            template = None
         if template is None:
             template = "For input "
             for input_name in inputs:

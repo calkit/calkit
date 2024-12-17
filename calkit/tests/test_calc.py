@@ -9,8 +9,9 @@ def test_formula():
     calc = calkit.calc.Formula(
         params=dict(formula="0.2151 * x + y**2"),
         inputs=["x", "y"],
-        output=calkit.calc.Output(name="z", description="The value"),
-        output_template="The value is {z:.1f}.",
+        output=calkit.calc.Output(
+            name="z", description="The value", template="The value is {z:.1f}."
+        ),
     )
     assert calc.evaluate(x=10.2, y=0.1) == 2.20402
     res = calkit.calc.evaluate_and_format(calc, x=5, y=1)

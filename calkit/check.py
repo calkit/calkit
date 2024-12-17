@@ -225,7 +225,10 @@ def check_reproducibility(
     stages_no_env = []
     stages_with_env = []
     for stage_name, stage in stages.items():
-        cmd = stage.get("cmd", "")
+        if "foreach" in stage:
+            cmd = stage.get("do", {}).get("cmd", "")
+        else:
+            cmd = stage.get("cmd", "")
         if (
             "calkit" not in cmd
             and "conda run" not in cmd

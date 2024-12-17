@@ -1,4 +1,4 @@
-__version__ = "0.10.1"
+__version__ = "0.11.0"
 
 from .core import *
 from . import git
@@ -10,3 +10,5 @@ from . import models
 from . import office
 from . import templates
 from . import conda
+from . import calc
+from . import check

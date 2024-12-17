@@ -978,3 +978,42 @@ def check_conda_env(
         log_func=log_func,
         relaxed=relaxed,
     )
+
+
+@app.command(name="calc")
+def run_calculation(
+    name: Annotated[str, typer.Argument(help="Calculation name.")],
+    inputs: Annotated[
+        list[str],
+        typer.Option(
+            "--input", "-i", help="Inputs defined like x=1 (with no spaces.)"
+        ),
+    ] = [],
+    no_formatting: Annotated[
+        bool,
+        typer.Option(
+            "--no-format", help="Do not format output before printing"
+        ),
+    ] = False,
+):
+    """Run a project's calculation."""
+    ck_info = calkit.load_calkit_info()
+    calcs = ck_info.get("calculations", {})
+    if name not in calcs:
+        raise_error(f"Calculation '{name}' not defined in calkit.yaml")
+    try:
+        calc = calkit.calc.parse(calcs[name])
+    except Exception as e:
+        raise_error(f"Invalid calculation: {e}")
+    # Parse inputs
+    parsed_inputs = {}
+    for i in inputs:
+        iname, ival = i.split("=")
+        parsed_inputs[iname] = ival
+    try:
+        if no_formatting:
+            typer.echo(calc.evaluate(**parsed_inputs))
+        else:
+            typer.echo(calc.evaluate_and_format(**parsed_inputs))
+    except Exception as e:
+        raise_error(f"Calculation failed: {e}")

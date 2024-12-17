@@ -168,10 +168,13 @@ class HttpRequest(Calculation):
 
 class XGBoostModelParams(BaseModel):
     path: str
+    type: Literal["classifier", "regressor"]
 
 
 class XGBoostModel(Calculation):
     """Make predictions with an XGBoost model saved as JSON.
+
+    This is currently just a prototype and should not be expected to work.
 
     One input, ``data``, should be defined to be passed to the model's
     ``predict`` method.
@@ -187,7 +190,11 @@ class XGBoostModel(Calculation):
 
         # Convert model path to something that can be loaded if running on the
         # Calkit Cloud
-        model = xgboost.Booster(model_file=self.params.path)
+        types = {
+            "classifier": xgboost.XGBClassifier,
+            "regressor": xgboost.XGBRegressor,
+        }
+        model = types[self.params.type]().load_model(self.params.path)
         return model.predict(**inputs)
 
 

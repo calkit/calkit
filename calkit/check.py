@@ -98,7 +98,7 @@ class ReproCheck(BaseModel):
             if n_bad:
                 return (
                     f"There are {n_bad} {artifact_type} that are neither "
-                    "Imported nor produced by a pipeline stage. "
+                    "imported nor produced by a pipeline stage. "
                     "Define where they were imported from or create "
                     "stage(s) to produce them."
                 )

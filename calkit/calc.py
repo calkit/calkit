@@ -12,7 +12,7 @@ from pydantic import BaseModel, model_validator
 class Input(BaseModel):
     name: str | None = None
     description: str | None = None
-    dtype: Literal["int", "float"] = "float"
+    dtype: Literal["int", "float", "str"] = "float"
     min: int | float | None = None
     max: int | float | None = None
 
@@ -20,7 +20,7 @@ class Input(BaseModel):
 class Output(BaseModel):
     name: str
     description: str | None = None
-    dtype: Literal["int", "float"] = "float"
+    dtype: Literal["int", "float", "str"] = "float"
 
 
 class Calculation(BaseModel):
@@ -33,8 +33,11 @@ class Calculation(BaseModel):
     output_template: str | None = None
     # TODO: Enforce that we don't have any inputs with the same name as the output
 
-    def check_inputs(self, **inputs) -> None:
-        """Check that the supplied inputs match those declared."""
+    def check_inputs(self, **inputs) -> dict:
+        """Check that the supplied inputs match those declared and do type
+        coercion.
+        """
+        dtypes = {"int": int, "float": float, "str": str}
         for k in self.inputs:
             if k not in inputs:
                 raise ValueError(f"Missing input {k}")
@@ -43,13 +46,20 @@ class Calculation(BaseModel):
                 raise ValueError(f"{k} is not in declared inputs")
             if isinstance(self.inputs, dict):
                 input_def = self.inputs[k]
+                v = dtypes[input_def.dtype](v)
+                inputs[k] = v
                 if input_def.min is not None and v < input_def.min:
                     raise ValueError(f"Input value {k} = {v} it too small")
                 if input_def.max is not None and v > input_def.max:
                     raise ValueError(f"Input value {k} = {v} is too large")
+            else:
+                # Default type is float
+                v = float(v)
+                inputs[k] = v
+        return inputs
 
     def evaluate(self, **inputs) -> dict:
-        self.check_inputs(**inputs)
+        inputs = self.check_inputs(**inputs)
         raise NotImplementedError
 
     def evaluate_and_format(self, **inputs) -> str:
@@ -77,7 +87,7 @@ class Formula(Calculation):
     params: FormulaParams
 
     def evaluate(self, **inputs):
-        self.check_inputs(**inputs)
+        inputs = self.check_inputs(**inputs)
         return arithmetic_eval.evaluate(self.params.formula, inputs)
 
 
@@ -104,7 +114,7 @@ class Linear(Calculation):
         return self
 
     def evaluate(self, **inputs):
-        super().check_inputs(**inputs)
+        inputs = super().check_inputs(**inputs)
         val = self.params.offset
         for input_name, input_val in inputs.items():
             val += self.params.coeffs[input_name] * input_val
@@ -123,10 +133,10 @@ class LookupTable(Calculation):
     kind: str = "lookup-table"
     params: LookupTableParams
 
-    def check_inputs(self, **inputs):
+    def check_inputs(self, **inputs) -> dict:
         if len(inputs) > 1:
             raise ValueError("Only one input can be provided")
-        super().check_inputs(**inputs)
+        return super().check_inputs(**inputs)
 
     def evaluate(self, **inputs):
         self.check_inputs(**inputs)

@@ -78,7 +78,7 @@ class ReproCheck(BaseModel):
         if not self.has_calkit_info:
             return (
                 "There is no `calkit.yaml` file. "
-                "Add some artifacts with `calkit new `."
+                "Add some artifacts with `calkit new`."
             )
         if self.n_environments == 0:
             return (
@@ -98,7 +98,7 @@ class ReproCheck(BaseModel):
             if n_bad:
                 return (
                     f"There are {n_bad} {artifact_type} that are neither "
-                    "Imported nor produced by a pipeline stage. "
+                    "imported nor produced by a pipeline stage. "
                     "Define where they were imported from or create "
                     "stage(s) to produce them."
                 )
@@ -167,7 +167,8 @@ class ReproCheck(BaseModel):
                 f"created by pipeline: {n_good}/{n} "
                 f"{_bool_to_check_x(n_bad == 0)}\n"
             )
-        txt += f"\nRecommendation: {self.recommendation}\n"
+        if self.recommendation:
+            txt += f"\nRecommendation: {self.recommendation}\n"
         return txt
 
 
@@ -225,7 +226,10 @@ def check_reproducibility(
     stages_no_env = []
     stages_with_env = []
     for stage_name, stage in stages.items():
-        cmd = stage.get("cmd", "")
+        if "foreach" in stage:
+            cmd = stage.get("do", {}).get("cmd", "")
+        else:
+            cmd = stage.get("cmd", "")
         if (
             "calkit" not in cmd
             and "conda run" not in cmd

@@ -145,6 +145,31 @@ class HttpRequest(Calculation):
             return resp.text
 
 
+class XGBoostModelParams(BaseModel):
+    path: str
+
+
+class XGBoostModel(Calculation):
+    """Make predictions with an XGBoost model saved as JSON.
+
+    One input, ``data``, should be defined to be passed to the model's
+    ``predict`` method.
+    """
+
+    kind: str = "xgboost"
+    params: XGBoostModelParams
+
+    def evaluate(self, **inputs):
+        super().check_inputs(**inputs)
+        # Load model from JSON
+        import xgboost
+
+        # Convert model path to something that can be loaded if running on the
+        # Calkit Cloud
+        model = xgboost.Booster(model_file=self.params.path)
+        return model.predict(**inputs)
+
+
 def parse(data: dict) -> Calculation:
     if isinstance(data, BaseModel):
         data = data.model_dump()

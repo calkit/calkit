@@ -29,7 +29,7 @@ class Output(BaseModel):
 
 
 class Calculation(BaseModel):
-    kind: Literal["formula"]
+    kind: str
     params: dict = {}
     name: str | None = None
     description: str | None = None

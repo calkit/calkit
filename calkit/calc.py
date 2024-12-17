@@ -8,11 +8,15 @@ import arithmetic_eval
 import requests
 from pydantic import BaseModel, model_validator
 
+DTYPES = {"int": int, "float": float, "str": str}
+DEFAULT_IN_TYPE = "float"
+DEFAULT_OUT_TYPE = "float"
+
 
 class Input(BaseModel):
     name: str
     description: str | None = None
-    dtype: Literal["int", "float", "str"] = "float"
+    dtype: Literal["int", "float", "str"] = DEFAULT_IN_TYPE
     min: int | float | None = None
     max: int | float | None = None
 
@@ -20,7 +24,7 @@ class Input(BaseModel):
 class Output(BaseModel):
     name: str
     description: str | None = None
-    dtype: Literal["int", "float", "str"] = "float"
+    dtype: Literal["int", "float", "str"] = DEFAULT_OUT_TYPE
     template: str | None = None
 
 
@@ -71,7 +75,6 @@ class Calculation(BaseModel):
         """Check that the supplied inputs match those declared and do type
         coercion.
         """
-        dtypes = {"int": int, "float": float, "str": str}
         inputs_dict = self.inputs_dict
         for k in inputs_dict:
             if k not in inputs:
@@ -80,7 +83,7 @@ class Calculation(BaseModel):
             if k not in inputs_dict:
                 raise ValueError(f"{k} is not in declared inputs")
             input_def = inputs_dict[k]
-            v = dtypes[input_def.dtype](v)
+            v = DTYPES[input_def.dtype](v)
             inputs[k] = v
             if input_def.min is not None and v < input_def.min:
                 raise ValueError(f"Input value {k} = {v} it too small")
@@ -88,9 +91,23 @@ class Calculation(BaseModel):
                 raise ValueError(f"Input value {k} = {v} is too large")
         return inputs
 
-    def evaluate(self, **inputs) -> dict:
-        inputs = self.check_inputs(**inputs)
+    def calculate(self, **inputs):
+        """This is the method to override to implement custom logic.
+
+        Input and output type coercion will be handled outside.
+        """
         raise NotImplementedError
+
+    def evaluate(self, **inputs):
+        inputs = self.check_inputs(**inputs)
+        out = self.calculate(**inputs)
+        return self.coerce_output(out)
+
+    def coerce_output(self, val):
+        if isinstance(self.output, Output):
+            return DTYPES[self.output.dtype](val)
+        else:
+            return DTYPES[DEFAULT_OUT_TYPE](val)
 
     def evaluate_and_format(self, **inputs) -> str:
         res = self.evaluate(**inputs)
@@ -117,7 +134,7 @@ class Formula(Calculation):
     kind: str = "formula"
     params: FormulaParams
 
-    def evaluate(self, **inputs):
+    def calculate(self, **inputs):
         inputs = self.check_inputs(**inputs)
         return arithmetic_eval.evaluate(self.params.formula, inputs)
 
@@ -139,8 +156,7 @@ class Linear(Calculation):
             raise ValueError("Coefficients must have same keys as input names")
         return self
 
-    def evaluate(self, **inputs):
-        inputs = super().check_inputs(**inputs)
+    def calculate(self, **inputs):
         val = self.params.offset
         for input_name, input_val in inputs.items():
             val += self.params.coeffs[input_name] * input_val
@@ -164,10 +180,6 @@ class LookupTable(Calculation):
             raise ValueError("Only one input can be provided")
         return super().check_inputs(**inputs)
 
-    def evaluate(self, **inputs):
-        self.check_inputs(**inputs)
-        return super().evaluate(**inputs)
-
 
 class HttpRequestParams(BaseModel):
     url: str
@@ -187,8 +199,7 @@ class HttpRequest(Calculation):
     kind: str = "http"
     params: HttpRequestParams
 
-    def evaluate(self, **inputs):
-        super().check_inputs(**inputs)
+    def calculate(self, **inputs):
         func = getattr(requests, self.params.method)
         if self.params.inputs_as_params:
             kws = {"params": inputs}
@@ -219,8 +230,7 @@ class XGBoostModel(Calculation):
     kind: str = "xgboost"
     params: XGBoostModelParams
 
-    def evaluate(self, **inputs):
-        super().check_inputs(**inputs)
+    def calculate(self, **inputs):
         # Load model from JSON
         import xgboost
 

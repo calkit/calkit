@@ -1,9 +1,11 @@
 """Functionality for calculations."""
 
+from __future__ import annotations
+
 from typing import Literal
 
 import arithmetic_eval
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class Input(BaseModel):
@@ -57,6 +59,36 @@ class Formula(Calculation):
         return arithmetic_eval.evaluate(self.params.formula, inputs)
 
 
+class LinearParams(BaseModel):
+    coeffs: dict[str, float]
+    offset: float = 0.0
+
+
+class Linear(Calculation):
+    """Calculation for a simple linear relationship."""
+
+    kind: str = "linear"
+    params: LinearParams
+
+    @model_validator(mode="after")
+    def validate_model(self) -> Linear:
+        input_names = (
+            self.inputs
+            if isinstance(self.inputs, list)
+            else list(self.inputs.keys())
+        )
+        if set(input_names) != set(self.params.coeffs.keys()):
+            raise ValueError("Coefficients must have same keys as input names")
+        return self
+
+    def evaluate(self, **inputs):
+        super().check_inputs(**inputs)
+        val = self.params.offset
+        for input_name, input_val in inputs.items():
+            val += self.params.coeffs[input_name] * input_val
+        return val
+
+
 class LookupTableParams(BaseModel):
     x_values: list[float]
     y_values: list[float]
@@ -83,7 +115,7 @@ def parse(data: dict) -> Calculation:
     if isinstance(data, BaseModel):
         data = data.model_dump()
     # Automatically take keys not in the `kind` and move them into `params`?
-    kinds = {"formula": Formula, "lookup-table": LookupTable}
+    kinds = {"formula": Formula, "lookup-table": LookupTable, "linear": Linear}
     return kinds[data["kind"]].model_validate(data)
 
 

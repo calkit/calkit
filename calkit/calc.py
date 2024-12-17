@@ -10,22 +10,28 @@ from pydantic import BaseModel, model_validator
 
 
 class Input(BaseModel):
+    name: str | None = None
+    description: str | None = None
     dtype: Literal["int", "float"] = "float"
     min: int | float | None = None
     max: int | float | None = None
 
 
 class Output(BaseModel):
+    name: str
+    description: str | None = None
     dtype: Literal["int", "float"] = "float"
 
 
 class Calculation(BaseModel):
     kind: Literal["formula"]
     params: dict = {}
-    title: str | None = None
+    name: str | None = None
     description: str | None = None
     inputs: dict[str, Input] | list[str]
-    outputs: dict[str, Output] | list[str]
+    output: Output | str
+    output_template: str | None = None
+    # TODO: Enforce that we don't have any inputs with the same name as the output
 
     def check_inputs(self, **inputs) -> None:
         """Check that the supplied inputs match those declared."""
@@ -45,6 +51,21 @@ class Calculation(BaseModel):
     def evaluate(self, **inputs) -> dict:
         self.check_inputs(**inputs)
         raise NotImplementedError
+
+    def evaluate_and_format(self, **inputs) -> str:
+        res = self.evaluate(**inputs)
+        if isinstance(self.output, Output):
+            out_name = self.output.name
+        else:
+            out_name = self.output
+        template = self.output_template
+        if template is None:
+            template = "For inputs "
+            for input_name in inputs:
+                template += input_name + "={" + input_name + "}, "
+            template += "the output is "
+            template += out_name + "={" + out_name + "}."
+        return template.format(**(inputs | {out_name: res}))
 
 
 class FormulaParams(BaseModel):
@@ -180,3 +201,7 @@ def parse(data: dict) -> Calculation:
 
 def evaluate(calc_def: dict | Calculation, **inputs) -> dict:
     return parse(calc_def).evaluate(**inputs)
+
+
+def evaluate_and_format(calc_def: dict | Calculation, **inputs) -> str:
+    return parse(calc_def).evaluate_and_format(**inputs)

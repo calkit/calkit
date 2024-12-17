@@ -1001,13 +1001,19 @@ def run_calculation(
     calcs = ck_info.get("calculations", {})
     if name not in calcs:
         raise_error(f"Calculation '{name}' not defined in calkit.yaml")
-    calc = calkit.calc.parse(calcs[name])
+    try:
+        calc = calkit.calc.parse(calcs[name])
+    except Exception as e:
+        raise_error(f"Invalid calculation: {e}")
     # Parse inputs
     parsed_inputs = {}
     for i in inputs:
         iname, ival = i.split("=")
         parsed_inputs[iname] = ival
-    if no_formatting:
-        typer.echo(calc.evaluate(**parsed_inputs))
-    else:
-        typer.echo(calc.evaluate_and_format(**parsed_inputs))
+    try:
+        if no_formatting:
+            typer.echo(calc.evaluate(**parsed_inputs))
+        else:
+            typer.echo(calc.evaluate_and_format(**parsed_inputs))
+    except Exception as e:
+        raise_error(f"Calculation failed: {e}")

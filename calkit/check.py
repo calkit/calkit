@@ -68,7 +68,7 @@ class ReproCheck(BaseModel):
         if not self.n_dvc_remotes:
             return (
                 "No DVC remotes have been defined. "
-                "Run `calkit config setup-remote` or `dvc remote add` next."
+                "Run `calkit config remote` or `dvc remote add` next."
             )
         if not self.has_pipeline:
             return (

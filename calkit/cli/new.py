@@ -45,10 +45,7 @@ def new_project(
         bool,
         typer.Option(
             "--cloud",
-            help=(
-                "Whether or not to create this project in the cloud "
-                "(Calkit and GitHub.)"
-            ),
+            help=("Create this project in the cloud (Calkit and GitHub.)"),
         ),
     ] = False,
     public: Annotated[
@@ -64,7 +61,18 @@ def new_project(
             "--git-url",
             help=(
                 "Git repo URL. "
-                "Usually https://github.com/{your_name}/{project_name}"
+                "Usually https://github.com/{your_name}/{project_name}."
+            ),
+        ),
+    ] = None,
+    template: Annotated[
+        str,
+        typer.Option(
+            "--template",
+            "-t",
+            help=(
+                "Template from which to derive the project, e.g., "
+                "'calkit/example-basic'."
             ),
         ),
     ] = None,
@@ -89,8 +97,10 @@ def new_project(
         f"Check out the docs at {docs_url}."
     )
     abs_path = os.path.abspath(path)
-    if cloud and os.path.exists(abs_path):
-        raise_error("Must specify a new directory if using --cloud")
+    if (cloud or template) and os.path.exists(abs_path):
+        raise_error(
+            "Must specify a new directory if using --cloud or --template"
+        )
     ck_info_fpath = os.path.join(abs_path, "calkit.yaml")
     if os.path.isfile(ck_info_fpath) and not overwrite:
         raise_error(
@@ -121,15 +131,102 @@ def new_project(
                     description=description,
                     git_repo_url=git_repo_url,
                     is_public=public,
+                    template=template,
                 ),
             )
         except Exception as e:
             raise_error(f"Posting new project to cloud failed: {e}")
         # Now clone here and that's about
-        subprocess.run(["calkit", "clone", resp["git_repo_url"], abs_path])
+        subprocess.run(["git", "clone", resp["git_repo_url"], abs_path])
+        try:
+            calkit.dvc.set_remote_auth(wdir=abs_path)
+        except Exception:
+            warn("Failed to setup Calkit DVC remote auth")
         prj = calkit.git.detect_project_name(path=abs_path)
         add_msg = f"\n\nYou can view your project at https://calkit.io/{prj}"
         typer.echo(success_message + add_msg)
+        return
+    # If using a template, clone it first
+    if template:
+        # TODO: If the template is not a Git repo URL, make a request to the
+        # Calkit Cloud to get it?
+        # For now, assume consistency between Calkit Cloud projects and
+        # GitHub repo URLs
+        if "github.com" in template:
+            template_git_url = template
+            template_name = template.split("github.com")[-1][1:].removesuffix(
+                ".git"
+            )
+        else:
+            template_name = template
+            template_git_url = f"https://github.com/{template}"
+        # Now clone it
+        subprocess.run(["git", "clone", template_git_url, abs_path])
+        # Templates should always have DVC initialized, so no need to do that
+        repo = git.Repo(abs_path)
+        git_rev = repo.git.rev_parse("HEAD")
+        # Rename origin remote as upstream
+        typer.echo("Renaming template remote as upstream")
+        repo.git.remote(["rename", "origin", "upstream"])
+        # Set git repo URL if provided
+        if git_repo_url:
+            typer.echo("Setting origin remote URL")
+            repo.git.remote(["add", "origin", git_repo_url])
+        # Update Calkit info in this project
+        ck_info = calkit.load_calkit_info(wdir=abs_path)
+        ck_info = ck_info | dict(
+            name=name,
+            title=title,
+            description=description,
+            git_repo_url=git_repo_url,
+            derived_from=dict(
+                project=template_name,
+                git_repo_url=template_git_url,
+                git_rev=git_rev,
+            ),
+        )
+        # Remove questions and owner if they're there
+        _ = ck_info.pop("questions", None)
+        _ = ck_info.pop("owner", None)
+        # Write Calkit info
+        with open(os.path.join(abs_path, "calkit.yaml"), "w") as f:
+            ryaml.dump(ck_info, f)
+        # Update README
+        readme_fpath = os.path.join(abs_path, "README.md")
+        typer.echo("Generating README.md")
+        readme_txt = calkit.make_readme_content(
+            project_name=name,
+            project_title=title,
+            project_description=description,
+        )
+        with open(readme_fpath, "w") as f:
+            f.write(readme_txt)
+        # Update DVC remote
+        # TODO: This will fail because we don't know this user's account name
+        typer.echo("Updating Calkit DVC remote")
+        try:
+            calkit.dvc.configure_remote(wdir=abs_path)
+        except ValueError:
+            warn(
+                "Could not update Calkit DVC remote since "
+                "no Git repo URL was provided"
+            )
+            warn(
+                "You will need to manually run `git remote add origin` "
+                "and `calkit config remote`"
+            )
+            subprocess.call(
+                ["dvc", "remote", "remove", "calkit", "-q"], cwd=abs_path
+            )
+        try:
+            calkit.dvc.set_remote_auth(wdir=abs_path)
+        except Exception:
+            warn("Could not set authentication for Calkit DVC remote")
+        # Commit this stuff to Git
+        repo.git.add(".")
+        if repo.git.diff("--staged"):
+            repo.git.commit(["-m", f"Create new project from {template_name}"])
+        typer.echo(success_message)
         return
     os.makedirs(abs_path, exist_ok=True)
     try:
@@ -692,6 +789,7 @@ def new_publication(
         str,
         typer.Option(
             "--template",
+            "-t",
             help=(
                 "Template with which to create the source files. "
                 "Should be in the format {type}/{name}."

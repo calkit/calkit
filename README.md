@@ -58,23 +58,51 @@ management interface and a DVC remote for easily storing all versions of your
 data/code/figures/publications, interacting with your collaborators,
 reusing others' research artifacts, etc.
 
-After signing up, visit the [settings](https://calkit.io/settings) page
-and create a token.
+After signing up, visit the
+[settings](https://calkit.io/settings?tab=tokens)
+page and create a token for use with the API.
 Then run
 
 ```sh
 calkit config set token ${YOUR_TOKEN_HERE}
 ```
 
-Then, inside a project repo you'd like to connect to the cloud, run
+## Quickstart
+
+After installing Calkit and setting your token as described above, run:
 
 ```sh
-calkit config setup-remote
+calkit new project calkit-project-1 \
+    --title "My first Calkit project" \
+    --template calkit/example-basic \
+    --cloud \
+    --public
 ```
 
-This will setup the Calkit DVC remote, such that commands like `dvc push` will
-allow you to push versions of your data or pipeline outputs to the cloud
-for safe storage and sharing with your collaborators.
+This will create a new project from the
+[`calkit/example-basic`](https://github.com/calkit/example-basic)
+template,
+creating it in the cloud and cloning to `calkit-project-1`.
+You should now be able to run:
+
+```sh
+cd calkit-project-1
+calkit run
+```
+
+This will reproduce the project's pipeline.
+Next, you can start adding stages to the pipeline,
+modifying the Python environments and scripts,
+and editing the paper.
+All will be kept in sync with the `calkit run` command.
+
+To back up all of your work, execute:
+
+```sh
+calkit save -am "Run pipeline"
+```
+
+This will commit and push to both GitHub and the Calkit Cloud.
 
 ## Tutorials
 

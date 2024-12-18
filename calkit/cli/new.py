@@ -139,7 +139,11 @@ def new_project(
         except Exception as e:
             raise_error(f"Posting new project to cloud failed: {e}")
         # Now clone here and that's about
-        subprocess.run(["calkit", "clone", resp["git_repo_url"], abs_path])
+        subprocess.run(["git", "clone", resp["git_repo_url"], abs_path])
+        try:
+            calkit.dvc.set_remote_auth(wdir=abs_path)
+        except Exception:
+            warn("Failed to setup Calkit DVC remote auth")
         prj = calkit.git.detect_project_name(path=abs_path)
         add_msg = f"\n\nYou can view your project at https://calkit.io/{prj}"
         typer.echo(success_message + add_msg)

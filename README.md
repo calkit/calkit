@@ -69,27 +69,24 @@ calkit config set token ${YOUR_TOKEN_HERE}
 
 ## Quickstart
 
-After installing Calkit and setting your token as described above,
-run something like:
+After installing Calkit and setting your token as described above, run:
 
 ```sh
-calkit new project my-calkit-project \
-    --title "My Calkit project" \
-    --description "Your description here." \
-    --template calkit/example-basic \ # Optional
-    --cloud \ # Optional
+calkit new project calkit-project-1 \
+    --title "My first Calkit project" \
+    --template calkit/example-basic \
+    --cloud \
     --public # Optional
 ```
 
 This will create a new project from the
-[`calkit/example-basic`](https://calkit.io/calkit/example-basic)
+[`calkit/example-basic`](https://github.com/calkit/example-basic)
 template,
-creating it in the cloud (as long as `--cloud` was specified)
-and cloning to `my-calkit-project`.
+creating it in the cloud and cloning to `calkit-project-1`.
 You should now be able to run:
 
 ```sh
-cd my-calkit-project
+cd calkit-project-1
 calkit run
 ```
 

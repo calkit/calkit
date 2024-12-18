@@ -96,12 +96,22 @@ def new_project(
         title = typer.prompt("Enter a title (ex: 'My research project')")
     typer.echo(f"Using title: {title}")
     if cloud:
-        # TODO: Figure out what the GitHub repo URL should be?
         # Cloud should allow None, which will allow us to post just the name
-        raise_error("Not implemented")
-        resp = calkit.cloud.post("/projects", json=dict(name=name))
-        # Now clone here and that's about it
-        # TODO: Should this be the only way?
+        try:
+            resp = calkit.cloud.post(
+                "/projects",
+                json=dict(
+                    name=name,
+                    title=title,
+                    description=description,
+                    git_repo_url=git_repo_url,
+                ),
+            )
+        except Exception as e:
+            raise_error(f"Posting new project to cloud failed: {e}")
+        # Now clone here and that's about
+        subprocess.run(["git", "clone", resp["git_repo_url"], abs_path])
+        # TODO: Setup Calkit Cloud DVC remote token in cloned repo
         return
     os.makedirs(abs_path, exist_ok=True)
     try:
@@ -133,6 +143,10 @@ def new_project(
         )
         with open(readme_fpath, "w") as f:
             f.write(readme_txt)
+    if git_repo_url and not repo.remotes:
+        typer.echo(f"Adding Git remote {git_repo_url}")
+        repo.git.remote(["add", "origin", git_repo_url])
+    # TODO: Setup Calkit Cloud DVC remote
     repo.git.add(".")
     if repo.git.diff("--staged") and not no_commit:
         repo.git.commit(["-m", "Initialize Calkit project"])

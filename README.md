@@ -76,7 +76,7 @@ calkit new project calkit-project-1 \
     --title "My first Calkit project" \
     --template calkit/example-basic \
     --cloud \
-    --public # Optional
+    --public
 ```
 
 This will create a new project from the

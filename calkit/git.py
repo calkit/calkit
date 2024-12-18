@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import git
 
+import calkit
 
-def detect_project_name(path=None) -> str:
-    """Read the project owner and name from the remote.
 
-    TODO: Currently only works with GitHub remotes where the GitHub repo
-    name is identical to the Calkit project name, which is not guaranteed.
-    We should probably look inside ``calkit.yaml`` at ``name``
-    first, and fallback to the GitHub remote URL if we can't find that.
-    """
+def detect_project_name(path: str = None) -> str:
+    """Read the project owner and name from the remote."""
+    ck_info = calkit.load_calkit_info(wdir=path)
+    name = ck_info.get("name")
     url = git.Repo(path=path).remote().url
-    return url.split("github.com")[-1][1:].removesuffix(".git")
+    from_url = url.split("github.com")[-1][1:].removesuffix(".git")
+    owner_name, project_name = from_url.split("/")
+    if name is None:
+        name = project_name
+    return f"{owner_name}/{name}"

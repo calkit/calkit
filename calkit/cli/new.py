@@ -14,10 +14,9 @@ from typing_extensions import Annotated
 
 import calkit
 from calkit.cli import raise_error, warn
+from calkit.cli.update import update_devcontainer
 from calkit.core import ryaml
 from calkit.docker import LAYERS
-
-from .update import update_devcontainer
 
 new_app = typer.Typer(no_args_is_help=True)
 
@@ -50,6 +49,13 @@ def new_project(
                 "Whether or not to create this project in the cloud "
                 "(Calkit and GitHub.)"
             ),
+        ),
+    ] = False,
+    public: Annotated[
+        bool,
+        typer.Option(
+            "--public",
+            help="Create as a public project if --cloud is selected.",
         ),
     ] = False,
     git_repo_url: Annotated[
@@ -105,13 +111,13 @@ def new_project(
                     title=title,
                     description=description,
                     git_repo_url=git_repo_url,
+                    is_public=public,
                 ),
             )
         except Exception as e:
             raise_error(f"Posting new project to cloud failed: {e}")
         # Now clone here and that's about
-        subprocess.run(["git", "clone", resp["git_repo_url"], abs_path])
-        # TODO: Setup Calkit Cloud DVC remote token in cloned repo
+        subprocess.run(["calkit", "clone", resp["git_repo_url"], abs_path])
         return
     os.makedirs(abs_path, exist_ok=True)
     try:
@@ -146,7 +152,10 @@ def new_project(
     if git_repo_url and not repo.remotes:
         typer.echo(f"Adding Git remote {git_repo_url}")
         repo.git.remote(["add", "origin", git_repo_url])
-    # TODO: Setup Calkit Cloud DVC remote
+    # Setup Calkit Cloud DVC remote
+    if repo.remotes:
+        calkit.dvc.configure_remote(wdir=abs_path)
+        calkit.dvc.set_remote_auth(wdir=abs_path)
     repo.git.add(".")
     if repo.git.diff("--staged") and not no_commit:
         repo.git.commit(["-m", "Initialize Calkit project"])

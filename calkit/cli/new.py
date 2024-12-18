@@ -45,10 +45,7 @@ def new_project(
         bool,
         typer.Option(
             "--cloud",
-            help=(
-                "Whether or not to create this project in the cloud "
-                "(Calkit and GitHub.)"
-            ),
+            help=("Create this project in the cloud (Calkit and GitHub.)"),
         ),
     ] = False,
     public: Annotated[

@@ -61,7 +61,7 @@ def new_project(
             "--git-url",
             help=(
                 "Git repo URL. "
-                "Usually https://github.com/{your_name}/{project_name}"
+                "Usually https://github.com/{your_name}/{project_name}."
             ),
         ),
     ] = None,

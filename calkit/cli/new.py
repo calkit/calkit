@@ -164,8 +164,11 @@ def new_project(
     if git_repo_url and not repo.remotes:
         typer.echo(f"Adding Git remote {git_repo_url}")
         repo.git.remote(["add", "origin", git_repo_url])
+    elif not git_repo_url and not repo.remotes:
+        warn("No Git remotes are configured")
     # Setup Calkit Cloud DVC remote
     if repo.remotes:
+        typer.echo("Setting up Calkit Cloud DVC remote")
         calkit.dvc.configure_remote(wdir=abs_path)
         calkit.dvc.set_remote_auth(wdir=abs_path)
     repo.git.add(".")

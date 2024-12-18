@@ -69,6 +69,7 @@ def new_project(
         str,
         typer.Option(
             "--template",
+            "-t",
             help=(
                 "Template from which to derive the project, e.g., "
                 "'calkit/example-basic'."
@@ -788,6 +789,7 @@ def new_publication(
         str,
         typer.Option(
             "--template",
+            "-t",
             help=(
                 "Template with which to create the source files. "
                 "Should be in the format {type}/{name}."

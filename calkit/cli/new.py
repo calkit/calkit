@@ -9,13 +9,103 @@ import subprocess
 import git
 import typer
 from typing_extensions import Annotated
+import re
 
+from git.exc import InvalidGitRepositoryError
 import calkit
-from calkit.cli import raise_error
+from calkit.cli import raise_error, warn
 from calkit.core import ryaml
 from calkit.docker import LAYERS
 
 new_app = typer.Typer(no_args_is_help=True)
+
+
+@new_app.command(name="project")
+def new_project(
+    path: Annotated[str, typer.Argument(help="Where to create the project.")],
+    name: Annotated[
+        str,
+        typer.Option(
+            "--name",
+            "-n",
+            help=(
+                "Project name. Will be inferred as kebab-cased directory "
+                "name if not provided."
+            ),
+        ),
+    ] = None,
+    title: Annotated[
+        str, typer.Option("--title", help="Project title.")
+    ] = None,
+    description: Annotated[
+        str, typer.Option("--description", help="Project description.")
+    ] = None,
+    cloud: Annotated[
+        bool,
+        typer.Option(
+            "--cloud",
+            help=(
+                "Whether or not to create this project in the cloud "
+                "(Calkit and GitHub.)"
+            ),
+        ),
+    ] = False,
+    git_repo_url: Annotated[
+        str,
+        typer.Option(
+            "--git-url",
+            help=(
+                "Git repo URL. "
+                "Usually https://github.com/{your_name}/{project_name}"
+            ),
+        ),
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite project if one already exists.",
+        ),
+    ] = False,
+):
+    """Create a new project."""
+    abs_path = os.path.abspath(path)
+    if cloud and os.path.exists(abs_path):
+        raise_error("Must specify a new directory if using --cloud")
+    ck_info_fpath = os.path.join(abs_path, "calkit.yaml")
+    if os.path.isfile(ck_info_fpath) and not overwrite:
+        raise_error(
+            "Destination is already a Calkit project; "
+            "use --overwrite to continue"
+        )
+    if os.path.isdir(abs_path) and os.listdir(abs_path):
+        warn(f"{abs_path} is not empty")
+    if name is None:
+        name = re.sub(r"[-_,\.\ ]", "-", os.path.basename(abs_path).lower())
+    if " " in name:
+        warn("Invalid name; replacing spaces with hyphens")
+        name = name.replace(" ", "-")
+    typer.echo(f"Creating project {name}")
+    if title is None:
+        title = typer.prompt("Enter a title (ex: 'My research project')")
+    typer.echo(f"Using title: {title}")
+    if cloud:
+        # TODO: Figure out what the GitHub repo URL should be?
+        # Cloud should allow None, which will allow us to post just the name
+        raise_error("Not implemented")
+        resp = calkit.cloud.post("/projects", json=dict(name=name))
+        # Now clone here and that's about it
+        # TODO: Should this be the only way?
+        return
+    os.makedirs(abs_path, exist_ok=True)
+    try:
+        repo = git.Repo(abs_path)
+    except InvalidGitRepositoryError:
+        subprocess.run(["git", "init"], cwd=abs_path)
+    repo = git.Repo(abs_path)
+    if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
+        subprocess.run(["dvc", "init"], cwd=abs_path)
 
 
 @new_app.command(name="figure")

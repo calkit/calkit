@@ -13,19 +13,23 @@ logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
 
 
-def configure_remote():
-    project_name = calkit.git.detect_project_name()
+def configure_remote(wdir: str = None):
+    project_name = calkit.git.detect_project_name(path=wdir)
     base_url = calkit.cloud.get_base_url()
     remote_url = f"{base_url}/projects/{project_name}/dvc"
     subprocess.check_call(
-        ["dvc", "remote", "add", "-d", "-f", get_app_name(), remote_url]
+        ["dvc", "remote", "add", "-d", "-f", get_app_name(), remote_url],
+        cwd=wdir,
     )
     subprocess.check_call(
-        ["dvc", "remote", "modify", get_app_name(), "auth", "custom"]
+        ["dvc", "remote", "modify", get_app_name(), "auth", "custom"],
+        cwd=wdir,
     )
 
 
-def set_remote_auth(remote_name: str = None, always_auth: bool = False):
+def set_remote_auth(
+    remote_name: str = None, always_auth: bool = False, wdir: str = None
+):
     """Get a token and set it in the local DVC config so we can interact with
     the cloud as an HTTP remote.
     """
@@ -48,7 +52,8 @@ def set_remote_auth(remote_name: str = None, always_auth: bool = False):
             remote_name,
             "custom_auth_header",
             "Authorization",
-        ]
+        ],
+        cwd=wdir,
     )
     subprocess.check_call(
         [
@@ -59,7 +64,8 @@ def set_remote_auth(remote_name: str = None, always_auth: bool = False):
             remote_name,
             "password",
             f"Bearer {settings.dvc_token}",
-        ]
+        ],
+        cwd=wdir,
     )
 
 

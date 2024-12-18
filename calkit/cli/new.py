@@ -3,19 +3,178 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 
 import git
 import typer
+from git.exc import InvalidGitRepositoryError
 from typing_extensions import Annotated
 
 import calkit
-from calkit.cli import raise_error
+from calkit.cli import raise_error, warn
+from calkit.cli.update import update_devcontainer
 from calkit.core import ryaml
 from calkit.docker import LAYERS
 
 new_app = typer.Typer(no_args_is_help=True)
+
+
+@new_app.command(name="project")
+def new_project(
+    path: Annotated[str, typer.Argument(help="Where to create the project.")],
+    name: Annotated[
+        str,
+        typer.Option(
+            "--name",
+            "-n",
+            help=(
+                "Project name. Will be inferred as kebab-cased directory "
+                "name if not provided."
+            ),
+        ),
+    ] = None,
+    title: Annotated[
+        str, typer.Option("--title", help="Project title.")
+    ] = None,
+    description: Annotated[
+        str, typer.Option("--description", help="Project description.")
+    ] = None,
+    cloud: Annotated[
+        bool,
+        typer.Option(
+            "--cloud",
+            help=(
+                "Whether or not to create this project in the cloud "
+                "(Calkit and GitHub.)"
+            ),
+        ),
+    ] = False,
+    public: Annotated[
+        bool,
+        typer.Option(
+            "--public",
+            help="Create as a public project if --cloud is selected.",
+        ),
+    ] = False,
+    git_repo_url: Annotated[
+        str,
+        typer.Option(
+            "--git-url",
+            help=(
+                "Git repo URL. "
+                "Usually https://github.com/{your_name}/{project_name}"
+            ),
+        ),
+    ] = None,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes to Git.")
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite project if one already exists.",
+        ),
+    ] = False,
+):
+    """Create a new project."""
+    # TODO: Update this when there is a real docs site up
+    docs_url = "https://github.com/calkit/calkit?tab=readme-ov-file#tutorials"
+    success_message = (
+        "\nCongrats on creating your new Calkit project!\n\n"
+        "Next, you'll probably want to start building your pipeline.\n\n"
+        f"Check out the docs at {docs_url}."
+    )
+    abs_path = os.path.abspath(path)
+    if cloud and os.path.exists(abs_path):
+        raise_error("Must specify a new directory if using --cloud")
+    ck_info_fpath = os.path.join(abs_path, "calkit.yaml")
+    if os.path.isfile(ck_info_fpath) and not overwrite:
+        raise_error(
+            "Destination is already a Calkit project; "
+            "use --overwrite to continue"
+        )
+    if os.path.isdir(abs_path) and os.listdir(abs_path):
+        warn(f"{abs_path} is not empty")
+    if name is None:
+        name = re.sub(r"[-_,\.\ ]", "-", os.path.basename(abs_path).lower())
+    if " " in name:
+        warn("Invalid name; replacing spaces with hyphens")
+        name = name.replace(" ", "-")
+    typer.echo(f"Creating project {name}")
+    if title is None:
+        title = typer.prompt("Enter a title (ex: 'My research project')")
+    typer.echo(f"Using title: {title}")
+    if cloud:
+        # Cloud should allow None, which will allow us to post just the name
+        # NOTE: This will fail if the user hasn't logged into GitHub in a
+        # while, and their token stored in the Calkit cloud is expired
+        try:
+            resp = calkit.cloud.post(
+                "/projects",
+                json=dict(
+                    name=name,
+                    title=title,
+                    description=description,
+                    git_repo_url=git_repo_url,
+                    is_public=public,
+                ),
+            )
+        except Exception as e:
+            raise_error(f"Posting new project to cloud failed: {e}")
+        # Now clone here and that's about
+        subprocess.run(["calkit", "clone", resp["git_repo_url"], abs_path])
+        prj = calkit.git.detect_project_name(path=abs_path)
+        add_msg = f"\n\nYou can view your project at https://calkit.io/{prj}"
+        typer.echo(success_message + add_msg)
+        return
+    os.makedirs(abs_path, exist_ok=True)
+    try:
+        repo = git.Repo(abs_path)
+    except InvalidGitRepositoryError:
+        typer.echo("Initializing Git repository")
+        subprocess.run(["git", "init", "-q"], cwd=abs_path)
+    repo = git.Repo(abs_path)
+    if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
+        typer.echo("Initializing DVC repository")
+        subprocess.run(["dvc", "init", "-q"], cwd=abs_path)
+    # Create calkit.yaml file
+    ck_info = calkit.load_calkit_info(wdir=abs_path)
+    ck_info = dict(name=name, title=title, description=description) | ck_info
+    with open(os.path.join(abs_path, "calkit.yaml"), "w") as f:
+        ryaml.dump(ck_info, f)
+    # Create dev container spec
+    update_devcontainer(wdir=abs_path)
+    # Create README
+    readme_fpath = os.path.join(abs_path, "README.md")
+    if os.path.isfile(readme_fpath) and not overwrite:
+        warn("README.md already exists; not modifying")
+    else:
+        typer.echo("Generating README.md")
+        readme_txt = calkit.make_readme_content(
+            project_name=name,
+            project_title=title,
+            project_description=description,
+        )
+        with open(readme_fpath, "w") as f:
+            f.write(readme_txt)
+    if git_repo_url and not repo.remotes:
+        typer.echo(f"Adding Git remote {git_repo_url}")
+        repo.git.remote(["add", "origin", git_repo_url])
+    elif not git_repo_url and not repo.remotes:
+        warn("No Git remotes are configured")
+    # Setup Calkit Cloud DVC remote
+    if repo.remotes:
+        typer.echo("Setting up Calkit Cloud DVC remote")
+        calkit.dvc.configure_remote(wdir=abs_path)
+        calkit.dvc.set_remote_auth(wdir=abs_path)
+    repo.git.add(".")
+    if repo.git.diff("--staged") and not no_commit:
+        repo.git.commit(["-m", "Initialize Calkit project"])
+    typer.echo(success_message)
 
 
 @new_app.command(name="figure")

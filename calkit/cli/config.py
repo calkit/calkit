@@ -42,7 +42,8 @@ def get_config_value(key: str) -> None:
         print()
 
 
-@config_app.command(name="setup-remote")
+@config_app.command(name="setup-remote", help="Alias for 'remote'.")
+@config_app.command(name="remote")
 def setup_remote():
     """Setup the Calkit cloud as the default DVC remote and store a token in
     the local config.
@@ -56,7 +57,8 @@ def setup_remote():
         raise_error("Current directory is not a Git repository")
 
 
-@config_app.command(name="setup-remote-auth")
+@config_app.command(name="setup-remote-auth", help="Alias for 'remote-auth'.")
+@config_app.command(name="remote-auth")
 def setup_remote_auth():
     """Store a Calkit cloud token in the local DVC config for all Calkit
     remotes.

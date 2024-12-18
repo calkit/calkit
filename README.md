@@ -69,7 +69,7 @@ calkit config set token ${YOUR_TOKEN_HERE}
 Then, inside a project repo you'd like to connect to the cloud, run
 
 ```sh
-calkit config setup-remote
+calkit config remote
 ```
 
 This will setup the Calkit DVC remote, such that commands like `dvc push` will

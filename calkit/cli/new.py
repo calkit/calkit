@@ -211,7 +211,7 @@ def new_project(
             )
             warn(
                 "You will need to manually run `git remote add origin` "
-                "and `calkit config setup-remote`"
+                "and `calkit config remote`"
             )
             subprocess.call(
                 ["dvc", "remote", "remove", "calkit", "-q"], cwd=abs_path

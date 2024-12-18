@@ -81,6 +81,13 @@ def new_project(
     ] = False,
 ):
     """Create a new project."""
+    # TODO: Update this when there is a real docs site up
+    docs_url = "https://github.com/calkit/calkit?tab=readme-ov-file#tutorials"
+    success_message = (
+        "\nCongrats on creating your new Calkit project!\n\n"
+        "Next, you'll probably want to start building your pipeline.\n\n"
+        f"Check out the docs at {docs_url}."
+    )
     abs_path = os.path.abspath(path)
     if cloud and os.path.exists(abs_path):
         raise_error("Must specify a new directory if using --cloud")
@@ -103,6 +110,8 @@ def new_project(
     typer.echo(f"Using title: {title}")
     if cloud:
         # Cloud should allow None, which will allow us to post just the name
+        # NOTE: This will fail if the user hasn't logged into GitHub in a
+        # while, and their token stored in the Calkit cloud is expired
         try:
             resp = calkit.cloud.post(
                 "/projects",
@@ -118,6 +127,9 @@ def new_project(
             raise_error(f"Posting new project to cloud failed: {e}")
         # Now clone here and that's about
         subprocess.run(["calkit", "clone", resp["git_repo_url"], abs_path])
+        prj = calkit.git.detect_project_name(path=abs_path)
+        add_msg = f"\n\You can view your project at https://calkit.io/{prj}"
+        typer.echo(success_message + add_msg)
         return
     os.makedirs(abs_path, exist_ok=True)
     try:
@@ -159,6 +171,7 @@ def new_project(
     repo.git.add(".")
     if repo.git.diff("--staged") and not no_commit:
         repo.git.commit(["-m", "Initialize Calkit project"])
+    typer.echo(success_message)
 
 
 @new_app.command(name="figure")

@@ -84,7 +84,8 @@ calkit new project my-calkit-project \
 This will create a new project from the
 [`calkit/example-basic`](https://calkit.io/calkit/example-basic)
 template,
-creating it in the cloud and cloning to `my-calkit-project`.
+creating it in the cloud (as long as `--cloud` was specified)
+and cloning to `my-calkit-project`.
 You should now be able to run:
 
 ```sh

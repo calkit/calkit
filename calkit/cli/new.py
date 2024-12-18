@@ -128,7 +128,7 @@ def new_project(
         # Now clone here and that's about
         subprocess.run(["calkit", "clone", resp["git_repo_url"], abs_path])
         prj = calkit.git.detect_project_name(path=abs_path)
-        add_msg = f"\n\You can view your project at https://calkit.io/{prj}"
+        add_msg = f"\n\nYou can view your project at https://calkit.io/{prj}"
         typer.echo(success_message + add_msg)
         return
     os.makedirs(abs_path, exist_ok=True)

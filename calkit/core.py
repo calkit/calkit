@@ -209,3 +209,13 @@ def save_notebook_stage_out(
         obj.write_parquet(fpath)
     else:
         raise ValueError(f"Unsupported format '{fmt}' for engine '{engine}'")
+
+
+def make_readme_content(
+    project_name: str, project_title: str, project_description: str | None
+) -> str:
+    """Create Markdown content for a Calkit project README."""
+    txt = f"# {project_title}\n\n"
+    if project_description is not None:
+        txt += f"\n{project_description}\n"
+    return txt

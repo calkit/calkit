@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 
 import git
 import typer
-from typing_extensions import Annotated
-import re
-
 from git.exc import InvalidGitRepositoryError
+from typing_extensions import Annotated
+
 import calkit
 from calkit.cli import raise_error, warn
 from calkit.core import ryaml
 from calkit.docker import LAYERS
+
+from .update import update_devcontainer
 
 new_app = typer.Typer(no_args_is_help=True)
 
@@ -60,6 +62,9 @@ def new_project(
             ),
         ),
     ] = None,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes to Git.")
+    ] = None,
     overwrite: Annotated[
         bool,
         typer.Option(
@@ -102,10 +107,35 @@ def new_project(
     try:
         repo = git.Repo(abs_path)
     except InvalidGitRepositoryError:
-        subprocess.run(["git", "init"], cwd=abs_path)
+        typer.echo("Initializing Git repository")
+        subprocess.run(["git", "init", "-q"], cwd=abs_path)
     repo = git.Repo(abs_path)
     if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
-        subprocess.run(["dvc", "init"], cwd=abs_path)
+        typer.echo("Initializing DVC repository")
+        subprocess.run(["dvc", "init", "-q"], cwd=abs_path)
+    # Create calkit.yaml file
+    ck_info = calkit.load_calkit_info(wdir=abs_path)
+    ck_info = dict(name=name, title=title, description=description) | ck_info
+    with open(os.path.join(abs_path, "calkit.yaml"), "w") as f:
+        ryaml.dump(ck_info, f)
+    # Create dev container spec
+    update_devcontainer(wdir=abs_path)
+    # Create README
+    readme_fpath = os.path.join(abs_path, "README.md")
+    if os.path.isfile(readme_fpath) and not overwrite:
+        warn("README.md already exists; not modifying")
+    else:
+        typer.echo("Generating README.md")
+        readme_txt = calkit.make_readme_content(
+            project_name=name,
+            project_title=title,
+            project_description=description,
+        )
+        with open(readme_fpath, "w") as f:
+            f.write(readme_txt)
+    repo.git.add(".")
+    if repo.git.diff("--staged") and not no_commit:
+        repo.git.commit(["-m", "Initialize Calkit project"])
 
 
 @new_app.command(name="figure")

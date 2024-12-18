@@ -80,7 +80,9 @@ calkit new project my-calkit-project \
     --public # Optional
 ```
 
-This will create a new project from the `calkit/example-basic` template,
+This will create a new project from the
+[`calkit/example-basic`](https://calkit.io/calkit/example-basic)
+template,
 creating it in the cloud and cloning to `my-calkit-project`.
 You should now be able to run:
 

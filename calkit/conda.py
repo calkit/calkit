@@ -2,12 +2,41 @@
 
 import json
 import os
+import re
 import subprocess
 
+from packaging.specifiers import SpecifierSet
+from packaging.version import Version
 from pydantic import BaseModel
 
 import calkit
 from calkit import ryaml
+
+
+def _check_single(req: str, actual: str, conda: bool = False) -> bool:
+    """Helper function for checking actual versions against requirements."""
+    req_name = re.split("[=<>]", req)[0]
+    req_spec = req.removeprefix(req_name)
+    if conda and req_spec.startswith("="):
+        req_spec = "=" + req_spec
+        if not req_spec.endswith(".*"):
+            req_spec += ".*"
+    actual_name, actual_vers = re.split("[=<>]+", actual, maxsplit=1)
+    if actual_name != req_name:
+        return False
+    actual_spec = actual.removeprefix(actual_name)
+    if conda and actual_spec.startswith("="):
+        actual_spec = "=" + actual_spec
+    version = Version(actual_vers)
+    spec = SpecifierSet(req_spec)
+    return spec.contains(version)
+
+
+def _check_list(req: str, actual: list[str], conda: bool = False) -> bool:
+    for installed in actual:
+        if _check_single(req, installed, conda=conda):
+            return True
+    return False
 
 
 class EnvCheckResult(BaseModel):
@@ -127,45 +156,23 @@ def check_env(
                 required_conda_deps.append(dep.replace("==", "="))
         log_func("Checking conda dependencies")
         for dep in required_conda_deps:
-            dep_split = dep.split("=")
-            package = dep_split[0]
-            if len(dep_split) > 1:
-                version = dep_split[1]
-            else:
-                version = None
-            if version is not None and dep not in existing_conda_deps:
+            is_okay = _check_list(
+                req=dep, actual=existing_conda_deps, conda=True
+            )
+            if not is_okay:
                 log_func(f"Found missing dependency: {dep}")
                 env_needs_rebuild = True
                 break
-            elif version is None:
-                # TODO: This does not handle specification of only major or
-                # major+minor version
-                if package not in [
-                    d.split("=")[0] for d in existing_conda_deps
-                ]:
-                    log_func(f"Found missing dependency: {dep}")
-                    env_needs_rebuild = True
-                    break
         if not env_needs_rebuild and not relaxed:
             log_func("Checking pip dependencies")
             for dep in required_pip_deps:
-                dep_split = dep.split("==")
-                package = dep_split[0]
-                if len(dep_split) > 1:
-                    version = dep_split[1]
-                else:
-                    version = None
-                if version is not None and dep not in existing_pip_deps:
+                is_okay = _check_list(
+                    req=dep, actual=existing_pip_deps, conda=False
+                )
+                if not is_okay:
                     env_needs_rebuild = True
                     log_func(f"Found missing dependency: {dep}")
                     break
-                elif version is None:
-                    if package not in [
-                        d.split("==")[0] for d in existing_pip_deps
-                    ]:
-                        log_func(f"Found missing dependency: {dep}")
-                        env_needs_rebuild = True
-                        break
     if env_needs_rebuild:
         res.env_needs_rebuild = True
         log_func(f"Rebuilding {env_name} since it does not match spec")

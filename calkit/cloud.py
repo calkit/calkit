@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+import warnings
 from functools import partial
 from typing import Literal
 
@@ -35,6 +35,7 @@ def get_token() -> str:
         _tokens[get_base_url()] = token
     # TODO: Check for expiration
     if token is None:
+        warnings.warn("No token found; attempting email+password auth")
         return auth()
     return token
 
@@ -50,10 +51,12 @@ def get_headers(headers: dict | None = None) -> dict:
 def auth() -> str:
     """Authenticate with the server and save a token."""
     cfg = config.read()
+    if cfg.email is None or cfg.password is None:
+        raise ValueError("Config is missing email or password")
     base_url = get_base_url()
     resp = requests.post(
         base_url + "/login/access-token",
-        data=dict(username=cfg.username, password=cfg.password),
+        data=dict(username=cfg.email, password=cfg.password),
     )
     token = resp.json()["access_token"]
     _tokens[base_url] = token

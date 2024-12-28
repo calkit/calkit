@@ -93,9 +93,9 @@ def clone(
     if location is not None:
         cmd.append(location)
     try:
-        subprocess.call(cmd)
-    except Exception as e:
-        raise_error(str(e))
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError:
+        raise_error("Failed to clone with Git")
     if location is None:
         location = url.split("/")[-1].removesuffix(".git")
     typer.echo(f"Moving into repo dir: {location}")
@@ -109,7 +109,10 @@ def clone(
                 calkit.dvc.set_remote_auth(remote_name=name)
     # DVC pull
     if not no_dvc_pull:
-        subprocess.call(["dvc", "pull"])
+        try:
+            subprocess.check_call(["dvc", "pull"])
+        except subprocess.CalledProcessError:
+            raise_error("Failed to pull from DVC remote(s)")
 
 
 @app.command(name="status")

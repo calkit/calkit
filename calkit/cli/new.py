@@ -827,7 +827,7 @@ def new_publication(
     else:
         template_type = None
     # Check all of our inputs
-    if template_type not in ["latex"]:
+    if template_type is not None and template_type not in ["latex"]:
         raise_error(f"Unknown template type '{template_type}'")
     if env_name is not None and template_type != "latex":
         raise_error("Environments can only be created for latex templates")

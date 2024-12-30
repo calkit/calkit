@@ -42,6 +42,7 @@ class Publication(_CalkitObject):
         "journal-article",
         "conference-paper",
         "presentation",
+        "proposal",
         "poster",
         "report",
         "blog",
@@ -106,6 +107,7 @@ class ProcedureInput(BaseModel):
     description : str
         Optional longer description of the input.
     """
+
     name: str | None = None
     dtype: Literal["int", "bool", "str", "float"] = None
     units: str | None = None
@@ -143,6 +145,32 @@ class Procedure(BaseModel):
     imported_from: str | None = None
 
 
+class Release(BaseModel):
+    kind: Literal["project", "publication", "dataset", "model", "figure"]
+    url: str | None = None
+    doi: str | None = None
+    has_suffix: bool = False
+
+
+class ProjectRelease(Release):
+    kind: Literal["project"]
+
+
+class PublicationRelease(Release):
+    kind: Literal["publication"]
+    path: str
+
+
+class DatasetRelease(Release):
+    kind: Literal["dataset"]
+    path: str
+
+
+class ModelRelease(Release):
+    kind: Literal["model"]
+    path: str
+
+
 class ProjectInfo(BaseModel):
     """All of the project's information or metadata, written to the
     ``calkit.yaml`` file.
@@ -178,3 +206,7 @@ class ProjectInfo(BaseModel):
     software: list[Software] = []
     notebooks: list[Notebook] = []
     procedures: dict[str, Procedure] = {}
+    releases: dict[
+        str,
+        ProjectRelease | PublicationRelease | DatasetRelease | ModelRelease,
+    ] = {}

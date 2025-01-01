@@ -16,12 +16,13 @@ except ImportError:
     UTC = _timezone.utc
 
 from datetime import datetime
-
 from typing import Literal
 
 import ruamel.yaml
 from git import Repo
 from git.exc import InvalidGitRepositoryError
+
+from calkit.models import ProjectInfo
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__package__)
@@ -60,7 +61,9 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
 
 
 def load_calkit_info(
-    wdir=None, process_includes: bool | str | list[str] = False
+    wdir=None,
+    process_includes: bool | str | list[str] = False,
+    as_pydantic: bool = False,
 ) -> dict:
     """Load Calkit project information.
 
@@ -99,6 +102,8 @@ def load_calkit_info(
                         with open(include_fpath) as f:
                             include_data = ryaml.load(f)
                         info[kind][obj_name] |= include_data
+    if as_pydantic:
+        return ProjectInfo.model_validate(info)
     return info
 
 

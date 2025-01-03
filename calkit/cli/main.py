@@ -7,6 +7,7 @@ import functools
 import hashlib
 import json
 import os
+import platform as _platform
 import subprocess
 import sys
 import time
@@ -676,8 +677,12 @@ def run_in_env(
                     raise_error(f"Failed to create uv-venv at {prefix}")
             fname, ext = os.path.splitext(path)
             lock_fpath = fname + "-lock" + ext
+            if _platform.system() == "Windows":
+                activate_cmd = f"{prefix}\\Scripts\\activate"
+            else:
+                activate_cmd = f". {prefix}/bin/activate"
             check_cmd = (
-                f". {prefix}/bin/activate "
+                f"{activate_cmd} "
                 f"&& uv pip install -q -r {path} "
                 f"&& uv pip freeze > {lock_fpath} "
                 "&& deactivate"
@@ -689,7 +694,7 @@ def run_in_env(
             except subprocess.CalledProcessError:
                 raise_error("Failed to check uv-venv")
         # Now run the command
-        cmd = f". {prefix}/bin/activate && {shell_cmd} && deactivate"
+        cmd = f"{activate_cmd} && {shell_cmd} && deactivate"
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:

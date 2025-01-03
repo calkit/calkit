@@ -658,7 +658,6 @@ def run_in_env(
         except subprocess.CalledProcessError:
             raise_error(f"Failed to run in {env['kind']} environment")
     elif env["kind"] == "uv-venv":
-        # TODO: This doesn't work on Windows
         if "prefix" not in env:
             raise_error("uv-venv environments require a prefix")
         if "path" not in env:

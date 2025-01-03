@@ -63,7 +63,15 @@ class ReferenceCollection(BaseModel):
 
 class Environment(BaseModel):
     kind: Literal[
-        "conda", "docker", "pip", "poetry", "npm", "yarn", "remote-ssh"
+        "conda",
+        "docker",
+        "poetry",
+        "npm",
+        "yarn",
+        "remote-ssh",
+        "uv",
+        "pixi",
+        "uv-venv",
     ]
     path: str | None = None
     description: str | None = None
@@ -71,8 +79,13 @@ class Environment(BaseModel):
     default: bool | None = None
 
 
+class UvVenvEnvironment(Environment):
+    kind: Literal["uv-venv"]
+    prefix: str
+
+
 class DockerEnvironment(Environment):
-    kind: str = "docker"
+    kind: Literal["docker"]
     image: str
     layers: list[str] | None = None
     shell: Literal["bash", "sh"] = "sh"
@@ -202,7 +215,9 @@ class ProjectInfo(BaseModel):
     figures: list[Figure] = []
     publications: list[Publication] = []
     references: list[ReferenceCollection] = []
-    environments: dict[str, Environment | DockerEnvironment] = {}
+    environments: dict[
+        str, Environment | DockerEnvironment | UvVenvEnvironment
+    ] = {}
     software: list[Software] = []
     notebooks: list[Notebook] = []
     procedures: dict[str, Procedure] = {}

@@ -64,7 +64,7 @@ def load_calkit_info(
     wdir=None,
     process_includes: bool | str | list[str] = False,
     as_pydantic: bool = False,
-) -> dict:
+) -> dict | ProjectInfo:
     """Load Calkit project information.
 
     Parameters

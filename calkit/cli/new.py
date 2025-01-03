@@ -1035,3 +1035,67 @@ def new_conda_env(
         repo.git.add("dvc.yaml")
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add Conda environment {name}"])
+
+
+@new_app.command("uv-venv")
+def new_uv_venv(
+    packages: Annotated[
+        list[str],
+        typer.Argument(help="Packages to include in the environment."),
+    ],
+    name: Annotated[
+        str, typer.Option("--name", "-n", help="Environment name.")
+    ],
+    path: Annotated[
+        str, typer.Option("--path", help="Path for requirements file.")
+    ] = "requirements.txt",
+    prefix: Annotated[
+        str, typer.Option("--prefix", help="Prefix for environment location.")
+    ] = ".venv",
+    description: Annotated[
+        str, typer.Option("--description", help="Description.")
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite any existing environment with this name.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
+):
+    """Create a new uv virtual environment."""
+    if os.path.isfile(path) and not overwrite:
+        raise_error("Output path already exists (use -f to overwrite)")
+    repo = git.Repo()
+    # Add environment to Calkit info
+    ck_info = calkit.load_calkit_info()
+    # If environments is a list instead of a dict, reformulate it
+    envs = ck_info.get("environments", {})
+    if isinstance(envs, list):
+        typer.echo("Converting environments from list to dict")
+        envs = {env.pop("name"): env for env in envs}
+    if name in envs and not overwrite:
+        raise_error(
+            f"Environment with name {name} already exists "
+            "(use -f to overwrite)"
+        )
+    packages_txt = "\n".join(packages)
+    # Write environment to path
+    with open(path, "w") as f:
+        f.write(packages_txt)
+    repo.git.add(path)
+    typer.echo("Adding environment to calkit.yaml")
+    env = dict(path=path, kind="uv-venv", prefix=prefix)
+    if description is not None:
+        env["description"] = description
+    envs[name] = env
+    ck_info["environments"] = envs
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
+    if not no_commit and repo.git.diff("--staged"):
+        repo.git.commit(["-m", f"Add uv venv {name}"])

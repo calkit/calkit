@@ -169,3 +169,46 @@ def test_new_publication(tmp_dir):
         "calkit runenv -n my-latex-env "
         '"cd my-paper && latexmk -interaction=nonstopmode -pdf paper.tex"'
     )
+
+
+def test_new_uv_venv(tmp_dir):
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["dvc", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-venv",
+            "-n",
+            "my-uv-venv",
+            "pandas>=2.0",
+            "matplotlib",
+        ]
+    )
+    ck_info = calkit.load_calkit_info(as_pydantic=True)
+    envs = ck_info.environments
+    env = envs["my-uv-venv"]
+    assert env.path == "requirements.txt"
+    assert env.prefix == ".venv"
+    assert env.kind == "uv-venv"
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-venv",
+            "-n",
+            "my-uv-venv2",
+            "--path",
+            "requirements-2.txt",
+            "--prefix",
+            ".venv2",
+            "pandas>=2.0",
+            "matplotlib",
+        ]
+    )
+    ck_info = calkit.load_calkit_info(as_pydantic=True)
+    envs = ck_info.environments
+    env = envs["my-uv-venv2"]
+    assert env.path == "requirements-2.txt"
+    assert env.prefix == ".venv2"
+    assert env.kind == "uv-venv"

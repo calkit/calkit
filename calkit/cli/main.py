@@ -519,7 +519,12 @@ def manual_step(
 
 @app.command(
     name="runenv",
-    help="Run a command in an environment.",
+    help="Execute a command in an environment (alias for 'xenv').",
+    context_settings={"ignore_unknown_options": True},
+)
+@app.command(
+    name="xenv",
+    help="Execute a command in an environment.",
     context_settings={"ignore_unknown_options": True},
 )
 def run_in_env(
@@ -802,7 +807,8 @@ def check_docker_env(
         json.dump(inspect, f, indent=4)
 
 
-@app.command(name="runproc", help="Run or execute a procedure.")
+@app.command(name="runproc", help="Execute a procedure (alias for 'xproc').")
+@app.command(name="xproc", help="Execute a procedure.")
 def run_procedure(
     name: Annotated[str, typer.Argument(help="The name of the procedure.")],
     no_commit: Annotated[

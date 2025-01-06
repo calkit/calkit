@@ -264,10 +264,10 @@ class Calkit(Magics):
                 cmd += ["-o", _posix_path(path)]
         stage_cmd = f'python "{_posix_path(script_fpath)}"'
         if args.env:
-            runenv = "calkit runenv"
+            xenv = "calkit xenv"
             if isinstance(args.env, str):
-                runenv += f" -n {args.env}"
-            stage_cmd = runenv + " -- " + stage_cmd
+                xenv += f" -n {args.env}"
+            stage_cmd = xenv + " -- " + stage_cmd
         cmd.append(stage_cmd)
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True)

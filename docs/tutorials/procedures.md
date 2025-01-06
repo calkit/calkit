@@ -54,7 +54,7 @@ Here we use an `_include` key to reference the other file to help keep
 
 ## Executing
 
-If we run `calkit runproc my-important-procedure` from the command line,
+If we run `calkit xproc my-important-procedure` from the command line,
 our procedure will start.
 We will be prompted to perform the first step and press enter to confirm.
 
@@ -93,7 +93,7 @@ has been run, and if the plot need to be remade.
 ```yaml
 stages:
   run-proc:
-    cmd: calkit runproc my-important-procedure
+    cmd: calkit xproc my-important-procedure
     outs:
       - .calkit/procedure-runs/my-important-procedure:
           cache: false # Track this in Git, not DVC

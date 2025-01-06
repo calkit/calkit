@@ -79,7 +79,7 @@ calkit new conda-env \
 ```
 
 Calkit will create an environment definition in `calkit.yaml`,
-which enables running a command in this environment with
-`calkit runenv -n my-project-py311 my-command-here`.
+which enables executing a command in this environment with
+`calkit xenv -n my-project-py311 my-command-here`.
 That call will automatically create or update the Conda environment on the fly
 as needed and export a lock file describing the actual environment.

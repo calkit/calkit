@@ -72,6 +72,7 @@ class Environment(BaseModel):
         "uv",
         "pixi",
         "uv-venv",
+        "renv",
     ]
     path: str | None = None
     description: str | None = None
@@ -90,6 +91,11 @@ class DockerEnvironment(Environment):
     layers: list[str] | None = None
     shell: Literal["bash", "sh"] = "sh"
     platform: str | None = None
+
+
+class REnvironment(Environment):
+    kind: Literal["renv"]
+    prefix: str
 
 
 class Software(BaseModel):

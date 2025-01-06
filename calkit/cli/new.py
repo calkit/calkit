@@ -910,7 +910,7 @@ def new_publication(
             f"-pdf {template_obj.target}"
         )
         if env_name is not None:
-            cmd = f'calkit runenv -n {env_name} "{cmd}"'
+            cmd = f'calkit xenv -n {env_name} "{cmd}"'
         target_dep = os.path.join(path, template_obj.target)
         dvc_cmd = [
             "dvc",

@@ -141,7 +141,7 @@ def import_environment(
     ] = None,
     dest_name: Annotated[
         str,
-        typer.Argument(
+        typer.Option(
             "--name", "-n", help="Name to use in the destination project."
         ),
     ] = None,

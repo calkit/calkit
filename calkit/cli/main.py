@@ -399,6 +399,7 @@ def run_dvc_repro(
     system dependencies.
     """
     # First check any system-level dependencies exist
+    typer.echo("Checking system-level dependencies")
     try:
         calkit.check_system_deps()
     except Exception as e:

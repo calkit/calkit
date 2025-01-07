@@ -7,6 +7,8 @@ import json
 import logging
 import os
 import pickle
+import re
+import subprocess
 
 try:
     from datetime import UTC
@@ -224,3 +226,42 @@ def make_readme_content(
     if project_description is not None:
         txt += f"\n{project_description}\n"
     return txt
+
+
+def check_dep_exists(exe_name: str) -> bool:
+    """Check that a dependency exists.
+
+    TODO: Add version checking.
+    """
+    if exe_name == "calkit":
+        return True
+    cmd = [exe_name]
+    # Executables with non-conventional CLIs
+    if exe_name == "matlab":
+        cmd.append("-help")
+    else:
+        # Fall back to simply calling ``--version``
+        cmd.append("--version")
+    try:
+        subprocess.check_output(cmd)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+def check_system_deps(wdir: str | None = None) -> None:
+    """Check that the dependencies declared in a project's ``calkit.yaml`` file
+    exist.
+    """
+    ck_info = load_calkit_info(wdir=wdir)
+    deps = ck_info.get("dependencies", [])
+    for dep in deps:
+        if isinstance(dep, dict):
+            keys = list(dep.keys())
+            if len(keys) != 1:
+                raise ValueError(f"Malformed dependency: {dep}")
+            dep_name = keys[0]
+        else:
+            dep_name = re.split("[=<>]", dep)[0]
+        if not check_dep_exists(dep_name):
+            raise ValueError(f"{dep_name} not found")

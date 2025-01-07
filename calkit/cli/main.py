@@ -364,7 +364,6 @@ def run_local_server():
 @app.command(
     name="run",
     add_help_option=False,
-    help="Run DVC pipeline (a wrapper for `dvc repro`).",
 )
 def run_dvc_repro(
     targets: Optional[list[str]] = typer.Argument(default=None),
@@ -396,9 +395,14 @@ def run_dvc_repro(
     no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
     no_run_cache: Annotated[bool, typer.Option("--no-run-cache")] = False,
 ):
-    """A simple wrapper for ``dvc repro`` that will automatically create any
-    necessary Calkit objects from stage metadata.
+    """Run DVC pipeline and parse Calkit objects from metadata after checking
+    system dependencies.
     """
+    # First check any system-level dependencies exist
+    try:
+        calkit.check_system_deps()
+    except Exception as e:
+        raise_error(e)
     if targets is None:
         targets = []
     args = targets

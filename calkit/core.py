@@ -255,6 +255,17 @@ def check_system_deps(wdir: str | None = None) -> None:
     """
     ck_info = load_calkit_info(wdir=wdir)
     deps = ck_info.get("dependencies", [])
+    if "git" not in deps:
+        deps.append("git")
+    # Infer dependencies from environment types
+    for _, env in ck_info.get("environments", {}).items():
+        kind = env.get("kind")
+        if kind in ["docker", "uv", "conda", "pixi"] and kind not in deps:
+            deps.append(kind)
+        elif kind == "uv-venv" and "uv" not in deps:
+            deps.append("uv")
+        elif kind == "renv" and "Rscript" not in deps:
+            deps.append("Rscript")
     for dep in deps:
         if isinstance(dep, dict):
             keys = list(dep.keys())

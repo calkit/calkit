@@ -463,8 +463,12 @@ def run_dvc_repro(
                     "notebook",
                 ]:
                     raise_error(f"Invalid Calkit output type '{cktype}'")
+                if isinstance(outs[0], str):
+                    path = outs[0]
+                else:
+                    path = str(list(outs[0].keys())[0])
                 objects.append(
-                    dict(path=outs[0]) | ckmeta | dict(stage=stage_name)
+                    dict(path=path) | ckmeta | dict(stage=stage_name)
                 )
     # Now that we've extracted Calkit objects from stage metadata, we can put
     # them into the calkit.yaml file, overwriting objects with the same path

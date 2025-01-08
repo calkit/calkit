@@ -235,6 +235,7 @@ def check_reproducibility(
             and "conda run" not in cmd
             and "mamba run" not in cmd
             and "docker run" not in cmd
+            and "renv::restore()" not in cmd
         ):
             stages_no_env.append(stage_name)
         else:

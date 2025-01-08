@@ -10,6 +10,7 @@ import git
 import typer
 
 import calkit
+from calkit.cli import raise_error
 
 import_app = typer.Typer(no_args_is_help=True)
 
@@ -120,3 +121,44 @@ def import_dataset(
     # Run dvc pull
     typer.echo("Running dvc pull")
     subprocess.call(["dvc", "pull", dest_path])
+
+
+@import_app.command(name="environment")
+def import_environment(
+    src_path: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Environment location and name, e.g., "
+                "someone/some-project:env-name. If not present, the Calkit "
+                "Cloud will be queried."
+            )
+        ),
+    ],
+    dest_path: Annotated[
+        str,
+        typer.Option("--path", help="Output path at which to save."),
+    ] = None,
+    dest_name: Annotated[
+        str,
+        typer.Option(
+            "--name", "-n", help="Name to use in the destination project."
+        ),
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Force adding the dataset even if it already exists.",
+        ),
+    ] = False,
+) -> None:
+    project, env_name = src_path.split(":")
+    if os.path.isdir(project):
+        cloud = False
+        typer.echo("Importing from local project directory")
+    else:
+        cloud = True
+        typer.echo("Importing from Cloud project")
+    raise_error("Not yet implemented")  # TODO

@@ -466,7 +466,7 @@ def new_docker_env(
     stage: Annotated[
         str,
         typer.Option(
-            "--stage", help="DVC pipeline stage name, if built in one."
+            "--stage", help="DVC pipeline stage name, deprecated."
         ),
     ] = None,
     layers: Annotated[
@@ -551,6 +551,7 @@ def new_docker_env(
         ryaml.dump(ck_info, f)
     # If we're creating a stage, do so with DVC
     if stage:
+        warn("--stage is deprecated since envs are checked at run time")
         typer.echo(f"Creating DVC stage {stage}")
         if not os.path.isfile(".dvc/config"):
             typer.echo(f"Running dvc init")

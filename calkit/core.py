@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import glob
 import json
 import logging
@@ -9,6 +10,8 @@ import os
 import pickle
 import re
 import subprocess
+
+import requests
 
 try:
     from datetime import UTC
@@ -276,3 +279,73 @@ def check_system_deps(wdir: str | None = None) -> None:
             dep_name = re.split("[=<>]", dep)[0]
         if not check_dep_exists(dep_name):
             raise ValueError(f"{dep_name} not found")
+
+
+def project_and_path_from_path(path: str) -> tuple:
+    """Split a path into project and path, respecting the ``CALKIT_PROJECT``
+    environmental variable if set.
+
+    For example, a path like
+
+        someone/some-project:some/path/to/file.png
+
+    will return
+
+        (someone/some-project, some/path/to/file.png)
+    """
+    path_split = path.split(":")
+    if len(path_split) == 2:
+        project = path_split[0]
+        path = path_split[1]
+    elif len(path_split) == 1:
+        project = None
+    else:
+        raise ValueError("Path has too many colons in it")
+    if project is None:
+        project = os.getenv("CALKIT_PROJECT")
+    return project, path
+
+
+def read_file(path: str, as_bytes: bool = None) -> str | bytes:
+    """Read file content from path, which can optionally include a project
+    identifier, which if specified will indicate we should read from the API.
+    """
+    project, path = project_and_path_from_path(path)
+    if as_bytes is None:
+        _, ext = os.path.splitext(path)
+        as_bytes = ext in [
+            ".png",
+            ".jpg",
+            ".gif",
+            ".jpeg",
+            ".pdf",
+            ".xlsx",
+            ".docx",
+        ]
+    if project is not None:
+        import calkit.cloud
+
+        if len(project.split("/")) != 2:
+            raise ValueError("Invalid project identifier (too many slashes)")
+        resp = calkit.cloud.get(f"/projects/{project}/contents/{path}")
+        # If the response has a content key, that is a base64 encoded string
+        if (content := resp.get("content")) is not None:
+            # Load the content appropriately
+            content_bytes = base64.b64decode(content)
+            if as_bytes:
+                return content_bytes
+            else:
+                return content_bytes.decode()
+        # If the response has a URL, we can fetch from that directly
+        elif (url := resp.get("url")) is not None:
+            resp2 = requests.get(url)
+            resp2.raise_for_status()
+            if as_bytes:
+                return resp2.content
+            else:
+                return resp2.text
+        else:
+            raise ValueError("No content or URL returned from API")
+    # Project is None, so let's just read a local file
+    with open(path, mode="rb" if as_bytes else "r") as f:
+        return f.read()

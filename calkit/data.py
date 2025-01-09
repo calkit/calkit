@@ -11,13 +11,23 @@ import base64
 import io
 from typing import Literal
 
-import pandas as pd
-import polars as pl
-
 import calkit
 import calkit.config
 
 DEFAULT_ENGINE = calkit.config.read().dataframe_engine
+
+
+def _get_df_lib(engine: str):
+    if engine == "pandas":
+        import pandas
+
+        return pandas
+    elif engine == "polars":
+        import polars
+
+        return polars
+    else:
+        raise ValueError("Unknown engine")
 
 
 def list_datasets():
@@ -28,7 +38,7 @@ def list_datasets():
 def read_dataset(
     path: str,
     engine: Literal["pandas", "polars"] = DEFAULT_ENGINE,
-) -> pl.DataFrame | pd.DataFrame:
+):
     """Read a dataset from a path.
 
     Path can include the project owner/name like
@@ -42,15 +52,9 @@ def read_dataset(
     def load_from_fobj(fobj, path: str):
         """Read from a filelike object or path."""
         if path.endswith(".csv"):
-            if engine == "pandas":
-                return pd.read_csv(fobj)
-            elif engine == "polars":
-                return pl.read_csv(fobj)
+            return _get_df_lib(engine).read_csv(fobj)
         elif path.endswith(".parquet"):
-            if engine == "pandas":
-                return pd.read_parquet(fobj)
-            elif engine == "polars":
-                return pl.read_parquet(fobj)
+            return _get_df_lib(engine).read_parquet(fobj)
 
     project, path = calkit.project_and_path_from_path(path)
     if project is not None:

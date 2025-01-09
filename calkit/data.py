@@ -36,7 +36,8 @@ def load_dataset(
 
         someone/some-project:my-data-folder/data.csv
 
-    When a project is set, we will use the API to fetch the data.
+    When a project is set via the ``CALKIT_PROJECT`` environmental variable,
+    we will use the API to fetch the data.
     """
 
     def load_from_fobj(fobj, path: str):

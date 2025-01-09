@@ -53,16 +53,7 @@ def load_dataset(
             elif engine == "polars":
                 return pl.read_parquet(fobj)
 
-    path_split = path.split(":")
-    if len(path_split) == 2:
-        project = path_split[0]
-        path = path_split[1]
-    elif len(path_split) == 1:
-        project = None
-    else:
-        raise ValueError("Path has too many colons in it")
-    if project is None:
-        project = os.getenv("CALKIT_PROJECT")
+    project, path = calkit.project_and_path_from_path(path)
     if project is not None:
         if len(project.split("/")) != 2:
             raise ValueError("Invalid project identifier (too many slashes)")
@@ -73,7 +64,7 @@ def load_dataset(
             content_bytes = base64.b64decode(content)
             return load_from_fobj(io.BytesIO(content_bytes), path=path)
         # If the response has a URL, we can fetch from that directly
-        elif (url:= resp.get("url")) is not None:
+        elif (url := resp.get("url")) is not None:
             return load_from_fobj(url, path=path)
         else:
             raise ValueError("No content or URL returned from API")

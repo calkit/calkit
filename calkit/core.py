@@ -276,3 +276,28 @@ def check_system_deps(wdir: str | None = None) -> None:
             dep_name = re.split("[=<>]", dep)[0]
         if not check_dep_exists(dep_name):
             raise ValueError(f"{dep_name} not found")
+
+
+def project_and_path_from_path(path: str) -> tuple:
+    """Split a path into project and path, respecting the ``CALKIT_PROJECT``
+    environmental variable if set.
+
+    For example, a path like
+
+        someone/some-project:some/path/to/file.png
+
+    will return
+
+        (someone/some-project, some/path/to/file.png)
+    """
+    path_split = path.split(":")
+    if len(path_split) == 2:
+        project = path_split[0]
+        path = path_split[1]
+    elif len(path_split) == 1:
+        project = None
+    else:
+        raise ValueError("Path has too many colons in it")
+    if project is None:
+        project = os.getenv("CALKIT_PROJECT")
+    return project, path

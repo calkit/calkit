@@ -166,6 +166,8 @@ def test_run_in_venv(tmp_dir):
             "-n",
             "my-pixi",
             "pandas=2.0.0",
+            "--pip",
+            "polars==1.16.0",
         ]
     )
     ck_info = calkit.load_calkit_info(as_pydantic=True)

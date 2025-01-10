@@ -1194,6 +1194,9 @@ def new_pixi_env(
     name: Annotated[
         str, typer.Option("--name", "-n", help="Environment name.")
     ],
+    pip_packages: Annotated[
+        list[str], typer.Option("--pip", help="Packages to install with pip.")
+    ] = [],
     description: Annotated[
         str, typer.Option("--description", help="Description.")
     ] = None,
@@ -1243,6 +1246,9 @@ def new_pixi_env(
     # Install the packages
     for pkg in packages:
         subprocess.run(["pixi", "add", pkg, "--feature", name])
+    # Install any PyPI packages
+    for pkg in pip_packages:
+        subprocess.run(["pixi", "add", "--pypi", pkg, "--feature", name])
     # Create a pixi environment
     subprocess.run(
         [

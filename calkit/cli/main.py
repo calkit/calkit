@@ -694,6 +694,10 @@ def run_in_env(
             ["uv", "venv"] if kind == "uv-venv" else ["python", "-m", "venv"]
         )
         pip_cmd = "pip" if kind == "venv" else "uv pip"
+        pip_install_args = "-q"
+        if "python" in env and kind == "uv-venv":
+            create_cmd += ["--python", env["python"]]
+            pip_install_args += f" --python {env['python']}"
         # Check environment
         if not no_check:
             if not os.path.isdir(prefix):
@@ -711,7 +715,7 @@ def run_in_env(
                 activate_cmd = f". {prefix}/bin/activate"
             check_cmd = (
                 f"{activate_cmd} "
-                f"&& {pip_cmd} install -q -r {path} "
+                f"&& {pip_cmd} install {pip_install_args} -r {path} "
                 f"&& {pip_cmd} freeze > {lock_fpath} "
                 "&& deactivate"
             )
@@ -719,7 +723,10 @@ def run_in_env(
                 if verbose:
                     typer.echo(f"Running command: {check_cmd}")
                 subprocess.check_output(
-                    check_cmd, shell=True, cwd=wdir, stderr=subprocess.STDOUT
+                    check_cmd,
+                    shell=True,
+                    cwd=wdir,
+                    stderr=subprocess.STDOUT if not verbose else None,
                 )
             except subprocess.CalledProcessError:
                 raise_error(f"Failed to check {kind}")

@@ -1051,6 +1051,9 @@ def new_uv_venv(
     prefix: Annotated[
         str, typer.Option("--prefix", help="Prefix for environment location.")
     ] = ".venv",
+    python_version: Annotated[
+        str, typer.Option("--python", "-p", help="Python version.")
+    ] = None,
     description: Annotated[
         str, typer.Option("--description", help="Description.")
     ] = None,
@@ -1097,6 +1100,8 @@ def new_uv_venv(
     repo.git.add(path)
     typer.echo("Adding environment to calkit.yaml")
     env = dict(path=path, kind="uv-venv", prefix=prefix)
+    if python_version is not None:
+        env["python"] = python_version
     if description is not None:
         env["description"] = description
     envs[name] = env

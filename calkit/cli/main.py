@@ -671,23 +671,27 @@ def run_in_env(
             subprocess.check_call(cmd, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error(f"Failed to run in {env['kind']} environment")
-    elif env["kind"] == "uv-venv":
+    elif (kind := env["kind"]) in ["uv-venv", "venv"]:
         if "prefix" not in env:
-            raise_error("uv-venv environments require a prefix")
+            raise_error("venv environments require a prefix")
         if "path" not in env:
-            raise_error("uv-venv environments require a path")
+            raise_error("venv environments require a path")
         prefix = env["prefix"]
         path = env["path"]
         shell_cmd = " ".join(cmd)
+        create_cmd = (
+            ["uv", "venv"] if kind == "uv-venv" else ["python", "-m", "venv"]
+        )
+        pip_cmd = "pip" if kind == "venv" else "uv pip"
         # Check environment
         if not no_check:
             if not os.path.isdir(prefix):
                 if verbose:
-                    typer.echo(f"Creating uv-venv at {prefix}")
+                    typer.echo(f"Creating {kind} at {prefix}")
                 try:
-                    subprocess.check_call(["uv", "venv", prefix], cwd=wdir)
+                    subprocess.check_call(create_cmd + [prefix], cwd=wdir)
                 except subprocess.CalledProcessError:
-                    raise_error(f"Failed to create uv-venv at {prefix}")
+                    raise_error(f"Failed to create {kind} at {prefix}")
             fname, ext = os.path.splitext(path)
             lock_fpath = fname + "-lock" + ext
             if _platform.system() == "Windows":
@@ -696,16 +700,18 @@ def run_in_env(
                 activate_cmd = f". {prefix}/bin/activate"
             check_cmd = (
                 f"{activate_cmd} "
-                f"&& uv pip install -q -r {path} "
-                f"&& uv pip freeze > {lock_fpath} "
+                f"&& {pip_cmd} install -q -r {path} "
+                f"&& {pip_cmd} freeze > {lock_fpath} "
                 "&& deactivate"
             )
             try:
                 if verbose:
                     typer.echo(f"Running command: {check_cmd}")
-                subprocess.check_output(check_cmd, shell=True, cwd=wdir)
+                subprocess.check_output(
+                    check_cmd, shell=True, cwd=wdir, stderr=subprocess.STDOUT
+                )
             except subprocess.CalledProcessError:
-                raise_error("Failed to check uv-venv")
+                raise_error(f"Failed to check {kind}")
         # Now run the command
         cmd = f"{activate_cmd} && {shell_cmd} && deactivate"
         if verbose:

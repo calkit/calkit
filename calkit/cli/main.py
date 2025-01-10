@@ -678,7 +678,18 @@ def run_in_env(
             raise_error("venv environments require a path")
         prefix = env["prefix"]
         path = env["path"]
-        shell_cmd = " ".join(cmd)
+        # Any parts of the raw command with whitespace in them need to be
+        # quoted
+        quoted_cmd = []
+        for part in cmd:
+            if " " in part:
+                part = f'"{part}"'
+            quoted_cmd.append(part)
+        shell_cmd = " ".join(quoted_cmd)
+        if verbose:
+            typer.echo(f"Raw command: {cmd}")
+            typer.echo(f"Quoted command: {quoted_cmd}")
+            typer.echo(f"Shell command: {shell_cmd}")
         create_cmd = (
             ["uv", "venv"] if kind == "uv-venv" else ["python", "-m", "venv"]
         )

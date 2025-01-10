@@ -1143,7 +1143,7 @@ def new_venv(
         bool, typer.Option("--no-commit", help="Do not commit changes.")
     ] = False,
 ):
-    """Create a new uv virtual environment."""
+    """Create a new Python virtual environment with venv."""
     if os.path.isfile(path) and not overwrite:
         raise_error("Output path already exists (use -f to overwrite)")
     repo = git.Repo()

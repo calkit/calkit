@@ -1230,6 +1230,8 @@ def new_pixi_env(
                 "pixi",
                 "init",
                 ".",
+                "--format",
+                "pixi",
                 "--platform",
                 "win-64",
                 "--platform",

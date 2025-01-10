@@ -1197,6 +1197,9 @@ def new_pixi_env(
     description: Annotated[
         str, typer.Option("--description", help="Description.")
     ] = None,
+    platforms: Annotated[
+        list[str], typer.Option("--platform", "-p", help="Platform.")
+    ] = [],
     overwrite: Annotated[
         bool,
         typer.Option(
@@ -1232,16 +1235,11 @@ def new_pixi_env(
                 ".",
                 "--format",
                 "pixi",
-                "--platform",
-                "win-64",
-                "--platform",
-                "linux-64",
-                "--platform",
-                "osx-64",
-                "--platform",
-                "osx-arm64",
             ]
         )
+    # Ensure all platforms exist
+    for p in platforms:
+        subprocess.run(["pixi", "project", "platform", "add", p])
     # Install the packages
     for pkg in packages:
         subprocess.run(["pixi", "add", pkg, "--feature", name])

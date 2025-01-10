@@ -719,7 +719,7 @@ def run_in_env(
         try:
             subprocess.check_call(cmd, shell=True, cwd=wdir)
         except subprocess.CalledProcessError:
-            raise_error("Failed to run in uv-venv")
+            raise_error(f"Failed to run in {kind}")
     else:
         raise_error("Environment kind not supported")
 

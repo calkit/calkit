@@ -1162,6 +1162,11 @@ def new_venv(
                     f"Environment '{env_name}' already exists with "
                     f"prefix '{prefix}'"
                 )
+    # Put a gitignore file in the env dir if one doesn't exist
+    if not os.path.isfile(os.path.join(prefix, ".gitignore")):
+        os.makedirs(prefix, exist_ok=True)
+        with open(os.path.join(prefix, ".gitignore"), "w") as f:
+            f.write("*\n")
     packages_txt = "\n".join(packages)
     # Write environment to path
     with open(path, "w") as f:

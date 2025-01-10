@@ -91,6 +91,11 @@ class UvVenvEnvironment(Environment):
     prefix: str
 
 
+class PixiEnvironment(Environment):
+    kind: Literal["pixi"]
+    name: str | None = None
+
+
 class DockerEnvironment(Environment):
     kind: Literal["docker"]
     image: str

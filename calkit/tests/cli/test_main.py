@@ -157,6 +157,37 @@ def test_run_in_venv(tmp_dir):
         .strip()
     )
     assert out == "1.17.0"
+    # Test pixi envs
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "pixi-env",
+            "-n",
+            "my-pixi",
+            "pandas=2.0.0",
+        ]
+    )
+    ck_info = calkit.load_calkit_info(as_pydantic=True)
+    envs = ck_info.environments
+    env = envs["my-pixi"]
+    out = (
+        subprocess.check_output(
+            [
+                "calkit",
+                "xenv",
+                "-n",
+                "my-pixi",
+                "--",
+                "python",
+                "-c",
+                "import pandas; print(pandas.__version__)",
+            ]
+        )
+        .decode()
+        .strip()
+    )
+    assert out == "2.0.0"
 
 
 def test_check_call():

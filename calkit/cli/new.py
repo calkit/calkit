@@ -1183,3 +1183,89 @@ def new_venv(
     repo.git.add("calkit.yaml")
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add venv {name}"])
+
+
+@new_app.command("pixi-env")
+def new_pixi_env(
+    packages: Annotated[
+        list[str],
+        typer.Argument(help="Packages to include in the environment."),
+    ],
+    name: Annotated[
+        str, typer.Option("--name", "-n", help="Environment name.")
+    ],
+    description: Annotated[
+        str, typer.Option("--description", help="Description.")
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite any existing environment with this name.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
+):
+    """Create a new pixi virtual environment."""
+    repo = git.Repo()
+    # Add environment to Calkit info
+    ck_info = calkit.load_calkit_info()
+    # If environments is a list instead of a dict, reformulate it
+    envs = ck_info.get("environments", {})
+    if isinstance(envs, list):
+        typer.echo("Converting environments from list to dict")
+        envs = {env.pop("name"): env for env in envs}
+    if name in envs and not overwrite:
+        raise_error(
+            f"Environment with name {name} already exists "
+            "(use -f to overwrite)"
+        )
+    if os.path.isfile("pixi.toml") and overwrite:
+        os.remove("pixi.toml")
+    # Create the environment now
+    if not os.path.isfile("pixi.toml"):
+        subprocess.run(
+            [
+                "pixi",
+                "init",
+                ".",
+                "--platform",
+                "win-64",
+                "--platform",
+                "linux-64",
+                "--platform",
+                "osx-64",
+                "--platform",
+                "osx-arm64",
+            ]
+        )
+    # Install the packages
+    for pkg in packages:
+        subprocess.run(["pixi", "add", pkg, "--feature", name])
+    # Create a pixi environment
+    subprocess.run(
+        [
+            "pixi",
+            "project",
+            "environment",
+            "add",
+            name,
+            "--feature",
+            name,
+        ]
+    )
+    typer.echo("Adding environment to calkit.yaml")
+    env = dict(kind="pixi", path="pixi.toml", name=name)
+    if description is not None:
+        env["description"] = description
+    envs[name] = env
+    ck_info["environments"] = envs
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    repo.git.add("pixi.toml")
+    repo.git.add("calkit.yaml")
+    if not no_commit and repo.git.diff("--staged"):
+        repo.git.commit(["-m", f"Add pixi env {name}"])

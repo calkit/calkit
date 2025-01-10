@@ -1223,8 +1223,6 @@ def new_pixi_env(
             f"Environment with name {name} already exists "
             "(use -f to overwrite)"
         )
-    if os.path.isfile("pixi.toml") and overwrite:
-        os.remove("pixi.toml")
     # Create the environment now
     if not os.path.isfile("pixi.toml"):
         subprocess.run(
@@ -1255,6 +1253,7 @@ def new_pixi_env(
             name,
             "--feature",
             name,
+            "--force",
         ]
     )
     typer.echo("Adding environment to calkit.yaml")

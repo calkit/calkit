@@ -89,23 +89,74 @@ def test_run_in_env(tmp_dir):
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["py3.10"]
     assert env.get("path") is None
+
+
+def test_run_in_venv(tmp_dir):
+    subprocess.check_call("git init", shell=True)
+    subprocess.check_call("dvc init", shell=True)
     # Test uv venv
     subprocess.check_call(
-        ["calkit", "new", "uv-venv", "-n", "uv1", "polars==1.18.0"]
-    )
-    out = subprocess.check_output(
         [
             "calkit",
-            "xenv",
+            "new",
+            "uv-venv",
             "-n",
             "uv1",
-            "--",
-            "python",
-            "-c",
-            "'import polars; print(polars.__version__)'",
+            "--python",
+            "3.13",
+            "--no-commit",
+            "polars==1.18.0",
         ]
-    ).decode().strip()
+    )
+    out = (
+        subprocess.check_output(
+            [
+                "calkit",
+                "xenv",
+                "-n",
+                "uv1",
+                "--",
+                "python",
+                "-c",
+                "import polars; print(polars.__version__)",
+            ]
+        )
+        .decode()
+        .strip()
+    )
     assert out == "1.18.0"
+    # Test regular venvs
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "venv",
+            "-n",
+            "venv1",
+            "--prefix",
+            ".venv1",
+            "--path",
+            "reqs2.txt",
+            "polars==1.17.0",
+        ]
+    )
+    out = (
+        subprocess.check_output(
+            [
+                "calkit",
+                "xenv",
+                "-n",
+                "venv1",
+                "--",
+                "python",
+                "-c",
+                "import polars; print(polars.__version__)",
+            ]
+        )
+        .decode()
+        .strip()
+    )
+    assert out == "1.17.0"
 
 
 def test_check_call():

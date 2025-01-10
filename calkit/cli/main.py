@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import platform as _platform
+import shlex
 import subprocess
 import sys
 import time
@@ -680,11 +681,7 @@ def run_in_env(
         path = env["path"]
         # Any parts of the raw command with whitespace in them need to be
         # quoted
-        quoted_cmd = []
-        for part in cmd:
-            if " " in part:
-                part = f'"{part}"'
-            quoted_cmd.append(part)
+        quoted_cmd = [shlex.quote(part) for part in cmd]
         shell_cmd = " ".join(quoted_cmd)
         if verbose:
             typer.echo(f"Raw command: {cmd}")
@@ -707,6 +704,10 @@ def run_in_env(
                     subprocess.check_call(create_cmd + [prefix], cwd=wdir)
                 except subprocess.CalledProcessError:
                     raise_error(f"Failed to create {kind} at {prefix}")
+                # Put a gitignore file in the env dir if one doesn't exist
+                if not os.path.isfile(os.path.join(prefix, ".gitignore")):
+                    with open(os.path.join(prefix, ".gitignore"), "w") as f:
+                        f.write("*\n")
             fname, ext = os.path.splitext(path)
             lock_fpath = fname + "-lock" + ext
             if _platform.system() == "Windows":

@@ -71,6 +71,7 @@ class Environment(BaseModel):
         "remote-ssh",
         "uv",
         "pixi",
+        "venv",
         "uv-venv",
         "renv",
     ]
@@ -78,6 +79,11 @@ class Environment(BaseModel):
     description: str | None = None
     stage: str | None = None
     default: bool | None = None
+
+
+class VenvEnvironment(Environment):
+    kind: Literal["venv"]
+    prefix: str
 
 
 class UvVenvEnvironment(Environment):
@@ -222,7 +228,8 @@ class ProjectInfo(BaseModel):
     publications: list[Publication] = []
     references: list[ReferenceCollection] = []
     environments: dict[
-        str, Environment | DockerEnvironment | UvVenvEnvironment
+        str,
+        Environment | DockerEnvironment | VenvEnvironment | UvVenvEnvironment,
     ] = {}
     software: list[Software] = []
     notebooks: list[Notebook] = []

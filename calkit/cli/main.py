@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import platform as _platform
+import shlex
 import subprocess
 import sys
 import time
@@ -671,23 +672,42 @@ def run_in_env(
             subprocess.check_call(cmd, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error(f"Failed to run in {env['kind']} environment")
-    elif env["kind"] == "uv-venv":
+    elif (kind := env["kind"]) in ["uv-venv", "venv"]:
         if "prefix" not in env:
-            raise_error("uv-venv environments require a prefix")
+            raise_error("venv environments require a prefix")
         if "path" not in env:
-            raise_error("uv-venv environments require a path")
+            raise_error("venv environments require a path")
         prefix = env["prefix"]
         path = env["path"]
-        shell_cmd = " ".join(cmd)
+        # Any parts of the raw command with whitespace in them need to be
+        # quoted
+        quoted_cmd = [shlex.quote(part) for part in cmd]
+        shell_cmd = " ".join(quoted_cmd)
+        if verbose:
+            typer.echo(f"Raw command: {cmd}")
+            typer.echo(f"Quoted command: {quoted_cmd}")
+            typer.echo(f"Shell command: {shell_cmd}")
+        create_cmd = (
+            ["uv", "venv"] if kind == "uv-venv" else ["python", "-m", "venv"]
+        )
+        pip_cmd = "pip" if kind == "venv" else "uv pip"
+        pip_install_args = "-q"
+        if "python" in env and kind == "uv-venv":
+            create_cmd += ["--python", env["python"]]
+            pip_install_args += f" --python {env['python']}"
         # Check environment
         if not no_check:
             if not os.path.isdir(prefix):
                 if verbose:
-                    typer.echo(f"Creating uv-venv at {prefix}")
+                    typer.echo(f"Creating {kind} at {prefix}")
                 try:
-                    subprocess.check_call(["uv", "venv", prefix], cwd=wdir)
+                    subprocess.check_call(create_cmd + [prefix], cwd=wdir)
                 except subprocess.CalledProcessError:
-                    raise_error(f"Failed to create uv-venv at {prefix}")
+                    raise_error(f"Failed to create {kind} at {prefix}")
+                # Put a gitignore file in the env dir if one doesn't exist
+                if not os.path.isfile(os.path.join(prefix, ".gitignore")):
+                    with open(os.path.join(prefix, ".gitignore"), "w") as f:
+                        f.write("*\n")
             fname, ext = os.path.splitext(path)
             lock_fpath = fname + "-lock" + ext
             if _platform.system() == "Windows":
@@ -696,16 +716,21 @@ def run_in_env(
                 activate_cmd = f". {prefix}/bin/activate"
             check_cmd = (
                 f"{activate_cmd} "
-                f"&& uv pip install -q -r {path} "
-                f"&& uv pip freeze > {lock_fpath} "
+                f"&& {pip_cmd} install {pip_install_args} -r {path} "
+                f"&& {pip_cmd} freeze > {lock_fpath} "
                 "&& deactivate"
             )
             try:
                 if verbose:
                     typer.echo(f"Running command: {check_cmd}")
-                subprocess.check_output(check_cmd, shell=True, cwd=wdir)
+                subprocess.check_output(
+                    check_cmd,
+                    shell=True,
+                    cwd=wdir,
+                    stderr=subprocess.STDOUT if not verbose else None,
+                )
             except subprocess.CalledProcessError:
-                raise_error("Failed to check uv-venv")
+                raise_error(f"Failed to check {kind}")
         # Now run the command
         cmd = f"{activate_cmd} && {shell_cmd} && deactivate"
         if verbose:
@@ -713,7 +738,7 @@ def run_in_env(
         try:
             subprocess.check_call(cmd, shell=True, cwd=wdir)
         except subprocess.CalledProcessError:
-            raise_error("Failed to run in uv-venv")
+            raise_error(f"Failed to run in {kind}")
     else:
         raise_error("Environment kind not supported")
 

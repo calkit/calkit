@@ -77,7 +77,7 @@ If it's convenient, e.g., if an image already contains all the necessary
 dependencies, go with a Docker environment.
 However, in some cases Docker may be a bit heavier than necessary.
 
-If you're running Python code, a `uv-venv` is a good default choice.
+If you're running Python code, a `uv-venv` environment is a good default choice.
 `uv` is very easy to install and very fast.
 
 If you have non-Python dependencies that depend on complex compiled binaries

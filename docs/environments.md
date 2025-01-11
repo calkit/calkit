@@ -25,12 +25,13 @@ and are checked for before running the pipeline with `calkit run`.
 
 Calkit supports defining and running code in these environment types:
 
-- Docker
+- [Docker](https://docker.com)
 - [Conda](https://docs.conda.io/projects/conda/en/stable/)
-- `venv` (built into the Python standard library)
+- [`venv`](https://docs.python.org/3/library/venv.html)
+  (included in the Python standard library)
 - [`uv`](https://docs.astral.sh/uv/) (both `venv` and project-based)
 - [Pixi](https://github.com/prefix-dev/pixi)
-- `renv`
+- [`renv`](https://rstudio.github.io/renv/index.html)
 
 Environment definitions are placed in the project's `calkit.yaml` file
 in the `environments` section.

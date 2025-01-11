@@ -639,7 +639,7 @@ def run_in_env(
             image_name,
             shell,
             "-c",
-            f"{shell_cmd}",
+            shell_cmd,
         ]
         if verbose:
             typer.echo(f"Running command: {docker_cmd}")

@@ -58,6 +58,7 @@ def _to_shell_cmd(cmd: list[str]) -> str:
     quoted_cmd = []
     for part in cmd:
         if " " in part or '"' in part or "'" in part:
+            part = part.replace('"', r'\"')
             quoted_cmd.append(f"\"{part}\"")
         else:
             quoted_cmd.append(part)

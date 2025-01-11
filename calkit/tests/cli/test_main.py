@@ -229,3 +229,6 @@ def test_to_shell_cmd():
     cmd = ["python", "-c", "print('sup')"]
     shell_cmd = _to_shell_cmd(cmd)
     assert shell_cmd == "python -c \"print('sup')\""
+    cmd = ["python", "-c", 'print("hello world")']
+    shell_cmd = _to_shell_cmd(cmd)
+    assert shell_cmd == "python -c \"print(\\\"hello world\\\")\""

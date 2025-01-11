@@ -5,9 +5,9 @@ necessary conditions for code to run properly.
 Ensuring that every stage in your pipeline is run within a
 defined environment is a great way to improve reproducibility.
 
-A Calkit project's environments are defined or declared
-in the `environments` section of the project's `calkit.yaml` file.
-Calkit provides a command line utility `calkit xenv`
+Calkit provides a means for defining or declaring environments
+in a project.
+There is also a command line utility `calkit xenv`
 for executing a command in one
 of these, which ensures that the environment
 matches its specification before execution.

@@ -63,7 +63,7 @@ def test_run_in_env(tmp_dir):
                 "env2",
                 "python",
                 "-c",
-                '"import foampy; print(foampy.__version__)"',
+                "import foampy; print(foampy.__version__)",
             ]
         )
         .decode()

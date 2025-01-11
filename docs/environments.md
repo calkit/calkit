@@ -54,13 +54,13 @@ Typically this will produce a "lock" file describing the exact
 dependencies that made it into that environment
 to help with diagnosing reproducibility issues down the road.
 
-## Which type should I use?
+## Choosing an environment type
 
-The question of which type is not as important as whether or
-not you're using a defined environment at all,
-so if you are, that's great.
-However, if you need help choosing a type,
-here are some guidelines.
+So which type of environment should you use?
+The short answer is: any.
+Any environment is better than none, i.e., running out in the
+global host machine environment.
+If you want the long answer, keep reading.
 
 Docker is probably the most reproducible out of any environment type,
 since a Docker image includes information about the operating system.

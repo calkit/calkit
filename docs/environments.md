@@ -9,8 +9,8 @@ A Calkit project's environments are defined or declared
 in the `environments` section of the project's `calkit.yaml` file.
 Calkit provides a command line utility `calkit xenv`
 for executing a command in one
-of these environments, which ensures that the environment
-matches its declared definition before execution.
+of these, which ensures that the environment
+matches its specification before execution.
 
 ## Environment types and definitions
 

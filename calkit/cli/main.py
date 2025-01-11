@@ -622,7 +622,7 @@ def run_in_env(
                 platform=env.get("platform"),
                 quiet=True,
             )
-        shell_cmd = " ".join(cmd)
+        shell_cmd = shlex.join(cmd)
         docker_cmd = [
             "docker",
             "run",
@@ -681,11 +681,9 @@ def run_in_env(
         path = env["path"]
         # Any parts of the raw command with whitespace in them need to be
         # quoted
-        quoted_cmd = [shlex.quote(part) for part in cmd]
-        shell_cmd = " ".join(quoted_cmd)
+        shell_cmd = shlex.join(cmd)
         if verbose:
             typer.echo(f"Raw command: {cmd}")
-            typer.echo(f"Quoted command: {quoted_cmd}")
             typer.echo(f"Shell command: {shell_cmd}")
         create_cmd = (
             ["uv", "venv"] if kind == "uv-venv" else ["python", "-m", "venv"]

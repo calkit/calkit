@@ -2,24 +2,15 @@
 
 A computational environment describes the
 necessary conditions for code to run properly.
-This could go so far as to include hardware,
-but in the context of a Calkit project an environment
-declares software dependencies and
-[environmental variables](https://en.wikipedia.org/wiki/Environment_variable).
+Ensuring that every stage in your pipeline is run within a
+defined environment is a great way to improve reproducibility.
 
-Defining an environment for every computational process in your pipeline
-is a good way to enhance reproducibility.
-
-One special environment is the host or local machine.
-For maximum reproducibility,
-it's important to keep the host machine as simple as possible.
-Generic tools for creating an managing environments can be installed on the
-host, e.g., Docker,
-but specific software dependencies used to run code for the project
-should be defined in a different environment.
-These local or host machine dependencies are defined in the `dependencies`
-section of a project's `calkit.yaml` file,
-and are checked for before running the pipeline with `calkit run`.
+A Calkit project's environments are defined or declared
+in the `environments` section of the project's `calkit.yaml` file.
+Calkit provides a command line utility `calkit xenv`
+for executing a command in one
+of these environments, which ensures that the environment
+matches its declared definition before execution.
 
 ## Environment types and definitions
 

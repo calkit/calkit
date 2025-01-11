@@ -232,3 +232,4 @@ def test_to_shell_cmd():
     cmd = ["python", "-c", 'print("hello world")']
     shell_cmd = _to_shell_cmd(cmd)
     assert shell_cmd == "python -c \"print(\\\"hello world\\\")\""
+    subprocess.check_call(shell_cmd, shell=True)

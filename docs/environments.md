@@ -160,3 +160,82 @@ This highlights the design philosophy of Calkit.
 Simply declare the environment and use it in a pipeline stage
 and Calkit will ensure it is built and up to date.
 There is no need to think about building images as a separate step.
+
+### uv
+
+To create a new uv virtual environment,
+inside a project directory run something like:
+
+```sh
+calkit new uv-venv -n my-env "polars>=1.0" matplotlib
+```
+
+This will create a new `uv` virtual environment called `my-uv-env` defined in
+`requirements.txt` (changeable with the `--path` option).
+
+You can then run a command in this environment,
+and since it doesn't exist yet, will be created and a file
+`requirements-lock.txt` will be created.
+
+```sh
+calkit xenv -n my-env python -c "import matplotlib, print(matplotlib.__version__)"
+```
+
+If you were to run something like:
+
+```sh
+calkit xenv -n my-env python -c "import pandas, print(pandas.__version__)"
+```
+
+it would fail,
+since `pandas` is not present in `requirements.txt`.
+However, if you add it there,
+calling the above command again will succeed thanks to Calkit
+automatically syncing the environment before execution.
+The `requirements-lock.txt` file will also be updated.
+
+### venv
+
+A `venv` environment,
+which uses Python's built-in `venv` module,
+can be used nearly identically to the `uv` example above.
+Simply replace `uv-venv` with `venv` in the `calkit new` call.
+
+### Conda
+
+As you might expect,
+Conda environments again work nearly identically to `uv-venv` and `venv`
+environments.
+
+You can create a new Conda environment with something like:
+
+```sh
+calkit new conda-env -n my-conda-env numpy matplotlib --pip pandas
+```
+
+Note that in this case, we specified one package, `pandas`, to be
+installed from the Python Package Index (PyPI)
+with `pip` using the `--pip` option.
+
+The new Conda environment spec will be written to `environment.yml`
+by default,
+which can be controlled with the `--path` option.
+
+Similar to other environment types,
+any time a command is executed with `calkit xenv`,
+this environment will be checked and created or updated as necessary.
+
+Calling
+
+```sh
+calkit xenv -n my-conda-env -- which python
+```
+
+will create it.
+If you add any dependencies to `environment.yml`,
+calling that same command will cause the environment to be rebuilt
+before execution,
+and an updated `environment-lock.yml` file will be created.
+Again this highlights Calkit's declarative design philosophy.
+Declare the environment and what command should be executed inside,
+and Calkit will handle the rest.

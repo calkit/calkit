@@ -50,6 +50,21 @@ app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 
 
+def _to_shell_cmd(cmd: list[str]) -> str:
+    """Join a command to be compatible with running at the shell.
+
+    This is similar to ``shlex.join`` but works with Git Bash on Windows.
+    """
+    quoted_cmd = []
+    for part in cmd:
+        if " " in part or '"' in part or "'" in part:
+            part = part.replace('"', r'\"')
+            quoted_cmd.append(f"\"{part}\"")
+        else:
+            quoted_cmd.append(part)
+    return " ".join(quoted_cmd)
+
+
 @app.callback()
 def main(
     version: Annotated[
@@ -622,7 +637,7 @@ def run_in_env(
                 platform=env.get("platform"),
                 quiet=True,
             )
-        shell_cmd = " ".join(cmd)
+        shell_cmd = _to_shell_cmd(cmd)
         docker_cmd = [
             "docker",
             "run",
@@ -639,7 +654,7 @@ def run_in_env(
             image_name,
             shell,
             "-c",
-            f"{shell_cmd}",
+            shell_cmd,
         ]
         if verbose:
             typer.echo(f"Running command: {docker_cmd}")
@@ -679,13 +694,9 @@ def run_in_env(
             raise_error("venv environments require a path")
         prefix = env["prefix"]
         path = env["path"]
-        # Any parts of the raw command with whitespace in them need to be
-        # quoted
-        quoted_cmd = [shlex.quote(part) for part in cmd]
-        shell_cmd = " ".join(quoted_cmd)
+        shell_cmd = _to_shell_cmd(cmd)
         if verbose:
             typer.echo(f"Raw command: {cmd}")
-            typer.echo(f"Quoted command: {quoted_cmd}")
             typer.echo(f"Shell command: {shell_cmd}")
         create_cmd = (
             ["uv", "venv"] if kind == "uv-venv" else ["python", "-m", "venv"]

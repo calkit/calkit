@@ -5,6 +5,7 @@ import subprocess
 import pytest
 
 import calkit
+from calkit.cli.main import _to_shell_cmd
 from calkit.core import ryaml
 
 
@@ -63,7 +64,7 @@ def test_run_in_env(tmp_dir):
                 "env2",
                 "python",
                 "-c",
-                '"import foampy; print(foampy.__version__)"',
+                "import foampy; print(foampy.__version__)",
             ]
         )
         .decode()
@@ -212,3 +213,23 @@ def test_check_call():
         .split("\n")
     )
     assert "yo" in out
+
+
+def test_to_shell_cmd():
+    cmd = ["python", "-c", "import math; print('hello world')"]
+    subprocess.check_call(cmd)
+    shell_cmd = _to_shell_cmd(cmd)
+    assert shell_cmd == "python -c \"import math; print('hello world')\""
+    subprocess.check_call(shell_cmd, shell=True)
+    cmd = ["echo", "hello world"]
+    subprocess.check_call(cmd)
+    shell_cmd = _to_shell_cmd(cmd)
+    assert shell_cmd == "echo \"hello world\""
+    subprocess.check_call(shell_cmd, shell=True)
+    cmd = ["python", "-c", "print('sup')"]
+    shell_cmd = _to_shell_cmd(cmd)
+    assert shell_cmd == "python -c \"print('sup')\""
+    cmd = ["python", "-c", 'print("hello world")']
+    shell_cmd = _to_shell_cmd(cmd)
+    assert shell_cmd == "python -c \"print(\\\"hello world\\\")\""
+    subprocess.check_call(shell_cmd, shell=True)

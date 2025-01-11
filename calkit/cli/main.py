@@ -50,6 +50,20 @@ app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 
 
+def _to_shell_cmd(cmd: list[str]) -> str:
+    """Join a command to be compatible with running at the shell.
+
+    This is similar to ``shlex.join`` but works with Git Bash on Windows.
+    """
+    quoted_cmd = []
+    for part in cmd:
+        if " " in part or '"' in part or "'" in part:
+            quoted_cmd.append(f"\"{part}\"")
+        else:
+            quoted_cmd.append(part)
+    return " ".join(quoted_cmd)
+
+
 @app.callback()
 def main(
     version: Annotated[
@@ -622,7 +636,7 @@ def run_in_env(
                 platform=env.get("platform"),
                 quiet=True,
             )
-        shell_cmd = shlex.join(cmd)
+        shell_cmd = _to_shell_cmd(cmd)
         docker_cmd = [
             "docker",
             "run",
@@ -679,9 +693,7 @@ def run_in_env(
             raise_error("venv environments require a path")
         prefix = env["prefix"]
         path = env["path"]
-        # Any parts of the raw command with whitespace in them need to be
-        # quoted
-        shell_cmd = shlex.join(cmd)
+        shell_cmd = _to_shell_cmd(cmd)
         if verbose:
             typer.echo(f"Raw command: {cmd}")
             typer.echo(f"Shell command: {shell_cmd}")

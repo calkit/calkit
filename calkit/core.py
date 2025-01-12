@@ -232,7 +232,7 @@ def make_readme_content(
 
 
 def check_dep_exists(
-    name: str, kind: Literal["app", "env-var"] = "app"
+    name: str, kind: Literal["app", "env-var", "calkit-config"] = "app"
 ) -> bool:
     """Check that a dependency exists.
 
@@ -240,6 +240,11 @@ def check_dep_exists(
     """
     if kind == "env-var":
         return name in os.environ
+    if kind == "calkit-config":
+        import calkit.config
+
+        cfg = calkit.config.read()
+        return getattr(cfg, name, None) is not None
     if name == "calkit":
         return True
     cmd = [name]

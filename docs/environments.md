@@ -50,7 +50,7 @@ Before the command is executed,
 Calkit will check that the environment matches its specification,
 and if it needs to be updated,
 that will be done before execution.
-Typically this will produce a "lock" file describing the exact
+Typically this will produce a "lock file" describing the exact
 dependencies that made it into that environment
 to help with diagnosing reproducibility issues down the road.
 

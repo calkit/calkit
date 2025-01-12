@@ -2,37 +2,29 @@
 
 A computational environment describes the
 necessary conditions for code to run properly.
-This could go so far as to include hardware,
-but in the context of a Calkit project an environment
-declares software dependencies and
-[environmental variables](https://en.wikipedia.org/wiki/Environment_variable).
+Ensuring that every stage in your pipeline is run within a
+defined environment is a great way to improve reproducibility.
 
-Defining an environment for every computational process in your pipeline
-is a good way to enhance reproducibility.
-
-One special environment is the host or local machine.
-For maximum reproducibility,
-it's important to keep the host machine as simple as possible.
-Generic tools for creating an managing environments can be installed on the
-host, e.g., Docker,
-but specific software dependencies used to run code for the project
-should be defined in a different environment.
-These local or host machine dependencies are defined in the `dependencies`
-section of a project's `calkit.yaml` file,
-and are checked for before running the pipeline with `calkit run`.
+Calkit provides a means for defining or declaring environments
+in a project.
+There is also a command line utility `calkit xenv`
+for executing a command in one
+of these, which ensures that the environment
+matches its specification before execution.
 
 ## Environment types and definitions
 
 Calkit supports defining and running code in these environment types:
 
-- Docker
+- [Docker](https://docker.com)
 - [Conda](https://docs.conda.io/projects/conda/en/stable/)
-- `venv` (built into the Python standard library)
+- [`venv`](https://docs.python.org/3/library/venv.html)
+  (included in the Python standard library)
 - [`uv`](https://docs.astral.sh/uv/) (both `venv` and project-based)
 - [Pixi](https://github.com/prefix-dev/pixi)
-- `renv`
+- [`renv`](https://rstudio.github.io/renv/index.html)
 
-Environment definitions are placed in the project's `calkit.yaml` file
+Environment definitions live in the project's `calkit.yaml` file
 in the `environments` section.
 Most environments will have a `path` property pointing to a file
 that lists the necessary dependencies.
@@ -62,13 +54,14 @@ Typically this will produce a "lock" file describing the exact
 dependencies that made it into that environment
 to help with diagnosing reproducibility issues down the road.
 
-## Which type should I use?
+## Choosing an environment type
 
-The question of which type is not as important as whether or
-not you're using a defined environment at all,
-so if you are, that's great.
-However, if you need help choosing a type,
-here are some guidelines.
+So which type of environment should you use?
+The short answer is: any.
+Any environment is better than none,
+where none means installing dependencies in the global host machine
+environment.
+If you want the long answer, keep reading.
 
 Docker is probably the most reproducible out of any environment type,
 since a Docker image includes information about the operating system.
@@ -76,7 +69,7 @@ If it's convenient, e.g., if an image already contains all the necessary
 dependencies, go with a Docker environment.
 However, in some cases Docker may be a bit heavier than necessary.
 
-If you're running Python code, a `uv-venv` is a good default choice.
+If you're running Python code, a `uv-venv` environment is a good default choice.
 `uv` is very easy to install and very fast.
 
 If you have non-Python dependencies that depend on complex compiled binaries
@@ -91,6 +84,11 @@ If you're working on a machine for which you don't have control to install
 dependencies,
 or working as part of a team,
 a plain old Python `venv` could be the best option.
+
+Again,
+try not to get too hung up on the decision of which environment type to use.
+Try one and see how it goes.
+Calkit should make the experience similar for all types.
 
 ## Examples
 
@@ -135,7 +133,7 @@ This will produce a Dockerfile defining the image,
 and when that environment is run with `calkit xenv`,
 that image will be built and a lock file produced.
 
-For example:
+For example, running:
 
 ```sh
 calkit new docker-env \
@@ -144,19 +142,19 @@ calkit new docker-env \
     --add-layer miniforge
 ```
 
-This will create a Dockerfile in the project and add the environment
+will create a Dockerfile in the project and add the environment
 named `foam2` to the `calkit.yaml` file.
 Calling `calkit xenv -n foam2 bash` will cause the image to be built
 and a lock file `Dockerfile-lock.json` to be created.
 Note that the Dockerfile path can be controlled with the `--path` option.
 
 You can go in and modify the Dockerfile, e.g.,
-to add more commands,
+to add more installation commands,
 and another call to `calkit xenv -n foam2` will kick off a rebuild
 automatically,
 since the lock file will no longer match the Dockerfile.
 
-This highlights the design philosophy of Calkit.
+This highlights Calkit's declarative design philosophy.
 Simply declare the environment and use it in a pipeline stage
 and Calkit will ensure it is built and up to date.
 There is no need to think about building images as a separate step.
@@ -171,7 +169,8 @@ calkit new uv-venv -n my-env "polars>=1.0" matplotlib
 ```
 
 This will create a new `uv` virtual environment called `my-uv-env` defined in
-`requirements.txt` (changeable with the `--path` option).
+`requirements.txt` (changeable with the `--path` option),
+with the packages installed under a folder `.venv`.
 
 You can then run a command in this environment,
 and since it doesn't exist yet, will be created and a file
@@ -189,7 +188,7 @@ calkit xenv -n my-env python -c "import pandas, print(pandas.__version__)"
 
 it would fail,
 since `pandas` is not present in `requirements.txt`.
-However, if you add it there,
+However, if you add it in there,
 calling the above command again will succeed thanks to Calkit
 automatically syncing the environment before execution.
 The `requirements-lock.txt` file will also be updated.
@@ -225,7 +224,7 @@ Similar to other environment types,
 any time a command is executed with `calkit xenv`,
 this environment will be checked and created or updated as necessary.
 
-Calling
+Calling:
 
 ```sh
 calkit xenv -n my-conda-env -- which python

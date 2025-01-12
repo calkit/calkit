@@ -24,9 +24,9 @@ def run_cmd(cmd: list[str]):
 
 
 def raise_error(txt: str):
-    typer.echo(typer.style("Error: " + txt, fg="red"), err=txt)
+    typer.echo(typer.style("Error: " + str(txt), fg="red"), err=txt)
     raise typer.Exit(1)
 
 
 def warn(txt: str):
-    typer.echo(typer.style("Warning: " + txt, fg="yellow"))
+    typer.echo(typer.style("Warning: " + str(txt), fg="yellow"))

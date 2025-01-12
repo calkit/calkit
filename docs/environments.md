@@ -24,7 +24,7 @@ Calkit supports defining and running code in these environment types:
 - [Pixi](https://github.com/prefix-dev/pixi)
 - [`renv`](https://rstudio.github.io/renv/index.html)
 
-Environment definitions are placed in the project's `calkit.yaml` file
+Environment definitions live in the project's `calkit.yaml` file
 in the `environments` section.
 Most environments will have a `path` property pointing to a file
 that lists the necessary dependencies.
@@ -58,8 +58,9 @@ to help with diagnosing reproducibility issues down the road.
 
 So which type of environment should you use?
 The short answer is: any.
-Any environment is better than none, i.e., running out in the
-global host machine environment.
+Any environment is better than none,
+where none means installing dependencies in the global host machine
+environment.
 If you want the long answer, keep reading.
 
 Docker is probably the most reproducible out of any environment type,
@@ -83,6 +84,11 @@ If you're working on a machine for which you don't have control to install
 dependencies,
 or working as part of a team,
 a plain old Python `venv` could be the best option.
+
+Again,
+try not to get too hung up on the decision of which environment type to use.
+Try one and see how it goes.
+Calkit should make the experience similar for all types.
 
 ## Examples
 
@@ -127,7 +133,7 @@ This will produce a Dockerfile defining the image,
 and when that environment is run with `calkit xenv`,
 that image will be built and a lock file produced.
 
-For example:
+For example, running:
 
 ```sh
 calkit new docker-env \
@@ -136,19 +142,19 @@ calkit new docker-env \
     --add-layer miniforge
 ```
 
-This will create a Dockerfile in the project and add the environment
+will create a Dockerfile in the project and add the environment
 named `foam2` to the `calkit.yaml` file.
 Calling `calkit xenv -n foam2 bash` will cause the image to be built
 and a lock file `Dockerfile-lock.json` to be created.
 Note that the Dockerfile path can be controlled with the `--path` option.
 
 You can go in and modify the Dockerfile, e.g.,
-to add more commands,
+to add more installation commands,
 and another call to `calkit xenv -n foam2` will kick off a rebuild
 automatically,
 since the lock file will no longer match the Dockerfile.
 
-This highlights the design philosophy of Calkit.
+This highlights Calkit's declarative design philosophy.
 Simply declare the environment and use it in a pipeline stage
 and Calkit will ensure it is built and up to date.
 There is no need to think about building images as a separate step.
@@ -163,7 +169,8 @@ calkit new uv-venv -n my-env "polars>=1.0" matplotlib
 ```
 
 This will create a new `uv` virtual environment called `my-uv-env` defined in
-`requirements.txt` (changeable with the `--path` option).
+`requirements.txt` (changeable with the `--path` option),
+with the packages installed under a folder `.venv`.
 
 You can then run a command in this environment,
 and since it doesn't exist yet, will be created and a file
@@ -181,7 +188,7 @@ calkit xenv -n my-env python -c "import pandas, print(pandas.__version__)"
 
 it would fail,
 since `pandas` is not present in `requirements.txt`.
-However, if you add it there,
+However, if you add it in there,
 calling the above command again will succeed thanks to Calkit
 automatically syncing the environment before execution.
 The `requirements-lock.txt` file will also be updated.
@@ -217,7 +224,7 @@ Similar to other environment types,
 any time a command is executed with `calkit xenv`,
 this environment will be checked and created or updated as necessary.
 
-Calling
+Calling:
 
 ```sh
 calkit xenv -n my-conda-env -- which python

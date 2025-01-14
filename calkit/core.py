@@ -231,16 +231,25 @@ def make_readme_content(
     return txt
 
 
-def check_dep_exists(exe_name: str) -> bool:
+def check_dep_exists(
+    name: str, kind: Literal["app", "env-var", "calkit-config"] = "app"
+) -> bool:
     """Check that a dependency exists.
 
     TODO: Add version checking.
     """
-    if exe_name == "calkit":
+    if kind == "env-var":
+        return name in os.environ
+    if kind == "calkit-config":
+        import calkit.config
+
+        cfg = calkit.config.read()
+        return getattr(cfg, name, None) is not None
+    if name == "calkit":
         return True
-    cmd = [exe_name]
+    cmd = [name]
     # Executables with non-conventional CLIs
-    if exe_name == "matlab":
+    if name == "matlab":
         cmd.append("-help")
     else:
         # Fall back to simply calling ``--version``
@@ -275,10 +284,12 @@ def check_system_deps(wdir: str | None = None) -> None:
             if len(keys) != 1:
                 raise ValueError(f"Malformed dependency: {dep}")
             dep_name = keys[0]
+            dep_kind = dep[dep_name].get("kind", "app")
         else:
             dep_name = re.split("[=<>]", dep)[0]
-        if not check_dep_exists(dep_name):
-            raise ValueError(f"{dep_name} not found")
+            dep_kind = "app"
+        if not check_dep_exists(dep_name, dep_kind):
+            raise ValueError(f"{dep_kind} '{dep_name}' not found")
 
 
 def project_and_path_from_path(path: str) -> tuple:

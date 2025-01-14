@@ -840,11 +840,14 @@ def check_docker_env(
             "Layers"
         ] or dockerfile_md5 != lock[0].get("DockerfileMD5")
     if rebuild:
-        cmd = ["docker", "build", "-t", tag, "-f", fpath]
+        wdir, fname = os.path.split(fpath)
+        if not wdir:
+            wdir = None
+        cmd = ["docker", "build", "-t", tag, "-f", fname]
         if platform is not None:
             cmd += ["--platform", platform]
         cmd.append(".")
-        subprocess.check_call(cmd)
+        subprocess.check_call(cmd, cwd=wdir)
     # Write the lock file
     inspect = get_docker_inspect()
     inspect[0]["DockerfileMD5"] = dockerfile_md5

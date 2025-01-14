@@ -841,6 +841,8 @@ def check_docker_env(
         ] or dockerfile_md5 != lock[0].get("DockerfileMD5")
     if rebuild:
         wdir, fname = os.path.split(fpath)
+        if not wdir:
+            wdir = None
         cmd = ["docker", "build", "-t", tag, "-f", fname]
         if platform is not None:
             cmd += ["--platform", platform]

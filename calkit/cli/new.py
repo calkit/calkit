@@ -533,7 +533,7 @@ def new_docker_env(
         image=image_name,
         wdir=wdir,
     )
-    if base is not None:
+    if base is not None or path is not None:
         env["path"] = path
     if stage is not None:
         env["stage"] = stage

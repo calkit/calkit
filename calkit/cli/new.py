@@ -461,8 +461,15 @@ def new_docker_env(
         ),
     ] = None,
     path: Annotated[
-        str, typer.Option("--path", help="Dockerfile path.")
-    ] = "Dockerfile",
+        str,
+        typer.Option(
+            "--path",
+            help=(
+                "Dockerfile path. Will default to 'Dockerfile' "
+                "if --from is specified."
+            ),
+        ),
+    ] = None,
     stage: Annotated[
         str,
         typer.Option("--stage", help="DVC pipeline stage name, deprecated."),
@@ -495,6 +502,8 @@ def new_docker_env(
     ] = False,
 ):
     """Create a new Docker environment."""
+    if base is not None and path is None:
+        path = "Dockerfile"
     if base and os.path.isfile(path) and not overwrite:
         raise_error("Output path already exists (use -f to overwrite)")
     if stage and not base:

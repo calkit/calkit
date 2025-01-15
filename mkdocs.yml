@@ -37,7 +37,6 @@ nav:
   - Home: index.md
   - Environments: environments.md
   - Tutorials:
-      - tutorials/index.md
       - tutorials/adding-latex-pub-docker.md
       - tutorials/notebook-pipeline.md
       - tutorials/procedures.md

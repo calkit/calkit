@@ -8,7 +8,6 @@ import hashlib
 import json
 import os
 import platform as _platform
-import shlex
 import subprocess
 import sys
 import time

@@ -458,6 +458,8 @@ def run_dvc_repro(
     objects = []
     with open("dvc.yaml") as f:
         pipeline = calkit.ryaml.load(f)
+        if pipeline is None:
+            raise_error("Pipeline is empty")
         for stage_name, stage_info in pipeline.get("stages", {}).items():
             ckmeta = stage_info.get("meta", {}).get("calkit")
             if ckmeta is not None:

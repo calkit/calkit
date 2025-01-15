@@ -255,9 +255,11 @@ def check_dep_exists(
         # Fall back to simply calling ``--version``
         cmd.append("--version")
     try:
-        subprocess.check_output(cmd)
+        subprocess.run(
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
         return True
-    except subprocess.CalledProcessError:
+    except FileNotFoundError:
         return False
 
 

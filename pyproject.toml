@@ -40,9 +40,17 @@ data = [
   "pandas",
   "polars",
 ]
+dev = [
+  "pytest",
+]
+docs = [
+  "mkdocs",
+  "mkdocs-material",
+]
 
 [project.urls]
-Homepage = "https://github.com/calkit/calkit"
+Homepage = "https://calkit.org"
+Repository = "https://github.com/calkit/calkit"
 Issues = "https://github.com/calkit/calkit/issues"
 
 [project.scripts]

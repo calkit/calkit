@@ -1,0 +1,53 @@
+site_name: Calkit
+repo_name: calkit/calkit
+repo_url: https://github.com/calkit/calkit.git
+theme:
+  name: material
+  logo: img/c-to-the-k-white.svg
+  features:
+    - content.code.copy
+    - navigation.footer
+    - navigation.indexes
+    - navigation.top
+  palette:
+    # Palette toggle for automatic mode
+    - media: "(prefers-color-scheme)"
+      primary: teal
+      accent: cyan
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      primary: teal
+      accent: cyan
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+nav:
+  - Home: index.md
+  - Environments: environments.md
+  - Tutorials:
+      - tutorials/index.md
+      - tutorials/adding-latex-pub-docker.md
+      - tutorials/notebook-pipeline.md
+      - tutorials/procedures.md
+      - tutorials/conda-envs.md
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences

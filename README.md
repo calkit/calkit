@@ -99,6 +99,8 @@ This will commit and push to both GitHub and the Calkit Cloud.
 - [A reproducible workflow using Microsoft Office (Word and Excel)](https://petebachant.me/office-repro/)
 - [Reproducible OpenFOAM simulations](https://petebachant.me/reproducible-openfoam/)
 
+See more in the [docs](https://docs.calkit.org).
+
 ## Why does reproducibility matter?
 
 If your work is reproducible, that means that someone else can "run" it and

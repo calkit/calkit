@@ -38,7 +38,9 @@ nav:
   - Installation: installation.md
   - Cloud integration: cloud-integration.md
   - Version control: version-control.md
-  - The pipeline: pipeline.md
+  - The pipeline:
+      - pipeline/index.md
+      - pipeline/manual-steps.md
   - The calkit.yaml file: calkit-yaml.md
   - Environments: environments.md
   - References: references.md

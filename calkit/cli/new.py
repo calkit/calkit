@@ -89,8 +89,7 @@ def new_project(
     ] = False,
 ):
     """Create a new project."""
-    # TODO: Update this when there is a real docs site up
-    docs_url = "https://github.com/calkit/calkit?tab=readme-ov-file#tutorials"
+    docs_url = "https://docs.calkit.org"
     success_message = (
         "\nCongrats on creating your new Calkit project!\n\n"
         "Next, you'll probably want to start building your pipeline.\n\n"

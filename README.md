@@ -15,22 +15,7 @@ Calkit also adds a domain-specific data model
 such that all aspects of the research process can be fully described in a
 single repository and therefore easily consumed by others.
 
-Our goal is to make reproducibility easier so it becomes more common.
-To do this, we try to make it easy for users to follow two simple rules:
-
-1. **Keep everything in version control.** This includes large files like
-   datasets, enabled by DVC.
-   The [Calkit cloud](https://github.com/calkit/calkit-cloud)
-   serves as a simple default DVC remote storage location for those who do not
-   want to manage their own infrastructure.
-2. **Generate all important artifacts with a single pipeline.** There should be
-   no special instructions required to reproduce a project's artifacts.
-   It should be as simple as calling `calkit run`.
-   The DVC pipeline (in a project's `dvc.yaml` file) is therefore the main
-   thing to "build" throughout a research project.
-   Calkit provides helper functionality to build pipeline stages that
-   keep computational environments up-to-date and label their outputs for
-   convenient reuse.
+To learn more, see the [documentation](https://docs.calkit.org).
 
 ## Installation
 

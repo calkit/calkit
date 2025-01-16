@@ -46,6 +46,7 @@ nav:
       - tutorials/first-project.md
       - tutorials/openfoam.md
       - tutorials/adding-latex-pub-docker.md
+      - tutorials/latex-codespaces.md
       - tutorials/notebook-pipeline.md
       - tutorials/procedures.md
       - tutorials/conda-envs.md

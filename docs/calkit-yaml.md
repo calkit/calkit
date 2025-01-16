@@ -1,0 +1,18 @@
+# The `calkit.yaml` file
+
+The `calkit.yaml` file serves as a small "database"
+for the project's important metadata, which includes its:
+
+- Global or system-level dependencies
+  (applications, libraries, environmental variables)
+- Environments
+- Datasets
+- Figures
+- Publications (journal articles, conference papers, presentations, posters)
+- [Procedures](tutorials/procedures.md)
+- [References](references.md)
+- Subprojects (smaller projects executed as part of the main project)
+
+Objects can be imported from other projects,
+which produces a chain of reference to allow tracking reuse
+and reduce redundant storage.

@@ -35,12 +35,19 @@ theme:
         name: Switch to system preference
 nav:
   - Home: index.md
+  - Installation: installation.md
+  - Cloud integration: cloud-integration.md
+  - Version control: version-control.md
+  - The pipeline: pipeline.md
+  - The calkit.yaml file: calkit-yaml.md
   - Environments: environments.md
+  - References: references.md
   - Tutorials:
       - tutorials/adding-latex-pub-docker.md
       - tutorials/notebook-pipeline.md
       - tutorials/procedures.md
       - tutorials/conda-envs.md
+  - CLI reference: cli-reference.md
 markdown_extensions:
   - admonition
   - pymdownx.highlight:

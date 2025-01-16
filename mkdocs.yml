@@ -43,10 +43,12 @@ nav:
   - Environments: environments.md
   - References: references.md
   - Tutorials:
+      - tutorials/first-project.md
       - tutorials/adding-latex-pub-docker.md
       - tutorials/notebook-pipeline.md
       - tutorials/procedures.md
       - tutorials/conda-envs.md
+      - tutorials/matlab.md
   - CLI reference: cli-reference.md
 markdown_extensions:
   - admonition

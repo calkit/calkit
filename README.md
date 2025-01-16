@@ -91,13 +91,13 @@ This will commit and push to both GitHub and the Calkit Cloud.
 
 ## Tutorials
 
-- [LaTeX collaboration with GitHub Codespaces](https://petebachant.me/latex-collab/)
-- [Jupyter notebook as a DVC pipeline](docs/tutorials/notebook-pipeline.md)
-- [Keeping track of conda environments](docs/tutorials/conda-envs.md)
-- [Defining and executing manual procedures](docs/tutorials/procedures.md)
-- [Adding a new LaTeX-based publication with its own Docker build environment](docs/tutorials/adding-latex-pub-docker.md)
-- [A reproducible workflow using Microsoft Office (Word and Excel)](https://petebachant.me/office-repro/)
-- [Reproducible OpenFOAM simulations](https://petebachant.me/reproducible-openfoam/)
+- [LaTeX collaboration with GitHub Codespaces](https://docs.calkit.org/tutorials/latex-codespaces/)
+- [Jupyter notebook as a DVC pipeline](https://docs.calkit.org/tutorials/notebook-pipeline/)
+- [Keeping track of conda environments](https://docs.calkit.org/tutorials/conda-envs/)
+- [Defining and executing manual procedures](https://docs.calkit.org/tutorials/procedures/)
+- [Adding a new LaTeX-based publication with its own Docker build environment](https://docs.calkit.org/tutorials/adding-latex-pub-docker/)
+- [A reproducible workflow using Microsoft Office (Word and Excel)](https://docs.calkit.org/tutorials/office/)
+- [Reproducible OpenFOAM simulations](https://docs.calkit.org/tutorials/openfoam/)
 
 See more in the [docs](https://docs.calkit.org).
 

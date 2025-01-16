@@ -55,6 +55,8 @@ nav:
   - CLI reference: cli-reference.md
 markdown_extensions:
   - admonition
+  - attr_list
+  - pymdownx.blocks.caption
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span

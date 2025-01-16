@@ -1,6 +1,15 @@
 # Using Microsoft Office
 
+!!! note
+
+    Many of the steps shown here use the Calkit web UI.
+    However, all steps could have just as easily been performed with the
+    [CLI](../cli-reference.md).
+
 ![Does using Microsoft Office always mean going to the dark side?](img/office/anakin-excel.jpg)
+/// caption
+Does using Microsoft Office always mean going to the dark side?
+///
 
 Everyone knows that when you want to get serious about reproducibility
 you need to stop using Microsoft Word and Excel and become a computer hacker,
@@ -29,6 +38,9 @@ your paper will get through the review process faster,
 shortening the time-to-impact.
 
 ![Elsevier's research data availability standards (with annotations.)](img/office/elsevier-research-data-guidelines.png)
+/// caption
+Elsevier's research data availability standards (with annotations.)
+///
 
 Here we'll see that it's possible
 to get started working reproducibly without becoming a de facto
@@ -66,6 +78,9 @@ we're going focus on just two:
   run the pipeline.
 
 ![Manual or ad hoc 'version control' (don't do this.) From phdcomics.com.](img/office/phd-comics-version-control.webp)
+/// caption
+Manual or ad hoc 'version control' (don't do this.) From phdcomics.com.
+///
 
 In order to follow rule number 1,
 we are going to treat our project's repository, or "repo,"
@@ -88,7 +103,10 @@ We can start off by creating a Git (and GitHub)
 repo for our project
 up on [calkit.io](https://calkit.io).
 
-![Creating the project on calkit.io.](img/office/create-project.png)
+![Creating the project on calkit.io.](img/office/create-project.png){ width="450px" }
+/// caption
+Creating the project on calkit.io.
+///
 
 Next, we'll do the only command line thing in this whole process
 and spin up a local Calkit server.
@@ -105,6 +123,9 @@ then go to the local machine page, we see that the repo has never been
 cloned to our computer, so let's click the "Clone" button.
 
 ![The project's local machine page showing we haven't cloned the repo yet.](img/office/needs-clone.png)
+/// caption
+The project's local machine page showing we haven't cloned the repo yet.
+///
 
 By default, it will be cloned somewhere
 like `C:/Users/your-name/calkit/the-project-name`,
@@ -120,6 +141,9 @@ We are going to do this by adding some rows to an Excel spreadsheet
 and saving it in our project repo as `data.xlsx`.
 
 ![Creating our dataset in Excel.](img/office/excel-data.png)
+/// caption
+Creating our dataset in Excel.
+///
 
 Back on the Calkit local machine page,
 if we refresh the status
@@ -127,7 +151,10 @@ we see that the `data.xlsx` spreadsheet is showing up as an untracked
 file in the project repo.
 Let's add it to the repo by clicking the "Add" button.
 
-![We have an untracked file.](img/office/untracked-data.png)
+![We have an untracked file.](img/office/untracked-data.png){ width="450px" }
+/// caption
+We have an untracked file.
+///
 
 After adding and committing,
 Calkit is going to automatically push to the remotes
@@ -142,8 +169,14 @@ and let's use a commit message like
 "Add chart to spreadsheet".
 
 ![Creating our figure in Excel.](img/office/excel-chart.png)
+/// caption
+Creating our figure in Excel.
+///
 
-![Uncommitted changes in the repo after adding a chart to the spreadsheet.](img/office/uncommitted-changes.png)
+![Uncommitted changes in the repo after adding a chart to the spreadsheet.](img/office/uncommitted-changes.png){ width="450px" }
+/// caption
+Uncommitted changes in the repo after adding a chart to the spreadsheet.
+///
 
 At this point our data is in version control so we'll
 know if it ever changes.
@@ -164,7 +197,10 @@ there will be a few fields to fill out:
    but again, you can choose whatever makes sense to you.
 3. The title and description of our figure.
 
-![Creating a new pipeline stage to extract our chart from Excel.](img/office/new-stage.png)
+![Creating a new pipeline stage to extract our chart from Excel.](img/office/new-stage.png){ width="450px" }
+/// caption
+Creating a new pipeline stage to extract our chart from Excel.
+///
 
 After saving the stage and refreshing the status we'll see that the pipeline
 is out-of-date,
@@ -172,7 +208,10 @@ which makes sense.
 We added a stage but haven't yet run the pipeline.
 So let's do that by clicking the "Run" button.
 
-![The pipeline is out-of-date after adding a stage.](img/office/pipeline-out-of-date.png)
+![The pipeline is out-of-date after adding a stage.](img/office/pipeline-out-of-date.png){ width="450px" }
+/// caption
+The pipeline is out-of-date after adding a stage.
+///
 
 After the pipeline has been run we can see there are some uncommitted
 changes in the repo, so let's commit them with a message that makes sense,
@@ -200,6 +239,9 @@ This will allow us to update the image externally and not need to
 reimport into Word.
 
 ![Linking to the image file when inserting a picture in Word.](img/office/insert-link-to-file.png)
+/// caption
+Linking to the image file when inserting a picture in Word.
+///
 
 Again when we refresh we'll see that `paper.docx` has uncommitted changes,
 so let's commit them with a message like
@@ -219,7 +261,10 @@ Adding `figures/chart.png` to the input dependencies will cause our
 PDF generation stage to be rerun if that or `paper.docx` changes.
 Otherwise, it will not run, so running the pipeline can be as fast as possible.
 
-![Adding a stage to convert our Word document to PDF.](img/office/word-to-pdf-stage-2.png)
+![Adding a stage to convert our Word document to PDF.](img/office/word-to-pdf-stage-2.png){ width="450px" }
+/// caption
+Adding a stage to convert our Word document to PDF.
+///
 
 Again the pipeline will show that it's out-of-date,
 so let's run and commit again, using a message like
@@ -249,6 +294,9 @@ Keeping track of all that would consume valuable mental energy that could
 be better spent on interpreting and communicating the results!
 
 ![A diagram and YAML representation of the pipeline on calkit.io.](img/office/workflow-page.png)
+/// caption
+A diagram and YAML representation of the pipeline on calkit.io.
+///
 
 To close the loop and show the value of using version control and a pipeline,
 let's go and add a few rows to our dataset,
@@ -259,9 +307,15 @@ and that our pipeline is again out-of-date,
 meaning that our primary output (the PDF of the paper)
 not longer reflects our input data.
 
-![Adding rows to our dataset.](img/office/chart-more-rows.png)
+![Adding rows to the dataset.](img/office/chart-more-rows.png)
+/// caption
+Adding rows to the dataset.
+///
 
-![After adding a row to the spreadsheet, our pipeline is again out-of-date.](img/office/status-more-rows.png)
+![After adding a row to the spreadsheet, the pipeline is again out-of-date.](img/office/status-more-rows.png){ width="450px" }
+/// caption
+After adding a row to the spreadsheet, the pipeline is again out-of-date.
+///
 
 Now with one click we can rerun the pipeline,
 which is going to update both our figure PNG file and the paper PDF in one
@@ -273,6 +327,9 @@ Having the files in version control also means we can go check out an old
 version if we made a mistake.
 
 ![Confirming the figure in our publication's PDF includes the additional rows.](img/office/updated-publication.png)
+/// caption
+Confirming the figure in our publication's PDF includes the additional rows.
+///
 
 Well, we did it.
 We created a reproducible workflow using Microsoft Word and Excel,

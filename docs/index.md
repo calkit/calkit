@@ -32,11 +32,12 @@ To do this, we try to make it easy for users to follow two simple rules:
 ## Features
 
 - A [version control interface](version-control.md)
-  that unifies and simplifies Git and DVC.
+  that unifies and simplifies interaction with Git and DVC.
 - Automated [environment management](environments.md).
 - A [project metadata model](calkit-yaml.md)
   to declare global dependencies, environments,
-  and artifacts like datasets, figures, and publications.
+  and artifacts like datasets, figures, notebooks, and publications
+  to facilitate searchability and reuse.
 - A complementary [cloud platform](https://calkit.io) to interact with
   the project and its artifacts, which serves as a DVC remote.
 - Templates for projects, publications, and more.

@@ -3,7 +3,7 @@
 Sometimes there are steps in a pipeline that are too cumbersome to
 automate,
 but are not complex enough to warrant defining an entire
-[procedure](tutorials/procedures.md).
+[procedure](../tutorials/procedures.md).
 Or maybe they will not need to be iterated much,
 so automation would not be worth the trouble.
 

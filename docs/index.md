@@ -42,7 +42,8 @@ To do this, we try to make it easy for users to follow two simple rules:
   the project and its artifacts, which also serves as a DVC remote.
 - Templates for projects, publications, and more.
 - The ability to declare, execute, and track
-  [manual procedures](tutorials/procedures.md).
+  [manual procedures](tutorials/procedures.md) and
+  [manual steps](pipeline/manual-steps.md).
 - A Jupyter cell magic to
   [use notebook cells as pipeline stages](tutorials/notebook-pipeline.md).
 - Tools to help improve the reproducibility of workflows that depend on

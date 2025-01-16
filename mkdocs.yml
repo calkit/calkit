@@ -44,6 +44,7 @@ nav:
   - References: references.md
   - Tutorials:
       - tutorials/first-project.md
+      - tutorials/openfoam.md
       - tutorials/adding-latex-pub-docker.md
       - tutorials/notebook-pipeline.md
       - tutorials/procedures.md

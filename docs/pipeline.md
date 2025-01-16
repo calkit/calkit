@@ -7,7 +7,7 @@ the project's important artifacts.
 
 The command, or `cmd` key, for each stage should typically
 include the `calkit xenv` command,
-such that every process is run in a defined environment.
+such that every process is executed in a defined environment.
 This way,
 Calkit will ensure the environment matches its specification
 before execution.

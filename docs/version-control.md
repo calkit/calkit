@@ -30,8 +30,9 @@ with Git or DVC and act accordingly.
 Options:
 
 - `--to`, `-t`: Manually specify `git` or `dvc` as the tracking mechanism.
-- `--commit-message`, `-m`: Create a commit after adding.
-- `--push`: Push to the Git or DVC remote after pushing.
+- `--commit-message`, `-m`: Create a commit after adding
+  and use the provided message.
+- `--push`: Push to the Git or DVC remote after committing.
 
 ### `save`
 

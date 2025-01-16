@@ -45,3 +45,5 @@ To do this, we try to make it easy for users to follow two simple rules:
   [manual procedures](tutorials/procedures.md).
 - A Jupyter cell magic to
   [use notebook cells as pipeline stages](tutorials/notebook-pipeline.md).
+- Tools to help improve the reproducibility of workflows that depend on
+  [Microsoft Office](tutorials/office.md).

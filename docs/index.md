@@ -39,7 +39,7 @@ To do this, we try to make it easy for users to follow two simple rules:
   and artifacts like datasets, figures, notebooks, and publications
   to facilitate searchability and reuse.
 - A complementary [cloud platform](https://calkit.io) to interact with
-  the project and its artifacts, which serves as a DVC remote.
+  the project and its artifacts, which also serves as a DVC remote.
 - Templates for projects, publications, and more.
 - The ability to declare, execute, and track
   [manual procedures](tutorials/procedures.md).

@@ -27,3 +27,19 @@ To do this, we try to make it easy for users to follow two simple rules:
    Calkit provides helper functionality to build pipeline stages that
    keep computational environments up-to-date and label their outputs for
    convenient reuse.
+
+## Features
+
+- A [version control interface](version-control.md)
+  that unifies and simplifies Git and DVC.
+- Automated [environment management](environments.md).
+- A [project metadata model](calkit-yaml.md)
+  to declare global dependencies, environments,
+  and artifacts like datasets, figures, and publications.
+- A complementary [cloud platform](https://calkit.io) to interact with
+  the project and its artifacts, which serves as a DVC remote.
+- Templates for projects, publications, and more.
+- The ability to declare, execute, and track
+  [manual procedures](tutorials/procedures.md).
+- A Jupyter cell magic to
+  [use notebook cells as pipeline stages](tutorials/notebook-pipeline.md).

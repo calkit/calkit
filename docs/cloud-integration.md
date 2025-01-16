@@ -1,4 +1,4 @@
-## Cloud integration
+# Cloud integration
 
 The Calkit Cloud ([calkit.io](https://calkit.io)) serves as a project
 management interface and a DVC remote for easily storing all versions of your

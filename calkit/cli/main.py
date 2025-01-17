@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 
+import dotenv
 import git
 import typer
 from typing_extensions import Annotated, Optional
@@ -57,8 +58,8 @@ def _to_shell_cmd(cmd: list[str]) -> str:
     quoted_cmd = []
     for part in cmd:
         if " " in part or '"' in part or "'" in part:
-            part = part.replace('"', r'\"')
-            quoted_cmd.append(f"\"{part}\"")
+            part = part.replace('"', r"\"")
+            quoted_cmd.append(f'"{part}"')
         else:
             quoted_cmd.append(part)
     return " ".join(quoted_cmd)
@@ -1079,3 +1080,18 @@ def run_calculation(
             typer.echo(calc.evaluate_and_format(**parsed_inputs))
     except Exception as e:
         raise_error(f"Calculation failed: {e}")
+
+
+@app.command(name="set-env-var")
+def set_env_var(
+    name: Annotated[str, typer.Argument(help="Name of the variable.")],
+    value: Annotated[str, typer.Argument(help="Value of the variable.")],
+):
+    """Set an environmental variable for the project in its '.env' file."""
+    # Ensure that .env is ignored by git
+    repo = git.Repo()
+    if not repo.ignored(".env"):
+        typer.echo("Adding .env to .gitignore")
+        with open(".gitignore", "a") as f:
+            f.write("\n.env\n")
+    dotenv.set_key(dotenv_path=".env", key_to_set=name, value_to_set=value)

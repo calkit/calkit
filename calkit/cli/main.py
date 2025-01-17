@@ -414,6 +414,7 @@ def run_dvc_repro(
     """Run DVC pipeline and parse Calkit objects from metadata after checking
     system dependencies.
     """
+    dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     # First check any system-level dependencies exist
     typer.echo("Checking system-level dependencies")
     try:
@@ -597,6 +598,7 @@ def run_in_env(
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
 ):
+    dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info(process_includes="environments")
     envs = ck_info.get("environments", {})
     if not envs:

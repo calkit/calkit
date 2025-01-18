@@ -359,7 +359,7 @@ def save(
 
 @app.command(name="pull")
 def pull(
-    no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False
+    no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
 ):
     """Pull with both Git and DVC."""
     typer.echo("Git pulling")
@@ -383,7 +383,7 @@ def pull(
 
 @app.command(name="push")
 def push(
-    no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False
+    no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
 ):
     """Push with both Git and DVC."""
     typer.echo("Pushing to Git remote")

@@ -13,6 +13,7 @@ import sys
 import time
 
 import dotenv
+import dvc.repo
 import git
 import typer
 from typing_extensions import Annotated, Optional
@@ -282,10 +283,12 @@ def save(
             ),
         ),
     ] = None,
-    all: Annotated[
+    save_all: Annotated[
         Optional[bool],
         typer.Option(
-            "--all", "-a", help="Automatically stage all changed files."
+            "--all",
+            "-a",
+            help=("Save all, automatically handling staging and ignoring."),
         ),
     ] = False,
     message: Annotated[
@@ -310,6 +313,45 @@ def save(
     """
     if paths is not None:
         add(paths, to=to)
+    elif save_all:
+        # First check to see if we should commit anything to DVC
+        dvc_repo = dvc.repo.Repo()
+        dvc_status = dvc_repo.data_status()
+        for dvc_uncommitted in dvc_status["uncommitted"].get("modified", []):
+            typer.echo(
+                f"Adding {dvc_uncommitted} to DVC"
+            )
+            dvc_repo.commit(dvc_uncommitted, force=True)
+        repo = git.Repo()
+        untracked_git_files = repo.untracked_files
+        auto_ignore_suffixes = [".DS_Store", ".env"]
+        auto_ignore_paths = [os.path.join(".dvc", "config.local")]
+        auto_ignore_prefixes = [".venv"]
+        for untracked_file in untracked_git_files:
+            if (
+                any(
+                    [
+                        untracked_file.endswith(suffix)
+                        for suffix in auto_ignore_suffixes
+                    ]
+                )
+                or any(
+                    [
+                        untracked_file.startswith(prefix)
+                        for prefix in auto_ignore_prefixes
+                    ]
+                )
+                or untracked_file in auto_ignore_paths
+            ):
+                typer.echo(f"Automatically ignoring {untracked_file}")
+                with open(".gitignore", "a") as f:
+                    f.write("\n" + untracked_file + "\n")
+        # Now add untracked files automatically
+        for untracked_file in repo.untracked_files:
+            add(paths=[untracked_file])
+        # Now add changed files
+        for changed_file in [d.a_path for d in repo.index.diff(None)]:
+            repo.git.add(changed_file)
     commit(all=True if paths is None else False, message=message)
     if not no_push:
         push()

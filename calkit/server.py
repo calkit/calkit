@@ -454,7 +454,7 @@ def discard_changes(owner_name: str, project_name: str) -> Message:
             subprocess.check_call(
                 ["dvc", "checkout", path, "--force"], cwd=project.wdir
             )
-    except dvc.config.ConfigError as e:
+    except dvc.config.ConfigError:
         pass
     return Message(message="Changes successfully discarded")
 

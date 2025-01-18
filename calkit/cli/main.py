@@ -945,7 +945,7 @@ def run_procedure(
     # Check to make sure the working tree is clean, so we know we ran the
     # committed version of the procedure
     git_status = git_repo.git.status()
-    if not "working tree clean" in git_status:
+    if "working tree clean" not in git_status:
         raise_error(
             f"Cannot execute procedures unless repo is clean:\n\n{git_status}"
         )

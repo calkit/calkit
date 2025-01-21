@@ -423,7 +423,7 @@ def run_local_server():
     name="run",
     add_help_option=False,
 )
-def run_dvc_repro(
+def run(
     targets: Optional[list[str]] = typer.Argument(default=None),
     help: Annotated[bool, typer.Option("-h", "--help")] = False,
     quiet: Annotated[bool, typer.Option("-q", "--quiet")] = False,
@@ -453,9 +453,7 @@ def run_dvc_repro(
     no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
     no_run_cache: Annotated[bool, typer.Option("--no-run-cache")] = False,
 ):
-    """Run DVC pipeline and parse Calkit objects from metadata after checking
-    system dependencies.
-    """
+    """Check dependencies, run DVC pipeline, and update Calkit objects."""
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     # First check any system-level dependencies exist
     typer.echo("Checking system-level dependencies")

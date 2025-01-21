@@ -29,3 +29,25 @@ def test_check_reproducibility(tmp_path):
     res = check_reproducibility()
     assert res.has_readme
     assert res.instructions_in_readme
+
+
+def test_check_call():
+    out = (
+        subprocess.check_output(
+            ["calkit", "check", "call", "echo sup", "--if-error", "echo yo"]
+        )
+        .decode()
+        .strip()
+        .split("\n")
+    )
+    assert "sup" in out
+    assert "yo" not in out
+    out = (
+        subprocess.check_output(
+            ["calkit", "check", "call", "sup", "--if-error", "echo yo"]
+        )
+        .decode()
+        .strip()
+        .split("\n")
+    )
+    assert "yo" in out

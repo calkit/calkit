@@ -12,6 +12,8 @@ import subprocess
 import sys
 import time
 
+import dotenv
+import dvc.repo
 import git
 import typer
 from typing_extensions import Annotated, Optional
@@ -57,8 +59,8 @@ def _to_shell_cmd(cmd: list[str]) -> str:
     quoted_cmd = []
     for part in cmd:
         if " " in part or '"' in part or "'" in part:
-            part = part.replace('"', r'\"')
-            quoted_cmd.append(f"\"{part}\"")
+            part = part.replace('"', r"\"")
+            quoted_cmd.append(f'"{part}"')
         else:
             quoted_cmd.append(part)
     return " ".join(quoted_cmd)
@@ -281,10 +283,12 @@ def save(
             ),
         ),
     ] = None,
-    all: Annotated[
+    save_all: Annotated[
         Optional[bool],
         typer.Option(
-            "--all", "-a", help="Automatically stage all changed files."
+            "--all",
+            "-a",
+            help=("Save all, automatically handling staging and ignoring."),
         ),
     ] = False,
     message: Annotated[
@@ -309,6 +313,43 @@ def save(
     """
     if paths is not None:
         add(paths, to=to)
+    elif save_all:
+        # First check to see if we should commit anything to DVC
+        dvc_repo = dvc.repo.Repo()
+        dvc_status = dvc_repo.data_status()
+        for dvc_uncommitted in dvc_status["uncommitted"].get("modified", []):
+            typer.echo(f"Adding {dvc_uncommitted} to DVC")
+            dvc_repo.commit(dvc_uncommitted, force=True)
+        repo = git.Repo()
+        untracked_git_files = repo.untracked_files
+        auto_ignore_suffixes = [".DS_Store", ".env"]
+        auto_ignore_paths = [os.path.join(".dvc", "config.local")]
+        auto_ignore_prefixes = [".venv"]
+        for untracked_file in untracked_git_files:
+            if (
+                any(
+                    [
+                        untracked_file.endswith(suffix)
+                        for suffix in auto_ignore_suffixes
+                    ]
+                )
+                or any(
+                    [
+                        untracked_file.startswith(prefix)
+                        for prefix in auto_ignore_prefixes
+                    ]
+                )
+                or untracked_file in auto_ignore_paths
+            ):
+                typer.echo(f"Automatically ignoring {untracked_file}")
+                with open(".gitignore", "a") as f:
+                    f.write("\n" + untracked_file + "\n")
+        # Now add untracked files automatically
+        for untracked_file in repo.untracked_files:
+            add(paths=[untracked_file])
+        # Now add changed files
+        for changed_file in [d.a_path for d in repo.index.diff(None)]:
+            repo.git.add(changed_file)
     commit(all=True if paths is None else False, message=message)
     if not no_push:
         push()
@@ -316,7 +357,7 @@ def save(
 
 @app.command(name="pull")
 def pull(
-    no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False
+    no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
 ):
     """Pull with both Git and DVC."""
     typer.echo("Git pulling")
@@ -340,7 +381,7 @@ def pull(
 
 @app.command(name="push")
 def push(
-    no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False
+    no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
 ):
     """Push with both Git and DVC."""
     typer.echo("Pushing to Git remote")
@@ -380,7 +421,7 @@ def run_local_server():
     name="run",
     add_help_option=False,
 )
-def run_dvc_repro(
+def run(
     targets: Optional[list[str]] = typer.Argument(default=None),
     help: Annotated[bool, typer.Option("-h", "--help")] = False,
     quiet: Annotated[bool, typer.Option("-q", "--quiet")] = False,
@@ -410,9 +451,8 @@ def run_dvc_repro(
     no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
     no_run_cache: Annotated[bool, typer.Option("--no-run-cache")] = False,
 ):
-    """Run DVC pipeline and parse Calkit objects from metadata after checking
-    system dependencies.
-    """
+    """Check dependencies, run DVC pipeline, and update Calkit objects."""
+    dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     # First check any system-level dependencies exist
     typer.echo("Checking system-level dependencies")
     try:
@@ -596,6 +636,7 @@ def run_in_env(
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
 ):
+    dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info(process_includes="environments")
     envs = ck_info.get("environments", {})
     if not envs:
@@ -756,35 +797,6 @@ def run_in_env(
 
 
 @app.command(
-    name="check-call",
-    help=(
-        "Check that a call to a command succeeds and run another command "
-        "if there is an error."
-    ),
-)
-def check_call(
-    cmd: Annotated[str, typer.Argument(help="Command to check.")],
-    if_error: Annotated[
-        str,
-        typer.Option(
-            "--if-error", help="Command to run if there is an error."
-        ),
-    ],
-):
-    try:
-        subprocess.check_call(cmd, shell=True)
-        typer.echo("Command succeeded")
-    except subprocess.CalledProcessError:
-        typer.echo("Command failed")
-        try:
-            typer.echo("Attempting fallback call")
-            subprocess.check_call(if_error, shell=True)
-            typer.echo("Fallback call succeeded")
-        except subprocess.CalledProcessError:
-            raise_error("Fallback call failed")
-
-
-@app.command(
     name="build-docker",
     help="Build Docker image if missing or different from lock file.",
 )
@@ -900,7 +912,7 @@ def run_procedure(
     # Check to make sure the working tree is clean, so we know we ran the
     # committed version of the procedure
     git_status = git_repo.git.status()
-    if not "working tree clean" in git_status:
+    if "working tree clean" not in git_status:
         raise_error(
             f"Cannot execute procedures unless repo is clean:\n\n{git_status}"
         )
@@ -1079,3 +1091,18 @@ def run_calculation(
             typer.echo(calc.evaluate_and_format(**parsed_inputs))
     except Exception as e:
         raise_error(f"Calculation failed: {e}")
+
+
+@app.command(name="set-env-var")
+def set_env_var(
+    name: Annotated[str, typer.Argument(help="Name of the variable.")],
+    value: Annotated[str, typer.Argument(help="Value of the variable.")],
+):
+    """Set an environmental variable for the project in its '.env' file."""
+    # Ensure that .env is ignored by git
+    repo = git.Repo()
+    if not repo.ignored(".env"):
+        typer.echo("Adding .env to .gitignore")
+        with open(".gitignore", "a") as f:
+            f.write("\n.env\n")
+    dotenv.set_key(dotenv_path=".env", key_to_set=name, value_to_set=value)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Literal
 
 from pydantic import BaseModel
@@ -21,7 +21,7 @@ class _ImportedFromUrl(BaseModel):
 class _CalkitObject(BaseModel):
     path: str
     title: str
-    description: str
+    description: str | None = None
     stage: str | None = None
 
 
@@ -201,6 +201,14 @@ class ModelRelease(Release):
     path: str
 
 
+class ShowcaseFigure(BaseModel):
+    figure: str
+
+
+class ShowcaseText(BaseModel):
+    text: str
+
+
 class ProjectInfo(BaseModel):
     """All of the project's information or metadata, written to the
     ``calkit.yaml`` file.
@@ -243,3 +251,4 @@ class ProjectInfo(BaseModel):
         str,
         ProjectRelease | PublicationRelease | DatasetRelease | ModelRelease,
     ] = {}
+    showcase: list[ShowcaseFigure | ShowcaseText] | None = None

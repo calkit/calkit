@@ -24,6 +24,7 @@ dependencies = [
   "pydantic[email]",
   "pydantic-settings",
   "pyjwt",
+  "python-dotenv>=1",
   "pywin32; platform_system == 'Windows'",
   "requests",
   "typer",
@@ -50,8 +51,8 @@ docs = [
 
 [project.urls]
 Homepage = "https://calkit.org"
-Repository = "https://github.com/calkit/calkit"
 Issues = "https://github.com/calkit/calkit/issues"
+Repository = "https://github.com/calkit/calkit"
 
 [project.scripts]
 calkit = "calkit.cli:run"

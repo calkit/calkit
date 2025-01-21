@@ -193,28 +193,6 @@ def test_run_in_venv(tmp_dir):
     assert out == "2.0.0"
 
 
-def test_check_call():
-    out = (
-        subprocess.check_output(
-            ["calkit", "check-call", "echo sup", "--if-error", "echo yo"]
-        )
-        .decode()
-        .strip()
-        .split("\n")
-    )
-    assert "sup" in out
-    assert "yo" not in out
-    out = (
-        subprocess.check_output(
-            ["calkit", "check-call", "sup", "--if-error", "echo yo"]
-        )
-        .decode()
-        .strip()
-        .split("\n")
-    )
-    assert "yo" in out
-
-
 def test_to_shell_cmd():
     cmd = ["python", "-c", "import math; print('hello world')"]
     subprocess.check_call(cmd)
@@ -224,12 +202,12 @@ def test_to_shell_cmd():
     cmd = ["echo", "hello world"]
     subprocess.check_call(cmd)
     shell_cmd = _to_shell_cmd(cmd)
-    assert shell_cmd == "echo \"hello world\""
+    assert shell_cmd == 'echo "hello world"'
     subprocess.check_call(shell_cmd, shell=True)
     cmd = ["python", "-c", "print('sup')"]
     shell_cmd = _to_shell_cmd(cmd)
     assert shell_cmd == "python -c \"print('sup')\""
     cmd = ["python", "-c", 'print("hello world")']
     shell_cmd = _to_shell_cmd(cmd)
-    assert shell_cmd == "python -c \"print(\\\"hello world\\\")\""
+    assert shell_cmd == 'python -c "print(\\"hello world\\")"'
     subprocess.check_call(shell_cmd, shell=True)

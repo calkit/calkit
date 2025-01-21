@@ -318,9 +318,7 @@ def save(
         dvc_repo = dvc.repo.Repo()
         dvc_status = dvc_repo.data_status()
         for dvc_uncommitted in dvc_status["uncommitted"].get("modified", []):
-            typer.echo(
-                f"Adding {dvc_uncommitted} to DVC"
-            )
+            typer.echo(f"Adding {dvc_uncommitted} to DVC")
             dvc_repo.commit(dvc_uncommitted, force=True)
         repo = git.Repo()
         untracked_git_files = repo.untracked_files
@@ -796,35 +794,6 @@ def run_in_env(
             raise_error(f"Failed to run in {kind}")
     else:
         raise_error("Environment kind not supported")
-
-
-@app.command(
-    name="check-call",
-    help=(
-        "Check that a call to a command succeeds and run another command "
-        "if there is an error."
-    ),
-)
-def check_call(
-    cmd: Annotated[str, typer.Argument(help="Command to check.")],
-    if_error: Annotated[
-        str,
-        typer.Option(
-            "--if-error", help="Command to run if there is an error."
-        ),
-    ],
-):
-    try:
-        subprocess.check_call(cmd, shell=True)
-        typer.echo("Command succeeded")
-    except subprocess.CalledProcessError:
-        typer.echo("Command failed")
-        try:
-            typer.echo("Attempting fallback call")
-            subprocess.check_call(if_error, shell=True)
-            typer.echo("Fallback call succeeded")
-        except subprocess.CalledProcessError:
-            raise_error("Fallback call failed")
 
 
 @app.command(

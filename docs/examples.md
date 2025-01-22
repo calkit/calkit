@@ -15,3 +15,42 @@ If you have one you'd like to be included, please
   - Interactive HTML figures generated with PyVista
   - An interactive marimo app hosted on HF spaces for interacting with the
     results
+
+## A basic research project
+
+- Project page: https://calkit.io/calkit/example-basic
+- GitHub repo: https://github.com/calkit/example-basic
+- Features:
+  - An automatically-managed Conda environment for data processing and
+    visualization
+  - A LaTeX publication built with a Docker container
+  - A dev container spec to enable editing and collaboration with GitHub
+    Codespaces
+
+## MATLAB
+
+- Project page: https://calkit.io/calkit/example-matlab
+- GitHub repo: https://github.com/calkit/example-matlab
+- Features:
+  - Dependency checking before pipeline execution
+  - MATLAB scripts run in batch mode
+
+## Strava analysis
+
+- Project page: https://calkit.io/petebachant/strava-analysis
+- GitHub repo: https://github.com/petebachant/strava-analysis
+- Features:
+  - OAuth2 authentication with an external API
+  - Environmental variable dependencies
+  - A pipeline designed to be run periodically to accumulate new data
+  - A project showcase with interactive Plotly figures
+
+## OpenFOAM RANS boundary later validation
+
+- Project page: https://calkit.io/petebachant/rans-boundary-layer-validation
+- GitHub repo: https://github.com/petebachant/rans-boundary-layer-validation
+- Features:
+  - OpenFOAM simulations run in a Docker container
+  - A LaTeX document built with a Docker container
+  - A direct numerical simulation dataset for validation imported from a
+    different project, derived from the Johns Hopkins Turbulence Database

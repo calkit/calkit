@@ -2,7 +2,7 @@
 
 Here are some example projects that use Calkit.
 If you have one you'd like to be included, please
-[edit this page](https://github.com/calkit/calkit/edit/main/docs/examples.md).
+[✏️ edit this page](https://github.com/calkit/calkit/edit/main/docs/examples.md).
 
 ## NACA 0012 2-D RANS with OpenFOAM
 

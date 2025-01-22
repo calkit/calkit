@@ -47,6 +47,7 @@ nav:
   - References: references.md
   - Calculations: calculations.md
   - Apps: apps.md
+  - Examples: examples.md
   - Tutorials:
       - tutorials/first-project.md
       - tutorials/openfoam.md

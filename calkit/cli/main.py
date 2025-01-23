@@ -16,10 +16,12 @@ import dotenv
 import dvc.repo
 import git
 import typer
+from dvc.exceptions import NotDvcRepoError
+from git.exc import InvalidGitRepositoryError
 from typing_extensions import Annotated, Optional
 
 import calkit
-from calkit.cli import print_sep, raise_error, run_cmd
+from calkit.cli import print_sep, raise_error, run_cmd, warn
 from calkit.cli.check import check_app
 from calkit.cli.config import config_app
 from calkit.cli.import_ import import_app
@@ -185,6 +187,16 @@ def add(
     """
     if to is not None and to not in ["git", "dvc"]:
         raise_error(f"Invalid option for 'to': {to}")
+    try:
+        repo = git.Repo()
+    except InvalidGitRepositoryError:
+        warn("Not currently in a Git repo; initializing")
+        repo = git.Repo.init()
+    try:
+        dvc_repo = dvc.repo.Repo()
+    except NotDvcRepoError:
+        warn("DVC not initialized yet; initializing")
+        dvc_repo = dvc.repo.Repo.init()
     # Ensure autostage is enabled for DVC
     subprocess.call(["dvc", "config", "core.autostage", "true"])
     subprocess.call(["git", "add", ".dvc/config"])

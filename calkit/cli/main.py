@@ -213,8 +213,7 @@ def add(
     try:
         repo = git.Repo()
     except InvalidGitRepositoryError:
-        warn("Not currently in a Git repo; initializing")
-        repo = git.Repo.init()
+        raise_error("Not currently in a Git repo; run `calkit init` first")
     try:
         dvc_repo = dvc.repo.Repo()
     except NotDvcRepoError:

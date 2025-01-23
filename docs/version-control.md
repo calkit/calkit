@@ -105,7 +105,7 @@ graph LR
 
 If you have a collaborator working on the same project,
 any time they have pushed commits,
-you will need to pull
+you will need to pull before being able to push yourself.
 
 ## Command reference
 

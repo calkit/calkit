@@ -336,6 +336,8 @@ def save(
 
     This is essentially git/dvc add, commit, and push in one step.
     """
+    if not paths and not save_all:
+        raise_error("Paths must be provided if not using --all")
     if paths is not None:
         add(paths, to=to)
     elif save_all:

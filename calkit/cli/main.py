@@ -254,7 +254,7 @@ def add(
             elif os.path.splitext(path)[-1] in dvc_extensions:
                 typer.echo(f"Adding {path} to DVC per its extension")
                 subprocess.call(["dvc", "add", path])
-            if calkit.get_size(path) > dvc_size_thresh_bytes:
+            elif calkit.get_size(path) > dvc_size_thresh_bytes:
                 typer.echo(
                     f"Adding {path} to DVC since it's greater than 1 MB"
                 )

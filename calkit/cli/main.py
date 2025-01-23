@@ -81,15 +81,26 @@ def main(
 
 
 @app.command(name="init")
-def init():
+def init(
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Force reinitializing DVC if already initialized.",
+        ),
+    ] = False,
+):
     """Initialize the current working directory."""
-    raise_error("Not implemented")
     subprocess.run(["git", "init"])
-    subprocess.run(["dvc", "init"])
-    # Initialize `calkit.yaml`
-    # Initialize `dvc.yaml`
-    # Add a sane .gitignore file
-    # Add a sane LICENSE file?
+    dvc_cmd = ["dvc", "init"]
+    if force:
+        dvc_cmd.append("-f")
+    subprocess.run(dvc_cmd)
+    # TODO: Initialize `calkit.yaml`
+    # TODO: Initialize `dvc.yaml`
+    # TODO: Add a sane .gitignore file
+    # TODO: Add a sane LICENSE file?
 
 
 @app.command(name="clone")

@@ -1,8 +1,13 @@
 """Tests for ``cli.main``."""
 
+import os
 import subprocess
 
+import dvc.repo
+import git
 import pytest
+from dvc.exceptions import NotDvcRepoError
+from git.exc import InvalidGitRepositoryError
 
 import calkit
 from calkit.cli.main import _to_shell_cmd
@@ -211,3 +216,45 @@ def test_to_shell_cmd():
     shell_cmd = _to_shell_cmd(cmd)
     assert shell_cmd == 'python -c "print(\\"hello world\\")"'
     subprocess.check_call(shell_cmd, shell=True)
+
+
+def test_add(tmp_dir):
+    # Create a text file that should be added to Git
+    with open("text.txt", "w") as f:
+        f.write("Hi")
+    # Create a large-ish binary file that should be added to DVC
+    with open("large.bin", "wb") as f:
+        f.write(os.urandom(2_000_000))
+    # Create a small directory that should be added to Git
+    os.makedirs("src")
+    with open("src/code.py", "w") as f:
+        f.write("import os")
+    # Create a large data directory that should be added to DVC
+    os.makedirs("data/raw")
+    with open("data/raw/file1.bin", "wb") as f:
+        f.write(os.urandom(2_000_000))
+    # Create a file with an extension that should automatically be added to DVC
+    with open("data.parquet", "w") as f:
+        f.write("This is a fake parquet file")
+    # First, if Git and/or DVC have never been initialized, test that happens?
+    with pytest.raises(InvalidGitRepositoryError):
+        repo = git.Repo()
+    with pytest.raises(NotDvcRepoError):
+        dvc_repo = dvc.repo.Repo()
+    subprocess.check_call(["calkit", "add", "text.txt"])
+    repo = git.Repo()
+    assert "text.txt" in calkit.git.get_staged_files()
+    subprocess.check_call(["calkit", "add", "large.bin"])
+    assert "large.bin.dvc" in calkit.git.get_staged_files()
+    assert "large.bin" in calkit.dvc.list_paths()
+    subprocess.check_call(["calkit", "add", "src"])
+    assert "src/code.py" in calkit.git.get_staged_files()
+    subprocess.check_call(["calkit", "add", "data.parquet"])
+    assert "data.parquet.dvc" in calkit.git.get_staged_files()
+    assert "data.parquet" in calkit.dvc.list_paths()
+    subprocess.check_call(["calkit", "add", "data"])
+    assert "data.dvc" in calkit.git.get_staged_files()
+    assert "data" in calkit.dvc.list_paths()
+    # Check that we can't run `calkit add .`
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(["calkit", "add", "."])

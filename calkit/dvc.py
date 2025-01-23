@@ -6,6 +6,8 @@ import logging
 import os
 import subprocess
 
+import dvc.repo
+
 import calkit
 from calkit.config import get_app_name
 
@@ -102,3 +104,9 @@ def get_remotes(wdir: str = None) -> dict[str, str]:
         name, url = line.split("\t")
         resp[name] = url
     return resp
+
+
+def list_paths(wdir: str = None) -> list[str]:
+    """List paths tracked with DVC."""
+    dvc_repo = dvc.repo.Repo(wdir)
+    return [p.get("path") for p in dvc_repo.ls(".", dvc_only=True)]

@@ -376,6 +376,14 @@ def save(
         # Now add changed files
         for changed_file in [d.a_path for d in repo.index.diff(None)]:
             repo.git.add(changed_file)
+    if message is None:
+        typer.echo("No message provided; entering interactive mode")
+        typer.echo("Creating a commit including the following paths:")
+        for path in calkit.git.get_staged_files():
+            typer.echo(f"- {path}")
+        typer.echo("Please provide a message describing the changes.")
+        typer.echo("Example: Add new data to data/raw")
+        message = typer.prompt("Message")
     commit(all=True if paths is None else False, message=message)
     if not no_push:
         push()

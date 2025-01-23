@@ -80,6 +80,18 @@ def main(
         raise typer.Exit()
 
 
+@app.command(name="init")
+def init():
+    """Initialize the current working directory."""
+    raise_error("Not implemented")
+    subprocess.run(["git", "init"])
+    subprocess.run(["dvc", "init"])
+    # Initialize `calkit.yaml`
+    # Initialize `dvc.yaml`
+    # Add a sane .gitignore file
+    # Add a sane LICENSE file?
+
+
 @app.command(name="clone")
 def clone(
     url: Annotated[str, typer.Argument(help="Repo URL.")],

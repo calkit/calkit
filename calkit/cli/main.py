@@ -287,6 +287,10 @@ def commit(
     ] = False,
 ):
     """Commit a change to the repo."""
+    if message is None:
+        typer.echo("Please provide a message describing the changes.")
+        typer.echo("Example: Update y-label in scripts/plot-data.py")
+        message = typer.prompt("Message")
     cmd = ["git", "commit"]
     if all:
         cmd.append("-a")

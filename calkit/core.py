@@ -362,3 +362,21 @@ def read_file(path: str, as_bytes: bool = None) -> str | bytes:
     # Project is None, so let's just read a local file
     with open(path, mode="rb" if as_bytes else "r") as f:
         return f.read()
+
+
+def get_size(path: str):
+    """Get the size of a path in bytes.
+
+    This differs from ``os.path.getsize`` in that it is recursive.
+    """
+    if os.path.isfile(path):
+        return os.path.getsize(path)
+    # From https://stackoverflow.com/a/1392549/2284865
+    total_size = 0
+    for dirpath, dirnames, filenames in os.walk(path):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            # skip if it is symbolic link
+            if not os.path.islink(fp):
+                total_size += os.path.getsize(fp)
+    return total_size

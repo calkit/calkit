@@ -238,10 +238,6 @@ def add(
         ]
         if "." in paths and to is None:
             raise_error("Cannot add '.' with calkit; use git or dvc")
-        if to is None:
-            for path in paths:
-                if os.path.isdir(path):
-                    raise_error("Cannot auto-add directories; use git or dvc")
         for path in paths:
             # Detect if this file should be tracked with Git or DVC
             # First see if it's in Git
@@ -250,25 +246,22 @@ def add(
                     f"Adding {path} to Git since it's already in the repo"
                 )
                 subprocess.call(["git", "add", path])
-                continue
-            if path in dvc_paths:
+            elif path in dvc_paths:
                 typer.echo(
                     f"Adding {path} to DVC since it's already tracked with DVC"
                 )
                 subprocess.call(["dvc", "add", path])
-                continue
-            if os.path.splitext(path)[-1] in dvc_extensions:
+            elif os.path.splitext(path)[-1] in dvc_extensions:
                 typer.echo(f"Adding {path} to DVC per its extension")
                 subprocess.call(["dvc", "add", path])
-                continue
-            if os.path.getsize(path) > dvc_size_thresh_bytes:
+            if calkit.get_size(path) > dvc_size_thresh_bytes:
                 typer.echo(
                     f"Adding {path} to DVC since it's greater than 1 MB"
                 )
                 subprocess.call(["dvc", "add", path])
-                continue
-            typer.echo(f"Adding {path} to Git")
-            subprocess.call(["git", "add", path])
+            else:
+                typer.echo(f"Adding {path} to Git")
+                subprocess.call(["git", "add", path])
     if commit_message is not None:
         subprocess.call(["git", "commit", "-m", commit_message])
     if push_commit:

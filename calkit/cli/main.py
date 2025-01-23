@@ -1106,3 +1106,9 @@ def set_env_var(
         with open(".gitignore", "a") as f:
             f.write("\n.env\n")
     dotenv.set_key(dotenv_path=".env", key_to_set=name, value_to_set=value)
+
+
+@app.command(name="upgrade")
+def upgrade():
+    """Upgrade Calkit."""
+    subprocess.check_call(["pip", "install", "--upgrade", "calkit-python"])

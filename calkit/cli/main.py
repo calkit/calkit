@@ -233,13 +233,15 @@ def add(
             ".doc",
         ]
         dvc_size_thresh_bytes = 1_000_000
+        dvc_paths = [
+            obj.get("path") for obj in dvc_repo.ls(".", dvc_only=True)
+        ]
         if "." in paths and to is None:
             raise_error("Cannot add '.' with calkit; use git or dvc")
         if to is None:
             for path in paths:
                 if os.path.isdir(path):
                     raise_error("Cannot auto-add directories; use git or dvc")
-        repo = git.Repo()
         for path in paths:
             # Detect if this file should be tracked with Git or DVC
             # First see if it's in Git
@@ -248,6 +250,12 @@ def add(
                     f"Adding {path} to Git since it's already in the repo"
                 )
                 subprocess.call(["git", "add", path])
+                continue
+            if path in dvc_paths:
+                typer.echo(
+                    f"Adding {path} to DVC since it's already tracked with DVC"
+                )
+                subprocess.call(["dvc", "add", path])
                 continue
             if os.path.splitext(path)[-1] in dvc_extensions:
                 typer.echo(f"Adding {path} to DVC per its extension")
@@ -368,6 +376,7 @@ def save(
                 typer.echo(f"Automatically ignoring {untracked_file}")
                 with open(".gitignore", "a") as f:
                     f.write("\n" + untracked_file + "\n")
+        # TODO: Figure out if we should group large folders for dvc
         # Now add untracked files automatically
         for untracked_file in repo.untracked_files:
             add(paths=[untracked_file])

@@ -238,11 +238,13 @@ def test_add(tmp_dir):
         f.write("This is a fake parquet file")
     # First, if Git and/or DVC have never been initialized, test that happens?
     with pytest.raises(InvalidGitRepositoryError):
-        repo = git.Repo()
+        git.Repo()
     with pytest.raises(NotDvcRepoError):
-        dvc_repo = dvc.repo.Repo()
+        dvc.repo.Repo()
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(["calkit", "add", "text.txt"])
+    subprocess.check_call(["git", "init"])
     subprocess.check_call(["calkit", "add", "text.txt"])
-    repo = git.Repo()
     assert "text.txt" in calkit.git.get_staged_files()
     subprocess.check_call(["calkit", "add", "large.bin"])
     assert "large.bin.dvc" in calkit.git.get_staged_files()

@@ -16,10 +16,12 @@ import dotenv
 import dvc.repo
 import git
 import typer
+from dvc.exceptions import NotDvcRepoError
+from git.exc import InvalidGitRepositoryError
 from typing_extensions import Annotated, Optional
 
 import calkit
-from calkit.cli import print_sep, raise_error, run_cmd
+from calkit.cli import print_sep, raise_error, run_cmd, warn
 from calkit.cli.check import check_app
 from calkit.cli.config import config_app
 from calkit.cli.import_ import import_app
@@ -76,6 +78,29 @@ def main(
     if version:
         typer.echo(f"Calkit {calkit.__version__}")
         raise typer.Exit()
+
+
+@app.command(name="init")
+def init(
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Force reinitializing DVC if already initialized.",
+        ),
+    ] = False,
+):
+    """Initialize the current working directory."""
+    subprocess.run(["git", "init"])
+    dvc_cmd = ["dvc", "init"]
+    if force:
+        dvc_cmd.append("-f")
+    subprocess.run(dvc_cmd)
+    # TODO: Initialize `calkit.yaml`
+    # TODO: Initialize `dvc.yaml`
+    # TODO: Add a sane .gitignore file
+    # TODO: Add a sane LICENSE file?
 
 
 @app.command(name="clone")
@@ -185,6 +210,16 @@ def add(
     """
     if to is not None and to not in ["git", "dvc"]:
         raise_error(f"Invalid option for 'to': {to}")
+    try:
+        repo = git.Repo()
+    except InvalidGitRepositoryError:
+        warn("Not currently in a Git repo; initializing")
+        repo = git.Repo.init()
+    try:
+        dvc_repo = dvc.repo.Repo()
+    except NotDvcRepoError:
+        warn("DVC not initialized yet; initializing")
+        dvc_repo = dvc.repo.Repo.init()
     # Ensure autostage is enabled for DVC
     subprocess.call(["dvc", "config", "core.autostage", "true"])
     subprocess.call(["git", "add", ".dvc/config"])
@@ -209,13 +244,11 @@ def add(
             ".doc",
         ]
         dvc_size_thresh_bytes = 1_000_000
+        dvc_paths = [
+            obj.get("path") for obj in dvc_repo.ls(".", dvc_only=True)
+        ]
         if "." in paths and to is None:
             raise_error("Cannot add '.' with calkit; use git or dvc")
-        if to is None:
-            for path in paths:
-                if os.path.isdir(path):
-                    raise_error("Cannot auto-add directories; use git or dvc")
-        repo = git.Repo()
         for path in paths:
             # Detect if this file should be tracked with Git or DVC
             # First see if it's in Git
@@ -224,19 +257,22 @@ def add(
                     f"Adding {path} to Git since it's already in the repo"
                 )
                 subprocess.call(["git", "add", path])
-                continue
-            if os.path.splitext(path)[-1] in dvc_extensions:
+            elif path in dvc_paths:
+                typer.echo(
+                    f"Adding {path} to DVC since it's already tracked with DVC"
+                )
+                subprocess.call(["dvc", "add", path])
+            elif os.path.splitext(path)[-1] in dvc_extensions:
                 typer.echo(f"Adding {path} to DVC per its extension")
                 subprocess.call(["dvc", "add", path])
-                continue
-            if os.path.getsize(path) > dvc_size_thresh_bytes:
+            elif calkit.get_size(path) > dvc_size_thresh_bytes:
                 typer.echo(
                     f"Adding {path} to DVC since it's greater than 1 MB"
                 )
                 subprocess.call(["dvc", "add", path])
-                continue
-            typer.echo(f"Adding {path} to Git")
-            subprocess.call(["git", "add", path])
+            else:
+                typer.echo(f"Adding {path} to Git")
+                subprocess.call(["git", "add", path])
     if commit_message is not None:
         subprocess.call(["git", "commit", "-m", commit_message])
     if push_commit:
@@ -262,6 +298,10 @@ def commit(
     ] = False,
 ):
     """Commit a change to the repo."""
+    if message is None:
+        typer.echo("Please provide a message describing the changes.")
+        typer.echo("Example: Update y-label in scripts/plot-data.py")
+        message = typer.prompt("Message")
     cmd = ["git", "commit"]
     if all:
         cmd.append("-a")
@@ -311,6 +351,8 @@ def save(
 
     This is essentially git/dvc add, commit, and push in one step.
     """
+    if not paths and not save_all:
+        raise_error("Paths must be provided if not using --all")
     if paths is not None:
         add(paths, to=to)
     elif save_all:
@@ -344,12 +386,21 @@ def save(
                 typer.echo(f"Automatically ignoring {untracked_file}")
                 with open(".gitignore", "a") as f:
                     f.write("\n" + untracked_file + "\n")
+        # TODO: Figure out if we should group large folders for dvc
         # Now add untracked files automatically
         for untracked_file in repo.untracked_files:
             add(paths=[untracked_file])
         # Now add changed files
         for changed_file in [d.a_path for d in repo.index.diff(None)]:
             repo.git.add(changed_file)
+    if message is None:
+        typer.echo("No message provided; entering interactive mode")
+        typer.echo("Creating a commit including the following paths:")
+        for path in calkit.git.get_staged_files():
+            typer.echo(f"- {path}")
+        typer.echo("Please provide a message describing the changes.")
+        typer.echo("Example: Add new data to data/raw")
+        message = typer.prompt("Message")
     commit(all=True if paths is None else False, message=message)
     if not no_push:
         push()
@@ -1106,3 +1157,14 @@ def set_env_var(
         with open(".gitignore", "a") as f:
             f.write("\n.env\n")
     dotenv.set_key(dotenv_path=".env", key_to_set=name, value_to_set=value)
+
+
+@app.command(name="upgrade")
+def upgrade():
+    """Upgrade Calkit."""
+    # See if uv is installed first
+    if calkit.check_dep_exists("uv"):
+        cmd = ["uv", "pip", "install", "--system"]
+    else:
+        cmd = ["pip", "install"]
+    subprocess.run(cmd + ["--upgrade", "calkit-python"])

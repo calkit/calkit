@@ -209,6 +209,12 @@ class ShowcaseText(BaseModel):
     text: str
 
 
+class DerivedFromProject(BaseModel):
+    project: str
+    git_repo_url: str
+    git_rev: str
+
+
 class ProjectInfo(BaseModel):
     """All of the project's information or metadata, written to the
     ``calkit.yaml`` file.
@@ -234,7 +240,7 @@ class ProjectInfo(BaseModel):
     description: str | None = None
     name: str | None = None
     git_repo_url: str | None = None
-    parent: str | None = None
+    derived_from: DerivedFromProject | None = None
     questions: list[str] = []
     datasets: list[Dataset] = []
     figures: list[Figure] = []

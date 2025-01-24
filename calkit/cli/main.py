@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import csv
-import functools
-import hashlib
-import json
 import os
 import platform as _platform
 import subprocess
@@ -22,7 +19,7 @@ from typing_extensions import Annotated, Optional
 
 import calkit
 from calkit.cli import print_sep, raise_error, run_cmd, warn
-from calkit.cli.check import check_app
+from calkit.cli.check import check_app, check_conda_env, check_docker_env
 from calkit.cli.config import config_app
 from calkit.cli.import_ import import_app
 from calkit.cli.list import list_app
@@ -846,78 +843,6 @@ def run_in_env(
         raise_error("Environment kind not supported")
 
 
-@app.command(
-    name="build-docker",
-    help="Build Docker image if missing or different from lock file.",
-)
-def check_docker_env(
-    tag: Annotated[str, typer.Argument(help="Image tag.")],
-    fpath: Annotated[
-        str, typer.Option("-i", "--input", help="Path to input Dockerfile.")
-    ] = "Dockerfile",
-    platform: Annotated[
-        str, typer.Option("--platform", help="Which platform(s) to build for.")
-    ] = None,
-    quiet: Annotated[
-        bool, typer.Option("--quiet", "-q", help="Be quiet.")
-    ] = False,
-):
-    def get_docker_inspect():
-        out = json.loads(
-            subprocess.check_output(["docker", "inspect", tag]).decode()
-        )
-        # Remove some keys that can change without the important aspects of
-        # the image changing
-        _ = out[0].pop("Id")
-        _ = out[0].pop("RepoDigests")
-        _ = out[0].pop("Metadata")
-        _ = out[0].pop("DockerVersion")
-        return out
-
-    outfile = open(os.devnull, "w") if quiet else None
-    typer.echo(f"Checking for existing image with tag {tag}", file=outfile)
-    # First call Docker inspect
-    try:
-        inspect = get_docker_inspect()
-    except subprocess.CalledProcessError:
-        typer.echo(f"No image with tag {tag} found locally", file=outfile)
-        inspect = []
-    typer.echo(f"Reading Dockerfile from {fpath}", file=outfile)
-    with open(fpath) as f:
-        dockerfile = f.read()
-    dockerfile_md5 = hashlib.md5(dockerfile.encode()).hexdigest()
-    lock_fpath = fpath + "-lock.json"
-    rebuild = True
-    if os.path.isfile(lock_fpath):
-        typer.echo(f"Reading lock file: {lock_fpath}", file=outfile)
-        with open(lock_fpath) as f:
-            lock = json.load(f)
-    else:
-        typer.echo(f"Lock file ({lock_fpath}) does not exist", file=outfile)
-        lock = None
-    if inspect and lock:
-        typer.echo(
-            "Checking image and Dockerfile against lock file", file=outfile
-        )
-        rebuild = inspect[0]["RootFS"]["Layers"] != lock[0]["RootFS"][
-            "Layers"
-        ] or dockerfile_md5 != lock[0].get("DockerfileMD5")
-    if rebuild:
-        wdir, fname = os.path.split(fpath)
-        if not wdir:
-            wdir = None
-        cmd = ["docker", "build", "-t", tag, "-f", fname]
-        if platform is not None:
-            cmd += ["--platform", platform]
-        cmd.append(".")
-        subprocess.check_call(cmd, cwd=wdir)
-    # Write the lock file
-    inspect = get_docker_inspect()
-    inspect[0]["DockerfileMD5"] = dockerfile_md5
-    with open(lock_fpath, "w") as f:
-        json.dump(inspect, f, indent=4)
-
-
 @app.command(name="runproc", help="Execute a procedure (alias for 'xproc').")
 @app.command(name="xproc", help="Execute a procedure.")
 def run_procedure(
@@ -1057,51 +982,6 @@ def run_procedure(
             )
         if step.wait_after_s:
             wait(step.wait_after_s)
-
-
-@app.command(
-    name="check-conda-env",
-    help="Check a conda environment and rebuild if necessary.",
-)
-def check_conda_env(
-    env_fpath: Annotated[
-        str,
-        typer.Option(
-            "--file", "-f", help="Path to conda environment YAML file."
-        ),
-    ] = "environment.yml",
-    output_fpath: Annotated[
-        str,
-        typer.Option(
-            "--output",
-            "-o",
-            help=(
-                "Path to which existing environment should be exported. "
-                "If not specified, will have the same filename with '-lock' "
-                "appended to it, keeping the same extension."
-            ),
-        ),
-    ] = None,
-    relaxed: Annotated[
-        bool,
-        typer.Option(
-            "--relaxed", help="Treat conda and pip dependencies as equivalent."
-        ),
-    ] = False,
-    quiet: Annotated[
-        bool, typer.Option("--quiet", "-q", help="Be quiet.")
-    ] = False,
-):
-    if quiet:
-        log_func = functools.partial(typer.echo, file=open(os.devnull, "w"))
-    else:
-        log_func = typer.echo
-    calkit.conda.check_env(
-        env_fpath=env_fpath,
-        output_fpath=output_fpath,
-        log_func=log_func,
-        relaxed=relaxed,
-    )
 
 
 @app.command(name="calc")

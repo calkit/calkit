@@ -709,12 +709,11 @@ def run_in_env(
     if env_name not in envs:
         raise_error(f"Environment '{env_name}' does not exist")
     env = envs[env_name]
-    if wdir is not None:
-        cwd = os.path.abspath(wdir)
-    else:
-        cwd = os.getcwd()
     image_name = env.get("image", env_name)
     docker_wdir = env.get("wdir", "/work")
+    docker_wdir_mount = docker_wdir
+    if wdir is not None:
+        docker_wdir = os.path.join(docker_wdir, wdir)
     shell = env.get("shell", "sh")
     platform = env.get("platform")
     if env["kind"] == "docker":
@@ -742,7 +741,7 @@ def run_in_env(
             "-w",
             docker_wdir,
             "-v",
-            f"{cwd}:{docker_wdir}",
+            f"{os.getcwd()}:{docker_wdir_mount}",
             image_name,
             shell,
             "-c",

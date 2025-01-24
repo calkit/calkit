@@ -15,6 +15,8 @@ import calkit
 from calkit.check import check_reproducibility
 from calkit.cli import raise_error
 
+import checksumdir
+
 check_app = typer.Typer(no_args_is_help=True)
 
 
@@ -65,6 +67,7 @@ def check_docker_env(
     platform: Annotated[
         str, typer.Option("--platform", help="Which platform(s) to build for.")
     ] = None,
+    deps: Annotated[list[str], typer.Option("--dep", "-d", help="Declare an explicit dependency for this Docker image.")] = [],
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Be quiet.")
     ] = False,
@@ -81,6 +84,14 @@ def check_docker_env(
         _ = out[0].pop("DockerVersion")
         return out
 
+    def get_md5(path: str, exclude_files: list[str] | None = None) -> str:
+        if os.path.isdir(path):
+            return checksumdir.dirhash(dep, excluded_files=exclude_files)
+        else:
+            with open(path) as f:
+                content = f.read()
+            return hashlib.md5(content.encode()).hexdigest()
+
     outfile = open(os.devnull, "w") if quiet else None
     typer.echo(f"Checking for existing image with tag {tag}", file=outfile)
     # First call Docker inspect
@@ -90,10 +101,12 @@ def check_docker_env(
         typer.echo(f"No image with tag {tag} found locally", file=outfile)
         inspect = []
     typer.echo(f"Reading Dockerfile from {fpath}", file=outfile)
-    with open(fpath) as f:
-        dockerfile = f.read()
-    dockerfile_md5 = hashlib.md5(dockerfile.encode()).hexdigest()
+    dockerfile_md5 = get_md5(fpath)
     lock_fpath = fpath + "-lock.json"
+    # Compute MD5s of any dependencies
+    deps_md5s = {}
+    for dep in deps:
+        deps_md5s[dep] = get_md5(dep, exclude_files=lock_fpath)
     rebuild = True
     if os.path.isfile(lock_fpath):
         typer.echo(f"Reading lock file: {lock_fpath}", file=outfile)
@@ -109,18 +122,25 @@ def check_docker_env(
         rebuild = inspect[0]["RootFS"]["Layers"] != lock[0]["RootFS"][
             "Layers"
         ] or dockerfile_md5 != lock[0].get("DockerfileMD5")
+        if not rebuild:
+            for dep, md5 in deps_md5s.items():
+                if md5 != lock[0].get("DepsMD5s", {}).get(dep):
+                    typer.echo(f"Found modified dependency: {dep}")
+                    rebuild = True
+                    break
     if rebuild:
         wdir, fname = os.path.split(fpath)
         if not wdir:
             wdir = None
-        cmd = ["docker", "build", "-t", tag, "-f", fname]
+        cmd = ["docker", "build", "-q", "-t", tag, "-f", fname]
         if platform is not None:
             cmd += ["--platform", platform]
         cmd.append(".")
-        subprocess.check_call(cmd, cwd=wdir)
+        subprocess.check_output(cmd, cwd=wdir)
     # Write the lock file
     inspect = get_docker_inspect()
     inspect[0]["DockerfileMD5"] = dockerfile_md5
+    inspect[0]["DepsMD5s"] = deps_md5s
     with open(lock_fpath, "w") as f:
         json.dump(inspect, f, indent=4)
 

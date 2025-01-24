@@ -724,6 +724,7 @@ def run_in_env(
                 tag=env["image"],
                 fpath=env["path"],
                 platform=env.get("platform"),
+                deps=env.get("deps", []),
                 quiet=True,
             )
         shell_cmd = _to_shell_cmd(cmd)

@@ -733,6 +733,7 @@ def run_in_env(
         ]
         if platform:
             docker_cmd += ["--platform", platform]
+        docker_cmd += env.get("args", [])
         docker_cmd += [
             "-it" if sys.stdin.isatty() else "-i",
             "--rm",

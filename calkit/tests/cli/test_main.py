@@ -11,7 +11,6 @@ from git.exc import InvalidGitRepositoryError
 
 import calkit
 from calkit.cli.main import _to_shell_cmd
-from calkit.core import ryaml
 
 
 def test_run_in_env(tmp_dir):
@@ -169,7 +168,7 @@ def test_run_in_venv(tmp_dir):
     )
     ck_info = calkit.load_calkit_info(as_pydantic=True)
     envs = ck_info.environments
-    env = envs["my-pixi"]
+    assert "my-pixi" in envs
     out = (
         subprocess.check_output(
             [

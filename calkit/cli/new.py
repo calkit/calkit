@@ -980,7 +980,7 @@ def new_conda_env(
     if stage:
         typer.echo(f"Creating DVC stage {stage}")
         if not os.path.isfile(".dvc/config"):
-            typer.echo(f"Running dvc init")
+            typer.echo("Running dvc init")
             subprocess.check_call(["dvc", "init"])
         ck_cmd = f"calkit check-conda-env -f {path}"
         fname, ext = os.path.splitext(path)

@@ -57,7 +57,8 @@ def _to_shell_cmd(cmd: list[str]) -> str:
     """
     quoted_cmd = []
     for part in cmd:
-        if " " in part or '"' in part or "'" in part:
+        # Find quotes within quotes and escape them
+        if " " in part or '"' in part[1:-1] or "'" in part[1:-1]:
             part = part.replace('"', r"\"")
             quoted_cmd.append(f'"{part}"')
         else:
@@ -708,12 +709,11 @@ def run_in_env(
     if env_name not in envs:
         raise_error(f"Environment '{env_name}' does not exist")
     env = envs[env_name]
-    if wdir is not None:
-        cwd = os.path.abspath(wdir)
-    else:
-        cwd = os.getcwd()
     image_name = env.get("image", env_name)
     docker_wdir = env.get("wdir", "/work")
+    docker_wdir_mount = docker_wdir
+    if wdir is not None:
+        docker_wdir = os.path.join(docker_wdir, wdir)
     shell = env.get("shell", "sh")
     platform = env.get("platform")
     if env["kind"] == "docker":
@@ -724,6 +724,7 @@ def run_in_env(
                 tag=env["image"],
                 fpath=env["path"],
                 platform=env.get("platform"),
+                deps=env.get("deps", []),
                 quiet=True,
             )
         shell_cmd = _to_shell_cmd(cmd)
@@ -733,13 +734,14 @@ def run_in_env(
         ]
         if platform:
             docker_cmd += ["--platform", platform]
+        docker_cmd += env.get("args", [])
         docker_cmd += [
             "-it" if sys.stdin.isatty() else "-i",
             "--rm",
             "-w",
             docker_wdir,
             "-v",
-            f"{cwd}:{docker_wdir}",
+            f"{os.getcwd()}:{docker_wdir_mount}",
             image_name,
             shell,
             "-c",

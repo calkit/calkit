@@ -13,6 +13,7 @@ classifiers = [
 ]
 dependencies = [
   "arithmeval",
+  "checksumdir",
   "docx2pdf",
   "dvc",
   "eval-type-backport; python_version < '3.10'",

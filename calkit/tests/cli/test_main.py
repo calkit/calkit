@@ -89,17 +89,7 @@ def test_run_in_env(tmp_dir):
     os.makedirs("my-new-dir/another", exist_ok=True)
     out = (
         subprocess.check_output(
-            "calkit xenv -n py3.10 -- cd my-new-dir && ls",
-            shell=True,
-        )
-        .decode()
-        .strip()
-    )
-    assert out == "another"
-    # Test that above works with a quoted command
-    out = (
-        subprocess.check_output(
-            'calkit xenv -n py3.10 -- "cd my-new-dir && ls"',
+            "calkit xenv -n py3.10 --wdir my-new-dir -- ls",
             shell=True,
         )
         .decode()
@@ -227,6 +217,13 @@ def test_to_shell_cmd():
     shell_cmd = _to_shell_cmd(cmd)
     assert shell_cmd == 'python -c "print(\\"hello world\\")"'
     subprocess.check_call(shell_cmd, shell=True)
+    cmd = [
+        "sh",
+        "-c",
+        "cd dir1 && ls",
+    ]
+    good_shell_cmd = 'sh -c "cd dir1 && ls"'
+    assert _to_shell_cmd(cmd) == good_shell_cmd
 
 
 def test_add(tmp_dir):

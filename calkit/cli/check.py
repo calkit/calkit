@@ -132,7 +132,7 @@ def check_docker_env(
         wdir, fname = os.path.split(fpath)
         if not wdir:
             wdir = None
-        cmd = ["docker", "build", "-q", "-t", tag, "-f", fname]
+        cmd = ["docker", "build", "-t", tag, "-f", fname]
         if platform is not None:
             cmd += ["--platform", platform]
         cmd.append(".")

@@ -4,9 +4,10 @@ import json
 import os
 import re
 import subprocess
+import warnings
 
 from packaging.specifiers import SpecifierSet
-from packaging.version import Version
+from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel
 
 import calkit
@@ -20,14 +21,22 @@ def _check_single(req: str, actual: str, conda: bool = False) -> bool:
     if conda and req_spec.startswith("="):
         req_spec = "=" + req_spec
         if not req_spec.endswith(".*"):
-            req_spec += ".*"
+            if len(req_spec.split(".")) < 3:
+                req_spec += ".*"
     actual_name, actual_vers = re.split("[=<>]+", actual, maxsplit=1)
     if actual_name != req_name:
         return False
     actual_spec = actual.removeprefix(actual_name)
     if conda and actual_spec.startswith("="):
         actual_spec = "=" + actual_spec
-    version = Version(actual_vers)
+    try:
+        version = Version(actual_vers)
+    except InvalidVersion:
+        warnings.warn(
+            f"Cannot properly check {actual_name} version {actual_vers}"
+        )
+        # TODO: Check exact version only
+        return True
     spec = SpecifierSet(req_spec)
     return spec.contains(version)
 

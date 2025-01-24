@@ -21,13 +21,11 @@ def test_run_in_env(tmp_dir):
     subprocess.check_call(
         "calkit new docker-env "
         "--name my-image "
-        "--stage build-image "
         "--from ubuntu "
         "--add-layer miniforge "
         "--description 'This is a test image'",
         shell=True,
     )
-    subprocess.check_call("calkit run", shell=True)
     out = (
         subprocess.check_output("calkit xenv echo sup", shell=True)
         .decode()
@@ -40,7 +38,6 @@ def test_run_in_env(tmp_dir):
         "calkit new docker-env "
         "-n env2 "
         "--image my-image-2 "
-        "--stage build-image-2 "
         "--path Dockerfile.2 "
         "--from ubuntu "
         "--add-layer miniforge "
@@ -48,12 +45,6 @@ def test_run_in_env(tmp_dir):
         "--description 'This is a test image 2'",
         shell=True,
     )
-    with open("dvc.yaml") as f:
-        pipeline = ryaml.load(f)
-    stg = pipeline["stages"]["build-image-2"]
-    cmd = stg["cmd"]
-    assert "-i Dockerfile.2" in cmd
-    subprocess.check_call("calkit run", shell=True)
     with pytest.raises(subprocess.CalledProcessError):
         out = (
             subprocess.check_output("calkit xenv echo sup", shell=True)

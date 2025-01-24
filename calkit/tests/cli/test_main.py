@@ -96,6 +96,15 @@ def test_run_in_env(tmp_dir):
         .strip()
     )
     assert out == "another"
+    out = (
+        subprocess.check_output(
+            "calkit xenv -n py3.10 --wdir my-new-dir -- ls ..",
+            shell=True,
+        )
+        .decode()
+        .strip()
+    )
+    assert "my-new-dir" in out.split("\n")
 
 
 def test_run_in_venv(tmp_dir):

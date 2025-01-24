@@ -154,6 +154,21 @@ and another call to `calkit xenv -n foam2` will kick off a rebuild
 automatically,
 since the lock file will no longer match the Dockerfile.
 
+If you're copying local files into the Docker image,
+you can declare these
+dependencies in the environment definition so the content of those will be
+tracked as well:
+
+```yaml
+# In calkit.yaml
+environments:
+  foam2:
+    kind: docker
+    image: foam2
+    deps:
+      - src/mySolver.C
+```
+
 This highlights Calkit's declarative design philosophy.
 Simply declare the environment and use it in a pipeline stage
 and Calkit will ensure it is built and up to date.

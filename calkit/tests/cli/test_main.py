@@ -85,6 +85,27 @@ def test_run_in_env(tmp_dir):
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["py3.10"]
     assert env.get("path") is None
+    # Test that we can run a command that changes directory first
+    os.makedirs("my-new-dir/another", exist_ok=True)
+    out = (
+        subprocess.check_output(
+            "calkit xenv -n py3.10 -- cd my-new-dir && ls",
+            shell=True,
+        )
+        .decode()
+        .strip()
+    )
+    assert out == "another"
+    # Test that above works with a quoted command
+    out = (
+        subprocess.check_output(
+            'calkit xenv -n py3.10 -- "cd my-new-dir && ls"',
+            shell=True,
+        )
+        .decode()
+        .strip()
+    )
+    assert out == "another"
 
 
 def test_run_in_venv(tmp_dir):

@@ -469,10 +469,6 @@ def new_docker_env(
             ),
         ),
     ] = None,
-    stage: Annotated[
-        str,
-        typer.Option("--stage", help="DVC pipeline stage name, deprecated."),
-    ] = None,
     layers: Annotated[
         list[str],
         typer.Option(
@@ -505,8 +501,6 @@ def new_docker_env(
         path = "Dockerfile"
     if base and os.path.isfile(path) and not overwrite:
         raise_error("Output path already exists (use -f to overwrite)")
-    if stage and not base:
-        raise_error("--from must be specified when creating a build stage")
     if image_name is None:
         typer.echo("No image name specified; using environment name")
         image_name = name
@@ -543,8 +537,6 @@ def new_docker_env(
     )
     if base is not None or path is not None:
         env["path"] = path
-    if stage is not None:
-        env["stage"] = stage
     if description is not None:
         env["description"] = description
     if layers:
@@ -555,35 +547,7 @@ def new_docker_env(
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
-    # If we're creating a stage, do so with DVC
-    if stage:
-        warn("--stage is deprecated since envs are checked at run time")
-        typer.echo(f"Creating DVC stage {stage}")
-        if not os.path.isfile(".dvc/config"):
-            typer.echo(f"Running dvc init")
-            subprocess.check_call(["dvc", "init"])
-        ck_cmd = f"calkit build-docker {image_name} -i {path}"
-        if platform:
-            ck_cmd += f" --platform {platform}"
-        subprocess.check_call(
-            [
-                "dvc",
-                "stage",
-                "add",
-                "-f",
-                "-n",
-                stage,
-                "--always-changed",
-                "-d",
-                path,
-                "--outs-persist-no-cache",
-                f"{path}-lock.json",
-                ck_cmd,
-            ]
-        )
     repo.git.add("calkit.yaml")
-    if stage:
-        repo.git.add("dvc.yaml")
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add Docker environment {name}"])
 

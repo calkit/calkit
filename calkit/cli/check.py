@@ -9,13 +9,12 @@ import os
 import subprocess
 from typing import Annotated
 
+import checksumdir
 import typer
 
 import calkit
 from calkit.check import check_reproducibility
 from calkit.cli import raise_error
-
-import checksumdir
 
 check_app = typer.Typer(no_args_is_help=True)
 
@@ -67,7 +66,14 @@ def check_docker_env(
     platform: Annotated[
         str, typer.Option("--platform", help="Which platform(s) to build for.")
     ] = None,
-    deps: Annotated[list[str], typer.Option("--dep", "-d", help="Declare an explicit dependency for this Docker image.")] = [],
+    deps: Annotated[
+        list[str],
+        typer.Option(
+            "--dep",
+            "-d",
+            help="Declare an explicit dependency for this Docker image.",
+        ),
+    ] = [],
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Be quiet.")
     ] = False,

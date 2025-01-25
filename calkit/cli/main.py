@@ -918,6 +918,15 @@ def run_in_env(
                 .strip()
             )
             typer.echo(f"Running with remote PID: {remote_pid}")
+            # Save PID to jobs database so we can resume waiting
+            typer.echo("Updating jobs database")
+            os.makedirs(".calkit", exist_ok=True)
+            job["remote_pid"] = remote_pid
+            job["submitted"] = time.time()
+            job["finished"] = None
+            jobs[job_key] = job
+            with open(jobs_fpath, "w") as f:
+                calkit.ryaml.dump(jobs, f)
         # Now wait for the job to complete
         typer.echo(f"Waiting for remote PID {remote_pid} to finish")
         ps_cmd = ["ssh"] + key_cmd + [f"{user}@{host}", "ps", "-p", remote_pid]
@@ -945,7 +954,7 @@ def run_in_env(
         typer.echo("Updating jobs database")
         os.makedirs(".calkit", exist_ok=True)
         job["remote_pid"] = None
-        job["last_finished"] = time.time()
+        job["finished"] = time.time()
         jobs[job_key] = job
         with open(jobs_fpath, "w") as f:
             calkit.ryaml.dump(jobs, f)

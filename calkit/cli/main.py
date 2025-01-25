@@ -843,9 +843,6 @@ def run_in_env(
         except subprocess.CalledProcessError:
             raise_error(f"Failed to run in {kind}")
     elif env["kind"] == "ssh":
-        # Check if there's already a job running in this environment and don't
-        # start a new one if so
-        # TODO
         try:
             host = os.path.expandvars(env["host"])
             user = os.path.expandvars(env["user"])
@@ -905,8 +902,6 @@ def run_in_env(
                     typer.echo(f"scp cmd: {scp_cmd}")
                 subprocess.check_call(scp_cmd)
             # Now run the command
-            # TODO: Use some sort of non-blocking job so we can disconnect and
-            # resume
             typer.echo(f"Running remote command: {remote_shell_cmd}")
             if verbose:
                 typer.echo(f"Full command: {remote_cmd}")

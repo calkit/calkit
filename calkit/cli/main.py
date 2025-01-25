@@ -841,6 +841,58 @@ def run_in_env(
             subprocess.check_call(cmd, shell=True, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error(f"Failed to run in {kind}")
+    elif env["kind"] == "ssh":
+        # Check if there's already a job running in this environment and don't
+        # start a new one if so
+        # TODO
+        try:
+            host = os.path.expandvars(env["host"])
+            user = os.path.expandvars(env["user"])
+            remote_wdir = env["wdir"]
+        except KeyError:
+            raise_error(
+                "Host, user, and wdir must be defined for ssh environments"
+            )
+        send_paths = env.get("send_paths")
+        get_paths = env.get("get_paths")
+        key = env.get("key")
+        if key is not None:
+            key = os.path.expanduser(os.path.expandvars(key))
+        remote_shell_cmd = _to_shell_cmd(cmd)
+        remote_cmd = f"cd '{remote_wdir}' && {remote_shell_cmd}"
+        key_cmd = ["-i", key] if key is not None else []
+        # First make sure the remote working dir exists
+        typer.echo("Ensuring remote working directory exists")
+        subprocess.check_call(
+            ["ssh"] + key_cmd + [f"{user}@{host}", f"mkdir -p {remote_wdir}"]
+        )
+        # Now send any necessary files
+        if send_paths:
+            typer.echo("Sending to remote directory")
+            subprocess.check_call(
+                ["scp"]
+                + key_cmd
+                + send_paths
+                + [f"{user}@{host}:{remote_wdir}/"]
+            )
+        # Now run the command
+        # TODO: Use some sort of non-blocking job so we can disconnect and
+        # resume
+        typer.echo(f"Running remote command: {remote_cmd}")
+        subprocess.check_call(
+            ["ssh"] + key_cmd + [f"{user}@{host}", remote_cmd]
+        )
+        # Now sync the files back
+        # TODO: Figure out how to do this in one command
+        # Getting the syntax right is troublesome since it appears to work
+        # differently on different platforms
+        if get_paths:
+            typer.echo("Copying files back from remote directory")
+            for src_path in get_paths:
+                src_path = remote_wdir + "/" + src_path
+                src = f"{user}@{host}:{src_path}"
+                scp_cmd = ["scp", "-r"] + key_cmd + [src, "."]
+                subprocess.check_call(scp_cmd)
     else:
         raise_error("Environment kind not supported")
 

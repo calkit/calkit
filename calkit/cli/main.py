@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import glob
 import os
 import platform as _platform
 import subprocess
@@ -869,12 +870,19 @@ def run_in_env(
         # Now send any necessary files
         if send_paths:
             typer.echo("Sending to remote directory")
-            subprocess.check_call(
-                ["scp"]
+            # Accept glob patterns
+            paths = []
+            for p in send_paths:
+                paths += glob.glob(p)
+            scp_cmd = (
+                ["scp", "-r"]
                 + key_cmd
-                + send_paths
+                + paths
                 + [f"{user}@{host}:{remote_wdir}/"]
             )
+            if verbose:
+                typer.echo(f"scp cmd: {scp_cmd}")
+            subprocess.check_call(scp_cmd)
         # Now run the command
         # TODO: Use some sort of non-blocking job so we can disconnect and
         # resume

@@ -50,6 +50,11 @@ app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 
+# Constants for version control auto-ignore
+AUTO_IGNORE_SUFFIXES = [".DS_Store", ".env"]
+AUTO_IGNORE_PATHS = [os.path.join(".dvc", "config.local")]
+AUTO_IGNORE_PREFIXES = [".venv"]
+
 
 def _to_shell_cmd(cmd: list[str]) -> str:
     """Join a command to be compatible with running at the shell.
@@ -190,6 +195,9 @@ def add(
             help="Automatically commit and use this as a message.",
         ),
     ] = None,
+    disable_auto_ignore: Annotated[
+        bool, typer.Option("--no-auto-ignore", help="Disable auto-ignore.")
+    ] = False,
     push_commit: Annotated[
         bool, typer.Option("--push", help="Push after committing.")
     ] = False,
@@ -212,7 +220,17 @@ def add(
     try:
         repo = git.Repo()
     except InvalidGitRepositoryError:
-        raise_error("Not currently in a Git repo; run `calkit init` first")
+        # Prompt user if they want to run git init here
+        warn("Current directory is not a Git repo")
+        auto_init = typer.confirm(
+            "Do you want to initialize the current directory with Git?",
+            default=False,
+        )
+        if auto_init:
+            subprocess.check_call(["git", "init"])
+        else:
+            raise_error("Not currently in a Git repo; run `calkit init` first")
+        repo = git.Repo()
     try:
         dvc_repo = dvc.repo.Repo()
     except NotDvcRepoError:
@@ -245,8 +263,45 @@ def add(
         dvc_paths = [
             obj.get("path") for obj in dvc_repo.ls(".", dvc_only=True)
         ]
-        if "." in paths and to is None:
-            raise_error("Cannot add '.' with calkit; use git or dvc")
+        if "." in paths:
+            paths.remove(".")
+            # TODO: There is some copy/paste from the `save` function here
+            dvc_status = dvc_repo.data_status()
+            for dvc_uncommitted in dvc_status["uncommitted"].get(
+                "modified", []
+            ):
+                typer.echo(f"Adding {dvc_uncommitted} to DVC")
+                dvc_repo.commit(dvc_uncommitted, force=True)
+            untracked_git_files = repo.untracked_files
+            if not disable_auto_ignore:
+                for untracked_file in untracked_git_files:
+                    if (
+                        any(
+                            [
+                                untracked_file.endswith(suffix)
+                                for suffix in AUTO_IGNORE_SUFFIXES
+                            ]
+                        )
+                        or any(
+                            [
+                                untracked_file.startswith(prefix)
+                                for prefix in AUTO_IGNORE_PREFIXES
+                            ]
+                        )
+                        or untracked_file in AUTO_IGNORE_PATHS
+                    ):
+                        typer.echo(f"Automatically ignoring {untracked_file}")
+                        with open(".gitignore", "a") as f:
+                            f.write("\n" + untracked_file + "\n")
+                        if ".gitignore" not in paths:
+                            paths.append(".gitignore")
+            # TODO: Figure out if we should group large folders for dvc
+            # Now add untracked files automatically
+            for untracked_file in repo.untracked_files:
+                paths.append(untracked_file)
+            # Now add changed files
+            for changed_file in [d.a_path for d in repo.index.diff(None)]:
+                paths.append(changed_file)
         for path in paths:
             # Detect if this file should be tracked with Git or DVC
             # First see if it's in Git
@@ -354,43 +409,7 @@ def save(
     if paths is not None:
         add(paths, to=to)
     elif save_all:
-        # First check to see if we should commit anything to DVC
-        dvc_repo = dvc.repo.Repo()
-        dvc_status = dvc_repo.data_status()
-        for dvc_uncommitted in dvc_status["uncommitted"].get("modified", []):
-            typer.echo(f"Adding {dvc_uncommitted} to DVC")
-            dvc_repo.commit(dvc_uncommitted, force=True)
-        repo = git.Repo()
-        untracked_git_files = repo.untracked_files
-        auto_ignore_suffixes = [".DS_Store", ".env"]
-        auto_ignore_paths = [os.path.join(".dvc", "config.local")]
-        auto_ignore_prefixes = [".venv"]
-        for untracked_file in untracked_git_files:
-            if (
-                any(
-                    [
-                        untracked_file.endswith(suffix)
-                        for suffix in auto_ignore_suffixes
-                    ]
-                )
-                or any(
-                    [
-                        untracked_file.startswith(prefix)
-                        for prefix in auto_ignore_prefixes
-                    ]
-                )
-                or untracked_file in auto_ignore_paths
-            ):
-                typer.echo(f"Automatically ignoring {untracked_file}")
-                with open(".gitignore", "a") as f:
-                    f.write("\n" + untracked_file + "\n")
-        # TODO: Figure out if we should group large folders for dvc
-        # Now add untracked files automatically
-        for untracked_file in repo.untracked_files:
-            add(paths=[untracked_file])
-        # Now add changed files
-        for changed_file in [d.a_path for d in repo.index.diff(None)]:
-            repo.git.add(changed_file)
+        add(paths=["."])
     if message is None:
         typer.echo("No message provided; entering interactive mode")
         typer.echo("Creating a commit including the following paths:")

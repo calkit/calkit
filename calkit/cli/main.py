@@ -212,7 +212,17 @@ def add(
     try:
         repo = git.Repo()
     except InvalidGitRepositoryError:
-        raise_error("Not currently in a Git repo; run `calkit init` first")
+        # Prompt user if they want to run git init here
+        warn("Current directory is not a Git repo")
+        auto_init = typer.confirm(
+            "Do you want to initialize the current directory with Git?",
+            default=False,
+        )
+        if auto_init:
+            subprocess.check_call(["git", "init"])
+        else:
+            raise_error("Not currently in a Git repo; run `calkit init` first")
+        repo = git.Repo()
     try:
         dvc_repo = dvc.repo.Repo()
     except NotDvcRepoError:

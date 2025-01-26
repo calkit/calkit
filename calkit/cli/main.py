@@ -409,40 +409,7 @@ def save(
     if paths is not None:
         add(paths, to=to)
     elif save_all:
-        # First check to see if we should commit anything to DVC
-        dvc_repo = dvc.repo.Repo()
-        dvc_status = dvc_repo.data_status()
-        for dvc_uncommitted in dvc_status["uncommitted"].get("modified", []):
-            typer.echo(f"Adding {dvc_uncommitted} to DVC")
-            dvc_repo.commit(dvc_uncommitted, force=True)
-        repo = git.Repo()
-        untracked_git_files = repo.untracked_files
-        for untracked_file in untracked_git_files:
-            if (
-                any(
-                    [
-                        untracked_file.endswith(suffix)
-                        for suffix in AUTO_IGNORE_SUFFIXES
-                    ]
-                )
-                or any(
-                    [
-                        untracked_file.startswith(prefix)
-                        for prefix in AUTO_IGNORE_PREFIXES
-                    ]
-                )
-                or untracked_file in AUTO_IGNORE_PATHS
-            ):
-                typer.echo(f"Automatically ignoring {untracked_file}")
-                with open(".gitignore", "a") as f:
-                    f.write("\n" + untracked_file + "\n")
-        # TODO: Figure out if we should group large folders for dvc
-        # Now add untracked files automatically
-        for untracked_file in repo.untracked_files:
-            add(paths=[untracked_file])
-        # Now add changed files
-        for changed_file in [d.a_path for d in repo.index.diff(None)]:
-            repo.git.add(changed_file)
+        add(paths=["."])
     if message is None:
         typer.echo("No message provided; entering interactive mode")
         typer.echo("Creating a commit including the following paths:")

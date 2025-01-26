@@ -274,6 +274,5 @@ def test_add(tmp_dir):
     subprocess.check_call(["calkit", "add", "data"])
     assert "data.dvc" in calkit.git.get_staged_files()
     assert "data" in calkit.dvc.list_paths()
-    # Check that we can't run `calkit add .`
-    with pytest.raises(subprocess.CalledProcessError):
-        subprocess.check_call(["calkit", "add", "."])
+    # Check that we can run `calkit add .`
+    subprocess.check_call(["calkit", "add", "."])

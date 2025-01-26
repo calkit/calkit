@@ -293,6 +293,12 @@ and which we want to copy back after they finish.
 Wildcards in paths are supported, so the entire directory could be copied
 if desired by specifying `*`.
 
+To register an SSH key with the host, use `ssh-copy-id`. For example:
+
+```sh
+ssh-copy-id -i ~/.ssh/id_ed25519 my-user-name@10.225.22.25
+```
+
 To execute a command in this environment, we can add a stage like this
 to our DVC pipeline in `dvc.yaml`:
 

@@ -23,6 +23,7 @@ Calkit supports defining and running code in these environment types:
 - [`uv`](https://docs.astral.sh/uv/) (both `venv` and project-based)
 - [Pixi](https://github.com/prefix-dev/pixi)
 - [`renv`](https://rstudio.github.io/renv/index.html)
+- `ssh`
 
 Environment definitions live in the project's `calkit.yaml` file
 in the `environments` section.
@@ -253,3 +254,60 @@ and an updated `environment-lock.yml` file will be created.
 Again this highlights Calkit's declarative design philosophy.
 Declare the environment and what command should be executed inside,
 and Calkit will handle the rest.
+
+### SSH
+
+It's possible to define a remote environment that uses `ssh` to connect
+and run commands,
+and `scp` to copy files back and forth.
+This could be useful, e.g.,
+for running one or more pipeline stages on a high performance computing (HPC)
+cluster,
+or simply offloading some work to a virtual machine in the cloud
+with specialized hardware like a more powerful GPU.
+
+It is assumed that dependencies on the remote machine are managed separately.
+
+An SSH environment defined in `calkit.yaml` looks like:
+
+```yaml
+environments:
+  cluster:
+    kind: ssh
+    host: "10.225.22.25"
+    user: my-user-name
+    wdir: /home/my-user-name/calkit/example-ssh
+    key: ~/.ssh/id_ed25519
+    send_paths:
+      - script.sh
+    get_paths:
+      - results
+```
+
+In the example above, we define an environment called `cluster`,
+where we specify the host IP address, our username on that machine,
+the working directory, the path to an SSH key on our local machine
+(so we can connect without a password),
+which paths we want to send before executing commands,
+and which we want to copy back after they finish.
+Wildcards in paths are supported, so the entire directory could be copied
+if desired by specifying `*`.
+
+To register an SSH key with the host, use `ssh-copy-id`. For example:
+
+```sh
+ssh-copy-id -i ~/.ssh/id_ed25519 my-user-name@10.225.22.25
+```
+
+To execute a command in this environment, we can add a stage like this
+to our DVC pipeline in `dvc.yaml`:
+
+```yaml
+stages:
+  run-simulation:
+    cmd: calkit xenv -n cluster bash script.sh
+    deps:
+      - script.sh
+    outs:
+      - results
+```

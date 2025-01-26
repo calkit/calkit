@@ -52,6 +52,7 @@ Features:
 - Environmental variable dependencies
 - A pipeline designed to be run periodically to accumulate new data
 - A project showcase with interactive Plotly figures
+- A uv project-based environment and dedicated Python package
 
 ## OpenFOAM RANS boundary later validation
 
@@ -64,3 +65,13 @@ Features:
 - A LaTeX document built with a Docker container
 - A direct numerical simulation dataset for validation imported from a
   different project, derived from the Johns Hopkins Turbulence Database
+
+## SSH
+
+[Project page](https://calkit.io/calkit/example-ssh) |
+[GitHub repo](https://github.com/calkit/example-ssh)
+
+Features:
+
+- An SSH environment for running a remote command over SSH and copying back
+  results to the local machine

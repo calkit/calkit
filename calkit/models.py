@@ -109,6 +109,16 @@ class REnvironment(Environment):
     prefix: str
 
 
+class SSHEnvironment(BaseModel):
+    kind: Literal["ssh"]
+    host: str
+    user: str
+    wdir: str
+    key: str | None = None
+    send_paths: list[str] = ["./*"]
+    get_paths: list[str] = ["*"]
+
+
 class Software(BaseModel):
     title: str
     path: str
@@ -248,7 +258,11 @@ class ProjectInfo(BaseModel):
     references: list[ReferenceCollection] = []
     environments: dict[
         str,
-        Environment | DockerEnvironment | VenvEnvironment | UvVenvEnvironment,
+        Environment
+        | DockerEnvironment
+        | VenvEnvironment
+        | UvVenvEnvironment
+        | SSHEnvironment,
     ] = {}
     software: list[Software] = []
     notebooks: list[Notebook] = []

@@ -1155,9 +1155,17 @@ def set_env_var(
 @app.command(name="upgrade")
 def upgrade():
     """Upgrade Calkit."""
-    # See if uv is installed first
-    if calkit.check_dep_exists("uv"):
-        cmd = ["uv", "pip", "install", "--system"]
+    if calkit.check_dep_exists("pipx"):
+        cmd = ["pipx", "upgrade", "calkit-python"]
+    elif calkit.check_dep_exists("uv"):
+        cmd = [
+            "uv",
+            "pip",
+            "install",
+            "--system",
+            "--upgrade",
+            "calkit-python",
+        ]
     else:
-        cmd = ["pip", "install"]
-    subprocess.run(cmd + ["--upgrade", "calkit-python"])
+        cmd = ["pip", "install", "--upgrade", "calkit-python"]
+    subprocess.run(cmd)

@@ -52,6 +52,7 @@ Features:
 - Environmental variable dependencies
 - A pipeline designed to be run periodically to accumulate new data
 - A project showcase with interactive Plotly figures
+- A uv project-based environment and dedicated Python package
 
 ## OpenFOAM RANS boundary later validation
 

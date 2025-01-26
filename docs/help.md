@@ -10,5 +10,5 @@ or the
 [Discord server](https://discord.gg/QHEDz7G6).
 
 If you want to get in touch directly,
-you can
-[send us an email](mailto:help@calkit.io).
+feel free to
+[send an email](mailto:help@calkit.io).

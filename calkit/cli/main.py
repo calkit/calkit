@@ -51,9 +51,9 @@ app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 
 # Constants for version control auto-ignore
-AUTO_IGNORE_SUFFIXES = [".DS_Store", ".env"]
+AUTO_IGNORE_SUFFIXES = [".DS_Store", ".env", ".pyc"]
 AUTO_IGNORE_PATHS = [os.path.join(".dvc", "config.local")]
-AUTO_IGNORE_PREFIXES = [".venv"]
+AUTO_IGNORE_PREFIXES = [".venv", "__pycache__"]
 
 
 def _to_shell_cmd(cmd: list[str]) -> str:

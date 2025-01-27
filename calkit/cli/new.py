@@ -877,11 +877,11 @@ def new_publication(
     # Create stage if applicable
     if stage_name is not None and template_type == "latex":
         cmd = (
-            f"cd {path} && latexmk -interaction=nonstopmode "
-            f"-pdf {template_obj.target}"
+            "latexmk -cd -interaction=nonstopmode -pdf "
+            f"{path}/{template_obj.target}"
         )
         if env_name is not None:
-            cmd = f'calkit xenv -n {env_name} "{cmd}"'
+            cmd = f"calkit xenv -n {env_name} -- {cmd}"
         target_dep = os.path.join(path, template_obj.target)
         dvc_cmd = [
             "dvc",

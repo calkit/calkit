@@ -919,7 +919,6 @@ def new_conda_env(
         str,
         typer.Option(
             "--conda-name",
-            "-c",
             help=(
                 "Name to use in the Conda environment file, if desired. "
                 "Will be automatically generated if not provided. "
@@ -966,7 +965,7 @@ def new_conda_env(
             "(use -f to overwrite)"
         )
     if conda_name is None:
-        project_name = ck_info("name")
+        project_name = ck_info.get("name")
         if project_name is None:
             project_name = os.path.basename(os.getcwd())
         conda_name = calkit.to_kebab_case(project_name) + "-" + name

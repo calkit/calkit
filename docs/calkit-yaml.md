@@ -32,3 +32,7 @@ showcase:
   - figure: figures/my-figure.png
   - text: There is a figure above.
 ```
+
+[This project](https://calkit.io/petebachant/strava-analysis)
+has a showcase that includes Plotly figures saved as JSON,
+which render interactively.

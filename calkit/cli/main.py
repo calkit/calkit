@@ -217,6 +217,14 @@ def add(
             help="Automatically commit and use this as a message.",
         ),
     ] = None,
+    auto_commit_message: Annotated[
+        bool,
+        typer.Option(
+            "--auto-message",
+            "-M",
+            help="Commit with an automatically-generated message.",
+        ),
+    ] = False,
     disable_auto_ignore: Annotated[
         bool, typer.Option("--no-auto-ignore", help="Disable auto-ignore.")
     ] = False,
@@ -237,6 +245,18 @@ def add(
     Note: This will enable the 'autostage' feature of DVC, automatically
     adding any .dvc files to Git when adding to DVC.
     """
+    if auto_commit_message:
+        if commit_message is not None:
+            raise_error(
+                "Commit message should not be provided if using "
+                "automatic message"
+            )
+        if "." in paths:
+            raise_error("Cannot auto-generate commit message for '.'")
+        if len(paths) > 1:
+            raise_error(
+                "Cannot auto-generate commit message for more than one path"
+            )
     if to is not None and to not in ["git", "dvc"]:
         raise_error(f"Invalid option for 'to': {to}")
     try:
@@ -261,22 +281,25 @@ def add(
     # Ensure autostage is enabled for DVC
     subprocess.call(["dvc", "config", "core.autostage", "true"])
     subprocess.call(["git", "add", ".dvc/config"])
+    dvc_paths = [obj.get("path") for obj in dvc_repo.ls(".", dvc_only=True)]
+    untracked_git_files = repo.untracked_files
+    if auto_commit_message:
+        # See if this path is in the repo already
+        if paths[0] in dvc_paths or repo.git.ls_files(paths[0]):
+            commit_message = f"Update {paths[0]}"
+        else:
+            commit_message = f"Add {paths[0]}"
     if to is not None:
         subprocess.call([to, "add"] + paths)
     else:
-        dvc_paths = [
-            obj.get("path") for obj in dvc_repo.ls(".", dvc_only=True)
-        ]
         if "." in paths:
             paths.remove(".")
-            # TODO: There is some copy/paste from the `save` function here
             dvc_status = dvc_repo.data_status()
             for dvc_uncommitted in dvc_status["uncommitted"].get(
                 "modified", []
             ):
                 typer.echo(f"Adding {dvc_uncommitted} to DVC")
                 dvc_repo.commit(dvc_uncommitted, force=True)
-            untracked_git_files = repo.untracked_files
             if not disable_auto_ignore:
                 for untracked_file in untracked_git_files:
                     if (

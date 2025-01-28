@@ -241,8 +241,10 @@ def new_project(
     ck_info = dict(name=name, title=title, description=description) | ck_info
     with open(os.path.join(abs_path, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
     # Create dev container spec
     update_devcontainer(wdir=abs_path)
+    repo.git.add(".devcontainer")
     # Create README
     readme_fpath = os.path.join(abs_path, "README.md")
     if os.path.isfile(readme_fpath) and not overwrite:
@@ -256,6 +258,7 @@ def new_project(
         )
         with open(readme_fpath, "w") as f:
             f.write(readme_txt)
+        repo.git.add("README.md")
     if git_repo_url and not repo.remotes:
         typer.echo(f"Adding Git remote {git_repo_url}")
         repo.git.remote(["add", "origin", git_repo_url])
@@ -266,7 +269,6 @@ def new_project(
         typer.echo("Setting up Calkit Cloud DVC remote")
         calkit.dvc.configure_remote(wdir=abs_path)
         calkit.dvc.set_remote_auth(wdir=abs_path)
-    repo.git.add(".")
     if repo.git.diff("--staged") and not no_commit:
         repo.git.commit(["-m", "Initialize Calkit project"])
     typer.echo(success_message)

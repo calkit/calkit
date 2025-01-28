@@ -19,3 +19,16 @@ for the project's important metadata, which includes its:
 Objects can be imported from other projects,
 which produces a chain of reference to allow tracking reuse
 and reduce redundant storage.
+
+## Showcase
+
+The project showcase is a list of elements that best represent the project,
+shown on the project homepage on the Calkit Cloud web app.
+For example:
+
+```yaml
+showcase:
+  - text: Here is some text.
+  - figure: figures/my-figure.png
+  - text: There is a figure above.
+```

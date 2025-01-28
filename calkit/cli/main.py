@@ -54,6 +54,28 @@ app.add_typer(check_app, name="check", help="Check things.")
 AUTO_IGNORE_SUFFIXES = [".DS_Store", ".env", ".pyc"]
 AUTO_IGNORE_PATHS = [os.path.join(".dvc", "config.local")]
 AUTO_IGNORE_PREFIXES = [".venv", "__pycache__"]
+# Constants for version control auto-add to DVC
+DVC_EXTENSIONS = [
+    ".png",
+    ".jpeg",
+    ".jpg",
+    ".gif",
+    ".h5",
+    ".parquet",
+    ".pickle",
+    ".mp4",
+    ".avi",
+    ".webm",
+    ".pdf",
+    ".xlsx",
+    ".docx",
+    ".xls",
+    ".doc",
+    ".nc",
+    ".nc4",
+    ".zarr",
+]
+DVC_SIZE_THRESH_BYTES = 1_000_000
 
 
 def _to_shell_cmd(cmd: list[str]) -> str:
@@ -242,24 +264,6 @@ def add(
     if to is not None:
         subprocess.call([to, "add"] + paths)
     else:
-        dvc_extensions = [
-            ".png",
-            ".jpeg",
-            ".jpg",
-            ".gif",
-            ".h5",
-            ".parquet",
-            ".pickle",
-            ".mp4",
-            ".avi",
-            ".webm",
-            ".pdf",
-            ".xlsx",
-            ".docx",
-            ".xls",
-            ".doc",
-        ]
-        dvc_size_thresh_bytes = 1_000_000
         dvc_paths = [
             obj.get("path") for obj in dvc_repo.ls(".", dvc_only=True)
         ]
@@ -315,10 +319,10 @@ def add(
                     f"Adding {path} to DVC since it's already tracked with DVC"
                 )
                 subprocess.call(["dvc", "add", path])
-            elif os.path.splitext(path)[-1] in dvc_extensions:
+            elif os.path.splitext(path)[-1] in DVC_EXTENSIONS:
                 typer.echo(f"Adding {path} to DVC per its extension")
                 subprocess.call(["dvc", "add", path])
-            elif calkit.get_size(path) > dvc_size_thresh_bytes:
+            elif calkit.get_size(path) > DVC_SIZE_THRESH_BYTES:
                 typer.echo(
                     f"Adding {path} to DVC since it's greater than 1 MB"
                 )

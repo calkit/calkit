@@ -380,3 +380,8 @@ def get_size(path: str):
             if not os.path.islink(fp):
                 total_size += os.path.getsize(fp)
     return total_size
+
+
+def to_kebab_case(str) -> str:
+    """Convert a string to kebab-case."""
+    return re.sub(r"[-_,\.\ ]", "-", str.lower())

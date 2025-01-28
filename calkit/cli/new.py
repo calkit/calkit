@@ -109,7 +109,7 @@ def new_project(
     if os.path.isdir(abs_path) and os.listdir(abs_path):
         warn(f"{abs_path} is not empty")
     if name is None:
-        name = re.sub(r"[-_,\.\ ]", "-", os.path.basename(abs_path).lower())
+        name = calkit.to_kebab_case(os.path.basename(abs_path))
     if " " in name:
         warn("Invalid name; replacing spaces with hyphens")
         name = name.replace(" ", "-")
@@ -916,6 +916,19 @@ def new_conda_env(
     name: Annotated[
         str, typer.Option("--name", "-n", help="Environment name.")
     ],
+    conda_name: Annotated[
+        str,
+        typer.Option(
+            "--conda-name",
+            "-c",
+            help=(
+                "Name to use in the Conda environment file, if desired. "
+                "Will be automatically generated if not provided. "
+                "Note that these should be unique since Conda environments are "
+                "a system-wide collection."
+            ),
+        ),
+    ] = None,
     path: Annotated[
         str, typer.Option("--path", help="Environment YAML file path.")
     ] = "environment.yml",
@@ -953,9 +966,14 @@ def new_conda_env(
             f"Environment with name {name} already exists "
             "(use -f to overwrite)"
         )
+    if conda_name is None:
+        project_name = ck_info("name")
+        if project_name is None:
+            project_name = os.path.basename(os.getcwd())
+        conda_name = calkit.to_kebab_case(project_name) + "-" + name
     # Write environment to path
     conda_env = dict(
-        name=name, channels=["conda-forge"], dependencies=packages
+        name=conda_name, channels=["conda-forge"], dependencies=packages
     )
     if pip_packages:
         conda_env["dependencies"].append(dict(pip=pip_packages))

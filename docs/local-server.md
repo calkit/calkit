@@ -1,7 +1,7 @@
 # Local server for GUI interaction
 
 Calkit includes a local server for interacting with projects locally via the
-Calkit Cloud UI.
+Calkit Cloud UI ([calkit.io](https://calkit.io)).
 It can be launched with:
 
 ```sh

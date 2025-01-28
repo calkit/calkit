@@ -58,7 +58,7 @@ nav:
       - tutorials/conda-envs.md
       - tutorials/office.md
       - tutorials/matlab.md
-  - Local server: local-server.md
+  - Local server (GUI interaction): local-server.md
   - CLI reference: cli-reference.md
 markdown_extensions:
   - admonition

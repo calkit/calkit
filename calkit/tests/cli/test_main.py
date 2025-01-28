@@ -276,3 +276,23 @@ def test_add(tmp_dir):
     assert "data" in calkit.dvc.list_paths()
     # Check that we can run `calkit add .`
     subprocess.check_call(["calkit", "add", "."])
+    # Test the auto commit message feature
+    subprocess.check_call(["git", "reset"])
+    subprocess.check_call(["calkit", "add", "large.bin", "-M"])
+    repo = git.Repo()
+    assert repo.head.commit.message.strip() == "Update large.bin"
+    subprocess.check_call(["calkit", "add", "src", "-M"])
+    assert repo.head.commit.message.strip() == "Add src"
+    with open("src/code.py", "w") as f:
+        f.write("# This is the new code")
+    subprocess.check_call(["calkit", "add", "src/code.py", "-M"])
+    assert repo.head.commit.message.strip() == "Update src/code.py"
+    with open("data/raw/file2.bin", "wb") as f:
+        f.write(os.urandom(2_000_000))
+    subprocess.check_call(["calkit", "add", "data", "-M"])
+    assert repo.head.commit.message.strip() == "Update data"
+    os.makedirs("data2")
+    with open("data2/large2.bin", "wb") as f:
+        f.write(os.urandom(2_000_000))
+    subprocess.check_call(["calkit", "add", "data2", "-M"])
+    assert repo.head.commit.message.strip() == "Add data2"

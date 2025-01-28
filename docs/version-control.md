@@ -170,4 +170,6 @@ Options:
 - `--to`, `-t`: Manually specify `git` or `dvc` as the tracking mechanism.
 - `--commit-message`, `-m`: Create a commit after adding
   and use the provided message.
+- `--auto-commit-message`, `-M`: Commit with an automatically-generated message.
+  Only compatible when adding one path.
 - `--push`: Push to the Git or DVC remote after committing.

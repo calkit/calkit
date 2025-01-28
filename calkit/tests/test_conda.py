@@ -1,11 +1,14 @@
 """Tests for the ``conda`` module."""
 
+import os
 import subprocess
-import uuid
 
 import pytest
 
+import calkit
 from calkit.conda import _check_list, _check_single, check_env
+
+ENV_NAME = "main"
 
 
 def test_check_single():
@@ -31,15 +34,14 @@ def delete_env(name: str):
 
 
 @pytest.fixture
-def env_name():
-    # Setup code
-    name = "tmp_" + str(uuid.uuid4())[:12]
+def conda_env_name():
+    name = calkit.to_kebab_case(os.path.basename(os.getcwd())) + "-" + ENV_NAME
     yield name
     # Teardown code
     delete_env(name)
 
 
-def test_check_env(tmp_dir, env_name):
+def test_check_env(tmp_dir, conda_env_name):
     subprocess.check_call(["git", "init"])
     subprocess.check_call(["dvc", "init"])
     subprocess.check_call(
@@ -48,7 +50,7 @@ def test_check_env(tmp_dir, env_name):
             "new",
             "conda-env",
             "-n",
-            env_name,
+            ENV_NAME,
             "python",
             "pip",
             "--pip",
@@ -69,7 +71,7 @@ def test_check_env(tmp_dir, env_name):
             "conda-env",
             "--overwrite",
             "-n",
-            env_name,
+            ENV_NAME,
             "python=3.11.0",
             "pip",
             "--pip",
@@ -91,7 +93,7 @@ def test_check_env(tmp_dir, env_name):
             "conda-env",
             "--overwrite",
             "-n",
-            env_name,
+            ENV_NAME,
             "python=3.11.0",
             "pip",
             "sqlalchemy",
@@ -102,7 +104,7 @@ def test_check_env(tmp_dir, env_name):
             "conda",
             "run",
             "-n",
-            env_name,
+            ENV_NAME,
             "pip",
             "install",
             "--upgrade",
@@ -118,7 +120,7 @@ def test_check_env(tmp_dir, env_name):
             "conda-env",
             "--overwrite",
             "-n",
-            env_name,
+            ENV_NAME,
             "python=3.11.0",
             "pip",
             "sqlalchemy",
@@ -133,7 +135,7 @@ def test_check_env(tmp_dir, env_name):
             "conda-env",
             "--overwrite",
             "-n",
-            env_name,
+            ENV_NAME,
             "python=3.11.0",
             "pip",
             "--pip",
@@ -150,7 +152,7 @@ def test_check_env(tmp_dir, env_name):
             "conda-env",
             "--overwrite",
             "-n",
-            env_name,
+            ENV_NAME,
             "python=3.12",
             "--pip",
             "numpy>=1",

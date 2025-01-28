@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 
@@ -109,7 +108,7 @@ def new_project(
     if os.path.isdir(abs_path) and os.listdir(abs_path):
         warn(f"{abs_path} is not empty")
     if name is None:
-        name = re.sub(r"[-_,\.\ ]", "-", os.path.basename(abs_path).lower())
+        name = calkit.to_kebab_case(os.path.basename(abs_path))
     if " " in name:
         warn("Invalid name; replacing spaces with hyphens")
         name = name.replace(" ", "-")
@@ -242,8 +241,10 @@ def new_project(
     ck_info = dict(name=name, title=title, description=description) | ck_info
     with open(os.path.join(abs_path, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
     # Create dev container spec
     update_devcontainer(wdir=abs_path)
+    repo.git.add(".devcontainer")
     # Create README
     readme_fpath = os.path.join(abs_path, "README.md")
     if os.path.isfile(readme_fpath) and not overwrite:
@@ -257,6 +258,7 @@ def new_project(
         )
         with open(readme_fpath, "w") as f:
             f.write(readme_txt)
+        repo.git.add("README.md")
     if git_repo_url and not repo.remotes:
         typer.echo(f"Adding Git remote {git_repo_url}")
         repo.git.remote(["add", "origin", git_repo_url])
@@ -267,7 +269,6 @@ def new_project(
         typer.echo("Setting up Calkit Cloud DVC remote")
         calkit.dvc.configure_remote(wdir=abs_path)
         calkit.dvc.set_remote_auth(wdir=abs_path)
-    repo.git.add(".")
     if repo.git.diff("--staged") and not no_commit:
         repo.git.commit(["-m", "Initialize Calkit project"])
     typer.echo(success_message)
@@ -916,16 +917,24 @@ def new_conda_env(
     name: Annotated[
         str, typer.Option("--name", "-n", help="Environment name.")
     ],
+    conda_name: Annotated[
+        str,
+        typer.Option(
+            "--conda-name",
+            help=(
+                "Name to use in the Conda environment file, if desired. "
+                "Will be automatically generated if not provided. "
+                "Note that these should be unique since Conda environments are "
+                "a system-wide collection."
+            ),
+        ),
+    ] = None,
     path: Annotated[
         str, typer.Option("--path", help="Environment YAML file path.")
     ] = "environment.yml",
     pip_packages: Annotated[
         list[str], typer.Option("--pip", help="Packages to install with pip.")
     ] = [],
-    stage: Annotated[
-        str,
-        typer.Option("--stage", help="DVC pipeline stage name for checking."),
-    ] = None,
     description: Annotated[
         str, typer.Option("--description", help="Description.")
     ] = None,
@@ -957,9 +966,14 @@ def new_conda_env(
             f"Environment with name {name} already exists "
             "(use -f to overwrite)"
         )
+    if conda_name is None:
+        project_name = ck_info.get("name")
+        if project_name is None:
+            project_name = os.path.basename(os.getcwd())
+        conda_name = calkit.to_kebab_case(project_name) + "-" + name
     # Write environment to path
     conda_env = dict(
-        name=name, channels=["conda-forge"], dependencies=packages
+        name=conda_name, channels=["conda-forge"], dependencies=packages
     )
     if pip_packages:
         conda_env["dependencies"].append(dict(pip=pip_packages))
@@ -968,42 +982,13 @@ def new_conda_env(
     repo.git.add(path)
     typer.echo("Adding environment to calkit.yaml")
     env = dict(path=path, kind="conda")
-    if stage is not None:
-        env["stage"] = stage
     if description is not None:
         env["description"] = description
     envs[name] = env
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
-    # If we're creating a stage, do so with DVC
-    if stage:
-        typer.echo(f"Creating DVC stage {stage}")
-        if not os.path.isfile(".dvc/config"):
-            typer.echo("Running dvc init")
-            subprocess.check_call(["dvc", "init"])
-        ck_cmd = f"calkit check-conda-env -f {path}"
-        fname, ext = os.path.splitext(path)
-        lock_path = f"{fname}-lock{ext}"
-        subprocess.check_call(
-            [
-                "dvc",
-                "stage",
-                "add",
-                "-f",
-                "-n",
-                stage,
-                "--always-changed",
-                "-d",
-                path,
-                "--outs-persist-no-cache",
-                lock_path,
-                ck_cmd,
-            ]
-        )
     repo.git.add("calkit.yaml")
-    if stage:
-        repo.git.add("dvc.yaml")
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add Conda environment {name}"])
 

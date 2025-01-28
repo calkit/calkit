@@ -3,6 +3,7 @@
 import os
 import subprocess
 
+import git
 import pytest
 
 import calkit
@@ -212,3 +213,18 @@ def test_new_uv_venv(tmp_dir):
     assert env.path == "requirements-2.txt"
     assert env.prefix == ".venv2"
     assert env.kind == "uv-venv"
+
+
+def test_new_project(tmp_dir):
+    subprocess.check_call(["touch", "some-existing-file.txt"])
+    subprocess.check_call(
+        ["calkit", "new", "project", ".", "--title", "My new project"]
+    )
+    repo = git.Repo()
+    assert "some-existing-file.txt" in repo.untracked_files
+    assert repo.git.ls_files("calkit.yaml")
+    assert repo.git.ls_files("README.md")
+    assert not repo.git.ls_files("some-other-file.txt")
+    assert repo.git.ls_files(".devcontainer")
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["title"] == "My new project"

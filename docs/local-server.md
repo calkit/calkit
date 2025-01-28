@@ -15,6 +15,8 @@ you'll be able to visually perform tasks like committing and ignoring files,
 running the pipeline, adding stages to the pipeline,
 and pushing to the cloud.
 
+This feature is used in the [Microsoft Office tutorial](tutorials/office.md).
+
 ![Local server page](tutorials/img/office/pipeline-out-of-date.png){ width="450px" }
 /// caption
 The local server status widget on the Calkit Cloud UI.

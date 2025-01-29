@@ -31,6 +31,8 @@ showcase:
   - text: Here is some text.
   - figure: figures/my-figure.png
   - text: There is a figure above.
+  - markdown: "### This is a Markdown heading"
+  - publication: paper/paper.pdf
 ```
 
 [This project](https://calkit.io/petebachant/strava-analysis)

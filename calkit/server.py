@@ -15,6 +15,7 @@ import dvc.repo
 import dvc.repo.data
 import dvc.repo.status
 import git
+from dvc.exceptions import NotDvcRepoError
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
@@ -318,8 +319,8 @@ def get_status(
             "modified", []
         )
         dvc_status = dict(pipeline=dvc_pipeline_status, data=dvc_data_status)
-    except dvc.config.ConfigError as e:
-        errors.append(dict(type="dvc.config.ConfigError", info=str(e)))
+    except (dvc.config.ConfigError, NotDvcRepoError) as e:
+        errors.append(dict(type=str(type(e)), info=str(e)))
         dvc_status = None
     # TODO: Structure this in an intelligent way
     return {

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import subprocess
 
+import git
 import typer
 from git.exc import InvalidGitRepositoryError
+from typing_extensions import Annotated
 
+import calkit
 from calkit import config
 from calkit.cli.core import raise_error
 from calkit.dvc import configure_remote, get_remotes, set_remote_auth
@@ -44,7 +47,14 @@ def get_config_value(key: str) -> None:
 
 @config_app.command(name="setup-remote", help="Alias for 'remote'.")
 @config_app.command(name="remote")
-def setup_remote():
+def setup_remote(
+    no_commit: Annotated[
+        bool,
+        typer.Option(
+            "--no-commit", help="Do not commit changes to DVC config."
+        ),
+    ] = False,
+):
     """Setup the Calkit cloud as the default DVC remote and store a token in
     the local config.
     """
@@ -55,6 +65,13 @@ def setup_remote():
         raise_error("DVC remote config failed; have you run `dvc init`?")
     except InvalidGitRepositoryError:
         raise_error("Current directory is not a Git repository")
+    if not no_commit:
+        repo = git.Repo()
+        repo.git.reset()
+        repo.git.add(".dvc/config")
+        if calkit.git.get_staged_files():
+            typer.echo("Committing changes to DVC config")
+            repo.git.commit(["-m", "Set DVC remote"])
 
 
 @config_app.command(name="setup-remote-auth", help="Alias for 'remote-auth'.")

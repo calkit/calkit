@@ -7,7 +7,7 @@ for the project's important metadata, which includes its:
   (applications, libraries, environmental variables)
 - Questions the project seeks to answer
 - Environments
-- Datasets
+- [Datasets](datasets.md)
 - Figures
 - Publications (journal articles, conference papers, presentations, posters)
 - [Procedures](tutorials/procedures.md)

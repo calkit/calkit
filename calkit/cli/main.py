@@ -155,6 +155,27 @@ def clone(
     """Clone a Git repo and by default configure and pull from the DVC
     remote.
     """
+    # If the URL looks like just a project owner and name, fetch its repo URL
+    # first
+    if not url.startswith("https://") and not url.startswith("git@"):
+        url_split = url.split("/")
+        if len(url_split) != 2:
+            raise_error(
+                "Calkit projects must be specified like "
+                "{owner_name}/{project_name}"
+            )
+        owner_name, project_name = url_split
+        typer.echo("Fetching Git repo URL from the Calkit Cloud")
+        try:
+            project = calkit.cloud.get(
+                f"/projects/{owner_name}/{project_name}"
+            )
+        except Exception as e:
+            raise_error(f"Failed to fetch project information: {e}")
+        url = project["git_repo_url"]
+        # TODO: Figure out if we should clone with SSH
+        if not url.endswith(".git"):
+            url += ".git"
     # Git clone
     cmd = ["git", "clone", url]
     if recursive:
@@ -496,6 +517,33 @@ def push(
         subprocess.check_call(["dvc", "push"])
     except subprocess.CalledProcessError:
         raise_error("DVC push failed")
+
+
+@app.command(name="ignore")
+def ignore(
+    path: Annotated[str, typer.Argument(help="Path to ignore.")],
+    no_commit: Annotated[
+        bool,
+        typer.Option(
+            "--no-commit", help="Do not commit changes to .gitignore."
+        ),
+    ] = False,
+):
+    """Ignore a file, i.e., keep it out of version control."""
+    repo = git.Repo()
+    if repo.ignored(path):
+        typer.echo(f"{path} is already ignored")
+        exit(0)
+    typer.echo(f"Adding '{path}' to .gitignore")
+    txt = "\n" + path + "\n"
+    with open(".gitignore", "a") as f:
+        f.write(txt)
+    if not no_commit:
+        repo = git.Repo()
+        repo.git.reset()
+        repo.git.add(".gitignore")
+        if calkit.git.get_staged_files():
+            repo.git.commit(["-m", f"Ignore {path}"])
 
 
 @app.command(name="local-server")

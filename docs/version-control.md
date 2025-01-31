@@ -122,6 +122,13 @@ The multi-step equivalent would be:
 - `calkit config remote`
 - `dvc pull`
 
+If the project is hosted on the Calkit Cloud, it can be referenced by
+name rather than Git repo URL. For example:
+
+```sh
+calkit clone petebachant/strava-analysis
+```
+
 ### `status`
 
 `calkit status` will show the combined status from both Git and DVC.

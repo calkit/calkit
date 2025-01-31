@@ -43,6 +43,7 @@ nav:
       - pipeline/index.md
       - pipeline/manual-steps.md
   - The calkit.yaml file: calkit-yaml.md
+  - Datasets: datasets.md
   - Environments: environments.md
   - References: references.md
   - Calculations: calculations.md

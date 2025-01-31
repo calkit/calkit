@@ -3,7 +3,7 @@
 If your research project produces a dataset,
 you can indicate it as such to make it easy for others to reuse in their
 own project.
-These are listed in the `datasets` section of the project's `calkit.yaml`.
+These are listed in the `datasets` section of the project's `calkit.yaml` file.
 
 A dataset is identified by its path in the project repo,
 and this path can be a folder.

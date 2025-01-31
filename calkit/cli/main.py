@@ -498,6 +498,33 @@ def push(
         raise_error("DVC push failed")
 
 
+@app.command(name="ignore")
+def ignore(
+    path: Annotated[str, typer.Argument(help="Path to ignore.")],
+    no_commit: Annotated[
+        bool,
+        typer.Option(
+            "--no-commit", help="Do not commit changes to .gitignore."
+        ),
+    ] = False,
+):
+    """Ignore a file, i.e., keep it out of version control."""
+    repo = git.Repo()
+    if repo.ignored(path):
+        typer.echo(f"{path} is already ignored")
+        exit(0)
+    typer.echo(f"Adding '{path}' to .gitignore")
+    txt = "\n" + path + "\n"
+    with open(".gitignore", "a") as f:
+        f.write(txt)
+    if not no_commit:
+        repo = git.Repo()
+        repo.git.reset()
+        repo.git.add(".gitignore")
+        if calkit.git.get_staged_files():
+            repo.git.commit(["-m", f"Ignore {path}"])
+
+
 @app.command(name="local-server")
 def run_local_server():
     """Run the local server to interact over HTTP."""

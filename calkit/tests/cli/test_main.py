@@ -313,5 +313,8 @@ def test_status(tmp_dir):
     status = calkit.get_latest_project_status()
     assert status.status == "completed"
     assert status.message == "We're done."
+    history = calkit.get_project_status_history()
+    assert history[-1] == status
+    calkit.get_project_status_history(as_pydantic=False)
     with pytest.raises(subprocess.CalledProcessError):
         subprocess.check_call(["calkit", "new", "status", "very-cool"])

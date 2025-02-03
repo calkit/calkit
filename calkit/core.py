@@ -390,14 +390,30 @@ def to_kebab_case(str) -> str:
     return re.sub(r"[-_,\.\ ]", "-", str.lower())
 
 
-def get_latest_project_status(wdir: str = None) -> ProjectStatus | None:
+def get_project_status_history(
+    wdir: str = None, as_pydantic=True
+) -> list[ProjectStatus] | list[dict]:
+    statuses = []
     fpath = os.path.join(".calkit", "status.csv")
     if wdir is not None:
         fpath = os.path.join(wdir, fpath)
     if os.path.isfile(fpath):
         with open(fpath) as f:
             reader = csv.reader(f)
-            last_line = list(reader)[-1]
-        ts, status, message = last_line
-        ts = datetime.fromisoformat(ts)
-        return ProjectStatus(timestamp=ts, status=status, message=message)
+            next(reader, None)  # Skip header row
+            for line in reader:
+                ts, status, message = line
+                ts = datetime.fromisoformat(ts)
+                obj = ProjectStatus(
+                    timestamp=ts, status=status, message=message
+                )
+                if not as_pydantic:
+                    obj = obj.model_dump()
+                statuses.append(obj)
+    return statuses
+
+
+def get_latest_project_status(wdir: str = None) -> ProjectStatus | None:
+    statuses = get_project_status_history(wdir=wdir)
+    if statuses:
+        return statuses[-1]

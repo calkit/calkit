@@ -390,7 +390,7 @@ def to_kebab_case(str) -> str:
     return re.sub(r"[-_,\.\ ]", "-", str.lower())
 
 
-def get_current_project_status(wdir: str = None) -> ProjectStatus | None:
+def get_latest_project_status(wdir: str = None) -> ProjectStatus | None:
     fpath = os.path.join(".calkit", "status.csv")
     if wdir is not None:
         fpath = os.path.join(wdir, fpath)

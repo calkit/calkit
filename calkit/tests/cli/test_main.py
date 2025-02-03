@@ -303,14 +303,14 @@ def test_status(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(["calkit", "new", "status", "in-progress"])
     subprocess.check_call(["calkit", "status"])
-    status = calkit.get_current_project_status()
+    status = calkit.get_latest_project_status()
     assert status.status == "in-progress"
     assert not status.message
     subprocess.check_call(
         ["calkit", "new", "status", "completed", "-m", "We're done."]
     )
     subprocess.check_call(["calkit", "status"])
-    status = calkit.get_current_project_status()
+    status = calkit.get_latest_project_status()
     assert status.status == "completed"
     assert status.message == "We're done."
     with pytest.raises(subprocess.CalledProcessError):

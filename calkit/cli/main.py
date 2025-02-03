@@ -210,7 +210,7 @@ def get_status():
     """Get a unified Git and DVC status."""
     print_sep("Project")
     # Print latest status
-    status = calkit.get_current_project_status()
+    status = calkit.get_latest_project_status()
     if status is not None:
         ts = status.timestamp.strftime("%Y-%m-%d %H:%M:%S")
         colors = {

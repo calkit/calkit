@@ -9,6 +9,7 @@ import platform as _platform
 import subprocess
 import sys
 import time
+from datetime import datetime
 
 import dotenv
 import dvc.repo
@@ -208,6 +209,28 @@ def clone(
 @app.command(name="status")
 def get_status():
     """Get a unified Git and DVC status."""
+    print_sep("Project")
+    # Print latest status
+    fpath = os.path.join(".calkit", "status.csv")
+    if os.path.isfile(fpath):
+        with open(fpath) as f:
+            reader = csv.reader(f)
+            last_line = list(reader)[-1]
+        ts, status, _ = last_line
+        ts = datetime.fromisoformat(ts)
+        ts = ts.strftime("%Y-%m-%d %H:%M:%S")
+        colors = {
+            "in-progress": "blue",
+            "on-hold": "yellow",
+            "completed": "green",
+        }
+        status_txt = typer.style(status, fg=colors.get(status))
+        typer.echo(f"Current status: {status_txt} (updated {ts} UTC)")
+    else:
+        typer.echo(
+            'Project status not set. Use "calkit new status" to update.'
+        )
+    typer.echo()
     print_sep("Code (Git)")
     run_cmd(["git", "status"])
     typer.echo()

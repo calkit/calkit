@@ -7,8 +7,10 @@ import os
 import subprocess
 
 import dvc.repo
+import git
 
 import calkit
+from calkit.cli import warn
 from calkit.config import get_app_name
 
 logger = logging.getLogger(__package__)
@@ -16,7 +18,22 @@ logger.setLevel(logging.INFO)
 
 
 def configure_remote(wdir: str = None):
-    project_name = calkit.git.detect_project_name(path=wdir)
+    try:
+        project_name = calkit.git.detect_project_name(path=wdir)
+    except ValueError as e:
+        raise ValueError(f"Can't detect project name: {e}")
+    # If Git origin is not set, set that
+    repo = git.Repo(wdir)
+    try:
+        repo.remote()
+    except ValueError:
+        warn("No Git remote defined; querying Calkit Cloud")
+        # Try to fetch Git repo URL from Calkit cloud
+        try:
+            project = calkit.cloud.get(f"/projects/{project_name}")
+        except Exception as e:
+            raise ValueError(f"Could not fetch project info: {e}")
+        repo.git.remote(["add", "origin", project["git_repo_url"]])
     base_url = calkit.cloud.get_base_url()
     remote_url = f"{base_url}/projects/{project_name}/dvc"
     subprocess.check_call(
@@ -110,3 +127,8 @@ def list_paths(wdir: str = None) -> list[str]:
     """List paths tracked with DVC."""
     dvc_repo = dvc.repo.Repo(wdir)
     return [p.get("path") for p in dvc_repo.ls(".", dvc_only=True)]
+
+
+def get_output_revisions(path: str):
+    """Get all revisions of a pipeline output."""
+    pass

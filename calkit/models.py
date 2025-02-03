@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Literal
 
 from pydantic import BaseModel
@@ -223,6 +223,12 @@ class DerivedFromProject(BaseModel):
     project: str
     git_repo_url: str
     git_rev: str
+
+
+class ProjectStatus(BaseModel):
+    timestamp: datetime
+    status: Literal["in-progress", "on-hold", "completed"]
+    message: str | None = None
 
 
 class ProjectInfo(BaseModel):

@@ -9,7 +9,6 @@ import platform as _platform
 import subprocess
 import sys
 import time
-from datetime import datetime
 
 import dotenv
 import dvc.repo
@@ -211,20 +210,15 @@ def get_status():
     """Get a unified Git and DVC status."""
     print_sep("Project")
     # Print latest status
-    fpath = os.path.join(".calkit", "status.csv")
-    if os.path.isfile(fpath):
-        with open(fpath) as f:
-            reader = csv.reader(f)
-            last_line = list(reader)[-1]
-        ts, status, _ = last_line
-        ts = datetime.fromisoformat(ts)
-        ts = ts.strftime("%Y-%m-%d %H:%M:%S")
+    status = calkit.get_current_project_status()
+    if status is not None:
+        ts = status.timestamp.strftime("%Y-%m-%d %H:%M:%S")
         colors = {
             "in-progress": "blue",
             "on-hold": "yellow",
             "completed": "green",
         }
-        status_txt = typer.style(status, fg=colors.get(status))
+        status_txt = typer.style(status.status, fg=colors.get(status.status))
         typer.echo(f"Current status: {status_txt} (updated {ts} UTC)")
     else:
         typer.echo(

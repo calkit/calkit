@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import csv
 import glob
 import json
 import logging
@@ -10,6 +11,8 @@ import os
 import pickle
 import re
 import subprocess
+
+from calkit.models import ProjectStatus
 
 import requests
 
@@ -385,3 +388,16 @@ def get_size(path: str):
 def to_kebab_case(str) -> str:
     """Convert a string to kebab-case."""
     return re.sub(r"[-_,\.\ ]", "-", str.lower())
+
+
+def get_current_project_status(wdir: str = None) -> ProjectStatus | None:
+    fpath = os.path.join(".calkit", "status.csv")
+    if wdir is not None:
+        fpath = os.path.join(wdir, fpath)
+    if os.path.isfile(fpath):
+        with open(fpath) as f:
+            reader = csv.reader(f)
+            last_line = list(reader)[-1]
+        ts, status, message = last_line
+        ts = datetime.fromisoformat(ts)
+        return ProjectStatus(timestamp=ts, status=status, message=message)

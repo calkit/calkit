@@ -31,9 +31,12 @@ def configure_remote(wdir: str = None):
         # Try to fetch Git repo URL from Calkit cloud
         try:
             project = calkit.cloud.get(f"/projects/{project_name}")
+            url = project["git_repo_url"]
         except Exception as e:
             raise ValueError(f"Could not fetch project info: {e}")
-        repo.git.remote(["add", "origin", project["git_repo_url"]])
+        if not url.endswith(".git"):
+            url += ".git"
+        repo.git.remote(["add", "origin", url])
     base_url = calkit.cloud.get_base_url()
     remote_url = f"{base_url}/projects/{project_name}/dvc"
     subprocess.check_call(

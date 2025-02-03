@@ -70,7 +70,7 @@ def setup_remote(
     if not no_commit:
         repo = git.Repo()
         repo.git.add(".dvc/config")
-        if calkit.git.get_staged_files():
+        if ".dvc/config" in calkit.git.get_staged_files():
             typer.echo("Committing changes to DVC config")
             repo.git.commit([".dvc/config", "-m", "Set DVC remote"])
 

@@ -11,7 +11,10 @@ def print_sep(name: str):
     txt_width = len(name) + 2
     buffer_width = (width - txt_width) // 2
     buffer = "-" * buffer_width
-    typer.echo(f"{buffer} {name} {buffer}")
+    line = f"{buffer} {name} {buffer}"
+    if len(line) == (width - 1):
+        line += "-"
+    typer.echo(line)
 
 
 def run_cmd(cmd: list[str]):

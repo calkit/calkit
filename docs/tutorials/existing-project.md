@@ -67,7 +67,12 @@ Here's an example project folder layout:
 │   └── 📜 process.py
 ├── 📂 simulations
 │   ├── 📂 case1
-│   └── 📂 case2
+│   │   ├── 📜 config.txt
+│   │   └── 📜 output.h5
+│   ├── 📂 case2
+│   │   ├── 📜 config.txt
+│   │   └── 📜 output.h5
+├── 📜 references.bib
 └── 📜 README.md
 ```
 
@@ -87,6 +92,13 @@ maybe `data` and `thesis` don't live in the same folder,
 reorganize your files so all materials relevant to the research
 are in one folder.
 
+It's a good idea to keep your library of references
+(the BibTeX file `references.bib` in the example above)
+in the project folder, rather than having any of your publications
+reference a file outside the project,
+e.g., if you have a "global" BibTeX file.
+Locality helps keep things simple and reduce external dependencies.
+
 ## Create/initialize the project
 
 ## Put everything in version control
@@ -97,3 +109,5 @@ it's time to add files to version control.
 ## Add all computational processes to the pipeline
 
 To be continued...
+
+## Define all of the project artifacts

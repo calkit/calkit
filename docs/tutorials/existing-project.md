@@ -23,77 +23,6 @@ and have [set a token in your local config](../cloud-integration.md).
 
 ## Organize the project folder
 
-
-
-## Create/initialize the project
-
-Let's assume our project lives under our home directory,
-e.g., `/home/{your name}/research/my-phd-work`.
-The first thing we're going to do is open a terminal
-in that directory.
-We can open a terminal first and `cd` in there,
-or on some systems we can right click on a folder in a file explorer
-and there will be a shortcut to open a terminal there.
-If you're using Windows, it's a good idea to use Git Bash for this rather
-than the Windows Command Prompt or PowerShell.
-
-Let's run `ls` to see what this directory looks like:
-
-```sh
-$ ls
-data					environment.yml
-```
-
-ChatGPT thinks a typical grad student's files might be organized like:
-
-```
-📂 GradSchool
-├── 📂 Coursework
-│   ├── 📂 Semester1
-│   │   ├── 📂 Course1_Name
-│   │   │   ├── 📜 Lecture_Notes.pdf
-│   │   │   ├── 📜 Assignments/
-│   │   │   ├── 📜 Readings/
-│   │   │   ├── 📜 Projects/
-│   │   └── 📂 Course2_Name
-│   ├── 📂 Semester2
-│   └── ...
-├── 📂 Research
-│   ├── 📂 Papers
-│   │   ├── 📜 Paper1.pdf
-│   │   ├── 📜 Paper2.pdf
-│   │   ├── 📜 Notes.md
-│   ├── 📂 Data
-│   │   ├── 📂 Raw
-│   │   ├── 📂 Processed
-│   │   ├── 📂 Results
-│   ├── 📂 Code
-│   │   ├── 📂 Experiments
-│   │   ├── 📂 Scripts
-│   │   ├── 📜 analysis.py
-│   │   ├── 📜 README.md
-│   ├── 📂 Thesis
-│   │   ├── 📜 Chapters/
-│   │   ├── 📜 Bibliography.bib
-│   │   ├── 📜 Thesis_Draft.docx
-│   │   ├── 📜 Figures/
-│   ├── 📜 Research_Proposal.pdf
-│   ├── 📜 Meeting_Notes/
-├── 📂 Conferences
-│   ├── 📜 Abstracts/
-│   ├── 📜 Slides/
-│   ├── 📜 Posters/
-├── 📂 Admin
-│   ├── 📜 CV.pdf
-│   ├── 📜 Funding_Applications/
-│   ├── 📜 Teaching/
-│   ├── 📜 Travel_Reimbursements/
-└── 📂 Misc
-    ├── 📜 Useful_Readings/
-    ├── 📜 Side_Projects/
-    ├── 📜 TODO.md
-```
-
 This kind of layout is probably pretty typical.
 
 For a grad student, they might work on a single topic throughout
@@ -105,43 +34,7 @@ is a good idea,
 but the way `Conferences` and `Research` are laid out
 can be improved.
 
-(Let's also move away from camelcase with underscores and use kebab-case)
-
 We're going to shoot for a project-based structure like:
-
-```
-📂 grad-school
-├── 📂 coursework
-│   ├── 📂 semester1
-│   └── ...
-├── 📂 research
-│   ├── 📂 paper-1
-│   │   ├── 📜 paper.tex
-│   │   ├── 📜 paper.pdf
-│   │   ├── 📜 README.md
-│   ├── 📂 data
-│   │   ├── 📂 raw
-│   │   ├── 📂 processed
-│   ├── 📂 figures
-│   │   ├── 📜 plot1.png
-│   │   ├── 📜 plot2.png
-│   ├── 📂 scripts
-│   │   ├── 📜 plot.py
-│   │   ├── 📜 process.py
-│   ├── 📂 thesis
-│   │   ├── 📂 chapters
-│   │   ├── 📜 README.md
-│   │   ├── 📜 slides.pptx
-│   ├── 📜 README.md
-├── 📂 conferences
-│   └── 📂 2025-aps-dfd
-│       └── 📜 registration.pdf
-├── 📂 admin
-│   ├── 📜 2024-transcript.pdf
-│   └── ...
-└── 📂 misc
-    └── 📜 notes.md
-```
 
 Let's assume the entire `research` folder involves one research project
 answering a set of related questions.
@@ -211,6 +104,8 @@ If it doesn't look like this, e.g.,
 maybe `data` and `thesis` don't live in the same folder,
 reorganize your files so all materials relevant to the research
 are in one folder.
+
+## Create/initialize the project
 
 ## Put everything in version control
 

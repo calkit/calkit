@@ -146,7 +146,7 @@ underneath.
 Let's see what an ideal research project layout might look like:
 
 ```
-📂 research
+📂 my-phd-research
 ├── 📂 data
 │   ├── 📂 raw
 │   └── 📂 processed
@@ -173,12 +173,37 @@ Let's see what an ideal research project layout might look like:
 ├── 📂 simulations
 │   ├── 📂 case1
 │   └── 📂 case2
-├── 📜 calkit.yaml
-├── 📜 dvc.yaml
 └── 📜 README.md
 ```
 
+First, get your project organized similarly to the layout above.
+Put everything in the single project folder.
+
+What belongs in the project folder?
+Basically anything related to collecting data,
+processing data,
+and publishing results.
+
+Personal information like transcripts or coursework do not belong in
+the research project materials.
+
+So if we assume all of these files already exist,
+but are potentially scattered about,
+reorganize them into a single project folder.
+
+It's okay if the structure doesn't match exactly.
+It's just important that everything is included.
+You can reorganize later.
+
+If it doesn't look like this, e.g.,
+maybe `data` and `thesis` don't live in the same folder,
+reorganize your files so all materials relevant to the research
+are in one folder.
+
 ## Put everything in version control
+
+Now that we have everything in one project folder,
+it's time to add files to version control.
 
 ## Add all computational processes to the pipeline
 

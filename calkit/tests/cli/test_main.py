@@ -296,3 +296,25 @@ def test_add(tmp_dir):
         f.write(os.urandom(2_000_000))
     subprocess.check_call(["calkit", "add", "data2", "-M"])
     assert repo.head.commit.message.strip() == "Add data2"
+
+
+def test_status(tmp_dir):
+    subprocess.check_call(["calkit", "status"])
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(["calkit", "new", "status", "in-progress"])
+    subprocess.check_call(["calkit", "status"])
+    status = calkit.get_latest_project_status()
+    assert status.status == "in-progress"
+    assert not status.message
+    subprocess.check_call(
+        ["calkit", "new", "status", "completed", "-m", "We're done."]
+    )
+    subprocess.check_call(["calkit", "status"])
+    status = calkit.get_latest_project_status()
+    assert status.status == "completed"
+    assert status.message == "We're done."
+    history = calkit.get_project_status_history()
+    assert history[-1] == status
+    calkit.get_project_status_history(as_pydantic=False)
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(["calkit", "new", "status", "very-cool"])

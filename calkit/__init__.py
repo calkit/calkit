@@ -1,4 +1,4 @@
-__version__ = "0.17.6"
+__version__ = "0.18.0"
 
 from .core import *
 from . import git

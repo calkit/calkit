@@ -208,6 +208,23 @@ def clone(
 @app.command(name="status")
 def get_status():
     """Get a unified Git and DVC status."""
+    print_sep("Project")
+    # Print latest status
+    status = calkit.get_latest_project_status()
+    if status is not None:
+        ts = status.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        colors = {
+            "in-progress": "blue",
+            "on-hold": "yellow",
+            "completed": "green",
+        }
+        status_txt = typer.style(status.status, fg=colors.get(status.status))
+        typer.echo(f"Current status: {status_txt} (updated {ts} UTC)")
+    else:
+        typer.echo(
+            'Project status not set. Use "calkit new status" to update.'
+        )
+    typer.echo()
     print_sep("Code (Git)")
     run_cmd(["git", "status"])
     typer.echo()

@@ -65,13 +65,14 @@ def setup_remote(
         raise_error("DVC remote config failed; have you run `dvc init`?")
     except InvalidGitRepositoryError:
         raise_error("Current directory is not a Git repository")
+    except ValueError as e:
+        raise_error(e)
     if not no_commit:
         repo = git.Repo()
-        repo.git.reset()
         repo.git.add(".dvc/config")
-        if calkit.git.get_staged_files():
+        if ".dvc/config" in calkit.git.get_staged_files():
             typer.echo("Committing changes to DVC config")
-            repo.git.commit(["-m", "Set DVC remote"])
+            repo.git.commit([".dvc/config", "-m", "Set DVC remote"])
 
 
 @config_app.command(name="setup-remote-auth", help="Alias for 'remote-auth'.")

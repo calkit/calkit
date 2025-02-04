@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import csv
 import os
 import shutil
 import subprocess
+from enum import Enum
 
 import git
 import typer
@@ -1231,3 +1233,49 @@ def new_pixi_env(
     repo.git.add("calkit.yaml")
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add pixi env {name}"])
+
+
+class Status(str, Enum):
+    in_progress = "in-progress"
+    on_hold = "on-hold"
+    completed = "completed"
+
+
+@new_app.command(name="status")
+def new_status(
+    status: Annotated[
+        Status,
+        typer.Argument(help="Current status of the project."),
+    ],
+    message: Annotated[
+        str,
+        typer.Option(
+            "--message",
+            "-m",
+            help="Optional message describing the status.",
+        ),
+    ] = "",
+    no_commit: Annotated[
+        bool,
+        typer.Option(
+            "--no-commit", help="Do not commit changes to the status log."
+        ),
+    ] = False,
+):
+    """Add a new project status to the log."""
+    typer.echo(f"Adding {status.value} status log entry")
+    fpath = os.path.join(".calkit", "status.csv")
+    os.makedirs(".calkit", exist_ok=True)
+    now = calkit.utcnow(remove_tz=False)
+    # Append to end of CSV
+    write_header = not os.path.isfile(fpath)
+    with open(fpath, "a") as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow(["timestamp", "status", "message"])
+        writer.writerow([now.isoformat(), status.value, message])
+    if not no_commit:
+        typer.echo("Committing")
+        repo = git.Repo()
+        repo.git.add(fpath)
+        repo.git.commit([fpath, "-m", f"Add {status.value} status log entry"])

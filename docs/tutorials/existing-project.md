@@ -23,25 +23,18 @@ and have [set a token in your local config](../cloud-integration.md).
 
 ## Organize the project folder
 
-This kind of layout is probably pretty typical.
+The first step is to collect up all of the files relevant to the project
+and ensure they are in a single folder with nothing else in it.
+If you're a grad student, you might work on a single topic throughout
+grad school, which means all of your research-related files can
+go into a single project.
+Note that we don't want to include things like coursework
+or personal things like your CV or transcripts.
+The folder should only include materials relevant to planning,
+performing, and publishing
+the research.
 
-For a grad student, they might work on a single topic throughout
-grad school,
-so let's reorganize the `Research` folder around a project-based layout.
-
-Separating coursework, admin, and miscellaneous files from research
-is a good idea,
-but the way `Conferences` and `Research` are laid out
-can be improved.
-
-We're going to shoot for a project-based structure like:
-
-Let's assume the entire `research` folder involves one research project
-answering a set of related questions.
-If this were not the case, we could create a subdirectory for each project
-underneath.
-
-Let's see what an ideal research project layout might look like:
+Here's an example project folder layout:
 
 ```
 📂 my-phd-research
@@ -54,6 +47,10 @@ Let's see what an ideal research project layout might look like:
 │   ├── 📜 plot1.png
 │   └── 📜 plot2.png
 ├── 📂 pubs
+│   ├── 📂 proposal
+│   │   ├── 📜 proposal.pdf
+│   │   ├── 📜 proposal.tex
+│   │   └── 📜 README.md
 │   ├── 📂 2025-article-1
 │   │   ├── 📜 paper.pdf
 │   │   ├── 📜 paper.tex
@@ -74,31 +71,16 @@ Let's see what an ideal research project layout might look like:
 └── 📜 README.md
 ```
 
-First, get your project organized similarly to the layout above.
-Put everything in the single project folder.
-
-What belongs in the project folder?
-Basically anything related to collecting data,
-processing data,
-and publishing results.
-
-Personal information like transcripts or coursework do not belong in
-the research project materials.
-
-So if we assume all of these files already exist,
-but are potentially scattered about,
-reorganize them into a single project folder.
-
-It's okay if the structure doesn't match exactly.
-It's just important that everything is included.
-You can reorganize later.
-
 Anything to be shared with the outside world,
 and anything required to produce those things should be included.
 That is,
 if you have a script referencing some data outside the folder,
 move the data into the folder and update the script accordingly.
 Make it all local.
+
+It's okay if the structure doesn't match exactly.
+It's just important that everything is in there.
+You can reorganize later.
 
 If it doesn't look like this, e.g.,
 maybe `data` and `thesis` don't live in the same folder,

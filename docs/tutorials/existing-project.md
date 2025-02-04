@@ -14,11 +14,16 @@ make sure that Calkit is installed,
 you have an account on [calkit.io](https://calkit.io),
 and have [set a token in your local config](../cloud-integration.md).
 
+1. Organize the project folder.
 1. Create a new Calkit project.
-2. Add all existing files to version control and back them up in the cloud.
-3. Add all computational processes to the pipeline, ensuring they run in
+1. Add all existing files to version control and back them up in the cloud.
+1. Add all computational processes to the pipeline, ensuring they run in
    defined environments.
-4. Define the project artifacts for presentation and consumption.
+1. Define the project artifacts for presentation and consumption.
+
+## Organize the project folder
+
+
 
 ## Create/initialize the project
 
@@ -194,6 +199,13 @@ reorganize them into a single project folder.
 It's okay if the structure doesn't match exactly.
 It's just important that everything is included.
 You can reorganize later.
+
+Anything to be shared with the outside world,
+and anything required to produce those things should be included.
+That is,
+if you have a script referencing some data outside the folder,
+move the data into the folder and update the script accordingly.
+Make it all local.
 
 If it doesn't look like this, e.g.,
 maybe `data` and `thesis` don't live in the same folder,

@@ -382,3 +382,24 @@ def test_new_stage(tmp_dir):
             ]
         )
     # Check that we fail to create a stage with a non-existent environment
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(
+            [
+                "calkit",
+                "new",
+                "stage",
+                "--name",
+                "plot",
+                "-f",
+                "--kind",
+                "python-script",
+                "--target",
+                "plot.py",
+                "--out",
+                "plot1.png",
+                "-o",
+                "plot2.png",
+                "-e",
+                "nonexistent-env",
+            ]
+        )

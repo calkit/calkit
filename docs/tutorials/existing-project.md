@@ -134,3 +134,8 @@ it's time to add files to version control.
 To be continued...
 
 ## Define all of the project artifacts
+
+## Questions or comments?
+
+Participate in the discussion
+[here](https://github.com/orgs/calkit/discussions/241).

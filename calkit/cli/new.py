@@ -1367,6 +1367,9 @@ def new_stage(
             help="Overwrite an existing stage with this name if necessary.",
         ),
     ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes to Git.")
+    ] = False,
 ):
     """Create a new pipeline stage."""
     ck_info = calkit.load_calkit_info()
@@ -1416,3 +1419,13 @@ def new_stage(
         subprocess.check_call(add_cmd)
     except subprocess.CalledProcessError:
         raise_error("Failed to create stage")
+    if not no_commit:
+        try:
+            repo = git.Repo()
+        except InvalidGitRepositoryError:
+            raise_error("Can't commit because this is not a Git repo")
+        repo.git.add("dvc.yaml")
+        if "dvc.yaml" in calkit.git.get_staged_files():
+            repo.git.commit(
+                ["dvc.yaml", "-m", f"Add {kind.value} pipeline stage '{name}'"]
+            )

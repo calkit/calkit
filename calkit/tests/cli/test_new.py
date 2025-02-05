@@ -228,3 +228,101 @@ def test_new_project(tmp_dir):
     assert repo.git.ls_files(".devcontainer")
     ck_info = calkit.load_calkit_info()
     assert ck_info["title"] == "My new project"
+
+
+def test_new_stage(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "docker-env",
+            "--name",
+            "tex",
+            "--image",
+            "texlive/texlive:latest-full",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-venv",
+            "--name",
+            "py",
+            "requests",
+        ]
+    )
+    with open("plot.py", "w") as f:
+        f.write("print('hi')")
+    with open("paper.tex", "w") as f:
+        f.write("Hello")
+    with open("data.csv", "w") as f:
+        f.write("data")
+    # Create a Python script stage
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "stage",
+            "--name",
+            "plot",
+            "--kind",
+            "python-script",
+            "--environment",
+            "py",
+            "--target",
+            "plot.py",
+            "--dep",
+            "data.csv",
+            "--out",
+            "plot1.png",
+            "-o",
+            "plot2.png",
+        ]
+    )
+    pipeline = calkit.dvc.read_pipeline()
+    assert (
+        pipeline["stages"]["plot"]["cmd"]
+        == "calkit xenv -n py -- python plot.py"
+    )
+    assert pipeline["stages"]["plot"]["deps"] == ["plot.py", "data.csv"]
+    assert pipeline["stages"]["plot"]["outs"] == ["plot1.png", "plot2.png"]
+    # Create a LaTeX stage
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "stage",
+            "--name",
+            "build-paper",
+            "--kind",
+            "latex",
+            "--environment",
+            "tex",
+            "--target",
+            "paper.tex",
+            "--dep",
+            "plot1.png",
+            "-d",
+            "plot2.png",
+            "--out",
+            "paper.pdf",
+        ]
+    )
+    pipeline = calkit.dvc.read_pipeline()
+    assert pipeline["stages"]["build-paper"]["cmd"] == (
+        "calkit xenv -n tex -- "
+        "latexmk -cd -interaction=nonstopmode -pdf paper.tex"
+    )
+    assert pipeline["stages"]["plot"]["deps"] == [
+        "paper.tex",
+        "plot1.png",
+        "plot2.png",
+    ]
+    assert pipeline["stages"]["plot"]["outs"] == ["paper.pdf"]
+    # Check that we can create a MATLAB script with no environment
+    with open("script.m", "w") as f:
+        f.write("script")
+    # Check that we fail for a nonexistent dependency
+    # Check that we fail to create a stage with a non-existent environment

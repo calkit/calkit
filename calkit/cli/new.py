@@ -1381,6 +1381,10 @@ def new_stage(
         if environment not in ck_info["environments"]:
             raise_error(f"Environment '{environment}' does not exist")
         cmd = f"calkit xenv -n {environment} -- "
+        # Add environment path as a dependency
+        env_path = ck_info["environments"][environment].get("path")
+        if env_path is not None:
+            deps = [env_path] + deps
     if not os.path.exists(target):
         raise_error(f"Target '{target}' does not exist")
     if kind.value == "python-script":

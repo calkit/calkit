@@ -287,7 +287,7 @@ def test_new_stage(tmp_dir):
         == "calkit xenv -n py -- python plot.py"
     )
     assert set(pipeline["stages"]["plot"]["deps"]) == set(
-        ["plot.py", "data.csv"]
+        ["plot.py", "data.csv", "requirements.txt"]
     )
     assert set(pipeline["stages"]["plot"]["outs"]) == set(
         ["plot1.png", "plot2.png"]

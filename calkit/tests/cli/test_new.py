@@ -361,5 +361,24 @@ def test_new_stage(tmp_dir):
     assert set(pipeline["stages"]["plot"]["outs"]) == set(
         ["plot1.png", "plot2.png"]
     )
-    # Check that we fail for a nonexistent dependency
+    # Check that we fail for a nonexistent target
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(
+            [
+                "calkit",
+                "new",
+                "stage",
+                "--name",
+                "plot",
+                "-f",
+                "--kind",
+                "matlab-script",
+                "--target",
+                "script2.m",
+                "--out",
+                "plot1.png",
+                "-o",
+                "plot2.png",
+            ]
+        )
     # Check that we fail to create a stage with a non-existent environment

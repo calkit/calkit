@@ -97,8 +97,17 @@ It's a good idea to keep your library of references
 (the BibTeX file `references.bib` in the example above)
 in the project folder, rather than having any of your publications
 reference a file outside the project,
-e.g., if you have a "global" BibTeX file.
+e.g., if you have a "global" BibTeX file,
+or a reference collection in an app like Zotero.
+Similarly,
+if you have files in other cloud services like Overleaf,
+download all of them to the project folder.
 Locality helps keep things simple and reduce external dependencies.
+This project folder should be the single source of truth.
+You can potentially work on things in other tools,
+though that may not be worth the complexity,
+but if you do work on them externally,
+the files should always be downloaded back to the main project folder.
 
 !!! tip
 
@@ -124,6 +133,48 @@ Locality helps keep things simple and reduce external dependencies.
 
 ## Create/initialize the project
 
+Inside the project folder, i.e., after calling `cd my-phd-research`,
+create a new Calkit project inside with:
+
+```sh
+calkit new project . \
+    --name my-phd-research \
+    --title "Experimental investigation of something" \
+    --description "Investigating the effects of a thing." \
+    --cloud
+```
+
+In this command, the `.` means the current working directory,
+or "here."
+The name, title, and description should be adapted to your own
+project.
+The name should be "kebab-case" (all lowercase with hyphens separating words),
+the title should be sentence or title case,
+and the description should include punctuation,
+kind of like an abstract.
+
+The `--cloud` flag is going to create a GitHub repo and Calkit Cloud project
+for us, which will be linked together.
+In the next step,
+when we put the files in version control,
+the code and text files will go to GitHub,
+and the larger data files will go to the Calkit Cloud.
+This will be handled seamlessly and transparently.
+
+Note you can add a `--public` flag if you want the project to be public
+from the get-go.
+This is encouraged but can be a little worrying at first.
+The project can always be made public later,
+so let's start private for now.
+
+The actions that Calkit will take are:
+- Initialize a Git repository with GitHub as the remote
+- Initialize a DVC configuration with the Calkit Cloud as the remote
+- Create a `calkit.yaml` file for the project metadata
+- Create a dev container specification in `.devcontainer` for use with VS Code
+  or GitHub Codespaces
+- If one doesn't exist already, a `README.md` file will be created
+
 ## Put everything in version control
 
 Now that we have everything in one project folder,
@@ -134,6 +185,19 @@ it's time to add files to version control.
 To be continued...
 
 ## Define all of the project artifacts
+
+If your project has produced any datasets that might be useful to others,
+declare these in the `datasets` section.
+
+Note that when they are ready for public consumption,
+we can create a "release" that will archive these and give them a
+digital object identifier (DOI) for citation and traceability.
+It's a good idea to create a release of the project before submitting
+a journal article and citing inside,
+so readers can find their way back to the project and inspect how
+things were created.
+
+## Next steps
 
 ## Questions or comments?
 

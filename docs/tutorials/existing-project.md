@@ -100,6 +100,28 @@ reference a file outside the project,
 e.g., if you have a "global" BibTeX file.
 Locality helps keep things simple and reduce external dependencies.
 
+!!! tip
+
+    Don't be afraid to repeat yourself in code.
+    There is a common software engineering principle
+    "don't repeat yourself," (DRY), which if applied too aggressively,
+    can make it very difficult to track dependencies,
+    which is crucial to maintaining reproducibility and simplicity.
+
+    For example, imagine the `plot.py` and `process.py` script both contain
+    similar logic for reading in raw data.
+    One might be tempted to put this logic into a separate module so it's
+    not written twice,
+    but someday the requirement for plotting may change slightly,
+    and if this module is a dependency for processing,
+    technically the processing should be rerun to ensure reproducibility.
+    If the processing is expensive, this could be wasteful.
+
+    It's a good rule of thumb to wait until you've repeated a block of code
+    three times before "abstracting" that logic into its own thing.
+    That way, you can see how it's used and use the interface that emerged
+    rather than attempting to design one from the start.
+
 ## Create/initialize the project
 
 ## Put everything in version control

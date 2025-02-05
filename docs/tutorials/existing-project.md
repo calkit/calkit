@@ -177,10 +177,155 @@ The actions that Calkit will take are:
 
 ## Put everything in version control
 
-Now that we have everything in one project folder,
+Now that we have everything in one project folder
+and we have the project created in the cloud,
 it's time to add files to version control.
+If you run `calkit status`,
+you'll see an output like:
+
+```sh
+$ calkit status
+---------------------------- Project -----------------------------
+Project status not set. Use "calkit new status" to update.
+
+--------------------------- Code (Git) ---------------------------
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+        .DS_Store
+        data/
+        docs/
+        figures/
+        pubs/
+        references.bib
+        scripts/
+        simulations/
+
+nothing added to commit but untracked files present (use "git add" to track)
+
+--------------------------- Data (DVC) ---------------------------
+No changes.
+
+------------------------- Pipeline (DVC) -------------------------
+There are no data or pipelines tracked in this project yet.
+See <https://dvc.org/doc/start> to get started!
+```
+
+We have a list of files and folders that are untracked,
+meaning they are not in version control yet.
+We could add these with either `git add` or `dvc add`,
+or we can let Calkit decide which makes the most sense depending
+on the file type and size.
+
+If you're a Mac user, you'll notice the `.DS_Store` file,
+which is not something we want to keep in version control.
+We can ignore that file with `calkit ignore .DS_Store`.
+When you run `calkit status` again, you'll notice that file is no longer
+in the list of untracked files, which is exactly what we want.
+You can use `calkit ignore` with any other files or folders you want to keep
+out of version control, but keep in mind that when something is not in
+version control,
+it's not available to collaborators,
+and won't be present
+in another copy of the project repo elsewhere, e.g., on a different computer.
+
+Now let's go through our untracked folders one by one and start adding them
+to the repo.
+We can start with by running `calkit add` on `data/raw`:
+
+```sh
+$ calkit add data/raw -M
+Adding data/raw to DVC since it's greater than 1 MB
+100% Adding...|█████████████████████████████████████████████████|1/1 [00:00, 58.23file/s]
+[main ee7b35b] Add data/raw
+ 2 files changed, 7 insertions(+)
+ create mode 100644 data/.gitignore
+ create mode 100644 data/raw.dvc
+```
+
+In the output, Calkit explains why that folder was added to DVC.
+Note that we also used the `-M` flag,
+which will automatically generate a commit message for us.
+If you'd like to specify your own message, use `-m` instead.
+You can see a list of all commits with `git log`.
+
+Repeat the `calkit status` and `calkit add` process with
+each of the files and folders until there are no more untracked files.
+Be careful adding folders with lots of contents inside.
+It's usually a good idea to add these more granularly instead of all at once.
+The `pubs` directory in our example is one such case.
+There are PDFs in there, which typically belong in DVC instead of Git,
+and there may be LaTeX output logs and intermediate files,
+which should typically be ignored.
+
+```sh
+$ calkit add pubs/2025-aps-dfd-slides/slides.tex -M
+
+Adding pubs/2025-aps-dfd-slides/slides.tex to Git
+[main d680687] Add pubs/2025-aps-dfd-slides/slides.tex
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+ create mode 100644 pubs/2025-aps-dfd-slides/slides.tex
+```
+
+```sh
+$ calkit add pubs/2025-aps-dfd-slides/slides.pdf -M
+
+Adding pubs/2025-aps-dfd-slides/slides.pdf to DVC per its extension
+100% Adding...|█████████████████████████████████████████████████|1/1 [00:00, 99.20file/s]
+[main 757042b] Add pubs/2025-aps-dfd-slides/slides.pdf
+ 2 files changed, 6 insertions(+)
+ create mode 100644 pubs/2025-aps-dfd-slides/.gitignore
+ create mode 100644 pubs/2025-aps-dfd-slides/slides.pdf.dvc
+```
+
+If you want to manually control whether a target is tracked with Git or DVC,
+you can use the `--to=git` or `--to=dvc` option.
+Also, if you make a mistake along the way you can use the `git revert`
+command, after finding the offending commit with `git log`.
+
+### Back up the project in the cloud
+
+After all relevant files are added and committed to the repo,
+we can push to both GitHub and the Calkit Cloud with `calkit push`:
+
+```sh
+$ calkit push
+Pushing to Git remote
+Enumerating objects: 41, done.
+Counting objects: 100% (41/41), done.
+Delta compression using up to 10 threads
+Compressing objects: 100% (29/29), done.
+Writing objects: 100% (37/37), 3.29 KiB | 3.29 MiB/s, done.
+Total 37 (delta 11), reused 0 (delta 0), pack-reused 0
+remote: Resolving deltas: 100% (11/11), completed with 1 local object.
+To https://github.com/your-name/my-phd-research
+   dc09efe..8f21641  main -> main
+Pushing to DVC remote
+Checking authentication for DVC remote: calkit
+Collecting                                                    |57.0 [00:00, 2.73kentry/s]
+Pushing
+42 files pushed
+```
 
 ## Add all computational processes to the pipeline
+
+Now that we have all of our files in version control,
+we need to ensure that our output artifacts like derived datasets,
+figures, and publication PDFs are generated with the pipeline.
+This will ensure that they stay up to date if any of their
+input data or dependencies change.
+
+But first,
+before building the pipeline,
+we need to define computational environments to use in the stages.
+This is important for reproducibility since our results will be less
+dependent on the unique state of our local machine.
+Others looking to reproduce our work will only need to have the
+environment management software installed,
+and the specific applications or packages needed will be installed
+and used automatically by Calkit.
 
 ### Create computational environments
 

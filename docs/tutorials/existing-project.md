@@ -96,11 +96,6 @@ It's okay if the structure doesn't match exactly.
 It's just important that everything is in there.
 You can reorganize later.
 
-If it doesn't look like this, e.g.,
-maybe `data` and `thesis` don't live in the same folder,
-reorganize your files so all materials relevant to the research
-are in one folder.
-
 It's a good idea to keep your library of references
 (the BibTeX file `references.bib` in the example above)
 in the project folder, rather than having any of your publications

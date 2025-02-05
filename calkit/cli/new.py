@@ -1279,3 +1279,82 @@ def new_status(
         repo = git.Repo()
         repo.git.add(fpath)
         repo.git.commit([fpath, "-m", f"Add {status.value} status log entry"])
+
+
+class StageKind(str, Enum):
+    python_script = "python-script"
+    latex = "latex"
+    r_script = "r-script"
+    sh_script = "sh-script"
+    bash_script = "bash-script"
+    zsh_script = "zsh-script"
+    matlab_script = "matlab-script"
+
+
+@new_app.command(name="stage")
+def new_stage(
+    name: Annotated[
+        str,
+        typer.Option("--name", "-n", help="Stage name, typically kebab-case."),
+    ],
+    kind: Annotated[
+        StageKind, typer.Option("--kind", help="What kind of stage to create.")
+    ],
+    target: Annotated[
+        str,
+        typer.Option(
+            "--target", "-t", help="Target file, e.g., the script to run."
+        ),
+    ],
+    environment: Annotated[
+        str,
+        typer.Option(
+            "--environment", "-e", help="Environment to use to run the stage."
+        ),
+    ] = None,
+    deps: Annotated[
+        list[str],
+        typer.Option("--dep", "-d", help="A path on which the stage depends."),
+    ] = [],
+    outs: Annotated[
+        list[str],
+        typer.Option(
+            "--out", "-o", help="A path that is produced by the stage."
+        ),
+    ] = [],
+    outs_persist: Annotated[
+        list[str],
+        typer.Option(
+            "--out-persist",
+            help="An output that should not be deleted before running.",
+        ),
+    ] = [],
+    outs_no_cache: Annotated[
+        list[str],
+        typer.Option(
+            "--out-git",
+            help="An output that should be tracked with Git instead of DVC.",
+        ),
+    ] = [],
+    outs_persist_no_cache: Annotated[
+        list[str],
+        typer.Option(
+            "--out-git-persist",
+            help=(
+                "An output that should be tracked with Git instead of DVC, "
+                "and also should not be deleted before running stage."
+            ),
+        ),
+    ] = [],
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite an existing stage with this name if necessary.",
+        ),
+    ] = False,
+):
+    """Create a new pipeline stage."""
+    if environment is None:
+        warn("No environment is specified")

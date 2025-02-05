@@ -270,7 +270,7 @@ If you have other kinds of stages, e.g., MATLAB, R, or shell scripts to run,
 see the output of `calkit new stage --help` for information on how to
 create those.
 
-## Run the pipeline and push outputs to the cloud
+### Check that the pipeline runs and push outputs to the cloud
 
 Lastly,
 we can check that the pipeline runs properly by calling:

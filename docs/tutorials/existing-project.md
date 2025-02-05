@@ -7,8 +7,10 @@
     run `pip install --upgrade calkit` or `calkit upgrade` to upgrade.
 
 In this tutorial we're going to convert an existing project
-into a Calkit project.
-We're going to assume this project is not using any version control system.
+into a Calkit project,
+assuming we've never done anything like this before.
+Thus, the project is not yet using any version control
+or pipeline management system.
 We're also going to do everything
 in the most automated and hands-off way possible.
 More flexibility can be achieved with the lower-level interfaces,
@@ -32,7 +34,7 @@ The basic steps we'll take here are:
 ## Organize the project folder
 
 The first step is to collect all of the files relevant to the project
-and ensure they are in a single folder with nothing else in it.
+and ensure they are in a single parent folder.
 If you're a grad student, you might work on a single topic throughout
 grad school, which means all of your research-related files can
 go into a single project.
@@ -41,6 +43,12 @@ or personal things like your CV or transcripts.
 The folder should only include materials relevant to planning,
 performing, and publishing
 the research.
+Anything to be shared with the outside world,
+and anything required to produce those things should be included.
+That is,
+if you have a script referencing some data outside the folder,
+move the data into the folder and update the script accordingly.
+Make it all local.
 
 Here's an example project folder layout:
 
@@ -84,13 +92,6 @@ Here's an example project folder layout:
 └── 📜 references.bib
 ```
 
-Anything to be shared with the outside world,
-and anything required to produce those things should be included.
-That is,
-if you have a script referencing some data outside the folder,
-move the data into the folder and update the script accordingly.
-Make it all local.
-
 It's okay if the structure doesn't match exactly.
 It's just important that everything is in there.
 You can reorganize later.
@@ -106,20 +107,20 @@ in the project folder, rather than having any of your publications
 reference a file outside the project,
 e.g., if you have a "global" BibTeX file,
 or a reference collection in an app like Zotero.
+
 Similarly,
-if you have files in other cloud services like Dropbox or Overleaf,
+if you have files in cloud services like Dropbox or Overleaf,
 download all of them to the project folder.
 Locality helps keep things simple and reduce external dependencies.
 This project folder should be the single source of truth.
 You can potentially work on things in other tools,
-though that may not be worth the complexity,
-but if you do work on them externally,
+and if so,
 the files should always be downloaded back to the main project folder.
 
 !!! tip
 
     Don't be afraid to repeat yourself in code.
-    There is a common software engineering principle
+    There is a software engineering principle
     "don't repeat yourself," (DRY), which if applied too aggressively,
     can make it very difficult to track dependencies,
     which is crucial to maintaining reproducibility and simplicity.
@@ -134,7 +135,8 @@ the files should always be downloaded back to the main project folder.
     If the processing is expensive, this could be wasteful.
 
     It's a good rule of thumb to wait until you've repeated a block of code
-    three times before "abstracting" that logic into its own thing.
+    three times before "abstracting" that logic into its own separate
+    piece of code.
     That way, you can see how it's used and use the interface that emerged
     rather than attempting to design one from the start.
 
@@ -181,7 +183,7 @@ To summarize, this command will:
 - Create a `calkit.yaml` file for the project metadata
 - Create a dev container specification in `.devcontainer` for use with VS Code
   or GitHub Codespaces
-- If one doesn't exist already, a `README.md` file will be created
+- Create a basic `README.md` file
 
 ## Put everything in version control
 
@@ -261,7 +263,7 @@ You can see a list of all commits with `git log`.
 
 Repeat the `calkit status` and `calkit add` process with
 each of the files and folders until there are no more untracked files.
-Be careful adding folders with lots of contents inside.
+Be careful adding folders with lots of other files and folders inside.
 It's usually a good idea to add these more granularly instead of all at once.
 The `pubs` directory in our example is one such case.
 There are PDFs in there, which typically belong in DVC instead of Git,
@@ -339,7 +341,7 @@ and used automatically by Calkit.
 
 This project uses Python scripts,
 so we'll first want to define an environment in which these will run.
-If we use Conda, we can call:
+If we want to use Conda (and it's installed), we can call:
 
 ```sh
 calkit new conda-env --name py pandas matplotlib
@@ -362,8 +364,7 @@ you can create one called `processing` and one called `plotting`.
 
 If you aren't using Python,
 you can create other types of environments.
-We just want to ensure that all of our processes are run in one,
-rather than being purely dependent on the global machine environment.
+The main goal is to ensure that all processes are run in one if possible.
 See the [environments documentation](../environments.md) for more information.
 
 The project also compiles some LaTeX documents.
@@ -436,8 +437,8 @@ create those.
 
 ### Check that the pipeline runs and push outputs to the cloud
 
-Lastly,
-we can check that the pipeline runs properly by calling:
+Now that the pipeline is built,
+we can check that it runs properly by calling:
 
 ```sh
 calkit run
@@ -457,10 +458,14 @@ are declared in the [`calkit.yaml` file](../calkit-yaml.md).
 The purpose of doing this is to make them more easily searchable and reusable.
 For example,
 users can run `calkit import dataset` in their own project to reuse
-one of yours.
+one of yours,
+and your project will be listed as the source in that project's
+`calkit.yaml` file.
 
 Note that when they are ready for public consumption,
-we can create a "release" that will archive these and give them a
+we can create a "release" that will archive these materials
+to a service like
+Figshare, Zenodo, or OSF, and give them a
 digital object identifier (DOI) for citation and traceability.
 It's a good idea to create a release of the project before submitting
 a journal article and citing inside,

@@ -330,5 +330,36 @@ def test_new_stage(tmp_dir):
     # Check that we can create a MATLAB script with no environment
     with open("script.m", "w") as f:
         f.write("script")
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "stage",
+            "--name",
+            "plot",
+            "-f",
+            "--kind",
+            "matlab-script",
+            "--target",
+            "script.m",
+            "--dep",
+            "data.csv",
+            "--out",
+            "plot1.png",
+            "-o",
+            "plot2.png",
+        ]
+    )
+    pipeline = calkit.dvc.read_pipeline()
+    assert (
+        pipeline["stages"]["plot"]["cmd"]
+        == "matlab -noFigureWindows -batch \"run('script.m');\""
+    )
+    assert set(pipeline["stages"]["plot"]["deps"]) == set(
+        ["script.m", "data.csv"]
+    )
+    assert set(pipeline["stages"]["plot"]["outs"]) == set(
+        ["plot1.png", "plot2.png"]
+    )
     # Check that we fail for a nonexistent dependency
     # Check that we fail to create a stage with a non-existent environment

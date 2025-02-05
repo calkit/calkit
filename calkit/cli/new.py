@@ -1363,6 +1363,7 @@ def new_stage(
         bool,
         typer.Option(
             "--overwrite",
+            "--force",
             "-f",
             help="Overwrite an existing stage with this name if necessary.",
         ),

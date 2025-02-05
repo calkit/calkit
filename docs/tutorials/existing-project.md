@@ -20,6 +20,8 @@ make sure that Calkit is installed,
 you have an account on [calkit.io](https://calkit.io),
 and have [set a token in your local config](../cloud-integration.md).
 
+The basic steps we'll take here are:
+
 1. Organize the project folder.
 1. Create a new Calkit project.
 1. Add all existing files to version control and back them up in the cloud.
@@ -29,7 +31,7 @@ and have [set a token in your local config](../cloud-integration.md).
 
 ## Organize the project folder
 
-The first step is to collect up all of the files relevant to the project
+The first step is to collect all of the files relevant to the project
 and ensure they are in a single folder with nothing else in it.
 If you're a grad student, you might work on a single topic throughout
 grad school, which means all of your research-related files can
@@ -105,7 +107,7 @@ reference a file outside the project,
 e.g., if you have a "global" BibTeX file,
 or a reference collection in an app like Zotero.
 Similarly,
-if you have files in other cloud services like Overleaf,
+if you have files in other cloud services like Dropbox or Overleaf,
 download all of them to the project folder.
 Locality helps keep things simple and reduce external dependencies.
 This project folder should be the single source of truth.
@@ -167,12 +169,12 @@ and the larger data files will go to the Calkit Cloud.
 This will be handled seamlessly and transparently.
 
 Note you can add a `--public` flag if you want the project to be public
-from the get-go.
+from the get go.
 This is encouraged but can be a little worrying at first.
 The project can always be made public later,
-so let's start private for now.
+so let's start with it private for now.
 
-The actions that Calkit will take are:
+To summarize, this command will:
 
 - Initialize a Git repository with GitHub as the remote
 - Initialize a DVC configuration with the Calkit Cloud as the remote

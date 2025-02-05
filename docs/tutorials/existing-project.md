@@ -377,6 +377,14 @@ select any other image you'd like from
 
 ### Add pipeline stages
 
+Now we can create a stage for all of our important outputs.
+For each of these, we'll define
+what kind of stage it is,
+the target file (script or LaTeX input),
+which environment it should run in,
+and any additional input dependencies or outputs.
+Let's start with data processing:
+
 ```sh
 calkit new stage \
     --name process-data \
@@ -386,6 +394,8 @@ calkit new stage \
     --dep data/raw \
     --out data/processed
 ```
+
+Then plotting:
 
 ```sh
 calkit new stage \
@@ -397,6 +407,8 @@ calkit new stage \
     --dep data/raw \
     --out figures
 ```
+
+Now add stages to build our LaTeX documents:
 
 ```sh
 calkit new stage \

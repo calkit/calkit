@@ -168,6 +168,7 @@ The project can always be made public later,
 so let's start private for now.
 
 The actions that Calkit will take are:
+
 - Initialize a Git repository with GitHub as the remote
 - Initialize a DVC configuration with the Calkit Cloud as the remote
 - Create a `calkit.yaml` file for the project metadata
@@ -182,9 +183,106 @@ it's time to add files to version control.
 
 ## Add all computational processes to the pipeline
 
-To be continued...
+### Create computational environments
 
-## Define all of the project artifacts
+This project uses Python scripts,
+so we'll first want to define an environment in which these will run.
+If we use Conda, we can call:
+
+```sh
+calkit new conda-env --name py pandas matplotlib
+```
+
+In the command above we're specifying two packages to exist in the environment,
+`pandas` and `matplotlib`.
+However, you may have many more than this.
+You can add them to the command or add them to the resulting
+environment definition file later.
+If you prefer Python's built-in `venv` module to manage your environment,
+you can replace `conda-env` with `venv`,
+and similarly, if you prefer `uv`, you can replace it with `uv-venv`.
+
+If you have multiple Python scripts that require different,
+possibly conflicting sets of package,
+you can simply create multiple environments and name them descriptively.
+For example, instead of one environment called `py`,
+you can create one called `processing` and one called `plotting`.
+
+If you aren't using Python,
+you can create other types of environments.
+We just want to ensure that all of our processes are run in one,
+rather than being purely dependent on the global machine environment.
+See the [environments documentation](../environments.md) for more information.
+
+The project also compiles some LaTeX documents.
+We can create a Docker environment called `tex` for these with:
+
+```sh
+calkit new docker-env --name tex --image texlive/texlive:latest-full
+```
+
+If you don't need the full TeXLive distribution, you can
+select any other image you'd like from
+[this list on Docker Hub](https://hub.docker.com/r/texlive/texlive/tags).
+
+### Add pipeline stages
+
+```sh
+calkit new stage \
+    --name process-data \
+    --environment py \
+    --kind python-script \
+    --target scripts/process.py \
+    --dep data/raw \
+    --out data/processed
+```
+
+```sh
+calkit new stage \
+    --name plot \
+    --environment py \
+    --kind python-script \
+    --target scripts/plot.py \
+    --dep data/processed \
+    --dep data/raw \
+    --out figures
+```
+
+```sh
+calkit new stage \
+    --name build-aps-slides \
+    --environment tex \
+    --kind latex \
+    --target pubs/2025-aps-dfd-slides/slides.tex \
+    --dep figures
+```
+
+```sh
+calkit new stage \
+    --name build-article-1 \
+    --environment tex \
+    --kind latex \
+    --target pubs/2025-article-1/paper.tex \
+    --dep figures
+```
+
+## Run the pipeline and push outputs to the cloud
+
+Lastly,
+we can check that the pipeline runs properly by calling:
+
+```sh
+calkit run
+```
+
+If there are no errors,
+we can commit the outputs and push them up to the cloud with:
+
+```sh
+calkit save -am "Run pipeline"
+```
+
+## Declare all of the project artifacts
 
 If your project has produced any datasets that might be useful to others,
 declare these in the `datasets` section.

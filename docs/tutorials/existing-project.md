@@ -1,5 +1,11 @@
 # Converting an existing project to a Calkit project
 
+!!! note
+
+    This tutorial requires Calkit version 0.19.0 or above.
+    If the output of `calkit --version` shows a lower version,
+    run `pip install --upgrade calkit` or `calkit upgrade` to upgrade.
+
 In this tutorial we're going to convert an existing project
 into a Calkit project.
 We're going to assume this project is not using any version control system.

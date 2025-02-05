@@ -72,6 +72,7 @@ Here's an example project folder layout:
 │   ├── 📂 case2
 │   │   ├── 📜 config.txt
 │   │   └── 📜 output.h5
+│   └── 📜 run.py
 ├── 📜 references.bib
 └── 📜 README.md
 ```

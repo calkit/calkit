@@ -536,7 +536,9 @@ or maybe we have a new idea for a derived dataset we can create.
 A good way to go about doing this is to create a scratch script or notebook,
 ignoring it with `calkit ignore`,
 prototyping in there,
-and moving any valuable code out into a script once it works.
+and moving any valuable code out into a version-controlled script once it
+works the way you want it to.
+
 Then, add a new pipeline stage to run that script with `calkit new stage`.
 If you need a different environment, you can create one,
 or you can update an existing environment by editing its definition file,

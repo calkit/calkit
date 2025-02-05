@@ -450,8 +450,12 @@ calkit save -am "Run pipeline"
 
 ## Declare all of the project artifacts
 
-If your project has produced any datasets that might be useful to others,
-declare these in the `datasets` section.
+Project artifacts like datasets, figures, and publications
+are declared in the [`calkit.yaml` file](../calkit-yaml.md).
+The purpose of doing this is to make them more easily searchable and reusable.
+For example,
+users can run `calkit import dataset` in their own project to reuse
+one of yours.
 
 Note that when they are ready for public consumption,
 we can create a "release" that will archive these and give them a
@@ -461,7 +465,82 @@ a journal article and citing inside,
 so readers can find their way back to the project and inspect how
 things were created.
 
+Let's go ahead an add our raw and processed datasets to `calkit.yaml`:
+
+```yaml
+datasets:
+  - path: data/raw
+    title: Raw data
+  - path: data/processed
+    title: Processed data
+```
+
+We can add more metadata about each dataset, e.g., a description,
+or definitions for the columns,
+but at the very least we need to define a path and title.
+
+Next, add the figures to `calkit.yaml`.
+This will make them show up on the figures section of the project homepage
+on [calkit.io](https://calkit.io).
+
+```yaml
+figures:
+  - path: figures/plot1.png
+    title: Plot of something
+    description: This is a plot of something.
+    stage: plot
+  - path: figures/plot2.png
+    title: Plot of something else
+    description: This is a plot of something else.
+    stage: plot
+```
+
+You'll notice we've defined the pipeline stage that produced each of
+these figures.
+This will allow users to trace back from the figure to the code that
+produced it.
+
+Lastly, let's add our publications to `calkit.yaml`,
+which will make them viewable on the project publications page on
+calkit.io:
+
+```yaml
+publications:
+  - path: pubs/2025-aps-dfd-slides/slides.pdf
+    kind: presentation
+    title: This is the title of the talk
+    stage: build-aps-slides
+  - path: pubs/2025-article-1/paper.pdf
+    kind: journal-article
+    title: This is the title of the paper
+    stage: build-article-1
+  - path: pubs/thesis/thesis.pdf
+    kind: phd-thesis
+    title: This is the title of the thesis
+    stage: build-thesis
+```
+
+Commit and push these changes with:
+
+```sh
+calkit save calkit.yaml -m "Add artifacts to calkit.yaml"
+```
+
 ## Next steps
+
+Now that our project is fully version-controlled and reproducible,
+maybe we have some new figures to generate,
+or maybe we have a new idea for a derived dataset we can create.
+A good way to go about doing this is to create a scratch script or notebook,
+ignoring it with `calkit ignore`,
+prototyping in there,
+and moving any valuable code out into a script once it works.
+Then, add a new pipeline stage to run that script with `calkit new stage`.
+If you need a different environment, you can create one,
+or you can update an existing environment by editing its definition file,
+e.g., `environment.yml` for a Conda environment.
+If you execute `calkit run` again, only the stages that are missing outputs
+or have updated dependencies will change.
 
 ## Questions or comments?
 

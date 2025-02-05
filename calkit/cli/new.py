@@ -10,7 +10,7 @@ from enum import Enum
 
 import git
 import typer
-from git.exc import InvalidGitRepositoryError
+from git.exc import GitCommandError, InvalidGitRepositoryError
 from typing_extensions import Annotated
 
 import calkit
@@ -97,10 +97,10 @@ def new_project(
         f"Check out the docs at {docs_url}."
     )
     abs_path = os.path.abspath(path)
-    if (cloud or template) and os.path.exists(abs_path):
-        raise_error(
-            "Must specify a new directory if using --cloud or --template"
-        )
+    if template and os.path.exists(abs_path):
+        raise_error("Must specify a new directory if using --template")
+    if cloud and os.path.isdir(os.path.join(abs_path, ".git")):
+        raise_error("Must not already be a Git repo to use --cloud")
     ck_info_fpath = os.path.join(abs_path, "calkit.yaml")
     if os.path.isfile(ck_info_fpath) and not overwrite:
         raise_error(
@@ -120,8 +120,8 @@ def new_project(
     typer.echo(f"Using title: {title}")
     if cloud:
         # Cloud should allow None, which will allow us to post just the name
-        # NOTE: This will fail if the user hasn't logged into GitHub in a
-        # while, and their token stored in the Calkit cloud is expired
+        # NOTE: This will fail if the user hasn't logged into the Calkit Cloud
+        # in 6 months, since their GitHub refresh token stored is expired
         try:
             resp = calkit.cloud.post(
                 "/projects",
@@ -136,8 +136,21 @@ def new_project(
             )
         except Exception as e:
             raise_error(f"Posting new project to cloud failed: {e}")
-        # Now clone here and that's about
-        subprocess.run(["git", "clone", resp["git_repo_url"], abs_path])
+        # Now clone here
+        if not os.path.isdir(abs_path):
+            subprocess.run(["git", "clone", resp["git_repo_url"], abs_path])
+        else:
+            typer.echo("Fetching from newly create Git repo")
+            repo = git.Repo.init(abs_path, initial_branch="main")
+            repo.git.remote(["add", "origin", resp["git_repo_url"]])
+            repo.git.fetch()
+            checkout_cmd = ["-t", "origin/main"]
+            if overwrite:
+                checkout_cmd.append("--force")
+            try:
+                repo.git.checkout(checkout_cmd)
+            except GitCommandError as e:
+                raise_error(f"Failed to check out main branch: {e}")
         try:
             calkit.dvc.set_remote_auth(wdir=abs_path)
         except Exception:

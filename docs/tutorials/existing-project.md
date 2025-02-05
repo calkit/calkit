@@ -73,8 +73,7 @@ Here's an example project folder layout:
 │   │   ├── 📜 config.txt
 │   │   └── 📜 output.h5
 │   └── 📜 run.py
-├── 📜 references.bib
-└── 📜 README.md
+└── 📜 references.bib
 ```
 
 Anything to be shared with the outside world,

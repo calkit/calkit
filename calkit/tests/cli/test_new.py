@@ -286,8 +286,12 @@ def test_new_stage(tmp_dir):
         pipeline["stages"]["plot"]["cmd"]
         == "calkit xenv -n py -- python plot.py"
     )
-    assert pipeline["stages"]["plot"]["deps"] == ["plot.py", "data.csv"]
-    assert pipeline["stages"]["plot"]["outs"] == ["plot1.png", "plot2.png"]
+    assert set(pipeline["stages"]["plot"]["deps"]) == set(
+        ["plot.py", "data.csv"]
+    )
+    assert set(pipeline["stages"]["plot"]["outs"]) == set(
+        ["plot1.png", "plot2.png"]
+    )
     # Create a LaTeX stage
     subprocess.check_call(
         [
@@ -315,12 +319,14 @@ def test_new_stage(tmp_dir):
         "calkit xenv -n tex -- "
         "latexmk -cd -interaction=nonstopmode -pdf paper.tex"
     )
-    assert pipeline["stages"]["plot"]["deps"] == [
-        "paper.tex",
-        "plot1.png",
-        "plot2.png",
-    ]
-    assert pipeline["stages"]["plot"]["outs"] == ["paper.pdf"]
+    assert set(pipeline["stages"]["build-paper"]["deps"]) == set(
+        [
+            "paper.tex",
+            "plot1.png",
+            "plot2.png",
+        ]
+    )
+    assert pipeline["stages"]["build-paper"]["outs"] == ["paper.pdf"]
     # Check that we can create a MATLAB script with no environment
     with open("script.m", "w") as f:
         f.write("script")

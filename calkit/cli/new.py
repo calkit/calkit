@@ -1356,5 +1356,50 @@ def new_stage(
     ] = False,
 ):
     """Create a new pipeline stage."""
+    ck_info = calkit.load_calkit_info()
     if environment is None:
         warn("No environment is specified")
+        cmd = ""
+    else:
+        if environment not in ck_info["environments"]:
+            raise_error(f"Environment '{environment}' does not exist")
+        cmd = f"calkit xenv -n {environment} -- "
+    if not os.path.exists(target):
+        raise_error(f"Target '{target}' does not exist")
+    if kind.value == "python-script":
+        cmd += f"python {target}"
+    elif kind.value == "latex":
+        cmd += f"latexmk -cd -interaction=nonstopmode -pdf {target}"
+        out_target = target.removesuffix(".tex") + ".pdf"
+        if out_target not in (
+            outs + outs_no_cache + outs_persist + outs_persist_no_cache
+        ):
+            outs = [out_target] + outs
+    elif kind.value == "matlab-script":
+        cmd += f"matlab -noFigureWindows -batch \"run('{target}');\""
+    elif kind.value == "sh-script":
+        cmd += f"sh {target}"
+    elif kind.value == "bash-script":
+        cmd += f"bash {target}"
+    elif kind.value == "zsh-script":
+        cmd += f"zsh {target}"
+    elif kind.value == "r-script":
+        cmd += f"Rscript {target}"
+    add_cmd = ["dvc", "stage", "add", "-n", name]
+    for dep in [target] + deps:
+        add_cmd += ["-d", dep]
+    for out in outs:
+        add_cmd += ["-o", out]
+    for out in outs_no_cache:
+        add_cmd += ["--outs-no-cache", out]
+    for out in outs_persist:
+        add_cmd += ["--outs-persist", out]
+    for out in outs_persist_no_cache:
+        add_cmd += ["--outs-persist-no-cache", out]
+    if overwrite:
+        add_cmd.append("-f")
+    add_cmd.append(cmd)
+    try:
+        subprocess.check_call(add_cmd)
+    except subprocess.CalledProcessError:
+        raise_error("Failed to create stage")

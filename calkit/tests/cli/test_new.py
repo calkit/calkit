@@ -228,3 +228,178 @@ def test_new_project(tmp_dir):
     assert repo.git.ls_files(".devcontainer")
     ck_info = calkit.load_calkit_info()
     assert ck_info["title"] == "My new project"
+
+
+def test_new_stage(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "docker-env",
+            "--name",
+            "tex",
+            "--image",
+            "texlive/texlive:latest-full",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-venv",
+            "--name",
+            "py",
+            "requests",
+        ]
+    )
+    with open("plot.py", "w") as f:
+        f.write("print('hi')")
+    with open("paper.tex", "w") as f:
+        f.write("Hello")
+    with open("data.csv", "w") as f:
+        f.write("data")
+    # Create a Python script stage
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "stage",
+            "--name",
+            "plot",
+            "--kind",
+            "python-script",
+            "--environment",
+            "py",
+            "--target",
+            "plot.py",
+            "--dep",
+            "data.csv",
+            "--out",
+            "plot1.png",
+            "-o",
+            "plot2.png",
+        ]
+    )
+    pipeline = calkit.dvc.read_pipeline()
+    assert (
+        pipeline["stages"]["plot"]["cmd"]
+        == "calkit xenv -n py -- python plot.py"
+    )
+    assert set(pipeline["stages"]["plot"]["deps"]) == set(
+        ["plot.py", "data.csv", "requirements.txt"]
+    )
+    assert set(pipeline["stages"]["plot"]["outs"]) == set(
+        ["plot1.png", "plot2.png"]
+    )
+    # Create a LaTeX stage
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "stage",
+            "--name",
+            "build-paper",
+            "--kind",
+            "latex",
+            "--environment",
+            "tex",
+            "--target",
+            "paper.tex",
+            "--dep",
+            "plot1.png",
+            "-d",
+            "plot2.png",
+            "--out",
+            "paper.pdf",
+        ]
+    )
+    pipeline = calkit.dvc.read_pipeline()
+    assert pipeline["stages"]["build-paper"]["cmd"] == (
+        "calkit xenv -n tex -- "
+        "latexmk -cd -interaction=nonstopmode -pdf paper.tex"
+    )
+    assert set(pipeline["stages"]["build-paper"]["deps"]) == set(
+        [
+            "paper.tex",
+            "plot1.png",
+            "plot2.png",
+        ]
+    )
+    assert pipeline["stages"]["build-paper"]["outs"] == ["paper.pdf"]
+    # Check that we can create a MATLAB script with no environment
+    with open("script.m", "w") as f:
+        f.write("script")
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "stage",
+            "--name",
+            "plot",
+            "-f",
+            "--kind",
+            "matlab-script",
+            "--target",
+            "script.m",
+            "--dep",
+            "data.csv",
+            "--out",
+            "plot1.png",
+            "-o",
+            "plot2.png",
+        ]
+    )
+    pipeline = calkit.dvc.read_pipeline()
+    assert (
+        pipeline["stages"]["plot"]["cmd"]
+        == "matlab -noFigureWindows -batch \"run('script.m');\""
+    )
+    assert set(pipeline["stages"]["plot"]["deps"]) == set(
+        ["script.m", "data.csv"]
+    )
+    assert set(pipeline["stages"]["plot"]["outs"]) == set(
+        ["plot1.png", "plot2.png"]
+    )
+    # Check that we fail for a nonexistent target
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(
+            [
+                "calkit",
+                "new",
+                "stage",
+                "--name",
+                "plot",
+                "-f",
+                "--kind",
+                "matlab-script",
+                "--target",
+                "script2.m",
+                "--out",
+                "plot1.png",
+                "-o",
+                "plot2.png",
+            ]
+        )
+    # Check that we fail to create a stage with a non-existent environment
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(
+            [
+                "calkit",
+                "new",
+                "stage",
+                "--name",
+                "plot",
+                "-f",
+                "--kind",
+                "python-script",
+                "--target",
+                "plot.py",
+                "--out",
+                "plot1.png",
+                "-o",
+                "plot2.png",
+                "-e",
+                "nonexistent-env",
+            ]
+        )

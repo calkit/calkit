@@ -10,7 +10,7 @@ from enum import Enum
 
 import git
 import typer
-from git.exc import InvalidGitRepositoryError
+from git.exc import GitCommandError, InvalidGitRepositoryError
 from typing_extensions import Annotated
 
 import calkit
@@ -97,10 +97,10 @@ def new_project(
         f"Check out the docs at {docs_url}."
     )
     abs_path = os.path.abspath(path)
-    if (cloud or template) and os.path.exists(abs_path):
-        raise_error(
-            "Must specify a new directory if using --cloud or --template"
-        )
+    if template and os.path.exists(abs_path):
+        raise_error("Must specify a new directory if using --template")
+    if cloud and os.path.isdir(os.path.join(abs_path, ".git")):
+        raise_error("Must not already be a Git repo to use --cloud")
     ck_info_fpath = os.path.join(abs_path, "calkit.yaml")
     if os.path.isfile(ck_info_fpath) and not overwrite:
         raise_error(
@@ -120,8 +120,8 @@ def new_project(
     typer.echo(f"Using title: {title}")
     if cloud:
         # Cloud should allow None, which will allow us to post just the name
-        # NOTE: This will fail if the user hasn't logged into GitHub in a
-        # while, and their token stored in the Calkit cloud is expired
+        # NOTE: This will fail if the user hasn't logged into the Calkit Cloud
+        # in 6 months, since their GitHub refresh token stored is expired
         try:
             resp = calkit.cloud.post(
                 "/projects",
@@ -136,8 +136,21 @@ def new_project(
             )
         except Exception as e:
             raise_error(f"Posting new project to cloud failed: {e}")
-        # Now clone here and that's about
-        subprocess.run(["git", "clone", resp["git_repo_url"], abs_path])
+        # Now clone here
+        if not os.path.isdir(abs_path):
+            subprocess.run(["git", "clone", resp["git_repo_url"], abs_path])
+        else:
+            typer.echo("Fetching from newly create Git repo")
+            repo = git.Repo.init(abs_path, initial_branch="main")
+            repo.git.remote(["add", "origin", resp["git_repo_url"]])
+            repo.git.fetch()
+            checkout_cmd = ["-t", "origin/main"]
+            if overwrite:
+                checkout_cmd.append("--force")
+            try:
+                repo.git.checkout(checkout_cmd)
+            except GitCommandError as e:
+                raise_error(f"Failed to check out main branch: {e}")
         try:
             calkit.dvc.set_remote_auth(wdir=abs_path)
         except Exception:
@@ -1279,3 +1292,145 @@ def new_status(
         repo = git.Repo()
         repo.git.add(fpath)
         repo.git.commit([fpath, "-m", f"Add {status.value} status log entry"])
+
+
+class StageKind(str, Enum):
+    python_script = "python-script"
+    latex = "latex"
+    r_script = "r-script"
+    sh_script = "sh-script"
+    bash_script = "bash-script"
+    zsh_script = "zsh-script"
+    matlab_script = "matlab-script"
+
+
+@new_app.command(name="stage")
+def new_stage(
+    name: Annotated[
+        str,
+        typer.Option("--name", "-n", help="Stage name, typically kebab-case."),
+    ],
+    kind: Annotated[
+        StageKind, typer.Option("--kind", help="What kind of stage to create.")
+    ],
+    target: Annotated[
+        str,
+        typer.Option(
+            "--target", "-t", help="Target file, e.g., the script to run."
+        ),
+    ],
+    environment: Annotated[
+        str,
+        typer.Option(
+            "--environment", "-e", help="Environment to use to run the stage."
+        ),
+    ] = None,
+    deps: Annotated[
+        list[str],
+        typer.Option("--dep", "-d", help="A path on which the stage depends."),
+    ] = [],
+    outs: Annotated[
+        list[str],
+        typer.Option(
+            "--out", "-o", help="A path that is produced by the stage."
+        ),
+    ] = [],
+    outs_persist: Annotated[
+        list[str],
+        typer.Option(
+            "--out-persist",
+            help="An output that should not be deleted before running.",
+        ),
+    ] = [],
+    outs_no_cache: Annotated[
+        list[str],
+        typer.Option(
+            "--out-git",
+            help="An output that should be tracked with Git instead of DVC.",
+        ),
+    ] = [],
+    outs_persist_no_cache: Annotated[
+        list[str],
+        typer.Option(
+            "--out-git-persist",
+            help=(
+                "An output that should be tracked with Git instead of DVC, "
+                "and also should not be deleted before running stage."
+            ),
+        ),
+    ] = [],
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "--force",
+            "-f",
+            help="Overwrite an existing stage with this name if necessary.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes to Git.")
+    ] = False,
+):
+    """Create a new pipeline stage."""
+    ck_info = calkit.load_calkit_info()
+    if environment is None:
+        warn("No environment is specified")
+        cmd = ""
+    else:
+        if environment not in ck_info["environments"]:
+            raise_error(f"Environment '{environment}' does not exist")
+        cmd = f"calkit xenv -n {environment} -- "
+        # Add environment path as a dependency
+        env_path = ck_info["environments"][environment].get("path")
+        if env_path is not None:
+            deps = [env_path] + deps
+    if not os.path.exists(target):
+        raise_error(f"Target '{target}' does not exist")
+    if kind.value == "python-script":
+        cmd += f"python {target}"
+    elif kind.value == "latex":
+        cmd += f"latexmk -cd -interaction=nonstopmode -pdf {target}"
+        out_target = target.removesuffix(".tex") + ".pdf"
+        if out_target not in (
+            outs + outs_no_cache + outs_persist + outs_persist_no_cache
+        ):
+            outs = [out_target] + outs
+    elif kind.value == "matlab-script":
+        cmd += f"matlab -noFigureWindows -batch \"run('{target}');\""
+    elif kind.value == "sh-script":
+        cmd += f"sh {target}"
+    elif kind.value == "bash-script":
+        cmd += f"bash {target}"
+    elif kind.value == "zsh-script":
+        cmd += f"zsh {target}"
+    elif kind.value == "r-script":
+        cmd += f"Rscript {target}"
+    add_cmd = ["dvc", "stage", "add", "-n", name]
+    for dep in [target] + deps:
+        add_cmd += ["-d", dep]
+    for out in outs:
+        add_cmd += ["-o", out]
+    for out in outs_no_cache:
+        add_cmd += ["--outs-no-cache", out]
+    for out in outs_persist:
+        add_cmd += ["--outs-persist", out]
+    for out in outs_persist_no_cache:
+        add_cmd += ["--outs-persist-no-cache", out]
+    if overwrite:
+        add_cmd.append("-f")
+    add_cmd.append(cmd)
+    try:
+        subprocess.check_call(add_cmd)
+    except subprocess.CalledProcessError:
+        raise_error("Failed to create stage")
+    if not no_commit:
+        try:
+            repo = git.Repo()
+        except InvalidGitRepositoryError:
+            raise_error("Can't commit because this is not a Git repo")
+        repo.git.add("dvc.yaml")
+        if "dvc.yaml" in calkit.git.get_staged_files():
+            repo.git.commit(
+                ["dvc.yaml", "-m", f"Add {kind.value} pipeline stage '{name}'"]
+            )

@@ -52,6 +52,7 @@ nav:
   - Examples: examples.md
   - Tutorials:
       - tutorials/first-project.md
+      - tutorials/existing-project.md
       - tutorials/openfoam.md
       - tutorials/adding-latex-pub-docker.md
       - tutorials/latex-codespaces.md

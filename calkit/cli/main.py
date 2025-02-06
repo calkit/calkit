@@ -1064,6 +1064,17 @@ def run_in_env(
         jobs[job_key] = job
         with open(jobs_fpath, "w") as f:
             calkit.ryaml.dump(jobs, f)
+    elif env["kind"] == "renv":
+        try:
+            subprocess.check_call(
+                ["Rscript", "-e", "'renv::restore()'"], cwd=wdir
+            )
+        except subprocess.CalledProcessError:
+            raise_error("Failed to check renv")
+        try:
+            subprocess.check_call(cmd, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in renv")
     else:
         raise_error("Environment kind not supported")
 

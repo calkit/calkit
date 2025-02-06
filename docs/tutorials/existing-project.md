@@ -584,7 +584,8 @@ add a new pipeline stage to run that script with `calkit new stage`.
 If you need a different environment, you can create one,
 or you can update an existing environment by editing its definition file.
 If you execute `calkit run` again, only the stages that are missing outputs
-or have updated dependencies will change.
+or have updated dependencies will be executed,
+ensuring the project remains reproducible as efficiently as possible.
 If you continue to commit all changes along the way,
 you'll always be able to get back to something that works
 if something goes wrong,

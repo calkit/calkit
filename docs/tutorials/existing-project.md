@@ -39,16 +39,14 @@ If you're a grad student, you might work on a single topic throughout
 grad school, which means all of your research-related files can
 go into a single project.
 Note that we don't want to include things like coursework
-or personal things like your CV or transcripts.
+or personal documents like your CV or transcripts.
 The folder should only include materials relevant to planning,
 performing, and publishing
 the research.
 Anything to be shared with the outside world,
 and anything required to produce those things should be included.
-That is,
-if you have a script referencing some data outside the folder,
-move the data into the folder and update the script accordingly.
-Make it all local.
+If you have a script referencing some data outside this parent folder,
+move the data inside and update the script accordingly.
 
 Here's an example project folder layout:
 
@@ -95,6 +93,14 @@ Here's an example project folder layout:
 It's okay if the structure doesn't match exactly.
 It's just important that everything is in there.
 You can reorganize later.
+We're mainly focused on minimizing external dependencies to
+improve reproducibility.
+That is,
+the more self-contained we can make the project,
+the easier it will be to reproduce,
+since getting all of those external dependencies documented properly
+and setup in a different context can be
+a challenge.
 
 It's a good idea to keep your library of references
 (the BibTeX file `references.bib` in the example above)
@@ -106,10 +112,9 @@ or a reference collection in an app like Zotero.
 Similarly,
 if you have files in cloud services like Dropbox or Overleaf,
 download all of them to the project folder.
-Locality helps keep things simple and reduce external dependencies.
 This project folder should be the single source of truth.
-You can potentially work on things in other tools,
-and if so,
+You can work on materials in other tools,
+but if so,
 the files should always be downloaded back to the main project folder.
 
 !!! tip
@@ -137,8 +142,9 @@ the files should always be downloaded back to the main project folder.
 
 ## Create/initialize the project
 
-Inside the project folder, i.e., after calling `cd my-phd-research`,
-create a new Calkit project inside with:
+With a terminal open inside the project folder
+(`my-phd-research` in the example above),
+initialize it as a new Calkit project with:
 
 ```sh
 calkit new project . \
@@ -151,7 +157,7 @@ calkit new project . \
 In this command, the `.` means the current working directory,
 or "here."
 The name, title, and description should be adapted to your own
-project.
+project of course.
 The name should be "kebab-case" (all lowercase with hyphens separating words),
 the title should be sentence or title case,
 and the description should include punctuation,
@@ -318,7 +324,8 @@ Pushing
 
 Now that we have all of our files in version control,
 we need to ensure that our output artifacts like derived datasets,
-figures, and publication PDFs are generated with the pipeline.
+figures, and publication PDFs are generated with
+[the pipeline](../pipeline/index.md).
 This will ensure that they stay up to date if any of their
 input data or dependencies change.
 
@@ -346,13 +353,18 @@ In the command above we're specifying two packages to exist in the environment,
 `pandas` and `matplotlib`.
 However, you may have many more than this.
 You can add them to the command or add them to the resulting
-environment definition file later.
+environment definition file
+(`environment.yml` by default for Conda environments) later.
 If you prefer Python's built-in `venv` module to manage your environment,
 you can replace `conda-env` with `venv`,
 and similarly, if you prefer `uv`, you can replace it with `uv-venv`.
 
+After an environment is created,
+it will be stored in the `environments` section of the `calkit.yaml` file.
+It can also be modified (or removed) by editing that file.
+
 If you have multiple Python scripts that require different,
-possibly conflicting sets of package,
+possibly conflicting sets of packages,
 you can simply create multiple environments and name them descriptively.
 For example, instead of one environment called `py`,
 you can create one called `processing` and one called `plotting`.
@@ -369,9 +381,12 @@ We can create a Docker environment called `tex` for these with:
 calkit new docker-env --name tex --image texlive/texlive:latest-full
 ```
 
+This environment is referencing a TeXLive Docker image from Docker Hub,
+which requires [Docker](https://docker.com) to be installed,
+but will not require a separate LaTeX distribution to be installed.
 If you don't need the full TeXLive distribution, you can
 select any other image you'd like from
-[this list on Docker Hub](https://hub.docker.com/r/texlive/texlive/tags).
+[this list](https://hub.docker.com/r/texlive/texlive/tags).
 
 ### Add pipeline stages
 
@@ -393,7 +408,28 @@ calkit new stage \
     --out data/processed
 ```
 
-Then plotting:
+This will add a stage to the `dvc.yaml` file that looks like:
+
+```yaml
+stages:
+  process-data:
+    cmd: calkit xenv -n py -- python scripts/process.py
+    deps:
+    - data/raw
+    - environment.yml
+    - scripts/process.py
+    outs:
+    - data/processed
+```
+
+This stage can also be modified later, e.g.,
+if there end up being additional dependencies
+(files or folders which if changed, require the script to be rerun).
+See the
+[DVC documentation](https://dvc.org/doc/user-guide/pipelines/defining-pipelines#stages)
+for more information about defining pipeline stages.
+
+Next, create a stage for plotting:
 
 ```sh
 calkit new stage \
@@ -406,7 +442,7 @@ calkit new stage \
     --out figures
 ```
 
-Now add stages to build our LaTeX documents:
+Then add stages to build our LaTeX documents:
 
 ```sh
 calkit new stage \
@@ -440,7 +476,7 @@ calkit run
 ```
 
 If there are no errors,
-we can commit the outputs and push them up to the cloud with:
+we can commit the outputs and push them up to the cloud with `calkit save`:
 
 ```sh
 calkit save -am "Run pipeline"
@@ -456,6 +492,8 @@ users can run `calkit import dataset` in their own project to reuse
 one of yours,
 and your project will be listed as the source in that project's
 `calkit.yaml` file.
+See the [FAIR principles](https://www.go-fair.org/fair-principles/)
+to learn more about why this is important.
 
 Note that when they are ready for public consumption,
 we can create a "release" that will archive these materials
@@ -463,9 +501,9 @@ to a service like
 Figshare, Zenodo, or OSF, and give them a
 digital object identifier (DOI) for citation and traceability.
 It's a good idea to create a release of the project before submitting
-a journal article and citing inside,
+a journal article and to cite it therein,
 so readers can find their way back to the project and inspect how
-things were created.
+the materials were created.
 
 Let's go ahead an add our raw and processed datasets to `calkit.yaml`:
 
@@ -482,7 +520,7 @@ or definitions for the columns,
 but at the very least we need to define a path and title.
 
 Next, add the figures to `calkit.yaml`.
-This will make them show up on the figures section of the project homepage
+This will make them show up in the figures section of the project homepage
 on [calkit.io](https://calkit.io).
 
 ```yaml
@@ -522,7 +560,7 @@ publications:
     stage: build-thesis
 ```
 
-Commit and push these changes with:
+We can then commit and push the changes to `calkit.yaml` with:
 
 ```sh
 calkit save calkit.yaml -m "Add artifacts to calkit.yaml"
@@ -531,20 +569,27 @@ calkit save calkit.yaml -m "Add artifacts to calkit.yaml"
 ## Next steps
 
 Now that our project is fully version-controlled and reproducible,
-maybe we have some new figures to generate,
+we have a solid baseline to return to if anything breaks
+due to future changes.
+Maybe we have some new figures to generate,
 or maybe we have a new idea for a derived dataset we can create.
 A good way to go about doing this is to create a scratch script or notebook,
 ignoring it with `calkit ignore`,
-prototyping in there,
+prototyping in that scratch space,
 and moving any valuable code out into a version-controlled script once it
 works the way you want it to.
 
-Then, add a new pipeline stage to run that script with `calkit new stage`.
+After producing a new working script,
+add a new pipeline stage to run that script with `calkit new stage`.
 If you need a different environment, you can create one,
-or you can update an existing environment by editing its definition file,
-e.g., `environment.yml` for a Conda environment.
+or you can update an existing environment by editing its definition file.
 If you execute `calkit run` again, only the stages that are missing outputs
 or have updated dependencies will change.
+If you continue to commit all changes along the way,
+you'll always be able to get back to something that works
+if something goes wrong,
+sort of like climbing with a safety harness,
+clipping it onto higher and higher anchors as you ascend.
 
 ## Questions or comments?
 

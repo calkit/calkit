@@ -134,7 +134,7 @@ calkit clone petebachant/strava-analysis
 `calkit status` will show the combined status from both Git and DVC.
 For example:
 
-```
+```sh
 $ calkit status
 --------------------------- Code (Git) ---------------------------
 On branch main
@@ -164,6 +164,11 @@ Options:
 - `--message`, `-m`: Specify a commit message. If omitted, the user will be
   prompted for one.
 - `--no-push`: Do not push after committing.
+
+### `sync`
+
+`calkit sync` will pull from then push to the cloud,
+ensuring both copies are in sync.
 
 ### `add`
 

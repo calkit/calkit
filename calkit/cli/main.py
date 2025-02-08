@@ -536,6 +536,15 @@ def push(
         raise_error("DVC push failed")
 
 
+@app.command(name="sync")
+def sync(
+    no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
+):
+    """Sync the project repo by pulling and then pushing."""
+    pull(no_check_auth=no_check_auth)
+    push(no_check_auth=no_check_auth)
+
+
 @app.command(name="ignore")
 def ignore(
     path: Annotated[str, typer.Argument(help="Path to ignore.")],

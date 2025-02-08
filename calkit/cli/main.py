@@ -541,6 +541,7 @@ def sync(
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
 ):
     """Sync the project repo by pulling and then pushing."""
+    # TODO: Walk users through merge conflicts if they arise
     pull(no_check_auth=no_check_auth)
     push(no_check_auth=no_check_auth)
 

@@ -1434,3 +1434,49 @@ def new_stage(
             repo.git.commit(
                 ["dvc.yaml", "-m", f"Add {kind.value} pipeline stage '{name}'"]
             )
+
+
+@new_app.command(name="release")
+def new_release(
+    name: Annotated[
+        str,
+        typer.Option(
+            "--name",
+            "-n",
+            help=(
+                "A name for the release, typically kebab-case. "
+                "Will be used for the Git tag and GitHub release title."
+            ),
+        ),
+    ],
+    release_type: Annotated[
+        str, typer.Option("--type", help="The type of release to create.")
+    ] = "project",
+    path: Annotated[
+        str,
+        typer.Argument(help="The path to release; '.' for a project release."),
+    ] = ".",
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Only print actions that would be taken but don't take them.",
+        ),
+    ] = False,
+):
+    """Create a new release."""
+    if release_type not in [
+        "project",
+        "publication",
+        "figure",
+        "dataset",
+        "software",
+    ]:
+        raise_error(f"Unknown release type '{release_type}'")
+    # First see if we have a Zenodo token
+    cfg = calkit.config.read()
+    if cfg.zenodo_token is None:
+        typer.echo(
+            "Zenodo token missing from config; "
+            "attempting to fetch from Calkit Cloud"
+        )

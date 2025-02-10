@@ -8,6 +8,7 @@ import shutil
 import subprocess
 from enum import Enum
 
+import dotenv
 import git
 import typer
 from git.exc import GitCommandError, InvalidGitRepositoryError
@@ -1473,10 +1474,10 @@ def new_release(
         "software",
     ]:
         raise_error(f"Unknown release type '{release_type}'")
+    dotenv.load_dotenv()
     # First see if we have a Zenodo token
-    cfg = calkit.config.read()
-    if cfg.zenodo_token is None:
-        typer.echo(
-            "Zenodo token missing from config; "
-            "attempting to fetch from Calkit Cloud"
-        )
+    token = calkit.config.read().zenodo_token
+    if token is None:
+        token = os.getenv("ZENODO_TOKEN")
+    if token is None:
+        raise_error("No Zenodo token found in config or env vars")

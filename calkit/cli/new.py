@@ -1474,10 +1474,25 @@ def new_release(
         "software",
     ]:
         raise_error(f"Unknown release type '{release_type}'")
+    # TODO: Check path is consistent with release type
     dotenv.load_dotenv()
     # First see if we have a Zenodo token
     token = calkit.config.read().zenodo_token
     if token is None:
         token = os.getenv("ZENODO_TOKEN")
     if token is None:
-        raise_error("No Zenodo token found in config or env vars")
+        raise_error(
+            "No Zenodo token found in config or environmental variables"
+        )
+    # Is there already a deposition for this release, which indicates we should
+    # create a new version?
+    # TODO: Save release state in .calkit/releases/{name}.yaml
+    ck_info = calkit.load_calkit_info()
+    releases = ck_info.get("releases", {})
+    # TODO: Enable resuming a release?
+    if name in releases:
+        raise_error(f"Release with name '{name}' already exists")
+    release_status_fpath = f".calkit/releases/{name}.yaml"
+    os.makedirs(os.path.dirname(release_status_fpath), exist_ok=True)
+    # TODO: Create Git tag
+    # TODO: Create GitHub release

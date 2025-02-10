@@ -1496,3 +1496,4 @@ def new_release(
     os.makedirs(os.path.dirname(release_status_fpath), exist_ok=True)
     # TODO: Create Git tag
     # TODO: Create GitHub release
+    # TODO: Save URL and MD5 information to .calkit/archive-urls.yaml

@@ -38,7 +38,7 @@ def get_app_name() -> str:
 
 
 def get_local_config_path() -> str:
-    return os.path.join(".calkit/config.yaml")
+    return os.path.join(".calkit", "config.yaml")
 
 
 class Settings(BaseSettings):

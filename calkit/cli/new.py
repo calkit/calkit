@@ -1500,6 +1500,8 @@ def new_release(
     gitignore_path = release_dir + "/.gitignore"
     with open(gitignore_path, "w") as f:
         f.write("/files\n")
+    if not dry_run:
+        repo.git.add(gitignore_path)
     # TODO: Gather up a list of files to upload and strategize how to fit
     # within limits
     # TODO: Zip Git files into one archive and DVC into another?
@@ -1530,13 +1532,13 @@ def new_release(
         if os.path.isfile("README.md"):
             with open("README.md") as f:
                 readme_txt += f.readline() + "\n"
-    readme_txt += (
-        f"\nThis is an archived Calkit project (release: {name}).\n"
-    )
+    readme_txt += f"\nThis is an archived Calkit project (release: {name}).\n"
     readme_path = release_files_dir + "/README.md"
     with open(readme_path, "w") as f:
         f.write(readme_txt)
     # TODO: Upload to Zenodo
+    if not dry_run:
+        typer.echo("Uploading to Zenodo")
     # Add Zenodo badge to main README
     # TODO: Create Git tag
     # TODO: Create GitHub release

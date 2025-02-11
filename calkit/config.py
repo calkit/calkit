@@ -50,6 +50,8 @@ class Settings(BaseSettings):
         ),
         extra="ignore",
         env_prefix="CALKIT" + get_env_suffix(sep="_") + "_",
+        env_file=".env",
+        env_file_encoding="utf-8",
     )
     username: str | None = None
     email: str | None = None
@@ -70,6 +72,7 @@ class Settings(BaseSettings):
         return (
             init_settings,
             env_settings,
+            dotenv_settings,
             YamlConfigSettingsSource(settings_cls),
         )
 

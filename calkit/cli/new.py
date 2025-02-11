@@ -1499,7 +1499,7 @@ def new_release(
         f.write("/files\n")
     if not dry_run:
         repo.git.add(gitignore_path)
-    # Gather up a list of files to upload and strategize how to fit
+    # Gather up the list of files to upload
     if path == ".":
         zip_path = release_files_dir + "/archive.zip"
         all_paths = calkit.releases.ls_files()

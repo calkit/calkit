@@ -48,6 +48,7 @@ def _request(
         params=params,
         json=json,
         data=data,
+        headers=headers,
         **kwargs,
     )
     resp.raise_for_status()

@@ -42,7 +42,9 @@ def ls_files() -> list[str]:
     return git_files + dvc_files
 
 
-def make_dvc_md5s(zipfile: str | None = None) -> dict:
+def make_dvc_md5s(
+    zipfile: str | None = None, paths: list[str] | None = None
+) -> dict:
     """Create a dictionary of DVC tracked files for a release, keyed by MD5
     so we can iterate through them and populate the cache from a release
     archive.
@@ -50,6 +52,8 @@ def make_dvc_md5s(zipfile: str | None = None) -> dict:
     dvc_files = calkit.dvc.list_files()
     resp = {}
     for f in dvc_files:
+        if paths and f["path"] not in paths:
+            continue
         resp[f["md5"]] = dict(path=f["path"], zipfile=zipfile)
     return resp
 

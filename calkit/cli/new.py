@@ -6,6 +6,7 @@ import csv
 import os
 import shutil
 import subprocess
+import zipfile
 from enum import Enum
 
 import dotenv
@@ -1490,24 +1491,37 @@ def new_release(
     # TODO: Enable resuming a release?
     if name in releases:
         raise_error(f"Release with name '{name}' already exists")
+    repo = git.Repo()
     release_dir = f".calkit/releases/{name}"
     release_files_dir = release_dir + "/files"
     os.makedirs(release_files_dir, exist_ok=True)
     # TODO: Ignore release files dir
+    gitignore_path = release_dir + "/.gitignore"
+    with open(gitignore_path, "w") as f:
+        f.write("/files\n")
     # TODO: Gather up a list of files to upload and strategize how to fit
     # within limits
     # TODO: Zip Git files into one archive and DVC into another?
+    zip_path = release_files_dir + "/archive.zip"  # TODO: Name descriptively?
+    all_paths = calkit.releases.ls_files()
+    with zipfile.ZipFile(zip_path, "w") as zipf:
+        for fpath in all_paths:
+            zipf.write(fpath)
     # Save a metadata file with each DVC file's MD5 checksum
-    # so we can use that to know if we should download the ZIP file and insert
-    # into the DVC cache
-    # Upload a new README for the Zenodo release
-    # Add Zenodo badge to README
+    dvc_md5s = calkit.releases.make_dvc_md5s(zipfile="archive.zip")
+    dvc_md5s_path = release_dir + "/dvc-md5s.yaml"
+    with open(dvc_md5s_path, "w") as f:
+        calkit.ryaml.dump(dvc_md5s, f)
+    if not dry_run:
+        repo.git.add(dvc_md5s_path)
+    # TODO: Create a README for the Zenodo release
+    # TODO: Upload to Zenodo
+    # Add Zenodo badge to main README
     # TODO: Create Git tag
     # TODO: Create GitHub release
     # TODO: Save URL and MD5 information to
     # .calkit/releases/{name}/dvc-md5s.yaml
     # Save release in Calkit info
-    repo = git.Repo()
     release = dict(
         kind=release_type,
         path=path,
@@ -1525,3 +1539,5 @@ def new_release(
         repo.git.add("calkit.yaml")
         # TODO: Commit?
         # TODO: Push?
+    else:
+        typer.echo(f"Would have created release:\n{release}")

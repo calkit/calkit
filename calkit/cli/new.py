@@ -1573,3 +1573,5 @@ def new_release(
         # TODO: Push?
     else:
         typer.echo(f"Would have created release:\n{release}")
+    # TODO: Create CITATION.cff file if it doesn't exist
+    # TODO: Add to references so it can be cited

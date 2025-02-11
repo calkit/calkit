@@ -1496,6 +1496,7 @@ def new_release(
     release_files_dir = release_dir + "/files"
     os.makedirs(release_files_dir, exist_ok=True)
     # TODO: Ignore release files dir
+    typer.echo(f"Ignoring {release_files_dir}")
     gitignore_path = release_dir + "/.gitignore"
     with open(gitignore_path, "w") as f:
         f.write("/files\n")
@@ -1504,12 +1505,19 @@ def new_release(
     # TODO: Zip Git files into one archive and DVC into another?
     zip_path = release_files_dir + "/archive.zip"  # TODO: Name descriptively?
     all_paths = calkit.releases.ls_files()
+    typer.echo(f"Adding files to {zip_path}")
     with zipfile.ZipFile(zip_path, "w") as zipf:
         for fpath in all_paths:
             zipf.write(fpath)
+    # Check size of archive
+    size = os.path.getsize(zip_path)
+    typer.echo(f"Archive size: {(size / 1e6):.1f} MB")
+    if size >= 50e9:
+        raise_error("Archive is too large (>50 GB) to upload to Zenodo")
     # Save a metadata file with each DVC file's MD5 checksum
     dvc_md5s = calkit.releases.make_dvc_md5s(zipfile="archive.zip")
     dvc_md5s_path = release_dir + "/dvc-md5s.yaml"
+    typer.echo(f"Saving DVC MD5 info to {dvc_md5s_path}")
     with open(dvc_md5s_path, "w") as f:
         calkit.ryaml.dump(dvc_md5s, f)
     if not dry_run:

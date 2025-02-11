@@ -4,6 +4,10 @@ For more information on the citation file format, see:
 https://github.com/citation-file-format/citation-file-format
 """
 
+import subprocess
+
+import git
+
 CITATION_CFF_TEMPLATE = """
 cff-version: 1.2.0
 message: If you use this software, please cite it using these metadata.
@@ -26,3 +30,16 @@ identifiers:
 license: Apache-2.0
 repository-code: "https://github.com/citation-file-format/my-research-software"
 """
+
+
+def ls_files() -> list[str]:
+    """List all files to be released."""
+    repo = git.Repo()
+    git_files = repo.git.ls_files(".").strip().split("\n")
+    dvc_files = (
+        subprocess.check_output(["dvc", "ls", ".", "-R", "--dvc-only"])
+        .decode()
+        .strip()
+        .split("\n")
+    )
+    return git_files + dvc_files

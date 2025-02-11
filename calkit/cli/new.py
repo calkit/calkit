@@ -1522,7 +1522,20 @@ def new_release(
         calkit.ryaml.dump(dvc_md5s, f)
     if not dry_run:
         repo.git.add(dvc_md5s_path)
-    # TODO: Create a README for the Zenodo release
+    # Create a README for the Zenodo release
+    readme_txt = ""
+    if title := ck_info.get("title"):
+        readme_txt += f"# {title}\n"
+    else:
+        if os.path.isfile("README.md"):
+            with open("README.md") as f:
+                readme_txt += f.readline() + "\n"
+    readme_txt += (
+        f"\nThis is an archived Calkit project (release: {name}).\n"
+    )
+    readme_path = release_files_dir + "/README.md"
+    with open(readme_path, "w") as f:
+        f.write(readme_txt)
     # TODO: Upload to Zenodo
     # Add Zenodo badge to main README
     # TODO: Create Git tag

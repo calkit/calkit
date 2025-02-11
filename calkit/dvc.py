@@ -132,6 +132,14 @@ def list_paths(wdir: str = None) -> list[str]:
     return [p.get("path") for p in dvc_repo.ls(".", dvc_only=True)]
 
 
+def list_files(wdir: str = None, recursive=True) -> list[dict]:
+    """Return a list with all files in DVC, including their path and md5
+    checksum.
+    """
+    dvc_repo = dvc.repo.Repo(wdir)
+    return dvc_repo.ls(".", dvc_only=True, recursive=recursive)
+
+
 def get_output_revisions(path: str):
     """Get all revisions of a pipeline output."""
     pass

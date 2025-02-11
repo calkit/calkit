@@ -4,9 +4,11 @@ For more information on the citation file format, see:
 https://github.com/citation-file-format/citation-file-format
 """
 
-import subprocess
+import os
 
 import git
+
+import calkit
 
 CITATION_CFF_TEMPLATE = """
 cff-version: 1.2.0
@@ -38,3 +40,36 @@ def ls_files() -> list[str]:
     git_files = repo.git.ls_files(".").strip().split("\n")
     dvc_files = calkit.dvc.list_paths(recursive=True)
     return git_files + dvc_files
+
+
+def make_dvc_md5s(zipfile: str | None = None) -> dict:
+    """Create a dictionary of DVC tracked files for a release, keyed by MD5
+    so we can iterate through them and populate the cache from a release
+    archive.
+    """
+    dvc_files = calkit.dvc.list_files()
+    resp = {}
+    for f in dvc_files:
+        resp[f["md5"]] = dict(path=f["path"], zipfile=zipfile)
+    return resp
+
+
+def populate_dvc_cache():
+    """Populate DVC cache from releases."""
+    ck_info = calkit.load_calkit_info()
+    releases = ck_info.get("releases", {})
+    for name, release in releases.items():
+        md5s_fpath = f".calkit/releases/{name}/dvc-md5s.yaml"
+        with open(md5s_fpath) as f:
+            md5s = calkit.ryaml.load(f)
+        # TODO: If we don't have MD5s, create them
+        for md5, obj in md5s.items():
+            dvc_cache_fpath = f".dvc/cache/files/md5/{md5[:2]}/{md5[2:]}"
+            if not os.path.isfile(dvc_cache_fpath):
+                # TODO: Download file from Zenodo and save in the cache
+                release_fpath = f".calkit/releases/{name}/files/{obj['path']}"
+                zip_file = obj.get("zipfile")
+                if zip_file is not None:
+                    zip_fpath = f".calkit/releases/{name}/files/{zip_file}"
+                # Extract out of ZIP file if necessary
+                # TODO: Check MD5 before inserting into the cache

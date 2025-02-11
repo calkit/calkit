@@ -1490,12 +1490,14 @@ def new_release(
     # TODO: Enable resuming a release?
     if name in releases:
         raise_error(f"Release with name '{name}' already exists")
-    release_status_fpath = f".calkit/releases/{name}.yaml"
-    os.makedirs(os.path.dirname(release_status_fpath), exist_ok=True)
+    release_dir = f".calkit/releases/{name}"
+    release_files_dir = release_dir + "/files"
+    os.makedirs(release_files_dir, exist_ok=True)
+    # TODO: Ignore release files dir
     # TODO: Gather up a list of files to upload and strategize how to fit
     # within limits
-    # Zip all files into a single archive?
-    # Save a metadata file with each individual file's MD5 checksum
+    # TODO: Zip Git files into one archive and DVC into another?
+    # Save a metadata file with each DVC file's MD5 checksum
     # so we can use that to know if we should download the ZIP file and insert
     # into the DVC cache
     # Upload a new README for the Zenodo release

@@ -1483,9 +1483,6 @@ def new_release(
         calkit.zenodo.get_token()
     except Exception as e:
         raise_error(e)
-    # Is there already a deposition for this release, which indicates we should
-    # create a new version?
-    # TODO: Save release state in .calkit/releases/{name}.yaml
     ck_info = calkit.load_calkit_info()
     releases = ck_info.get("releases", {})
     # TODO: Enable resuming a release?
@@ -1495,7 +1492,7 @@ def new_release(
     release_dir = f".calkit/releases/{name}"
     release_files_dir = release_dir + "/files"
     os.makedirs(release_files_dir, exist_ok=True)
-    # TODO: Ignore release files dir
+    # Ignore release files dir
     typer.echo(f"Ignoring {release_files_dir}")
     gitignore_path = release_dir + "/.gitignore"
     with open(gitignore_path, "w") as f:
@@ -1549,6 +1546,8 @@ def new_release(
     if size >= 50e9:
         raise_error("Release is too large (>50 GB) to upload to Zenodo")
     # TODO: Upload to Zenodo
+    # Is there already a deposition for this release, which indicates we should
+    # create a new version?
     if not dry_run:
         typer.echo("Uploading to Zenodo")
     # Add Zenodo badge to main README

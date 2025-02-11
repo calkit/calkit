@@ -36,10 +36,5 @@ def ls_files() -> list[str]:
     """List all files to be released."""
     repo = git.Repo()
     git_files = repo.git.ls_files(".").strip().split("\n")
-    dvc_files = (
-        subprocess.check_output(["dvc", "ls", ".", "-R", "--dvc-only"])
-        .decode()
-        .strip()
-        .split("\n")
-    )
+    dvc_files = calkit.dvc.list_paths(recursive=True)
     return git_files + dvc_files

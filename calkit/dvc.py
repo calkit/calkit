@@ -126,10 +126,13 @@ def get_remotes(wdir: str = None) -> dict[str, str]:
     return resp
 
 
-def list_paths(wdir: str = None) -> list[str]:
+def list_paths(wdir: str = None, recursive=False) -> list[str]:
     """List paths tracked with DVC."""
     dvc_repo = dvc.repo.Repo(wdir)
-    return [p.get("path") for p in dvc_repo.ls(".", dvc_only=True)]
+    return [
+        p.get("path")
+        for p in dvc_repo.ls(".", dvc_only=True, recursive=recursive)
+    ]
 
 
 def list_files(wdir: str = None, recursive=True) -> list[dict]:

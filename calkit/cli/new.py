@@ -1477,13 +1477,11 @@ def new_release(
     # TODO: Check path is consistent with release type
     dotenv.load_dotenv()
     # First see if we have a Zenodo token
-    token = calkit.config.read().zenodo_token
-    if token is None:
-        token = os.getenv("ZENODO_TOKEN")
-    if token is None:
-        raise_error(
-            "No Zenodo token found in config or environmental variables"
-        )
+    typer.echo("Checking for Zenodo token")
+    try:
+        calkit.zenodo.get_token()
+    except Exception as e:
+        raise_error(e)
     # Is there already a deposition for this release, which indicates we should
     # create a new version?
     # TODO: Save release state in .calkit/releases/{name}.yaml
@@ -1494,6 +1492,34 @@ def new_release(
         raise_error(f"Release with name '{name}' already exists")
     release_status_fpath = f".calkit/releases/{name}.yaml"
     os.makedirs(os.path.dirname(release_status_fpath), exist_ok=True)
+    # TODO: Gather up a list of files to upload and strategize how to fit
+    # within limits
+    # Zip all files into a single archive?
+    # Save a metadata file with each individual file's MD5 checksum
+    # so we can use that to know if we should download the ZIP file and insert
+    # into the DVC cache
+    # Upload a new README for the Zenodo release
+    # Add Zenodo badge to README
     # TODO: Create Git tag
     # TODO: Create GitHub release
-    # TODO: Save URL and MD5 information to .calkit/archive-urls.yaml
+    # TODO: Save URL and MD5 information to
+    # .calkit/releases/{name}/dvc-md5s.yaml
+    # Save release in Calkit info
+    repo = git.Repo()
+    release = dict(
+        kind=release_type,
+        path=path,
+        host="zenodo.org",
+        zenodo_deposition_id=1234,  # TODO
+        doi=None,  # TODO
+        url=None,  # TODO
+        description=None,  # TODO
+    )
+    releases[name] = release
+    ck_info["releases"] = releases
+    if not dry_run:
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        repo.git.add("calkit.yaml")
+        # TODO: Commit?
+        # TODO: Push?

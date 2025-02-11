@@ -63,3 +63,13 @@ post = partial(_request, "post")
 patch = partial(_request, "patch")
 put = partial(_request, "put")
 delete = partial(_request, "delete")
+
+
+def get_download_urls(record_id: int) -> dict[str, str]:
+    resp = get(f"/records/{record_id}")
+    download_urls = [f["links"]["self"] for f in resp["files"]]
+    filenames = [f["key"] for f in resp["files"]]
+    urls = {}
+    for fname, url in zip(filenames, download_urls):
+        urls[fname] = url
+    return urls

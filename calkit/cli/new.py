@@ -1554,8 +1554,6 @@ def new_release(
     # Add Zenodo badge to main README
     # TODO: Create Git tag
     # TODO: Create GitHub release
-    # TODO: Save URL and MD5 information to
-    # .calkit/releases/{name}/dvc-md5s.yaml
     # Save release in Calkit info
     release = dict(
         kind=release_type,

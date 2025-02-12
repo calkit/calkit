@@ -13,6 +13,7 @@ classifiers = [
 ]
 dependencies = [
   "arithmeval",
+  "bibtexparser",
   "checksumdir",
   "docx2pdf",
   "dvc>=3.59.0",

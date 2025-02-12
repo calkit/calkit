@@ -11,16 +11,42 @@ import git
 import calkit
 
 BIBTEX_TEMPLATE = """
-@misc{authorname_2025_165871,
-  author       = {Lastname, Firstname},
-  title        = {This is the title},
-  month        = feb,
-  year         = 2025,
-  publisher    = {Zenodo},
-  doi          = {10.5072/zenodo.165871},
-  url          = {https://doi.org/10.5072/zenodo.165871},
-}
+@misc{{{first_author_last_name}{year}_{dep_id},
+  author       = {{{authors}}},
+  title        = {{{title}}},
+  month        = {month},
+  year         = {{{year}}},
+  publisher    = {{Zenodo}},
+  doi          = {{{doi}}},
+  url          = {{https://doi.org/{doi}}},
+}}
 """.strip()
+
+
+def create_bibtex(
+    authors: list[dict], release_date: str, title: str, doi: str, dep_id: int
+) -> str:
+    """Create a BibTeX entry for a Zenodo release."""
+    first_author_last_name = authors[0]["last_name"]
+    authors_string = f"{authors[0]['last_name']}, {authors[0]['first_name']}"
+    if len(authors) > 1:
+        for author in authors[1:]:
+            authors_string += (
+                f" and {author['last_name']}, {author['first_name']}"
+            )
+    year, month, _ = release_date.split("-")
+    month = int(month)
+    year = int(year)
+    return BIBTEX_TEMPLATE.format(
+        first_author_last_name=first_author_last_name,
+        authors=authors_string,
+        title=title,
+        doi=doi,
+        month=month,
+        year=year,
+        dep_id=dep_id,
+    )
+
 
 CITATION_CFF_TEMPLATE = """
 cff-version: 1.2.0

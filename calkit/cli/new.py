@@ -9,6 +9,7 @@ import subprocess
 import zipfile
 from enum import Enum
 
+import bibtexparser
 import dotenv
 import git
 import requests
@@ -1799,15 +1800,6 @@ def new_release(
     )
     releases[name] = release
     ck_info["releases"] = releases
-    if not dry_run:
-        typer.echo("Writing to calkit.yaml")
-        with open("calkit.yaml", "w") as f:
-            calkit.ryaml.dump(ck_info, f)
-        repo.git.add("calkit.yaml")
-        # TODO: Commit?
-        # TODO: Push?
-    else:
-        typer.echo(f"Would have created release:\n{release}")
     # Create CITATION.cff file
     if release_type == "project":
         typer.echo("Writing CITATION.cff")
@@ -1818,7 +1810,52 @@ def new_release(
             calkit.ryaml.dump(cff, f)
         if not dry_run:
             repo.git.add("CITATION.cff")
-    # TODO: Add to references so it can be cited
+    # Add to references so it can be cited
+    typer.echo("Adding BibTeX entry to references")
+    reference_collections = ck_info.get("references", [])
+    if len(reference_collections) > 1:
+        warn("Multiple references collections; writing to first")
+    if not reference_collections:
+        references = dict(path="references.bib")
+    else:
+        references = reference_collections[0]
+    ref_path = references.get("path", "references.bib")
+    try:
+        if os.path.isfile(ref_path):
+            with open(ref_path) as f:
+                reflib = bibtexparser.load(f)
+        else:
+            reflib = bibtexparser.bibdatabase.BibDatabase()
+        zenodo_bibtex = calkit.releases.create_bibtex(
+            authors=authors,
+            release_date=release_date,
+            title=title,
+            doi=doi,
+            dep_id=zenodo_dep_id,
+        )
+        new_entry = bibtexparser.loads(zenodo_bibtex).entries[0]
+        # Search through entries for one with the same DOI, and replace if
+        # there is a match
+        existing_index = None
+        for n, entry in enumerate(reflib.entries):
+            if entry.get("doi") == doi:
+                typer.echo("Found matching DOI in existing references")
+                existing_index = n
+        if existing_index is not None:
+            _ = reflib.entries.pop(existing_index)
+        reflib.entries.append(new_entry)
+        with open(ref_path, "w") as f:
+            bibtexparser.dump(reflib, f)
+    except Exception as e:
+        warn(f"Failed to add to references: {e}")
+    # Write out Calkit metadata
+    if not dry_run:
+        typer.echo("Writing to calkit.yaml")
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        repo.git.add("calkit.yaml")
+    else:
+        typer.echo(f"Would have created release:\n{release}")
     # Commit with Git
     if not dry_run and calkit.git.get_staged_files() and not no_commit:
         repo.git.commit(["-m", f"Create new {release_type} release {name}"])

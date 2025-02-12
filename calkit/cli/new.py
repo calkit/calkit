@@ -1453,7 +1453,7 @@ def new_release(
         ),
     ],
     release_type: Annotated[
-        str, typer.Option("--type", help="The type of release to create.")
+        str, typer.Option("--kind", help="What kind of release to create.")
     ] = "project",
     path: Annotated[
         str,

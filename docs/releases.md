@@ -44,15 +44,17 @@ rather than simple `v1`, `v2`, etc.,
 You can also use the `--description` flag to add more details.
 
 When this is called, Calkit will:
-- Compress and upload all files kept in Git and DVC to Zenodo.
+- Compress and upload all files kept in Git and DVC to Zenodo,
+  which will produce a persistent digital object identifier (DOI)
+  for citation,
+  ensuring the release can be accessed for a long time.
 - Create a Git tag. This can be used to create a release on GitHub if desired.
 - Save the MD5 checksums of files kept in DVC in
   `.calkit/releases/{release_name}/dvc-md5s.yaml`.
   These can be used to populate the DVC cache from Zenodo later on.
 - Create a `CITATION.cff` file to make the project easier to cite.
-- Add a badge to the project's `README.md` file showing the release's
-  digital object identifier (DOI),
-  which makes it clearer how to cite and download.
+- Add a badge to the project's `README.md` file showing the release's DOI.
+- Add the release to the `releases` section of the `calkit.yaml` file.
 
 ## Releasing other types of artifacts individually
 

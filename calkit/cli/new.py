@@ -1824,3 +1824,4 @@ def new_release(
     # Push with Git
     if not dry_run and not no_push:
         repo.git.push(["origin", repo.active_branch.name, "--tags"])
+    typer.echo(f"New {release_type} release {name} successfully created")

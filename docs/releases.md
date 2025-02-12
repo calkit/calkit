@@ -37,19 +37,22 @@ To create a new release of the entire project, execute:
 calkit new release --name submitted-paper
 ```
 
-By default, the entire project will be released
-and added to the project references.
-All files except those ignored by Git/DVC will be uploaded.
-A Git tag will be created and a release will be added on GitHub.
-Any archived files will be indexed by their MD5 checksum in
-`.calkit/archive-urls.yaml`.
-A `CITATION.cff` file will also be created or updated,
-to indicate to others
-how to cite the project materials.
+The release name (`submitted-paper` above)
+should accurately and descriptively identify the release.
+For a research project, it might be better to use names of milestones
+rather than simple `v1`, `v2`, etc.,
+You can also use the `--description` flag to add more details.
 
-The release will also be added to the project's default
-[references collection](references.md).
-If none exist, one will be created at the default location (`references.bib`).
+When this is called, Calkit will:
+- Compress and upload all files kept in Git and DVC to Zenodo.
+- Create a Git tag. This can be used to create a release on GitHub if desired.
+- Save the MD5 checksums of files kept in DVC in
+  `.calkit/releases/{release_name}/dvc-md5s.yaml`.
+  These can be used to populate the DVC cache from Zenodo later on.
+- Create a `CITATION.cff` file to make the project easier to cite.
+- Add a badge to the project's `README.md` file showing the release's
+  digital object identifier (DOI),
+  which makes it clearer how to cite and download.
 
 ## Releasing other types of artifacts individually
 

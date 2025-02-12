@@ -105,7 +105,7 @@ def create_citation_cff(
         if release["kind"] == "project" and "doi" in release:
             ids.append(
                 {
-                    "description": f"Release {rname}.",
+                    "description": f"Release {rname}",
                     "type": "doi",
                     "value": release["doi"],
                 }

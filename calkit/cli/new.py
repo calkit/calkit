@@ -1481,6 +1481,20 @@ def new_release(
             help="Only print actions that would be taken but don't take them.",
         ),
     ] = False,
+    no_commit: Annotated[
+        bool,
+        typer.Option(
+            "--no-commit",
+            help="Do not commit changes to Git repo.",
+        ),
+    ] = False,
+    no_push: Annotated[
+        bool,
+        typer.Option(
+            "--no-push",
+            help="Do not push to Git remote.",
+        ),
+    ] = False,
 ):
     """Create a new release."""
     if release_type not in [
@@ -1757,10 +1771,11 @@ def new_release(
             + ["", doi_md, ""]
             + new_lines[first_content_line_index:]
         )
-        print(new_lines)
         readme_txt = "\n".join(new_lines)
         with open("README.md", "w") as f:
             f.write(readme_txt)
+        if not dry_run:
+            repo.git.add("README.md")
     # Create Git tag
     if not dry_run:
         repo.git.tag(["-a", name, "-m", description])
@@ -1803,5 +1818,9 @@ def new_release(
         if not dry_run:
             repo.git.add("CITATION.cff")
     # TODO: Add to references so it can be cited
-    # TODO: Commit with Git
-    # TODO: Push with Git
+    # Commit with Git
+    if not dry_run and calkit.git.get_staged_files() and not no_commit:
+        repo.git.commit(["-m", f"Create new {release_type} release {name}"])
+    # Push with Git
+    if not dry_run and not no_push:
+        repo.git.push(["origin", repo.active_branch.name, "--tags"])

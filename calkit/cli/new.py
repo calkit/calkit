@@ -1588,6 +1588,46 @@ def new_release(
         notes="Created from a Calkit project.",
         publication_date=str(calkit.utcnow().date()),
     )
+    # Determine creators from authors, adding to project if not present
+    authors = ck_info.get("authors", [])
+    if not authors:
+        warn("No authors defined for the project")
+        still_entering_authors = True
+        n = 0
+        while still_entering_authors:
+            n += 1
+            author = dict()
+            author["first_name"] = typer.prompt(
+                f"Enter the first name of author {n}"
+            )
+            author["last_name"] = typer.prompt(
+                f"Enter the last name of author {n}"
+            )
+            author["affiliation"] = typer.prompt(
+                f"Enter the affiliation of author {n}"
+            )
+            has_orchid = typer.confirm(
+                f"Does author {n} have an ORCID?", default=False
+            )
+            if has_orchid:
+                author["orcid"] = typer.prompt(
+                    f"Enter the ORCID of author {n}"
+                )
+            authors.append(author)
+            still_entering_authors = typer.confirm(
+                "Are there more authors to enter?", default=True
+            )
+        ck_info["authors"] = authors
+    zenodo_creators = []
+    for author in authors:
+        creator = dict(
+            name=f"{author['last_name']}, {author['first_name']}",
+            affiliation=author["affiliation"],
+        )
+        if "orcid" in author:
+            creator["orcid"] = author["orcid"]
+        zenodo_creators.append(creator)
+    zenodo_metadata["creators"] = zenodo_creators
     if release_type == "project":
         zenodo_metadata["upload_type"] = "other"
     elif release_type == "publication":
@@ -1649,12 +1689,14 @@ def new_release(
                 typer.echo(f"Status code: {resp.status_code}")
                 resp.raise_for_status()
         # Now publish the new deposition
+        typer.echo("Publishing Zenodo deposition")
         zenodo_dep = calkit.zenodo.post(
             f"/deposit/depositions/{zenodo_dep_id}/actions/publish"
         )
         zenodo_dep_id = zenodo_dep["id"]
         doi = zenodo_dep["doi"]
         url = zenodo_dep["doi_url"]
+        typer.echo(f"Published to Zenodo with DOI: {doi}")
     else:
         typer.echo(f"Would have posted Zenodo deposition: {zenodo_metadata}")
     # TODO: If this is a project release, add Zenodo badge to main README if
@@ -1685,6 +1727,7 @@ def new_release(
     releases[name] = release
     ck_info["releases"] = releases
     if not dry_run:
+        typer.echo("Writing to calkit.yaml")
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)
         repo.git.add("calkit.yaml")

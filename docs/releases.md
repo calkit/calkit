@@ -44,6 +44,7 @@ rather than simple `v1`, `v2`, etc.,
 You can also use the `--description` flag to add more details.
 
 When this is called, Calkit will:
+
 - Compress and upload all files kept in Git and DVC to Zenodo,
   which will produce a persistent digital object identifier (DOI)
   for citation,
@@ -55,6 +56,8 @@ When this is called, Calkit will:
 - Create a `CITATION.cff` file to make the project easier to cite.
 - Add a badge to the project's `README.md` file showing the release's DOI.
 - Add the release to the `releases` section of the `calkit.yaml` file.
+- Add a BibTeX entry for the release to a references file
+  (`references.bib` by default).
 
 ## Releasing other types of artifacts individually
 
@@ -64,6 +67,6 @@ execute:
 ```sh
 calkit new release \
     --name my-release-name \
-    --type publication \
+    --kind publication \
     path/to/the/publication.pdf
 ```

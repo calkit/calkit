@@ -1582,32 +1582,32 @@ def new_release(
     # Is there already a deposition for this release, which indicates we should
     # create a new version?
     zenodo_dep_id = None
-    zenodo_post_body = dict(
+    zenodo_metadata = dict(
         title=title,
         description=description,
         notes="Created from a Calkit project.",
         publication_date=str(calkit.utcnow().date()),
     )
     if release_type == "project":
-        zenodo_post_body["upload_type"] = "other"
+        zenodo_metadata["upload_type"] = "other"
     elif release_type == "publication":
         pubtype = artifact.get("kind")
         if pubtype == "journal-article":
-            zenodo_post_body["upload_type"] = "publication"
-            zenodo_post_body["publication_type"] = "article"
+            zenodo_metadata["upload_type"] = "publication"
+            zenodo_metadata["publication_type"] = "article"
         elif pubtype == "presentation":
-            zenodo_post_body["upload_type"] = "presentation"
+            zenodo_metadata["upload_type"] = "presentation"
         elif pubtype == "poster":
-            zenodo_post_body["upload_type"] = "poster"
+            zenodo_metadata["upload_type"] = "poster"
         else:
-            zenodo_post_body["upload_type"] = "other"
+            zenodo_metadata["upload_type"] = "other"
     elif release_type in ["dataset", "software"]:
-        zenodo_post_body["upload_type"] = release_type
+        zenodo_metadata["upload_type"] = release_type
     elif release_type == "figure":
-        zenodo_post_body["upload_type"] = "image"
-        zenodo_post_body["image_type"] = "figure"
+        zenodo_metadata["upload_type"] = "image"
+        zenodo_metadata["image_type"] = "figure"
     else:
-        zenodo_post_body["upload_type"] = "other"
+        zenodo_metadata["upload_type"] = "other"
     doi = None
     url = None
     for existing_name, existing_release in releases.items():
@@ -1627,12 +1627,12 @@ def new_release(
             # Create a new version of the existing deposit
             zenodo_dep = calkit.zenodo.post(
                 f"/deposit/depositions/{zenodo_dep_id}/actions/newversion",
-                json=zenodo_post_body,
+                json=dict(metadata=zenodo_metadata),
             )
             zenodo_dep_id = zenodo_dep["id"]
         else:
             zenodo_dep = calkit.zenodo.post(
-                "/deposit/depositions", json=zenodo_post_body
+                "/deposit/depositions", json=dict(metadata=zenodo_metadata)
             )
             zenodo_dep_id = zenodo_dep["id"]
         bucket_url = zenodo_dep["links"]["bucket"]
@@ -1656,7 +1656,7 @@ def new_release(
         doi = zenodo_dep["doi"]
         url = zenodo_dep["doi_url"]
     else:
-        typer.echo(f"Would have posted Zenodo deposition: {zenodo_post_body}")
+        typer.echo(f"Would have posted Zenodo deposition: {zenodo_metadata}")
     # TODO: If this is a project release, add Zenodo badge to main README if
     # it doesn't exist
     doi_md = (

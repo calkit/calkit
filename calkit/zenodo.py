@@ -6,6 +6,7 @@ from typing import Literal
 
 import dotenv
 import requests
+from requests.exceptions import HTTPError
 
 import calkit
 
@@ -51,6 +52,14 @@ def _request(
         headers=headers,
         **kwargs,
     )
+    if resp.status_code >= 400:
+        resp_json = resp.json()
+        msg = f"{resp.status_code}: "
+        if "message" in resp_json:
+            msg += resp_json["message"]
+        if "errors" in resp_json:
+            msg += f"\nErrors:\n{resp_json['errors']}"
+        raise HTTPError(msg)
     resp.raise_for_status()
     if as_json:
         return resp.json()

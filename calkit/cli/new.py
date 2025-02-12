@@ -1603,10 +1603,11 @@ def new_release(
     # Is there already a deposition for this release, which indicates we should
     # create a new version?
     zenodo_dep_id = None
+    project_name = calkit.git.detect_project_name()
     zenodo_metadata = dict(
         title=title,
         description=description,
-        notes="Created from a Calkit project.",
+        notes=f"Created from Calkit project {project_name} release {name}.",
         publication_date=release_date,
     )
     # Determine creators from authors, adding to project if not present

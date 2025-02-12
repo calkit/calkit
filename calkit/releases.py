@@ -10,6 +10,18 @@ import git
 
 import calkit
 
+BIBTEX_TEMPLATE = """
+@misc{authorname_2025_165871,
+  author       = {Lastname, Firstname},
+  title        = {This is the title},
+  month        = feb,
+  year         = 2025,
+  publisher    = {Zenodo},
+  doi          = {10.5072/zenodo.165871},
+  url          = {https://doi.org/10.5072/zenodo.165871},
+}
+""".strip()
+
 CITATION_CFF_TEMPLATE = """
 cff-version: 1.2.0
 message: If you use this software, please cite it using these metadata.
@@ -31,7 +43,7 @@ identifiers:
     value: "10.5281/zenodo.123457"
 license: Apache-2.0
 repository-code: "https://github.com/citation-file-format/my-research-software"
-"""
+""".strip()
 
 
 def create_citation_cff(

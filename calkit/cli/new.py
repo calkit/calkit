@@ -1497,7 +1497,7 @@ def new_release(
         raise_error(e)
     ck_info = calkit.load_calkit_info()
     releases = ck_info.get("releases", {})
-    # TODO: Enable resuming a release?
+    # TODO: Enable resuming a release if upload failed part-way?
     if name in releases:
         raise_error(f"Release with name '{name}' already exists")
     repo = git.Repo()
@@ -1523,6 +1523,11 @@ def new_release(
                 zipf.write(fpath)
         if description is None:
             description = "Release entire project."
+        title = ck_info.get("title")
+        if title is None:
+            warn("Project has no title")
+            title = typer.prompt("Enter a title for the project")
+            ck_info["title"] = title
     else:
         # TODO: Handle directories, e.g., datasets
         if not os.path.isfile(path):
@@ -1531,6 +1536,22 @@ def new_release(
         shutil.copy2(path, release_files_dir)
         if description is None:
             description = f"Release {release_type} at {path}."
+        # Check that this artifact actually exists
+        artifact_key = (
+            release_type + "s" if release_type != "software" else release_type
+        )
+        artifacts = ck_info.get(artifact_key, [])
+        title = None
+        artifact = None
+        for a in artifacts:
+            if a.get("path") == path:
+                artifact = a
+                title = artifact.get("title")
+                break
+        if artifact is None:
+            raise_error(f"{release_type} at {path} not defined in calkit.yaml")
+        if title is None:
+            raise_error(f"{release_type} at {path} has no title")
     # Save a metadata file with each DVC file's MD5 checksum
     dvc_md5s = calkit.releases.make_dvc_md5s(
         zipfile="archive.zip" if path == "." else None,
@@ -1543,13 +1564,7 @@ def new_release(
     if not dry_run:
         repo.git.add(dvc_md5s_path)
     # Create a README for the Zenodo release
-    readme_txt = ""
-    if title := ck_info.get("title"):
-        readme_txt += f"# {title}\n"
-    else:
-        if os.path.isfile("README.md"):
-            with open("README.md") as f:
-                readme_txt += f.readline() + "\n"
+    readme_txt = f"# {title}\n"
     git_rev = repo.git.rev_parse(["--short", "HEAD"])
     readme_txt += (
         f"\nThis is a {release_type} release ({name}) generated with "
@@ -1570,7 +1585,6 @@ def new_release(
     zenodo_upload_type = None  # TODO
     doi = None
     url = None
-    # TODO: Get title
     for existing_name, existing_release in releases.items():
         if (
             existing_release.get("kind") == release_type
@@ -1631,7 +1645,7 @@ def new_release(
     release = dict(
         kind=release_type,
         path=path,
-        git_rev=repo.git.rev_parse(["--short", "HEAD"]),
+        git_rev=git_rev,
         host="zenodo.org",
         zenodo_dep_id=zenodo_dep_id,
         doi=doi,

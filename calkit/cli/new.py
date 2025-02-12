@@ -1847,6 +1847,8 @@ def new_release(
         reflib.entries.append(new_entry)
         with open(ref_path, "w") as f:
             bibtexparser.dump(reflib, f)
+        if not dry_run:
+            repo.git.add(ref_path)
     except Exception as e:
         warn(f"Failed to add to references: {e}")
     # Write out Calkit metadata

@@ -34,6 +34,48 @@ repository-code: "https://github.com/citation-file-format/my-research-software"
 """
 
 
+def create_citation_cff(
+    ck_info: dict, release_name: str, release_date: str
+) -> dict:
+    """Create content to put in a CITATION.cff file."""
+    content = {
+        "cff-version": "1.2.0",
+        "message": (
+            "If you use these files, please cite is using these metadata."
+        ),
+        "title": ck_info["title"],
+        "abstract": ck_info["description"],
+        "version": release_name,
+        "date-released": str(release_date),
+        "repository-code": ck_info["git_repo_url"],
+    }
+    # Get authors from ck_info
+    authors = ck_info["authors"]
+    cff_authors = []
+    for author in authors:
+        cff_author = {
+            "family-names": author["last_name"],
+            "given-names": author["first_name"],
+        }
+        if "orcid" in author:
+            cff_author["orcid"] = author["orcid"]
+        cff_authors.append(cff_author)
+    content["authors"] = cff_authors
+    # Get DOIs from ck_info
+    ids = []
+    for rname, release in ck_info["releases"].items():
+        if release["kind"] == "project" and "doi" in release:
+            ids.append(
+                {
+                    "description": f"Release version {rname}.",
+                    "type": "doi",
+                    "value": release["doi"],
+                }
+            )
+    content["identifiers"] = ids
+    return content
+
+
 def ls_files() -> list[str]:
     """List all files to be released."""
     repo = git.Repo()

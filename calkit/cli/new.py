@@ -1470,6 +1470,10 @@ def new_release(
             ),
         ),
     ] = None,
+    release_date: Annotated[
+        str,
+        typer.Option("--date", help="Release date. Will default to today."),
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option(
@@ -1513,6 +1517,9 @@ def new_release(
         f.write("/files\n")
     if not dry_run:
         repo.git.add(gitignore_path)
+    if release_date is None:
+        release_date = str(calkit.utcnow().date())
+    typer.echo(f"Using release date: {release_date}")
     # Gather up the list of files to upload
     if path == ".":
         zip_path = release_files_dir + "/archive.zip"
@@ -1586,7 +1593,7 @@ def new_release(
         title=title,
         description=description,
         notes="Created from a Calkit project.",
-        publication_date=str(calkit.utcnow().date()),
+        publication_date=release_date,
     )
     # Determine creators from authors, adding to project if not present
     authors = ck_info.get("authors", [])
@@ -1654,22 +1661,40 @@ def new_release(
         if (
             existing_release.get("kind") == release_type
             and existing_release.get("path") == path
-            and existing_release.get("host") == "zenodo.org"
+            and existing_release.get("publisher") == "zenodo.org"
         ):
             zenodo_dep_id = existing_release.get("zenodo_dep_id")
             typer.echo(
                 f"Found existing Zenodo deposition ID {zenodo_dep_id} "
                 f"in release {existing_name} to create new version for"
             )
+            break
     if not dry_run:
         typer.echo("Uploading to Zenodo")
         if zenodo_dep_id is not None:
             # Create a new version of the existing deposit
+            # TODO: This might fail if a new version is in progress, in which
+            # case we should discard that
             zenodo_dep = calkit.zenodo.post(
                 f"/deposit/depositions/{zenodo_dep_id}/actions/newversion",
                 json=dict(metadata=zenodo_metadata),
             )
+            typer.echo("Created new version deposition")
+            typer.echo("Fetching latest draft")
+            zenodo_dep = requests.get(
+                zenodo_dep["links"]["latest_draft"],
+                params=dict(access_token=token),
+            ).json()
             zenodo_dep_id = zenodo_dep["id"]
+            typer.echo(
+                f"Fetched latest draft with deposition ID: {zenodo_dep_id} "
+            )
+            # Now update that draft with the metadata
+            typer.echo("Updating latest draft metadata")
+            calkit.zenodo.put(
+                f"/deposit/depositions/{zenodo_dep_id}",
+                json=dict(metadata=zenodo_metadata),
+            )
         else:
             zenodo_dep = calkit.zenodo.post(
                 "/deposit/depositions", json=dict(metadata=zenodo_metadata)
@@ -1689,7 +1714,7 @@ def new_release(
                 typer.echo(f"Status code: {resp.status_code}")
                 resp.raise_for_status()
         # Now publish the new deposition
-        typer.echo("Publishing Zenodo deposition")
+        typer.echo(f"Publishing Zenodo deposition ID {zenodo_dep_id}")
         zenodo_dep = calkit.zenodo.post(
             f"/deposit/depositions/{zenodo_dep_id}/actions/publish"
         )
@@ -1718,7 +1743,8 @@ def new_release(
         kind=release_type,
         path=path,
         git_rev=git_rev,
-        host="zenodo.org",
+        date=release_date,
+        publisher="zenodo.org",
         zenodo_dep_id=zenodo_dep_id,
         doi=doi,
         url=url,
@@ -1735,5 +1761,16 @@ def new_release(
         # TODO: Push?
     else:
         typer.echo(f"Would have created release:\n{release}")
-    # TODO: Create CITATION.cff file if it doesn't exist
+    # Create CITATION.cff file
+    if release_type == "project":
+        typer.echo("Writing CITATION.cff")
+        cff = calkit.releases.create_citation_cff(
+            ck_info=ck_info, release_name=name, release_date=release_date
+        )
+        with open("CITATION.cff", "w") as f:
+            calkit.ryaml.dump(cff, f)
+        if not dry_run:
+            repo.git.add("CITATION.cff")
     # TODO: Add to references so it can be cited
+    # TODO: Commit with Git
+    # TODO: Push with Git

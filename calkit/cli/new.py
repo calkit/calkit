@@ -11,6 +11,7 @@ from enum import Enum
 
 import dotenv
 import git
+import requests
 import typer
 from git.exc import GitCommandError, InvalidGitRepositoryError
 from typing_extensions import Annotated
@@ -1458,6 +1459,17 @@ def new_release(
         str,
         typer.Argument(help="The path to release; '.' for a project release."),
     ] = ".",
+    description: Annotated[
+        str,
+        typer.Option(
+            "--description",
+            "--desc",
+            help=(
+                "A description of the release. "
+                "Will be auto-generated if not provided."
+            ),
+        ),
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option(
@@ -1480,7 +1492,7 @@ def new_release(
     # First see if we have a Zenodo token
     typer.echo("Checking for Zenodo token")
     try:
-        calkit.zenodo.get_token()
+        token = calkit.zenodo.get_token()
     except Exception as e:
         raise_error(e)
     ck_info = calkit.load_calkit_info()
@@ -1489,6 +1501,8 @@ def new_release(
     if name in releases:
         raise_error(f"Release with name '{name}' already exists")
     repo = git.Repo()
+    if name in repo.tags:
+        raise_error(f"Git tag with name '{name}' already exists")
     release_dir = f".calkit/releases/{name}"
     release_files_dir = release_dir + "/files"
     os.makedirs(release_files_dir, exist_ok=True)
@@ -1507,12 +1521,16 @@ def new_release(
         with zipfile.ZipFile(zip_path, "w") as zipf:
             for fpath in all_paths:
                 zipf.write(fpath)
+        if description is None:
+            description = "Release entire project."
     else:
         # TODO: Handle directories, e.g., datasets
         if not os.path.isfile(path):
             raise_error("Single artifact releases must be a single file")
         typer.echo(f"Copying {path} into {release_files_dir}")
         shutil.copy2(path, release_files_dir)
+        if description is None:
+            description = f"Release {release_type} at {path}."
     # Save a metadata file with each DVC file's MD5 checksum
     dvc_md5s = calkit.releases.make_dvc_md5s(
         zipfile="archive.zip" if path == "." else None,
@@ -1545,23 +1563,80 @@ def new_release(
     typer.echo(f"Release size: {(size / 1e6):.1f} MB")
     if size >= 50e9:
         raise_error("Release is too large (>50 GB) to upload to Zenodo")
-    # TODO: Upload to Zenodo
+    # Upload to Zenodo
     # Is there already a deposition for this release, which indicates we should
     # create a new version?
+    zenodo_dep_id = None
+    zenodo_upload_type = None  # TODO
+    doi = None
+    url = None
+    # TODO: Get title
+    for existing_name, existing_release in releases.items():
+        if (
+            existing_release.get("kind") == release_type
+            and existing_release.get("path") == path
+            and existing_release.get("host") == "zenodo.org"
+        ):
+            zenodo_dep_id = existing_release.get("zenodo_dep_id")
+            typer.echo(
+                f"Found existing Zenodo deposition ID {zenodo_dep_id} "
+                "to create new version for"
+            )
     if not dry_run:
         typer.echo("Uploading to Zenodo")
-    # Add Zenodo badge to main README
-    # TODO: Create Git tag
-    # TODO: Create GitHub release
+        if zenodo_dep_id is not None:
+            # Create a new version of the existing deposit
+            zenodo_dep = calkit.zenodo.post(
+                f"/deposit/depositions/{zenodo_dep_id}/actions/newversion"
+            )
+            zenodo_dep_id = zenodo_dep["id"]
+        else:
+            zenodo_dep = calkit.zenodo.post("/deposit/depositions")
+            zenodo_dep_id = zenodo_dep["id"]
+        bucket_url = zenodo_dep["links"]["bucket"]
+        files = os.listdir(release_files_dir)
+        for filename in files:
+            typer.echo(f"Uploading {filename}")
+            fpath = os.path.join(release_files_dir, filename)
+            with open(fpath, "rb") as f:
+                resp = requests.put(
+                    f"{bucket_url}/{filename}",
+                    data=f,
+                    params={"access_token": token},
+                )
+                typer.echo(f"Status code: {resp.status_code}")
+                resp.raise_for_status()
+        # Now publish the new deposition
+        zenodo_dep = calkit.zenodo.post(
+            f"/deposit/depositions/{zenodo_dep_id}/actions/publish"
+        )
+        zenodo_dep_id = zenodo_dep["id"]
+        doi = zenodo_dep["doi"]
+        url = zenodo_dep["doi_url"]
+    # TODO: If this is a project release, add Zenodo badge to main README if
+    # it doesn't exist
+    doi_md = (
+        f"[![DOI](https://zenodo.org/badge/DOI/{doi}.svg)]"
+        f"(https://handle.stage.datacite.org/{doi})"
+    )
+    # Create Git tag
+    if not dry_run:
+        repo.git.tag(["-a", name, "-m", description])
+    else:
+        typer.echo(
+            f"Would have created Git tag {name} with message: {description}"
+        )
+    # TODO: Create GitHub release with Calkit Cloud API
     # Save release in Calkit info
     release = dict(
         kind=release_type,
         path=path,
+        git_rev=repo.git.rev_parse(["--short", "HEAD"]),
         host="zenodo.org",
-        zenodo_deposition_id=1234,  # TODO
-        doi=None,  # TODO
-        url=None,  # TODO
-        description=None,  # TODO
+        zenodo_dep_id=zenodo_dep_id,
+        doi=doi,
+        url=url,
+        description=description,
     )
     releases[name] = release
     ck_info["releases"] = releases

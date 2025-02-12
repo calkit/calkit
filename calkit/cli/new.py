@@ -1817,6 +1817,7 @@ def new_release(
         warn("Multiple references collections; writing to first")
     if not reference_collections:
         references = dict(path="references.bib")
+        ck_info["references"] = [references]
     else:
         references = reference_collections[0]
     ref_path = references.get("path", "references.bib")

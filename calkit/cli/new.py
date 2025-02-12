@@ -1724,12 +1724,43 @@ def new_release(
         typer.echo(f"Published to Zenodo with DOI: {doi}")
     else:
         typer.echo(f"Would have posted Zenodo deposition: {zenodo_metadata}")
-    # TODO: If this is a project release, add Zenodo badge to main README if
+    # If this is a project release, add Zenodo badge to project README if
     # it doesn't exist
-    doi_md = (
-        f"[![DOI](https://zenodo.org/badge/DOI/{doi}.svg)]"
-        f"(https://handle.stage.datacite.org/{doi})"
-    )
+    if release_type == "project" and doi is not None:
+        typer.echo("Adding DOI badge to README.md")
+        doi_md = (
+            f"[![DOI](https://zenodo.org/badge/DOI/{doi}.svg)]"
+            f"(https://handle.stage.datacite.org/{doi})"
+        )
+        if os.path.isfile("README.md"):
+            with open("README.md") as f:
+                readme_txt = f.read()
+        else:
+            readme_txt = f"# {title}\n"
+        existing_lines = readme_txt.split("\n")
+        new_lines = []
+        first_content_line_index = None
+        for n, line in enumerate(existing_lines):
+            if line.startswith(doi_md[:6]):
+                pass  # Skip DOI lines
+            else:
+                if (
+                    n != 0
+                    and line.strip()
+                    and first_content_line_index is None
+                ):
+                    first_content_line_index = len(new_lines)
+                new_lines.append(line)
+        # Ensure first 3 lines are title, blank, DOI lines
+        new_lines = (
+            [new_lines[0]]
+            + ["", doi_md, ""]
+            + new_lines[first_content_line_index:]
+        )
+        print(new_lines)
+        readme_txt = "\n".join(new_lines)
+        with open("README.md", "w") as f:
+            f.write(readme_txt)
     # Create Git tag
     if not dry_run:
         repo.git.tag(["-a", name, "-m", description])

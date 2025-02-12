@@ -1585,7 +1585,7 @@ def new_release(
     zenodo_post_body = dict(
         title=title,
         description=description,
-        notes="Uploaded from a Calkit project.",
+        notes="Created from a Calkit project.",
         publication_date=str(calkit.utcnow().date()),
     )
     if release_type == "project":

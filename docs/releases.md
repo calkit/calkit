@@ -46,9 +46,8 @@ You can also use the `--description` flag to add more details.
 When this is called, Calkit will:
 
 - Compress and upload all files kept in Git and DVC to Zenodo,
-  which will produce a persistent digital object identifier (DOI)
-  for citation,
-  ensuring the release can be accessed for a long time.
+  which will produce a DOI,
+  ensuring the release can be accessed even if the repo is relocated.
 - Create a Git tag. This can be used to create a release on GitHub if desired.
 - Save the MD5 checksums of files kept in DVC in
   `.calkit/releases/{release_name}/dvc-md5s.yaml`.

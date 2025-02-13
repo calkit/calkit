@@ -52,6 +52,7 @@ nav:
   - Local server (GUI interaction): local-server.md
   - Examples: examples.md
   - Tutorials:
+      - tutorials/index.md
       - tutorials/first-project.md
       - tutorials/existing-project.md
       - tutorials/openfoam.md

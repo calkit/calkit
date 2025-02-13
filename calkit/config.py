@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     token: str | None = None
     dvc_token: str | None = None
     dataframe_engine: Literal["pandas", "polars"] = "pandas"
+    github_token: str | None = None
     zenodo_token: str | None = None
 
     @classmethod

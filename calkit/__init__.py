@@ -12,5 +12,6 @@ from . import templates
 from . import conda
 from . import calc
 from . import check
+from . import github
 from . import zenodo
 from . import releases

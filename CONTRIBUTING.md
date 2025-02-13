@@ -9,7 +9,8 @@ This guide will help you get started.
 
 ### 1. Find an issue to work on
 
-- Check the **[backlog](https://github.com/orgs/calkit/projects/1/views/1)** for task that are ready to be worked on.
+- Check the **[backlog](https://github.com/orgs/calkit/projects/1/views/1)**
+  for issues that are ready to be worked on.
 - Look for issues labeled `good first issue` if you're new.
 - If you have an idea, open a new issue and discuss it before coding.
 

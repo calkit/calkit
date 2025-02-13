@@ -36,20 +36,20 @@ description = "Reproducibility simplified."
 dynamic = ["version"]
 name = "calkit-python"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 
 [project.optional-dependencies]
 data = [
   "pandas",
   "polars",
 ]
+
+[dependency-groups]
 dev = [
   "pytest",
-]
-docs = [
   "mkdocs",
   "mkdocs-material",
-  "mkdocs-mermaid2-plugin"
+  "mkdocs-mermaid2-plugin",
 ]
 
 [project.urls]

@@ -1742,6 +1742,7 @@ def new_release(
         typer.echo(f"Would have posted Zenodo deposition: {zenodo_metadata}")
     # If this is a project release, add Zenodo badge to project README if
     # it doesn't exist
+    doi_md = None
     if release_type == "project" and doi is not None:
         typer.echo("Adding DOI badge to README.md")
         doi_md = (
@@ -1866,11 +1867,15 @@ def new_release(
         repo.git.push(["origin", repo.active_branch.name, "--tags"])
         # Now create GitHub release
         typer.echo("Creating GitHub release")
+        release_body = ""
+        if doi_md is not None:
+            release_body += doi_md + "\n\n"
+        release_body += description
         resp = calkit.cloud.post(
             f"/projects/{project_name}/github-releases",
             json=dict(
                 tag_name=name,
-                body=description,
+                body=release_body,
             ),
         )
         typer.echo(f"Created GitHub release at: {resp['url']}")

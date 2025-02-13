@@ -1785,7 +1785,6 @@ def new_release(
         typer.echo(
             f"Would have created Git tag {name} with message: {description}"
         )
-    # TODO: Create GitHub release with Calkit Cloud API
     # Save release in Calkit info
     release = dict(
         kind=release_type,
@@ -1865,4 +1864,13 @@ def new_release(
     # Push with Git
     if not dry_run and not no_push:
         repo.git.push(["origin", repo.active_branch.name, "--tags"])
+        # Now create GitHub release
+        calkit.cloud.post(
+            f"/projects/{project_name}/github-releases",
+            json=dict(
+                tag_name=name,
+                body=description,
+            ),
+        )
+        # TODO: Upload assets for GitHub release if they're not too big?
     typer.echo(f"New {release_type} release {name} successfully created")

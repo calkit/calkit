@@ -6,9 +6,13 @@ import csv
 import os
 import shutil
 import subprocess
+import zipfile
 from enum import Enum
 
+import bibtexparser
+import dotenv
 import git
+import requests
 import typer
 from git.exc import GitCommandError, InvalidGitRepositoryError
 from typing_extensions import Annotated
@@ -1434,3 +1438,446 @@ def new_stage(
             repo.git.commit(
                 ["dvc.yaml", "-m", f"Add {kind.value} pipeline stage '{name}'"]
             )
+
+
+@new_app.command(name="release")
+def new_release(
+    name: Annotated[
+        str,
+        typer.Option(
+            "--name",
+            "-n",
+            help=(
+                "A name for the release, typically kebab-case. "
+                "Will be used for the Git tag and GitHub release title."
+            ),
+        ),
+    ],
+    release_type: Annotated[
+        str, typer.Option("--kind", help="What kind of release to create.")
+    ] = "project",
+    path: Annotated[
+        str,
+        typer.Argument(help="The path to release; '.' for a project release."),
+    ] = ".",
+    description: Annotated[
+        str,
+        typer.Option(
+            "--description",
+            "--desc",
+            help=(
+                "A description of the release. "
+                "Will be auto-generated if not provided."
+            ),
+        ),
+    ] = None,
+    release_date: Annotated[
+        str,
+        typer.Option("--date", help="Release date. Will default to today."),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Only print actions that would be taken but don't take them.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool,
+        typer.Option(
+            "--no-commit",
+            help="Do not commit changes to Git repo.",
+        ),
+    ] = False,
+    no_push: Annotated[
+        bool,
+        typer.Option(
+            "--no-push",
+            help="Do not push to Git remote.",
+        ),
+    ] = False,
+):
+    """Create a new release."""
+    if release_type not in [
+        "project",
+        "publication",
+        "figure",
+        "dataset",
+        "software",
+    ]:
+        raise_error(f"Unknown release type '{release_type}'")
+    # TODO: Check path is consistent with release type
+    dotenv.load_dotenv()
+    # First see if we have a Zenodo token
+    typer.echo("Checking for Zenodo token")
+    try:
+        token = calkit.zenodo.get_token()
+    except Exception as e:
+        raise_error(e)
+    ck_info = calkit.load_calkit_info()
+    releases = ck_info.get("releases", {})
+    # TODO: Enable resuming a release if upload failed part-way?
+    if name in releases:
+        raise_error(f"Release with name '{name}' already exists")
+    repo = git.Repo()
+    if name in repo.tags:
+        raise_error(f"Git tag with name '{name}' already exists")
+    release_dir = f".calkit/releases/{name}"
+    release_files_dir = release_dir + "/files"
+    os.makedirs(release_files_dir, exist_ok=True)
+    # Ignore release files dir
+    typer.echo(f"Ignoring {release_files_dir}")
+    gitignore_path = release_dir + "/.gitignore"
+    with open(gitignore_path, "w") as f:
+        f.write("/files\n")
+    if not dry_run:
+        repo.git.add(gitignore_path)
+    if release_date is None:
+        release_date = str(calkit.utcnow().date())
+    typer.echo(f"Using release date: {release_date}")
+    # Gather up the list of files to upload
+    if path == ".":
+        zip_path = release_files_dir + "/archive.zip"
+        all_paths = calkit.releases.ls_files()
+        typer.echo(f"Adding files to {zip_path}")
+        with zipfile.ZipFile(zip_path, "w") as zipf:
+            for fpath in all_paths:
+                zipf.write(fpath)
+        if description is None:
+            description = "An archive of all project files."
+        title = ck_info.get("title")
+        if title is None:
+            warn("Project has no title")
+            title = typer.prompt("Enter a title for the project")
+            ck_info["title"] = title
+    else:
+        # TODO: Handle directories, e.g., datasets
+        if not os.path.isfile(path):
+            raise_error("Single artifact releases must be a single file")
+        typer.echo(f"Copying {path} into {release_files_dir}")
+        shutil.copy2(path, release_files_dir)
+        if description is None:
+            description = f"Release {release_type} at {path}."
+        # Check that this artifact actually exists
+        artifact_key = (
+            release_type + "s" if release_type != "software" else release_type
+        )
+        artifacts = ck_info.get(artifact_key, [])
+        title = None
+        artifact = None
+        for a in artifacts:
+            if a.get("path") == path:
+                artifact = a
+                title = artifact.get("title")
+                break
+        if artifact is None:
+            raise_error(f"{release_type} at {path} not defined in calkit.yaml")
+        if title is None:
+            raise_error(f"{release_type} at {path} has no title")
+    # Save a metadata file with each DVC file's MD5 checksum
+    dvc_md5s = calkit.releases.make_dvc_md5s(
+        zipfile="archive.zip" if path == "." else None,
+        paths=None if path == "." else [path],
+    )
+    dvc_md5s_path = release_dir + "/dvc-md5s.yaml"
+    typer.echo(f"Saving DVC MD5 info to {dvc_md5s_path}")
+    with open(dvc_md5s_path, "w") as f:
+        calkit.ryaml.dump(dvc_md5s, f)
+    if not dry_run:
+        repo.git.add(dvc_md5s_path)
+    # Create a README for the Zenodo release
+    readme_txt = f"# {title}\n"
+    git_rev = repo.git.rev_parse(["--short", "HEAD"])
+    readme_txt += (
+        f"\nThis is a {release_type} release ({name}) generated with "
+        f"Calkit from Git rev {git_rev}.\n"
+    )
+    readme_path = release_files_dir + "/README.md"
+    with open(readme_path, "w") as f:
+        f.write(readme_txt)
+    # Check size of files dir
+    size = calkit.get_size(release_files_dir)
+    typer.echo(f"Release size: {(size / 1e6):.1f} MB")
+    if size >= 50e9:
+        raise_error("Release is too large (>50 GB) to upload to Zenodo")
+    # Upload to Zenodo
+    # Is there already a deposition for this release, which indicates we should
+    # create a new version?
+    zenodo_dep_id = None
+    project_name = calkit.git.detect_project_name()
+    zenodo_metadata = dict(
+        title=title,
+        description=description,
+        notes=f"Created from Calkit project {project_name} release {name}.",
+        publication_date=release_date,
+    )
+    # Determine creators from authors, adding to project if not present
+    authors = ck_info.get("authors", [])
+    if not authors:
+        warn("No authors defined for the project")
+        still_entering_authors = True
+        n = 0
+        while still_entering_authors:
+            n += 1
+            author = dict()
+            author["first_name"] = typer.prompt(
+                f"Enter the first name of author {n}"
+            )
+            author["last_name"] = typer.prompt(
+                f"Enter the last name of author {n}"
+            )
+            author["affiliation"] = typer.prompt(
+                f"Enter the affiliation of author {n}"
+            )
+            has_orchid = typer.confirm(
+                f"Does author {n} have an ORCID?", default=False
+            )
+            if has_orchid:
+                author["orcid"] = typer.prompt(
+                    f"Enter the ORCID of author {n}"
+                )
+            authors.append(author)
+            still_entering_authors = typer.confirm(
+                "Are there more authors to enter?", default=True
+            )
+        ck_info["authors"] = authors
+    zenodo_creators = []
+    for author in authors:
+        creator = dict(
+            name=f"{author['last_name']}, {author['first_name']}",
+            affiliation=author["affiliation"],
+        )
+        if "orcid" in author:
+            creator["orcid"] = author["orcid"]
+        zenodo_creators.append(creator)
+    zenodo_metadata["creators"] = zenodo_creators
+    if release_type == "project":
+        zenodo_metadata["upload_type"] = "other"
+    elif release_type == "publication":
+        pubtype = artifact.get("kind")
+        if pubtype == "journal-article":
+            zenodo_metadata["upload_type"] = "publication"
+            zenodo_metadata["publication_type"] = "article"
+        elif pubtype == "presentation":
+            zenodo_metadata["upload_type"] = "presentation"
+        elif pubtype == "poster":
+            zenodo_metadata["upload_type"] = "poster"
+        else:
+            zenodo_metadata["upload_type"] = "other"
+    elif release_type in ["dataset", "software"]:
+        zenodo_metadata["upload_type"] = release_type
+    elif release_type == "figure":
+        zenodo_metadata["upload_type"] = "image"
+        zenodo_metadata["image_type"] = "figure"
+    else:
+        zenodo_metadata["upload_type"] = "other"
+    doi = None
+    url = None
+    for existing_name, existing_release in releases.items():
+        if (
+            existing_release.get("kind") == release_type
+            and existing_release.get("path") == path
+            and existing_release.get("publisher") == "zenodo.org"
+        ):
+            zenodo_dep_id = existing_release.get("zenodo_dep_id")
+            typer.echo(
+                f"Found existing Zenodo deposition ID {zenodo_dep_id} "
+                f"in release {existing_name} to create new version for"
+            )
+            break
+    if not dry_run:
+        typer.echo("Uploading to Zenodo")
+        if zenodo_dep_id is not None:
+            # Create a new version of the existing deposit
+            # TODO: This might fail if a new version is in progress, in which
+            # case we should discard that
+            zenodo_dep = calkit.zenodo.post(
+                f"/deposit/depositions/{zenodo_dep_id}/actions/newversion",
+                json=dict(metadata=zenodo_metadata),
+            )
+            typer.echo("Created new version deposition")
+            typer.echo("Fetching latest draft")
+            zenodo_dep = requests.get(
+                zenodo_dep["links"]["latest_draft"],
+                params=dict(access_token=token),
+            ).json()
+            zenodo_dep_id = zenodo_dep["id"]
+            typer.echo(
+                f"Fetched latest draft with deposition ID: {zenodo_dep_id} "
+            )
+            # Now update that draft with the metadata
+            typer.echo("Updating latest draft metadata")
+            calkit.zenodo.put(
+                f"/deposit/depositions/{zenodo_dep_id}",
+                json=dict(metadata=zenodo_metadata),
+            )
+        else:
+            zenodo_dep = calkit.zenodo.post(
+                "/deposit/depositions", json=dict(metadata=zenodo_metadata)
+            )
+            zenodo_dep_id = zenodo_dep["id"]
+        bucket_url = zenodo_dep["links"]["bucket"]
+        files = os.listdir(release_files_dir)
+        for filename in files:
+            typer.echo(f"Uploading {filename}")
+            fpath = os.path.join(release_files_dir, filename)
+            with open(fpath, "rb") as f:
+                resp = requests.put(
+                    f"{bucket_url}/{filename}",
+                    data=f,
+                    params={"access_token": token},
+                )
+                typer.echo(f"Status code: {resp.status_code}")
+                resp.raise_for_status()
+        # Now publish the new deposition
+        typer.echo(f"Publishing Zenodo deposition ID {zenodo_dep_id}")
+        zenodo_dep = calkit.zenodo.post(
+            f"/deposit/depositions/{zenodo_dep_id}/actions/publish"
+        )
+        zenodo_dep_id = zenodo_dep["id"]
+        doi = zenodo_dep["doi"]
+        url = zenodo_dep["doi_url"]
+        typer.echo(f"Published to Zenodo with DOI: {doi}")
+    else:
+        typer.echo(f"Would have posted Zenodo deposition: {zenodo_metadata}")
+    # If this is a project release, add Zenodo badge to project README if
+    # it doesn't exist
+    doi_md = None
+    if release_type == "project" and doi is not None:
+        typer.echo("Adding DOI badge to README.md")
+        doi_md = (
+            f"[![DOI](https://zenodo.org/badge/DOI/{doi}.svg)]"
+            f"(https://handle.stage.datacite.org/{doi})"
+        )
+        if os.path.isfile("README.md"):
+            with open("README.md") as f:
+                readme_txt = f.read()
+        else:
+            readme_txt = f"# {title}\n"
+        existing_lines = readme_txt.split("\n")
+        new_lines = []
+        first_content_line_index = None
+        for n, line in enumerate(existing_lines):
+            if line.startswith(doi_md[:6]):
+                pass  # Skip DOI lines
+            else:
+                if (
+                    n != 0
+                    and line.strip()
+                    and first_content_line_index is None
+                ):
+                    first_content_line_index = len(new_lines)
+                new_lines.append(line)
+        # Ensure first 3 lines are title, blank, DOI lines
+        new_lines = (
+            [new_lines[0]]
+            + ["", doi_md, ""]
+            + new_lines[first_content_line_index:]
+        )
+        readme_txt = "\n".join(new_lines)
+        with open("README.md", "w") as f:
+            f.write(readme_txt)
+        if not dry_run:
+            repo.git.add("README.md")
+    # Create Git tag
+    if not dry_run:
+        repo.git.tag(["-a", name, "-m", description])
+    else:
+        typer.echo(
+            f"Would have created Git tag {name} with message: {description}"
+        )
+    # Save release in Calkit info
+    release = dict(
+        kind=release_type,
+        path=path,
+        git_rev=git_rev,
+        date=release_date,
+        publisher="zenodo.org",
+        zenodo_dep_id=zenodo_dep_id,
+        doi=doi,
+        url=url,
+        description=description,
+    )
+    releases[name] = release
+    ck_info["releases"] = releases
+    # Create CITATION.cff file
+    if release_type == "project":
+        typer.echo("Writing CITATION.cff")
+        cff = calkit.releases.create_citation_cff(
+            ck_info=ck_info, release_name=name, release_date=release_date
+        )
+        with open("CITATION.cff", "w") as f:
+            calkit.ryaml.dump(cff, f)
+        if not dry_run:
+            repo.git.add("CITATION.cff")
+    # Add to references so it can be cited
+    typer.echo("Adding BibTeX entry to references")
+    reference_collections = ck_info.get("references", [])
+    if len(reference_collections) > 1:
+        warn("Multiple references collections; writing to first")
+    if not reference_collections:
+        references = dict(path="references.bib")
+        ck_info["references"] = [references]
+    else:
+        references = reference_collections[0]
+    ref_path = references.get("path", "references.bib")
+    try:
+        if os.path.isfile(ref_path):
+            with open(ref_path) as f:
+                reflib = bibtexparser.load(f)
+        else:
+            reflib = bibtexparser.bibdatabase.BibDatabase()
+        zenodo_bibtex = calkit.releases.create_bibtex(
+            authors=authors,
+            release_date=release_date,
+            title=title,
+            doi=doi,
+            dep_id=zenodo_dep_id,
+        )
+        new_entry = bibtexparser.loads(zenodo_bibtex).entries[0]
+        # Search through entries for one with the same DOI, and replace if
+        # there is a match
+        existing_index = None
+        for n, entry in enumerate(reflib.entries):
+            if entry.get("doi") == doi:
+                typer.echo("Found matching DOI in existing references")
+                existing_index = n
+        if existing_index is not None:
+            _ = reflib.entries.pop(existing_index)
+        reflib.entries.append(new_entry)
+        with open(ref_path, "w") as f:
+            bibtexparser.dump(reflib, f)
+        if not dry_run:
+            repo.git.add(ref_path)
+    except Exception as e:
+        warn(f"Failed to add to references: {e}")
+    # Write out Calkit metadata
+    if not dry_run:
+        typer.echo("Writing to calkit.yaml")
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        repo.git.add("calkit.yaml")
+    else:
+        typer.echo(f"Would have created release:\n{release}")
+    # Commit with Git
+    if not dry_run and calkit.git.get_staged_files() and not no_commit:
+        repo.git.commit(["-m", f"Create new {release_type} release {name}"])
+    # Push with Git
+    if not dry_run and not no_push and not no_commit:
+        repo.git.push(["origin", repo.active_branch.name, "--tags"])
+        # Now create GitHub release
+        typer.echo("Creating GitHub release")
+        release_body = ""
+        if doi_md is not None:
+            release_body += doi_md + "\n\n"
+        release_body += description
+        resp = calkit.cloud.post(
+            f"/projects/{project_name}/github-releases",
+            json=dict(
+                tag_name=name,
+                body=release_body,
+            ),
+        )
+        typer.echo(f"Created GitHub release at: {resp['url']}")
+        # TODO: Upload assets for GitHub release if they're not too big?
+    typer.echo(f"New {release_type} release {name} successfully created")

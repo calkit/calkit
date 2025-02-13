@@ -1,4 +1,4 @@
-__version__ = "0.19.1"
+__version__ = "0.20.0"
 
 from .core import *
 from . import git
@@ -12,3 +12,6 @@ from . import templates
 from . import conda
 from . import calc
 from . import check
+from . import github
+from . import zenodo
+from . import releases

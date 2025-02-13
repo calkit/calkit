@@ -126,10 +126,17 @@ def get_remotes(wdir: str = None) -> dict[str, str]:
     return resp
 
 
-def list_paths(wdir: str = None) -> list[str]:
+def list_paths(wdir: str = None, recursive=False) -> list[str]:
     """List paths tracked with DVC."""
+    return [p.get("path") for p in list_files(wdir=wdir, recursive=recursive)]
+
+
+def list_files(wdir: str = None, recursive=True) -> list[dict]:
+    """Return a list with all files in DVC, including their path and md5
+    checksum.
+    """
     dvc_repo = dvc.repo.Repo(wdir)
-    return [p.get("path") for p in dvc_repo.ls(".", dvc_only=True)]
+    return dvc_repo.ls(".", dvc_only=True, recursive=recursive)
 
 
 def get_output_revisions(path: str):

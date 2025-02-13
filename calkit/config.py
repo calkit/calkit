@@ -37,6 +37,10 @@ def get_app_name() -> str:
     return __package__ + get_env_suffix()
 
 
+def get_local_config_path() -> str:
+    return os.path.join(".calkit", "config.yaml")
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         yaml_file=os.path.join(
@@ -46,12 +50,16 @@ class Settings(BaseSettings):
         ),
         extra="ignore",
         env_prefix="CALKIT" + get_env_suffix(sep="_") + "_",
+        env_file=".env",
+        env_file_encoding="utf-8",
     )
     username: str | None = None
     email: str | None = None
     token: str | None = None
     dvc_token: str | None = None
     dataframe_engine: Literal["pandas", "polars"] = "pandas"
+    github_token: str | None = None
+    zenodo_token: str | None = None
 
     @classmethod
     def settings_customise_sources(
@@ -65,6 +73,7 @@ class Settings(BaseSettings):
         return (
             init_settings,
             env_settings,
+            dotenv_settings,
             YamlConfigSettingsSource(settings_cls),
         )
 

@@ -13,9 +13,10 @@ classifiers = [
 ]
 dependencies = [
   "arithmeval",
+  "bibtexparser",
   "checksumdir",
   "docx2pdf",
-  "dvc",
+  "dvc>=3.59.0",
   "eval-type-backport; python_version < '3.10'",
   "fastapi",
   "gitpython",

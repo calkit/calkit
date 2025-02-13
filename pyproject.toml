@@ -36,17 +36,25 @@ description = "Reproducibility simplified."
 dynamic = ["version"]
 name = "calkit-python"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 
 [project.optional-dependencies]
 data = [
-  "pandas",
-  "polars",
+  "pandas>=2.2.3",
+  "polars>=1.18.0",
 ]
 
 [dependency-groups]
 dev = [
+  "ipykernel",
+  "jupyter",
+  "kaleido==0.2.1",
+  "numpy",
+  "pandas>=2.2.3",
+  "plotly",
+  "pyarrow",
   "pytest",
+  "pytest-test-utils", # For tmp_dir fixture
   "mkdocs",
   "mkdocs-material",
   "mkdocs-mermaid2-plugin",

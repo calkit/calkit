@@ -18,16 +18,16 @@ This guide will help you get started.
 1. [**Fork** the repository](https://github.com/calkit/calkit/fork).
 1. **Clone** your fork locally:
    ```bash
-   git clone https://github.com/your-username/calkit.git
+   git clone https://github.com/{your-username}/calkit.git
    cd calkit
    ```
-1. **Install dependencies:**
-   - Docker
-   - Miniforge
-   - uv
+1. **Install system-level dependencies:**
+   - [Docker](https://docker.com)
+   - [Miniforge](https://conda-forge.org/download/)
+   - [uv](https://docs.astral.sh/uv/getting-started/installation/)
 1. **Run tests** to ensure everything is working:
    ```bash
-   make test
+   uv run pytest
    ```
 
 ### 3. Make your changes
@@ -36,7 +36,11 @@ This guide will help you get started.
   ```bash
   git checkout -b your-feature-name
   ```
-- Make your changes and commit them
+- Check and fix code formatting:
+  ```bash
+  make format
+  ```
+- Commit your changes
   (use the imperative mood and capitalize the first letter,
   but don't use punctuation):
   ```bash
@@ -50,33 +54,21 @@ This guide will help you get started.
 
 ### 4. Submit a pull request (PR)
 
-- Open a **Pull Request** on GitHub.
-- Link the PR to the issue it resolves.
-- Ensure your PR follows the **code style guidelines**.
+- Open a **Pull request** on GitHub.
+- Link the PR to the issue it resolves by adding "resolves #{issue number}"
+  to the description.
 - Wait for a review and make necessary changes.
 
----
+## 💡 Other ways to contribute
 
-## 🔍 Code Style & Best Practices
-
-- Follow **PEP 8** for Python code.
-- Keep code modular and well-documented.
-- Write tests for new features or fixes.
-
----
-
-## 💡 Other Ways to Contribute
-
-- **Report Bugs**: Open an issue with detailed reproduction steps.
-- **Improve Documentation**: Help us make Calkit's docs better.
-- **Suggest Features**: Share your ideas for improvements.
-
----
+- **Report bugs**: Open an issue with detailed reproduction steps.
+- **Improve documentation**: Help us make Calkit's docs better.
+- **Suggest features**: Share your ideas for improvements.
 
 ## 🎉 Join the Community
 
-- Participate in **[GitHub Discussions](https://github.com/calkit-org/calkit/discussions)**.
-- Join our **Discord/Slack (link TBD)** for real-time collaboration.
-- Follow our updates on **Twitter/LinkedIn (link TBD)**.
+- Participate in **[GitHub Discussions](https://github.com/calkit/discussions)**.
+- Join our [**Discord**](https://discord.gg/ubb7gAXc) for real-time collaboration.
+- Follow our updates on [**LinkedIn**](https://linkedin.com/company/calkit).
 
 We appreciate your help in making Calkit better! 🚀

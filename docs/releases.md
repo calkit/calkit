@@ -65,7 +65,7 @@ execute:
 
 ```sh
 calkit new release \
-    --name my-release-name \
+    --name my-publication-v1 \
     --kind publication \
     path/to/the/publication.pdf
 ```

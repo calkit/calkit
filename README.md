@@ -3,6 +3,19 @@
     <img width="40%" src="docs/img/calkit-no-bg.png" alt="Calkit">
   </a>
 </p>
+<p align="center">
+  <a href="https://docs.calkit.org" target="_blank">
+    Documentation
+  </a>
+  |
+  <a href="https://docs.calkit.org/tutorials" target="_blank">
+    Tutorials
+  </a>
+  |
+  <a href="https://github.com/orgs/calkit/discussions" target="_blank">
+    Discussions
+  </a>
+</p>
 
 Calkit is a framework and toolkit for reproducible research projects.
 It acts as a top-level layer to integrate and simplify the use of enabling
@@ -14,8 +27,6 @@ and [Docker](https://docker.com).
 Calkit also adds a domain-specific data model
 such that all aspects of the research process can be fully described in a
 single repository and therefore easily consumed by others.
-
-To learn more, see the [documentation](https://docs.calkit.org).
 
 ## Installation
 
@@ -89,17 +100,10 @@ calkit save -am "Run pipeline"
 
 This will commit and push to both GitHub and the Calkit Cloud.
 
-## Tutorials
+## Get involved
 
-- [LaTeX collaboration with GitHub Codespaces](https://docs.calkit.org/tutorials/latex-codespaces/)
-- [Jupyter notebook as a DVC pipeline](https://docs.calkit.org/tutorials/notebook-pipeline/)
-- [Keeping track of conda environments](https://docs.calkit.org/tutorials/conda-envs/)
-- [Defining and executing manual procedures](https://docs.calkit.org/tutorials/procedures/)
-- [Adding a new LaTeX-based publication with its own Docker build environment](https://docs.calkit.org/tutorials/adding-latex-pub-docker/)
-- [A reproducible workflow using Microsoft Office (Word and Excel)](https://docs.calkit.org/tutorials/office/)
-- [Reproducible OpenFOAM simulations](https://docs.calkit.org/tutorials/openfoam/)
-
-See more in the [docs](https://docs.calkit.org).
+We welcome all kinds of contributions!
+See [CONTRIBUTING.md](CONTRIBUTING.md) to learn how to get involved.
 
 ## Why does reproducibility matter?
 

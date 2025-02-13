@@ -25,7 +25,7 @@ Let's title ours "RANS boundary layer validation",
 since for our example, we're going to create a project that attempts to
 answer the question:
 
->What RANS model works best for a simple boundary layer?
+> What RANS model works best for a simple boundary layer?
 
 We'll keep this private for now
 (though in general it's good to work openly.)
@@ -260,7 +260,7 @@ Now let's show the value of making our project reproducible,
 addressing the problem we laid out in the introduction, assuming Reviewer 2's
 request was something like:
 
->The legend labels should be updated to use mathematical symbols.
+> The legend labels should be updated to use mathematical symbols.
 
 We're going to pretend we were forced to start from scratch,
 so let's delete the local copy of our project repo

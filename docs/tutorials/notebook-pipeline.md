@@ -19,6 +19,7 @@ to help "productionize" notebook cells as DVC pipeline stages without
 needing to cut/paste anything.
 
 This enables a workflow like:
+
 1. Prototype a cell by running whatever commands make sense.
 2. Convert cells that are working and valuable into pipeline
    stages, and delete anything else.

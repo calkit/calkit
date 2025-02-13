@@ -1507,7 +1507,7 @@
 
 \endinput
 
-%%% Date: 3-8-20 
+%%% Date: 3-8-20
 %%% Updated the template to get the line numbers using lineno.sty
 %%% Inserted \@afterindentfalse\@afterheading to avoid indentation after headings
 

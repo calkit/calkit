@@ -415,11 +415,11 @@ stages:
   process-data:
     cmd: calkit xenv -n py -- python scripts/process.py
     deps:
-    - data/raw
-    - environment.yml
-    - scripts/process.py
+      - data/raw
+      - environment.yml
+      - scripts/process.py
     outs:
-    - data/processed
+      - data/processed
 ```
 
 This stage can also be modified later, e.g.,

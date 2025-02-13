@@ -2,7 +2,7 @@
 % Stefan Llewellyn Smith, sgls1@damtp.cam.ac.uk
 % See readme in jfm style distribution.
 %%
-%%v1.1 revised 12/2005 to fix second initial problem, as suggested by 
+%%v1.1 revised 12/2005 to fix second initial problem, as suggested by
 %%Christian Schoof
 %%
 %% This is file `jfmraw.bst',
@@ -551,7 +551,7 @@ FUNCTION {format.authors}
 { author empty$
      { "" }
      {
-      author format.names scaps 
+      author format.names scaps
      }
    if$
 }
@@ -929,7 +929,7 @@ FUNCTION {format.journal.pages}
 
 FUNCTION {format.vol.num.pages}
 { volume field.or.null
-%   bolden 
+%   bolden
    cmd@bvolume
    number empty$
      'skip$
@@ -972,14 +972,14 @@ FUNCTION {format.in.ed.booktitle}
        if$
        editor empty$
          { "" * }
-         {" (" * 
+         {" (" *
            editor num.names$ #1 >
              { bbl.editors }
              { bbl.editor }
            if$
            *
            " " *
-           format.in.editors * 
+           format.in.editors *
            ")" *
          }
        if$

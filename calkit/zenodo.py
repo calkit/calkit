@@ -17,9 +17,7 @@ def get_token() -> str:
     if token is None:
         token = os.getenv("ZENODO_TOKEN")
     if token is None:
-        raise ValueError(
-            "No Zenodo token found in config or environmental variables"
-        )
+        token = calkit.cloud.get("/user/zenodo-token")["access_token"]
     return token
 
 

@@ -65,7 +65,7 @@ This guide will help you get started.
 - **Improve documentation**: Help us make Calkit's docs better.
 - **Suggest features**: Share your ideas for improvements.
 
-## 🎉 Join the Community
+## 🎉 Join the community
 
 - Participate in **[GitHub Discussions](https://github.com/calkit/discussions)**.
 - Join our [**Discord**](https://discord.gg/ubb7gAXc) for real-time collaboration.

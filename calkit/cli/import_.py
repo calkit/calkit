@@ -65,7 +65,7 @@ def import_dataset(
     resp = calkit.cloud.get(
         f"/projects/{owner_name}/{project_name}/datasets/{path}"
     )
-    if not "dvc_import" in resp:
+    if "dvc_import" not in resp:
         raise ValueError("This file is not available to import with DVC")
     dvc_fpath = dest_path + ".dvc"
     dvc_dir = os.path.dirname(dvc_fpath)

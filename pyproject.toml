@@ -31,6 +31,7 @@ dependencies = [
   "requests",
   "typer",
   "uvicorn",
+  "tqdm>=4.67.1",
 ]
 description = "Reproducibility simplified."
 dynamic = ["version"]

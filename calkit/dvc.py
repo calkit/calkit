@@ -91,13 +91,14 @@ def set_remote_auth(
     )
 
 
-def add_external_remote(owner_name: str, project_name: str):
+def add_external_remote(owner_name: str, project_name: str) -> dict:
     base_url = calkit.cloud.get_base_url()
     remote_url = f"{base_url}/projects/{owner_name}/{project_name}/dvc"
     remote_name = f"{get_app_name()}:{owner_name}/{project_name}"
     subprocess.call(["dvc", "remote", "add", "-f", remote_name, remote_url])
     subprocess.call(["dvc", "remote", "modify", remote_name, "auth", "custom"])
     set_remote_auth(remote_name)
+    return {"name": remote_name, "url": remote_url}
 
 
 def read_pipeline(wdir: str = ".") -> dict:

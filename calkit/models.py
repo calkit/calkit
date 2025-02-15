@@ -12,6 +12,7 @@ class _ImportedFromProject(BaseModel):
     project: str
     path: str | None = None
     git_rev: str | None = None
+    filter_paths: list[str] | None = None
 
 
 class _ImportedFromUrl(BaseModel):

@@ -7,6 +7,7 @@ from functools import partial
 from typing import Literal
 
 import requests
+from requests.exceptions import HTTPError
 
 from . import config
 
@@ -82,7 +83,14 @@ def _request(
         headers=get_headers(headers),
         **kwargs,
     )
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except HTTPError as e:
+        try:
+            detail = resp.json()["detail"]
+        except Exception:
+            raise e
+        raise HTTPError(f"{resp.status_code}: {detail}")
     if as_json:
         return resp.json()
     else:

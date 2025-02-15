@@ -107,9 +107,14 @@ def import_dataset(
         dvc_dir = os.path.dirname(dvc_fpath)
         os.makedirs(dvc_dir, exist_ok=True)
         # Update paths in .dvc file so they are relative to the DVC file
-        for n, out in enumerate(dvc_import["outs"]):
-            dvc_import["outs"][n]["path"] = os.path.relpath(
-                out["path"], dvc_dir
+        if len(dvc_import["outs"]) > 1:
+            for n, out in enumerate(dvc_import["outs"]):
+                dvc_import["outs"][n]["path"] = os.path.relpath(
+                    out["path"], dvc_dir
+                )
+        else:
+            dvc_import["outs"][0]["path"] = os.path.basename(
+                dvc_import["outs"][0]["path"]
             )
         typer.echo("Saving .dvc file")
         with open(dvc_fpath, "w") as f:

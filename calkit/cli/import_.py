@@ -102,6 +102,13 @@ def import_dataset(
                 "Cannot specify destination path when importing multiple "
                 "DVC files"
             )
+        # Ensure we have a DVC remote corresponding to this project, and that we
+        # have a token set for that remote
+        typer.echo("Adding new DVC remote")
+        remote = calkit.dvc.add_external_remote(
+            owner_name=owner_name, project_name=project_name
+        )
+        repo.git.add(".dvc/config")
         # Import this data with DVC
         dvc_fpath = ds_dest_path + ".dvc"
         dvc_dir = os.path.dirname(dvc_fpath)
@@ -112,21 +119,16 @@ def import_dataset(
                 dvc_import["outs"][n]["path"] = os.path.relpath(
                     out["path"], dvc_dir
                 )
+                dvc_import["outs"][n]["remote"] = remote["name"]
         else:
             dvc_import["outs"][0]["path"] = os.path.basename(
                 dvc_import["outs"][0]["path"]
             )
+            dvc_import["outs"][0]["remote"] = remote["name"]
         typer.echo("Saving .dvc file")
         with open(dvc_fpath, "w") as f:
             calkit.ryaml.dump(dvc_import, f)
         repo.git.add(dvc_fpath)
-        # Ensure we have a DVC remote corresponding to this project, and that we
-        # have a token set for that remote
-        typer.echo("Adding new DVC remote")
-        calkit.dvc.add_external_remote(
-            owner_name=owner_name, project_name=project_name
-        )
-        repo.git.add(".dvc/config")
         # Add to .gitignore
         typer.echo("Checking .gitignore")
         if os.path.isfile(".gitignore"):
@@ -198,10 +200,10 @@ def import_dataset(
         # Commit any necessary changes
         typer.echo("Committing changes")
         repo.git.commit(["-m", f"Import dataset {src_path}"])
-    if not no_dvc_pull:
+    if not no_dvc_pull and dvc_import is not None:
         # Run dvc pull
         typer.echo("Running dvc pull")
-        subprocess.call(["dvc", "pull", dest_path])
+        subprocess.call(["dvc", "pull", dvc_fpath])
 
 
 @import_app.command(name="environment")

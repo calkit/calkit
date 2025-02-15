@@ -187,7 +187,7 @@ def import_dataset(
         imported_from=calkit.models._ImportedFromProject(
             project=f"{owner_name}/{project_name}",
             path=path,
-            git_rev=None,  # TODO?
+            git_rev=resp.get("git_rev"),
             filter_paths=filter_paths,
         ),
     )

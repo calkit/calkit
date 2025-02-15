@@ -18,13 +18,13 @@ from pydantic_settings import (
 
 
 def get_env() -> Literal["local", "staging", "production"]:
-    return os.getenv(f"{__package__.upper()}_ENV", "production")
+    return os.getenv("CALKIT_ENV", "production")
 
 
 def set_env(name: Literal["local", "staging", "production"]) -> None:
     if name not in ["local", "staging", "production"]:
         raise ValueError(f"{name} is not a valid environment name")
-    os.environ[f"{__package__.upper()}_ENV"] = name
+    os.environ["CALKIT_ENV"] = name
 
 
 def get_env_suffix(sep: str = "-") -> str:
@@ -34,20 +34,24 @@ def get_env_suffix(sep: str = "-") -> str:
 
 
 def get_app_name() -> str:
-    return __package__ + get_env_suffix()
+    return "calkit" + get_env_suffix()
 
 
 def get_local_config_path() -> str:
     return os.path.join(".calkit", "config.yaml")
 
 
+def get_config_yaml_fpath() -> str:
+    return os.path.join(
+        os.path.expanduser("~"),
+        ".calkit",
+        f"config{get_env_suffix()}.yaml",
+    )
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        yaml_file=os.path.join(
-            os.path.expanduser("~"),
-            "." + __package__,
-            f"config{get_env_suffix()}.yaml",
-        ),
+        yaml_file=get_config_yaml_fpath(),
         extra="ignore",
         env_prefix="CALKIT" + get_env_suffix(sep="_") + "_",
         env_file=".env",
@@ -101,4 +105,6 @@ class Settings(BaseSettings):
 
 def read() -> Settings:
     """Read the config."""
+    # Update YAML file path in case environment has changed
+    Settings.model_config["yaml_file"] = get_config_yaml_fpath()
     return Settings()

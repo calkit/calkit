@@ -35,3 +35,6 @@ stages:
         title: The raw data
         description: Raw voltage, collected from the sensor.
 ```
+
+To learn more, see
+[DVC's pipeline documentation](https://dvc.org/doc/start/data-pipelines/data-pipelines).

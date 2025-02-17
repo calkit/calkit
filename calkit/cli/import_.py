@@ -208,7 +208,7 @@ def import_dataset(
 
 @import_app.command(name="environment")
 def import_environment(
-    src_path: Annotated[
+    src: Annotated[
         str,
         typer.Argument(
             help=(
@@ -237,11 +237,30 @@ def import_environment(
         ),
     ] = False,
 ) -> None:
-    project, env_name = src_path.split(":")
+    """Import an environment from another project."""
+    try:
+        project, env_name = src.split(":")
+    except ValueError:
+        raise_error("Invalid source environment specification")
     if os.path.isdir(project):
-        cloud = False
-        typer.echo("Importing from local project directory")
+        typer.echo(f"Importing from local project directory: {project}")
+        src_ck_info = calkit.load_calkit_info(
+            wdir=project, process_includes=True
+        )
+        environments = src_ck_info.get("environments", {})
+        if env_name not in environments:
+            raise_error(f"Environment {env_name} not found in project")
     else:
-        cloud = True
         typer.echo("Importing from Cloud project")
+        try:
+            resp = calkit.cloud.get(
+                f"/projects/{project}/environments/{env_name}"
+            )
+        except Exception as e:
+            raise_error(f"Failed to fetch environment info from cloud: {e}")
+    # Write environment into current Calkit info
+    ck_info = calkit.load_calkit_info()
+    # TODO: Check if an environment with this name already exists
+    if dest_name is None:
+        dest_name = env_name
     raise_error("Not yet implemented")  # TODO

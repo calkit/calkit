@@ -285,6 +285,7 @@ def import_environment(
         new_env["imported_from"]["project"] = src_project_name
     if dest_path is not None and "path" in new_env:
         new_env["path"] = dest_path
+    # TODO: Write the environment content to file if necessary
     new_env = dict(imported_from=dict(project=project))
     environments[dest_name] = new_env
     ck_info["environments"] = environments

@@ -250,6 +250,14 @@ def import_environment(
         environments = src_ck_info.get("environments", {})
         if env_name not in environments:
             raise_error(f"Environment {env_name} not found in project")
+        src_env = environments[env_name]
+        if "path" in src_env:
+            env_path = src_env["path"]
+        # TODO: How can we know what project this was imported from?
+        try:
+            src_project_name = calkit.detect_project_name(project)
+        except Exception as e:
+            raise_error(f"Could not detect source project name: {e}")
     else:
         typer.echo("Importing from Cloud project")
         try:
@@ -258,9 +266,13 @@ def import_environment(
             )
         except Exception as e:
             raise_error(f"Failed to fetch environment info from cloud: {e}")
+        src_project_name = project
     # Write environment into current Calkit info
     ck_info = calkit.load_calkit_info()
     # TODO: Check if an environment with this name already exists
     if dest_name is None:
         dest_name = env_name
+    new_env = dict(
+        imported_from=dict(project=project)
+    )
     raise_error("Not yet implemented")  # TODO

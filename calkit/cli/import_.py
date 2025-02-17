@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import os
 import subprocess
+from copy import deepcopy
 from typing import Annotated
 
 import git
@@ -236,6 +237,9 @@ def import_environment(
             help="Force adding the dataset even if it already exists.",
         ),
     ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
 ) -> None:
     """Import an environment from another project."""
     try:
@@ -253,7 +257,6 @@ def import_environment(
         src_env = environments[env_name]
         if "path" in src_env:
             env_path = src_env["path"]
-        # TODO: How can we know what project this was imported from?
         try:
             src_project_name = calkit.detect_project_name(project)
         except Exception as e:
@@ -272,7 +275,13 @@ def import_environment(
     # TODO: Check if an environment with this name already exists
     if dest_name is None:
         dest_name = env_name
-    new_env = dict(
-        imported_from=dict(project=project)
-    )
-    raise_error("Not yet implemented")  # TODO
+    # If source env is imported, don't update that field
+    new_env = deepcopy(src_env)
+    new_env = dict(imported_from=dict(project=project))
+    ck_info["environments"][dest_name] = new_env
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    repo = git.Repo()
+    repo.git.add("calkit.yaml")
+    if not no_commit and calkit.git.get_staged_files():
+        repo.git.commit(["-m", f"Import environment {src}"])

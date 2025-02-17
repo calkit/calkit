@@ -270,17 +270,22 @@ def import_environment(
         except Exception as e:
             raise_error(f"Failed to fetch environment info from cloud: {e}")
         src_project_name = project
+        # TODO: Parse information we need from the response
     # Write environment into current Calkit info
     ck_info = calkit.load_calkit_info()
-    # TODO: Check if an environment with this name already exists
+    environments = ck_info.get("environments", {})
+    # Check if an environment with this name already exists
     if dest_name is None:
         dest_name = env_name
+    if dest_name in environments and not overwrite:
+        raise_error("An environment with this name already exists")
     # If source env is imported, don't update that field
     new_env = deepcopy(src_env)
     if "imported_from" not in new_env:
         new_env["imported_from"]["project"] = src_project_name
     new_env = dict(imported_from=dict(project=project))
-    ck_info["environments"][dest_name] = new_env
+    environments[dest_name] = new_env
+    ck_info["environments"] = environments
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     repo = git.Repo()

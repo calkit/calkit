@@ -159,7 +159,7 @@ def new_project(
             calkit.dvc.set_remote_auth(wdir=abs_path)
         except Exception:
             warn("Failed to setup Calkit DVC remote auth")
-        prj = calkit.git.detect_project_name(path=abs_path)
+        prj = calkit.detect_project_name(wdir=abs_path)
         add_msg = f"\n\nYou can view your project at https://calkit.io/{prj}"
         typer.echo(success_message + add_msg)
         return
@@ -1604,7 +1604,7 @@ def new_release(
     # Is there already a deposition for this release, which indicates we should
     # create a new version?
     zenodo_dep_id = None
-    project_name = calkit.git.detect_project_name()
+    project_name = calkit.detect_project_name()
     zenodo_metadata = dict(
         title=title,
         description=description,

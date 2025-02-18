@@ -79,7 +79,7 @@ def get_root(get_jupyter_servers: bool = True) -> list[LocalProject]:
     for pdir in project_dirs:
         logger.info(f"Inspecting {pdir}")
         try:
-            project = calkit.git.detect_project_name(path=pdir)
+            project = calkit.detect_project_name(wdir=pdir)
         except ValueError:
             logger.warning(f"Can't detect project name in {pdir}")
             continue

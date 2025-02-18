@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import os
 import subprocess
+from copy import deepcopy
 from typing import Annotated
 
 import git
@@ -208,7 +209,7 @@ def import_dataset(
 
 @import_app.command(name="environment")
 def import_environment(
-    src_path: Annotated[
+    src: Annotated[
         str,
         typer.Argument(
             help=(
@@ -236,12 +237,66 @@ def import_environment(
             help="Force adding the dataset even if it already exists.",
         ),
     ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
 ) -> None:
-    project, env_name = src_path.split(":")
+    """Import an environment from another project."""
+    raise_error(
+        "This command is not yet implemented; "
+        "please thumbs-up this issue if you'd like to see "
+        "it finished: https://github.com/calkit/calkit/issues/239"
+    )
+    try:
+        project, env_name = src.split(":")
+    except ValueError:
+        raise_error("Invalid source environment specification")
     if os.path.isdir(project):
-        cloud = False
-        typer.echo("Importing from local project directory")
+        typer.echo(f"Importing from local project directory: {project}")
+        src_ck_info = calkit.load_calkit_info(
+            wdir=project, process_includes=True
+        )
+        environments = src_ck_info.get("environments", {})
+        if env_name not in environments:
+            raise_error(f"Environment {env_name} not found in project")
+        src_env = environments[env_name]
+        if "path" in src_env:
+            env_path = src_env["path"]
+        try:
+            src_project_name = calkit.detect_project_name(project)
+        except Exception as e:
+            raise_error(f"Could not detect source project name: {e}")
     else:
-        cloud = True
         typer.echo("Importing from Cloud project")
-    raise_error("Not yet implemented")  # TODO
+        try:
+            resp = calkit.cloud.get(
+                f"/projects/{project}/environments/{env_name}"
+            )
+        except Exception as e:
+            raise_error(f"Failed to fetch environment info from cloud: {e}")
+        src_project_name = project
+        # TODO: Parse information we need from the response
+    # Write environment into current Calkit info
+    ck_info = calkit.load_calkit_info()
+    environments = ck_info.get("environments", {})
+    # Check if an environment with this name already exists
+    if dest_name is None:
+        dest_name = env_name
+    if dest_name in environments and not overwrite:
+        raise_error("An environment with this name already exists")
+    # If source env is imported, don't update that field
+    new_env = deepcopy(src_env)
+    if "imported_from" not in new_env:
+        new_env["imported_from"]["project"] = src_project_name
+    if dest_path is not None and "path" in new_env:
+        new_env["path"] = dest_path
+    # TODO: Write the environment content to file if necessary
+    new_env = dict(imported_from=dict(project=project))
+    environments[dest_name] = new_env
+    ck_info["environments"] = environments
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    repo = git.Repo()
+    repo.git.add("calkit.yaml")
+    if not no_commit and calkit.git.get_staged_files():
+        repo.git.commit(["-m", f"Import environment {src}"])

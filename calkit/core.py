@@ -12,9 +12,9 @@ import pickle
 import re
 import subprocess
 
-from calkit.models import ProjectStatus
-
 import requests
+
+from calkit.models import ProjectStatus
 
 try:
     from datetime import UTC
@@ -417,3 +417,22 @@ def get_latest_project_status(wdir: str = None) -> ProjectStatus | None:
     statuses = get_project_status_history(wdir=wdir)
     if statuses:
         return statuses[-1]
+
+
+def detect_project_name(wdir: str = None) -> str:
+    """Detect a Calkit project owner and name."""
+    ck_info = load_calkit_info(wdir=wdir)
+    name = ck_info.get("name")
+    owner = ck_info.get("owner")
+    if name is None or owner is None:
+        try:
+            url = Repo(path=wdir).remote().url
+        except ValueError:
+            raise ValueError("No Git remote set with name 'origin'")
+        from_url = url.split("github.com")[-1][1:].removesuffix(".git")
+        owner_name, project_name = from_url.split("/")
+    if name is None:
+        name = project_name
+    if owner is None:
+        owner = owner_name
+    return f"{owner}/{name}"

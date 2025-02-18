@@ -53,6 +53,7 @@ dev = [
   "kaleido==0.2.1",
   "numpy",
   "pandas>=2.2.3",
+  "polars>=1.18.0",
   "plotly",
   "pre-commit",
   "pyarrow",

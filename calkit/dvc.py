@@ -19,7 +19,7 @@ logger.setLevel(logging.INFO)
 
 def configure_remote(wdir: str = None):
     try:
-        project_name = calkit.git.detect_project_name(path=wdir)
+        project_name = calkit.detect_project_name(wdir=wdir)
     except ValueError as e:
         raise ValueError(f"Can't detect project name: {e}")
     # If Git origin is not set, set that

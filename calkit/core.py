@@ -26,7 +26,6 @@ except ImportError:
 from datetime import datetime
 from typing import Literal
 
-import git
 import ruamel.yaml
 from git import Repo
 from git.exc import InvalidGitRepositoryError
@@ -427,7 +426,7 @@ def detect_project_name(wdir: str = None) -> str:
     owner = ck_info.get("owner")
     if name is None or owner is None:
         try:
-            url = git.Repo(path=wdir).remote().url
+            url = Repo(path=wdir).remote().url
         except ValueError:
             raise ValueError("No Git remote set with name 'origin'")
         from_url = url.split("github.com")[-1][1:].removesuffix(".git")

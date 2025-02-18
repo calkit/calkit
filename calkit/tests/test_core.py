@@ -1,5 +1,6 @@
 """Tests for the ``core`` module."""
 
+import os
 import subprocess
 
 import git
@@ -25,3 +26,35 @@ def test_detect_project_name(tmp_dir):
     with open("calkit.yaml", "w") as f:
         f.write("owner: someone-else\nname: some-project\n")
     assert calkit.detect_project_name() == "someone-else/some-project"
+
+
+def test_load_calkit_info(tmp_dir):
+    subpath = "some/project"
+    os.makedirs(subpath)
+    os.makedirs(subpath + "/.calkit/environments")
+    with open(subpath + "/.calkit/environments/env2.yaml", "w") as f:
+        calkit.ryaml.dump({"kind": "docker", "image": "openfoam"}, f)
+    with open(subpath + "/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "name": "some-project",
+                "owner": "someone",
+                "environments": {
+                    "env1": {"kind": "docker", "image": "ubuntu"},
+                    "env2": {"_include": ".calkit/environments/env2.yaml"},
+                },
+            },
+            f,
+        )
+    ck_info = calkit.load_calkit_info(wdir=subpath)
+    assert ck_info["environments"]["env1"]["image"] == "ubuntu"
+    assert ck_info["environments"]["env2"] == {
+        "_include": ".calkit/environments/env2.yaml"
+    }
+    ck_info = calkit.load_calkit_info(wdir=subpath, process_includes=True)
+    assert ck_info["environments"]["env1"]["image"] == "ubuntu"
+    assert ck_info["environments"]["env2"]["image"] == "openfoam"
+    os.chdir(subpath)
+    ck_info = calkit.load_calkit_info(process_includes=True)
+    assert ck_info["environments"]["env1"]["image"] == "ubuntu"
+    assert ck_info["environments"]["env2"]["image"] == "openfoam"

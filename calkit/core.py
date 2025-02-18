@@ -107,9 +107,12 @@ def load_calkit_info(
                 for obj_name, obj in info[kind].items():
                     if "_include" in obj:
                         include_fpath = obj.pop("_include")
-                        with open(include_fpath) as f:
-                            include_data = ryaml.load(f)
-                        info[kind][obj_name] |= include_data
+                        if wdir is not None:
+                            include_fpath = os.path.join(wdir, include_fpath)
+                        if os.path.isfile(include_fpath):
+                            with open(include_fpath) as f:
+                                include_data = ryaml.load(f)
+                            info[kind][obj_name] |= include_data
     if as_pydantic:
         return ProjectInfo.model_validate(info)
     return info

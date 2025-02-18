@@ -242,7 +242,11 @@ def import_environment(
     ] = False,
 ) -> None:
     """Import an environment from another project."""
-    raise_error("This command is not yet implemented")
+    raise_error(
+        "This command is not yet implemented; "
+        "please thumbs-up this issue if you'd like to see "
+        "it finished: https://github.com/calkit/calkit/issues/239"
+    )
     try:
         project, env_name = src.split(":")
     except ValueError:

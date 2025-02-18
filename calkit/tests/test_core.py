@@ -1,10 +1,9 @@
 """Tests for the ``core`` module."""
 
+import os
 import subprocess
 
 import git
-
-import os
 
 import calkit
 

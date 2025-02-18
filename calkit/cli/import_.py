@@ -242,6 +242,7 @@ def import_environment(
     ] = False,
 ) -> None:
     """Import an environment from another project."""
+    raise_error("This command is not yet implemented")
     try:
         project, env_name = src.split(":")
     except ValueError:

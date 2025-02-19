@@ -498,6 +498,12 @@ def new_docker_env(
     wdir: Annotated[
         str, typer.Option("--wdir", help="Working directory.")
     ] = "/work",
+    user: Annotated[
+        str,
+        typer.Option(
+            "--user", help="User account to use to run the container."
+        ),
+    ] = None,
     platform: Annotated[
         str, typer.Option("--platform", help="Which platform(s) to build for.")
     ] = None,
@@ -563,6 +569,8 @@ def new_docker_env(
         env["layers"] = layers
     if platform:
         env["platform"] = platform
+    if user:
+        env["user"] = user
     envs[name] = env
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:

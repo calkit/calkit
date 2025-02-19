@@ -856,6 +856,8 @@ def run_in_env(
         ]
         if platform:
             docker_cmd += ["--platform", platform]
+        if docker_user := env.get("user"):
+            docker_cmd += ["--user", docker_user]
         docker_cmd += env.get("args", [])
         docker_cmd += [
             "-it" if sys.stdin.isatty() else "-i",

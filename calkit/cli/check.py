@@ -11,6 +11,7 @@ from typing import Annotated
 
 import checksumdir
 import dotenv
+import git
 import typer
 
 import calkit
@@ -224,3 +225,11 @@ def check_env_vars():
             dotenv.set_key(
                 dotenv_path=".env", key_to_set=name, value_to_set=value
             )
+    # Ensure that .env is ignored by git
+    repo = git.Repo()
+    if not repo.ignored(".env"):
+        typer.echo("Adding .env to .gitignore")
+        with open(".gitignore", "a") as f:
+            f.write("\n.env\n")
+    message = "✅ All set!"
+    typer.echo(message.encode("utf-8", errors="replace"))

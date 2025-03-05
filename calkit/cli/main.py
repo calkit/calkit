@@ -6,11 +6,10 @@ import csv
 import glob
 import os
 import platform as _platform
+import posixpath
 import subprocess
 import sys
 import time
-
-import posixpath
 
 import dotenv
 import dvc.repo

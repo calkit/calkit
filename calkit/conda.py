@@ -56,7 +56,6 @@ class EnvCheckResult(BaseModel):
 
 def check_env(
     env_fpath: str = "environment.yml",
-    use_mamba=True,
     log_func=None,
     output_fpath: str = None,
     relaxed: bool = False,
@@ -71,13 +70,13 @@ def check_env(
     If ``relaxed`` is enabled, dependencies can exist in either the conda or
     pip category.
     """
-    conda = "mamba" if use_mamba else "conda"
     if log_func is None:
         log_func = calkit.logger.info
     log_func(f"Checking conda env defined in {env_fpath}")
     res = EnvCheckResult()
+    # Use mamba here because it's faster and produces less output
     envs = json.loads(
-        subprocess.check_output([conda, "env", "list", "--json"]).decode()
+        subprocess.check_output(["mamba", "env", "list", "--json"]).decode()
     )["envs"]
     # Get existing env names, but skip the base environment
     # Note that this could fail for environments with non-default prefixes
@@ -100,7 +99,9 @@ def check_env(
         log_func(f"Environment {env_name} doesn't exist; creating")
         res.env_exists = False
         # Environment doesn't exist, so create it
-        subprocess.check_call([conda, "env", "create", "-y", "-f", env_fpath])
+        # Create with conda since newer mamba versions create a strange
+        # "Library" subdirectory, at least on Windows
+        subprocess.check_call(["conda", "env", "create", "-y", "-f", env_fpath])
         env_needs_rebuild = False
         env_needs_export = True
     else:
@@ -185,7 +186,7 @@ def check_env(
     if env_needs_rebuild:
         res.env_needs_rebuild = True
         log_func(f"Rebuilding {env_name} since it does not match spec")
-        subprocess.check_call([conda, "env", "create", "-y", "-f", env_fpath])
+        subprocess.check_call(["conda", "env", "create", "-y", "-f", env_fpath])
         env_needs_export = True
     else:
         log_func(f"Environment {env_name} matches spec")

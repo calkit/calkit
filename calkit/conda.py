@@ -101,7 +101,9 @@ def check_env(
         # Environment doesn't exist, so create it
         # Create with conda since newer mamba versions create a strange
         # "Library" subdirectory, at least on Windows
-        subprocess.check_call(["conda", "env", "create", "-y", "-f", env_fpath])
+        subprocess.check_call(
+            ["conda", "env", "create", "-y", "-f", env_fpath]
+        )
         env_needs_rebuild = False
         env_needs_export = True
     else:
@@ -186,7 +188,9 @@ def check_env(
     if env_needs_rebuild:
         res.env_needs_rebuild = True
         log_func(f"Rebuilding {env_name} since it does not match spec")
-        subprocess.check_call(["conda", "env", "create", "-y", "-f", env_fpath])
+        subprocess.check_call(
+            ["conda", "env", "create", "-y", "-f", env_fpath]
+        )
         env_needs_export = True
     else:
         log_func(f"Environment {env_name} matches spec")

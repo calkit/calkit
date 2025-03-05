@@ -10,6 +10,8 @@ import subprocess
 import sys
 import time
 
+import posixpath
+
 import dotenv
 import dvc.repo
 import git
@@ -835,7 +837,7 @@ def run_in_env(
     docker_wdir = env.get("wdir", "/work")
     docker_wdir_mount = docker_wdir
     if wdir is not None:
-        docker_wdir = os.path.join(docker_wdir, wdir)
+        docker_wdir = posixpath.join(docker_wdir, wdir)
     shell = env.get("shell", "sh")
     platform = env.get("platform")
     if env["kind"] == "docker":

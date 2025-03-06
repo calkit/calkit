@@ -25,7 +25,12 @@ check: format ## Run code quality tools.
 .PHONY: test
 test: ## Test the code with pytest.
 	@echo "🚀 Testing code with pytest"
-	@uv run pytest --cov --cov-config=pyproject.toml --cov-report=xml
+	@uv run pytest
+
+.PHONY: test-cov
+test-cov: ## Test the code coverage with pytest.
+	@echo "🚀 Testing code coverage with pytest"
+	@uv run pytest --cov --cov-config=pyproject.toml
 
 .PHONY: docs-test
 docs-test: ## Test if documentation can be built without warnings or errors.

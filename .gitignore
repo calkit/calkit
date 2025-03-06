@@ -5,3 +5,5 @@ dev.ipynb
 site
 .env
 .venv
+.coverage*
+coverage.xml

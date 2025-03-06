@@ -14,7 +14,7 @@ list_app = typer.Typer(no_args_is_help=True)
 def _list_objects(
     kind: Literal[
         "notebooks", "datasets", "figures", "references", "publications"
-    ]
+    ],
 ):
     """List objects.
 

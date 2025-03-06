@@ -25,7 +25,6 @@ def _posix_path(path: str):
 
 @magics_class
 class Calkit(Magics):
-
     @magic_arguments.magic_arguments()
     @magic_arguments.argument(
         "-n",

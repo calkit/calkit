@@ -289,7 +289,7 @@ class Calkit(Magics):
         # If the last line of the cell has no equals signs, run that command,
         # since it's probably meant for display
         last_line = cell.strip().split("\n")[-1]
-        if not "=" in last_line:
+        if "=" not in last_line:
             self.shell.run_cell(last_line)
 
 

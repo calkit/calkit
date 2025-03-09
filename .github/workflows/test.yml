@@ -43,8 +43,9 @@ jobs:
         with:
           miniforge-version: latest
           auto-activate-base: true
+          conda-remove-defaults: true
       - name: Initialize Bash for Conda
-        shell: bash
+        shell: bash -el {0}
         run: conda init bash
       - name: Install Pixi
         shell: bash

@@ -22,6 +22,7 @@ from typing_extensions import Annotated, Optional
 import calkit
 from calkit.cli import print_sep, raise_error, run_cmd, warn
 from calkit.cli.check import check_app, check_conda_env, check_docker_env
+from calkit.cli.cloud import cloud_app
 from calkit.cli.config import config_app
 from calkit.cli.import_ import import_app
 from calkit.cli.list import list_app
@@ -50,6 +51,7 @@ app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
+app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
 
 # Constants for version control auto-ignore
 AUTO_IGNORE_SUFFIXES = [".DS_Store", ".env", ".pyc"]
@@ -139,6 +141,9 @@ def clone(
             help="Location to clone to (default will be ./{repo_name})"
         ),
     ] = None,
+    ssh: Annotated[
+        bool, typer.Option("--ssh", help="Use SSH with Git.")
+    ] = False,
     no_config_remote: Annotated[
         bool,
         typer.Option(
@@ -174,9 +179,11 @@ def clone(
         except Exception as e:
             raise_error(f"Failed to fetch project information: {e}")
         url = project["git_repo_url"]
-        # TODO: Figure out if we should clone with SSH
         if not url.endswith(".git"):
             url += ".git"
+        if ssh:
+            typer.echo("Converting URL to use with SSH")
+            url = url.replace("https://github.com/", "git@github.com:")
     # Git clone
     cmd = ["git", "clone", url]
     if recursive:

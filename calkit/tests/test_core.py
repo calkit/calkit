@@ -9,8 +9,11 @@ import calkit
 
 
 def test_find_project_dirs():
+    # TODO: We should setup a dummy project for this test so it doesn't depend
+    # on the state of the dev's machine
     calkit.find_project_dirs()
-    assert calkit.find_project_dirs(relative=False)
+    if os.path.isdir(os.path.join(os.path.expanduser("~"), "calkit")):
+        assert calkit.find_project_dirs(relative=False)
 
 
 def test_to_kebab_case():

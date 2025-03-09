@@ -52,8 +52,9 @@ jobs:
         run: |
           curl -fsSL https://pixi.sh/install.sh | bash
       - name: Run tests
-        shell: bash
+        shell: bash -el {0}
         run: |
           source ~/.bashrc
           pixi --version
+          conda --version
           make test

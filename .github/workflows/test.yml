@@ -43,6 +43,8 @@ jobs:
         with:
           miniforge-version: latest
           auto-activate-base: true
+      - name: Initialize Bash for Conda
+        run: conda init bash
       - name: Install Pixi
         shell: bash
         run: |

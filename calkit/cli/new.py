@@ -1295,7 +1295,7 @@ def new_status(
     now = calkit.utcnow(remove_tz=False)
     # Append to end of CSV
     write_header = not os.path.isfile(fpath)
-    with open(fpath, "a") as f:
+    with open(fpath, "a", newline="") as f:
         writer = csv.writer(f)
         if write_header:
             writer.writerow(["timestamp", "status", "message"])

@@ -32,7 +32,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     # TODO: Figure out why the tests hang and delete line below
-    if: false
+    if: true
     steps:
       - uses: actions/checkout@v4
       - name: Configure Git Credentials
@@ -59,8 +59,8 @@ jobs:
         shell: bash -el {0}
         run: |
           source ~/.bashrc
+          source ~/.profile
           pixi --version
           conda --version
           docker --version
-          conda activate base
           make test

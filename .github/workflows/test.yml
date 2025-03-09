@@ -27,4 +27,6 @@ jobs:
           source ~/.bashrc
           pixi --version
       - name: Run tests
-        run: make test
+        run: |
+          pixi --version
+          make test

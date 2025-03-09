@@ -57,4 +57,5 @@ jobs:
           source ~/.bashrc
           pixi --version
           conda --version
+          conda activate base
           make test

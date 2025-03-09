@@ -22,7 +22,7 @@ def test_run_in_env(tmp_dir):
         "--name my-image "
         "--from ubuntu "
         "--add-layer miniforge "
-        "--description 'This is a test image'",
+        '--description "This is a test image"',
         shell=True,
     )
     out = (
@@ -41,7 +41,7 @@ def test_run_in_env(tmp_dir):
         "--from ubuntu "
         "--add-layer miniforge "
         "--add-layer foampy "
-        "--description 'This is a test image 2'",
+        '--description "This is a test image 2"',
         shell=True,
     )
     with pytest.raises(subprocess.CalledProcessError):
@@ -71,7 +71,7 @@ def test_run_in_env(tmp_dir):
         "calkit new docker-env "
         "--name py3.10 "
         "--image python:3.10.15-bookworm "
-        "--description 'Just Python.'",
+        '--description "Just Python."',
         shell=True,
     )
     out = (

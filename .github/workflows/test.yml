@@ -56,8 +56,8 @@ jobs:
         shell: bash -el {0}
         run: |
           source ~/.bashrc
-          source ~/.bash_profile
           pixi --version
           conda --version
           docker --version
+          conda activate base
           make test

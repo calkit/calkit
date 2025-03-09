@@ -104,7 +104,7 @@ def test_check_env(tmp_dir, conda_env_name):
             "conda",
             "run",
             "-n",
-            ENV_NAME,
+            conda_env_name,
             "pip",
             "install",
             "--upgrade",

@@ -30,7 +30,7 @@ def test_check_list():
 
 
 def delete_env(name: str):
-    subprocess.check_call(["mamba", "env", "remove", "-y", "-n", name])
+    subprocess.check_call(["conda", "env", "remove", "-y", "-n", name])
 
 
 @pytest.fixture

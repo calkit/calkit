@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import os
+import pathlib
 import shutil
 import subprocess
 import zipfile
@@ -867,7 +868,7 @@ def new_publication(
     elif overwrite and pub_fpath in pub_paths:
         pubs = [p for p in pubs if p.get("path") != pub_fpath]
     pub = dict(
-        path=pub_fpath,
+        path=pathlib.Path(pub_fpath).as_posix(),
         kind=kind,
         title=title,
         description=description,
@@ -1294,7 +1295,7 @@ def new_status(
     now = calkit.utcnow(remove_tz=False)
     # Append to end of CSV
     write_header = not os.path.isfile(fpath)
-    with open(fpath, "a") as f:
+    with open(fpath, "a", newline="") as f:
         writer = csv.writer(f)
         if write_header:
             writer.writerow(["timestamp", "status", "message"])

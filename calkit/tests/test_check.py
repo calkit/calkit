@@ -40,6 +40,7 @@ def test_check_call():
         .strip()
         .split("\n")
     )
+    out = [v.strip() for v in out]
     assert "sup" in out
     assert "yo" not in out
     out = (
@@ -50,4 +51,5 @@ def test_check_call():
         .strip()
         .split("\n")
     )
+    out = [v.strip() for v in out]
     assert "yo" in out

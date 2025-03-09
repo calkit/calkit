@@ -29,6 +29,7 @@ jobs:
           make test
   windows:
     runs-on: windows-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Configure Git Credentials

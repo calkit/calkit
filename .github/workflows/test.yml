@@ -12,12 +12,14 @@ jobs:
           git config --global user.name github-actions[bot]
           git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
           git config --global init.defaultBranch main
-      - name: Install uv
+      - name: Setup uv
         uses: astral-sh/setup-uv@v5
-      - name: Install Miniforge
+      - name: Setup Miniforge
         uses: conda-incubator/setup-miniconda@v3
         with:
           miniforge-version: latest
           auto-activate-base: true
+      - name: Setup Pixi
+        uses: prefix-dev/setup-pixi@v0.8.3
       - name: Run tests
         run: make test

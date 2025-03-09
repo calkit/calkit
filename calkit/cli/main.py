@@ -141,6 +141,9 @@ def clone(
             help="Location to clone to (default will be ./{repo_name})"
         ),
     ] = None,
+    ssh: Annotated[
+        bool, typer.Option("--ssh", help="Use SSH with Git.")
+    ] = False,
     no_config_remote: Annotated[
         bool,
         typer.Option(
@@ -176,9 +179,11 @@ def clone(
         except Exception as e:
             raise_error(f"Failed to fetch project information: {e}")
         url = project["git_repo_url"]
-        # TODO: Figure out if we should clone with SSH
         if not url.endswith(".git"):
             url += ".git"
+        if ssh:
+            typer.echo("Converting URL to use with SSH")
+            url = url.replace("https://github.com/", "git@github.com:")
     # Git clone
     cmd = ["git", "clone", url]
     if recursive:

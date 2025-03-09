@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import os
+import pathlib
 import shutil
 import subprocess
 import zipfile
@@ -867,7 +868,7 @@ def new_publication(
     elif overwrite and pub_fpath in pub_paths:
         pubs = [p for p in pubs if p.get("path") != pub_fpath]
     pub = dict(
-        path=pub_fpath,
+        path=pathlib.Path(pub_fpath).as_posix(),
         kind=kind,
         title=title,
         description=description,

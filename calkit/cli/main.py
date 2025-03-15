@@ -867,7 +867,7 @@ def run_in_env(
         docker_user = env.get("user")
         if docker_user is None:
             try:
-                docker_user = os.getuid()
+                docker_user = str(os.getuid())
             except AttributeError:
                 # We're probably on Windows, so there is no UID to map
                 pass

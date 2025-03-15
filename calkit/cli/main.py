@@ -864,7 +864,16 @@ def run_in_env(
         ]
         if platform:
             docker_cmd += ["--platform", platform]
-        if docker_user := env.get("user"):
+        docker_user = env.get("user")
+        if docker_user is None:
+            try:
+                uid = os.getuid()
+                gid = os.getgid()
+                docker_user = f"{uid}:{gid}"
+            except AttributeError:
+                # We're probably on Windows, so there is no UID to map
+                pass
+        if docker_user is not None:
             docker_cmd += ["--user", docker_user]
         docker_cmd += env.get("args", [])
         docker_cmd += [

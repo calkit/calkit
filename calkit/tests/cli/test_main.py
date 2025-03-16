@@ -31,6 +31,8 @@ def test_run_in_env(tmp_dir):
         .strip()
     )
     assert out == "sup"
+    # Ensure we can modify a local file
+    subprocess.check_call(["calkit", "xenv", "touch", "test.txt"])
     # Now let's create a 2nd Docker env and make sure we need to call it by
     # name when trying to run
     subprocess.check_call(

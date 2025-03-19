@@ -339,3 +339,10 @@ def test_save(tmp_dir):
     # Check that the last log message was "Update test.txt"
     last_commit_message = repo.head.commit.message.strip()
     assert last_commit_message == "Update test.txt"
+    # Check that we fail to save if there are two changed files
+    with open("test2.txt", "w") as f:
+        f.write("sup")
+    with open("test3.txt", "w") as f:
+        f.write("sup")
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(["calkit", "save", "-aM", "--no-push"])

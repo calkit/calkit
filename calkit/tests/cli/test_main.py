@@ -320,3 +320,36 @@ def test_status(tmp_dir):
     calkit.get_project_status_history(as_pydantic=False)
     with pytest.raises(subprocess.CalledProcessError):
         subprocess.check_call(["calkit", "new", "status", "very-cool"])
+
+
+def test_save(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    repo = git.Repo()
+    assert repo.head.commit.message.strip() == "Initialize DVC"
+    with open("test.txt", "w") as f:
+        f.write("sup")
+    subprocess.check_call(["calkit", "save", "-aM", "--no-push"])
+    # Check that the last log message was "Add test.txt"
+    last_commit_message = repo.head.commit.message.strip()
+    assert last_commit_message == "Add test.txt"
+    # Update the file
+    with open("test.txt", "w") as f:
+        f.write("sup sup")
+    subprocess.check_call(["calkit", "save", "-aM", "--no-push"])
+    # Check that the last log message was "Update test.txt"
+    last_commit_message = repo.head.commit.message.strip()
+    assert last_commit_message == "Update test.txt"
+    # Check that we fail to save if there are two changed files
+    with open("test2.txt", "w") as f:
+        f.write("sup")
+    with open("test3.txt", "w") as f:
+        f.write("sup")
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(["calkit", "save", "-aM", "--no-push"])
+    with open("test3.txt", "w") as f:
+        f.write("sup2")
+    subprocess.check_call(
+        ["calkit", "save", "-am", "A unique message", "--no-push"]
+    )
+    last_commit_message = repo.head.commit.message.strip()
+    assert last_commit_message == "A unique message"

@@ -126,6 +126,12 @@ def init(
     if force:
         dvc_cmd.append("-f")
     subprocess.run(dvc_cmd)
+    # Ensure autostage is enabled for DVC
+    subprocess.call(["dvc", "config", "core.autostage", "true"])
+    # Commit the newly created .dvc directory
+    repo = git.Repo()
+    repo.git.add(".dvc")
+    repo.git.commit("-m", "Initialize DVC")
     # TODO: Initialize `calkit.yaml`
     # TODO: Initialize `dvc.yaml`
     # TODO: Add a sane .gitignore file
@@ -327,7 +333,7 @@ def add(
     # Ensure autostage is enabled for DVC
     subprocess.call(["dvc", "config", "core.autostage", "true"])
     subprocess.call(["git", "add", ".dvc/config"])
-    dvc_paths = [obj.get("path") for obj in dvc_repo.ls(".", dvc_only=True)]
+    dvc_paths = calkit.dvc.list_paths()
     untracked_git_files = repo.untracked_files
     if auto_commit_message:
         # See if this path is in the repo already
@@ -460,6 +466,14 @@ def save(
     message: Annotated[
         Optional[str], typer.Option("--message", "-m", help="Commit message.")
     ] = None,
+    auto_commit_message: Annotated[
+        bool,
+        typer.Option(
+            "--auto-message",
+            "-M",
+            help="Commit with an automatically-generated message.",
+        ),
+    ] = False,
     to: Annotated[
         str,
         typer.Option(
@@ -483,6 +497,21 @@ def save(
         add(paths, to=to)
     elif save_all:
         add(paths=["."])
+    if auto_commit_message and message is None:
+        staged_files = calkit.git.get_staged_files_with_status()
+        if len(staged_files) != 1:
+            raise_error(
+                "Automatic commit messages can only be generated when "
+                f"changing one file (changed: {staged_files})"
+            )
+        dvc_paths = calkit.dvc.list_paths()
+        # See if this path is in the repo already
+        staged_file = staged_files[0]["path"]
+        status = staged_files[0]["status"]
+        if staged_file in dvc_paths or status == "M":
+            message = f"Update {staged_file}"
+        else:
+            message = f"Add {staged_file}"
     if message is None:
         typer.echo("No message provided; entering interactive mode")
         typer.echo("Creating a commit including the following paths:")

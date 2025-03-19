@@ -346,3 +346,10 @@ def test_save(tmp_dir):
         f.write("sup")
     with pytest.raises(subprocess.CalledProcessError):
         subprocess.check_call(["calkit", "save", "-aM", "--no-push"])
+    with open("test3.txt", "w") as f:
+        f.write("sup2")
+    subprocess.check_call(
+        ["calkit", "save", "-am", "A unique message", "--no-push"]
+    )
+    last_commit_message = repo.head.commit.message.strip()
+    assert last_commit_message == "A unique message"

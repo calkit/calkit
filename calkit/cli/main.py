@@ -486,6 +486,9 @@ def save(
             "--no-push", help="Do not push to Git and DVC after committing."
         ),
     ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
+    ] = False,
 ):
     """Save paths by committing and pushing.
 
@@ -499,6 +502,10 @@ def save(
         add(paths=["."])
     if auto_commit_message and message is None:
         staged_files = calkit.git.get_staged_files_with_status()
+        if verbose:
+            typer.echo(
+                f"Generating commit message for staged files: {staged_files}"
+            )
         if len(staged_files) != 1:
             raise_error(
                 "Automatic commit messages can only be generated when "
@@ -520,9 +527,19 @@ def save(
         typer.echo("Please provide a message describing the changes.")
         typer.echo("Example: Add new data to data/raw")
         message = typer.prompt("Message")
+    # Figure out if we have any DVC files in this commit, and if not, we can
+    # skip pushing to DVC
+    any_dvc = any(
+        [
+            path == "dvc.lock" or path.endswith(".dvc")
+            for path in calkit.git.get_staged_files()
+        ]
+    )
     commit(all=True if paths is None else False, message=message)
     if not no_push:
-        push()
+        if verbose and not any_dvc:
+            typer.echo("Not pushing to DVC since no DVC files were staged")
+        push(no_dvc=not any_dvc)
 
 
 @app.command(name="pull")
@@ -552,6 +569,7 @@ def pull(
 @app.command(name="push")
 def push(
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
+    no_dvc: Annotated[bool, typer.Option("--no-dvc")] = False,
 ):
     """Push with both Git and DVC."""
     typer.echo("Pushing to Git remote")
@@ -559,18 +577,21 @@ def push(
         subprocess.check_call(["git", "push"])
     except subprocess.CalledProcessError:
         raise_error("Git push failed")
-    typer.echo("Pushing to DVC remote")
-    if not no_check_auth:
-        # Check that our dvc remotes all have our DVC token set for them
-        remotes = calkit.dvc.get_remotes()
-        for name, url in remotes.items():
-            if name == "calkit" or name.startswith("calkit:"):
-                typer.echo(f"Checking authentication for DVC remote: {name}")
-                calkit.dvc.set_remote_auth(remote_name=name)
-    try:
-        subprocess.check_call(["dvc", "push"])
-    except subprocess.CalledProcessError:
-        raise_error("DVC push failed")
+    if not no_dvc:
+        typer.echo("Pushing to DVC remote")
+        if not no_check_auth:
+            # Check that our dvc remotes all have our DVC token set for them
+            remotes = calkit.dvc.get_remotes()
+            for name, url in remotes.items():
+                if name == "calkit" or name.startswith("calkit:"):
+                    typer.echo(
+                        f"Checking authentication for DVC remote: {name}"
+                    )
+                    calkit.dvc.set_remote_auth(remote_name=name)
+        try:
+            subprocess.check_call(["dvc", "push"])
+        except subprocess.CalledProcessError:
+            raise_error("DVC push failed")
 
 
 @app.command(name="sync")
@@ -1349,3 +1370,15 @@ def upgrade():
     else:
         cmd = ["pip", "install", "--upgrade", "calkit-python"]
     subprocess.run(cmd)
+
+
+@app.command(name="switch-branch")
+def switch_branch(name: Annotated[str, typer.Argument(help="Branch name.")]):
+    """Switch to a different branch."""
+    repo = git.Repo()
+    if name not in repo.heads:
+        typer.echo(f"Branch '{name}' does not exist; creating")
+        cmd = ["-b", name]
+    else:
+        cmd = [name]
+    repo.git.checkout(cmd)

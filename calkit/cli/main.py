@@ -1370,3 +1370,15 @@ def upgrade():
     else:
         cmd = ["pip", "install", "--upgrade", "calkit-python"]
     subprocess.run(cmd)
+
+
+@app.command(name="switch-branch")
+def switch_branch(name: Annotated[str, typer.Argument(help="Branch name.")]):
+    """Switch to a different branch."""
+    repo = git.Repo()
+    if name not in repo.heads:
+        typer.echo(f"Branch '{name}' does not exist; creating")
+        cmd = ["-b", name]
+    else:
+        cmd = [name]
+    repo.git.checkout(cmd)

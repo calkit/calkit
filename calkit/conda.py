@@ -236,6 +236,9 @@ def check_env(
         )
         # Remove prefix from env export since it will be an absolute path
         _ = env_export.pop("prefix")
+        # Remove name if prefix is set, since that will be the prefix
+        if prefix is not None:
+            _ = env_export.pop("name")
         with open(output_fpath, "w") as f:
             ryaml.dump(env_export, f)
     return res

@@ -75,9 +75,9 @@ def check_env(
     log_func(f"Checking conda env defined in {env_fpath}")
     res = EnvCheckResult()
     # Use mamba here because it's faster and produces less output
-    info = json.loads(subprocess.check_output(["mamba", "info", "--json"]))
-    base_env = info["base environment"]
-    envs_dir = os.path.join(base_env, "envs")
+    info = json.loads(subprocess.check_output(["conda", "info", "--json"]))
+    root_prefix = info["root_prefix"]
+    envs_dir = os.path.join(root_prefix, "envs")
     envs = json.loads(
         subprocess.check_output(["mamba", "env", "list", "--json"]).decode()
     )["envs"]
@@ -86,7 +86,7 @@ def check_env(
         os.path.basename(env) for env in envs if env.startswith(envs_dir)
     ]
     # Get a list of environments defined by prefix instead of name
-    env_prefixes = [e for e in envs if not e.startswith(base_env)]
+    env_prefixes = [e for e in envs if not e.startswith(root_prefix)]
     with open(env_fpath) as f:
         env_spec = ryaml.load(f)
     env_name = env_spec["name"]

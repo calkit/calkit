@@ -180,7 +180,7 @@ def check_reproducibility(
     if log_func is None:
         log_func = print
     try:
-        repo = git.Repo(wdir)
+        git.Repo(wdir)
         res["is_git_repo"] = True
     except InvalidGitRepositoryError:
         res["is_git_repo"] = False

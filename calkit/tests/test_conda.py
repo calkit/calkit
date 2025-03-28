@@ -80,10 +80,11 @@ def test_check_env(tmp_dir, conda_env_name):
     )
     res = check_env()
     assert res.env_exists
-    assert not res.env_needs_export
+    assert res.env_needs_export
     assert res.env_needs_rebuild
     res = check_env()
     assert not res.env_needs_rebuild
+    assert not res.env_needs_export
     # Check relaxed mode, where we allow dependencies to be in either the pip
     # or conda section
     subprocess.check_call(
@@ -163,3 +164,46 @@ def test_check_env(tmp_dir, conda_env_name):
     res = check_env()
     assert not res.env_needs_export
     assert not res.env_needs_rebuild
+
+
+@pytest.fixture
+def conda_env_prefix():
+    prefix = ".conda-envs/my-conda-env"
+    yield prefix
+    subprocess.check_call(["conda", "env", "remove", "-y", "--prefix", prefix])
+
+
+def test_check_prefix_env(tmp_dir, conda_env_prefix):
+    subprocess.check_call(["calkit", "init"])
+    # Test we can use a local prefix
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "conda-env",
+            "-n",
+            "my-conda-env",
+            "python=3.12",
+            "--prefix",
+            conda_env_prefix,
+        ]
+    )
+    res = check_env()
+    assert not res.env_exists
+    assert res.env_needs_export
+    assert os.path.isfile(os.path.join(conda_env_prefix, "env-export.yml"))
+    res = check_env()
+    assert res.env_exists
+    # Env will need to be exported a second time since we save it inside the
+    # prefix folder, so the mtime will be slightly after creation of the
+    # initial environment
+    assert res.env_needs_export
+    assert not res.env_needs_rebuild
+    # Now the env should be exported okay
+    res = check_env()
+    assert res.env_exists
+    assert not res.env_needs_export
+    assert not res.env_needs_rebuild
+    subprocess.check_call(
+        ["calkit", "xenv", "-n", "my-conda-env", "python", "--version"]
+    )

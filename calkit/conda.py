@@ -112,8 +112,12 @@ def check_env(
         "--no-builds",
         "--json",
     ]
+    # Create with conda since newer mamba versions create a strange
+    # "Library" subdirectory, at least on Windows
+    create_cmd = ["conda", "env", "create", "-y", "-f", env_fpath]
     if prefix is not None:
         export_cmd += ["--prefix", prefix]
+        create_cmd += ["--prefix", prefix]
     else:
         export_cmd += ["-n", env_name]
     # Check if env even exists
@@ -122,11 +126,6 @@ def check_env(
         log_func(f"Environment {env_name} doesn't exist; creating")
         res.env_exists = False
         # Environment doesn't exist, so create it
-        # Create with conda since newer mamba versions create a strange
-        # "Library" subdirectory, at least on Windows
-        create_cmd = ["conda", "env", "create", "-y", "-f", env_fpath]
-        if prefix is not None:
-            create_cmd += ["--prefix", prefix]
         subprocess.check_call(create_cmd)
         env_needs_rebuild = False
         env_needs_export = True
@@ -205,7 +204,6 @@ def check_env(
     if env_needs_rebuild:
         res.env_needs_rebuild = True
         log_func(f"Rebuilding {env_name} since it does not match spec")
-        create_cmd = ["conda", "env", "create", "-y", "-f", env_fpath]
         subprocess.check_call(create_cmd)
         env_needs_export = True
     else:

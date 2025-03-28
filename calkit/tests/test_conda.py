@@ -228,3 +228,18 @@ def test_check_prefix_env(tmp_dir, conda_env_prefix):
             "import requests",
         ]
     )
+    # Test that we can specify --wdir
+    os.makedirs("subdir")
+    subprocess.check_call(
+        [
+            "calkit",
+            "xenv",
+            "--wdir",
+            "subdir",
+            "-n",
+            "my-conda-env",
+            "python",
+            "-c",
+            "import requests",
+        ]
+    )

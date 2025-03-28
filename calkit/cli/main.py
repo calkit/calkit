@@ -953,10 +953,11 @@ def run_in_env(
                 relaxed=relaxed_check,
                 quiet=not verbose,
             )
+        # TODO: Prefix should only be in the env file or calkit.yaml, not both?
         prefix = env.get("prefix")
         conda_cmd = ["conda", "run"]
         if prefix is not None:
-            conda_cmd += ["--prefix", prefix]
+            conda_cmd += ["--prefix", os.path.abspath(prefix)]
         else:
             conda_cmd += ["-n", conda_env["name"]]
         cmd = conda_cmd + cmd

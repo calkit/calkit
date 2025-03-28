@@ -134,6 +134,7 @@ def check_env(
         env_needs_export = False
         # Environment does exist, so check it
         if os.path.isfile(env_check_fpath):
+            log_func(f"Found env check file at {env_check_fpath}")
             # Open up the env check result file
             with open(env_check_fpath) as f:
                 env_check = ryaml.load(f)
@@ -145,11 +146,13 @@ def check_env(
             current_mtime = os.path.getmtime(
                 os.path.normpath(env_check["prefix"])
             )
+            log_func(f"Env check mtime: {existing_mtime}")
+            log_func(f"Env dir mtime: {current_mtime}")
             env_needs_export = existing_mtime != current_mtime
         else:
+            log_func(f"Env check file at {env_check_fpath} does not exist")
             env_needs_export = True
         if env_needs_export:
-            res.env_needs_export = True
             log_func(f"Exporting existing env to {env_check_fpath}")
             env_check = json.loads(
                 subprocess.check_output(export_cmd).decode()
@@ -208,6 +211,7 @@ def check_env(
         log_func(f"Environment {env_name} matches spec")
         res.env_needs_rebuild = False
     # If the env was rebuilt, export the env check
+    res.env_needs_export = env_needs_export
     if env_needs_export:
         log_func(f"Exporting existing env to {env_check_fpath}")
         env_check = json.loads(subprocess.check_output(export_cmd).decode())
@@ -230,6 +234,8 @@ def check_env(
                 [a for a in export_cmd if a != "--no-builds"]
             ).decode()
         )
+        # Remove prefix from env export since it will be an absolute path
+        _ = env_export.pop("prefix")
         with open(output_fpath, "w") as f:
             ryaml.dump(env_export, f)
     return res

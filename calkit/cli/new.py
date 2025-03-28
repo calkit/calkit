@@ -1007,7 +1007,11 @@ def new_conda_env(
         name=conda_name, channels=["conda-forge"], dependencies=packages
     )
     if prefix is not None:
+        from calkit.cli.main import ignore
+
         conda_env["prefix"] = prefix
+        ignore(prefix, no_commit=True)
+        repo.git.add(".gitignore")
     if pip_packages:
         conda_env["dependencies"].append(dict(pip=pip_packages))
     with open(path, "w") as f:

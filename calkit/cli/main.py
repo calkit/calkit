@@ -949,9 +949,17 @@ def run_in_env(
             conda_env = calkit.ryaml.load(f)
         if not no_check:
             check_conda_env(
-                env_fpath=env["path"], relaxed=relaxed_check, quiet=True
+                env_fpath=env["path"],
+                relaxed=relaxed_check,
+                quiet=True,
             )
-        cmd = ["conda", "run", "-n", conda_env["name"]] + cmd
+        prefix = env.get("prefix")
+        conda_cmd = ["conda", "run"]
+        if prefix is not None:
+            conda_cmd += ["--prefix", prefix]
+        else:
+            conda_cmd += ["-n", conda_env["name"]]
+        cmd = conda_cmd + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:

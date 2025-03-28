@@ -75,35 +75,58 @@ def check_env(
     log_func(f"Checking conda env defined in {env_fpath}")
     res = EnvCheckResult()
     # Use mamba here because it's faster and produces less output
+    info = json.loads(subprocess.check_output(["conda", "info", "--json"]))
+    root_prefix = info["root_prefix"]
+    envs_dir = os.path.join(root_prefix, "envs")
     envs = json.loads(
         subprocess.check_output(["mamba", "env", "list", "--json"]).decode()
     )["envs"]
-    # Get existing env names, but skip the base environment
-    # Note that this could fail for environments with non-default prefixes
+    # Get existing env names for those in the envs directory
     existing_env_names = [
-        os.path.basename(env) for env in envs if "envs" in env
+        os.path.basename(env) for env in envs if env.startswith(envs_dir)
     ]
+    # Get a list of environments defined by prefix instead of name
+    env_prefixes = [e for e in envs if not e.startswith(root_prefix)]
     with open(env_fpath) as f:
         env_spec = ryaml.load(f)
     env_name = env_spec["name"]
-    env_check_fpath = os.path.join(
-        os.path.expanduser("~"),
-        ".calkit",
-        "conda-env-checks",
-        env_name + ".yml",
-    )
+    prefix = env_spec.get("prefix")
+    prefix_orig = prefix
+    if prefix is not None:
+        prefix = os.path.abspath(prefix)
+        env_check_fpath = os.path.join(prefix, "env-export.yml")
+    else:
+        env_check_fpath = os.path.join(
+            os.path.expanduser("~"),
+            ".calkit",
+            "conda-env-checks",
+            env_name + ".yml",
+        )
     env_check_dir = os.path.dirname(env_check_fpath)
     os.makedirs(env_check_dir, exist_ok=True)
+    # Create env export command, which will be used later
+    export_cmd = [
+        "conda",  # Mamba output is slightly different
+        "env",
+        "export",
+        "--no-builds",
+        "--json",
+    ]
+    # Create with conda since newer mamba versions create a strange
+    # "Library" subdirectory, at least on Windows
+    create_cmd = ["conda", "env", "create", "-y", "-f", env_fpath]
+    if prefix is not None:
+        export_cmd += ["--prefix", prefix]
+        create_cmd += ["--prefix", prefix]
+    else:
+        export_cmd += ["-n", env_name]
     # Check if env even exists
-    if env_name not in existing_env_names:
+    # If env has a prefix defined, it will be identified by that
+    if env_name not in existing_env_names and prefix not in env_prefixes:
         log_func(f"Environment {env_name} doesn't exist; creating")
         res.env_exists = False
         # Environment doesn't exist, so create it
-        # Create with conda since newer mamba versions create a strange
-        # "Library" subdirectory, at least on Windows
-        subprocess.check_call(
-            ["conda", "env", "create", "-y", "-f", env_fpath]
-        )
+        subprocess.check_call(create_cmd)
         env_needs_rebuild = False
         env_needs_export = True
     else:
@@ -111,6 +134,7 @@ def check_env(
         env_needs_export = False
         # Environment does exist, so check it
         if os.path.isfile(env_check_fpath):
+            log_func(f"Found env check file at {env_check_fpath}")
             # Open up the env check result file
             with open(env_check_fpath) as f:
                 env_check = ryaml.load(f)
@@ -122,24 +146,16 @@ def check_env(
             current_mtime = os.path.getmtime(
                 os.path.normpath(env_check["prefix"])
             )
+            log_func(f"Env check mtime: {existing_mtime}")
+            log_func(f"Env dir mtime: {current_mtime}")
             env_needs_export = existing_mtime != current_mtime
         else:
+            log_func(f"Env check file at {env_check_fpath} does not exist")
             env_needs_export = True
         if env_needs_export:
-            res.env_needs_export = True
             log_func(f"Exporting existing env to {env_check_fpath}")
             env_check = json.loads(
-                subprocess.check_output(
-                    [
-                        "conda",  # Mamba output is slightly different
-                        "env",
-                        "export",
-                        "-n",
-                        env_name,
-                        "--no-builds",
-                        "--json",
-                    ]
-                ).decode()
+                subprocess.check_output(export_cmd).decode()
             )
             env_check["mtime"] = os.path.getmtime(
                 os.path.normpath(env_check["prefix"])
@@ -188,29 +204,16 @@ def check_env(
     if env_needs_rebuild:
         res.env_needs_rebuild = True
         log_func(f"Rebuilding {env_name} since it does not match spec")
-        subprocess.check_call(
-            ["conda", "env", "create", "-y", "-f", env_fpath]
-        )
+        subprocess.check_call(create_cmd)
         env_needs_export = True
     else:
         log_func(f"Environment {env_name} matches spec")
         res.env_needs_rebuild = False
     # If the env was rebuilt, export the env check
+    res.env_needs_export = env_needs_export
     if env_needs_export:
         log_func(f"Exporting existing env to {env_check_fpath}")
-        env_check = json.loads(
-            subprocess.check_output(
-                [
-                    "conda",  # Mamba output is slightly different
-                    "env",
-                    "export",
-                    "-n",
-                    env_name,
-                    "--no-builds",
-                    "--json",
-                ]
-            ).decode()
-        )
+        env_check = json.loads(subprocess.check_output(export_cmd).decode())
         env_check["mtime"] = os.path.getmtime(
             os.path.normpath(env_check["prefix"])
         )
@@ -225,8 +228,17 @@ def check_env(
         or not os.path.isfile(output_fpath)
     ):
         log_func(f"Exporting lock file to {output_fpath}")
+        env_export = json.loads(
+            subprocess.check_output(
+                [a for a in export_cmd if a != "--no-builds"]
+            ).decode()
+        )
+        # Remove prefix from env export since it will be an absolute path
+        _ = env_export.pop("prefix")
+        # Remove name if prefix is set, since that will be the prefix
+        if prefix is not None:
+            _ = env_export.pop("name")
+            env_export["prefix"] = prefix_orig
         with open(output_fpath, "w") as f:
-            _ = env_check.pop("mtime")
-            _ = env_check.pop("prefix")
-            ryaml.dump(env_check, f)
+            ryaml.dump(env_export, f)
     return res

@@ -905,7 +905,7 @@ def run_in_env(
                 fpath=env["path"],
                 platform=env.get("platform"),
                 deps=env.get("deps", []),
-                quiet=True,
+                quiet=not verbose,
             )
         shell_cmd = _to_shell_cmd(cmd)
         docker_cmd = [
@@ -949,9 +949,18 @@ def run_in_env(
             conda_env = calkit.ryaml.load(f)
         if not no_check:
             check_conda_env(
-                env_fpath=env["path"], relaxed=relaxed_check, quiet=True
+                env_fpath=env["path"],
+                relaxed=relaxed_check,
+                quiet=not verbose,
             )
-        cmd = ["conda", "run", "-n", conda_env["name"]] + cmd
+        # TODO: Prefix should only be in the env file or calkit.yaml, not both?
+        prefix = env.get("prefix")
+        conda_cmd = ["conda", "run"]
+        if prefix is not None:
+            conda_cmd += ["--prefix", os.path.abspath(prefix)]
+        else:
+            conda_cmd += ["-n", conda_env["name"]]
+        cmd = conda_cmd + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:

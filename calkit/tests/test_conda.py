@@ -207,3 +207,24 @@ def test_check_prefix_env(tmp_dir, conda_env_prefix):
     subprocess.check_call(
         ["calkit", "xenv", "-n", "my-conda-env", "python", "--version"]
     )
+    # Test that we can add a new dependency
+    with open("environment.yml") as f:
+        env = calkit.ryaml.load(f)
+    env["dependencies"].append("requests")
+    with open("environment.yml", "w") as f:
+        calkit.ryaml.dump(env, f)
+    res = check_env()
+    assert res.env_exists
+    assert res.env_needs_export
+    assert res.env_needs_rebuild
+    subprocess.check_call(
+        [
+            "calkit",
+            "xenv",
+            "-n",
+            "my-conda-env",
+            "python",
+            "-c",
+            "import requests",
+        ]
+    )

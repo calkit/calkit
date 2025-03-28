@@ -91,6 +91,7 @@ def check_env(
         env_spec = ryaml.load(f)
     env_name = env_spec["name"]
     prefix = env_spec.get("prefix")
+    prefix_orig = prefix
     if prefix is not None:
         prefix = os.path.abspath(prefix)
         env_check_fpath = os.path.join(prefix, "env-export.yml")
@@ -239,6 +240,7 @@ def check_env(
         # Remove name if prefix is set, since that will be the prefix
         if prefix is not None:
             _ = env_export.pop("name")
+            env_export["prefix"] = prefix_orig
         with open(output_fpath, "w") as f:
             ryaml.dump(env_export, f)
     return res

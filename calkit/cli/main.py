@@ -905,7 +905,7 @@ def run_in_env(
                 fpath=env["path"],
                 platform=env.get("platform"),
                 deps=env.get("deps", []),
-                quiet=True,
+                quiet=not verbose,
             )
         shell_cmd = _to_shell_cmd(cmd)
         docker_cmd = [
@@ -951,7 +951,7 @@ def run_in_env(
             check_conda_env(
                 env_fpath=env["path"],
                 relaxed=relaxed_check,
-                quiet=True,
+                quiet=not verbose,
             )
         prefix = env.get("prefix")
         conda_cmd = ["conda", "run"]

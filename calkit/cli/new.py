@@ -963,6 +963,9 @@ def new_conda_env(
     pip_packages: Annotated[
         list[str], typer.Option("--pip", help="Packages to install with pip.")
     ] = [],
+    prefix: Annotated[
+        str, typer.Option("--prefix", help="Prefix for environment location.")
+    ] = None,
     description: Annotated[
         str, typer.Option("--description", help="Description.")
     ] = None,
@@ -1003,6 +1006,8 @@ def new_conda_env(
     conda_env = dict(
         name=conda_name, channels=["conda-forge"], dependencies=packages
     )
+    if prefix is not None:
+        conda_env["prefix"] = prefix
     if pip_packages:
         conda_env["dependencies"].append(dict(pip=pip_packages))
     with open(path, "w") as f:
@@ -1010,6 +1015,8 @@ def new_conda_env(
     repo.git.add(path)
     typer.echo("Adding environment to calkit.yaml")
     env = dict(path=path, kind="conda")
+    if prefix is not None:
+        env["prefix"] = prefix
     if description is not None:
         env["description"] = description
     envs[name] = env

@@ -225,8 +225,18 @@ def check_env(
         or not os.path.isfile(output_fpath)
     ):
         log_func(f"Exporting lock file to {output_fpath}")
+        env_export = json.loads(
+            subprocess.check_output(
+                [
+                    "conda",
+                    "env",
+                    "export",
+                    "-n",
+                    env_name,
+                    "--json",
+                ]
+            ).decode()
+        )
         with open(output_fpath, "w") as f:
-            _ = env_check.pop("mtime")
-            _ = env_check.pop("prefix")
-            ryaml.dump(env_check, f)
+            ryaml.dump(env_export, f)
     return res

@@ -134,12 +134,16 @@ class HomebrewInstall(QWidget):
                 ),
             ]
         )
-        # TODO: Check if this was successful
-        self.layout.removeWidget(self.install_button)
-        self.install_button.deleteLater()
-        self.install_button = None
-        # Update label to show installed
-        self.label.setText(self.txt_installed)
+        # Check if this was successful
+        if subprocess.returncode == 0:
+            self.layout.removeWidget(self.install_button)
+            self.install_button.deleteLater()
+            self.install_button = None
+            # Update label to show installed
+            self.label.setText(self.txt_installed)
+        else:
+            print("Failed")
+            # TODO: Show error message to user
 
 
 class ChocolateyInstall(QWidget):

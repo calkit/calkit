@@ -14,9 +14,12 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -56,19 +59,40 @@ def get_platform() -> Literal["linux", "mac", "windows"]:
         raise ValueError("Unsupported platform")
 
 
+class CalkitToken(QWidget):
+    """A widget to set the Calkit token."""
+
+    def __init__(self):
+        super().__init__()
+        self.config = calkit.config.read()
+        txt = "Set Calkit Cloud API token:"
+        if self.config.token is not None:
+            txt += "  ✅"
+        self.label = QLabel(txt)
+        self.fix_button = QPushButton(
+            "Set" if self.config.token is None else "Update"
+        )
+        self.layout = QHBoxLayout(self)
+        self.fix_button.clicked.connect(self.open_token_dialog)
+        self.layout.addWidget(self.label)
+        self.layout.addWidget(self.fix_button)
+
+    def open_token_dialog(self):
+        text, ok = QInputDialog.getText(
+            self,
+            "Set Calkit Cloud API token",
+            "Token:",
+            echo=QLineEdit.Password,
+        )
+        if ok and text:
+            self.config.token = text
+            self.config.write()
+
+
 def make_setup_steps_list() -> list[QCheckBox]:
     """Create a list of setup steps."""
-    steps = []
+    steps = [CalkitToken()]
     platform = get_platform()
-    config = calkit.config.read()
-    steps.append(
-        QCheckBox(
-            "Set Calkit Cloud API token",
-            checkable=True,
-            checked=config.token is not None,  # TODO Check validity
-            # TODO Add a button to set the token
-        )
-    )
     if platform == "mac":
         steps.append(
             QCheckBox(

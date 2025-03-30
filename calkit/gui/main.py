@@ -13,7 +13,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -203,6 +202,72 @@ class ChocolateyInstall(QWidget):
             # TODO: Show error message to user
 
 
+class GitInstall(QWidget):
+    """A widget to check for and install Git."""
+
+    def __init__(
+        self,
+        package_manager_install_widget: HomebrewInstall
+        | ChocolateyInstall
+        | None = None,
+    ):
+        super().__init__()
+        self.package_manager_install_widget = package_manager_install_widget
+        self.layout = QHBoxLayout(self)
+        self.layout.setAlignment(Qt.AlignTop)
+        self.layout.setSpacing(0)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.txt_installed = "Install Git:  ✅ "
+        self.txt_not_installed = "Install Git:  ❌ "
+        installed = calkit.check_dep_exists("git")
+        self.label = QLabel(
+            self.txt_installed if installed else self.txt_not_installed
+        )
+        self.layout.addWidget(self.label)
+        if not installed:
+            self.install_button = QPushButton("Install")
+            self.install_button.clicked.connect(self.install)
+            self.layout.addWidget(self.install_button)
+            platform = get_platform()
+            if platform == "windows" and not calkit.check_dep_exists("choco"):
+                self.install_button.setEnabled(False)
+                self.install_button.setToolTip(
+                    "Chocolatey must be installed first"
+                )
+            elif platform == "mac" and not calkit.check_dep_exists("brew"):
+                self.install_button.setEnabled(False)
+                self.install_button.setToolTip(
+                    "Homebrew must be installed first"
+                )
+            elif platform == "linux" and not calkit.check_dep_exists("apt"):
+                self.install_button.setEnabled(False)
+                self.install_button.setToolTip("APT must be installed")
+
+    def install(self):
+        # Disable install button
+        self.install_button.setEnabled(False)
+        # Show loading message
+        self.install_button.setText("Installing...")
+        if get_platform() == "windows":
+            # Use Chocolatey to install Git
+            process = subprocess.run(["choco", "install", "git"])
+        elif get_platform() == "mac":
+            process = subprocess.run(["brew", "install", "git"])
+        elif get_platform() == "linux":
+            # Use apt to install Git
+            cmd = "apt install git"
+            process = subprocess.run(["pkexec", "sh", "-c", cmd])
+        if process.returncode == 0:
+            self.layout.removeWidget(self.install_button)
+            self.install_button.deleteLater()
+            self.install_button = None
+            # Update label to show installed
+            self.label.setText(self.txt_installed)
+        else:
+            print("Failed")
+            # TODO: Error handling
+
+
 class GitUserName(QWidget):
     """A widget to set the Git user name."""
 
@@ -285,13 +350,7 @@ def make_setup_steps_list() -> list[QWidget]:
         steps.append(HomebrewInstall())
     elif platform == "windows":
         steps.append(ChocolateyInstall())
-    steps.append(
-        QCheckBox(
-            "Install Git",
-            checkable=True,
-            checked=calkit.check_dep_exists("git"),
-        )
-    )
+    steps.append(GitInstall())
     steps.append(GitUserName())
     steps.append(GitUserEmail())
     return steps

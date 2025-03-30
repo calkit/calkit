@@ -350,15 +350,27 @@ class GitUserEmail(QWidget):
 
 def make_setup_steps_widget_list() -> list[QWidget]:
     """Create a list of setup steps."""
-    steps = [CalkitToken()]
+    steps = []
     platform = get_platform()
     if platform == "mac":
         steps.append(HomebrewInstall())
     elif platform == "windows":
         steps.append(ChocolateyInstall())
     steps.append(PackageManagerInstallWidget(app_name="git", app_title="Git"))
+    # TODO: Install WSL if on Windows
+    # TODO: Install everything in WSL if on Windows?
+    # TODO: Install Docker
+    # TODO: Ensure Docker is running
+    # TODO: Ensure Docker permissions are set on Linux
     steps.append(GitUserName())
     steps.append(GitUserEmail())
+    # TODO: Ensure we have GitHub credentials?
+    # TODO: Install Miniforge, initializing shell
+    # TODO: Install Calkit inside Miniforge base environment
+    # Ensure Calkit token is set
+    steps.append(CalkitToken())
+    # TODO: Install VS Code
+    # TODO: Install recommended VS Code extensions
     return steps
 
 

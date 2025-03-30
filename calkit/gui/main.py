@@ -210,10 +210,10 @@ class GitUserName(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.txt_not_set = "Set Git user.name:  ❌ "
         self.txt_set = "Set Git user.name:  ✅ "
-        self.label = QLabel(
-            self.txt_set if git_user_name() else self.txt_not_set
-        )
         self.git_user_name = git_user_name()
+        self.label = QLabel(
+            self.txt_set if self.git_user_name else self.txt_not_set
+        )
         self.fix_button = QPushButton(
             "Set" if not self.git_user_name else "Update"
         )
@@ -247,10 +247,10 @@ class GitUserEmail(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.txt_not_set = "Set Git user.email:  ❌ "
         self.txt_set = "Set Git user.email:  ✅ "
-        self.label = QLabel(
-            self.txt_set if git_email() else self.txt_not_set
-        )
         self.git_email = git_email()
+        self.label = QLabel(
+            self.txt_set if self.git_email else self.txt_not_set
+        )
         self.fix_button = QPushButton(
             "Set" if not self.git_email else "Update"
         )

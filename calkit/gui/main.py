@@ -202,11 +202,15 @@ class ChocolateyInstall(QWidget):
             # TODO: Show error message to user
 
 
-class GitInstall(QWidget):
-    """A widget to check for and install Git."""
+class PackageManagerInstallWidget(QWidget):
+    """A widget to check for and install an app with the system package
+    manager.
+    """
 
     def __init__(
         self,
+        app_name: str,
+        app_title: str,
         package_manager_install_widget: HomebrewInstall
         | ChocolateyInstall
         | None = None,
@@ -217,9 +221,11 @@ class GitInstall(QWidget):
         self.layout.setAlignment(Qt.AlignTop)
         self.layout.setSpacing(0)
         self.layout.setContentsMargins(0, 0, 0, 0)
-        self.txt_installed = "Install Git:  ✅ "
-        self.txt_not_installed = "Install Git:  ❌ "
-        installed = calkit.check_dep_exists("git")
+        self.app_name = app_name
+        self.app_title = app_title
+        self.txt_installed = f"Install {self.app_title}:  ✅ "
+        self.txt_not_installed = f"Install {self.app_title}:  ❌ "
+        installed = calkit.check_dep_exists(self.app_name)
         self.label = QLabel(
             self.txt_installed if installed else self.txt_not_installed
         )
@@ -250,12 +256,12 @@ class GitInstall(QWidget):
         self.install_button.setText("Installing...")
         if get_platform() == "windows":
             # Use Chocolatey to install Git
-            process = subprocess.run(["choco", "install", "git"])
+            process = subprocess.run(["choco", "install", self.app_name])
         elif get_platform() == "mac":
-            process = subprocess.run(["brew", "install", "git"])
+            process = subprocess.run(["brew", "install", self.app_name])
         elif get_platform() == "linux":
             # Use apt to install Git
-            cmd = "apt install git"
+            cmd = f"apt install {self.app_name}"
             process = subprocess.run(["pkexec", "sh", "-c", cmd])
         if process.returncode == 0:
             self.layout.removeWidget(self.install_button)
@@ -342,7 +348,7 @@ class GitUserEmail(QWidget):
             self.fix_button.setText("Update")
 
 
-def make_setup_steps_list() -> list[QWidget]:
+def make_setup_steps_widget_list() -> list[QWidget]:
     """Create a list of setup steps."""
     steps = [CalkitToken()]
     platform = get_platform()
@@ -350,7 +356,7 @@ def make_setup_steps_list() -> list[QWidget]:
         steps.append(HomebrewInstall())
     elif platform == "windows":
         steps.append(ChocolateyInstall())
-    steps.append(GitInstall())
+    steps.append(PackageManagerInstallWidget(app_name="git", app_title="Git"))
     steps.append(GitUserName())
     steps.append(GitUserEmail())
     return steps
@@ -381,10 +387,10 @@ class MainWindow(QWidget):
         self.setup_title = QLabel("System setup")
         self.setup_title.setStyleSheet("font-weight: bold; font-size: 16px;")
         self.setup_layout.addWidget(self.setup_title)
-        # Add checkboxes to the left section
-        self.checkboxes = make_setup_steps_list()
-        for checkbox in self.checkboxes:
-            self.setup_layout.addWidget(checkbox, stretch=0)
+        # Add setup steps to the left section
+        self.setup_step_widgets = make_setup_steps_widget_list()
+        for setup_step_widget in self.setup_step_widgets:
+            self.setup_layout.addWidget(setup_step_widget, stretch=0)
         self.layout.addWidget(self.setup_widget)
         # Right half: Projects
         self.projects_widget = QWidget()

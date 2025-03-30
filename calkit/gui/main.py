@@ -79,11 +79,11 @@ class CalkitToken(QWidget):
         self.layout.setAlignment(Qt.AlignTop)
         self.layout.setSpacing(0)
         self.layout.setContentsMargins(0, 0, 0, 0)
-        self.fix_button.clicked.connect(self.open_token_dialog)
+        self.fix_button.clicked.connect(self.open_dialog)
         self.layout.addWidget(self.label)
         self.layout.addWidget(self.fix_button)
 
-    def open_token_dialog(self):
+    def open_dialog(self):
         webbrowser.open("https://calkit.io/settings?tab=tokens")
         text, ok = QInputDialog.getText(
             self,
@@ -220,9 +220,9 @@ class GitUserName(QWidget):
         self.fix_button.setStyleSheet("font-size: 10px;")
         self.layout.addWidget(self.label)
         self.layout.addWidget(self.fix_button, stretch=0)
-        self.fix_button.clicked.connect(self.open_user_name_dialog)
+        self.fix_button.clicked.connect(self.open_dialog)
 
-    def open_user_name_dialog(self):
+    def open_dialog(self):
         text, ok = QInputDialog.getText(
             self,
             "Set Git user.name",

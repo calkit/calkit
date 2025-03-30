@@ -66,15 +66,19 @@ class CalkitToken(QWidget):
     def __init__(self):
         super().__init__()
         self.config = calkit.config.read()
-        self.txt_not_set = "Set Calkit Cloud API token:  ❌"
-        self.txt_set = "Set Calkit Cloud API token:  ✅"
+        self.txt_not_set = "Set Calkit Cloud API token:  ❌ "
+        self.txt_set = "Set Calkit Cloud API token:  ✅ "
         self.label = QLabel(
             self.txt_set if self.config.token is not None else self.txt_not_set
         )
         self.fix_button = QPushButton(
             "Set" if self.config.token is None else "Update"
         )
+        self.fix_button.setStyleSheet("font-size: 10px;")
         self.layout = QHBoxLayout(self)
+        self.layout.setAlignment(Qt.AlignTop)
+        self.layout.setSpacing(0)
+        self.layout.setContentsMargins(0, 0, 0, 0)
         self.fix_button.clicked.connect(self.open_token_dialog)
         self.layout.addWidget(self.label)
         self.layout.addWidget(self.fix_button)
@@ -100,8 +104,11 @@ class HomebrewInstall(QWidget):
     def __init__(self):
         super().__init__()
         self.layout = QHBoxLayout(self)
-        self.txt_installed = "Install Homebrew:  ✅"
-        self.txt_not_installed = "Install Homebrew:  ❌"
+        self.layout.setAlignment(Qt.AlignTop)
+        self.layout.setSpacing(0)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.txt_installed = "Install Homebrew:  ✅ "
+        self.txt_not_installed = "Install Homebrew:  ❌ "
         installed = calkit.check_dep_exists("brew")
         self.label = QLabel(
             self.txt_installed if installed else self.txt_not_installed
@@ -141,8 +148,8 @@ class ChocolateyInstall(QWidget):
     def __init__(self):
         super().__init__()
         self.layout = QHBoxLayout(self)
-        self.txt_installed = "Install Chocolatey:  ✅"
-        self.txt_not_installed = "Install Chocolatey:  ❌"
+        self.txt_installed = "Install Chocolatey:  ✅ "
+        self.txt_not_installed = "Install Chocolatey:  ❌ "
         installed = calkit.check_dep_exists("choco")
         self.label = QLabel(
             self.txt_installed if installed else self.txt_not_installed
@@ -245,13 +252,14 @@ class MainWindow(QWidget):
         self.setup_widget = QWidget()
         self.setup_layout = QVBoxLayout(self.setup_widget)
         self.setup_layout.setAlignment(Qt.AlignTop)
+        self.setup_layout.setSpacing(0)
         self.setup_title = QLabel("System setup")
         self.setup_title.setStyleSheet("font-weight: bold; font-size: 16px;")
         self.setup_layout.addWidget(self.setup_title)
         # Add checkboxes to the left section
         self.checkboxes = make_setup_steps_list()
         for checkbox in self.checkboxes:
-            self.setup_layout.addWidget(checkbox)
+            self.setup_layout.addWidget(checkbox, stretch=0)
         self.layout.addWidget(self.setup_widget)
         # Right half: Projects
         self.projects_widget = QWidget()

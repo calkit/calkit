@@ -94,26 +94,112 @@ class CalkitToken(QWidget):
             self.fix_button.setText("Update")
 
 
+class HomebrewInstall(QWidget):
+    """A widget to check for and install Homebrew."""
+
+    def __init__(self):
+        super().__init__()
+        self.layout = QHBoxLayout(self)
+        self.txt_installed = "Install Homebrew:  ✅"
+        self.txt_not_installed = "Install Homebrew:  ❌"
+        installed = calkit.check_dep_exists("brew")
+        self.label = QLabel(
+            self.txt_installed if installed else self.txt_not_installed
+        )
+        self.layout.addWidget(self.label)
+        if not installed:
+            self.install_button = QPushButton("Install")
+            self.install_button.clicked.connect(self.install)
+            self.layout.addWidget(self.install_button)
+
+    def install(self):
+        # Disable install button
+        self.install_button.setEnabled(False)
+        # Show loading message
+        self.install_button.setText("Installing...")
+        subprocess.run(
+            [
+                "/bin/bash",
+                "-c",
+                (
+                    "$(curl -fsSL https://raw.githubusercontent.com/"
+                    "Homebrew/install/HEAD/install.sh)"
+                ),
+            ]
+        )
+        # TODO: Check if this was successful
+        self.layout.removeWidget(self.install_button)
+        self.install_button.deleteLater()
+        self.install_button = None
+        # Update label to show installed
+        self.label.setText(self.txt_installed)
+
+
+class ChocolateyInstall(QWidget):
+    """A widget to check for and install Chocolatey."""
+
+    def __init__(self):
+        super().__init__()
+        self.layout = QHBoxLayout(self)
+        self.txt_installed = "Install Chocolatey:  ✅"
+        self.txt_not_installed = "Install Chocolatey:  ❌"
+        installed = calkit.check_dep_exists("choco")
+        self.label = QLabel(
+            self.txt_installed if installed else self.txt_not_installed
+        )
+        self.layout.addWidget(self.label)
+        if not installed:
+            self.install_button = QPushButton("Install")
+            self.install_button.clicked.connect(self.install)
+            self.layout.addWidget(self.install_button)
+
+    def install(self):
+        # Disable install button
+        self.install_button.setEnabled(False)
+        # Show loading message
+        self.install_button.setText("Installing...")
+        # Run command as administrator in PowerShell
+        cmd = (
+            "Set-ExecutionPolicy Bypass -Scope Process -Force; "
+            "[System.Net.ServicePointManager]::SecurityProtocol = "
+            "[System.Net.ServicePointManager]::SecurityProtocol -bor 3072; "
+            "iex ((New-Object System.Net.WebClient).DownloadString("
+            "'https://community.chocolatey.org/install.ps1'))"
+        )
+        process = subprocess.run(
+            [
+                "powershell",
+                "-Command",
+                "Start-Process",
+                "powershell",
+                "-Verb",
+                "runAs",
+                "-ArgumentList",
+                f"'{cmd}'",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        # Check if this was successful
+        if process.returncode == 0:
+            self.layout.removeWidget(self.install_button)
+            self.install_button.deleteLater()
+            self.install_button = None
+            # Update label to show installed
+            self.label.setText(self.txt_installed)
+        else:
+            print("Failed")
+            # TODO: Show error message to user
+
+
 def make_setup_steps_list() -> list[QCheckBox]:
     """Create a list of setup steps."""
     steps = [CalkitToken()]
     platform = get_platform()
     if platform == "mac":
-        steps.append(
-            QCheckBox(
-                "Install Homebrew",
-                checkable=True,
-                checked=calkit.check_dep_exists("brew"),
-            )
-        )
+        steps.append(HomebrewInstall())
     elif platform == "windows":
-        steps.append(
-            QCheckBox(
-                "Install Chocolatey",
-                checkable=True,
-                checked=calkit.check_dep_exists("choco"),
-            )
-        )
+        steps.append(ChocolateyInstall())
     steps.append(
         QCheckBox(
             "Install Git",

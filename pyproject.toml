@@ -44,6 +44,9 @@ data = [
   "pandas>=2.2.3",
   "polars>=1.18.0",
 ]
+gui = [
+  "pyside6",
+]
 
 [dependency-groups]
 dev = [
@@ -57,6 +60,8 @@ dev = [
   "plotly",
   "pre-commit",
   "pyarrow",
+  "pyinstaller",
+  "pyside6",
   "pytest",
   "pytest-cov",
   "pytest-test-utils", # For tmp_dir fixture

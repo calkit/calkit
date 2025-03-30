@@ -6,6 +6,7 @@ in their editor of choice.
 
 import subprocess
 import sys
+import webbrowser
 from typing import Literal
 
 from PySide6.QtCore import Qt
@@ -65,10 +66,11 @@ class CalkitToken(QWidget):
     def __init__(self):
         super().__init__()
         self.config = calkit.config.read()
-        txt = "Set Calkit Cloud API token:"
-        if self.config.token is not None:
-            txt += "  ✅"
-        self.label = QLabel(txt)
+        self.txt_not_set = "Set Calkit Cloud API token:  ❌"
+        self.txt_set = "Set Calkit Cloud API token:  ✅"
+        self.label = QLabel(
+            self.txt_set if self.config.token is not None else self.txt_not_set
+        )
         self.fix_button = QPushButton(
             "Set" if self.config.token is None else "Update"
         )
@@ -78,15 +80,18 @@ class CalkitToken(QWidget):
         self.layout.addWidget(self.fix_button)
 
     def open_token_dialog(self):
+        webbrowser.open("https://calkit.io/settings?tab=tokens")
         text, ok = QInputDialog.getText(
             self,
             "Set Calkit Cloud API token",
-            "Token:",
+            "Enter API token created at calkit.io/settings:",
             echo=QLineEdit.Password,
         )
         if ok and text:
             self.config.token = text
             self.config.write()
+            self.label.setText(self.txt_set)
+            self.fix_button.setText("Update")
 
 
 def make_setup_steps_list() -> list[QCheckBox]:

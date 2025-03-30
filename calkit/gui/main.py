@@ -379,6 +379,8 @@ def make_setup_steps_widget_list() -> list[QWidget]:
     # TODO: Install everything in WSL if on Windows?
     # TODO: Install Docker
     # TODO: Ensure Docker is running
+    # We can use `docker desktop status` and `docker desktop start` for this
+    # However, this is not necessary on Linux
     # TODO: Ensure Docker permissions are set on Linux
     steps.append(GitUserName())
     steps.append(GitUserEmail())

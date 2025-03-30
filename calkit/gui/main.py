@@ -199,7 +199,81 @@ class ChocolateyInstall(QWidget):
             # TODO: Show error message to user
 
 
-def make_setup_steps_list() -> list[QCheckBox]:
+class GitUserName(QWidget):
+    """A widget to set the Git user name."""
+
+    def __init__(self):
+        super().__init__()
+        self.layout = QHBoxLayout(self)
+        self.layout.setAlignment(Qt.AlignTop)
+        self.layout.setSpacing(0)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.txt_not_set = "Set Git user.name:  ❌ "
+        self.txt_set = "Set Git user.name:  ✅ "
+        self.label = QLabel(
+            self.txt_set if git_user_name() else self.txt_not_set
+        )
+        self.git_user_name = git_user_name()
+        self.fix_button = QPushButton(
+            "Set" if not self.git_user_name else "Update"
+        )
+        self.fix_button.setStyleSheet("font-size: 10px;")
+        self.layout.addWidget(self.label)
+        self.layout.addWidget(self.fix_button, stretch=0)
+        self.fix_button.clicked.connect(self.open_user_name_dialog)
+
+    def open_user_name_dialog(self):
+        text, ok = QInputDialog.getText(
+            self,
+            "Set Git user.name",
+            "Enter your full name:",
+            text=self.git_user_name,
+        )
+        if ok and text:
+            subprocess.run(["git", "config", "--global", "user.name", text])
+            self.label.setText(self.txt_set)
+            self.git_user_name = git_user_name()
+            self.fix_button.setText("Update")
+
+
+class GitUserEmail(QWidget):
+    """A widget to set the Git user email."""
+
+    def __init__(self):
+        super().__init__()
+        self.layout = QHBoxLayout(self)
+        self.layout.setAlignment(Qt.AlignTop)
+        self.layout.setSpacing(0)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.txt_not_set = "Set Git user.email:  ❌ "
+        self.txt_set = "Set Git user.email:  ✅ "
+        self.label = QLabel(
+            self.txt_set if git_email() else self.txt_not_set
+        )
+        self.git_email = git_email()
+        self.fix_button = QPushButton(
+            "Set" if not self.git_email else "Update"
+        )
+        self.fix_button.setStyleSheet("font-size: 10px;")
+        self.layout.addWidget(self.label)
+        self.layout.addWidget(self.fix_button, stretch=0)
+        self.fix_button.clicked.connect(self.open_dialog)
+
+    def open_dialog(self):
+        text, ok = QInputDialog.getText(
+            self,
+            "Set Git user.email",
+            "Enter your email address:",
+            text=self.git_email,
+        )
+        if ok and text:
+            subprocess.run(["git", "config", "--global", "user.email", text])
+            self.label.setText(self.txt_set)
+            self.git_email = git_email()
+            self.fix_button.setText("Update")
+
+
+def make_setup_steps_list() -> list[QWidget]:
     """Create a list of setup steps."""
     steps = [CalkitToken()]
     platform = get_platform()
@@ -214,20 +288,8 @@ def make_setup_steps_list() -> list[QCheckBox]:
             checked=calkit.check_dep_exists("git"),
         )
     )
-    steps.append(
-        QCheckBox(
-            "Set Git user.name",
-            checkable=True,
-            checked=bool(git_user_name()),
-        )
-    )
-    steps.append(
-        QCheckBox(
-            "Set Git user.email",
-            checkable=True,
-            checked=bool(git_email()),
-        )
-    )
+    steps.append(GitUserName())
+    steps.append(GitUserEmail())
     return steps
 
 

@@ -359,11 +359,21 @@ def make_setup_steps_widget_list() -> list[QWidget]:
     We also want to disable the Git config widgets until Git is installed.
     """
     steps = []
+    # TODO: Check that this GUI is the latest version and add option to update
+    # if not
     platform = get_platform()
     if platform == "mac":
         steps.append(HomebrewInstall())
     elif platform == "windows":
         steps.append(ChocolateyInstall())
+        # Check for WSL
+        output = subprocess.check_output(["wsl", "--status"]).decode()
+        print("WSL status:", output)
+        wsl_okay = (
+            "Default Version: 2" in output
+            and "Default Distribution: Ubuntu" in output
+            and "not supported" not in output
+        )
     steps.append(PackageManagerInstallWidget(app_name="git", app_title="Git"))
     # TODO: Install WSL if on Windows
     # TODO: Install everything in WSL if on Windows?

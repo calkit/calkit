@@ -60,7 +60,7 @@ def get_platform() -> Literal["linux", "mac", "windows"]:
         raise ValueError("Unsupported platform")
 
 
-def create_setup_step_layout(widget: QWidget) -> QHBoxLayout:
+def make_setup_step_layout(widget: QWidget) -> QHBoxLayout:
     layout = QHBoxLayout(widget)
     layout.setAlignment(Qt.AlignTop)
     layout.setSpacing(0)
@@ -83,7 +83,7 @@ class CalkitToken(QWidget):
             "Set" if self.config.token is None else "Update"
         )
         self.fix_button.setStyleSheet("font-size: 10px;")
-        self.layout = create_setup_step_layout(self)
+        self.layout = make_setup_step_layout(self)
         self.fix_button.clicked.connect(self.open_dialog)
         self.layout.addWidget(self.label)
         self.layout.addWidget(self.fix_button)
@@ -112,7 +112,7 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
 
     def __init__(self):
         super().__init__()
-        self.layout = create_setup_step_layout(self)
+        self.layout = make_setup_step_layout(self)
         self.txt_installed = f"Install {self.dependency_name}:  ✅ "
         self.txt_not_installed = f"Install {self.dependency_name}:  ❌ "
         installed = self.installed
@@ -272,7 +272,7 @@ class PackageManagerInstallWidget(QWidget):
     ):
         super().__init__()
         self.package_manager_install_widget = package_manager_install_widget
-        self.layout = create_setup_step_layout(self)
+        self.layout = make_setup_step_layout(self)
         self.app_name = app_name
         self.app_title = app_title
         self.txt_installed = f"Install {self.app_title}:  ✅ "
@@ -331,7 +331,7 @@ class GitUserName(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.layout = create_setup_step_layout(self)
+        self.layout = make_setup_step_layout(self)
         self.txt_not_set = "Set Git user.name:  ❌ "
         self.txt_set = "Set Git user.name:  ✅ "
         self.git_user_name = git_user_name()
@@ -365,7 +365,7 @@ class GitUserEmail(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.layout = create_setup_step_layout(self)
+        self.layout = make_setup_step_layout(self)
         self.txt_not_set = "Set Git user.email:  ❌ "
         self.txt_set = "Set Git user.email:  ✅ "
         self.git_email = git_email()

@@ -421,7 +421,6 @@ def make_setup_steps_widget_list() -> list[QWidget]:
         steps.append(ChocolateyInstall())
         steps.append(WSLInstall())
     steps.append(PackageManagerInstallWidget(app_name="git", app_title="Git"))
-    # TODO: Install WSL if on Windows
     # TODO: Install everything in WSL if on Windows?
     # TODO: Install Docker
     # TODO: Ensure Docker is running

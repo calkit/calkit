@@ -219,39 +219,23 @@ class ChocolateyInstall(DependencyInstall):
         return process.returncode == 0
 
 
-class WSLInstall(QWidget):
+class WSLInstall(DependencyInstall):
     """A widget to check for and install WSL on Windows."""
 
-    def __init__(self):
-        super().__init__()
-        self.layout = QHBoxLayout(self)
-        self.layout.setAlignment(Qt.AlignTop)
-        self.layout.setSpacing(0)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        self.txt_installed = "Install WSL:  ✅ "
-        self.txt_not_installed = "Install WSL:  ❌ "
-        # Check for WSL
+    @property
+    def dependency_name(self) -> str:
+        return "WSL"
+
+    @property
+    def installed(self) -> bool:
         output = subprocess.check_output(["wsl", "--status"]).decode()
-        print("WSL status:", output)
-        installed = (
+        return (
             "Default Version: 2" in output
             and "Default Distribution: Ubuntu" in output
             and "not supported" not in output
         )
-        self.label = QLabel(
-            self.txt_installed if installed else self.txt_not_installed
-        )
-        self.layout.addWidget(self.label)
-        if not installed:
-            self.install_button = QPushButton("Install")
-            self.install_button.clicked.connect(self.install)
-            self.layout.addWidget(self.install_button)
 
-    def install(self):
-        # Disable install button
-        self.install_button.setEnabled(False)
-        # Show loading message
-        self.install_button.setText("Installing...")
+    def install(self) -> bool:
         # Run command as administrator in PowerShell
         cmd = "wsl --install -d Ubuntu"
         process = subprocess.run(
@@ -268,16 +252,7 @@ class WSLInstall(QWidget):
             capture_output=True,
             text=True,
         )
-        # Check if this was successful
-        if process.returncode == 0:
-            self.layout.removeWidget(self.install_button)
-            self.install_button.deleteLater()
-            self.install_button = None
-            # Update label to show installed
-            self.label.setText(self.txt_installed)
-        else:
-            print("Failed")
-            # TODO: Show error message to user
+        return process.returncode == 0
 
 
 class PackageManagerInstallWidget(QWidget):

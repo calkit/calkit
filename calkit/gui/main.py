@@ -4,12 +4,16 @@ This app helps install and track system-wide dependencies and open projects
 in their editor of choice.
 """
 
+import glob
+import os
 import subprocess
 import sys
 import webbrowser
-from abc import ABC, ABCMeta, abstractmethod
+from abc import ABCMeta, abstractmethod
 from typing import Literal
 
+import git
+import git.exc
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
@@ -461,7 +465,27 @@ def get_project_dirs() -> list[str]:
     TODO: This should fetch from the cloud and show if it exists in the
     ``calkit`` directory, allowing users to clone.
     """
-    raise NotImplementedError
+    start = os.path.join(os.path.expanduser("~"), "calkit")
+    max_depth = 1
+    res = []
+    for i in range(max_depth):
+        pattern = os.path.join(start, *["*"] * (i + 1), "calkit.yaml")
+        res += glob.glob(pattern)
+        # Check GitHub documents for users who use GitHub Desktop
+        pattern = os.path.join(
+            start, "*", "GitHub", *["*"] * (i + 1), "calkit.yaml"
+        )
+        res += glob.glob(pattern)
+    final_res = []
+    for ck_fpath in res:
+        path = os.path.dirname(ck_fpath)
+        # Make sure this path is a Git repo
+        try:
+            git.Repo(path)
+        except git.exc.InvalidGitRepositoryError:
+            continue
+        final_res.append(os.path.basename(path))
+    return final_res
 
 
 class MainWindow(QWidget):
@@ -481,6 +505,7 @@ class MainWindow(QWidget):
         self.setup_title.setStyleSheet("font-weight: bold; font-size: 16px;")
         self.setup_layout.addWidget(self.setup_title)
         # Add setup steps to the left section
+        print("Creating setup steps")
         self.setup_step_widgets = make_setup_steps_widget_list()
         for setup_step_widget in self.setup_step_widgets:
             self.setup_layout.addWidget(setup_step_widget, stretch=0)
@@ -496,9 +521,10 @@ class MainWindow(QWidget):
         self.projects_layout.addWidget(self.projects_title)
         # Add a list of folders with "open" icons
         self.project_list = QListWidget()
-        self.add_project_item("Project A")
-        self.add_project_item("Project B")
-        self.add_project_item("Project C")
+        print("Detecting project directories")
+        project_dirs = get_project_dirs()
+        for project in project_dirs:
+            self.add_project_item(project)
         self.projects_layout.addWidget(self.project_list)
         # Add the projects widget to the layout
         self.layout.addWidget(self.projects_widget)

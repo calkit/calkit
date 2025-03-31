@@ -376,71 +376,41 @@ class PackageManagerInstallWidget(QWidget):
             # TODO: Error handling
 
 
-class GitUserName(QWidget):
-    """A widget to set the Git user name."""
-
-    def __init__(self):
+class GitConfigStep(QWidget):
+    def __init__(self, key: str, pretty_name: str, wsl: bool = False) -> None:
         super().__init__()
+        self.key = key
+        self.pretty_name = pretty_name
+        self.wsl = wsl
         self.layout = make_setup_step_layout(self)
-        self.txt_not_set = "Set Git user.name:  ❌ "
-        self.txt_set = "Set Git user.name:  ✅ "
-        self.git_user_name = git_user_name()
-        self.label = QLabel(
-            self.txt_set if self.git_user_name else self.txt_not_set
-        )
-        self.fix_button = QPushButton(
-            "Set" if not self.git_user_name else "Update"
-        )
+        self.txt_not_set = f"Set Git {self.key}:  ❌ "
+        self.txt_set = f"Set Git {self.key}:  ✅ "
+        value = self.value
+        self.label = QLabel(self.txt_set if value else self.txt_not_set)
+        self.fix_button = QPushButton("Set" if not value else "Update")
         self.fix_button.setStyleSheet("font-size: 10px;")
         self.layout.addWidget(self.label)
         self.layout.addWidget(self.fix_button, stretch=0)
         self.fix_button.clicked.connect(self.open_dialog)
 
-    def open_dialog(self):
-        text, ok = QInputDialog.getText(
-            self,
-            "Set Git user.name",
-            "Enter your full name:",
-            text=self.git_user_name,
+    @property
+    def value(self) -> str:
+        return (
+            subprocess.check_output(["git", "config", self.key])
+            .decode()
+            .strip()
         )
-        if ok and text:
-            subprocess.run(["git", "config", "--global", "user.name", text])
-            self.label.setText(self.txt_set)
-            self.git_user_name = git_user_name()
-            self.fix_button.setText("Update")
-
-
-class GitUserEmail(QWidget):
-    """A widget to set the Git user email."""
-
-    def __init__(self):
-        super().__init__()
-        self.layout = make_setup_step_layout(self)
-        self.txt_not_set = "Set Git user.email:  ❌ "
-        self.txt_set = "Set Git user.email:  ✅ "
-        self.git_email = git_email()
-        self.label = QLabel(
-            self.txt_set if self.git_email else self.txt_not_set
-        )
-        self.fix_button = QPushButton(
-            "Set" if not self.git_email else "Update"
-        )
-        self.fix_button.setStyleSheet("font-size: 10px;")
-        self.layout.addWidget(self.label)
-        self.layout.addWidget(self.fix_button, stretch=0)
-        self.fix_button.clicked.connect(self.open_dialog)
 
     def open_dialog(self):
         text, ok = QInputDialog.getText(
             self,
-            "Set Git user.email",
-            "Enter your email address:",
-            text=self.git_email,
+            f"Set Git {self.key}",
+            f"Enter your {self.pretty_name}:",
+            text=self.value,
         )
         if ok and text:
-            subprocess.run(["git", "config", "--global", "user.email", text])
+            subprocess.run(["git", "config", "--global", self.key, text])
             self.label.setText(self.txt_set)
-            self.git_email = git_email()
             self.fix_button.setText("Update")
 
 
@@ -464,8 +434,12 @@ def make_setup_steps_widget_list() -> list[QWidget]:
         steps.append(ChocolateyInstall())
         steps.append(WSLInstall())
     # Install and configure Git
-    git_user_name = GitUserName()
-    git_user_email = GitUserEmail()
+    git_user_name = GitConfigStep(
+        key="user.name", pretty_name="full name", wsl=False
+    )
+    git_user_email = GitConfigStep(
+        key="user.email", pretty_name="email address", wsl=False
+    )
     git_install = PackageManagerInstallWidget(
         app_name="git",
         app_title="Git",

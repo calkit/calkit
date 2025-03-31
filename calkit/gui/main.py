@@ -313,18 +313,18 @@ class PackageManagerInstallWidget(QWidget):
         self,
         app_name: str,
         app_title: str,
-        package_manager_install_widget: HomebrewInstall
-        | ChocolateyInstall
-        | None = None,
+        child_steps: list[QWidget] = [],
     ):
         super().__init__()
-        self.package_manager_install_widget = package_manager_install_widget
+        self.child_steps = child_steps
         self.layout = make_setup_step_layout(self)
         self.app_name = app_name
         self.app_title = app_title
         self.txt_installed = f"Install {self.app_title}:  ✅ "
         self.txt_not_installed = f"Install {self.app_title}:  ❌ "
         installed = calkit.check_dep_exists(self.app_name)
+        for step in child_steps:
+            step.setEnabled(installed)
         self.label = QLabel(
             self.txt_installed if installed else self.txt_not_installed
         )
@@ -369,6 +369,8 @@ class PackageManagerInstallWidget(QWidget):
             self.install_button = None
             # Update label to show installed
             self.label.setText(self.txt_installed)
+            for step in self.child_steps:
+                step.setEnabled(True)
         else:
             print("Failed")
             # TODO: Error handling
@@ -462,9 +464,16 @@ def make_setup_steps_widget_list() -> list[QWidget]:
         steps.append(ChocolateyInstall())
         steps.append(WSLInstall())
     # Install and configure Git
-    steps.append(PackageManagerInstallWidget(app_name="git", app_title="Git"))
-    steps.append(GitUserName())
-    steps.append(GitUserEmail())
+    git_user_name = GitUserName()
+    git_user_email = GitUserEmail()
+    git_install = PackageManagerInstallWidget(
+        app_name="git",
+        app_title="Git",
+        child_steps=[git_user_name, git_user_email],
+    )
+    steps.append(git_install)
+    steps.append(git_user_name)
+    steps.append(git_user_email)
     # TODO: Install everything in WSL if on Windows?
     # Install Docker
     steps.append(DockerInstall())

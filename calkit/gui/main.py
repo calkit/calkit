@@ -402,15 +402,7 @@ class GitConfigStep(QWidget):
 
 
 def make_setup_steps_widget_list() -> list[QWidget]:
-    """Create a list of setup steps.
-
-    TODO: Figure out how to make some of these react to the others, e.g.,
-    we can't install Git until we install a package manager,
-    and once we do that, we want to enable the install button on the
-    install widget.
-
-    We also want to disable the Git config widgets until Git is installed.
-    """
+    """Create a list of setup steps."""
     steps = []
     # TODO: Check that this GUI is the latest version and add option to update
     # if not

@@ -304,7 +304,11 @@ class VSCodeInstall(DependencyInstall):
 
     @property
     def installed(self) -> bool:
-        return calkit.check_dep_exists("code")
+        try:
+            subprocess.check_output("code --version", shell=True)
+            return True
+        except subprocess.CalledProcessError:
+            return False
 
     def install(self) -> bool:
         """Install VS Code."""

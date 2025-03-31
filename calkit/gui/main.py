@@ -7,6 +7,7 @@ in their editor of choice.
 import subprocess
 import sys
 import webbrowser
+from abc import ABC, ABCMeta, abstractmethod
 from typing import Literal
 
 from PySide6.QtCore import Qt
@@ -97,6 +98,66 @@ class CalkitToken(QWidget):
             self.fix_button.setText("Update")
 
 
+class QWidgetABCMeta(ABCMeta, type(QWidget)):
+    pass
+
+
+class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
+    """An abstract base class to represent an installed dependency."""
+
+    def __init__(self):
+        super().__init__()
+        self.layout = QHBoxLayout(self)
+        self.layout.setAlignment(Qt.AlignTop)
+        self.layout.setSpacing(0)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.txt_installed = f"Install {self.dependency_name}:  ✅ "
+        self.txt_not_installed = f"Install {self.dependency_name}:  ❌ "
+        installed = self.installed
+        self.label = QLabel(
+            self.txt_installed if installed else self.txt_not_installed
+        )
+        self.layout.addWidget(self.label)
+        if not installed:
+            self.install_button = QPushButton("Install")
+            self.install_button.clicked.connect(self._install)
+            self.layout.addWidget(self.install_button)
+
+    @property
+    @abstractmethod
+    def dependency_name(self) -> str:
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def installed(self) -> bool:
+        """Return a bool indicating if the dependency is installed."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def install(self) -> bool:
+        """Install the app, returning a bool indicating success."""
+        raise NotImplementedError
+
+    def _install(self) -> None:
+        """Run the full install process."""
+        # Disable install button
+        self.install_button.setEnabled(False)
+        # Show loading message
+        self.install_button.setText("Installing...")
+        success = self.install()
+        # Check if this was successful
+        if success:
+            self.layout.removeWidget(self.install_button)
+            self.install_button.deleteLater()
+            self.install_button = None
+            # Update label to show installed
+            self.label.setText(self.txt_installed)
+        else:
+            print("Failed")
+            # TODO: Show error message to user
+
+
 class HomebrewInstall(QWidget):
     """A widget to check for and install Homebrew."""
 
@@ -145,33 +206,18 @@ class HomebrewInstall(QWidget):
             # TODO: Show error message to user
 
 
-class ChocolateyInstall(QWidget):
+class ChocolateyInstall(DependencyInstall):
     """A widget to check for and install Chocolatey."""
 
-    def __init__(self):
-        super().__init__()
-        self.layout = QHBoxLayout(self)
-        self.layout.setAlignment(Qt.AlignTop)
-        self.layout.setSpacing(0)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        self.txt_installed = "Install Chocolatey:  ✅ "
-        self.txt_not_installed = "Install Chocolatey:  ❌ "
-        installed = calkit.check_dep_exists("choco")
-        self.label = QLabel(
-            self.txt_installed if installed else self.txt_not_installed
-        )
-        self.layout.addWidget(self.label)
-        if not installed:
-            self.install_button = QPushButton("Install")
-            self.install_button.clicked.connect(self.install)
-            self.layout.addWidget(self.install_button)
+    @property
+    def dependency_name(self) -> str:
+        return "Chocolatey"
 
-    def install(self):
-        # Disable install button
-        self.install_button.setEnabled(False)
-        # Show loading message
-        self.install_button.setText("Installing...")
-        # Run command as administrator in PowerShell
+    @property
+    def installed(self) -> bool:
+        return calkit.check_dep_exists("choco")
+
+    def install(self) -> bool:
         cmd = (
             "Set-ExecutionPolicy Bypass -Scope Process -Force; "
             "[System.Net.ServicePointManager]::SecurityProtocol = "
@@ -193,16 +239,7 @@ class ChocolateyInstall(QWidget):
             capture_output=True,
             text=True,
         )
-        # Check if this was successful
-        if process.returncode == 0:
-            self.layout.removeWidget(self.install_button)
-            self.install_button.deleteLater()
-            self.install_button = None
-            # Update label to show installed
-            self.label.setText(self.txt_installed)
-        else:
-            print("Failed")
-            # TODO: Show error message to user
+        return process.returncode == 0
 
 
 class WSLInstall(QWidget):

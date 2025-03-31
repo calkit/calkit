@@ -158,32 +158,18 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
             # TODO: Show error message to user
 
 
-class HomebrewInstall(QWidget):
+class HomebrewInstall(DependencyInstall):
     """A widget to check for and install Homebrew."""
 
-    def __init__(self):
-        super().__init__()
-        self.layout = QHBoxLayout(self)
-        self.layout.setAlignment(Qt.AlignTop)
-        self.layout.setSpacing(0)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        self.txt_installed = "Install Homebrew:  ✅ "
-        self.txt_not_installed = "Install Homebrew:  ❌ "
-        installed = calkit.check_dep_exists("brew")
-        self.label = QLabel(
-            self.txt_installed if installed else self.txt_not_installed
-        )
-        self.layout.addWidget(self.label)
-        if not installed:
-            self.install_button = QPushButton("Install")
-            self.install_button.clicked.connect(self.install)
-            self.layout.addWidget(self.install_button)
+    @property
+    def dependency_name(self) -> str:
+        return "Homebrew"
 
-    def install(self):
-        # Disable install button
-        self.install_button.setEnabled(False)
-        # Show loading message
-        self.install_button.setText("Installing...")
+    @property
+    def installed(self) -> bool:
+        return calkit.check_dep_exists("brew")
+
+    def install(self) -> bool:
         subprocess.run(
             [
                 "/bin/bash",
@@ -194,16 +180,7 @@ class HomebrewInstall(QWidget):
                 ),
             ]
         )
-        # Check if this was successful
-        if subprocess.returncode == 0:
-            self.layout.removeWidget(self.install_button)
-            self.install_button.deleteLater()
-            self.install_button = None
-            # Update label to show installed
-            self.label.setText(self.txt_installed)
-        else:
-            print("Failed")
-            # TODO: Show error message to user
+        return subprocess.returncode == 0
 
 
 class ChocolateyInstall(DependencyInstall):

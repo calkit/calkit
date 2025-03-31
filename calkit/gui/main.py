@@ -309,76 +309,27 @@ class VSCodeInstall(DependencyInstall):
         raise NotImplementedError
 
 
-class PackageManagerInstallWidget(QWidget):
-    """A widget to check for and install an app with the system package
-    manager.
-    """
+class GitInstall(DependencyInstall):
+    @property
+    def dependency_name(self) -> str:
+        return "Git"
 
-    def __init__(
-        self,
-        app_name: str,
-        app_title: str,
-        child_steps: list[QWidget] = [],
-    ):
-        super().__init__()
-        self.child_steps = child_steps
-        self.layout = make_setup_step_layout(self)
-        self.app_name = app_name
-        self.app_title = app_title
-        self.txt_installed = f"Install {self.app_title}:  ✅ "
-        self.txt_not_installed = f"Install {self.app_title}:  ❌ "
-        installed = calkit.check_dep_exists(self.app_name)
-        for step in child_steps:
-            step.setEnabled(installed)
-        self.label = QLabel(
-            self.txt_installed if installed else self.txt_not_installed
-        )
-        self.layout.addWidget(self.label)
-        if not installed:
-            self.install_button = QPushButton("Install")
-            self.install_button.setStyleSheet("font-size: 10px;")
-            self.install_button.clicked.connect(self.install)
-            self.layout.addWidget(self.install_button)
-            platform = get_platform()
-            if platform == "windows" and not calkit.check_dep_exists("choco"):
-                self.install_button.setEnabled(False)
-                self.install_button.setToolTip(
-                    "Chocolatey must be installed first"
-                )
-            elif platform == "mac" and not calkit.check_dep_exists("brew"):
-                self.install_button.setEnabled(False)
-                self.install_button.setToolTip(
-                    "Homebrew must be installed first"
-                )
-            elif platform == "linux" and not calkit.check_dep_exists("apt"):
-                self.install_button.setEnabled(False)
-                self.install_button.setToolTip("APT must be installed")
+    @property
+    def installed(self) -> bool:
+        return calkit.check_dep_exists("git")
 
     def install(self):
-        # Disable install button
-        self.install_button.setEnabled(False)
-        # Show loading message
-        self.install_button.setText("Installing...")
-        if get_platform() == "windows":
+        platform = get_platform()
+        if platform == "windows":
             # Use Chocolatey to install Git
-            process = subprocess.run(["choco", "install", self.app_name])
-        elif get_platform() == "mac":
-            process = subprocess.run(["brew", "install", self.app_name])
-        elif get_platform() == "linux":
+            process = subprocess.run(["choco", "install", "git"])
+        elif platform == "mac":
+            process = subprocess.run(["brew", "install", "git"])
+        elif platform == "linux":
             # Use apt to install Git
-            cmd = f"apt install {self.app_name}"
+            cmd = "apt install git"
             process = subprocess.run(["pkexec", "sh", "-c", cmd])
-        if process.returncode == 0:
-            self.layout.removeWidget(self.install_button)
-            self.install_button.deleteLater()
-            self.install_button = None
-            # Update label to show installed
-            self.label.setText(self.txt_installed)
-            for step in self.child_steps:
-                step.setEnabled(True)
-        else:
-            print("Failed")
-            # TODO: Error handling
+        return process.returncode == 0
 
 
 class WSLGitInstall(DependencyInstall):
@@ -489,11 +440,7 @@ def make_setup_steps_widget_list() -> list[QWidget]:
     git_user_email = GitConfigStep(
         key="user.email", pretty_name="email address", wsl=False
     )
-    git_install = PackageManagerInstallWidget(
-        app_name="git",
-        app_title="Git",
-        child_steps=[git_user_name, git_user_email],
-    )
+    git_install = GitInstall(child_steps=[git_user_name, git_user_email])
     steps.append(git_install)
     steps.append(git_user_name)
     steps.append(git_user_email)

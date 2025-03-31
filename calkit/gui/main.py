@@ -272,6 +272,21 @@ class CondaInstall(DependencyInstall):
         raise NotImplementedError
 
 
+class VSCodeInstall(DependencyInstall):
+    @property
+    def dependency_name(self) -> str:
+        return "VS Code"
+
+    def installed(self) -> bool:
+        return calkit.check_dep_exists("code")
+
+    def install(self) -> bool:
+        """Install VS Code."""
+        # First check our platform and download the installer
+        # Run the installer
+        raise NotImplementedError
+
+
 class PackageManagerInstallWidget(QWidget):
     """A widget to check for and install an app with the system package
     manager.
@@ -444,6 +459,7 @@ def make_setup_steps_widget_list() -> list[QWidget]:
     # Ensure Calkit token is set
     steps.append(CalkitToken())
     # TODO: Install VS Code
+    steps.append(VSCodeInstall())
     # TODO: Install recommended VS Code extensions
     return steps
 

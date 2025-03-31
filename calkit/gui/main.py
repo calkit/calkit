@@ -257,6 +257,21 @@ class WSLInstall(DependencyInstall):
         return process.returncode == 0
 
 
+class CondaInstall(DependencyInstall):
+    @property
+    def dependency_name(self) -> str:
+        return "Conda"
+
+    def installed(self) -> bool:
+        return calkit.check_dep_exists("conda")
+
+    def install(self) -> bool:
+        """Install Conda."""
+        # First check our platform and download the installer
+        # Run the installer
+        raise NotImplementedError
+
+
 class PackageManagerInstallWidget(QWidget):
     """A widget to check for and install an app with the system package
     manager.
@@ -424,6 +439,7 @@ def make_setup_steps_widget_list() -> list[QWidget]:
     steps.append(GitUserEmail())
     # TODO: Ensure we have GitHub credentials?
     # TODO: Install Miniforge, initializing shell
+    steps.append(CondaInstall())
     # TODO: Install Calkit inside Miniforge base environment
     # Ensure Calkit token is set
     steps.append(CalkitToken())

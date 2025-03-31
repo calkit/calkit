@@ -151,6 +151,9 @@ class ChocolateyInstall(QWidget):
     def __init__(self):
         super().__init__()
         self.layout = QHBoxLayout(self)
+        self.layout.setAlignment(Qt.AlignTop)
+        self.layout.setSpacing(0)
+        self.layout.setContentsMargins(0, 0, 0, 0)
         self.txt_installed = "Install Chocolatey:  ✅ "
         self.txt_not_installed = "Install Chocolatey:  ❌ "
         installed = calkit.check_dep_exists("choco")
@@ -176,6 +179,67 @@ class ChocolateyInstall(QWidget):
             "iex ((New-Object System.Net.WebClient).DownloadString("
             "'https://community.chocolatey.org/install.ps1'))"
         )
+        process = subprocess.run(
+            [
+                "powershell",
+                "-Command",
+                "Start-Process",
+                "powershell",
+                "-Verb",
+                "runAs",
+                "-ArgumentList",
+                f"'{cmd}'",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        # Check if this was successful
+        if process.returncode == 0:
+            self.layout.removeWidget(self.install_button)
+            self.install_button.deleteLater()
+            self.install_button = None
+            # Update label to show installed
+            self.label.setText(self.txt_installed)
+        else:
+            print("Failed")
+            # TODO: Show error message to user
+
+
+class WSLInstall(QWidget):
+    """A widget to check for and install WSL on Windows."""
+
+    def __init__(self):
+        super().__init__()
+        self.layout = QHBoxLayout(self)
+        self.layout.setAlignment(Qt.AlignTop)
+        self.layout.setSpacing(0)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.txt_installed = "Install WSL:  ✅ "
+        self.txt_not_installed = "Install WSL:  ❌ "
+        # Check for WSL
+        output = subprocess.check_output(["wsl", "--status"]).decode()
+        print("WSL status:", output)
+        installed = (
+            "Default Version: 2" in output
+            and "Default Distribution: Ubuntu" in output
+            and "not supported" not in output
+        )
+        self.label = QLabel(
+            self.txt_installed if installed else self.txt_not_installed
+        )
+        self.layout.addWidget(self.label)
+        if not installed:
+            self.install_button = QPushButton("Install")
+            self.install_button.clicked.connect(self.install)
+            self.layout.addWidget(self.install_button)
+
+    def install(self):
+        # Disable install button
+        self.install_button.setEnabled(False)
+        # Show loading message
+        self.install_button.setText("Installing...")
+        # Run command as administrator in PowerShell
+        cmd = "wsl --install -d Ubuntu"
         process = subprocess.run(
             [
                 "powershell",
@@ -366,14 +430,7 @@ def make_setup_steps_widget_list() -> list[QWidget]:
         steps.append(HomebrewInstall())
     elif platform == "windows":
         steps.append(ChocolateyInstall())
-        # Check for WSL
-        output = subprocess.check_output(["wsl", "--status"]).decode()
-        print("WSL status:", output)
-        wsl_okay = (
-            "Default Version: 2" in output
-            and "Default Distribution: Ubuntu" in output
-            and "not supported" not in output
-        )
+        steps.append(WSLInstall())
     steps.append(PackageManagerInstallWidget(app_name="git", app_title="Git"))
     # TODO: Install WSL if on Windows
     # TODO: Install everything in WSL if on Windows?

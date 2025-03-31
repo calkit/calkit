@@ -240,7 +240,11 @@ class WSLInstall(DependencyInstall):
 
     @property
     def installed(self) -> bool:
-        output = subprocess.check_output(["wsl", "--status"]).decode()
+        output = (
+            subprocess.check_output(["wsl", "--status"])
+            .decode()
+            .replace("\x00", "")
+        )
         return (
             "Default Version: 2" in output
             and "Default Distribution: Ubuntu" in output

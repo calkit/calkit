@@ -122,6 +122,7 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
         self.layout.addWidget(self.label)
         if not installed:
             self.install_button = QPushButton("Install")
+            self.install_button.setStyleSheet("font-size: 10px;")
             self.install_button.clicked.connect(self._install)
             self.layout.addWidget(self.install_button)
 
@@ -262,6 +263,7 @@ class CondaInstall(DependencyInstall):
     def dependency_name(self) -> str:
         return "Conda"
 
+    @property
     def installed(self) -> bool:
         return calkit.check_dep_exists("conda")
 
@@ -272,11 +274,26 @@ class CondaInstall(DependencyInstall):
         raise NotImplementedError
 
 
+class DockerInstall(DependencyInstall):
+    @property
+    def dependency_name(self) -> str:
+        return "Docker"
+
+    @property
+    def installed(self) -> bool:
+        return calkit.check_dep_exists("docker")
+
+    def install(self) -> bool:
+        # TODO
+        raise NotImplementedError
+
+
 class VSCodeInstall(DependencyInstall):
     @property
     def dependency_name(self) -> str:
         return "VS Code"
 
+    @property
     def installed(self) -> bool:
         return calkit.check_dep_exists("code")
 
@@ -314,6 +331,7 @@ class PackageManagerInstallWidget(QWidget):
         self.layout.addWidget(self.label)
         if not installed:
             self.install_button = QPushButton("Install")
+            self.install_button.setStyleSheet("font-size: 10px;")
             self.install_button.clicked.connect(self.install)
             self.layout.addWidget(self.install_button)
             platform = get_platform()
@@ -443,15 +461,17 @@ def make_setup_steps_widget_list() -> list[QWidget]:
     elif platform == "windows":
         steps.append(ChocolateyInstall())
         steps.append(WSLInstall())
+    # Install and configure Git
     steps.append(PackageManagerInstallWidget(app_name="git", app_title="Git"))
+    steps.append(GitUserName())
+    steps.append(GitUserEmail())
     # TODO: Install everything in WSL if on Windows?
-    # TODO: Install Docker
+    # Install Docker
+    steps.append(DockerInstall())
     # TODO: Ensure Docker is running
     # We can use `docker desktop status` and `docker desktop start` for this
     # However, this is not necessary on Linux
     # TODO: Ensure Docker permissions are set on Linux
-    steps.append(GitUserName())
-    steps.append(GitUserEmail())
     # TODO: Ensure we have GitHub credentials?
     # TODO: Install Miniforge, initializing shell
     steps.append(CondaInstall())

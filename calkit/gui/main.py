@@ -110,12 +110,15 @@ class QWidgetABCMeta(ABCMeta, type(QWidget)):
 class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
     """An abstract base class to represent an installed dependency."""
 
-    def __init__(self):
+    def __init__(self, child_steps: list[QWidget] = []):
         super().__init__()
+        self.child_steps = child_steps
         self.layout = make_setup_step_layout(self)
         self.txt_installed = f"Install {self.dependency_name}:  ✅ "
         self.txt_not_installed = f"Install {self.dependency_name}:  ❌ "
         installed = self.installed
+        for step in self.child_steps:
+            step.setEnabled(installed)
         self.label = QLabel(
             self.txt_installed if installed else self.txt_not_installed
         )
@@ -156,6 +159,8 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
             self.install_button = None
             # Update label to show installed
             self.label.setText(self.txt_installed)
+            for step in self.child_steps:
+                step.setEnabled(True)
         else:
             print("Failed")
             # TODO: Show error message to user
@@ -376,6 +381,25 @@ class PackageManagerInstallWidget(QWidget):
             # TODO: Error handling
 
 
+class WSLGitInstall(DependencyInstall):
+    @property
+    def dependency_name(self) -> str:
+        return "Git in WSL"
+
+    @property
+    def installed(self) -> bool:
+        try:
+            subprocess.check_output(["wsl", "git", "--version"])
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
+    def install(self) -> bool:
+        cmd = "apt update && apt install git"
+        process = subprocess.run(["wsl", "pkexec", "sh", "-c", cmd])
+        return process.returncode == 0
+
+
 class GitConfigStep(QWidget):
     def __init__(self, key: str, pretty_name: str, wsl: bool = False) -> None:
         super().__init__()
@@ -383,8 +407,12 @@ class GitConfigStep(QWidget):
         self.pretty_name = pretty_name
         self.wsl = wsl
         self.layout = make_setup_step_layout(self)
-        self.txt_not_set = f"Set Git {self.key}:  ❌ "
-        self.txt_set = f"Set Git {self.key}:  ✅ "
+        if self.wsl:
+            self.txt_not_set = f"Set Git {self.key} in WSL:  ❌ "
+            self.txt_set = f"Set Git {self.key} in WSL:  ✅ "
+        else:
+            self.txt_not_set = f"Set Git {self.key}:  ❌ "
+            self.txt_set = f"Set Git {self.key}:  ✅ "
         value = self.value
         self.label = QLabel(self.txt_set if value else self.txt_not_set)
         self.fix_button = QPushButton("Set" if not value else "Update")
@@ -394,12 +422,20 @@ class GitConfigStep(QWidget):
         self.fix_button.clicked.connect(self.open_dialog)
 
     @property
+    def cmd(self) -> list[str]:
+        cmd = ["git", "config", "--global"]
+        if self.wsl:
+            cmd = ["wsl"] + cmd
+        return cmd
+
+    @property
     def value(self) -> str:
-        return (
-            subprocess.check_output(["git", "config", self.key])
-            .decode()
-            .strip()
-        )
+        try:
+            return (
+                subprocess.check_output(self.cmd + [self.key]).decode().strip()
+            )
+        except subprocess.CalledProcessError:
+            return ""
 
     def open_dialog(self):
         text, ok = QInputDialog.getText(
@@ -409,7 +445,7 @@ class GitConfigStep(QWidget):
             text=self.value,
         )
         if ok and text:
-            subprocess.run(["git", "config", "--global", self.key, text])
+            subprocess.run(self.cmd + [self.key, text])
             self.label.setText(self.txt_set)
             self.fix_button.setText("Update")
 
@@ -432,7 +468,20 @@ def make_setup_steps_widget_list() -> list[QWidget]:
         steps.append(HomebrewInstall())
     elif platform == "windows":
         steps.append(ChocolateyInstall())
-        steps.append(WSLInstall())
+        wsl_git_user = GitConfigStep(
+            "user.name", pretty_name="full name", wsl=True
+        )
+        wsl_git_email = GitConfigStep(
+            "user.email", pretty_name="email address", wsl=True
+        )
+        wsl_git_install = WSLGitInstall(
+            child_steps=[wsl_git_user, wsl_git_email]
+        )
+        wsl_install = WSLInstall(child_steps=[wsl_git_install])
+        steps.append(wsl_install)
+        steps.append(wsl_git_install)
+        steps.append(wsl_git_user)
+        steps.append(wsl_git_email)
     # Install and configure Git
     git_user_name = GitConfigStep(
         key="user.name", pretty_name="full name", wsl=False

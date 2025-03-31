@@ -516,6 +516,7 @@ class MainWindow(QWidget):
         print("Creating setup steps")
         self.setup_step_widgets = make_setup_steps_widget_list()
         for setup_step_widget in self.setup_step_widgets:
+            setup_step_widget.setMinimumHeight(20)
             self.setup_layout.addWidget(setup_step_widget, stretch=0)
         self.layout.addWidget(self.setup_widget)
         # Right half: Projects

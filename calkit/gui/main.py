@@ -14,7 +14,7 @@ from typing import Literal
 
 import git
 import git.exc
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -79,20 +79,20 @@ class CalkitToken(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.config = calkit.config.read()
+        is_set = self.is_set
         self.txt_not_set = "Set Calkit Cloud API token:  ❌ "
         self.txt_set = "Set Calkit Cloud API token:  ✅ "
-        self.label = QLabel(
-            self.txt_set if self.config.token is not None else self.txt_not_set
-        )
-        self.fix_button = QPushButton(
-            "Set" if self.config.token is None else "Update"
-        )
+        self.label = QLabel(self.txt_set if is_set else self.txt_not_set)
+        self.fix_button = QPushButton("Set" if not is_set else "Update")
         self.fix_button.setStyleSheet("font-size: 10px;")
         self.layout = make_setup_step_layout(self)
         self.fix_button.clicked.connect(self.open_dialog)
         self.layout.addWidget(self.label)
         self.layout.addWidget(self.fix_button)
+
+    @property
+    def is_set(self) -> bool:
+        return calkit.config.read().token is not None
 
     def open_dialog(self):
         webbrowser.open("https://calkit.io/settings?tab=tokens")
@@ -103,8 +103,9 @@ class CalkitToken(QWidget):
             echo=QLineEdit.Password,
         )
         if ok and text:
-            self.config.token = text
-            self.config.write()
+            config = calkit.config.read()
+            config.token = text
+            config.write()
             self.label.setText(self.txt_set)
             self.fix_button.setText("Update")
 
@@ -525,11 +526,36 @@ class MainWindow(QWidget):
         self.projects_widget = QWidget()
         self.projects_layout = QVBoxLayout(self.projects_widget)
         self.projects_layout.setAlignment(Qt.AlignTop)
+        self.projects_layout.setSpacing(0)
+        # Add projects title bar
+        self.projects_title_bar = QWidget(self.projects_widget)
+        self.projects_title_bar_layout = QHBoxLayout(self.projects_title_bar)
+        self.projects_title_bar_layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.projects_title_bar_layout.setContentsMargins(0, 0, 0, 0)
+        self.projects_title_bar_layout.setSpacing(0)
         self.projects_title = QLabel("Projects")
         self.projects_title.setStyleSheet(
             "font-weight: bold; font-size: 16px;"
         )
-        self.projects_layout.addWidget(self.projects_title)
+        self.projects_title_bar_layout.addWidget(self.projects_title)
+        # Add plus icon to add a new project
+        # This needs to be disabled if:
+        # - Calkit token is not set
+        # - Git is not installed
+        # - Calkit is not installed
+        # - GitHub credentials are not set?
+        self.new_project_button = QPushButton(self.projects_title_bar)
+        self.new_project_button.setIcon(QIcon.fromTheme("list-add"))
+        self.new_project_button.setStyleSheet(
+            "font-size: 10px; padding: 0px; padding-top: 2px; margin: 0px; "
+            "border: none;"
+        )
+        self.new_project_button.setFixedSize(30, 30)
+        self.new_project_button.setIconSize(QSize(18, 18))
+        self.new_project_button.setToolTip("Create new project")
+        self.new_project_button.clicked.connect(self.create_new_project)
+        self.projects_title_bar_layout.addWidget(self.new_project_button)
+        self.projects_layout.addWidget(self.projects_title_bar)
         # Add a list of folders with "open" icons
         self.project_list = QListWidget()
         print("Detecting project directories")
@@ -597,6 +623,17 @@ class MainWindow(QWidget):
         elif platform == "linux":
             cmd = ["xdg-open", dirname]
         subprocess.run(cmd)
+
+    def create_new_project(self) -> None:
+        QMessageBox.critical(
+            self,
+            "Not implemented",
+            "This is not implemented yet.",
+        )
+        return
+        # Create an input form to get project name, title, and an optional
+        # description
+        # TODO
 
 
 def run():

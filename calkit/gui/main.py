@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -414,16 +415,16 @@ class GitConfigStep(QWidget):
             self.fix_button.setText("Update")
 
 
-def make_setup_steps_widget_list() -> list[QWidget]:
+def make_setup_step_widgets() -> dict[str, QWidget]:
     """Create a list of setup steps."""
-    steps = []
+    steps = {}
     # TODO: Check that this GUI is the latest version and add option to update
     # if not
     platform = get_platform()
     if platform == "mac":
-        steps.append(HomebrewInstall())
+        steps["homebrew"] = HomebrewInstall()
     elif platform == "windows":
-        steps.append(ChocolateyInstall())
+        steps["chocolatey"] = ChocolateyInstall()
         wsl_git_user = GitConfigStep(
             "user.name", pretty_name="full name", wsl=True
         )
@@ -434,10 +435,10 @@ def make_setup_steps_widget_list() -> list[QWidget]:
             child_steps=[wsl_git_user, wsl_git_email]
         )
         wsl_install = WSLInstall(child_steps=[wsl_git_install])
-        steps.append(wsl_install)
-        steps.append(wsl_git_install)
-        steps.append(wsl_git_user)
-        steps.append(wsl_git_email)
+        steps["wsl"] = wsl_install
+        steps["wsl-git"] = wsl_git_install
+        steps["wsl-git-user"] = wsl_git_user
+        steps["wsl-git-email"] = wsl_git_email
     # Install and configure Git
     git_user_name = GitConfigStep(
         key="user.name", pretty_name="full name", wsl=False
@@ -446,24 +447,24 @@ def make_setup_steps_widget_list() -> list[QWidget]:
         key="user.email", pretty_name="email address", wsl=False
     )
     git_install = GitInstall(child_steps=[git_user_name, git_user_email])
-    steps.append(git_install)
-    steps.append(git_user_name)
-    steps.append(git_user_email)
+    steps["git"] = git_install
+    steps["git-user"] = git_user_name
+    steps["git-email"] = git_user_email
     # TODO: Install everything in WSL if on Windows?
     # Install Docker
-    steps.append(DockerInstall())
+    steps["docker"] = DockerInstall()
     # TODO: Ensure Docker is running
     # We can use `docker desktop status` and `docker desktop start` for this
     # However, this is not necessary on Linux
     # TODO: Ensure Docker permissions are set on Linux
     # TODO: Ensure we have GitHub credentials?
     # TODO: Install Miniforge, initializing shell
-    steps.append(CondaInstall())
+    steps["miniforge"] = CondaInstall()
     # TODO: Install Calkit inside Miniforge base environment
     # Ensure Calkit token is set
-    steps.append(CalkitToken())
+    steps["calkit-token"] = CalkitToken()
     # TODO: Install VS Code
-    steps.append(VSCodeInstall())
+    steps["vscode"] = VSCodeInstall()
     # TODO: Install recommended VS Code extensions
     return steps
 
@@ -515,8 +516,8 @@ class MainWindow(QWidget):
         self.setup_layout.addWidget(self.setup_title)
         # Add setup steps to the left section
         print("Creating setup steps")
-        self.setup_step_widgets = make_setup_steps_widget_list()
-        for setup_step_widget in self.setup_step_widgets:
+        self.setup_step_widgets = make_setup_step_widgets()
+        for _, setup_step_widget in self.setup_step_widgets.items():
             setup_step_widget.setMinimumHeight(20)
             self.setup_layout.addWidget(setup_step_widget, stretch=0)
         self.layout.addWidget(self.setup_widget)
@@ -551,6 +552,15 @@ class MainWindow(QWidget):
         self.project_list.addItem(item)
 
     def open_project_vs_code(self, item) -> None:
+        # If VS Code is not installed, show error message dialog
+        if not self.setup_step_widgets["vscode"].installed:
+            print("VS Code is not installed")
+            QMessageBox.critical(
+                self,
+                "VS Code not installed",
+                "Please install VS Code first.",
+            )
+            return
         project_name = item.text()
         project_dir = os.path.join(
             os.path.expanduser("~"), "calkit", project_name

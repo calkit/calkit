@@ -645,6 +645,7 @@ class MainWindow(QWidget):
         # - Git is not installed
         # - Calkit is not installed
         # - GitHub credentials are not set?
+        # TODO
         self.new_project_button = QPushButton(self.projects_title_bar)
         self.new_project_button.setIcon(QIcon.fromTheme("list-add"))
         self.new_project_button.setStyleSheet(

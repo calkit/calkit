@@ -41,5 +41,5 @@ docs: ## Build and serve the documentation.
 	@uv run mkdocs serve
 
 .PHONY: gui
-gui: ## Run the GUI in dev mode
+gui: ## Run the GUI in dev mode.
 	@uv run python -c "import calkit.gui; calkit.gui.run()"

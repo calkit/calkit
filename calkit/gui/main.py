@@ -607,6 +607,17 @@ class MainWindow(QWidget):
         self.new_project_button.setToolTip("Create new project")
         self.new_project_button.clicked.connect(self.create_new_project)
         self.projects_title_bar_layout.addWidget(self.new_project_button)
+        # Add refresh button to the projects title bar
+        self.refresh_projects_button = QPushButton(self.projects_title_bar)
+        self.refresh_projects_button.setIcon(QIcon.fromTheme("view-refresh"))
+        self.refresh_projects_button.setStyleSheet(
+            "font-size: 10px; padding: 0px; margin: 0px; border: none;"
+        )
+        self.refresh_projects_button.setFixedSize(15, 30)
+        self.refresh_projects_button.setIconSize(QSize(18, 18))
+        self.refresh_projects_button.setToolTip("Refresh projects")
+        self.refresh_projects_button.clicked.connect(self.refresh_project_list)
+        self.projects_title_bar_layout.addWidget(self.refresh_projects_button)
         self.projects_layout.addWidget(self.projects_title_bar)
         # Add a list of folders with "open" icons
         self.project_list = QListWidget()

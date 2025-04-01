@@ -608,7 +608,7 @@ class MainWindow(QWidget):
         self.layout = QHBoxLayout(self)
         # Add Calkit logo
         self.logo = QLabel()
-        # Left Section: Setup
+        # Left half: Setup
         self.setup_widget = QWidget()
         self.setup_layout = QVBoxLayout(self.setup_widget)
         self.setup_layout.setAlignment(Qt.AlignTop)

@@ -535,7 +535,7 @@ class MainWindow(QWidget):
         project_dirs = get_project_dirs()
         for project in project_dirs:
             self.add_project_item(project)
-        self.project_list.itemDoubleClicked.connect(self.open_project)
+        self.project_list.itemDoubleClicked.connect(self.open_project_vs_code)
         # Add right-click context menu to the project list
         self.project_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.project_list.customContextMenuRequested.connect(
@@ -550,7 +550,7 @@ class MainWindow(QWidget):
         item = QListWidgetItem(QIcon.fromTheme("folder-open"), project_name)
         self.project_list.addItem(item)
 
-    def open_project(self, item) -> None:
+    def open_project_vs_code(self, item) -> None:
         project_name = item.text()
         project_dir = os.path.join(
             os.path.expanduser("~"), "calkit", project_name
@@ -566,12 +566,27 @@ class MainWindow(QWidget):
             return  # Do nothing if no item was clicked
         # Create the context menu
         menu = QMenu(self)
-        open_action = menu.addAction("Open with VS Code")
+        open_vs_code_action = menu.addAction("Open with VS Code")
+        open_folder_action = menu.addAction("Open folder")
         # Execute the menu and get the selected action
         action = menu.exec(self.project_list.viewport().mapToGlobal(position))
         # Handle the selected action
-        if action == open_action:
-            self.open_project(item)
+        if action == open_vs_code_action:
+            self.open_project_vs_code(item)
+        elif action == open_folder_action:
+            self.open_project_folder(item)
+
+    def open_project_folder(self, item: QListWidgetItem) -> None:
+        """Open the project folder in the file explorer."""
+        platform = get_platform()
+        dirname = os.path.join(os.path.expanduser("~"), "calkit", item.text())
+        if platform == "windows":
+            cmd = ["explorer", dirname]
+        elif platform == "mac":
+            cmd = ["open", dirname]
+        elif platform == "linux":
+            cmd = ["xdg-open", dirname]
+        subprocess.run(cmd)
 
 
 def run():

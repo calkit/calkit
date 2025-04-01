@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -535,6 +536,11 @@ class MainWindow(QWidget):
         for project in project_dirs:
             self.add_project_item(project)
         self.project_list.itemDoubleClicked.connect(self.open_project)
+        # Add right-click context menu to the project list
+        self.project_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.project_list.customContextMenuRequested.connect(
+            self.show_project_context_menu
+        )
         self.projects_layout.addWidget(self.project_list)
         # Add the projects widget to the layout
         self.layout.addWidget(self.projects_widget)
@@ -551,6 +557,21 @@ class MainWindow(QWidget):
         )
         cmd = f"code {project_dir}"
         subprocess.run(cmd, shell=True)
+
+    def show_project_context_menu(self, position):
+        """Show a context menu for the project list."""
+        # Get the item at the clicked position
+        item = self.project_list.itemAt(position)
+        if item is None:
+            return  # Do nothing if no item was clicked
+        # Create the context menu
+        menu = QMenu(self)
+        open_action = menu.addAction("Open with VS Code")
+        # Execute the menu and get the selected action
+        action = menu.exec(self.project_list.viewport().mapToGlobal(position))
+        # Handle the selected action
+        if action == open_action:
+            self.open_project(item)
 
 
 def run():

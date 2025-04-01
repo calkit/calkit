@@ -14,6 +14,7 @@ from typing import Literal
 
 import git
 import git.exc
+from pydantic import BaseModel
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
@@ -472,32 +473,80 @@ def make_setup_step_widgets() -> dict[str, QWidget]:
     return steps
 
 
-def get_project_dirs() -> list[str]:
-    """Get a list of project directories.
+class Project(BaseModel):
+    owner_name: str
+    project_name: str
+    wdir: str | None = None
+    git_repo_url: str
 
-    TODO: This should fetch from the cloud and show if it exists in the
-    ``calkit`` directory, allowing users to clone.
-    """
+
+def get_projects() -> list[Project]:
+    """Get a list of projects."""
+    # Get projects from the cloud and match them up by Git repo URL
+    try:
+        cloud_projects = calkit.cloud.get(
+            "/user/projects", params=dict(limit=100)
+        )["data"]
+    except Exception as e:
+        cloud_projects = []
+        print(f"Error fetching projects from cloud: {e}")
+    # Reorient cloud projects as a dict keyed by the Git repo URL
+    cloud_projects_by_git_url = {}
+    for project_full_name in cloud_projects:
+        cloud_projects_by_git_url[project_full_name["git_repo_url"]] = (
+            project_full_name
+        )
+    # Get the local projects
     start = os.path.join(os.path.expanduser("~"), "calkit")
     max_depth = 1
     res = []
     for i in range(max_depth):
         pattern = os.path.join(start, *["*"] * (i + 1), "calkit.yaml")
         res += glob.glob(pattern)
-        # Check GitHub documents for users who use GitHub Desktop
-        pattern = os.path.join(
-            start, "*", "GitHub", *["*"] * (i + 1), "calkit.yaml"
-        )
-        res += glob.glob(pattern)
-    final_res = []
+    final_res_by_git_url = {}
     for ck_fpath in res:
-        path = os.path.dirname(ck_fpath)
+        project_dir = os.path.dirname(ck_fpath)
+        # Detect project name
+        try:
+            project_full_name = calkit.detect_project_name(wdir=project_dir)
+        except ValueError:
+            print(f"Can't detect project name in {project_dir}")
+            continue
+        owner, name = project_full_name.split("/")
         # Make sure this path is a Git repo
         try:
-            git.Repo(path)
+            repo = git.Repo(project_dir)
+            remote_url = repo.remotes.origin.url
+            # Simplify the remote URL to account for SSH and HTTPS
+            if remote_url.startswith("git@github.com:"):
+                remote_url = "https://github.com/" + remote_url.removeprefix(
+                    "git@github.com:"
+                )
+            remote_url = remote_url.removesuffix(".git")
         except git.exc.InvalidGitRepositoryError:
             continue
-        final_res.append(os.path.basename(path))
+        project = Project(
+            owner_name=owner,
+            project_name=name,
+            wdir=project_dir,
+            git_repo_url=remote_url,
+        )
+        final_res_by_git_url[remote_url] = project
+    for git_repo_url, project_dict in cloud_projects_by_git_url.items():
+        # If the project is not in the local directory, add it
+        if git_repo_url not in final_res_by_git_url:
+            project = Project(
+                owner_name=project_dict["owner_account_name"],
+                project_name=project_dict["name"],
+                git_repo_url=git_repo_url,
+                wdir=None,
+            )
+            final_res_by_git_url[git_repo_url] = project
+    final_res = []
+    # Sort by repo URL
+    git_repo_urls = sorted(final_res_by_git_url.keys())
+    for git_repo_url in git_repo_urls:
+        final_res.append(final_res_by_git_url[git_repo_url])
     return final_res
 
 
@@ -620,30 +669,31 @@ class MainWindow(QWidget):
         self.projects_title_bar_layout.addWidget(self.refresh_projects_button)
         self.projects_layout.addWidget(self.projects_title_bar)
         # Add a list of folders with "open" icons
-        self.project_list = QListWidget()
+        self.project_list_widget = QListWidget()
         self.refresh_project_list()
-        self.project_list.itemDoubleClicked.connect(self.open_project_vs_code)
+        self.project_list_widget.itemDoubleClicked.connect(
+            self.open_project_vs_code
+        )
         # Add right-click context menu to the project list
-        self.project_list.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.project_list.customContextMenuRequested.connect(
+        self.project_list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.project_list_widget.customContextMenuRequested.connect(
             self.show_project_context_menu
         )
-        self.projects_layout.addWidget(self.project_list)
+        self.projects_layout.addWidget(self.project_list_widget)
         # Add the projects widget to the layout
         self.layout.addWidget(self.projects_widget)
 
     def refresh_project_list(self) -> None:
         """Refresh the project list by clearing and re-adding items."""
         print("Refreshing project list")
-        self.project_list.clear()
-        project_dirs = get_project_dirs()
-        for project in project_dirs:
-            self.add_project_item(project)
-
-    def add_project_item(self, project_name):
-        """Add a project item with an 'open' icon to the list."""
-        item = QListWidgetItem(QIcon.fromTheme("folder-open"), project_name)
-        self.project_list.addItem(item)
+        self.project_list_widget.clear()
+        self.projects = get_projects()
+        self.projects_by_name = {}
+        for project in self.projects:
+            name = f"{project.owner_name}/{project.project_name}"
+            item = QListWidgetItem(QIcon.fromTheme("folder-open"), name)
+            self.projects_by_name[name] = project
+            self.project_list_widget.addItem(item)
 
     def open_project_vs_code(self, item) -> None:
         # If VS Code is not installed, show error message dialog
@@ -655,19 +705,17 @@ class MainWindow(QWidget):
                 "Please install VS Code first.",
             )
             return
-        project_name = item.text()
-        project_dir = os.path.join(
-            os.path.expanduser("~"), "calkit", project_name
-        )
-        cmd = f"code {project_dir}"
+        project = self.projects_by_name[item.text()]
+        cmd = f"code '{project.wdir}'"
         subprocess.run(cmd, shell=True)
 
     def show_project_context_menu(self, position):
         """Show a context menu for the project list."""
         # Get the item at the clicked position
-        item = self.project_list.itemAt(position)
+        item = self.project_list_widget.itemAt(position)
         if item is None:
             return  # Do nothing if no item was clicked
+        project = self.projects_by_name[item.text()]
         # Create the context menu
         menu = QMenu(self)
         open_vs_code_action = menu.addAction("Open with VS Code")
@@ -679,10 +727,31 @@ class MainWindow(QWidget):
         elif platform == "linux":
             open_folder_txt = "Open folder in file explorer"
         open_folder_action = menu.addAction(open_folder_txt)
-        # TODO: Add option to open on calkit.io
-        # TODO: Add option to open on github.com
+        clone_action = menu.addAction("Clone to Calkit projects folder")
+        clone_action.setEnabled(project.wdir is None)
+        clone_action.setToolTip(
+            "Clone the project to the Calkit projects folder"
+            if project.wdir is None
+            else "Project already exists in Calkit projects folder"
+        )
+        open_vs_code_action.setEnabled(project.wdir is not None)
+        open_folder_action.setEnabled(project.wdir is not None)
+        # Add option to open on calkit.io
+        open_calkit_io_action = menu.addAction("Open on calkit.io")
+        open_calkit_io_action.triggered.connect(
+            lambda: webbrowser.open(
+                f"https://calkit.io/{project.owner_name}/{project.project_name}"
+            )
+        )
+        # Add option to open on github.com
+        open_github_action = menu.addAction("Open on github.com")
+        open_github_action.triggered.connect(
+            lambda: webbrowser.open(project.git_repo_url)
+        )
         # Execute the menu and get the selected action
-        action = menu.exec(self.project_list.viewport().mapToGlobal(position))
+        action = menu.exec(
+            self.project_list_widget.viewport().mapToGlobal(position)
+        )
         # Handle the selected action
         if action == open_vs_code_action:
             self.open_project_vs_code(item)
@@ -692,13 +761,13 @@ class MainWindow(QWidget):
     def open_project_folder(self, item: QListWidgetItem) -> None:
         """Open the project folder in the file explorer."""
         platform = get_platform()
-        dirname = os.path.join(os.path.expanduser("~"), "calkit", item.text())
+        project = self.projects_by_name[item.text()]
         if platform == "windows":
-            cmd = ["explorer", dirname]
+            cmd = ["explorer", project.wdir]
         elif platform == "mac":
-            cmd = ["open", dirname]
+            cmd = ["open", project.wdir]
         elif platform == "linux":
-            cmd = ["xdg-open", dirname]
+            cmd = ["xdg-open", project.wdir]
         subprocess.run(cmd)
 
     def create_new_project(self) -> None:

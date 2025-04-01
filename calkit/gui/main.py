@@ -671,7 +671,14 @@ class MainWindow(QWidget):
         # Create the context menu
         menu = QMenu(self)
         open_vs_code_action = menu.addAction("Open with VS Code")
-        open_folder_action = menu.addAction("Open folder")
+        platform = get_platform()
+        if platform == "windows":
+            open_folder_txt = "Open folder in Explorer"
+        elif platform == "mac":
+            open_folder_txt = "Open folder in Finder"
+        elif platform == "linux":
+            open_folder_txt = "Open folder in file explorer"
+        open_folder_action = menu.addAction(open_folder_txt)
         # TODO: Add option to open on calkit.io
         # TODO: Add option to open on github.com
         # Execute the menu and get the selected action

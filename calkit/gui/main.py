@@ -682,9 +682,12 @@ class MainWindow(QWidget):
         dialog = NewProjectDialog()
         if dialog.exec() == QDialog.Accepted:
             form_data = dialog.get_form_data()
+            project_name = form_data["project_name"]
             # TODO: Create the project using the CLI method
             # Show a progress dialog while the project is being created
-            progress = QProgressDialog("Creating project...", None, 0, 0, self)
+            progress = QProgressDialog(
+                f"Creating {project_name}...", None, 0, 0, self
+            )
             progress.setWindowTitle("Please Wait")
             progress.setCancelButton(None)  # Remove the cancel button
             progress.setMinimumDuration(0)  # Show immediately

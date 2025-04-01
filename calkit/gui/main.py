@@ -613,8 +613,8 @@ class MainWindow(QWidget):
         self.refresh_projects_button.setStyleSheet(
             "font-size: 10px; padding: 0px; margin: 0px; border: none;"
         )
-        self.refresh_projects_button.setFixedSize(15, 30)
-        self.refresh_projects_button.setIconSize(QSize(18, 18))
+        self.refresh_projects_button.setFixedSize(18, 30)
+        self.refresh_projects_button.setIconSize(QSize(16, 16))
         self.refresh_projects_button.setToolTip("Refresh projects")
         self.refresh_projects_button.clicked.connect(self.refresh_project_list)
         self.projects_title_bar_layout.addWidget(self.refresh_projects_button)

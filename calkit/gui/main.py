@@ -604,6 +604,8 @@ class MainWindow(QWidget):
         menu = QMenu(self)
         open_vs_code_action = menu.addAction("Open with VS Code")
         open_folder_action = menu.addAction("Open folder")
+        # TODO: Add option to open on calkit.io
+        # TODO: Add option to open on github.com
         # Execute the menu and get the selected action
         action = menu.exec(self.project_list.viewport().mapToGlobal(position))
         # Handle the selected action

@@ -534,6 +534,7 @@ class MainWindow(QWidget):
         project_dirs = get_project_dirs()
         for project in project_dirs:
             self.add_project_item(project)
+        self.project_list.itemDoubleClicked.connect(self.open_project)
         self.projects_layout.addWidget(self.project_list)
         # Add the projects widget to the layout
         self.layout.addWidget(self.projects_widget)
@@ -542,6 +543,14 @@ class MainWindow(QWidget):
         """Add a project item with an 'open' icon to the list."""
         item = QListWidgetItem(QIcon.fromTheme("folder-open"), project_name)
         self.project_list.addItem(item)
+
+    def open_project(self, item) -> None:
+        project_name = item.text()
+        project_dir = os.path.join(
+            os.path.expanduser("~"), "calkit", project_name
+        )
+        cmd = f"code {project_dir}"
+        subprocess.run(cmd, shell=True)
 
 
 def run():

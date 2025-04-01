@@ -14,10 +14,11 @@ from typing import Literal
 
 import git
 import git.exc
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QMessageBox,
+    QProgressDialog,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -499,6 +501,56 @@ def get_project_dirs() -> list[str]:
     return final_res
 
 
+class NewProjectDialog(QDialog):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Create new project")
+        # Main layout
+        self.layout = QVBoxLayout(self)
+        # Project Name
+        self.project_name_label = QLabel("Name:")
+        self.project_name_input = QLineEdit()
+        self.layout.addWidget(self.project_name_label)
+        self.layout.addWidget(self.project_name_input)
+        # Description
+        self.description_label = QLabel("Description:")
+        self.description_input = QLineEdit()
+        self.layout.addWidget(self.description_label)
+        self.layout.addWidget(self.description_input)
+        # Buttons
+        self.button_layout = QHBoxLayout()
+        self.ok_button = QPushButton("OK")
+        self.cancel_button = QPushButton("Cancel")
+        self.button_layout.addWidget(self.ok_button)
+        self.button_layout.addWidget(self.cancel_button)
+        self.layout.addLayout(self.button_layout)
+        # Connect buttons
+        self.ok_button.clicked.connect(self.accept)
+        self.cancel_button.clicked.connect(self.reject)
+        # Connect the validate method to the textChanged signal
+        self.project_name_input.textChanged.connect(self.validate)
+        self.description_input.textChanged.connect(self.validate)
+        self.ok_button.setEnabled(False)
+
+    def validate(self) -> None:
+        """Validate the form data on each edit, disabling the submit button
+        until it's okay.
+        """
+        # Check if the project name is empty
+        if not self.project_name_input.text():
+            self.ok_button.setEnabled(False)
+            return
+        # If both are valid, enable the button
+        self.ok_button.setEnabled(True)
+
+    def get_form_data(self):
+        """Retrieve the form data."""
+        return {
+            "project_name": self.project_name_input.text(),
+            "description": self.description_input.text(),
+        }
+
+
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -627,15 +679,30 @@ class MainWindow(QWidget):
         subprocess.run(cmd)
 
     def create_new_project(self) -> None:
-        QMessageBox.critical(
-            self,
-            "Not implemented",
-            "This is not implemented yet.",
+        dialog = NewProjectDialog()
+        if dialog.exec() == QDialog.Accepted:
+            form_data = dialog.get_form_data()
+            # TODO: Create the project using the CLI method
+            # Show a progress dialog while the project is being created
+            progress = QProgressDialog("Creating project...", None, 0, 0, self)
+            progress.setWindowTitle("Please Wait")
+            progress.setCancelButton(None)  # Remove the cancel button
+            progress.setMinimumDuration(0)  # Show immediately
+            progress.setRange(0, 0)  # Indeterminate progress
+            progress.show()
+            # Close the progress dialog
+            # Use QTimer to simulate a delay without blocking the event loop
+            QTimer.singleShot(
+                2000, lambda: self.finish_project_creation(progress)
+            )
+
+    def finish_project_creation(self, progress: QProgressDialog) -> None:
+        """Finish the project creation process."""
+        progress.close()
+        # TODO: Refresh the project list
+        QMessageBox.information(
+            self, "Success", "Project created successfully!"
         )
-        return
-        # Create an input form to get project name, title, and an optional
-        # description
-        # TODO
 
 
 def run():

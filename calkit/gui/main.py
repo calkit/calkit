@@ -610,10 +610,7 @@ class MainWindow(QWidget):
         self.projects_layout.addWidget(self.projects_title_bar)
         # Add a list of folders with "open" icons
         self.project_list = QListWidget()
-        print("Detecting project directories")
-        project_dirs = get_project_dirs()
-        for project in project_dirs:
-            self.add_project_item(project)
+        self.refresh_project_list()
         self.project_list.itemDoubleClicked.connect(self.open_project_vs_code)
         # Add right-click context menu to the project list
         self.project_list.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -623,6 +620,14 @@ class MainWindow(QWidget):
         self.projects_layout.addWidget(self.project_list)
         # Add the projects widget to the layout
         self.layout.addWidget(self.projects_widget)
+
+    def refresh_project_list(self) -> None:
+        """Refresh the project list by clearing and re-adding items."""
+        print("Refreshing project list")
+        self.project_list.clear()
+        project_dirs = get_project_dirs()
+        for project in project_dirs:
+            self.add_project_item(project)
 
     def add_project_item(self, project_name):
         """Add a project item with an 'open' icon to the list."""
@@ -702,7 +707,8 @@ class MainWindow(QWidget):
     def finish_project_creation(self, progress: QProgressDialog) -> None:
         """Finish the project creation process."""
         progress.close()
-        # TODO: Refresh the project list
+        # Refresh the project list
+        self.refresh_project_list()
         QMessageBox.information(
             self, "Success", "Project created successfully!"
         )

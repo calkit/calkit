@@ -391,8 +391,7 @@ class GitConfigStep(QWidget):
         self.update_button.setStyleSheet(
             "font-size: 10px; padding: 0px; margin: 0px; border: none;"
         )
-        self.update_button.setFixedSize(18, 30)
-        self.update_button.setIconSize(QSize(16, 16))
+        self.update_button.setFixedSize(18, 18)
         self.update_button.setToolTip("Update")
         self.layout.addWidget(self.label)
         self.layout.addWidget(self.update_button, stretch=0)

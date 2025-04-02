@@ -6,6 +6,7 @@ in their editor of choice.
 
 import glob
 import os
+import platform
 import subprocess
 import sys
 import webbrowser
@@ -298,8 +299,34 @@ class CondaInstall(DependencyInstall):
 
     def install(self) -> bool:
         """Install Conda."""
+        # See https://github.com/conda-forge/miniforge/releases/latest
+        urls = {
+            "windows": (
+                "https://github.com/conda-forge/miniforge/"
+                "releases/download/24.11.3-2/"
+                "Miniforge3-24.11.3-2-Windows-x86_64.exe"
+            ),
+            "linux-aarch64": (
+                "https://github.com/conda-forge/miniforge/releases/download/"
+                "24.11.3-2/Miniforge3-24.11.3-2-Linux-aarch64.sh"
+            ),
+            "mac-arm64": (
+                "https://github.com/conda-forge/miniforge/releases/download/"
+                "24.11.3-2/Miniforge3-24.11.3-2-MacOSX-arm64.sh"
+            ),
+        }
         # First check our platform and download the installer
-        # Run the installer
+        pf = get_platform()
+        arch = platform.machine().lower()
+        if pf != "windows":
+            pf += "-" + arch
+        url = urls[pf]
+        # Check if the installer is already in our downloads
+        downloads_folder = os.path.join(os.path.expanduser("~"), "Downloads")
+        os.makedirs(downloads_folder, exist_ok=True)
+        download_fpath = os.path.join(downloads_folder, os.path.basename(url))
+        # Show progress bar while downloading
+        # Run the installer and show a progress bar while it's running
         raise NotImplementedError
 
 

@@ -832,7 +832,7 @@ class MainWindow(QWidget):
             progress = QProgressDialog(
                 f"Creating {project_name}...", None, 0, 0, self
             )
-            progress.setWindowTitle("Please Wait")
+            progress.setWindowTitle("Please wait")
             progress.setCancelButton(None)  # Remove the cancel button
             progress.setMinimumDuration(0)  # Show immediately
             progress.setRange(0, 0)  # Indeterminate progress

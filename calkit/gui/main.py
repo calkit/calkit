@@ -322,6 +322,7 @@ class CondaInstall(DependencyInstall):
         url = urls[pf]
         download_thread = FileDownloadThread(url=url, parent=self)
         if not download_thread.file_exists:
+            print("Downloading Miniforge")
             download_progress = QProgressDialog(
                 "Downloading Miniforge", None, 0, 100, self
             )
@@ -333,16 +334,26 @@ class CondaInstall(DependencyInstall):
                 lambda: download_progress.setValue(download_progress.maximum())
             )
             download_thread.start()
+        else:
+            print("Miniforge installer already downloaded")
         # Now run the installer
         # This should open a new window, and our progress dialog should poll
         # for the app being installed in a thread
         # TODO: This command needs to respect the platform
-        cmd = ["/bin/bash", download_thread.download_fpath]
+        if pf.startswith("mac"):
+            cmd = ["/bin/zsh", download_thread.download_fpath]
+        elif pf.startswith("linux"):
+            cmd = ["/bin/bash", download_thread.download_fpath]
+        elif pf.startswith("windows"):
+            cmd = [download_thread.download_fpath]
+        print("Installing with command:", cmd)
         install_thread = SubprocessThread(cmd=cmd, parent=self)
         install_progress = QProgressDialog(
             "Installing Miniforge", None, 0, 0, self
         )
-        return True
+        install_thread.finished.connect(install_progress.close)
+        install_thread.start()
+        return self.installed
 
 
 class DockerInstall(DependencyInstall):
@@ -670,9 +681,12 @@ class SubprocessThread(QThread):
         """Run the subprocess."""
         self.process = subprocess.run(self.cmd, cwd=self.wdir)
         if self.process.returncode != 0:
-            QMessageBox.critical(
-                self.parent, "Failed to clone", self.process.stdout.decode()
-            )
+            if self.process.stderr is not None:
+                QMessageBox.critical(
+                    self.parent,
+                    "Failed to clone",
+                    self.process.stderr.decode(),
+                )
 
 
 class FileDownloadThread(QThread):

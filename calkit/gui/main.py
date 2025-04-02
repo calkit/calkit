@@ -15,7 +15,7 @@ from typing import Literal
 import git
 import git.exc
 from pydantic import BaseModel
-from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QThread, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -614,6 +614,23 @@ class NewProjectDialog(QDialog):
         }
 
 
+class SubprocessThread(QThread):
+    """A thread to run a subprocess."""
+
+    def __init__(self, cmd: list[str], wdir: str = None, **kwargs):
+        super().__init__(**kwargs)
+        self.cmd = cmd
+        self.wdir = wdir
+
+    def run(self) -> None:
+        """Run the subprocess."""
+        self.process = subprocess.run(self.cmd, cwd=self.wdir)
+        if self.process.returncode != 0:
+            QMessageBox.critical(
+                self.parent, "Failed to clone", self.process.stdout.decode()
+            )
+
+
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -708,8 +725,8 @@ class MainWindow(QWidget):
         self.projects_by_name = {}
         for project in self.projects:
             name = f"{project.owner_name}/{project.project_name}"
-            item = QListWidgetItem()
-            widget = QWidget()
+            item = QListWidgetItem(self.project_list_widget)
+            widget = QWidget(self)
             layout = QHBoxLayout()
             layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
             layout.setContentsMargins(0, 0, 0, 0)
@@ -717,17 +734,18 @@ class MainWindow(QWidget):
             widget.setLayout(layout)
             project_label = QLabel(name)
             button = QPushButton("📂" if project.wdir is not None else "⬇️")
-            button.setObjectName(name)
             button.setStyleSheet(
                 "font-size: 12px; padding: 0px; margin: 2px; border: none;"
             )
             button.setCursor(Qt.PointingHandCursor)
-            method = (
-                self.open_project_vs_code
-                if project.wdir is not None
-                else self.clone_project
-            )
-            button.clicked.connect(lambda: method(item))
+            if project.wdir is not None:
+                button.setToolTip("Open in VS Code")
+                button.clicked.connect(
+                    lambda _, i=item: self.open_project_vs_code(i)
+                )
+            else:
+                button.setToolTip("Clone to Calkit projects folder")
+                button.clicked.connect(lambda _, i=item: self.clone_project(i))
             layout.addWidget(button)
             layout.addWidget(project_label)
             item.setSizeHint(widget.sizeHint())
@@ -747,7 +765,7 @@ class MainWindow(QWidget):
             )
             return
         project = self.projects_by_name[item.data(Qt.UserRole)]
-        cmd = f"code '{project.wdir}'"
+        cmd = f"code {project.wdir}"
         subprocess.run(cmd, shell=True)
 
     def show_project_context_menu(self, position):
@@ -804,11 +822,19 @@ class MainWindow(QWidget):
         cmd = ["calkit", "clone", project_name]
         wdir = os.path.join(os.path.expanduser("~"), "calkit")
         os.makedirs(wdir, exist_ok=True)
-        process = subprocess.run(cmd, cwd=wdir)
-        if process.returncode != 0:
-            QMessageBox.critical(
-                self, "Failed to clone", process.stdout.decode()
-            )
+        # Clone in a thread with a progress dialog
+        progress = QProgressDialog(
+            f"Cloning {project_name}...", None, 0, 0, self
+        )
+        progress.setWindowTitle("Please wait")
+        progress.setCancelButton(None)
+        progress.setMinimumDuration(0)  # Show immediately
+        progress.setRange(0, 0)  # Indeterminate progress
+        progress.show()
+        thread = SubprocessThread(cmd=cmd, wdir=wdir, parent=self)
+        thread.finished.connect(progress.close)
+        thread.finished.connect(self.refresh_project_list)
+        thread.start()
 
     def open_project_folder(self, item: QListWidgetItem) -> None:
         """Open the project folder in the file explorer."""

@@ -71,7 +71,7 @@ def get_platform() -> Literal["linux", "mac", "windows"]:
 
 def make_setup_step_layout(widget: QWidget) -> QHBoxLayout:
     layout = QHBoxLayout(widget)
-    layout.setAlignment(Qt.AlignTop)
+    layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
     layout.setSpacing(0)
     layout.setContentsMargins(0, 0, 0, 0)
     return layout
@@ -377,18 +377,26 @@ class GitConfigStep(QWidget):
         self.wsl = wsl
         self.layout = make_setup_step_layout(self)
         if self.wsl:
-            self.txt_not_set = f"Set Git {self.key} in WSL:  ❌ "
-            self.txt_set = f"Set Git {self.key} in WSL:  ✅ "
+            self.txt_not_set = f"Set Git {self.key} in WSL:  ❌"
+            self.txt_set = f"Set Git {self.key} in WSL:  ✅"
         else:
-            self.txt_not_set = f"Set Git {self.key}:  ❌ "
-            self.txt_set = f"Set Git {self.key}:  ✅ "
+            self.txt_not_set = f"Set Git {self.key}:  ❌"
+            self.txt_set = f"Set Git {self.key}:  ✅"
         value = self.value
         self.label = QLabel(self.txt_set if value else self.txt_not_set)
-        self.fix_button = QPushButton("Set" if not value else "Update")
-        self.fix_button.setStyleSheet("font-size: 10px;")
+        # Create a button for updating
+        self.update_button = QPushButton(self)
+        self.update_button.setText("✏️")
+        self.update_button.setCursor(Qt.PointingHandCursor)
+        self.update_button.setStyleSheet(
+            "font-size: 10px; padding: 0px; margin: 0px; border: none;"
+        )
+        self.update_button.setFixedSize(18, 30)
+        self.update_button.setIconSize(QSize(16, 16))
+        self.update_button.setToolTip("Update")
         self.layout.addWidget(self.label)
-        self.layout.addWidget(self.fix_button, stretch=0)
-        self.fix_button.clicked.connect(self.open_dialog)
+        self.layout.addWidget(self.update_button, stretch=0)
+        self.update_button.clicked.connect(self.open_dialog)
 
     @property
     def cmd(self) -> list[str]:

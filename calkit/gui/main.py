@@ -129,8 +129,8 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
         super().__init__()
         self.child_steps = child_steps
         self.layout = make_setup_step_layout(self)
-        self.txt_installed = f"Install {self.dependency_name}:  ✅ "
-        self.txt_not_installed = f"Install {self.dependency_name}:  ❌ "
+        self.txt_installed = f"Install {self.dependency_name}: ✅"
+        self.txt_not_installed = f"Install {self.dependency_name}: ❌"
         installed = self.installed
         for step in self.child_steps:
             step.setEnabled(installed)
@@ -139,8 +139,11 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
         )
         self.layout.addWidget(self.label)
         if not installed:
-            self.install_button = QPushButton("Install")
-            self.install_button.setStyleSheet("font-size: 10px;")
+            self.install_button = QPushButton("⬇️")
+            self.install_button.setCursor(Qt.PointingHandCursor)
+            self.install_button.setToolTip("Install")
+            self.install_button.setFixedSize(18, 18)
+            self.install_button.setStyleSheet("font-size: 10px; padding: 0px;")
             self.install_button.clicked.connect(self._install)
             self.layout.addWidget(self.install_button)
 

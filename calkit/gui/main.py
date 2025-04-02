@@ -708,9 +708,33 @@ class MainWindow(QWidget):
         self.projects_by_name = {}
         for project in self.projects:
             name = f"{project.owner_name}/{project.project_name}"
-            item = QListWidgetItem(QIcon.fromTheme("folder-open"), name)
+            item = QListWidgetItem()
+            widget = QWidget()
+            layout = QHBoxLayout()
+            layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(0)
+            widget.setLayout(layout)
+            project_label = QLabel(name)
+            button = QPushButton("📂" if project.wdir is not None else "⬇️")
+            button.setObjectName(name)
+            button.setStyleSheet(
+                "font-size: 12px; padding: 0px; margin: 2px; border: none;"
+            )
+            button.setCursor(Qt.PointingHandCursor)
+            method = (
+                self.open_project_vs_code
+                if project.wdir is not None
+                else self.clone_project
+            )
+            button.clicked.connect(lambda: method(item))
+            layout.addWidget(button)
+            layout.addWidget(project_label)
+            item.setSizeHint(widget.sizeHint())
+            item.setData(Qt.UserRole, name)
             self.projects_by_name[name] = project
             self.project_list_widget.addItem(item)
+            self.project_list_widget.setItemWidget(item, widget)
 
     def open_project_vs_code(self, item) -> None:
         # If VS Code is not installed, show error message dialog
@@ -722,7 +746,7 @@ class MainWindow(QWidget):
                 "Please install VS Code first.",
             )
             return
-        project = self.projects_by_name[item.text()]
+        project = self.projects_by_name[item.data(Qt.UserRole)]
         cmd = f"code '{project.wdir}'"
         subprocess.run(cmd, shell=True)
 
@@ -732,10 +756,13 @@ class MainWindow(QWidget):
         item = self.project_list_widget.itemAt(position)
         if item is None:
             return  # Do nothing if no item was clicked
-        project = self.projects_by_name[item.text()]
+        project = self.projects_by_name[item.data(Qt.UserRole)]
         # Create the context menu
         menu = QMenu(self)
         open_vs_code_action = menu.addAction("Open with VS Code")
+        open_vs_code_action.triggered.connect(
+            lambda: self.open_project_vs_code(item)
+        )
         platform = get_platform()
         if platform == "windows":
             open_folder_txt = "Open folder in Explorer"
@@ -744,6 +771,9 @@ class MainWindow(QWidget):
         elif platform == "linux":
             open_folder_txt = "Open folder in file explorer"
         open_folder_action = menu.addAction(open_folder_txt)
+        open_folder_action.triggered.connect(
+            lambda: self.open_project_folder(item)
+        )
         clone_action = menu.addAction("Clone to Calkit projects folder")
         clone_action.setEnabled(project.wdir is None)
         clone_action.setToolTip(
@@ -751,6 +781,7 @@ class MainWindow(QWidget):
             if project.wdir is None
             else "Project already exists in Calkit projects folder"
         )
+        clone_action.triggered.connect(lambda: self.clone_project(item))
         open_vs_code_action.setEnabled(project.wdir is not None)
         open_folder_action.setEnabled(project.wdir is not None)
         # Add option to open on calkit.io
@@ -765,20 +796,24 @@ class MainWindow(QWidget):
         open_github_action.triggered.connect(
             lambda: webbrowser.open(project.git_repo_url)
         )
-        # Execute the menu and get the selected action
-        action = menu.exec(
-            self.project_list_widget.viewport().mapToGlobal(position)
-        )
-        # Handle the selected action
-        if action == open_vs_code_action:
-            self.open_project_vs_code(item)
-        elif action == open_folder_action:
-            self.open_project_folder(item)
+        # Execute the menu
+        menu.exec(self.project_list_widget.viewport().mapToGlobal(position))
+
+    def clone_project(self, item: QListWidgetItem) -> None:
+        project_name = item.data(Qt.UserRole)
+        cmd = ["calkit", "clone", project_name]
+        wdir = os.path.join(os.path.expanduser("~"), "calkit")
+        os.makedirs(wdir, exist_ok=True)
+        process = subprocess.run(cmd, cwd=wdir)
+        if process.returncode != 0:
+            QMessageBox.critical(
+                self, "Failed to clone", process.stdout.decode()
+            )
 
     def open_project_folder(self, item: QListWidgetItem) -> None:
         """Open the project folder in the file explorer."""
         platform = get_platform()
-        project = self.projects_by_name[item.text()]
+        project = self.projects_by_name[item.data(Qt.UserRole)]
         if platform == "windows":
             cmd = ["explorer", project.wdir]
         elif platform == "mac":

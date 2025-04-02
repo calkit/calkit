@@ -143,7 +143,9 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
             self.install_button.setCursor(Qt.PointingHandCursor)
             self.install_button.setToolTip("Install")
             self.install_button.setFixedSize(18, 18)
-            self.install_button.setStyleSheet("font-size: 10px; padding: 0px;")
+            self.install_button.setStyleSheet(
+                "font-size: 12px; padding: 0px; margin: 0px; border: none;"
+            )
             self.install_button.clicked.connect(self._install)
             self.layout.addWidget(self.install_button)
 

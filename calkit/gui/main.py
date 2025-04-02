@@ -83,16 +83,15 @@ def run_in_git_bash(command: str) -> subprocess.CompletedProcess:
     """Run a command in Git Bash on Windows."""
     # Find the Git Bash executable path
     # Common locations:
-    git_bash_paths = [
+    paths = [
         r"C:\Program Files\Git\bin\bash.exe",
         r"C:\Program Files\Git\git-bash.exe",
         r"C:\Program Files (x86)\Git\bin\bash.exe",
         r"C:\Program Files (x86)\Git\git-bash.exe",
     ]
-    git_bash_path = None
-    for path in git_bash_paths:
+    for path in paths:
         if os.path.isfile(path):
-            return subprocess.run([git_bash_path, "-c", command])
+            return subprocess.run([path, "-c", command])
     raise FileNotFoundError("Git Bash executable not found")
 
 

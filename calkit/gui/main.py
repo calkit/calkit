@@ -83,15 +83,21 @@ class CalkitToken(QWidget):
     def __init__(self):
         super().__init__()
         is_set = self.is_set
-        self.txt_not_set = "Set Calkit Cloud API token:  ❌ "
-        self.txt_set = "Set Calkit Cloud API token:  ✅ "
+        self.txt_not_set = "Set Calkit Cloud API token: ❌"
+        self.txt_set = "Set Calkit Cloud API token: ✅"
         self.label = QLabel(self.txt_set if is_set else self.txt_not_set)
-        self.fix_button = QPushButton("Set" if not is_set else "Update")
-        self.fix_button.setStyleSheet("font-size: 10px;")
+        self.update_button = QPushButton(self)
+        self.update_button.setText("✏️")
+        self.update_button.setCursor(Qt.PointingHandCursor)
+        self.update_button.setStyleSheet(
+            "font-size: 10px; padding: 0px; margin: 0px; border: none;"
+        )
+        self.update_button.setFixedSize(18, 18)
+        self.update_button.setToolTip("Update")
         self.layout = make_setup_step_layout(self)
-        self.fix_button.clicked.connect(self.open_dialog)
+        self.update_button.clicked.connect(self.open_dialog)
         self.layout.addWidget(self.label)
-        self.layout.addWidget(self.fix_button)
+        self.layout.addWidget(self.update_button)
 
     @property
     def is_set(self) -> bool:
@@ -110,7 +116,6 @@ class CalkitToken(QWidget):
             config.token = text
             config.write()
             self.label.setText(self.txt_set)
-            self.fix_button.setText("Update")
 
 
 class QWidgetABCMeta(ABCMeta, type(QWidget)):
@@ -377,11 +382,11 @@ class GitConfigStep(QWidget):
         self.wsl = wsl
         self.layout = make_setup_step_layout(self)
         if self.wsl:
-            self.txt_not_set = f"Set Git {self.key} in WSL:  ❌"
-            self.txt_set = f"Set Git {self.key} in WSL:  ✅"
+            self.txt_not_set = f"Set Git {self.key} in WSL: ❌"
+            self.txt_set = f"Set Git {self.key} in WSL: ✅"
         else:
-            self.txt_not_set = f"Set Git {self.key}:  ❌"
-            self.txt_set = f"Set Git {self.key}:  ✅"
+            self.txt_not_set = f"Set Git {self.key}: ❌"
+            self.txt_set = f"Set Git {self.key}: ✅"
         value = self.value
         self.label = QLabel(self.txt_set if value else self.txt_not_set)
         # Create a button for updating
@@ -423,7 +428,6 @@ class GitConfigStep(QWidget):
         if ok and text:
             subprocess.run(self.cmd + [self.key, text])
             self.label.setText(self.txt_set)
-            self.fix_button.setText("Update")
 
 
 def make_setup_step_widgets() -> dict[str, QWidget]:

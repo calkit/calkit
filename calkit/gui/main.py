@@ -12,11 +12,12 @@ import sys
 import webbrowser
 from abc import ABCMeta, abstractmethod
 from typing import Literal
+from urllib.request import urlopen
 
 import git
 import git.exc
 from pydantic import BaseModel
-from PySide6.QtCore import QSize, Qt, QThread, QTimer
+from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -321,13 +322,17 @@ class CondaInstall(DependencyInstall):
         if pf != "windows":
             pf += "-" + arch
         url = urls[pf]
-        # Check if the installer is already in our downloads
-        downloads_folder = os.path.join(os.path.expanduser("~"), "Downloads")
-        os.makedirs(downloads_folder, exist_ok=True)
-        download_fpath = os.path.join(downloads_folder, os.path.basename(url))
-        # Show progress bar while downloading
-        # Run the installer and show a progress bar while it's running
-        raise NotImplementedError
+        download_thread = FileDownloadThread(url=url, parent=self)
+        if not download_thread.file_exists:
+            download_progress = QProgressDialog("Downloading Miniforge")
+            download_thread.total_size.connect(download_progress.setMaximum)
+            download_thread.current_progress.connect(
+                download_progress.setValue
+            )
+            download_thread.success.connect(
+                lambda: download_progress.setValue(download_progress.maximum())
+            )
+        # TODO: Now run the installer
 
 
 class DockerInstall(DependencyInstall):
@@ -658,6 +663,60 @@ class SubprocessThread(QThread):
             QMessageBox.critical(
                 self.parent, "Failed to clone", self.process.stdout.decode()
             )
+
+
+class FileDownloadThread(QThread):
+    """A thread to download a file."""
+
+    total_size = Signal(int)
+    current_progress = Signal(int)
+    success = Signal()
+
+    def __init__(self, url: str, parent=None):
+        super().__init__(parent)
+        self.url = url
+        self.downloads_folder = os.path.join(
+            os.path.expanduser("~"), "Downloads"
+        )
+        os.makedirs(self.downloads_folder, exist_ok=True)
+        self.download_fpath = os.path.join(
+            self.downloads_folder, os.path.basename(url)
+        )
+
+    @property
+    def file_exists(self) -> bool:
+        return os.path.isfile(self.download_fpath)
+
+    def run(self):
+        url = self.url
+        filename = self.download_fpath
+        read_bytes = 0
+        chunk_size = 1024
+        # Open the URL address
+        with urlopen(url) as r:
+            # Tell the window the amount of bytes to be downloaded
+            self.total_size.emit(int(r.info()["Content-Length"]))
+            with open(filename, "ab") as f:
+                while True:
+                    # Read a piece of the file we are downloading
+                    chunk = r.read(chunk_size)
+                    # If the result is `None`, that means data is not
+                    # downloaded yet
+                    # Just keep waiting
+                    if chunk is None:
+                        continue
+                    # If the result is an empty `bytes` instance, then
+                    # the file is complete
+                    elif chunk == b"":
+                        break
+                    # Write into the local file the downloaded chunk
+                    f.write(chunk)
+                    read_bytes += chunk_size
+                    # Tell the window how many bytes we have received
+                    self.current_progress.emit(read_bytes)
+        # If this line is reached then no exception has occurred in
+        # the previous lines
+        self.succeeded.emit()
 
 
 class MainWindow(QWidget):

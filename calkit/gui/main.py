@@ -171,8 +171,6 @@ class DependencyInstall(QWidget, metaclass=QWidgetABCMeta):
         """Run the full install process."""
         # Disable install button
         self.install_button.setEnabled(False)
-        # Show loading message
-        self.install_button.setText("Installing...")
         success = self.install()
         # Check if this was successful
         if success:
@@ -324,7 +322,9 @@ class CondaInstall(DependencyInstall):
         url = urls[pf]
         download_thread = FileDownloadThread(url=url, parent=self)
         if not download_thread.file_exists:
-            download_progress = QProgressDialog("Downloading Miniforge")
+            download_progress = QProgressDialog(
+                "Downloading Miniforge", None, 0, 100, self
+            )
             download_thread.total_size.connect(download_progress.setMaximum)
             download_thread.current_progress.connect(
                 download_progress.setValue
@@ -332,7 +332,17 @@ class CondaInstall(DependencyInstall):
             download_thread.success.connect(
                 lambda: download_progress.setValue(download_progress.maximum())
             )
-        # TODO: Now run the installer
+            download_thread.start()
+        # Now run the installer
+        # This should open a new window, and our progress dialog should poll
+        # for the app being installed in a thread
+        # TODO: This command needs to respect the platform
+        cmd = ["/bin/bash", download_thread.download_fpath]
+        install_thread = SubprocessThread(cmd=cmd, parent=self)
+        install_progress = QProgressDialog(
+            "Installing Miniforge", None, 0, 0, self
+        )
+        return True
 
 
 class DockerInstall(DependencyInstall):
@@ -716,7 +726,7 @@ class FileDownloadThread(QThread):
                     self.current_progress.emit(read_bytes)
         # If this line is reached then no exception has occurred in
         # the previous lines
-        self.succeeded.emit()
+        self.success.emit()
 
 
 class MainWindow(QWidget):

@@ -40,10 +40,14 @@ docs-test: ## Test if documentation can be built without warnings or errors.
 docs: ## Build and serve the documentation.
 	@uv run mkdocs serve
 
-.PHONY: assistant
-assistant: ## Run the Calkit Assistant GUI in dev mode.
-	@cd assistant && make gui
+.PHONY: gui
+gui: ## Run the GUI in dev mode.
+	@uv run main.py
 
-.PHONY: build-assistant
-build-assistant: ## Build the Calkit Assistant GUI with PyInstaller.
-	@cd assistant && make build
+.PHONY: build
+build: ## Build the GUI with PyInstaller.
+	@uv run pyinstaller --onefile --icon resources/icon.ico --name calkit-sysmgr main.py
+
+.PHONY: icon
+icon: resources/c-to-the-k.svg ## Create the app icon.
+	@convert -density 256x256 -background transparent resources/c-to-the-k.svg -define icon:auto-resize -colors 256 resources/icon.ico

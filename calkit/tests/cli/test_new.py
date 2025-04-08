@@ -227,7 +227,6 @@ def test_new_project(tmp_dir):
     assert ck_info["title"] == "My new project"
 
 
-@pytest.mark.skip(reason="This test requires a Calkit Cloud token")
 def test_new_project_existing_repo(tmp_dir):
     subprocess.check_call(["git", "init"])
     subprocess.check_call(

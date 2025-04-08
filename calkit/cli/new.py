@@ -134,9 +134,7 @@ def new_project(
                     text=True,
                 )
             except subprocess.CalledProcessError as e:
-                raise_error(
-                    f"Failed to initialize DVC repository: {e.stderr}"
-                )
+                raise_error(f"Failed to initialize DVC repository: {e.stderr}")
             # Commit the DVC init changes
             if not no_commit:
                 repo.git.add(".dvc")
@@ -342,8 +340,11 @@ def new_project(
     # Setup Calkit Cloud DVC remote
     if repo.remotes:
         typer.echo("Setting up Calkit Cloud DVC remote")
-        calkit.dvc.configure_remote(wdir=abs_path)
-        calkit.dvc.set_remote_auth(wdir=abs_path)
+        try:
+            calkit.dvc.configure_remote(wdir=abs_path)
+            calkit.dvc.set_remote_auth(wdir=abs_path)
+        except Exception as e:
+            warn(f"Failed to set up Calkit Cloud DVC remote: {e}")
     if repo.git.diff("--staged") and not no_commit:
         repo.git.commit(["-m", "Initialize Calkit project"])
     typer.echo(success_message)

@@ -216,6 +216,40 @@ def test_new_uv_venv(tmp_dir):
 
 
 def test_new_project(tmp_dir):
+    subprocess.check_call(
+        ["calkit", "new", "project", ".", "--title", "My new project"]
+    )
+    repo = git.Repo()
+    assert repo.git.ls_files("calkit.yaml")
+    assert repo.git.ls_files("README.md")
+    assert repo.git.ls_files(".devcontainer")
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["title"] == "My new project"
+
+
+def test_new_project_existing_repo(tmp_dir):
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/someone/somerepo.git",
+        ]
+    )
+    subprocess.check_call(
+        ["calkit", "new", "project", ".", "--title", "My new project"]
+    )
+    repo = git.Repo()
+    assert repo.git.ls_files("calkit.yaml")
+    assert repo.git.ls_files("README.md")
+    assert repo.git.ls_files(".devcontainer")
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["title"] == "My new project"
+
+
+def test_new_project_existing_files(tmp_dir):
     subprocess.check_call(["touch", "some-existing-file.txt"])
     subprocess.check_call(
         ["calkit", "new", "project", ".", "--title", "My new project"]

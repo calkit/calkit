@@ -104,15 +104,48 @@ def new_project(
     abs_path = os.path.abspath(path)
     if template and os.path.exists(abs_path):
         raise_error("Must specify a new directory if using --template")
-    if cloud and os.path.isdir(os.path.join(abs_path, ".git")):
-        raise_error("Must not already be a Git repo to use --cloud")
+    try:
+        repo = git.Repo(abs_path)
+    except InvalidGitRepositoryError:
+        repo = None
+    if repo is not None and git_repo_url is None:
+        try:
+            git_repo_url = repo.remotes.origin.url
+            # Convert to HTTPS if it's SSH
+            if git_repo_url.startswith("git@"):
+                git_repo_url = git_repo_url.replace(
+                    "git@github.com:", "https://github.com/"
+                )
+            git_repo_url = git_repo_url.removesuffix(".git")
+        except Exception as e:
+            git_repo_url = None
+            raise_error(
+                f"Could not detect Git repo URL from existing repo: {e}"
+            )
+        # If this isn't a DVC repo, run `dvc init`
+        if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
+            typer.echo("Initializing DVC repository")
+            try:
+                subprocess.run(
+                    ["dvc", "init", "-q"],
+                    cwd=abs_path,
+                    capture_output=True,
+                    check=True,
+                    text=True,
+                )
+            except subprocess.CalledProcessError as e:
+                raise_error(f"Failed to initialize DVC repository: {e.stderr}")
+            # Commit the DVC init changes
+            if not no_commit:
+                repo.git.add(".dvc")
+                repo.git.commit(["-m", "Initialize DVC"])
     ck_info_fpath = os.path.join(abs_path, "calkit.yaml")
     if os.path.isfile(ck_info_fpath) and not overwrite:
         raise_error(
             "Destination is already a Calkit project; "
             "use --overwrite to continue"
         )
-    if os.path.isdir(abs_path) and os.listdir(abs_path):
+    if os.path.isdir(abs_path) and os.listdir(abs_path) and repo is None:
         warn(f"{abs_path} is not empty")
     if name is None:
         name = calkit.to_kebab_case(os.path.basename(abs_path))
@@ -127,6 +160,7 @@ def new_project(
         # Cloud should allow None, which will allow us to post just the name
         # NOTE: This will fail if the user hasn't logged into the Calkit Cloud
         # in 6 months, since their GitHub refresh token stored is expired
+        typer.echo("Creating project in Calkit Cloud")
         try:
             resp = calkit.cloud.post(
                 "/projects",
@@ -144,8 +178,8 @@ def new_project(
         # Now clone here
         if not os.path.isdir(abs_path):
             subprocess.run(["git", "clone", resp["git_repo_url"], abs_path])
-        else:
-            typer.echo("Fetching from newly create Git repo")
+        elif repo is None:
+            typer.echo("Fetching from newly created Git repo")
             repo = git.Repo.init(abs_path, initial_branch="main")
             repo.git.remote(["add", "origin", resp["git_repo_url"]])
             repo.git.fetch()
@@ -156,6 +190,25 @@ def new_project(
                 repo.git.checkout(checkout_cmd)
             except GitCommandError as e:
                 raise_error(f"Failed to check out main branch: {e}")
+        else:
+            # Create a calkit.yaml file if one does not exist
+            calkit_fpath = os.path.join(abs_path, "calkit.yaml")
+            if not os.path.isfile(calkit_fpath):
+                typer.echo("Creating calkit.yaml file")
+                with open(calkit_fpath, "w") as f:
+                    ryaml.dump(
+                        dict(
+                            owner=resp["owner_account_name"],
+                            name=resp["name"],
+                            title=resp["title"],
+                            description=resp["description"],
+                            git_repo_url=resp["git_repo_url"],
+                        ),
+                        f,
+                    )
+                repo.git.add("calkit.yaml")
+                if not no_commit:
+                    repo.git.commit(["-m", "Create calkit.yaml"])
         try:
             calkit.dvc.set_remote_auth(wdir=abs_path)
         except Exception:
@@ -287,8 +340,11 @@ def new_project(
     # Setup Calkit Cloud DVC remote
     if repo.remotes:
         typer.echo("Setting up Calkit Cloud DVC remote")
-        calkit.dvc.configure_remote(wdir=abs_path)
-        calkit.dvc.set_remote_auth(wdir=abs_path)
+        try:
+            calkit.dvc.configure_remote(wdir=abs_path)
+            calkit.dvc.set_remote_auth(wdir=abs_path)
+        except Exception as e:
+            warn(f"Failed to set up Calkit Cloud DVC remote: {e}")
     if repo.git.diff("--staged") and not no_commit:
         repo.git.commit(["-m", "Initialize Calkit project"])
     typer.echo(success_message)

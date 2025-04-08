@@ -126,16 +126,16 @@ def new_project(
         if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
             typer.echo("Initializing DVC repository")
             try:
-                proc = subprocess.run(
+                subprocess.run(
                     ["dvc", "init", "-q"],
                     cwd=abs_path,
                     capture_output=True,
                     check=True,
                     text=True,
                 )
-            except subprocess.CalledProcessError:
+            except subprocess.CalledProcessError as e:
                 raise_error(
-                    f"Failed to initialize DVC repository: {proc.stderr}"
+                    f"Failed to initialize DVC repository: {e.stderr}"
                 )
             # Commit the DVC init changes
             if not no_commit:

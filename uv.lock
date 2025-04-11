@@ -396,106 +396,6 @@ css = [
 ]
 
 [[package]]
-name = "calkit-python"
-source = { editable = "." }
-dependencies = [
-    { name = "arithmeval" },
-    { name = "bibtexparser" },
-    { name = "checksumdir" },
-    { name = "docx2pdf" },
-    { name = "dvc" },
-    { name = "eval-type-backport", marker = "python_full_version < '3.10'" },
-    { name = "fastapi" },
-    { name = "gitpython" },
-    { name = "keyring" },
-    { name = "nbconvert" },
-    { name = "pillow" },
-    { name = "pydantic", extra = ["email"] },
-    { name = "pydantic-settings" },
-    { name = "pyjwt" },
-    { name = "python-dotenv" },
-    { name = "pywin32", marker = "sys_platform == 'win32'" },
-    { name = "requests" },
-    { name = "tqdm" },
-    { name = "typer" },
-    { name = "uvicorn" },
-]
-
-[package.optional-dependencies]
-data = [
-    { name = "pandas" },
-    { name = "polars" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "deptry" },
-    { name = "ipykernel" },
-    { name = "jupyter" },
-    { name = "kaleido" },
-    { name = "mkdocs" },
-    { name = "mkdocs-material" },
-    { name = "mkdocs-mermaid2-plugin" },
-    { name = "numpy", version = "2.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.2.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "pandas" },
-    { name = "plotly" },
-    { name = "polars" },
-    { name = "pre-commit" },
-    { name = "pyarrow" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "pytest-test-utils" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "arithmeval" },
-    { name = "bibtexparser" },
-    { name = "checksumdir" },
-    { name = "docx2pdf" },
-    { name = "dvc", specifier = ">=3.59.0" },
-    { name = "eval-type-backport", marker = "python_full_version < '3.10'" },
-    { name = "fastapi" },
-    { name = "gitpython" },
-    { name = "keyring" },
-    { name = "nbconvert" },
-    { name = "pandas", marker = "extra == 'data'", specifier = ">=2.2.3" },
-    { name = "pillow" },
-    { name = "polars", marker = "extra == 'data'", specifier = ">=1.18.0" },
-    { name = "pydantic", extras = ["email"] },
-    { name = "pydantic-settings" },
-    { name = "pyjwt" },
-    { name = "python-dotenv", specifier = ">=1" },
-    { name = "pywin32", marker = "sys_platform == 'win32'" },
-    { name = "requests" },
-    { name = "tqdm", specifier = ">=4.67.1" },
-    { name = "typer" },
-    { name = "uvicorn" },
-]
-provides-extras = ["data"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "deptry", specifier = ">=0.22.0" },
-    { name = "ipykernel" },
-    { name = "jupyter" },
-    { name = "kaleido", specifier = "==0.2.1" },
-    { name = "mkdocs" },
-    { name = "mkdocs-material" },
-    { name = "mkdocs-mermaid2-plugin" },
-    { name = "numpy" },
-    { name = "pandas", specifier = ">=2.2.3" },
-    { name = "plotly" },
-    { name = "polars", specifier = ">=1.18.0" },
-    { name = "pre-commit" },
-    { name = "pyarrow" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "pytest-test-utils" },
-]
-
-[[package]]
 name = "celery"
 version = "5.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -683,6 +583,106 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/b5/bc/7446a3877cae4638c93531239736ca3ee7933bd3f775db325bb1a1d5102c/checksumdir-1.2.0.tar.gz", hash = "sha256:10bfd7518da5a14b0e9ac03e9ad105f0e70f58bba52b6e9aa2f21a3f73c7b5a8", size = 4116 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1f/75/cc1e76d4957ef6852ef9a49c3f75794a2952d0af3d2482dc7d19f659fa42/checksumdir-1.2.0-py3-none-any.whl", hash = "sha256:77687e16da95970c94061c74ef2e13666c4b6e0e8c90a5eaf0c8f7591332cf01", size = 5342 },
+]
+
+[[package]]
+name = "ckt"
+source = { editable = "." }
+dependencies = [
+    { name = "arithmeval" },
+    { name = "bibtexparser" },
+    { name = "checksumdir" },
+    { name = "docx2pdf" },
+    { name = "dvc" },
+    { name = "eval-type-backport", marker = "python_full_version < '3.10'" },
+    { name = "fastapi" },
+    { name = "gitpython" },
+    { name = "keyring" },
+    { name = "nbconvert" },
+    { name = "pillow" },
+    { name = "pydantic", extra = ["email"] },
+    { name = "pydantic-settings" },
+    { name = "pyjwt" },
+    { name = "python-dotenv" },
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "requests" },
+    { name = "tqdm" },
+    { name = "typer" },
+    { name = "uvicorn" },
+]
+
+[package.optional-dependencies]
+data = [
+    { name = "pandas" },
+    { name = "polars" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "deptry" },
+    { name = "ipykernel" },
+    { name = "jupyter" },
+    { name = "kaleido" },
+    { name = "mkdocs" },
+    { name = "mkdocs-material" },
+    { name = "mkdocs-mermaid2-plugin" },
+    { name = "numpy", version = "2.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.2.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pandas" },
+    { name = "plotly" },
+    { name = "polars" },
+    { name = "pre-commit" },
+    { name = "pyarrow" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-test-utils" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "arithmeval" },
+    { name = "bibtexparser" },
+    { name = "checksumdir" },
+    { name = "docx2pdf" },
+    { name = "dvc", specifier = ">=3.59.0" },
+    { name = "eval-type-backport", marker = "python_full_version < '3.10'" },
+    { name = "fastapi" },
+    { name = "gitpython" },
+    { name = "keyring" },
+    { name = "nbconvert" },
+    { name = "pandas", marker = "extra == 'data'", specifier = ">=2.2.3" },
+    { name = "pillow" },
+    { name = "polars", marker = "extra == 'data'", specifier = ">=1.18.0" },
+    { name = "pydantic", extras = ["email"] },
+    { name = "pydantic-settings" },
+    { name = "pyjwt" },
+    { name = "python-dotenv", specifier = ">=1" },
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "requests" },
+    { name = "tqdm", specifier = ">=4.67.1" },
+    { name = "typer" },
+    { name = "uvicorn" },
+]
+provides-extras = ["data"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "deptry", specifier = ">=0.22.0" },
+    { name = "ipykernel" },
+    { name = "jupyter" },
+    { name = "kaleido", specifier = "==0.2.1" },
+    { name = "mkdocs" },
+    { name = "mkdocs-material" },
+    { name = "mkdocs-mermaid2-plugin" },
+    { name = "numpy" },
+    { name = "pandas", specifier = ">=2.2.3" },
+    { name = "plotly" },
+    { name = "polars", specifier = ">=1.18.0" },
+    { name = "pre-commit" },
+    { name = "pyarrow" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-test-utils" },
 ]
 
 [[package]]

@@ -46,7 +46,7 @@ uv tool install calkit-python
 Alternatively, but less ideally, you can install with your system Python:
 
 ```sh
-pip install calkit-python
+pip install ckt
 ```
 
 For Windows users, the

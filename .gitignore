@@ -7,3 +7,8 @@ site
 .venv
 .coverage*
 coverage.xml
+.mypy_cache
+.benchmarks
+.pytest_cache
+.ruff_cache
+dist

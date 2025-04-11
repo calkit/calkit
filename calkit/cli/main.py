@@ -1401,7 +1401,7 @@ def switch_branch(name: Annotated[str, typer.Argument(help="Branch name.")]):
         "allow_extra_args": True,
     },
 )
-def dvc(
+def call_dvc(
     ctx: typer.Context,
     help: Annotated[bool, typer.Option("-h", "--help")] = False,
 ):

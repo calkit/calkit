@@ -1410,6 +1410,5 @@ def dvc(
     Useful if Calkit is installed as a tool, e.g., with `uv tool` or `pipx`,
     and DVC is not installed.
     """
-    from dvc.cli import main as dvc_cli
-
-    sys.exit(dvc_cli(sys.argv[2:]))
+    process = subprocess.run([sys.executable, "-m", "dvc"] + sys.argv[2:])
+    sys.exit(process.returncode)

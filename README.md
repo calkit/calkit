@@ -40,7 +40,7 @@ For Python, we recommend
 After Python is installed, run:
 
 ```sh
-pip install calkit-python
+pip install ckt
 ```
 
 For Windows users, the

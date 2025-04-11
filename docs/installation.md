@@ -5,9 +5,15 @@ If you want to use [Docker](https://docker.com) containers,
 which is typically a good idea,
 that should also be installed.
 For Python, we recommend
-[Miniforge](https://conda-forge.org/miniforge/).
+[uv](https://docs.astral.sh/uv/).
 
-After Python is installed, execute:
+With uv installed, install Calkit with:
+
+```sh
+uv tool install calkit-python
+```
+
+Alternatively, but less ideally, you can install with your system Python:
 
 ```sh
 pip install calkit-python

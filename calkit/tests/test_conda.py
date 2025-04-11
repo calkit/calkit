@@ -42,8 +42,7 @@ def conda_env_name():
 
 
 def test_check_env(tmp_dir, conda_env_name):
-    subprocess.check_call(["git", "init"])
-    subprocess.check_call(["dvc", "init"])
+    subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
         [
             "calkit",

@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import sys
 
 from calkit.check import check_reproducibility
 
@@ -16,7 +17,7 @@ def test_check_reproducibility(tmp_path):
     assert not res.is_dvc_repo
     assert not res.has_readme
     assert "no README.md" in res.recommendation
-    subprocess.run(["dvc", "init"])
+    subprocess.run([sys.executable, "-m", "dvc", "init"])
     res = check_reproducibility()
     assert res.is_dvc_repo
     assert res.n_dvc_remotes == 0

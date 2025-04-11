@@ -7,6 +7,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import sys
 import zipfile
 from enum import Enum
 
@@ -127,7 +128,7 @@ def new_project(
             typer.echo("Initializing DVC repository")
             try:
                 subprocess.run(
-                    ["dvc", "init", "-q"],
+                    [sys.executable, "-m", "dvc", "init", "-q"],
                     cwd=abs_path,
                     capture_output=True,
                     check=True,
@@ -287,7 +288,16 @@ def new_project(
                 "and `calkit config remote`"
             )
             subprocess.call(
-                ["dvc", "remote", "remove", "calkit", "-q"], cwd=abs_path
+                [
+                    sys.executable,
+                    "-m",
+                    "dvc",
+                    "remote",
+                    "remove",
+                    "calkit",
+                    "-q",
+                ],
+                cwd=abs_path,
             )
         try:
             calkit.dvc.set_remote_auth(wdir=abs_path)
@@ -308,7 +318,9 @@ def new_project(
     repo = git.Repo(abs_path)
     if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
         typer.echo("Initializing DVC repository")
-        subprocess.run(["dvc", "init", "-q"], cwd=abs_path)
+        subprocess.run(
+            [sys.executable, "-m", "dvc", "init", "-q"], cwd=abs_path
+        )
     # Create calkit.yaml file
     ck_info = calkit.load_calkit_info(wdir=abs_path)
     ck_info = dict(name=name, title=title, description=description) | ck_info
@@ -439,7 +451,7 @@ def new_figure(
         for out in outs:
             outs_cmd += ["-o", out]
         subprocess.check_call(
-            ["dvc", "stage", "add", "-n", stage_name]
+            [sys.executable, "-m", "dvc", "stage", "add", "-n", stage_name]
             + (["-f"] if overwrite else [])
             + deps_cmd
             + outs_cmd
@@ -779,7 +791,7 @@ def new_dataset(
         for out in outs:
             outs_cmd += ["-o", out]
         subprocess.check_call(
-            ["dvc", "stage", "add", "-n", stage_name]
+            [sys.executable, "-m", "dvc", "stage", "add", "-n", stage_name]
             + (["-f"] if overwrite else [])
             + deps_cmd
             + outs_cmd
@@ -1486,7 +1498,7 @@ def new_stage(
         cmd += f"zsh {target}"
     elif kind.value == "r-script":
         cmd += f"Rscript {target}"
-    add_cmd = ["dvc", "stage", "add", "-n", name]
+    add_cmd = [sys.executable, "-m", "dvc", "stage", "add", "-n", name]
     for dep in [target] + deps:
         add_cmd += ["-d", dep]
     for out in outs:

@@ -14,8 +14,7 @@ from calkit.cli.main import _to_shell_cmd
 
 
 def test_run_in_env(tmp_dir):
-    subprocess.check_call("git init", shell=True)
-    subprocess.check_call("dvc init", shell=True)
+    subprocess.check_call("calkit init", shell=True)
     # First create a new Docker environment for this bare project
     subprocess.check_call(
         "calkit new docker-env "
@@ -110,8 +109,7 @@ def test_run_in_env(tmp_dir):
 
 
 def test_run_in_venv(tmp_dir):
-    subprocess.check_call("git init", shell=True)
-    subprocess.check_call("dvc init", shell=True)
+    subprocess.check_call("calkit init", shell=True)
     # Test uv venv
     subprocess.check_call(
         [
@@ -353,3 +351,8 @@ def test_save(tmp_dir):
     )
     last_commit_message = repo.head.commit.message.strip()
     assert last_commit_message == "A unique message"
+
+
+def test_call_dvc():
+    subprocess.check_call(["calkit", "dvc", "--help"])
+    subprocess.check_call(["calkit", "dvc", "stage", "--help"])

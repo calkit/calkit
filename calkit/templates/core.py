@@ -1,5 +1,7 @@
 """Core functionality for working with templates."""
 
+from __future__ import annotations
+
 import os
 import shutil
 from typing import Literal

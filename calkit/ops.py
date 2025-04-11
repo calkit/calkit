@@ -4,7 +4,10 @@ An op is a process that runs outside the pipeline, e.g., for continuous data
 collection, a task run on a schedule, or a fixed number of iterations.
 """
 
+from __future__ import annotations
+
 from typing import Literal
+
 from pydantic import BaseModel
 
 

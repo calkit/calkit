@@ -204,7 +204,7 @@ def import_dataset(
     if not no_dvc_pull and dvc_import is not None:
         # Run dvc pull
         typer.echo("Running dvc pull")
-        subprocess.call(["dvc", "pull", dvc_fpath])
+        subprocess.call(["calkit", "dvc", "pull", dvc_fpath])
 
 
 @import_app.command(name="environment")

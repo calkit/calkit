@@ -218,7 +218,7 @@ def dvc_pull(owner_name: str, project_name: str) -> Message:
     logger.info(f"Looking for project {owner_name}/{project_name}")
     project = get_local_project(owner_name, project_name)
     logger.info(f"Found project at {project.wdir}")
-    subprocess.check_call(["dvc", "pull"], cwd=project.wdir)
+    subprocess.check_call(["calkit", "dvc", "pull"], cwd=project.wdir)
     return Message(message="Success!")
 
 
@@ -227,7 +227,7 @@ def dvc_push(owner_name: str, project_name: str) -> Message:
     logger.info(f"Looking for project {owner_name}/{project_name}")
     project = get_local_project(owner_name, project_name)
     logger.info(f"Found project at {project.wdir}")
-    subprocess.check_call(["dvc", "push"], cwd=project.wdir)
+    subprocess.check_call(["calkit", "dvc", "push"], cwd=project.wdir)
     return Message(message="Success!")
 
 
@@ -453,7 +453,8 @@ def discard_changes(owner_name: str, project_name: str) -> Message:
         for path in changed:
             logger.info(f"Checking out {path} with DVC")
             subprocess.check_call(
-                ["dvc", "checkout", path, "--force"], cwd=project.wdir
+                ["calkit", "dvc", "checkout", path, "--force"],
+                cwd=project.wdir,
             )
     except dvc.config.ConfigError:
         pass
@@ -496,7 +497,7 @@ def get_pipeline(owner_name: str, project_name: str) -> Pipeline:
             raw_yaml = f.read()
         pipeline = calkit.ryaml.load(raw_yaml)
         mermaid = subprocess.check_output(
-            ["dvc", "dag", "--mermaid"], cwd=project.wdir
+            ["calkit", "dvc", "dag", "--mermaid"], cwd=project.wdir
         ).decode()
         return Pipeline(
             raw_yaml=raw_yaml,

@@ -122,12 +122,12 @@ def init(
 ):
     """Initialize the current working directory."""
     subprocess.run(["git", "init"])
-    dvc_cmd = ["dvc", "init"]
+    dvc_cmd = ["calkit", "dvc", "init"]
     if force:
         dvc_cmd.append("-f")
     subprocess.run(dvc_cmd)
     # Ensure autostage is enabled for DVC
-    subprocess.call(["dvc", "config", "core.autostage", "true"])
+    subprocess.call(["calkit", "dvc", "config", "core.autostage", "true"])
     # Commit the newly created .dvc directory
     repo = git.Repo()
     repo.git.add(".dvc")
@@ -214,7 +214,7 @@ def clone(
     # DVC pull
     if not no_dvc_pull:
         try:
-            subprocess.check_call(["dvc", "pull"])
+            subprocess.check_call(["calkit", "dvc", "pull"])
         except subprocess.CalledProcessError:
             raise_error("Failed to pull from DVC remote(s)")
 
@@ -243,10 +243,10 @@ def get_status():
     run_cmd(["git", "status"])
     typer.echo()
     print_sep("Data (DVC)")
-    run_cmd(["dvc", "data", "status"])
+    run_cmd(["calkit", "dvc", "data", "status"])
     typer.echo()
     print_sep("Pipeline (DVC)")
-    run_cmd(["dvc", "status"])
+    run_cmd(["calkit", "dvc", "status"])
 
 
 @app.command(name="diff")
@@ -255,7 +255,7 @@ def diff():
     print_sep("Code (Git)")
     run_cmd(["git", "diff"])
     print_sep("Pipeline (DVC)")
-    run_cmd(["dvc", "diff"])
+    run_cmd(["calkit", "dvc", "diff"])
 
 
 @app.command(name="add")
@@ -331,7 +331,7 @@ def add(
         warn("DVC not initialized yet; initializing")
         dvc_repo = dvc.repo.Repo.init()
     # Ensure autostage is enabled for DVC
-    subprocess.call(["dvc", "config", "core.autostage", "true"])
+    subprocess.call(["calkit", "dvc", "config", "core.autostage", "true"])
     subprocess.call(["git", "add", ".dvc/config"])
     dvc_paths = calkit.dvc.list_paths()
     untracked_git_files = repo.untracked_files
@@ -393,15 +393,15 @@ def add(
                 typer.echo(
                     f"Adding {path} to DVC since it's already tracked with DVC"
                 )
-                subprocess.call(["dvc", "add", path])
+                subprocess.call(["calkit", "dvc", "add", path])
             elif os.path.splitext(path)[-1] in DVC_EXTENSIONS:
                 typer.echo(f"Adding {path} to DVC per its extension")
-                subprocess.call(["dvc", "add", path])
+                subprocess.call(["calkit", "dvc", "add", path])
             elif calkit.get_size(path) > DVC_SIZE_THRESH_BYTES:
                 typer.echo(
                     f"Adding {path} to DVC since it's greater than 1 MB"
                 )
-                subprocess.call(["dvc", "add", path])
+                subprocess.call(["calkit", "dvc", "add", path])
             else:
                 typer.echo(f"Adding {path} to Git")
                 subprocess.call(["git", "add", path])
@@ -561,7 +561,7 @@ def pull(
                 typer.echo(f"Checking authentication for DVC remote: {name}")
                 calkit.dvc.set_remote_auth(remote_name=name)
     try:
-        subprocess.check_call(["dvc", "pull"])
+        subprocess.check_call(["calkit", "dvc", "pull"])
     except subprocess.CalledProcessError:
         raise_error("DVC pull failed")
 
@@ -589,7 +589,7 @@ def push(
                     )
                     calkit.dvc.set_remote_auth(remote_name=name)
         try:
-            subprocess.check_call(["dvc", "push"])
+            subprocess.check_call(["calkit", "dvc", "push"])
         except subprocess.CalledProcessError:
             raise_error("DVC push failed")
 
@@ -716,7 +716,7 @@ def run(
     if downstream is not None:
         args += downstream
     try:
-        subprocess.check_call(["dvc", "repro"] + args)
+        subprocess.check_call(["calkit", "dvc", "repro"] + args)
     except subprocess.CalledProcessError:
         raise_error("DVC pipeline failed")
     # Now parse stage metadata for calkit objects

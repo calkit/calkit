@@ -357,4 +357,4 @@ def test_save(tmp_dir):
 
 def test_call_dvc():
     subprocess.check_call(["calkit", "dvc", "--help"])
-    subprocess.check_call(["calkit", "stage", "--help"])
+    subprocess.check_call(["calkit", "dvc", "stage", "--help"])

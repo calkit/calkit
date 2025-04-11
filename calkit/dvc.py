@@ -87,6 +87,8 @@ def set_remote_auth(
         settings.write()
     subprocess.check_call(
         [
+            sys.executable,
+            "-m",
             "dvc",
             "remote",
             "modify",
@@ -99,6 +101,8 @@ def set_remote_auth(
     )
     subprocess.check_call(
         [
+            sys.executable,
+            "-m",
             "dvc",
             "remote",
             "modify",

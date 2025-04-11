@@ -981,6 +981,8 @@ def new_publication(
             cmd = f"calkit xenv -n {env_name} -- {cmd}"
         target_dep = os.path.join(path, template_obj.target)
         dvc_cmd = [
+            sys.executable,
+            "-m",
             "dvc",
             "stage",
             "add",

@@ -1391,3 +1391,25 @@ def switch_branch(name: Annotated[str, typer.Argument(help="Branch name.")]):
     else:
         cmd = [name]
     repo.git.checkout(cmd)
+
+
+@app.command(
+    name="dvc",
+    add_help_option=False,
+    context_settings={
+        "ignore_unknown_options": True,
+        "allow_extra_args": True,
+    },
+)
+def dvc(
+    ctx: typer.Context,
+    help: Annotated[bool, typer.Option("-h", "--help")] = False,
+):
+    """Run a command with the DVC CLI.
+
+    Useful if Calkit is installed as a tool, e.g., with `uv tool` or `pipx`,
+    and DVC is not installed.
+    """
+    from dvc.cli import main as dvc_cli
+
+    sys.exit(dvc_cli(sys.argv[2:]))

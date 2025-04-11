@@ -353,3 +353,8 @@ def test_save(tmp_dir):
     )
     last_commit_message = repo.head.commit.message.strip()
     assert last_commit_message == "A unique message"
+
+
+def test_dvc():
+    subprocess.check_call(["calkit", "dvc", "--help"])
+    subprocess.check_call(["calkit", "dvc", "stage", "--help"])

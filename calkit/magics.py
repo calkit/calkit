@@ -6,6 +6,7 @@ import ast
 import os
 import pathlib
 import subprocess
+import sys
 
 from IPython.core import magic_arguments
 from IPython.core.magic import Magics, cell_magic, magics_class
@@ -223,6 +224,8 @@ class Calkit(Magics):
         # Create a DVC stage that runs the script, defining the appropriate
         # dependencies and outputs, and run it
         cmd = [
+            sys.executable,
+            "-m",
             "dvc",
             "stage",
             "add",

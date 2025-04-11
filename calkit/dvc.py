@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import sys
 
 import dvc.repo
 import git
@@ -41,7 +42,8 @@ def configure_remote(wdir: str = None):
     remote_url = f"{base_url}/projects/{project_name}/dvc"
     subprocess.check_call(
         [
-            "calkit",
+            sys.executable,
+            "-m",
             "dvc",
             "remote",
             "add",
@@ -54,7 +56,8 @@ def configure_remote(wdir: str = None):
     )
     subprocess.check_call(
         [
-            "calkit",
+            sys.executable,
+            "-m",
             "dvc",
             "remote",
             "modify",
@@ -113,10 +116,28 @@ def add_external_remote(owner_name: str, project_name: str) -> dict:
     remote_url = f"{base_url}/projects/{owner_name}/{project_name}/dvc"
     remote_name = f"{get_app_name()}:{owner_name}/{project_name}"
     subprocess.call(
-        ["calkit", "dvc", "remote", "add", "-f", remote_name, remote_url]
+        [
+            sys.executable,
+            "-m",
+            "dvc",
+            "remote",
+            "add",
+            "-f",
+            remote_name,
+            remote_url,
+        ]
     )
     subprocess.call(
-        ["calkit", "dvc", "remote", "modify", remote_name, "auth", "custom"]
+        [
+            sys.executable,
+            "-m",
+            "dvc",
+            "remote",
+            "modify",
+            remote_name,
+            "auth",
+            "custom",
+        ]
     )
     set_remote_auth(remote_name)
     return {"name": remote_name, "url": remote_url}
@@ -135,7 +156,9 @@ def get_remotes(wdir: str = None) -> dict[str, str]:
     value.
     """
     out = (
-        subprocess.check_output(["calkit", "dvc", "remote", "list"], cwd=wdir)
+        subprocess.check_output(
+            [sys.executable, "-m", "dvc", "remote", "list"], cwd=wdir
+        )
         .decode()
         .strip()
     )

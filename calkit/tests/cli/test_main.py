@@ -355,6 +355,6 @@ def test_save(tmp_dir):
     assert last_commit_message == "A unique message"
 
 
-def test_dvc():
+def test_call_dvc():
     subprocess.check_call(["calkit", "dvc", "--help"])
-    subprocess.check_call(["calkit", "dvc", "stage", "--help"])
+    subprocess.check_call(["calkit", "stage", "--help"])

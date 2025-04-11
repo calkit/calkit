@@ -11,7 +11,7 @@ def test_stage(tmp_dir):
     # Test the stage magic
     # Run git and dvc init in the temp dir
     subprocess.check_call(["git", "init"])
-    subprocess.check_call(["calkit", "dvc", "init"])
+    subprocess.check_call([sys.executable, "-m", "dvc", "init"])
     # Copy in a test notebook and run it
     nb_fpath = os.path.join(
         os.path.dirname(__file__), "..", "..", "test", "pipeline.ipynb"

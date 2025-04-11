@@ -8,6 +8,8 @@ import subprocess
 from copy import deepcopy
 from typing import Annotated
 
+import sys
+
 import git
 import requests
 import typer
@@ -204,7 +206,7 @@ def import_dataset(
     if not no_dvc_pull and dvc_import is not None:
         # Run dvc pull
         typer.echo("Running dvc pull")
-        subprocess.call(["calkit", "dvc", "pull", dvc_fpath])
+        subprocess.call([sys.executable, "-m", "dvc", "pull", dvc_fpath])
 
 
 @import_app.command(name="environment")

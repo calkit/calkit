@@ -5,10 +5,9 @@ from __future__ import annotations
 import base64
 import os
 import subprocess
+import sys
 from copy import deepcopy
 from typing import Annotated
-
-import sys
 
 import git
 import requests

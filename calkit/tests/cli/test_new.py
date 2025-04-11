@@ -10,8 +10,7 @@ import calkit
 
 
 def test_new_foreach_stage(tmp_dir):
-    subprocess.check_call(["git", "init"])
-    subprocess.check_call([sys.executable, "-m", "dvc", "init"])
+    subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
         [
             "calkit",
@@ -54,8 +53,7 @@ def test_new_foreach_stage(tmp_dir):
 
 
 def test_new_figure(tmp_dir):
-    subprocess.check_call(["git", "init"])
-    subprocess.check_call([sys.executable, "-m", "dvc", "init"])
+    subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
         [
             "calkit",
@@ -134,8 +132,7 @@ def test_new_figure(tmp_dir):
 
 
 def test_new_publication(tmp_dir):
-    subprocess.check_call(["git", "init"])
-    subprocess.check_call([sys.executable, "-m", "dvc", "init"])
+    subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
         [
             "calkit",
@@ -173,8 +170,7 @@ def test_new_publication(tmp_dir):
 
 
 def test_new_uv_venv(tmp_dir):
-    subprocess.check_call(["git", "init"])
-    subprocess.check_call([sys.executable, "-m", "dvc", "init"])
+    subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
         [
             "calkit",

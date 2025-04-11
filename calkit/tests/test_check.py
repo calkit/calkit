@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import sys
 
 from calkit.check import check_reproducibility
 

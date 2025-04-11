@@ -7,8 +7,8 @@ import os
 import platform
 import re
 import subprocess
-from typing import Literal
 import sys
+from typing import Literal
 
 import dvc
 import dvc.config

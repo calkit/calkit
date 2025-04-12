@@ -38,6 +38,7 @@ def test_run_in_env(tmp_dir):
         capture_output=True,
         stdin=stdin,
         text=True,
+        check=True,
     )
     assert proc.stdout.strip() == "sup"
     # Ensure we can modify a local file

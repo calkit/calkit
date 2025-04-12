@@ -30,9 +30,7 @@ jobs:
           make test
   windows:
     runs-on: windows-latest
-    timeout-minutes: 15
-    # TODO: Figure out why the tests hang and delete line below
-    if: false
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Configure Git Credentials

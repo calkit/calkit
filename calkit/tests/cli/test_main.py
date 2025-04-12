@@ -28,7 +28,7 @@ def test_run_in_env(tmp_dir):
         "calkit new docker-env "
         "--name my-image "
         "--from ubuntu "
-        "--add-layer miniforge "
+        "--add-layer uv "
         '--description "This is a test image"',
         shell=True,
     )

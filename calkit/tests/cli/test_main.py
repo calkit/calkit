@@ -33,8 +33,8 @@ def test_run_in_env(tmp_dir):
         shell=True,
     )
     proc = subprocess.run(
-        "calkit xenv echo sup",
-        shell=True,
+        ["calkit", "xenv", "echo", "sup"],
+        shell=False,
         capture_output=True,
         stdin=stdin,
         text=True,

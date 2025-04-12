@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import sys
 
 import dvc.repo
 import git
@@ -14,24 +15,38 @@ from calkit.cli.main import _to_shell_cmd
 
 
 def test_run_in_env(tmp_dir):
+    # If running on Windows we need to set stdin for the subprocesses to
+    # ensure sys.stdin.isatty() is False, otherwise we will run docker with
+    # the -it flag, which will fail due to some strangeness with Pytest
+    if sys.platform == "win32":
+        stdin = subprocess.PIPE
+    else:
+        stdin = None
     subprocess.check_call("calkit init", shell=True)
     # First create a new Docker environment for this bare project
     subprocess.check_call(
         "calkit new docker-env "
         "--name my-image "
         "--from ubuntu "
-        "--add-layer miniforge "
+        "--add-layer uv "
         '--description "This is a test image"',
         shell=True,
     )
-    out = (
-        subprocess.check_output("calkit xenv echo sup", shell=True)
-        .decode()
-        .strip()
+    proc = subprocess.run(
+        ["calkit", "xenv", "echo", "sup"],
+        shell=False,
+        capture_output=True,
+        stdin=stdin,
+        text=True,
+        check=True,
     )
-    assert out == "sup"
+    assert proc.stdout.strip() == "sup"
     # Ensure we can modify a local file
-    subprocess.check_call(["calkit", "xenv", "touch", "test.txt"])
+    subprocess.run(
+        ["calkit", "xenv", "touch", "test.txt"],
+        stdin=stdin,
+        check=True,
+    )
     # Now let's create a 2nd Docker env and make sure we need to call it by
     # name when trying to run
     subprocess.check_call(
@@ -47,7 +62,9 @@ def test_run_in_env(tmp_dir):
     )
     with pytest.raises(subprocess.CalledProcessError):
         out = (
-            subprocess.check_output("calkit xenv echo sup", shell=True)
+            subprocess.check_output(
+                "calkit xenv echo sup", shell=True, stdin=stdin
+            )
             .decode()
             .strip()
         )
@@ -61,7 +78,8 @@ def test_run_in_env(tmp_dir):
                 "python",
                 "-c",
                 "import foampy; print(foampy.__version__)",
-            ]
+            ],
+            stdin=stdin,
         )
         .decode()
         .strip()
@@ -77,7 +95,9 @@ def test_run_in_env(tmp_dir):
     )
     out = (
         subprocess.check_output(
-            "calkit xenv -n py3.10 python --version", shell=True
+            "calkit xenv -n py3.10 python --version",
+            shell=True,
+            stdin=stdin,
         )
         .decode()
         .strip()
@@ -92,6 +112,7 @@ def test_run_in_env(tmp_dir):
         subprocess.check_output(
             "calkit xenv -n py3.10 --wdir my-new-dir -- ls",
             shell=True,
+            stdin=stdin,
         )
         .decode()
         .strip()
@@ -101,6 +122,7 @@ def test_run_in_env(tmp_dir):
         subprocess.check_output(
             "calkit xenv -n py3.10 --wdir my-new-dir -- ls ..",
             shell=True,
+            stdin=stdin,
         )
         .decode()
         .strip()

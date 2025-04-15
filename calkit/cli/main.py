@@ -1416,3 +1416,331 @@ def call_dvc(
     """
     process = subprocess.run([sys.executable, "-m", "dvc"] + sys.argv[2:])
     sys.exit(process.returncode)
+
+
+@app.command(name="shell")
+def shell_with_env(
+    env_name: Annotated[
+        str,
+        typer.Option(
+            "--name", "-n", help="Environment in which to obtain a shell."
+        ),
+    ],
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Don't check the environment is valid before running in it.",
+        ),
+    ] = False,
+    relaxed_check: Annotated[
+        bool,
+        typer.Option(
+            "--relaxed",
+            help="Check the environment in a relaxed way, if applicable.",
+        ),
+    ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
+    ] = False,
+):
+    """Obtain a shell in the specified environment."""
+    ck_info = calkit.load_calkit_info(process_includes="environments")
+    envs = ck_info.get("environments", {})
+    if not envs:
+        raise_error("No environments defined in calkit.yaml")
+    if isinstance(envs, list):
+        raise_error("Error: Environments should be a dict, not a list")
+    if env_name is None:
+        # See if there's a default env, or only one env defined
+        default_env_name = None
+        for n, e in envs.items():
+            if e.get("default"):
+                if default_env_name is not None:
+                    raise_error(
+                        "Only one default environment can be specified"
+                    )
+                default_env_name = n
+        if default_env_name is None and len(envs) == 1:
+            default_env_name = list(envs.keys())[0]
+        env_name = default_env_name
+    if env_name is None:
+        raise_error("Environment must be specified if there are multiple")
+    if env_name not in envs:
+        raise_error(f"Environment '{env_name}' does not exist")
+    env = envs[env_name]
+    image_name = env.get("image", env_name)
+    docker_wdir = env.get("wdir", "/work")
+    docker_wdir_mount = docker_wdir
+    shell = env.get("shell", "sh")
+    platform = env.get("platform")
+    cmd = "/bin/bash"
+    if env["kind"] == "docker":
+        if "image" not in env:
+            raise_error("Image must be defined for Docker environments")
+        if "path" in env and not no_check:
+            check_docker_env(
+                tag=env["image"],
+                fpath=env["path"],
+                platform=env.get("platform"),
+                deps=env.get("deps", []),
+                quiet=not verbose,
+            )
+        shell_cmd = _to_shell_cmd(cmd)
+        docker_cmd = [
+            "docker",
+            "run",
+        ]
+        if platform:
+            docker_cmd += ["--platform", platform]
+        docker_user = env.get("user")
+        if docker_user is None:
+            try:
+                uid = os.getuid()
+                gid = os.getgid()
+                docker_user = f"{uid}:{gid}"
+            except AttributeError:
+                # We're probably on Windows, so there is no UID to map
+                pass
+        if docker_user is not None:
+            docker_cmd += ["--user", docker_user]
+        docker_cmd += env.get("args", [])
+        docker_cmd += [
+            "-it" if sys.stdin.isatty() else "-i",
+            "--rm",
+            "-w",
+            docker_wdir,
+            "-v",
+            f"{os.getcwd()}:{docker_wdir_mount}",
+            image_name,
+            shell,
+            "-c",
+            shell_cmd,
+        ]
+        if verbose:
+            typer.echo(f"Running command: {docker_cmd}")
+        try:
+            subprocess.check_call(docker_cmd, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in Docker environment")
+    elif env["kind"] == "conda":
+        with open(env["path"]) as f:
+            conda_env = calkit.ryaml.load(f)
+        if not no_check:
+            check_conda_env(
+                env_fpath=env["path"],
+                relaxed=relaxed_check,
+                quiet=not verbose,
+            )
+        # TODO: Prefix should only be in the env file or calkit.yaml, not both?
+        prefix = env.get("prefix")
+        conda_cmd = ["conda", "activate"]
+        if prefix is not None:
+            conda_cmd += [os.path.abspath(prefix)]
+        else:
+            conda_cmd += [conda_env["name"]]
+        cmd = conda_cmd
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in Conda environment")
+    elif env["kind"] in ["pixi", "uv"]:
+        env_cmd = []
+        if "name" in env:
+            env_cmd = ["--environment", env["name"]]
+        cmd = [env["kind"], "run"] + env_cmd + cmd
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
+        try:
+            subprocess.check_call(cmd, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error(f"Failed to run in {env['kind']} environment")
+    elif (kind := env["kind"]) in ["uv-venv", "venv"]:
+        if "prefix" not in env:
+            raise_error("venv environments require a prefix")
+        if "path" not in env:
+            raise_error("venv environments require a path")
+        prefix = env["prefix"]
+        path = env["path"]
+        shell_cmd = _to_shell_cmd(cmd)
+        if verbose:
+            typer.echo(f"Raw command: {cmd}")
+            typer.echo(f"Shell command: {shell_cmd}")
+        create_cmd = (
+            ["uv", "venv"] if kind == "uv-venv" else ["python", "-m", "venv"]
+        )
+        pip_cmd = "pip" if kind == "venv" else "uv pip"
+        pip_install_args = "-q"
+        if "python" in env and kind == "uv-venv":
+            create_cmd += ["--python", env["python"]]
+            pip_install_args += f" --python {env['python']}"
+        # Check environment
+        if not no_check:
+            if not os.path.isdir(prefix):
+                if verbose:
+                    typer.echo(f"Creating {kind} at {prefix}")
+                try:
+                    subprocess.check_call(create_cmd + [prefix], cwd=wdir)
+                except subprocess.CalledProcessError:
+                    raise_error(f"Failed to create {kind} at {prefix}")
+                # Put a gitignore file in the env dir if one doesn't exist
+                if not os.path.isfile(os.path.join(prefix, ".gitignore")):
+                    with open(os.path.join(prefix, ".gitignore"), "w") as f:
+                        f.write("*\n")
+            fname, ext = os.path.splitext(path)
+            lock_fpath = fname + "-lock" + ext
+            if _platform.system() == "Windows":
+                activate_cmd = f"{prefix}\\Scripts\\activate"
+            else:
+                activate_cmd = f". {prefix}/bin/activate"
+            check_cmd = (
+                f"{activate_cmd} "
+                f"&& {pip_cmd} install {pip_install_args} -r {path} "
+                f"&& {pip_cmd} freeze > {lock_fpath} "
+                "&& deactivate"
+            )
+            try:
+                if verbose:
+                    typer.echo(f"Running command: {check_cmd}")
+                subprocess.check_output(
+                    check_cmd,
+                    shell=True,
+                    cwd=wdir,
+                    stderr=subprocess.STDOUT if not verbose else None,
+                )
+            except subprocess.CalledProcessError:
+                raise_error(f"Failed to check {kind}")
+        # Now run the command
+        cmd = f"{activate_cmd} && {shell_cmd} && deactivate"
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
+        try:
+            subprocess.check_call(cmd, shell=True, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error(f"Failed to run in {kind}")
+    elif env["kind"] == "ssh":
+        try:
+            host = os.path.expandvars(env["host"])
+            user = os.path.expandvars(env["user"])
+            remote_wdir = env["wdir"]
+        except KeyError:
+            raise_error(
+                "Host, user, and wdir must be defined for ssh environments"
+            )
+        send_paths = env.get("send_paths")
+        get_paths = env.get("get_paths")
+        key = env.get("key")
+        if key is not None:
+            key = os.path.expanduser(os.path.expandvars(key))
+        remote_shell_cmd = _to_shell_cmd(cmd)
+        # Run with nohup so we can disconnect
+        # TODO: Should we collect output instead of send to /dev/null?
+        remote_cmd = (
+            f"cd '{remote_wdir}' ; nohup {remote_shell_cmd} "
+            "> /dev/null 2>&1 & echo $! "
+        )
+        key_cmd = ["-i", key] if key is not None else []
+        # Check to see if we've already submitted a job with this command
+        jobs_fpath = ".calkit/jobs.yaml"
+        job_key = f"{env_name}::{remote_shell_cmd}"
+        remote_pid = None
+        if os.path.isfile(jobs_fpath):
+            with open(jobs_fpath) as f:
+                jobs = calkit.ryaml.load(f)
+            if jobs is None:
+                jobs = {}
+        else:
+            jobs = {}
+        job = jobs.get(job_key, {})
+        remote_pid = job.get("remote_pid")
+        if remote_pid is None:
+            # First make sure the remote working dir exists
+            typer.echo("Ensuring remote working directory exists")
+            subprocess.check_call(
+                ["ssh"]
+                + key_cmd
+                + [f"{user}@{host}", f"mkdir -p {remote_wdir}"]
+            )
+            # Now send any necessary files
+            if send_paths:
+                typer.echo("Sending to remote directory")
+                # Accept glob patterns
+                paths = []
+                for p in send_paths:
+                    paths += glob.glob(p)
+                scp_cmd = (
+                    ["scp", "-r"]
+                    + key_cmd
+                    + paths
+                    + [f"{user}@{host}:{remote_wdir}/"]
+                )
+                if verbose:
+                    typer.echo(f"scp cmd: {scp_cmd}")
+                subprocess.check_call(scp_cmd)
+            # Now run the command
+            typer.echo(f"Running remote command: {remote_shell_cmd}")
+            if verbose:
+                typer.echo(f"Full command: {remote_cmd}")
+            remote_pid = (
+                subprocess.check_output(
+                    ["ssh"] + key_cmd + [f"{user}@{host}", remote_cmd]
+                )
+                .decode()
+                .strip()
+            )
+            typer.echo(f"Running with remote PID: {remote_pid}")
+            # Save PID to jobs database so we can resume waiting
+            typer.echo("Updating jobs database")
+            os.makedirs(".calkit", exist_ok=True)
+            job["remote_pid"] = remote_pid
+            job["submitted"] = time.time()
+            job["finished"] = None
+            jobs[job_key] = job
+            with open(jobs_fpath, "w") as f:
+                calkit.ryaml.dump(jobs, f)
+        # Now wait for the job to complete
+        typer.echo(f"Waiting for remote PID {remote_pid} to finish")
+        ps_cmd = ["ssh"] + key_cmd + [f"{user}@{host}", "ps", "-p", remote_pid]
+        finished = False
+        while not finished:
+            try:
+                subprocess.check_output(ps_cmd)
+                finished = False
+                time.sleep(2)
+            except subprocess.CalledProcessError:
+                finished = True
+                typer.echo("Remote process finished")
+        # Now sync the files back
+        # TODO: Figure out how to do this in one command
+        # Getting the syntax right is troublesome since it appears to work
+        # differently on different platforms
+        if get_paths:
+            typer.echo("Copying files back from remote directory")
+            for src_path in get_paths:
+                src_path = remote_wdir + "/" + src_path
+                src = f"{user}@{host}:{src_path}"
+                scp_cmd = ["scp", "-r"] + key_cmd + [src, "."]
+                subprocess.check_call(scp_cmd)
+        # Now delete the remote PID from the jobs file
+        typer.echo("Updating jobs database")
+        os.makedirs(".calkit", exist_ok=True)
+        job["remote_pid"] = None
+        job["finished"] = time.time()
+        jobs[job_key] = job
+        with open(jobs_fpath, "w") as f:
+            calkit.ryaml.dump(jobs, f)
+    elif env["kind"] == "renv":
+        try:
+            subprocess.check_call(
+                ["Rscript", "-e", "'renv::restore()'"], cwd=wdir
+            )
+        except subprocess.CalledProcessError:
+            raise_error("Failed to check renv")
+        try:
+            subprocess.check_call(cmd, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in renv")
+    else:
+        raise_error("Environment kind not supported")

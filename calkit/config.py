@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import platform
 from typing import Any, Literal
 from typing import get_args as get_type_args
 
@@ -88,6 +89,30 @@ def get_config_yaml_fpath() -> str:
     )
 
 
+def set_secret(key: str, value: str) -> None:
+    """Sets a secret using keyring, handling byte conversion for Linux."""
+    service_name = get_app_name()
+    if platform.system() == "Linux":
+        value_bytes = value.encode("utf-8")
+        keyring.set_password(service_name, key, value_bytes)
+    else:
+        keyring.set_password(service_name, key, value)
+
+
+def get_secret(key: str) -> str | None:
+    """Gets a secret using keyring, handling byte conversion for Linux."""
+    service_name = get_app_name()
+    password = keyring.get_password(service_name, key)
+    if platform.system() == "Linux" and isinstance(password, bytes):
+        return password.decode("utf-8")
+    return password
+
+
+def delete_secret(key: str) -> None:
+    """Delete a secret using keyring."""
+    keyring.delete_password(get_app_name(), key)
+
+
 class KeyringOptionalSecret(str):
     pass
 
@@ -112,7 +137,7 @@ class KeyringSecretsSource(PydanticBaseSettingsSource):
     """
 
     def get_field_value(self, field: FieldInfo, field_name: str):
-        value = keyring.get_password(get_app_name(), field_name)
+        value = get_secret(field_name)
         return (value, field_name, False)
 
     def __call__(self) -> dict[str, Any]:
@@ -172,7 +197,8 @@ class Settings(BaseSettings):
                     KeyringOptionalSecret in get_type_args(value.annotation)
                 ) and key in cfg:
                     secret_val = cfg.pop(key)
-                    keyring.set_password(get_app_name(), key, secret_val)
+                    if secret_val is not None:
+                        set_secret(key, secret_val)
         with open(self.model_config["yaml_file"], "w") as f:
             yaml.safe_dump(cfg, f)
 

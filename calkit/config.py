@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from typing import Any, Literal
+from typing import get_args as get_type_args
 
 import keyring
 import keyring.errors
@@ -111,12 +112,7 @@ class KeyringSecretsSource(PydanticBaseSettingsSource):
     """
 
     def get_field_value(self, field: FieldInfo, field_name: str):
-        if not KEYRING_SUPPORTED:
-            value = None
-        elif field.annotation is KeyringOptionalSecret:
-            value = keyring.get_password(get_app_name(), field_name)
-        else:
-            value = None
+        value = keyring.get_password(get_app_name(), field_name)
         return (value, field_name, False)
 
     def __call__(self) -> dict[str, Any]:
@@ -124,7 +120,7 @@ class KeyringSecretsSource(PydanticBaseSettingsSource):
             return {}
         secrets = {}
         for field_name, field in self.settings_cls.model_fields.items():
-            if field.annotation is KeyringOptionalSecret:
+            if KeyringOptionalSecret in get_type_args(field.annotation):
                 secrets[field_name] = self.get_field_value(field, field_name)[
                     0
                 ]
@@ -172,7 +168,9 @@ class Settings(BaseSettings):
         # Remove anything that should be in the keyring
         if KEYRING_SUPPORTED:
             for key, value in Settings.model_fields.items():
-                if value.annotation is KeyringOptionalSecret and key in cfg:
+                if (
+                    KeyringOptionalSecret in get_type_args(value.annotation)
+                ) and key in cfg:
                     secret_val = cfg.pop(key)
                     keyring.set_password(get_app_name(), key, secret_val)
         with open(self.model_config["yaml_file"], "w") as f:

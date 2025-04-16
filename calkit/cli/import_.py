@@ -301,3 +301,80 @@ def import_environment(
     repo.git.add("calkit.yaml")
     if not no_commit and calkit.git.get_staged_files():
         repo.git.commit(["-m", f"Import environment {src}"])
+
+
+@import_app.command(name="publication")
+def import_publication(
+    src_path: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Location of publication, e.g., "
+                "https://www.overleaf.com/project/6800005973cb2e35."
+            )
+        ),
+    ],
+    dest_path: Annotated[
+        str,
+        typer.Argument(help="Output directory at which to save."),
+    ],
+    no_commit: Annotated[
+        bool,
+        typer.Option("--no-commit", help="Do not commit changes to repo."),
+    ] = False,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Force adding the publication even if it already exists.",
+        ),
+    ] = False,
+):
+    """Import a publication.
+
+    Currently only supports importing from Overleaf.
+    """
+    if not src_path.startswith("https://www.overleaf.com/project/"):
+        raise_error(
+            "Invalid publication path; must start with "
+            "'https://www.overleaf.com/project/'"
+        )
+    overleaf_project_id = src_path.split("/")[-1]
+    if not overleaf_project_id:
+        raise_error("Invalid Overleaf project ID")
+    ck_info = calkit.load_calkit_info()
+    pubs = ck_info.get("publications", [])
+    pub_paths = [pub["path"] for pub in pubs]
+    if not overwrite and ds_dest_path in pub_paths:
+        raise_error("A dataset already exists in this project at this path")
+    elif overwrite and ds_dest_path in pub_paths:
+        pubs = [ds for ds in pubs if ds["path"] != ds_dest_path]
+    repo = git.Repo()
+    # Clone the Overleaf project into .calkit/overleaf if it doesn't exist
+    # otherwise pull
+    # Add to datasets in calkit.yaml
+    typer.echo("Adding dataset to calkit.yaml")
+    new_pub = calkit.models.ImportedDataset(
+        path=ds_dest_path,
+        title=resp.get("title"),
+        description=resp.get("description"),
+        stage=None,
+        imported_from=calkit.models._ImportedFromProject(
+            project=f"{owner_name}/{project_name}",
+            path=path,
+            git_rev=resp.get("git_rev"),
+            filter_paths=filter_paths,
+        ),
+    )
+    pubs.append(new_pub.model_dump())
+    ck_info["publications"] = pubs
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
+    if not no_commit:
+        # Commit any necessary changes
+        typer.echo("Committing changes")
+        repo.git.commit(
+            ["-m", f"Import Overleaf project ID {overleaf_project_id}"]
+        )

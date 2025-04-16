@@ -100,7 +100,9 @@ def sync():
                     "--- b/",
                 ]
                 for line in diff_lines:
-                    if any(line.startswith(indicator) for indicator in indicators):
+                    if any(
+                        line.startswith(indicator) for indicator in indicators
+                    ):
                         line = line.replace("a/", f"a/{wdir}/")
                         line = line.replace("b/", f"b/{wdir}/")
                     new_lines.append(line)

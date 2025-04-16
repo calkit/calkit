@@ -44,6 +44,23 @@ def get_config_value(key: str) -> None:
         print()
 
 
+@config_app.command(name="unset")
+def unset_config_value(key: str):
+    """Unset a value in the config, returning it to default."""
+    model_fields = config.Settings.model_fields
+    if key not in model_fields:
+        raise_error(
+            f"Invalid config key: '{key}'; "
+            f"Valid keys: {list(model_fields.keys())}"
+        )
+    try:
+        cfg = config.read()
+        setattr(cfg, key, model_fields[key].default)
+    except Exception as e:
+        raise_error(f"Failed to unset {key} in config: {e}")
+    cfg.write()
+
+
 @config_app.command(name="setup-remote", help="Alias for 'remote'.")
 @config_app.command(name="remote")
 def setup_remote(

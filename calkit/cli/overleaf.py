@@ -22,6 +22,7 @@ def sync():
     # Find all publications with Overleaf projects linked
     ck_info = calkit.load_calkit_info()
     pubs = ck_info.get("publications", [])
+    repo = git.Repo()
     pubs = [p for p in pubs if p.get("overleaf", {}).get("project_id")]
     for pub in pubs:
         overleaf_project_id = pub["overleaf"]["project_id"]
@@ -29,6 +30,12 @@ def sync():
             f"Syncing {pub['path']} with "
             f"Overleaf project ID {overleaf_project_id}"
         )
+        wdir = pub["overleaf"].get("wdir")
+        if wdir is None:
+            raise_error(
+                "No working directory defined for this publication; "
+                "please set it in the publication's Overleaf config"
+            )
         # Ensure we've cloned the Overleaf project
         overleaf_project_dir = os.path.join(
             ".calkit", "overleaf", overleaf_project_id
@@ -49,13 +56,12 @@ def sync():
         else:
             overleaf_repo = git.Repo(overleaf_project_dir)
         # Pull the latest version in the Overleaf project
+        typer.echo("Pulling the latest version from Overleaf")
         overleaf_repo.git.pull()
         last_sync_commit = pub["overleaf"].get("last_sync_commit")
         sync_paths = pub["overleaf"].get("sync_paths", [])
         if not sync_paths:
-            warn(
-                "No sync paths defined in the publication's Overleaf config"
-            )
+            warn("No sync paths defined in the publication's Overleaf config")
         elif last_sync_commit:
             # Compute a diff in the Overleaf project between HEAD and the last
             # sync
@@ -64,6 +70,45 @@ def sync():
             )
             typer.echo("Diff:")
             typer.echo(diff)
+            # TODO: Modify the diff to account for the publication working
+            # directory, which will be missing from the Overleaf project
+            # Example diff:
+            # diff --git a/main.tex b/main.tex
+            # index 3106676..e36f402 100644
+            # --- a/main.tex
+            # +++ b/main.tex
+            # @@ -11,4 +11,6 @@
+            #
+            #  \section{Introduction}
+            #
+            # +Here is some text.
+            # +
+            #  \end{document}
+            #
+            if diff:
+                typer.echo("Applying to project repo")
+                typer.echo("Reformulating for working directory")
+                # Fix the diff to account for the publication working directory
+                diff_lines = diff.split("\n")
+                new_lines = []
+                # Fix any lines that start with:
+                indicators = [
+                    "diff --git",
+                    "--- a/",
+                    "+++ b/",
+                    "+++ a/",
+                    "--- b/",
+                ]
+                for line in diff_lines:
+                    if any(line.startswith(indicator) for indicator in indicators):
+                        line = line.replace("a/", f"a/{wdir}/")
+                        line = line.replace("b/", f"b/{wdir}/")
+                    new_lines.append(line)
+                diff = "\n".join(new_lines)
+                typer.echo(f"Reformatted diff:\n{diff}")
+                repo.git.apply(stdin=diff)
+            else:
+                typer.echo("No changes to apply")
         else:
             # Simply copy in all files, TODO
             typer.echo(

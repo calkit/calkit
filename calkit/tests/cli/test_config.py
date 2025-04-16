@@ -93,4 +93,7 @@ def test_get_set():
     )
     with open(fpath, "r") as f:
         cfg = calkit.ryaml.load(f)
-    assert "token" not in cfg
+    if calkit.config.KEYRING_SUPPORTED:
+        assert "token" not in cfg
+    else:
+        assert cfg["token"] == "this-is-a-new-token"

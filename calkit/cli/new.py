@@ -16,7 +16,7 @@ import dotenv
 import git
 import requests
 import typer
-from git.exc import GitCommandError, InvalidGitRepositoryError
+from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 from typing_extensions import Annotated
 
 import calkit
@@ -107,7 +107,7 @@ def new_project(
         raise_error("Must specify a new directory if using --template")
     try:
         repo = git.Repo(abs_path)
-    except InvalidGitRepositoryError:
+    except (InvalidGitRepositoryError, NoSuchPathError):
         repo = None
     if repo is not None and git_repo_url is None:
         try:

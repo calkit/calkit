@@ -130,7 +130,7 @@ class KeyringSecretsSource(PydanticBaseSettingsSource):
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         yaml_file=get_config_yaml_fpath(),
-        extra="allow",
+        extra="ignore",
         env_prefix="CALKIT" + get_env_suffix(sep="_") + "_",
         env_file=".env",
         env_file_encoding="utf-8",
@@ -139,10 +139,10 @@ class Settings(BaseSettings):
     email: str | None = None
     password: KeyringOptionalSecret | None = None
     token: KeyringOptionalSecret | None = None
-    dvc_token: str | None = None
+    dvc_token: KeyringOptionalSecret | None = None
     dataframe_engine: Literal["pandas", "polars"] = "pandas"
-    github_token: str | None = None
-    zenodo_token: str | None = None
+    github_token: KeyringOptionalSecret | None = None
+    zenodo_token: KeyringOptionalSecret | None = None
 
     @classmethod
     def settings_customise_sources(

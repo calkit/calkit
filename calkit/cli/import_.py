@@ -383,8 +383,12 @@ def import_publication(
         title="TODO",
         description="TODO",
         stage=None,
-        # TODO: Use imported_from?
-        overleaf=dict(project_id=overleaf_project_id),  # TODO: paths
+        overleaf=dict(
+            project_id=overleaf_project_id,
+            sync_paths=[],  # TODO: Should be all paths in the Overleaf project
+            push_paths=[],  # TODO: Could come from command line
+            last_sync_commit=overleaf_repo.head.commit.hexsha,
+        ),
     )
     pubs.append(new_pub.model_dump())
     ck_info["publications"] = pubs

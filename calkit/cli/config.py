@@ -20,6 +20,11 @@ config_app = typer.Typer(no_args_is_help=True)
 @config_app.command(name="set")
 def set_config_value(key: str, value: str):
     """Set a value in the config."""
+    keys = config.Settings.model_fields.keys()
+    if key not in keys:
+        raise_error(
+            f"Invalid config key: '{key}'; Valid keys are: {list(keys)}"
+        )
     try:
         cfg = config.read()
         cfg = config.Settings.model_validate(cfg.model_dump() | {key: value})

@@ -20,29 +20,49 @@ config_app = typer.Typer(no_args_is_help=True)
 @config_app.command(name="set")
 def set_config_value(key: str, value: str):
     """Set a value in the config."""
+    keys = config.Settings.model_fields.keys()
+    if key not in keys:
+        raise_error(
+            f"Invalid config key: '{key}'; Valid keys are: {list(keys)}"
+        )
     try:
         cfg = config.read()
         cfg = config.Settings.model_validate(cfg.model_dump() | {key: value})
-        # Kind of a hack for setting the password computed field
-        # Types have been validated above, so this won't hurt to do again
-        setattr(cfg, key, value)
-    except FileNotFoundError:
-        # TODO: This fails if we try to set password before any config has
-        # been written
-        # Username is fine
-        cfg = config.Settings.model_validate({key: value})
+    except Exception as e:
+        raise_error(f"Failed to set {key} in config: {e}")
     cfg.write()
 
 
 @config_app.command(name="get")
 def get_config_value(key: str) -> None:
     """Get and print a value from the config."""
-    cfg = config.read()
-    val = getattr(cfg, key)
+    cfg = config.read().model_dump()
+    if key not in cfg:
+        raise_error(
+            f"Invalid config key: '{key}'; Valid keys are: {list(cfg.keys())}"
+        )
+    val = cfg[key]
     if val is not None:
         print(val)
     else:
         print()
+
+
+@config_app.command(name="unset")
+def unset_config_value(key: str):
+    """Unset a value in the config, returning it to default."""
+    model_fields = config.Settings.model_fields
+    if key not in model_fields:
+        raise_error(
+            f"Invalid config key: '{key}'; "
+            f"Valid keys: {list(model_fields.keys())}"
+        )
+    try:
+        cfg = config.read()
+        setattr(cfg, key, model_fields[key].default)
+    except Exception as e:
+        raise_error(f"Failed to unset {key} in config: {e}")
+    cfg.write()
 
 
 @config_app.command(name="setup-remote", help="Alias for 'remote'.")

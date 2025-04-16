@@ -3,18 +3,58 @@
 from __future__ import annotations
 
 import os
-from typing import Literal
+import platform
+from typing import Any, Literal
+from typing import get_args as get_type_args
 
 import keyring
+import keyring.errors
 import yaml
-from keyring.errors import NoKeyringError
-from pydantic import computed_field
+from pydantic import GetCoreSchemaHandler
+from pydantic.fields import FieldInfo
+from pydantic_core import core_schema
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
     YamlConfigSettingsSource,
 )
+
+
+def supports_keyring() -> bool:
+    """Checks if the system supports the Python keyring library with a usable
+    backend.
+
+    Returns:
+        bool: True if keyring is supported, False otherwise.
+    """
+    try:
+        # Attempt to get a password (this will trigger backend initialization)
+        keyring.get_password("test_service", "test_user")
+        return True
+    except keyring.errors.NoKeyringError:
+        return False
+    except keyring.errors.PasswordDeleteError:
+        # This can happen if the backend is functional but empty.
+        # We consider this as supported.
+        return True
+    except keyring.errors.ExceptionRaised as e:
+        # Check if the underlying exception indicates no backend
+        if "No backend found" in str(e):
+            return False
+        else:
+            # Some other error occurred, might still be considered supported
+            # depending on your needs. For strict checking, return False.
+            return True  # Or False if you want to be strict
+    except ImportError:
+        # keyring library itself is not installed
+        return False
+    except Exception:
+        # Catch any other unexpected errors during initialization
+        return False
+
+
+KEYRING_SUPPORTED = supports_keyring()
 
 
 def get_env() -> Literal["local", "staging", "production"]:
@@ -49,6 +89,69 @@ def get_config_yaml_fpath() -> str:
     )
 
 
+def set_secret(key: str, value: str) -> None:
+    """Sets a secret using keyring, handling byte conversion for Linux."""
+    service_name = get_app_name()
+    if platform.system() == "Linux":
+        value_bytes = value.encode("utf-8")
+        keyring.set_password(service_name, key, value_bytes)
+    else:
+        keyring.set_password(service_name, key, value)
+
+
+def get_secret(key: str) -> str | None:
+    """Gets a secret using keyring, handling byte conversion for Linux."""
+    service_name = get_app_name()
+    password = keyring.get_password(service_name, key)
+    if platform.system() == "Linux" and isinstance(password, bytes):
+        return password.decode("utf-8")
+    return password
+
+
+def delete_secret(key: str) -> None:
+    """Delete a secret using keyring."""
+    keyring.delete_password(get_app_name(), key)
+
+
+class KeyringOptionalSecret(str):
+    pass
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        return core_schema.no_info_before_validator_function(
+            cls._convert, core_schema.str_schema()
+        )
+
+    @classmethod
+    def _convert(cls, value: Any) -> "KeyringOptionalSecret":
+        if not isinstance(value, str):
+            raise TypeError("Expected a string")
+        return cls(value)
+
+
+class KeyringSecretsSource(PydanticBaseSettingsSource):
+    """A Pydantic settings source that tries to load KeyringOptionalSecret
+    values from the system keyring.
+    """
+
+    def get_field_value(self, field: FieldInfo, field_name: str):
+        value = get_secret(field_name)
+        return (value, field_name, False)
+
+    def __call__(self) -> dict[str, Any]:
+        if not KEYRING_SUPPORTED:
+            return {}
+        secrets = {}
+        for field_name, field in self.settings_cls.model_fields.items():
+            if KeyringOptionalSecret in get_type_args(field.annotation):
+                secrets[field_name] = self.get_field_value(field, field_name)[
+                    0
+                ]
+        return secrets
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         yaml_file=get_config_yaml_fpath(),
@@ -59,11 +162,12 @@ class Settings(BaseSettings):
     )
     username: str | None = None
     email: str | None = None
-    token: str | None = None
-    dvc_token: str | None = None
+    password: KeyringOptionalSecret | None = None
+    token: KeyringOptionalSecret | None = None
+    dvc_token: KeyringOptionalSecret | None = None
     dataframe_engine: Literal["pandas", "polars"] = "pandas"
-    github_token: str | None = None
-    zenodo_token: str | None = None
+    github_token: KeyringOptionalSecret | None = None
+    zenodo_token: KeyringOptionalSecret | None = None
 
     @classmethod
     def settings_customise_sources(
@@ -79,26 +183,28 @@ class Settings(BaseSettings):
             env_settings,
             dotenv_settings,
             YamlConfigSettingsSource(settings_cls),
+            KeyringSecretsSource(settings_cls),
         )
-
-    @computed_field
-    @property
-    def password(self) -> str | None:
-        try:
-            return keyring.get_password(get_app_name(), self.username)
-        except NoKeyringError:
-            return None
-
-    @password.setter
-    def password(self, value: str) -> None:
-        keyring.set_password(get_app_name(), self.username, value)
 
     def write(self) -> None:
         base_dir = os.path.dirname(self.model_config["yaml_file"])
         os.makedirs(base_dir, exist_ok=True)
         cfg = self.model_dump()
-        # Remove password
-        _ = cfg.pop("password")
+        # Remove anything that should be in the keyring
+        if KEYRING_SUPPORTED:
+            for key, value in Settings.model_fields.items():
+                if (
+                    KeyringOptionalSecret in get_type_args(value.annotation)
+                ) and key in cfg:
+                    secret_val = cfg.pop(key)
+                    if secret_val is not None:
+                        set_secret(key, secret_val)
+                    else:
+                        try:
+                            delete_secret(key)
+                        except keyring.errors.KeyringError:
+                            # Ignore errors when deleting secrets
+                            pass
         with open(self.model_config["yaml_file"], "w") as f:
             yaml.safe_dump(cfg, f)
 

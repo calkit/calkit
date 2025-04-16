@@ -199,6 +199,12 @@ class Settings(BaseSettings):
                     secret_val = cfg.pop(key)
                     if secret_val is not None:
                         set_secret(key, secret_val)
+                    else:
+                        try:
+                            delete_secret(key)
+                        except keyring.errors.KeyringError:
+                            # Ignore errors when deleting secrets
+                            pass
         with open(self.model_config["yaml_file"], "w") as f:
             yaml.safe_dump(cfg, f)
 

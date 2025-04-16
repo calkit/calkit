@@ -36,8 +36,12 @@ def set_config_value(key: str, value: str):
 @config_app.command(name="get")
 def get_config_value(key: str) -> None:
     """Get and print a value from the config."""
-    cfg = config.read()
-    val = getattr(cfg, key)
+    cfg = config.read().model_dump()
+    if key not in cfg:
+        raise_error(
+            f"Invalid config key: '{key}'; Valid keys are: {list(cfg.keys())}"
+        )
+    val = cfg[key]
     if val is not None:
         print(val)
     else:

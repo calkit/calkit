@@ -25,6 +25,13 @@ def sync(
             help="Do not commit the changes.",
         ),
     ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            help="Enable verbose output.",
+        ),
+    ] = False,
 ):
     """Sync publications with Overleaf."""
     # TODO: We should probably ensure the pipeline isn't stale
@@ -84,8 +91,8 @@ def sync(
             # Ensure the diff ends with a new line
             if diff and not diff.endswith("\n"):
                 diff += "\n"
-            typer.echo("Diff:")
-            typer.echo(diff)
+            if verbose:
+                typer.echo(f"Git diff:\n{diff}")
             if diff:
                 typer.echo("Applying to project repo")
                 process = subprocess.run(

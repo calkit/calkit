@@ -184,12 +184,10 @@ def import_publication(
         while tex_env_name in envs:
             tex_env_name = f"tex-{n}"
             n += 1
-        envs[tex_env_name] = (
-            dict(
-                kind="docker",
-                image="texlive/texlive:latest-full",
-                description="TeXlive via Docker.",
-            ),
+        envs[tex_env_name] = dict(
+            kind="docker",
+            image="texlive/texlive:latest-full",
+            description="TeXlive via Docker.",
         )
         ck_info["environments"] = envs
     # Check that we have a build stage

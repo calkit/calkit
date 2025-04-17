@@ -321,7 +321,9 @@ def sync(
                 f"https://git:{overleaf_token}@git.overleaf.com/"
                 f"{overleaf_project_id}"
             )
-            overleaf_repo = git.Repo.clone_from(overleaf_clone_url)
+            overleaf_repo = git.Repo.clone_from(
+                overleaf_clone_url, to_path=overleaf_project_dir
+            )
         else:
             overleaf_repo = git.Repo(overleaf_project_dir)
         # Pull the latest version in the Overleaf project

@@ -174,7 +174,7 @@ def sync(
                 f"Sync {wdir} with Overleaf project {overleaf_project_id}"
             )
             repo.git.commit(
-                *sync_paths_in_project,
+                *(sync_paths_in_project + ["calkit.yaml"]),
                 "-m",
                 commit_message,
             )

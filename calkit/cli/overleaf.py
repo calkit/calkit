@@ -245,7 +245,7 @@ def import_publication(
             ["-m", f"Import Overleaf project ID {overleaf_project_id}"]
         )
     # Sync the project
-    sync(no_commit=no_commit)
+    sync(paths=[pub_path], no_commit=no_commit)
 
 
 @overleaf_app.command(name="sync")

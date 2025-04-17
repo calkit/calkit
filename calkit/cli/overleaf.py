@@ -39,9 +39,16 @@ def sync(
     ck_info = calkit.load_calkit_info()
     pubs = ck_info.get("publications", [])
     repo = git.Repo()
-    pubs = [p for p in pubs if p.get("overleaf", {}).get("project_id")]
     for pub in pubs:
-        overleaf_project_id = pub["overleaf"]["project_id"]
+        overleaf_config = pub.get("overleaf", {})
+        if not overleaf_config:
+            continue
+        overleaf_project_id = overleaf_config.get("project_id")
+        if not overleaf_project_id:
+            raise_error(
+                "No Overleaf project ID defined for this publication; "
+                "please set it in the publication's Overleaf config"
+            )
         typer.echo(
             f"Syncing {pub['path']} with "
             f"Overleaf project ID {overleaf_project_id}"
@@ -105,24 +112,12 @@ def sync(
             else:
                 typer.echo("No changes to apply")
         else:
-            # Simply copy in all files, TODO
+            # TODO: Simply copy in all files
             typer.echo(
                 "No last sync commit defined; "
                 "copying all files from Overleaf project"
             )
-            pass
-        # Stage the changes in the project repo
-        repo.git.add(sync_paths_in_project)
-        if repo.git.diff("--staged", sync_paths_in_project) and not no_commit:
-            typer.echo("Committing changes to project repo")
-            commit_message = (
-                f"Sync {wdir} with Overleaf project {overleaf_project_id}"
-            )
-            repo.git.commit(
-                *sync_paths_in_project,
-                "-m",
-                commit_message,
-            )
+            # TODO
         # Copy our versions of sync and push paths into the Overleaf project
         for sync_push_path in sync_paths + push_paths:
             src = os.path.join(wdir, sync_push_path)
@@ -163,6 +158,26 @@ def sync(
         last_overleaf_commit = overleaf_repo.head.commit.hexsha
         typer.echo(f"Updating last sync commit as {last_overleaf_commit}")
         pub["overleaf"]["last_sync_commit"] = last_overleaf_commit
-        # TODO: Write last sync commit to our publication in calkit.yaml and
-        # commit and push the changes
-        # TODO: Add option to run the pipeline after?
+        # Write publications back to calkit.yaml
+        ck_info["publications"] = pubs
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        repo.git.add("calkit.yaml")
+        # Stage the changes in the project repo
+        repo.git.add(sync_paths_in_project)
+        if (
+            repo.git.diff("--staged", sync_paths_in_project + ["calkit.yaml"])
+            and not no_commit
+        ):
+            typer.echo("Committing changes to project repo")
+            commit_message = (
+                f"Sync {wdir} with Overleaf project {overleaf_project_id}"
+            )
+            repo.git.commit(
+                *sync_paths_in_project,
+                "-m",
+                commit_message,
+            )
+    # Push to the project remote
+    repo.git.push()
+    # TODO: Add option to run the pipeline after?

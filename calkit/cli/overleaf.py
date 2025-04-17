@@ -446,5 +446,6 @@ def sync(
                 commit_message,
             )
     # Push to the project remote
+    typer.echo("Pushing changes to project Git remote")
     repo.git.push()
     # TODO: Add option to run the pipeline after?

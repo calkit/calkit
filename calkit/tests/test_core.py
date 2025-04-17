@@ -19,6 +19,8 @@ def test_find_project_dirs():
 def test_to_kebab_case():
     assert calkit.to_kebab_case("THIS IS") == "this-is"
     assert calkit.to_kebab_case("this_is_my-Project") == "this-is-my-project"
+    assert calkit.to_kebab_case("this is my project") == "this-is-my-project"
+    assert calkit.to_kebab_case("thisIs/myProject") == "thisis-myproject"
 
 
 def test_detect_project_name(tmp_dir):

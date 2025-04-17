@@ -390,7 +390,7 @@ def get_size(path: str):
 
 def to_kebab_case(str) -> str:
     """Convert a string to kebab-case."""
-    return re.sub(r"[-_,\.\ ]", "-", str.lower())
+    return re.sub(r"[-_/,\.\ ]", "-", str.lower())
 
 
 def get_project_status_history(

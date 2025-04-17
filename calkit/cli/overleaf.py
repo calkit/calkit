@@ -244,11 +244,21 @@ def import_publication(
         repo.git.commit(
             ["-m", f"Import Overleaf project ID {overleaf_project_id}"]
         )
-    # TODO: Sync the project
+    # Sync the project
+    sync(no_commit=no_commit)
 
 
 @overleaf_app.command(name="sync")
 def sync(
+    paths: Annotated[
+        list[str],
+        typer.Argument(
+            help=(
+                "Paths to sync with Overleaf, e.g., 'paper/paper.pdf'. "
+                "If not provided, all Overleaf publications will be synced."
+            ),
+        ),
+    ] = None,
     no_commit: Annotated[
         bool,
         typer.Option(
@@ -269,10 +279,16 @@ def sync(
     # Find all publications with Overleaf projects linked
     ck_info = calkit.load_calkit_info()
     pubs = ck_info.get("publications", [])
+    if paths is not None:
+        for path in paths:
+            if not any(pub.get("path") == path for pub in pubs):
+                raise_error(f"Publication with path '{path}' not found")
     repo = git.Repo()
     for pub in pubs:
         overleaf_config = pub.get("overleaf", {})
         if not overleaf_config:
+            continue
+        if paths is not None and pub.get("path") not in paths:
             continue
         overleaf_project_id = overleaf_config.get("project_id")
         if not overleaf_project_id:

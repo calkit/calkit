@@ -84,6 +84,23 @@ def import_publication(
     """Import a publication from an Overleaf project."""
     from calkit.cli.main import ignore as git_ignore
 
+    # First check that the user has an Overleaf token set
+    config = calkit.config.read()
+    overleaf_token = config.overleaf_token
+    if not overleaf_token:
+        warn("Overleaf token not set in config", prefix="")
+        typer.echo(
+            "One can be generated at:\n\n"
+            "    https://www.overleaf.com/user/settings\n\n"
+            "under the 'Git Integration' section.\n"
+        )
+        overleaf_token = typer.prompt(
+            "Enter Overleaf Git authentication token", hide_input=True
+        )
+        typer.echo("Storing Overleaf token in Calkit config")
+        config.overleaf_token = overleaf_token
+        config.write()
+
     if not src_url.startswith("https://www.overleaf.com/project/"):
         raise_error(
             "Invalid URL; must start with 'https://www.overleaf.com/project/'"
@@ -114,8 +131,6 @@ def import_publication(
     os.makedirs(overleaf_dir, exist_ok=True)
     git_ignore(overleaf_dir, no_commit=no_commit)
     overleaf_project_dir = os.path.join(overleaf_dir, overleaf_project_id)
-    config = calkit.config.read()
-    overleaf_token = config.overleaf_token
     git_clone_url = (
         f"https://git:{overleaf_token}@git.overleaf.com/{overleaf_project_id}"
     )

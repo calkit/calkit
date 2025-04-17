@@ -1474,7 +1474,7 @@ def new_stage(
     ] = False,
 ):
     """Create a new pipeline stage."""
-    ck_info = calkit.load_calkit_info()
+    ck_info = calkit.load_calkit_info(process_includes="environments")
     if environment is None:
         warn("No environment is specified")
         cmd = ""

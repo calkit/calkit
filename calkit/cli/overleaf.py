@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 
 import git
@@ -17,15 +18,16 @@ overleaf_app = typer.Typer(no_args_is_help=True)
 
 @overleaf_app.command(name="sync")
 def sync(
-    dry_run: Annotated[
+    no_commit: Annotated[
         bool,
         typer.Option(
-            "--dry-run",
-            help="Run in dry run mode (don't apply changes).",
+            "--no-commit",
+            help="Do not commit the changes.",
         ),
     ] = False,
 ):
     """Sync publications with Overleaf."""
+    # TODO: We should probably ensure the pipeline isn't stale
     # Find all publications with Overleaf projects linked
     ck_info = calkit.load_calkit_info()
     pubs = ck_info.get("publications", [])
@@ -67,6 +69,7 @@ def sync(
         overleaf_repo.git.pull()
         last_sync_commit = pub["overleaf"].get("last_sync_commit")
         sync_paths = pub["overleaf"].get("sync_paths", [])
+        sync_paths_relative = [os.path.join(wdir, p) for p in sync_paths]
         if not sync_paths:
             warn("No sync paths defined in the publication's Overleaf config")
         elif last_sync_commit:
@@ -98,6 +101,59 @@ def sync(
                 "copying all files from Overleaf project"
             )
             pass
-        # If there are changes, apply them to our local file(s)
-        # Copy our versions into the Overleaf project and commit
+        # Stage the changes in the project repo
+        repo.git.add(sync_paths_relative)
+        if repo.git.diff("--staged", sync_paths_relative) and not no_commit:
+            typer.echo("Committing changes to project repo")
+            commit_message = (
+                f"Sync {wdir} with Overleaf project {overleaf_project_id}"
+            )
+            repo.git.commit(
+                *sync_paths_relative,
+                "-m",
+                commit_message,
+            )
+        # Copy our versions of sync and push paths into the Overleaf project
+        push_paths = pub["overleaf"].get("push_paths", [])
+        for push_path in sync_paths + push_paths:
+            src = os.path.join(wdir, push_path)
+            dst = os.path.join(overleaf_project_dir, push_path)
+            if os.path.isdir(src):
+                # Remove destination directory if it exists
+                if os.path.isdir(dst):
+                    shutil.rmtree(dst)
+                # Copy the directory and its contents
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+            elif os.path.isfile(src):
+                # Copy the file
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(src, dst)
+            else:
+                raise_error(
+                    f"Source path {src} does not exist; "
+                    "please check your Overleaf config"
+                )
+                continue
+        # Stage the changes in the Overleaf project
+        overleaf_repo.git.add(sync_paths + push_paths)
+        if (
+            overleaf_repo.git.diff("--staged", sync_paths + push_paths)
+            and not no_commit
+        ):
+            commit_message = "Sync with Calkit project"
+            overleaf_repo.git.commit(
+                *(sync_paths + push_paths),
+                "-m",
+                commit_message,
+            )
+            # TODO: We should probably always push and pull to we can
+            # idempotently run this command
+            typer.echo("Pushing changes to Overleaf")
+            overleaf_repo.git.push()
+        # Update the last sync commit
+        last_overleaf_commit = overleaf_repo.head.commit.hexsha
+        typer.echo(f"Updating last sync commit as {last_overleaf_commit}")
+        pub["overleaf"]["last_sync_commit"] = last_overleaf_commit
+        # TODO: Write last sync commit to our publication in calkit.yaml and
+        # commit and push the changes
         # TODO: Add option to run the pipeline after?

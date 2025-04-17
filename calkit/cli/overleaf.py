@@ -44,6 +44,22 @@ def import_publication(
             ),
         ),
     ],
+    title: Annotated[
+        str,
+        typer.Option(
+            "--title",
+            "-t",
+            help="Title of the publication.",
+        ),
+    ],
+    description: Annotated[
+        str,
+        typer.Option(
+            "--description",
+            "-d",
+            help="Description of the publication.",
+        ),
+    ] = None,
     push_paths: Annotated[
         list[str],
         typer.Option(
@@ -206,8 +222,8 @@ def import_publication(
     typer.echo("Adding publication to calkit.yaml")
     new_pub = dict(
         path=pub_path,
-        title="TODO",
-        description="TODO",
+        title=title,
+        description=description,
         stage=stage_name,
         overleaf=dict(
             project_id=overleaf_project_id,

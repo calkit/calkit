@@ -18,7 +18,7 @@ overleaf_app = typer.Typer(no_args_is_help=True)
 
 @overleaf_app.command(name="import")
 def import_publication(
-    src_path: Annotated[
+    src_url: Annotated[
         str,
         typer.Argument(
             help=(
@@ -27,10 +27,47 @@ def import_publication(
             )
         ),
     ],
-    dest_path: Annotated[
+    dest_dir: Annotated[
         str,
-        typer.Argument(help="Output directory at which to save."),
+        typer.Argument(
+            help="Directory at which to save in the project, e.g., 'paper'."
+        ),
     ],
+    sync_paths: Annotated[
+        list[str],
+        typer.Option(
+            "--sync-path",
+            "-s",
+            help=(
+                "Paths to sync from the Overleaf project, e.g., 'main.tex'. "
+                "Note that multiple can be specified."
+            ),
+        ),
+    ],
+    push_paths: Annotated[
+        list[str],
+        typer.Option(
+            "--push-path",
+            "-p",
+            help=(
+                "Paths to push to the Overleaf project, e.g., 'figures'. "
+                "Note that these are relative to the publication working "
+                "directory."
+            ),
+        ),
+    ] = [],
+    pdf_path: Annotated[
+        str,
+        typer.Option(
+            "--pdf-path",
+            "-o",
+            help=(
+                "PDF output file in the Overleaf project, e.g., 'main.pdf'. "
+                "If not provided, it will be determined from the first sync "
+                "path."
+            ),
+        ),
+    ] = None,
     no_commit: Annotated[
         bool,
         typer.Option("--no-commit", help="Do not commit changes to repo."),
@@ -45,27 +82,37 @@ def import_publication(
     ] = False,
 ):
     """Import a publication from an Overleaf project."""
-    if not src_path.startswith("https://www.overleaf.com/project/"):
+    from calkit.cli.main import ignore as git_ignore
+
+    if not src_url.startswith("https://www.overleaf.com/project/"):
         raise_error(
             "Invalid URL; must start with 'https://www.overleaf.com/project/'"
         )
-    overleaf_project_id = src_path.split("/")[-1]
+    overleaf_project_id = src_url.split("/")[-1]
     if not overleaf_project_id:
         raise_error("Invalid Overleaf project ID")
     ck_info = calkit.load_calkit_info()
     pubs = ck_info.get("publications", [])
-    # TODO: Determine the PDF output path
-    pub_path = os.path.join(dest_path, "main.tex")
+    # Determine the PDF output path
+    if pdf_path is None:
+        # Use the first sync path as the PDF path
+        pdf_path = sync_paths[0].removesuffix(".tex") + ".pdf"
+        typer.echo(f"Using PDF path: {pdf_path}")
+    pub_path = os.path.join(dest_dir, pdf_path)
     pub_paths = [pub["path"] for pub in pubs]
     if not overwrite and pub_path in pub_paths:
-        raise_error("A dataset already exists in this project at this path")
+        raise_error(
+            "A publication already exists in this project at this path"
+        )
     elif overwrite and pub_path in pub_paths:
+        # Note: This publication will go to the end of the list
         pubs = [ds for ds in pubs if ds["path"] != pub_path]
     repo = git.Repo()
     # Clone the Overleaf project into .calkit/overleaf if it doesn't exist
     # otherwise pull
     overleaf_dir = os.path.join(".calkit", "overleaf")
     os.makedirs(overleaf_dir, exist_ok=True)
+    git_ignore(overleaf_dir, no_commit=no_commit)
     overleaf_project_dir = os.path.join(overleaf_dir, overleaf_project_id)
     config = calkit.config.read()
     overleaf_token = config.overleaf_token
@@ -84,7 +131,6 @@ def import_publication(
         depth=1,
     )
     # TODO: Copy Overleaf project files into the project
-    # TODO: Ensure we ignore .calkit/overleaf
     # Add to publications in calkit.yaml
     typer.echo("Adding publication to calkit.yaml")
     new_pub = dict(
@@ -99,7 +145,7 @@ def import_publication(
             last_sync_commit=overleaf_repo.head.commit.hexsha,
         ),
     )
-    pubs.append(new_pub.model_dump())
+    pubs.append(new_pub)
     ck_info["publications"] = pubs
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)

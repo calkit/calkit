@@ -149,15 +149,16 @@ def import_publication(
     # Add to publications in calkit.yaml
     typer.echo("Adding publication to calkit.yaml")
     new_pub = dict(
-        path="TODO",  # TODO
+        path=pub_path,
         title="TODO",
         description="TODO",
         stage=None,
         overleaf=dict(
             project_id=overleaf_project_id,
-            sync_paths=[],  # TODO: Should be all paths in the Overleaf project
+            wdir=dest_dir,
+            sync_paths=sync_paths,
             push_paths=[],  # TODO: Could come from command line
-            last_sync_commit=overleaf_repo.head.commit.hexsha,
+            last_sync_commit=None,
         ),
     )
     pubs.append(new_pub)
@@ -172,6 +173,7 @@ def import_publication(
         repo.git.commit(
             ["-m", f"Import Overleaf project ID {overleaf_project_id}"]
         )
+    # TODO: Sync the project
 
 
 @overleaf_app.command(name="sync")

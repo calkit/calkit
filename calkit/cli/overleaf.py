@@ -227,7 +227,6 @@ def import_publication(
         stage=stage_name,
         overleaf=dict(
             project_id=overleaf_project_id,
-            wdir=dest_dir,
             sync_paths=sync_paths,
             push_paths=push_paths,
             last_sync_commit=None,
@@ -300,12 +299,7 @@ def sync(
             f"Syncing {pub['path']} with "
             f"Overleaf project ID {overleaf_project_id}"
         )
-        wdir = pub["overleaf"].get("wdir")
-        if wdir is None:
-            raise_error(
-                "No working directory defined for this publication; "
-                "please set it in the publication's Overleaf config"
-            )
+        wdir = os.path.dirname(pub["path"])
         # Ensure we've cloned the Overleaf project
         overleaf_project_dir = os.path.join(
             ".calkit", "overleaf", overleaf_project_id

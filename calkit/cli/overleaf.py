@@ -163,9 +163,31 @@ def import_publication(
     )
     pubs.append(new_pub)
     ck_info["publications"] = pubs
+    # Check that we have a LaTeX environment
+    envs = ck_info.get("environments", {})
+    tex_env_name = None
+    for name, env in envs.items():
+        if env.get("kind") == "docker" and "texlive" in env.get("image", ""):
+            tex_env_name = name
+            break
+    if tex_env_name is None:
+        typer.echo("Creating TeXlive Docker environment")
+        tex_env_name = "tex"
+        n = 1
+        while tex_env_name in envs:
+            tex_env_name = f"tex-{n}"
+            n += 1
+        envs[tex_env_name] = (
+            dict(
+                kind="docker",
+                image="texlive/texlive:latest-full",
+                description="TeXlive via Docker.",
+            ),
+        )
+        ck_info["environments"] = envs
+    # TODO: Check that we have a build stage
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    # TODO: Create environment and build stage if these don't exist?
     repo.git.add("calkit.yaml")
     if not no_commit:
         # Commit any necessary changes

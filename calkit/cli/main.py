@@ -254,10 +254,20 @@ def get_status():
 
 
 @app.command(name="diff")
-def diff():
+def diff(
+    staged: Annotated[
+        bool,
+        typer.Option(
+            "--staged", help="Show a diff from files staged with Git."
+        ),
+    ] = False,
+):
     """Get a unified Git and DVC diff."""
     print_sep("Code (Git)")
-    run_cmd(["git", "diff"])
+    git_cmd = ["git", "diff"]
+    if staged:
+        git_cmd.append("--staged")
+    run_cmd(git_cmd)
     print_sep("Pipeline (DVC)")
     run_cmd([sys.executable, "-m", "dvc", "diff"])
 

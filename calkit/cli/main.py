@@ -634,7 +634,7 @@ def ignore(
     repo = git.Repo()
     if repo.ignored(path):
         typer.echo(f"{path} is already ignored")
-        exit(0)
+        return
     typer.echo(f"Adding '{path}' to .gitignore")
     txt = "\n" + path + "\n"
     with open(".gitignore", "a") as f:

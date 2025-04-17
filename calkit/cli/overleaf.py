@@ -60,6 +60,13 @@ def import_publication(
             help="Description of the publication.",
         ),
     ] = None,
+    kind: Annotated[
+        str,
+        typer.Option(
+            "--kind",
+            help="What of the publication this is, e.g., 'journal-article'.",
+        ),
+    ] = None,
     push_paths: Annotated[
         list[str],
         typer.Option(
@@ -224,6 +231,7 @@ def import_publication(
         path=pub_path,
         title=title,
         description=description,
+        kind=kind,
         stage=stage_name,
         overleaf=dict(
             project_id=overleaf_project_id,

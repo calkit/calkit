@@ -134,14 +134,14 @@ def import_publication(
         typer.echo(f"Using PDF path: {pdf_path}")
     tex_path = pdf_path.removesuffix(".pdf") + ".tex"
     pub_path = os.path.join(dest_dir, pdf_path)
-    pub_paths = [pub["path"] for pub in pubs]
+    pub_paths = [pub.get("path") for pub in pubs]
     if not overwrite and pub_path in pub_paths:
         raise_error(
-            "A publication already exists in this project at this path"
+            f"A publication already exists in this project at {pub_path}"
         )
     elif overwrite and pub_path in pub_paths:
         # Note: This publication will go to the end of the list
-        pubs = [ds for ds in pubs if ds["path"] != pub_path]
+        pubs = [p for p in pubs if p.get("path") != pub_path]
     repo = git.Repo()
     # Clone the Overleaf project into .calkit/overleaf if it doesn't exist
     # otherwise pull
@@ -152,10 +152,9 @@ def import_publication(
     git_clone_url = (
         f"https://git:{overleaf_token}@git.overleaf.com/{overleaf_project_id}"
     )
-    if os.path.isdir(overleaf_project_dir) and not overwrite:
-        raise_error(
-            "A publication already exists in this project at this path"
-        )
+    if os.path.isdir(overleaf_project_dir):
+        warn("This Overleaf project has already been cloned; removing")
+        shutil.rmtree(overleaf_project_dir)
     # Clone the Overleaf project
     typer.echo("Cloning Overleaf project")
     git.Repo.clone_from(

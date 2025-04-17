@@ -126,6 +126,7 @@ def import_publication(
         raise_error("Invalid Overleaf project ID")
     ck_info = calkit.load_calkit_info()
     pubs = ck_info.get("publications", [])
+    # TODO: Don't allow the same Overleaf project ID in multiple publications
     # Determine the PDF output path
     if pdf_path is None:
         # Use the first sync path as the PDF path

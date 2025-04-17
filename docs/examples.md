@@ -75,3 +75,13 @@ Features:
 
 - An SSH environment for running a remote command over SSH and copying back
   results to the local machine
+
+## Overleaf integration
+
+[Project page](https://calkit.io/calkit/example-overleaf) |
+[GitHub repo](https://github.com/calkit/example-overleaf)
+
+Features:
+
+- A publication linked to an Overleaf project, which syncs changes to the
+  text from Overleaf, and pushes figures generated locally to Overleaf.

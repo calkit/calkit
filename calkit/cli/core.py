@@ -33,5 +33,5 @@ def raise_error(txt: str):
     raise typer.Exit(1)
 
 
-def warn(txt: str):
-    typer.echo(typer.style("Warning: " + str(txt), fg="yellow"))
+def warn(txt: str, prefix: str = "Warning: "):
+    typer.echo(typer.style(prefix + str(txt), fg="yellow"))

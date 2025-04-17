@@ -16,7 +16,7 @@ import dotenv
 import git
 import requests
 import typer
-from git.exc import GitCommandError, InvalidGitRepositoryError
+from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 from typing_extensions import Annotated
 
 import calkit
@@ -107,7 +107,7 @@ def new_project(
         raise_error("Must specify a new directory if using --template")
     try:
         repo = git.Repo(abs_path)
-    except InvalidGitRepositoryError:
+    except (InvalidGitRepositoryError, NoSuchPathError):
         repo = None
     if repo is not None and git_repo_url is None:
         try:
@@ -1462,24 +1462,31 @@ def new_stage(
             help="Overwrite an existing stage with this name if necessary.",
         ),
     ] = False,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Do not check if the target, deps, environment, etc., exist.",
+        ),
+    ] = False,
     no_commit: Annotated[
         bool, typer.Option("--no-commit", help="Do not commit changes to Git.")
     ] = False,
 ):
     """Create a new pipeline stage."""
-    ck_info = calkit.load_calkit_info()
+    ck_info = calkit.load_calkit_info(process_includes="environments")
     if environment is None:
         warn("No environment is specified")
         cmd = ""
     else:
-        if environment not in ck_info["environments"]:
+        if environment not in ck_info["environments"] and not no_check:
             raise_error(f"Environment '{environment}' does not exist")
         cmd = f"calkit xenv -n {environment} -- "
-        # Add environment path as a dependency
-        env_path = ck_info["environments"][environment].get("path")
-        if env_path is not None:
+        # Add environment path as a dependency if applicable
+        env_path = ck_info["environments"].get(environment, {}).get("path")
+        if env_path is not None and env_path not in deps:
             deps = [env_path] + deps
-    if not os.path.exists(target):
+    if not os.path.exists(target) and not no_check:
         raise_error(f"Target '{target}' does not exist")
     if kind.value == "python-script":
         cmd += f"python {target}"
@@ -1501,7 +1508,9 @@ def new_stage(
     elif kind.value == "r-script":
         cmd += f"Rscript {target}"
     add_cmd = [sys.executable, "-m", "dvc", "stage", "add", "-n", name]
-    for dep in [target] + deps:
+    if target not in deps:
+        deps = [target] + deps
+    for dep in deps:
         add_cmd += ["-d", dep]
     for out in outs:
         add_cmd += ["-o", out]

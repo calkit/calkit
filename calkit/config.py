@@ -168,6 +168,7 @@ class Settings(BaseSettings):
     dataframe_engine: Literal["pandas", "polars"] = "pandas"
     github_token: KeyringOptionalSecret | None = None
     zenodo_token: KeyringOptionalSecret | None = None
+    overleaf_token: KeyringOptionalSecret | None = None
 
     @classmethod
     def settings_customise_sources(

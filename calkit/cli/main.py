@@ -29,6 +29,7 @@ from calkit.cli.list import list_app
 from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
+from calkit.cli.overleaf import overleaf_app
 from calkit.cli.update import update_app
 from calkit.models import Procedure
 
@@ -51,6 +52,7 @@ app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
+app.add_typer(overleaf_app, name="overleaf", help="Interact with Overleaf.")
 app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
 
 # Constants for version control auto-ignore
@@ -252,10 +254,20 @@ def get_status():
 
 
 @app.command(name="diff")
-def diff():
+def diff(
+    staged: Annotated[
+        bool,
+        typer.Option(
+            "--staged", help="Show a diff from files staged with Git."
+        ),
+    ] = False,
+):
     """Get a unified Git and DVC diff."""
     print_sep("Code (Git)")
-    run_cmd(["git", "diff"])
+    git_cmd = ["git", "diff"]
+    if staged:
+        git_cmd.append("--staged")
+    run_cmd(git_cmd)
     print_sep("Pipeline (DVC)")
     run_cmd([sys.executable, "-m", "dvc", "diff"])
 
@@ -622,7 +634,7 @@ def ignore(
     repo = git.Repo()
     if repo.ignored(path):
         typer.echo(f"{path} is already ignored")
-        exit(0)
+        return
     typer.echo(f"Adding '{path}' to .gitignore")
     txt = "\n" + path + "\n"
     with open(".gitignore", "a") as f:

@@ -117,7 +117,6 @@ def import_publication(
         typer.echo("Storing Overleaf token in Calkit config")
         config.overleaf_token = overleaf_token
         config.write()
-
     if not src_url.startswith("https://www.overleaf.com/project/"):
         raise_error(
             "Invalid URL; must start with 'https://www.overleaf.com/project/'"

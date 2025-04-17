@@ -1482,8 +1482,8 @@ def new_stage(
         if environment not in ck_info["environments"] and not no_check:
             raise_error(f"Environment '{environment}' does not exist")
         cmd = f"calkit xenv -n {environment} -- "
-        # Add environment path as a dependency
-        env_path = ck_info["environments"][environment].get("path")
+        # Add environment path as a dependency if applicable
+        env_path = ck_info["environments"].get(environment, {}).get("path")
         if env_path is not None:
             deps = [env_path] + deps
     if not os.path.exists(target) and not no_check:

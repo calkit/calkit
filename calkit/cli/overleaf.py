@@ -68,8 +68,10 @@ def sync(
         typer.echo("Pulling the latest version from Overleaf")
         overleaf_repo.git.pull()
         last_sync_commit = pub["overleaf"].get("last_sync_commit")
+        # Determine which paths to sync and push
         sync_paths = pub["overleaf"].get("sync_paths", [])
-        sync_paths_relative = [os.path.join(wdir, p) for p in sync_paths]
+        push_paths = pub["overleaf"].get("push_paths", [])
+        sync_paths_in_project = [os.path.join(wdir, p) for p in sync_paths]
         if not sync_paths:
             warn("No sync paths defined in the publication's Overleaf config")
         elif last_sync_commit:
@@ -102,22 +104,21 @@ def sync(
             )
             pass
         # Stage the changes in the project repo
-        repo.git.add(sync_paths_relative)
-        if repo.git.diff("--staged", sync_paths_relative) and not no_commit:
+        repo.git.add(sync_paths_in_project)
+        if repo.git.diff("--staged", sync_paths_in_project) and not no_commit:
             typer.echo("Committing changes to project repo")
             commit_message = (
                 f"Sync {wdir} with Overleaf project {overleaf_project_id}"
             )
             repo.git.commit(
-                *sync_paths_relative,
+                *sync_paths_in_project,
                 "-m",
                 commit_message,
             )
         # Copy our versions of sync and push paths into the Overleaf project
-        push_paths = pub["overleaf"].get("push_paths", [])
-        for push_path in sync_paths + push_paths:
-            src = os.path.join(wdir, push_path)
-            dst = os.path.join(overleaf_project_dir, push_path)
+        for sync_push_path in sync_paths + push_paths:
+            src = os.path.join(wdir, sync_push_path)
+            dst = os.path.join(overleaf_project_dir, sync_push_path)
             if os.path.isdir(src):
                 # Remove destination directory if it exists
                 if os.path.isdir(dst):

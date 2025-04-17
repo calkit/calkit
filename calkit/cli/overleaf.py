@@ -359,12 +359,26 @@ def sync(
             else:
                 typer.echo("No changes to apply")
         else:
-            # TODO: Simply copy in all files
+            # Simply copy in all files
             typer.echo(
                 "No last sync commit defined; "
                 "copying all files from Overleaf project"
             )
-            # TODO
+            for sync_path in sync_paths:
+                src = os.path.join(overleaf_project_dir, sync_path)
+                dst = os.path.join(wdir, sync_path)
+                if os.path.isdir(src):
+                    # Copy the directory and its contents
+                    shutil.copytree(src, dst, dirs_exist_ok=True)
+                elif os.path.isfile(src):
+                    # Copy the file
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copy2(src, dst)
+                else:
+                    raise_error(
+                        f"Source path {src} does not exist; "
+                        "please check your Overleaf config"
+                    )
         # Copy our versions of sync and push paths into the Overleaf project
         for sync_push_path in sync_paths + push_paths:
             src = os.path.join(wdir, sync_push_path)

@@ -2,22 +2,30 @@
 
 from __future__ import annotations
 
-import platform
+import os
 
-import docx2pdf
+import git
 import typer
 from typing_extensions import Annotated
-import os
 
 import calkit
 from calkit.cli import raise_error, warn
-import git
 
 overleaf_app = typer.Typer(no_args_is_help=True)
 
 
 @overleaf_app.command(name="sync")
-def sync():
+def sync(
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            False,
+            "--dry-run",
+            "-d",
+            help="Run in dry run mode (don't apply changes).",
+        ),
+    ],
+):
     """Sync publications with Overleaf."""
     # Find all publications with Overleaf projects linked
     ck_info = calkit.load_calkit_info()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 
 import git
 import typer
@@ -19,12 +20,10 @@ def sync(
     dry_run: Annotated[
         bool,
         typer.Option(
-            False,
             "--dry-run",
-            "-d",
             help="Run in dry run mode (don't apply changes).",
         ),
-    ],
+    ] = False,
 ):
     """Sync publications with Overleaf."""
     # Find all publications with Overleaf projects linked
@@ -76,47 +75,20 @@ def sync(
             diff = overleaf_repo.git.diff(
                 [last_sync_commit, "HEAD", "--"] + sync_paths
             )
+            # Ensure the diff ends with a new line
+            if diff and not diff.endswith("\n"):
+                diff += "\n"
             typer.echo("Diff:")
             typer.echo(diff)
-            # TODO: Modify the diff to account for the publication working
-            # directory, which will be missing from the Overleaf project
-            # Example diff:
-            # diff --git a/main.tex b/main.tex
-            # index 3106676..e36f402 100644
-            # --- a/main.tex
-            # +++ b/main.tex
-            # @@ -11,4 +11,6 @@
-            #
-            #  \section{Introduction}
-            #
-            # +Here is some text.
-            # +
-            #  \end{document}
-            #
             if diff:
                 typer.echo("Applying to project repo")
-                typer.echo("Reformulating for working directory")
-                # Fix the diff to account for the publication working directory
-                diff_lines = diff.split("\n")
-                new_lines = []
-                # Fix any lines that start with:
-                indicators = [
-                    "diff --git",
-                    "--- a/",
-                    "+++ b/",
-                    "+++ a/",
-                    "--- b/",
-                ]
-                for line in diff_lines:
-                    if any(
-                        line.startswith(indicator) for indicator in indicators
-                    ):
-                        line = line.replace("a/", f"a/{wdir}/")
-                        line = line.replace("b/", f"b/{wdir}/")
-                    new_lines.append(line)
-                diff = "\n".join(new_lines)
-                typer.echo(f"Reformatted diff:\n{diff}")
-                repo.git.apply(stdin=diff)
+                process = subprocess.run(
+                    ["git", "apply", "--directory", wdir, "-"],
+                    input=diff,
+                    text=True,
+                )
+                if process.returncode != 0:
+                    raise_error("Failed to apply diff")
             else:
                 typer.echo("No changes to apply")
         else:

@@ -210,7 +210,7 @@ def import_publication(
         typer.echo(f"Creating build stage '{stage_name}'")
         new_stage(
             name=stage_name,
-            env=tex_env_name,
+            environment=tex_env_name,
             kind="latex",
             target=os.path.join(dest_dir, tex_path),
             outs=[pub_path],

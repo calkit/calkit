@@ -99,7 +99,7 @@ def import_publication(
 ):
     """Import a publication from an Overleaf project."""
     from calkit.cli.main import ignore as git_ignore
-    from calkit.cli.new import new_stage
+    from calkit.cli.new import StageKind, new_stage
 
     # First check that the user has an Overleaf token set
     config = calkit.config.read()
@@ -193,7 +193,7 @@ def import_publication(
             dvc_info = calkit.ryaml.load(f)
         stages = dvc_info.get("stages", {})
         for stage_name_i, stage in stages.items():
-            if pdf_path in stage.get("outs", []):
+            if pub_path in stage.get("outs", []):
                 stage_name = stage_name_i
                 typer.echo(f"Found build stage '{stage_name}' in pipeline")
                 break
@@ -210,10 +210,11 @@ def import_publication(
         new_stage(
             name=stage_name,
             environment=tex_env_name,
-            kind="latex",
+            kind=StageKind.latex,
             target=os.path.join(dest_dir, tex_path),
             outs=[pub_path],
             deps=[os.path.join(dest_dir, p) for p in sync_paths + push_paths],
+            no_check=True,
             no_commit=True,
         )
         repo.git.add("dvc.yaml")

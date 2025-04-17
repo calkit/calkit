@@ -69,6 +69,7 @@ def sync(
         overleaf_repo.git.pull()
         last_sync_commit = pub["overleaf"].get("last_sync_commit")
         # Determine which paths to sync and push
+        # TODO: Support glob patterns
         sync_paths = pub["overleaf"].get("sync_paths", [])
         push_paths = pub["overleaf"].get("push_paths", [])
         sync_paths_in_project = [os.path.join(wdir, p) for p in sync_paths]

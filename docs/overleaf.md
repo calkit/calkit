@@ -35,7 +35,7 @@ To do this,
 visit the
 [Overleaf user settings page](https://www.overleaf.com/user/settings)
 and scroll down to the
-"You Git authentication tokens" section.
+"Your Git authentication tokens" section.
 Generate a token, copy it, and then set it in your Calkit config with:
 
 ```sh

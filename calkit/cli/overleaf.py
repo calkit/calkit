@@ -433,9 +433,7 @@ def sync(
             and not no_commit
         ):
             typer.echo("Committing changes to project repo")
-            commit_message = (
-                f"Sync {wdir} with Overleaf project {overleaf_project_id}"
-            )
+            commit_message = f"Sync {wdir} with Overleaf project"
             repo.git.commit(
                 *(sync_paths_in_project + ["calkit.yaml"]),
                 "-m",

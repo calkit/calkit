@@ -83,6 +83,7 @@ def import_publication(
 ):
     """Import a publication from an Overleaf project."""
     from calkit.cli.main import ignore as git_ignore
+    from calkit.cli.new import new_stage
 
     # First check that the user has an Overleaf token set
     config = calkit.config.read()
@@ -115,6 +116,7 @@ def import_publication(
         # Use the first sync path as the PDF path
         pdf_path = sync_paths[0].removesuffix(".tex") + ".pdf"
         typer.echo(f"Using PDF path: {pdf_path}")
+    tex_path = pdf_path.removesuffix(".pdf") + ".tex"
     pub_path = os.path.join(dest_dir, pdf_path)
     pub_paths = [pub["path"] for pub in pubs]
     if not overwrite and pub_path in pub_paths:
@@ -140,30 +142,13 @@ def import_publication(
         )
     # Clone the Overleaf project
     typer.echo("Cloning Overleaf project")
-    overleaf_repo = git.Repo.clone_from(
+    git.Repo.clone_from(
         git_clone_url,
         overleaf_project_dir,
         depth=1,
     )
-    # TODO: Copy Overleaf project files into the project
-    # Add to publications in calkit.yaml
-    typer.echo("Adding publication to calkit.yaml")
-    new_pub = dict(
-        path=pub_path,
-        title="TODO",
-        description="TODO",
-        stage=None,
-        overleaf=dict(
-            project_id=overleaf_project_id,
-            wdir=dest_dir,
-            sync_paths=sync_paths,
-            push_paths=[],  # TODO: Could come from command line
-            last_sync_commit=None,
-        ),
-    )
-    pubs.append(new_pub)
-    ck_info["publications"] = pubs
     # Check that we have a LaTeX environment
+    typer.echo("Checking that this project has a LaTeX environment")
     envs = ck_info.get("environments", {})
     tex_env_name = None
     for name, env in envs.items():
@@ -185,7 +170,55 @@ def import_publication(
             ),
         )
         ck_info["environments"] = envs
-    # TODO: Check that we have a build stage
+    # Check that we have a build stage
+    typer.echo("Checking for a build stage in the pipeline")
+    stage_name = None
+    if os.path.isfile("dvc.yaml"):
+        with open("dvc.yaml", "r") as f:
+            dvc_info = calkit.ryaml.load(f)
+        stages = dvc_info.get("stages", {})
+        for stage_name_i, stage in stages.items():
+            if pdf_path in stage.get("outs", []):
+                stage_name = stage_name_i
+                typer.echo(f"Found build stage '{stage_name}' in pipeline")
+                break
+    else:
+        stages = {}
+    if stage_name is None:
+        # Create a new stage
+        stage_name = calkit.to_kebab_case("build-" + dest_dir)
+        n = 1
+        while stage_name in stages:
+            stage_name = f"{stage_name}-{n}"
+            n += 1
+        typer.echo(f"Creating build stage '{stage_name}'")
+        new_stage(
+            name=stage_name,
+            env=tex_env_name,
+            kind="latex",
+            target=os.path.join(dest_dir, tex_path),
+            outs=[pub_path],
+            deps=[os.path.join(dest_dir, p) for p in sync_paths + push_paths],
+            no_commit=True,
+        )
+        repo.git.add("dvc.yaml")
+    # Add to publications in calkit.yaml
+    typer.echo("Adding publication to calkit.yaml")
+    new_pub = dict(
+        path=pub_path,
+        title="TODO",
+        description="TODO",
+        stage=stage_name,
+        overleaf=dict(
+            project_id=overleaf_project_id,
+            wdir=dest_dir,
+            sync_paths=sync_paths,
+            push_paths=push_paths,
+            last_sync_commit=None,
+        ),
+    )
+    pubs.append(new_pub)
+    ck_info["publications"] = pubs
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")

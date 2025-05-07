@@ -170,8 +170,12 @@ def get_remotes(wdir: str = None) -> dict[str, str]:
         return {}
     resp = {}
     for line in out.split("\n"):
-        name, url = line.split("\t")
-        resp[name] = url
+        split_line = line.split()
+        if len(split_line) >= 2:
+            # This is a remote
+            name = split_line[0]
+            url = split_line[1]
+            resp[name] = url
     return resp
 
 

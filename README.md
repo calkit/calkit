@@ -17,17 +17,14 @@
   </a>
 </p>
 
-Calkit is a project framework and toolkit to help ensure your research
+Calkit is a language-agnostic project framework and toolkit
+to help ensure your research
 is reproducible to the highest standard,
 which is defined as:
 
 >Inputs and process definitions are provided and sufficiently described
->such that someone else could easily and reliably reproduce the artifacts
->used to support your conclusions.
-
-It is verifiable that the included inputs and process definitions truly
-and easily reproduce the materials shared with the outside world to
-support the conclusions.
+>such that anyone can easily verify that they produced the outputs
+>used to support the conclusions.
 
 Practically, this means that someone (including you)
 should be able to "clone" your project,
@@ -36,7 +33,50 @@ and see that all of your derived datasets, figures, models, and publications
 were generated with the current versions of the relevant code and input data.
 That is, they do not need to follow a long list of manual steps to
 test the reproducibility.
-It should be verifiable without rerunning.
+
+Though it may sound like a lot of work,
+the benefits to ensuring your project is reproducible are many:
+
+1. You're less likely to be wrong, which means you'll be less likely to
+   need to submit a retraction.
+   If you share your entire project and it's reproducible,
+   it could make it through peer review more quickly since the referees
+   can verify its reproducibility.
+   Your work will be more credible, leading to increased impact.
+2. When your project actually runs with little effort,
+   others (and you) can take it and adapt it to their
+   own cases.
+   Those follow-on studies will then also be reproducible,
+   producing an ever-accumulating efficiency
+
+
+If you're convinced it's worth working at this level of automation and rigor,
+keep reading!
+
+How easy must it be?
+
+It is verifiable that the included inputs and process definitions truly
+and easily reproduce the materials shared with the outside world to
+support the conclusions.
+
+In contrast,
+simply sharing all your files with a long list of instructions for
+reproduction does not meet this standard.
+
+But what's the value in being so rigorous?
+Aren't the figures themselves evidence enough that they
+were generated accurately?
+
+Sharing materials in reproducible form is critical to making open science
+successful,
+and simply
+
+Calkit is language-agnostic,
+meaning you can use many different languages in the same project,
+e.g., Python, MATLAB, R, LaTeX,
+since different artifacts are more easily generated with different
+tools.
+As long as it runs on a computer, you can use it!
 
 At a lower level, this looks like:
 
@@ -54,18 +94,6 @@ the current version of its inputs and process definition.
 It means that all processes must be automated.
 Lists of manual steps in a README are not sufficient to be called
 reproducible.
-
-The benefits to ensuring your project is reproducible are many:
-
-1. You're less likely to be wrong, which means you'll be less likely to
-   need to file a retraction.
-   If you share your entire project and it's reproducible,
-   it might make it through peer review more quickly since the referees
-   can verify its reproducibility.
-   Your work will be more credible, leading to increased impact.
-2. When your project actually runs with little effort,
-   others (and you) can take it and adapt it to their
-   own cases, accelerating the pace of research.
 
 Lower, unacceptable standards for reproducibility include:
 

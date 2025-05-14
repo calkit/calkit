@@ -44,6 +44,7 @@ the benefits to ensuring your project is reproducible are many:
    it could make it through peer review more quickly since the referees
    can verify its reproducibility.
    Your work will be more credible, leading to increased impact.
+   You will feel safer.
 2. When your project actually runs with little effort,
    others (and you) can take it and adapt it to their
    own cases.

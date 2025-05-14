@@ -18,7 +18,7 @@
 </p>
 
 Calkit is a language-agnostic project framework and toolkit
-to help ensure your research
+to help ensure your research project
 is reproducible to the highest standard,
 which is defined as:
 
@@ -26,7 +26,7 @@ which is defined as:
 >such that anyone can easily verify that they produced the outputs
 >used to support the conclusions.
 
-Practically, this means that someone (including you)
+Practically, this means that anyone (including you)
 should be able to "clone" your project,
 execute a single command,
 and see that all of your derived datasets, figures, models, tables,

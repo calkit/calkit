@@ -187,16 +187,6 @@ helps them get up and running with less effort and training.
 Calkit should help users understand what is going on under the hood without
 forcing them to work at that lower level of abstraction.
 
-## How it works
-
-Calkit creates a simple human-readable "database" inside the `calkit.yaml`
-file, which serves as a way to store important information about the project,
-e.g., what question(s) it seeks to answer,
-what files should be considered datasets, figures, publications, etc.
-The Calkit cloud reads this database and registers the various entities
-as part of the entire ecosystem such that if a project is made public,
-other researchers can find and reuse your work to accelerate their own.
-
 ## Design/UX principles
 
 1. Be opinionated. Users should not be forced to make unimportant decisions.

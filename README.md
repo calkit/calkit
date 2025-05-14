@@ -22,9 +22,9 @@ to help ensure your research project
 is reproducible to the highest standard,
 which is defined as:
 
->Inputs and process definitions are provided and sufficiently described
->such that anyone can easily verify that they produced the outputs
->used to support the conclusions.
+> Inputs and process definitions are provided and sufficiently described
+> such that anyone can easily verify that they produced the outputs
+> used to support the conclusions.
 
 Practically, this means that anyone (including you)
 should be able to "clone" your project,

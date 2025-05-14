@@ -77,8 +77,10 @@ keep reading!
 - A command line interface (CLI) to simplify keeping code, text, and larger
   data files backed up in the same project repo using both
   [Git](https://git-scm.com/) and [DVC](https://dvc.org/).
-- A complementary cloud system to facilitate backup, collaboration,
-  and sharing.
+- A complementary
+  [cloud system](https://github.com/calkit/calkit-cloud)
+  to facilitate backup, collaboration,
+  and sharing throughout the entire research lifecycle.
 
 ## Installation
 

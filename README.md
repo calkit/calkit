@@ -29,7 +29,8 @@ which is defined as:
 Practically, this means that someone (including you)
 should be able to "clone" your project,
 execute a single command,
-and see that all of your derived datasets, figures, models, and publications
+and see that all of your derived datasets, figures, models, tables,
+and publications
 were generated with the current versions of the relevant code and input data.
 That is, they do not need to follow a long list of manual steps to
 test the reproducibility.
@@ -49,59 +50,10 @@ the benefits to ensuring your project is reproducible are many:
    Those follow-on studies will then also be reproducible,
    producing an ever-accumulating efficiency
 
-
 If you're convinced it's worth working at this level of automation and rigor,
 keep reading!
 
-How easy must it be?
-
-It is verifiable that the included inputs and process definitions truly
-and easily reproduce the materials shared with the outside world to
-support the conclusions.
-
-In contrast,
-simply sharing all your files with a long list of instructions for
-reproduction does not meet this standard.
-
-But what's the value in being so rigorous?
-Aren't the figures themselves evidence enough that they
-were generated accurately?
-
-Sharing materials in reproducible form is critical to making open science
-successful,
-and simply
-
-Calkit is language-agnostic,
-meaning you can use many different languages in the same project,
-e.g., Python, MATLAB, R, LaTeX,
-since different artifacts are more easily generated with different
-tools.
-As long as it runs on a computer, you can use it!
-
-At a lower level, this looks like:
-
-- All files are included, even large or raw data files.
-- All code is included, and the environment(s) in which it runs is
-  described sufficiently that it can be reproduced automatically,
-  e.g., with a Python virtual environment, Docker image, etc.
-
-Calkit provides a way to get your project into
-
-This means the computational environment(s) must be sufficiently
-recorded, e.g., with exact version numbers for all dependencies,
-and that it is verifiable that every output artifact was produced by
-the current version of its inputs and process definition.
-It means that all processes must be automated.
-Lists of manual steps in a README are not sufficient to be called
-reproducible.
-
-Lower, unacceptable standards for reproducibility include:
-
-1. Descriptions only in the paper, with no code or data provided.
-   This is not reproducible in the slightest.
-
->Why should I care about that?
->I know how my figures were created and they look fine now.
+## Features
 
 It acts as a top-level layer to integrate and simplify the use of enabling
 technologies such as

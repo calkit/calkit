@@ -56,15 +56,19 @@ keep reading!
 
 ## Features
 
-It acts as a top-level layer to integrate and simplify the use of enabling
-technologies such as
-[Git](https://git-scm.com/),
-[DVC](https://dvc.org/),
-[Conda](https://docs.conda.io/en/latest/),
-and [Docker](https://docker.com).
-Calkit also adds a domain-specific data model
-such that all aspects of the research process can be fully described in a
-single repository and therefore easily consumed by others.
+- A schema to store structured metadata describing the
+  project's important outputs (in its `calkit.yaml` file)
+  and how they are created
+  (its computational environments and pipeline).
+- A CLI to run the project's pipeline to verify it's reproducible,
+  regenerating outputs as needed and
+  ensuring all defined
+  computational environments (e.g., [Conda](https://docs.conda.io/en/latest/), [Docker](https://docker.com)) match their specification.
+- A command line interface (CLI) to simplify keeping code, text, and larger
+  data files backed up in the same project repo using both
+  [Git](https://git-scm.com/) and [DVC](https://dvc.org/).
+- A complementary cloud system to facilitate backup, collaboration,
+  and sharing.
 
 ## Installation
 

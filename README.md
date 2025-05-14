@@ -40,17 +40,26 @@ the benefits to ensuring your project is reproducible are many:
 
 1. You're less likely to be wrong, which means you'll be less likely to
    need to submit a retraction.
+   See [the replication crisis](https://en.wikipedia.org/wiki/Replication_crisis).
    If you share your entire project and it's reproducible,
    it could make it through peer review more quickly since the referees
    can verify its reproducibility.
    Your work will be more credible, leading to increased impact.
    You will feel safer.
+   You will avoid mistakes caused by, e.g., running an old version of a script
+   and including a figure that wasn't created after fixing a bug in the data
+   processing pipeline.
 2. When your project actually runs with little effort,
    others (and you) can take it and adapt it to their
    own cases.
    Those follow-on studies will then also be reproducible,
    and the gains in efficiency and accuracy will accumulate,
    accelerating the pace of scientific discovery.
+   Since your project is "runnable," it's more likely that someone else will be
+   able to reuse part of your work to run it in a different context, thereby
+   producing a bigger impact and accelerating the pace of discovery.
+   If someone can take what you've done and use it to calculate a
+   prediction, you have just produced truly useful knowledge.
 
 If you're convinced it's worth working at this level of automation and rigor,
 keep reading!
@@ -155,24 +164,6 @@ This will commit and push to both GitHub and the Calkit Cloud.
 
 We welcome all kinds of contributions!
 See [CONTRIBUTING.md](CONTRIBUTING.md) to learn how to get involved.
-
-## Why does reproducibility matter?
-
-If your work is reproducible, that means that someone else can "run" it and
-calculate the same results or outputs.
-This is a major step towards addressing
-[the replication crisis](https://en.wikipedia.org/wiki/Replication_crisis)
-and has some major benefits for both you as an individual and the research
-community:
-
-1. You will avoid mistakes caused by, e.g., running an old version of a script
-   and including a figure that wasn't created after fixing a bug in the data
-   processing pipeline.
-2. Since your project is "runnable," it's more likely that someone else will be
-   able to reuse part of your work to run it in a different context, thereby
-   producing a bigger impact and accelerating the pace of discovery.
-   If someone can take what you've done and use it to calculate a
-   prediction, you have just produced truly useful knowledge.
 
 ## Why another tool/platform?
 

@@ -17,7 +17,64 @@
   </a>
 </p>
 
-Calkit is a framework and toolkit for reproducible research projects.
+Calkit is a project framework and toolkit to help ensure your research
+is reproducible to the highest standard,
+which is defined as:
+
+>Inputs and process definitions are provided and sufficiently described
+>such that someone else could easily and reliably reproduce the artifacts
+>used to support your conclusions.
+
+It is verifiable that the included inputs and process definitions truly
+and easily reproduce the materials shared with the outside world to
+support the conclusions.
+
+Practically, this means that someone (including you)
+should be able to "clone" your project,
+execute a single command,
+and see that all of your derived datasets, figures, models, and publications
+were generated with the current versions of the relevant code and input data.
+That is, they do not need to follow a long list of manual steps to
+test the reproducibility.
+It should be verifiable without rerunning.
+
+At a lower level, this looks like:
+
+- All files are included, even large or raw data files.
+- All code is included, and the environment(s) in which it runs is
+  described sufficiently that it can be reproduced automatically,
+  e.g., with a Python virtual environment, Docker image, etc.
+
+Calkit provides a way to get your project into
+
+This means the computational environment(s) must be sufficiently
+recorded, e.g., with exact version numbers for all dependencies,
+and that it is verifiable that every output artifact was produced by
+the current version of its inputs and process definition.
+It means that all processes must be automated.
+Lists of manual steps in a README are not sufficient to be called
+reproducible.
+
+The benefits to ensuring your project is reproducible are many:
+
+1. You're less likely to be wrong, which means you'll be less likely to
+   need to file a retraction.
+   If you share your entire project and it's reproducible,
+   it might make it through peer review more quickly since the referees
+   can verify its reproducibility.
+   Your work will be more credible, leading to increased impact.
+2. When your project actually runs with little effort,
+   others (and you) can take it and adapt it to their
+   own cases, accelerating the pace of research.
+
+Lower, unacceptable standards for reproducibility include:
+
+1. Descriptions only in the paper, with no code or data provided.
+   This is not reproducible in the slightest.
+
+>Why should I care about that?
+>I know how my figures were created and they look fine now.
+
 It acts as a top-level layer to integrate and simplify the use of enabling
 technologies such as
 [Git](https://git-scm.com/),

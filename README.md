@@ -48,7 +48,8 @@ the benefits to ensuring your project is reproducible are many:
    others (and you) can take it and adapt it to their
    own cases.
    Those follow-on studies will then also be reproducible,
-   producing an ever-accumulating efficiency
+   and the gains in efficiency and accuracy will accumulate,
+   accelerating the pace of scientific discovery.
 
 If you're convinced it's worth working at this level of automation and rigor,
 keep reading!

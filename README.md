@@ -32,6 +32,11 @@ and process definitions that are claimed to have produced them.
 Calkit helps provide that evidence without forcing readers
 to actually repeat the computations.
 
+An important distinction is how much of the reproduction requires
+humans to follow instructions instead of computers.
+If a human needs to do too much,
+the work is not computationally reproducible.
+
 Simply providing code and data and leaving others to figure out what
 needs to be run in what order,
 or even providing them with a long list of instructions

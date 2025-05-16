@@ -36,6 +36,7 @@ An important distinction is how much of the reproduction requires
 humans to follow instructions instead of computers.
 If a human needs to do too much,
 the work is not computationally reproducible.
+Calkit provides the means to have the computer do _almost everything_.
 
 Simply providing code and data and leaving others to figure out what
 needs to be run in what order,

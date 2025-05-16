@@ -47,6 +47,9 @@ or even providing them with a long list of instructions
 (say, more than 3 shell commands),
 fails to meet this criteria.
 
+Calkit provides a wrapper around DVC that forces environments to be
+declared explicitly.
+
 Practically, this means that anyone (including you)
 should be able to download, or "clone" your project,
 execute a single command,

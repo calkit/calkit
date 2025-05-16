@@ -26,14 +26,43 @@ which is defined as:
 > such that anyone can easily verify that they produced the outputs
 > used to support the conclusions.
 
+So, for a project to be considered reproducible,
+you must provide adequate evidence that the outputs reflect the inputs
+and process definitions that are claimed to have produced them.
+Calkit helps provide that evidence without forcing readers
+to actually repeat the computations.
+
+Simply providing code and data and leaving others to figure out what
+needs to be run in what order,
+or even providing them with a long list of instructions
+(say, more than 3 shell commands),
+fails to meet this criteria.
+
 Practically, this means that anyone (including you)
-should be able to "clone" your project,
+should be able to download, or "clone" your project,
 execute a single command,
 and see that all of your derived datasets, figures, models, tables,
 and publications
 were generated with the current versions of the relevant code and input data.
-That is, they do not need to follow a long list of manual steps to
+That is, they do not need to follow a long list of manual steps
+and potentially run many expensive processes to
 test the reproducibility.
+
+It's true that a result can be reproducible and incorrect,
+or irreproducible and correct,
+but the discipline to keep your project in a continuously
+reproducible state is worth it in the end.
+
+In short,
+no more lists of instructions in READMEs!
+Declare all environments and pipeline stages in your `calkit.yaml` file,
+and voila! Your project is reproducible.
+
+"But I know the outputs definitely reflect my descriptions!"
+you might say.
+The purpose here is to verify for everyone else.
+They could test it,
+or they can trust that you've used a Calkit pipeline.
 
 Though it may sound like a lot of work,
 the benefits to ensuring your project is reproducible are many:
@@ -60,6 +89,10 @@ the benefits to ensuring your project is reproducible are many:
    producing a bigger impact and accelerating the pace of discovery.
    If someone can take what you've done and use it to calculate a
    prediction, you have just produced truly useful knowledge.
+
+Calkit will provide you with a framework so you don't need to reinvent
+the wheel when it comes to integrating data
+and automating processes.
 
 If you're convinced it's worth working at this level of automation and rigor,
 keep reading!
@@ -166,19 +199,6 @@ This will commit and push to both GitHub and the Calkit Cloud.
 
 We welcome all kinds of contributions!
 See [CONTRIBUTING.md](CONTRIBUTING.md) to learn how to get involved.
-
-## Why another tool/platform?
-
-Git, GitHub, DVC, Docker et al. are amazing tools/platforms, but their
-use involves multiple fairly difficult learning curves,
-and tying them together might mean developing something new for each project.
-Our goal is to provide a single tool and platform to unify all of these so
-that there is a single, gentle learning curve.
-However, it is not our goal to hide or replace these underlying components.
-Advanced users can use them directly, but new users aren't forced to, which
-helps them get up and running with less effort and training.
-Calkit should help users understand what is going on under the hood without
-forcing them to work at that lower level of abstraction.
 
 ## Design/UX principles
 

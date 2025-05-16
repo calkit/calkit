@@ -41,6 +41,12 @@ Calkit provides the means to have the computer do _almost everything_.
 [Claerbout and Karrenbach (1992)](https://doi.org/10.1190/1.1822162)
 use the phrase "pressing a single button".
 
+Calkit makes your project into a
+["repro pack"](https://lorenabarba.com/blog/how-repro-packs-can-save-your-future-self/)
+throughout its entire lifecycle,
+without needing to write any custom code for data backup
+or output caching.
+
 Simply providing code and data and leaving others to figure out what
 needs to be run in what order,
 or even providing them with a long list of instructions

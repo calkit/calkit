@@ -59,7 +59,7 @@ class EnvCheckResult(BaseModel):
 def check_env(
     env_fpath: str = "environment.yml",
     log_func=None,
-    output_fpath: str = None,
+    output_fpath: str | None = None,
     relaxed: bool = False,
 ) -> EnvCheckResult:
     """Check that a conda environment matches its spec.

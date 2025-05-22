@@ -47,6 +47,11 @@ throughout its entire lifecycle,
 without needing to write any custom code for data backup
 or output caching.
 
+Being language agnostic,
+Calkit allows you to run Python, MATLAB, R, Docker, etc.,
+whatever tool is best for each artifact,
+and to use them all in the same pipeline.
+
 Simply providing code and data and leaving others to figure out what
 needs to be run in what order,
 or even providing them with a long list of instructions

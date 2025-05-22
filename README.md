@@ -153,8 +153,7 @@ With uv installed, install Calkit with:
 uv tool install calkit-python
 ```
 
-Alternatively, but less ideally, you can install with your system Python
-(>=3.10):
+Alternatively, but less ideally, you can install with your system Python:
 
 ```sh
 pip install calkit-python

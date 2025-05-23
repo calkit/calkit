@@ -38,12 +38,18 @@ or process definitions (e.g., environment specifications, scripts)
 have changed since saving the current versions of each output artifact
 (figure, table, dataset, publication, etc.)
 
+When your project is reproducible,
+you'll be able to iterate more quickly and more often,
+easily onboard collaborators,
+and feel confident sharing all of your project materials
+alongside your research articles,
+because you'll know the code will actually run!
+This will allow others to reuse parts of your project in their own research,
+accelerating the pace of discovery.
+
 Working at this level of automation, discipline, and rigor may sound like
 a lot of effort,
-but Calkit makes it easy.
-
-The benefits of this level of discipline and rigor are many,
-and Calkit makes it easy!
+but Calkit makes it easy!
 
 Pitfalls Calkit will help you avoid:
 

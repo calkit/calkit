@@ -66,16 +66,6 @@ your results are reproducible,
 which will help you avoid mistakes,
 and ensure others can run and reuse parts of your project.
 
-Practically, this means that anyone (including you)
-should be able to download, or "clone" your project,
-execute a single command,
-and see that all of your derived datasets, figures, models, tables,
-and publications
-were generated with the current versions of the relevant code and input data.
-That is, they do not need to follow a long list of manual steps
-and potentially run many expensive processes to
-test the reproducibility.
-
 It's true that a result can be reproducible and incorrect,
 or irreproducible and correct,
 but the discipline to keep your project in a continuously
@@ -85,12 +75,6 @@ In short,
 no more lists of instructions in READMEs!
 Declare all environments and pipeline stages in your `calkit.yaml` file,
 and voila! Your project is reproducible.
-
-"But I know the outputs definitely reflect my descriptions!"
-you might say.
-The purpose here is to verify for everyone else.
-They could test it,
-or they can trust that you've used a Calkit pipeline.
 
 Though it may sound like a lot of work,
 the benefits to ensuring your project is reproducible are many:

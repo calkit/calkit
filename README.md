@@ -32,6 +32,11 @@ and process definitions that are claimed to have produced them.
 Calkit helps provide that evidence without forcing readers
 to actually repeat the computations.
 
+But what if my computations are expensive?
+If the tool/framework can verify that the outputs were indeed generated
+with the current versions of the inputs and process definitions,
+the expensive processes don't need to be rerun.
+
 An important distinction is how much of the reproduction requires
 humans to follow instructions instead of computers.
 If a human needs to do too much,
@@ -51,6 +56,11 @@ Being language agnostic,
 Calkit allows you to run Python, MATLAB, R, Docker, etc.,
 whatever tool is best for each artifact,
 and to use them all in the same pipeline.
+
+Use the Calkit framework for your project and you can feel safe that
+your results are reproducible,
+which will help you avoid mistakes,
+and ensure others can run and reuse parts of your project.
 
 Simply providing code and data and leaving others to figure out what
 needs to be run in what order,

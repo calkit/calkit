@@ -33,30 +33,10 @@ it should only require executing a single command
 which should finish in less than 15 minutes.
 
 If the processes are too expensive to rerun in less than 15 minutes,
-there should be a system in place to confirm that none of the input data
+it should be possible to confirm that none of the input data
 or process definitions (e.g., scripts)
 have changed since saving the current versions of each output artifact
 (figure, table, dataset, publication, etc.)
-
-So, for a project to be considered reproducible,
-you must provide adequate evidence that the outputs reflect the inputs
-and process definitions that are claimed to have produced them.
-Calkit helps provide that evidence without forcing readers
-to actually repeat the computations.
-
-But what if my computations are expensive?
-If the tool/framework can verify that the outputs were indeed generated
-with the current versions of the inputs and process definitions,
-the expensive processes don't need to be rerun.
-
-An important distinction is how much of the reproduction requires
-humans to follow instructions instead of computers.
-If a human needs to do too much,
-the work is not computationally reproducible.
-Calkit provides the means to have the computer do _almost everything_.
-
-[Claerbout and Karrenbach (1992)](https://doi.org/10.1190/1.1822162)
-use the phrase "pressing a single button".
 
 Calkit makes your project into a
 ["repro pack"](https://lorenabarba.com/blog/how-repro-packs-can-save-your-future-self/)

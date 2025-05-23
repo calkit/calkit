@@ -63,24 +63,10 @@ for its entire lifecycle,
 without needing to write any custom code for data backup
 or output caching.
 
-Being language agnostic,
-Calkit allows you to run Python, MATLAB, R, Docker, etc.,
-whatever tool is best for each artifact,
-and to use them all in the same pipeline.
-
 Use the Calkit framework for your project and you can feel safe that
 your results are reproducible,
 which will help you avoid mistakes,
 and ensure others can run and reuse parts of your project.
-
-Simply providing code and data and leaving others to figure out what
-needs to be run in what order,
-or even providing them with a long list of instructions
-(say, more than 3 shell commands),
-fails to meet this criteria.
-
-Calkit provides a wrapper around DVC that forces environments to be
-declared explicitly.
 
 Practically, this means that anyone (including you)
 should be able to download, or "clone" your project,

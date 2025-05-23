@@ -41,6 +41,7 @@ have changed since saving the current versions of each output artifact
 When your project is reproducible,
 you'll be able to iterate more quickly and more often,
 easily onboard collaborators,
+make fewer mistakes,
 and feel confident sharing all of your project materials
 alongside your research articles,
 because you'll know the code will actually run!
@@ -50,70 +51,6 @@ accelerating the pace of discovery.
 Working at this level of automation, discipline, and rigor may sound like
 a lot of effort,
 but Calkit makes it easy!
-
-Pitfalls Calkit will help you avoid:
-
-- Long lists of untested steps in your README, which make it hard to onboard
-  new collaborators or pick up where you left off after a break.
-- Forgetting to recompile a publication after changing the code that produces
-  a figure or table.
-- Putting in the effort to distribute your code and data in the spirit of
-  open science, only to find it produces no impact since no one knows what to
-  do with it or it doesn't run.
-
-Calkit makes your project into a
-["repro pack"](https://lorenabarba.com/blog/how-repro-packs-can-save-your-future-self/)
-for its entire lifecycle,
-without needing to write any custom code for data backup
-or output caching.
-
-Use the Calkit framework for your project and you can feel safe that
-your results are reproducible,
-which will help you avoid mistakes,
-and ensure others can run and reuse parts of your project.
-
-It's true that a result can be reproducible and incorrect,
-or irreproducible and correct,
-but the discipline to keep your project in a continuously
-reproducible state is worth it in the end.
-
-In short,
-no more lists of instructions in READMEs!
-Declare all environments and pipeline stages in your `calkit.yaml` file,
-and voila! Your project is reproducible.
-
-Though it may sound like a lot of work,
-the benefits to ensuring your project is reproducible are many:
-
-1. You're less likely to be wrong, which means you'll be less likely to
-   need to submit a retraction.
-   See [the replication crisis](https://en.wikipedia.org/wiki/Replication_crisis).
-   If you share your entire project and it's reproducible,
-   it could make it through peer review more quickly since the referees
-   can verify its reproducibility.
-   Your work will be more credible, leading to increased impact.
-   You will feel safer.
-   You will avoid mistakes caused by, e.g., running an old version of a script
-   and including a figure that wasn't created after fixing a bug in the data
-   processing pipeline.
-2. When your project actually runs with little effort,
-   others (and you) can take it and adapt it to their
-   own cases.
-   Those follow-on studies will then also be reproducible,
-   and the gains in efficiency and accuracy will accumulate,
-   accelerating the pace of scientific discovery.
-   Since your project is "runnable," it's more likely that someone else will be
-   able to reuse part of your work to run it in a different context, thereby
-   producing a bigger impact and accelerating the pace of discovery.
-   If someone can take what you've done and use it to calculate a
-   prediction, you have just produced truly useful knowledge.
-
-Calkit will provide you with a framework so you don't need to reinvent
-the wheel when it comes to integrating data
-and automating processes.
-
-If you're convinced it's worth working at this level of automation and rigor,
-keep reading!
 
 ## Features
 

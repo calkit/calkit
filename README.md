@@ -32,11 +32,14 @@ it should only require executing a single command
 [Claerbout and Karrenbach (1992)](https://doi.org/10.1190/1.1822162)),
 which should finish in less than 15 minutes.
 
-If the processes are too expensive to rerun in less than 15 minutes,
+If the processes are too expensive to rerun in under 15 minutes,
 it should be possible to confirm that none of the input data
-or process definitions (e.g., scripts)
+or process definitions (e.g., environment specifications, scripts)
 have changed since saving the current versions of each output artifact
 (figure, table, dataset, publication, etc.)
+
+The benefits of this level of discipline and rigor are many,
+and Calkit makes it easy!
 
 Pitfalls Calkit will help you avoid:
 
@@ -48,9 +51,11 @@ Pitfalls Calkit will help you avoid:
   open science, only to find it produces no impact since no one knows what to
   do with it or it doesn't run.
 
+In return for a little
+
 Calkit makes your project into a
 ["repro pack"](https://lorenabarba.com/blog/how-repro-packs-can-save-your-future-self/)
-throughout its entire lifecycle,
+for its entire lifecycle,
 without needing to write any custom code for data backup
 or output caching.
 
@@ -140,7 +145,7 @@ keep reading!
   (its computational environments and pipeline).
 - A CLI to run the project's pipeline to verify it's reproducible,
   regenerating outputs as needed and
-  ensuring all defined
+  ensuring all
   computational environments (e.g., [Conda](https://docs.conda.io/en/latest/), [Docker](https://docker.com)) match their specification.
 - A command line interface (CLI) to simplify keeping code, text, and larger
   data files backed up in the same project repo using both

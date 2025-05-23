@@ -38,6 +38,10 @@ or process definitions (e.g., environment specifications, scripts)
 have changed since saving the current versions of each output artifact
 (figure, table, dataset, publication, etc.)
 
+Working at this level of discipline and rigor may sound like
+a lot of effort,
+but Calkit makes it easy!
+
 The benefits of this level of discipline and rigor are many,
 and Calkit makes it easy!
 

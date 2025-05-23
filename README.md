@@ -55,8 +55,6 @@ Pitfalls Calkit will help you avoid:
   open science, only to find it produces no impact since no one knows what to
   do with it or it doesn't run.
 
-In return for a little
-
 Calkit makes your project into a
 ["repro pack"](https://lorenabarba.com/blog/how-repro-packs-can-save-your-future-self/)
 for its entire lifecycle,

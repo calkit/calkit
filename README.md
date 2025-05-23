@@ -38,6 +38,15 @@ or process definitions (e.g., scripts)
 have changed since saving the current versions of each output artifact
 (figure, table, dataset, publication, etc.)
 
+Pitfalls Calkit will help you avoid:
+- Long lists of untested steps in your README, which make it hard to onboard
+  new collaborators or pick up where you left off after a break.
+- Forgetting to recompile a publication after changing the code that produces
+  a figure.
+- Putting in the effort to distribute your code and data in the spirit of
+  open science, only to find it produces no impact since no one knows what to
+  do with it or it doesn't run.
+
 Calkit makes your project into a
 ["repro pack"](https://lorenabarba.com/blog/how-repro-packs-can-save-your-future-self/)
 throughout its entire lifecycle,

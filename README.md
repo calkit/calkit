@@ -43,7 +43,7 @@ you'll be able to iterate more quickly and more often,
 easily onboard collaborators,
 make fewer mistakes,
 and feel confident sharing all of your project materials
-alongside your research articles,
+with your research articles,
 because you'll know the code will actually run!
 This will allow others to reuse parts of your project in their own research,
 accelerating the pace of discovery.

@@ -20,7 +20,7 @@
 Calkit is a language-agnostic project framework and toolkit
 to make your research or analytics project
 reproducible to the highest standard,
-which is defined as:
+which means:
 
 > Inputs and process definitions are provided and sufficiently described
 > such that anyone can easily verify that they produced the outputs
@@ -38,9 +38,9 @@ or process definitions (e.g., environment specifications, scripts)
 have changed since saving the current versions of each output artifact
 (figure, table, dataset, publication, etc.)
 
-Working at this level of discipline and rigor may sound like
+Working at this level of automation, discipline, and rigor may sound like
 a lot of effort,
-but Calkit makes it easy!
+but Calkit makes it easy.
 
 The benefits of this level of discipline and rigor are many,
 and Calkit makes it easy!

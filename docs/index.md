@@ -13,7 +13,9 @@ which means:
 it should only require executing a single command
 (like "pressing a single button" in
 [Claerbout and Karrenbach (1992)](https://doi.org/10.1190/1.1822162)),
-which should finish in less than 15 minutes.
+which should finish in less than 15 minutes
+(suggested by
+[Vandewalle et al. (2009)](https://doi.org/10.1109/MSP.2009.932122)).
 
 If the processes are too expensive to rerun in under 15 minutes,
 it should be possible to confirm that none of the input data

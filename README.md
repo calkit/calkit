@@ -18,13 +18,25 @@
 </p>
 
 Calkit is a language-agnostic project framework and toolkit
-to help ensure your research project
-is reproducible to the highest standard,
+to make your research or analytics project
+reproducible to the highest standard,
 which is defined as:
 
 > Inputs and process definitions are provided and sufficiently described
 > such that anyone can easily verify that they produced the outputs
 > used to support the conclusions.
+
+"Easily" means that after obtaining your project files,
+it should only require executing a single command
+(like "pressing a single button" in
+[Claerbout and Karrenbach (1992)](https://doi.org/10.1190/1.1822162)),
+which should finish in less than 15 minutes.
+
+If the processes are too expensive to rerun in less than 15 minutes,
+there should be a system in place to confirm that none of the input data
+or process definitions (e.g., scripts)
+have changed since saving the current versions of each output artifact
+(figure, table, dataset, publication, etc.)
 
 So, for a project to be considered reproducible,
 you must provide adequate evidence that the outputs reflect the inputs

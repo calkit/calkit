@@ -66,8 +66,21 @@ def check_docker_env(
     fpath: Annotated[
         str, typer.Option("-i", "--input", help="Path to input Dockerfile.")
     ] = "Dockerfile",
+    lock_fpath: Annotated[
+        str | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help=(
+                "Path to which existing environment should be exported. "
+                "If not specified, will have the same filename with '-lock' "
+                "appended to it, keeping the same extension."
+            ),
+        ),
+    ] = None,
     platform: Annotated[
-        str, typer.Option("--platform", help="Which platform(s) to build for.")
+        str | None,
+        typer.Option("--platform", help="Which platform(s) to build for."),
     ] = None,
     deps: Annotated[
         list[str],
@@ -111,7 +124,8 @@ def check_docker_env(
         inspect = []
     typer.echo(f"Reading Dockerfile from {fpath}", file=outfile)
     dockerfile_md5 = get_md5(fpath)
-    lock_fpath = fpath + "-lock.json"
+    if lock_fpath is None:
+        lock_fpath = fpath + "-lock.json"
     # Compute MD5s of any dependencies
     deps_md5s = {}
     for dep in deps:
@@ -166,7 +180,7 @@ def check_conda_env(
         ),
     ] = "environment.yml",
     output_fpath: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--output",
             "-o",
@@ -205,6 +219,18 @@ def check_venv(
         str, typer.Argument(help="Path to requirements file.")
     ] = "requirements.txt",
     prefix: Annotated[str, typer.Option("--prefix", help="Prefix.")] = ".venv",
+    lock_fpath: Annotated[
+        str | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help=(
+                "Path to which existing environment should be exported. "
+                "If not specified, will have the same filename with '-lock' "
+                "appended to it, keeping the same extension."
+            ),
+        ),
+    ] = None,
     wdir: Annotated[
         str | None,
         typer.Option(
@@ -246,8 +272,9 @@ def check_venv(
         if not os.path.isfile(os.path.join(prefix, ".gitignore")):
             with open(os.path.join(prefix, ".gitignore"), "w") as f:
                 f.write("*\n")
-    fname, ext = os.path.splitext(path)
-    lock_fpath = fname + "-lock" + ext
+    if lock_fpath is None:
+        fname, ext = os.path.splitext(path)
+        lock_fpath = fname + "-lock" + ext
     if _platform.system() == "Windows":
         activate_cmd = f"{prefix}\\Scripts\\activate"
     else:

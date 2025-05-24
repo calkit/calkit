@@ -4,9 +4,9 @@ import calkit
 from calkit.models.pipeline import Pipeline
 
 
-def to_dvc() -> dict:
+def to_dvc(wdir: str | None = None) -> dict:
     """Transpile a Calkit pipeline to a DVC pipeline."""
-    ck_info = calkit.load_calkit_info()
+    ck_info = calkit.load_calkit_info(wdir=wdir)
     if "pipeline" not in ck_info:
         raise ValueError("No pipeline found in calkit.yaml")
     try:

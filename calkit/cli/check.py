@@ -233,3 +233,19 @@ def check_env_vars():
             f.write("\n.env\n")
     message = "✅ All set!"
     typer.echo(message.encode("utf-8", errors="replace"))
+
+
+@check_app.command(name="pipeline")
+def check_pipeline():
+    """Check that the project pipeline is defined correctly."""
+    from calkit.models.pipeline import Pipeline
+
+    ck_info = calkit.load_calkit_info()
+    if "pipeline" not in ck_info:
+        raise_error("No pipeline is defined in calkit.yaml")
+    try:
+        Pipeline.model_validate(ck_info["pipeline"])
+    except Exception as e:
+        raise_error(f"Pipeline is not defined correctly: {e}")
+    message = "✅ This project's pipeline is defined correctly!"
+    typer.echo(message.encode("utf-8", errors="replace"))

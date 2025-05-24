@@ -54,6 +54,7 @@ class Stage(BaseModel):
 
     kind: Literal[
         "python-script",
+        "latex",
         "bash-script",
         "sh-script",
         "matlab-script",
@@ -63,8 +64,10 @@ class Stage(BaseModel):
     ]
     environment: str
     wdir: str | None = None
-    inputs: list[str]  # TODO: Support other input types
-    outputs: list[str] | list[PathOutput]  # TODO: Support database outputs
+    inputs: list[str] = []  # TODO: Support other input types
+    outputs: (
+        list[str] | list[PathOutput]
+    ) = []  # TODO: Support database outputs
     always_run: bool = False
 
 
@@ -73,6 +76,33 @@ class PythonScriptStage(Stage):
     script_path: str
     args: list[str] = []
 
+    def to_dvc(self) -> dict:
+        """Convert to a DVC stage."""
+        cmd = f"calkit xenv -n {self.environment} -- python {self.script_path}"
+        for arg in self.args:
+            cmd += f" {arg}"
+        deps = [self.script_path]
+        for i in self.inputs:
+            if i not in deps:
+                deps.append(i)
+        outs = []
+        for out in self.outputs:
+            if isinstance(out, str):
+                outs += out
+            elif isinstance(out, PathOutput):
+                pass
+        stage = {"cmd": cmd, "deps": deps, "outs": outs}
+        if self.wdir is not None:
+            stage["wdir"] = self.wdir
+        if self.always_run:
+            stage["always_changed"] = True
+        return stage
+
+
+class LatexStage(Stage):
+    kind: Literal["latex"]
+    target_path: str
+
 
 class MatlabScriptStage(Stage):
     kind: Literal["matlab-script"]
@@ -80,4 +110,4 @@ class MatlabScriptStage(Stage):
 
 
 class Pipeline(BaseModel):
-    stages: dict[str, PythonScriptStage | MatlabScriptStage]
+    stages: dict[str, PythonScriptStage | LatexStage | MatlabScriptStage]

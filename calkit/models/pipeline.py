@@ -70,33 +70,66 @@ class Stage(BaseModel):
     ) = []  # TODO: Support database outputs
     always_run: bool = False
 
+    @property
+    def dvc_cmd(self) -> str:
+        raise NotImplementedError
 
-class PythonScriptStage(Stage):
-    kind: Literal["python-script"]
-    script_path: str
-    args: list[str] = []
-
-    def to_dvc(self) -> dict:
-        """Convert to a DVC stage."""
-        cmd = f"calkit xenv -n {self.environment} -- python {self.script_path}"
-        for arg in self.args:
-            cmd += f" {arg}"
-        deps = [self.script_path]
+    @property
+    def dvc_deps(self) -> list[str]:
+        deps = []
         for i in self.inputs:
             if i not in deps:
                 deps.append(i)
+        return deps
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
         outs = []
         for out in self.outputs:
             if isinstance(out, str):
-                outs += out
+                outs.append(out)
             elif isinstance(out, PathOutput):
-                pass
+                outs.append(
+                    {
+                        out.path: dict(
+                            cache=True if out.storage == "dvc" else False,
+                            persist=not out.delete_before_run,
+                        )
+                    }
+                )
+        return outs
+
+    def to_dvc(self) -> dict:
+        """Convert to a DVC stage."""
+        cmd = self.dvc_cmd
+        deps = self.dvc_deps
+        for i in self.inputs:
+            if i not in deps:
+                deps.append(i)
+        outs = self.dvc_outs
         stage = {"cmd": cmd, "deps": deps, "outs": outs}
         if self.wdir is not None:
             stage["wdir"] = self.wdir
         if self.always_run:
             stage["always_changed"] = True
         return stage
+
+
+class PythonScriptStage(Stage):
+    kind: Literal["python-script"]
+    script_path: str
+    args: list[str] = []
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f"calkit xenv -n {self.environment} -- python {self.script_path}"
+        for arg in self.args:
+            cmd += f" {arg}"
+        return cmd
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.script_path] + super().dvc_deps
 
 
 class LatexStage(Stage):

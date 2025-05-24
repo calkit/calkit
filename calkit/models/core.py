@@ -262,7 +262,7 @@ class ProjectInfo(BaseModel):
     derived_from: DerivedFromProject | None = None
     questions: list[str] = []
     dependencies: list = []
-    pipeline: dict[str, Stage]
+    pipeline: dict[str, Stage] | None = None
     datasets: list[Dataset] = []
     figures: list[Figure] = []
     publications: list[Publication] = []

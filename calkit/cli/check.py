@@ -388,9 +388,11 @@ def check_pipeline(
                 dvc_yaml = calkit.ryaml.load(f)
         else:
             dvc_yaml = {}
-        dvc_stages = dvc_yaml.get("stages", {})
-        for stage_name, stage in compiled.items():
-            dvc_stages[stage_name] = stage
+        dvc_stages = compiled
+        existing_stages = dvc_yaml.get("stages", {})
+        for stage_name, stage in existing_stages.items():
+            if stage_name not in dvc_stages:
+                dvc_stages[stage_name] = stage
         dvc_yaml["stages"] = dvc_stages
         with open("dvc.yaml", "w") as f:
             typer.echo("Writing to dvc.yaml")

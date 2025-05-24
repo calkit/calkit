@@ -19,4 +19,5 @@ def to_dvc() -> dict:
     # Now convert Calkit stages into DVC stages
     for stage_name, stage in pipeline.stages.items():
         dvc_stages[stage_name] = stage.to_dvc()
+        # TODO: Add environment lock file to deps
     return dvc_stages

@@ -6,6 +6,7 @@ import functools
 import hashlib
 import json
 import os
+import platform as _platform
 import subprocess
 from typing import Annotated
 
@@ -196,6 +197,78 @@ def check_conda_env(
         log_func=log_func,
         relaxed=relaxed,
     )
+
+
+@check_app.command(name="venv")
+def check_venv(
+    path: Annotated[
+        str, typer.Argument(help="Path to requirements file.")
+    ] = "requirements.txt",
+    prefix: Annotated[str, typer.Option("--prefix", help="Prefix.")] = ".venv",
+    wdir: Annotated[
+        str | None,
+        typer.Option(
+            "--wdir",
+            help="Working directory. Defaults to current working directory.",
+        ),
+    ] = None,
+    use_uv: Annotated[bool, typer.Option("--uv", help="Use uv.")] = True,
+    python: Annotated[
+        str | None,
+        typer.Option(
+            "--python", help="Python version to specify if using uv."
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Print verbose output.")
+    ] = False,
+):
+    """Check a Python virtual environment (uv or virtualenv)."""
+    kind = "uv-venv" if use_uv else "venv"
+    create_cmd = (
+        ["uv", "venv"] if kind == "uv-venv" else ["python", "-m", "venv"]
+    )
+    pip_cmd = "pip" if kind == "venv" else "uv pip"
+    pip_install_args = "-q"
+    if python is not None and not use_uv:
+        raise_error("Python version cannot be specified if not using uv")
+    if python is not None and use_uv:
+        create_cmd += ["--python", python]
+        pip_install_args += f" --python {python}"
+    if not os.path.isdir(prefix):
+        if verbose:
+            typer.echo(f"Creating {kind} at {prefix}")
+        try:
+            subprocess.check_call(create_cmd + [prefix], cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error(f"Failed to create {kind} at {prefix}")
+        # Put a gitignore file in the env dir if one doesn't exist
+        if not os.path.isfile(os.path.join(prefix, ".gitignore")):
+            with open(os.path.join(prefix, ".gitignore"), "w") as f:
+                f.write("*\n")
+    fname, ext = os.path.splitext(path)
+    lock_fpath = fname + "-lock" + ext
+    if _platform.system() == "Windows":
+        activate_cmd = f"{prefix}\\Scripts\\activate"
+    else:
+        activate_cmd = f". {prefix}/bin/activate"
+    check_cmd = (
+        f"{activate_cmd} "
+        f"&& {pip_cmd} install {pip_install_args} -r {path} "
+        f"&& {pip_cmd} freeze > {lock_fpath} "
+        "&& deactivate"
+    )
+    try:
+        if verbose:
+            typer.echo(f"Running command: {check_cmd}")
+        subprocess.check_output(
+            check_cmd,
+            shell=True,
+            cwd=wdir,
+            stderr=subprocess.STDOUT if not verbose else None,
+        )
+    except subprocess.CalledProcessError:
+        raise_error(f"Failed to check {kind}")
 
 
 @check_app.command(name="env-vars")

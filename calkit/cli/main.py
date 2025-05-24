@@ -21,7 +21,12 @@ from typing_extensions import Annotated, Optional
 
 import calkit
 from calkit.cli import print_sep, raise_error, run_cmd, warn
-from calkit.cli.check import check_app, check_conda_env, check_docker_env
+from calkit.cli.check import (
+    check_app,
+    check_conda_env,
+    check_docker_env,
+    check_venv,
+)
 from calkit.cli.cloud import cloud_app
 from calkit.cli.config import config_app
 from calkit.cli.import_ import import_app
@@ -1002,53 +1007,23 @@ def run_in_env(
         prefix = env["prefix"]
         path = env["path"]
         shell_cmd = _to_shell_cmd(cmd)
+        if _platform.system() == "Windows":
+            activate_cmd = f"{prefix}\\Scripts\\activate"
+        else:
+            activate_cmd = f". {prefix}/bin/activate"
         if verbose:
             typer.echo(f"Raw command: {cmd}")
             typer.echo(f"Shell command: {shell_cmd}")
-        create_cmd = (
-            ["uv", "venv"] if kind == "uv-venv" else ["python", "-m", "venv"]
-        )
-        pip_cmd = "pip" if kind == "venv" else "uv pip"
-        pip_install_args = "-q"
-        if "python" in env and kind == "uv-venv":
-            create_cmd += ["--python", env["python"]]
-            pip_install_args += f" --python {env['python']}"
         # Check environment
         if not no_check:
-            if not os.path.isdir(prefix):
-                if verbose:
-                    typer.echo(f"Creating {kind} at {prefix}")
-                try:
-                    subprocess.check_call(create_cmd + [prefix], cwd=wdir)
-                except subprocess.CalledProcessError:
-                    raise_error(f"Failed to create {kind} at {prefix}")
-                # Put a gitignore file in the env dir if one doesn't exist
-                if not os.path.isfile(os.path.join(prefix, ".gitignore")):
-                    with open(os.path.join(prefix, ".gitignore"), "w") as f:
-                        f.write("*\n")
-            fname, ext = os.path.splitext(path)
-            lock_fpath = fname + "-lock" + ext
-            if _platform.system() == "Windows":
-                activate_cmd = f"{prefix}\\Scripts\\activate"
-            else:
-                activate_cmd = f". {prefix}/bin/activate"
-            check_cmd = (
-                f"{activate_cmd} "
-                f"&& {pip_cmd} install {pip_install_args} -r {path} "
-                f"&& {pip_cmd} freeze > {lock_fpath} "
-                "&& deactivate"
+            check_venv(
+                path=path,
+                prefix=prefix,
+                use_uv=kind == "uv-venv",
+                python=env.get("python"),
+                wdir=wdir,
+                verbose=verbose,
             )
-            try:
-                if verbose:
-                    typer.echo(f"Running command: {check_cmd}")
-                subprocess.check_output(
-                    check_cmd,
-                    shell=True,
-                    cwd=wdir,
-                    stderr=subprocess.STDOUT if not verbose else None,
-                )
-            except subprocess.CalledProcessError:
-                raise_error(f"Failed to check {kind}")
         # Now run the command
         cmd = f"{activate_cmd} && {shell_cmd} && deactivate"
         if verbose:

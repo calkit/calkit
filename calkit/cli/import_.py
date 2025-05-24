@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import os
 import subprocess
+import sys
 from copy import deepcopy
 from typing import Annotated
 
@@ -204,7 +205,7 @@ def import_dataset(
     if not no_dvc_pull and dvc_import is not None:
         # Run dvc pull
         typer.echo("Running dvc pull")
-        subprocess.call(["dvc", "pull", dvc_fpath])
+        subprocess.call([sys.executable, "-m", "dvc", "pull", dvc_fpath])
 
 
 @import_app.command(name="environment")

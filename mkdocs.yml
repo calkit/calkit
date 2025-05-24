@@ -50,6 +50,7 @@ nav:
   - Apps: apps.md
   - Releasing/archiving projects and artifacts: releases.md
   - Local server (GUI interaction): local-server.md
+  - Overleaf integration: overleaf.md
   - Examples: examples.md
   - Tutorials:
       - tutorials/index.md

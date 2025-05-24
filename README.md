@@ -17,16 +17,60 @@
   </a>
 </p>
 
-Calkit is a framework and toolkit for reproducible research projects.
-It acts as a top-level layer to integrate and simplify the use of enabling
-technologies such as
-[Git](https://git-scm.com/),
-[DVC](https://dvc.org/),
-[Conda](https://docs.conda.io/en/latest/),
-and [Docker](https://docker.com).
-Calkit also adds a domain-specific data model
-such that all aspects of the research process can be fully described in a
-single repository and therefore easily consumed by others.
+Calkit is a language-agnostic project framework and toolkit
+to make your research or analytics project
+reproducible to the highest standard,
+which means:
+
+> Inputs and process definitions are provided and sufficiently described
+> such that anyone can easily verify that they produced the outputs
+> used to support the conclusions.
+
+"Easily" means that after obtaining your project files,
+it should only require executing a single command
+(like "pressing a single button" in
+[Claerbout and Karrenbach (1992)](https://doi.org/10.1190/1.1822162)),
+which should finish in less than 15 minutes
+(suggested by
+[Vandewalle et al. (2009)](https://doi.org/10.1109/MSP.2009.932122)).
+
+If the processes are too expensive to rerun in under 15 minutes,
+it should be possible to confirm that none of the input data
+or process definitions (e.g., environment specifications, scripts)
+have changed since saving the current versions of each output artifact
+(figure, table, dataset, publication, etc.)
+
+When your project is reproducible,
+you'll be able to iterate more quickly and more often,
+easily onboard collaborators,
+make fewer mistakes,
+and feel confident sharing all of your project materials
+with your research articles,
+because you'll know the code will actually run!
+This will allow others to reuse parts of your project in their own research,
+accelerating the pace of discovery.
+
+Working at this level of automation, discipline, and rigor may sound like
+a lot of effort,
+but Calkit makes it easy!
+
+## Features
+
+- A schema to store structured metadata describing the
+  project's important outputs (in its `calkit.yaml` file)
+  and how they are created
+  (its computational environments and pipeline).
+- A CLI to run the project's pipeline to verify it's reproducible,
+  regenerating outputs as needed and
+  ensuring all
+  computational environments (e.g., [Conda](https://docs.conda.io/en/latest/), [Docker](https://docker.com)) match their specification.
+- A command line interface (CLI) to simplify keeping code, text, and larger
+  data files backed up in the same project repo using both
+  [Git](https://git-scm.com/) and [DVC](https://dvc.org/).
+- A complementary
+  [cloud system](https://github.com/calkit/calkit-cloud)
+  to facilitate backup, collaboration,
+  and sharing throughout the entire research lifecycle.
 
 ## Installation
 
@@ -35,17 +79,25 @@ If you want to use [Docker](https://docker.com) containers,
 which is typically a good idea,
 that should also be installed.
 For Python, we recommend
-[Miniforge](https://conda-forge.org/miniforge/).
-If you're a Windows user and decide to install Miniforge or any other
-Conda-based distribution,
-e.g., Anaconda, you'll probably want to ensure that environment is
-[activated by default in Git Bash](https://discuss.codecademy.com/t/setting-up-conda-in-git-bash/534473).
+[uv](https://docs.astral.sh/uv/).
 
-After Python is installed, run
+With uv installed, install Calkit with:
+
+```sh
+uv tool install calkit-python
+```
+
+Alternatively, but less ideally, you can install with your system Python:
 
 ```sh
 pip install calkit-python
 ```
+
+For Windows users, the
+[Calkit Assistant](https://github.com/calkit/calkit-assistant)
+app is the easiest way to get everything set up and ready to work in
+VS Code, which can then be used as the primary app for working on
+all scientific or analytical computing projects.
 
 ## Cloud integration
 
@@ -104,47 +156,6 @@ This will commit and push to both GitHub and the Calkit Cloud.
 
 We welcome all kinds of contributions!
 See [CONTRIBUTING.md](CONTRIBUTING.md) to learn how to get involved.
-
-## Why does reproducibility matter?
-
-If your work is reproducible, that means that someone else can "run" it and
-calculate the same results or outputs.
-This is a major step towards addressing
-[the replication crisis](https://en.wikipedia.org/wiki/Replication_crisis)
-and has some major benefits for both you as an individual and the research
-community:
-
-1. You will avoid mistakes caused by, e.g., running an old version of a script
-   and including a figure that wasn't created after fixing a bug in the data
-   processing pipeline.
-2. Since your project is "runnable," it's more likely that someone else will be
-   able to reuse part of your work to run it in a different context, thereby
-   producing a bigger impact and accelerating the pace of discovery.
-   If someone can take what you've done and use it to calculate a
-   prediction, you have just produced truly useful knowledge.
-
-## Why another tool/platform?
-
-Git, GitHub, DVC, Docker et al. are amazing tools/platforms, but their
-use involves multiple fairly difficult learning curves,
-and tying them together might mean developing something new for each project.
-Our goal is to provide a single tool and platform to unify all of these so
-that there is a single, gentle learning curve.
-However, it is not our goal to hide or replace these underlying components.
-Advanced users can use them directly, but new users aren't forced to, which
-helps them get up and running with less effort and training.
-Calkit should help users understand what is going on under the hood without
-forcing them to work at that lower level of abstraction.
-
-## How it works
-
-Calkit creates a simple human-readable "database" inside the `calkit.yaml`
-file, which serves as a way to store important information about the project,
-e.g., what question(s) it seeks to answer,
-what files should be considered datasets, figures, publications, etc.
-The Calkit cloud reads this database and registers the various entities
-as part of the entire ecosystem such that if a project is made public,
-other researchers can find and reuse your work to accelerate their own.
 
 ## Design/UX principles
 

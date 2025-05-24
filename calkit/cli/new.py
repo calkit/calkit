@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import csv
 import os
+import pathlib
 import shutil
 import subprocess
+import sys
 import zipfile
 from enum import Enum
 
@@ -14,7 +16,7 @@ import dotenv
 import git
 import requests
 import typer
-from git.exc import GitCommandError, InvalidGitRepositoryError
+from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 from typing_extensions import Annotated
 
 import calkit
@@ -103,15 +105,48 @@ def new_project(
     abs_path = os.path.abspath(path)
     if template and os.path.exists(abs_path):
         raise_error("Must specify a new directory if using --template")
-    if cloud and os.path.isdir(os.path.join(abs_path, ".git")):
-        raise_error("Must not already be a Git repo to use --cloud")
+    try:
+        repo = git.Repo(abs_path)
+    except (InvalidGitRepositoryError, NoSuchPathError):
+        repo = None
+    if repo is not None and git_repo_url is None:
+        try:
+            git_repo_url = repo.remotes.origin.url
+            # Convert to HTTPS if it's SSH
+            if git_repo_url.startswith("git@"):
+                git_repo_url = git_repo_url.replace(
+                    "git@github.com:", "https://github.com/"
+                )
+            git_repo_url = git_repo_url.removesuffix(".git")
+        except Exception as e:
+            git_repo_url = None
+            raise_error(
+                f"Could not detect Git repo URL from existing repo: {e}"
+            )
+        # If this isn't a DVC repo, run `dvc init`
+        if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
+            typer.echo("Initializing DVC repository")
+            try:
+                subprocess.run(
+                    [sys.executable, "-m", "dvc", "init", "-q"],
+                    cwd=abs_path,
+                    capture_output=True,
+                    check=True,
+                    text=True,
+                )
+            except subprocess.CalledProcessError as e:
+                raise_error(f"Failed to initialize DVC repository: {e.stderr}")
+            # Commit the DVC init changes
+            if not no_commit:
+                repo.git.add(".dvc")
+                repo.git.commit(["-m", "Initialize DVC"])
     ck_info_fpath = os.path.join(abs_path, "calkit.yaml")
     if os.path.isfile(ck_info_fpath) and not overwrite:
         raise_error(
             "Destination is already a Calkit project; "
             "use --overwrite to continue"
         )
-    if os.path.isdir(abs_path) and os.listdir(abs_path):
+    if os.path.isdir(abs_path) and os.listdir(abs_path) and repo is None:
         warn(f"{abs_path} is not empty")
     if name is None:
         name = calkit.to_kebab_case(os.path.basename(abs_path))
@@ -126,6 +161,7 @@ def new_project(
         # Cloud should allow None, which will allow us to post just the name
         # NOTE: This will fail if the user hasn't logged into the Calkit Cloud
         # in 6 months, since their GitHub refresh token stored is expired
+        typer.echo("Creating project in Calkit Cloud")
         try:
             resp = calkit.cloud.post(
                 "/projects",
@@ -143,8 +179,8 @@ def new_project(
         # Now clone here
         if not os.path.isdir(abs_path):
             subprocess.run(["git", "clone", resp["git_repo_url"], abs_path])
-        else:
-            typer.echo("Fetching from newly create Git repo")
+        elif repo is None:
+            typer.echo("Fetching from newly created Git repo")
             repo = git.Repo.init(abs_path, initial_branch="main")
             repo.git.remote(["add", "origin", resp["git_repo_url"]])
             repo.git.fetch()
@@ -155,6 +191,25 @@ def new_project(
                 repo.git.checkout(checkout_cmd)
             except GitCommandError as e:
                 raise_error(f"Failed to check out main branch: {e}")
+        else:
+            # Create a calkit.yaml file if one does not exist
+            calkit_fpath = os.path.join(abs_path, "calkit.yaml")
+            if not os.path.isfile(calkit_fpath):
+                typer.echo("Creating calkit.yaml file")
+                with open(calkit_fpath, "w") as f:
+                    ryaml.dump(
+                        dict(
+                            owner=resp["owner_account_name"],
+                            name=resp["name"],
+                            title=resp["title"],
+                            description=resp["description"],
+                            git_repo_url=resp["git_repo_url"],
+                        ),
+                        f,
+                    )
+                repo.git.add("calkit.yaml")
+                if not no_commit:
+                    repo.git.commit(["-m", "Create calkit.yaml"])
         try:
             calkit.dvc.set_remote_auth(wdir=abs_path)
         except Exception:
@@ -233,7 +288,16 @@ def new_project(
                 "and `calkit config remote`"
             )
             subprocess.call(
-                ["dvc", "remote", "remove", "calkit", "-q"], cwd=abs_path
+                [
+                    sys.executable,
+                    "-m",
+                    "dvc",
+                    "remote",
+                    "remove",
+                    "calkit",
+                    "-q",
+                ],
+                cwd=abs_path,
             )
         try:
             calkit.dvc.set_remote_auth(wdir=abs_path)
@@ -254,7 +318,9 @@ def new_project(
     repo = git.Repo(abs_path)
     if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
         typer.echo("Initializing DVC repository")
-        subprocess.run(["dvc", "init", "-q"], cwd=abs_path)
+        subprocess.run(
+            [sys.executable, "-m", "dvc", "init", "-q"], cwd=abs_path
+        )
     # Create calkit.yaml file
     ck_info = calkit.load_calkit_info(wdir=abs_path)
     ck_info = dict(name=name, title=title, description=description) | ck_info
@@ -286,8 +352,11 @@ def new_project(
     # Setup Calkit Cloud DVC remote
     if repo.remotes:
         typer.echo("Setting up Calkit Cloud DVC remote")
-        calkit.dvc.configure_remote(wdir=abs_path)
-        calkit.dvc.set_remote_auth(wdir=abs_path)
+        try:
+            calkit.dvc.configure_remote(wdir=abs_path)
+            calkit.dvc.set_remote_auth(wdir=abs_path)
+        except Exception as e:
+            warn(f"Failed to set up Calkit Cloud DVC remote: {e}")
     if repo.git.diff("--staged") and not no_commit:
         repo.git.commit(["-m", "Initialize Calkit project"])
     typer.echo(success_message)
@@ -382,7 +451,7 @@ def new_figure(
         for out in outs:
             outs_cmd += ["-o", out]
         subprocess.check_call(
-            ["dvc", "stage", "add", "-n", stage_name]
+            [sys.executable, "-m", "dvc", "stage", "add", "-n", stage_name]
             + (["-f"] if overwrite else [])
             + deps_cmd
             + outs_cmd
@@ -498,6 +567,12 @@ def new_docker_env(
     wdir: Annotated[
         str, typer.Option("--wdir", help="Working directory.")
     ] = "/work",
+    user: Annotated[
+        str,
+        typer.Option(
+            "--user", help="User account to use to run the container."
+        ),
+    ] = None,
     platform: Annotated[
         str, typer.Option("--platform", help="Which platform(s) to build for.")
     ] = None,
@@ -563,6 +638,8 @@ def new_docker_env(
         env["layers"] = layers
     if platform:
         env["platform"] = platform
+    if user:
+        env["user"] = user
     envs[name] = env
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
@@ -714,7 +791,7 @@ def new_dataset(
         for out in outs:
             outs_cmd += ["-o", out]
         subprocess.check_call(
-            ["dvc", "stage", "add", "-n", stage_name]
+            [sys.executable, "-m", "dvc", "stage", "add", "-n", stage_name]
             + (["-f"] if overwrite else [])
             + deps_cmd
             + outs_cmd
@@ -859,7 +936,7 @@ def new_publication(
     elif overwrite and pub_fpath in pub_paths:
         pubs = [p for p in pubs if p.get("path") != pub_fpath]
     pub = dict(
-        path=pub_fpath,
+        path=pathlib.Path(pub_fpath).as_posix(),
         kind=kind,
         title=title,
         description=description,
@@ -904,6 +981,8 @@ def new_publication(
             cmd = f"calkit xenv -n {env_name} -- {cmd}"
         target_dep = os.path.join(path, template_obj.target)
         dvc_cmd = [
+            sys.executable,
+            "-m",
             "dvc",
             "stage",
             "add",
@@ -954,6 +1033,9 @@ def new_conda_env(
     pip_packages: Annotated[
         list[str], typer.Option("--pip", help="Packages to install with pip.")
     ] = [],
+    prefix: Annotated[
+        str, typer.Option("--prefix", help="Prefix for environment location.")
+    ] = None,
     description: Annotated[
         str, typer.Option("--description", help="Description.")
     ] = None,
@@ -994,6 +1076,12 @@ def new_conda_env(
     conda_env = dict(
         name=conda_name, channels=["conda-forge"], dependencies=packages
     )
+    if prefix is not None:
+        from calkit.cli.main import ignore
+
+        conda_env["prefix"] = prefix
+        ignore(prefix, no_commit=True)
+        repo.git.add(".gitignore")
     if pip_packages:
         conda_env["dependencies"].append(dict(pip=pip_packages))
     with open(path, "w") as f:
@@ -1001,6 +1089,8 @@ def new_conda_env(
     repo.git.add(path)
     typer.echo("Adding environment to calkit.yaml")
     env = dict(path=path, kind="conda")
+    if prefix is not None:
+        env["prefix"] = prefix
     if description is not None:
         env["description"] = description
     envs[name] = env
@@ -1286,7 +1376,7 @@ def new_status(
     now = calkit.utcnow(remove_tz=False)
     # Append to end of CSV
     write_header = not os.path.isfile(fpath)
-    with open(fpath, "a") as f:
+    with open(fpath, "a", newline="") as f:
         writer = csv.writer(f)
         if write_header:
             writer.writerow(["timestamp", "status", "message"])
@@ -1372,24 +1462,31 @@ def new_stage(
             help="Overwrite an existing stage with this name if necessary.",
         ),
     ] = False,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Do not check if the target, deps, environment, etc., exist.",
+        ),
+    ] = False,
     no_commit: Annotated[
         bool, typer.Option("--no-commit", help="Do not commit changes to Git.")
     ] = False,
 ):
     """Create a new pipeline stage."""
-    ck_info = calkit.load_calkit_info()
+    ck_info = calkit.load_calkit_info(process_includes="environments")
     if environment is None:
         warn("No environment is specified")
         cmd = ""
     else:
-        if environment not in ck_info["environments"]:
+        if environment not in ck_info["environments"] and not no_check:
             raise_error(f"Environment '{environment}' does not exist")
         cmd = f"calkit xenv -n {environment} -- "
-        # Add environment path as a dependency
-        env_path = ck_info["environments"][environment].get("path")
-        if env_path is not None:
+        # Add environment path as a dependency if applicable
+        env_path = ck_info["environments"].get(environment, {}).get("path")
+        if env_path is not None and env_path not in deps:
             deps = [env_path] + deps
-    if not os.path.exists(target):
+    if not os.path.exists(target) and not no_check:
         raise_error(f"Target '{target}' does not exist")
     if kind.value == "python-script":
         cmd += f"python {target}"
@@ -1410,8 +1507,10 @@ def new_stage(
         cmd += f"zsh {target}"
     elif kind.value == "r-script":
         cmd += f"Rscript {target}"
-    add_cmd = ["dvc", "stage", "add", "-n", name]
-    for dep in [target] + deps:
+    add_cmd = [sys.executable, "-m", "dvc", "stage", "add", "-n", name]
+    if target not in deps:
+        deps = [target] + deps
+    for dep in deps:
         add_cmd += ["-d", dep]
     for out in outs:
         add_cmd += ["-o", out]

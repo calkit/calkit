@@ -6,6 +6,7 @@ import csv
 import glob
 import os
 import platform as _platform
+import posixpath
 import subprocess
 import sys
 import time
@@ -21,12 +22,14 @@ from typing_extensions import Annotated, Optional
 import calkit
 from calkit.cli import print_sep, raise_error, run_cmd, warn
 from calkit.cli.check import check_app, check_conda_env, check_docker_env
+from calkit.cli.cloud import cloud_app
 from calkit.cli.config import config_app
 from calkit.cli.import_ import import_app
 from calkit.cli.list import list_app
 from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
+from calkit.cli.overleaf import overleaf_app
 from calkit.cli.update import update_app
 from calkit.models import Procedure
 
@@ -49,6 +52,8 @@ app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
+app.add_typer(overleaf_app, name="overleaf", help="Interact with Overleaf.")
+app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
 
 # Constants for version control auto-ignore
 AUTO_IGNORE_SUFFIXES = [".DS_Store", ".env", ".pyc"]
@@ -119,10 +124,18 @@ def init(
 ):
     """Initialize the current working directory."""
     subprocess.run(["git", "init"])
-    dvc_cmd = ["dvc", "init"]
+    dvc_cmd = [sys.executable, "-m", "dvc", "init"]
     if force:
         dvc_cmd.append("-f")
     subprocess.run(dvc_cmd)
+    # Ensure autostage is enabled for DVC
+    subprocess.call(
+        [sys.executable, "-m", "dvc", "config", "core.autostage", "true"]
+    )
+    # Commit the newly created .dvc directory
+    repo = git.Repo()
+    repo.git.add(".dvc")
+    repo.git.commit("-m", "Initialize DVC")
     # TODO: Initialize `calkit.yaml`
     # TODO: Initialize `dvc.yaml`
     # TODO: Add a sane .gitignore file
@@ -138,6 +151,9 @@ def clone(
             help="Location to clone to (default will be ./{repo_name})"
         ),
     ] = None,
+    ssh: Annotated[
+        bool, typer.Option("--ssh", help="Use SSH with Git.")
+    ] = False,
     no_config_remote: Annotated[
         bool,
         typer.Option(
@@ -173,9 +189,11 @@ def clone(
         except Exception as e:
             raise_error(f"Failed to fetch project information: {e}")
         url = project["git_repo_url"]
-        # TODO: Figure out if we should clone with SSH
         if not url.endswith(".git"):
             url += ".git"
+        if ssh:
+            typer.echo("Converting URL to use with SSH")
+            url = url.replace("https://github.com/", "git@github.com:")
     # Git clone
     cmd = ["git", "clone", url]
     if recursive:
@@ -200,7 +218,7 @@ def clone(
     # DVC pull
     if not no_dvc_pull:
         try:
-            subprocess.check_call(["dvc", "pull"])
+            subprocess.check_call([sys.executable, "-m", "dvc", "pull"])
         except subprocess.CalledProcessError:
             raise_error("Failed to pull from DVC remote(s)")
 
@@ -229,19 +247,29 @@ def get_status():
     run_cmd(["git", "status"])
     typer.echo()
     print_sep("Data (DVC)")
-    run_cmd(["dvc", "data", "status"])
+    run_cmd([sys.executable, "-m", "dvc", "data", "status"])
     typer.echo()
     print_sep("Pipeline (DVC)")
-    run_cmd(["dvc", "status"])
+    run_cmd([sys.executable, "-m", "dvc", "status"])
 
 
 @app.command(name="diff")
-def diff():
+def diff(
+    staged: Annotated[
+        bool,
+        typer.Option(
+            "--staged", help="Show a diff from files staged with Git."
+        ),
+    ] = False,
+):
     """Get a unified Git and DVC diff."""
     print_sep("Code (Git)")
-    run_cmd(["git", "diff"])
+    git_cmd = ["git", "diff"]
+    if staged:
+        git_cmd.append("--staged")
+    run_cmd(git_cmd)
     print_sep("Pipeline (DVC)")
-    run_cmd(["dvc", "diff"])
+    run_cmd([sys.executable, "-m", "dvc", "diff"])
 
 
 @app.command(name="add")
@@ -317,9 +345,11 @@ def add(
         warn("DVC not initialized yet; initializing")
         dvc_repo = dvc.repo.Repo.init()
     # Ensure autostage is enabled for DVC
-    subprocess.call(["dvc", "config", "core.autostage", "true"])
+    subprocess.call(
+        [sys.executable, "-m", "dvc", "config", "core.autostage", "true"]
+    )
     subprocess.call(["git", "add", ".dvc/config"])
-    dvc_paths = [obj.get("path") for obj in dvc_repo.ls(".", dvc_only=True)]
+    dvc_paths = calkit.dvc.list_paths()
     untracked_git_files = repo.untracked_files
     if auto_commit_message:
         # See if this path is in the repo already
@@ -379,15 +409,15 @@ def add(
                 typer.echo(
                     f"Adding {path} to DVC since it's already tracked with DVC"
                 )
-                subprocess.call(["dvc", "add", path])
+                subprocess.call([sys.executable, "-m", "dvc", "add", path])
             elif os.path.splitext(path)[-1] in DVC_EXTENSIONS:
                 typer.echo(f"Adding {path} to DVC per its extension")
-                subprocess.call(["dvc", "add", path])
+                subprocess.call([sys.executable, "-m", "dvc", "add", path])
             elif calkit.get_size(path) > DVC_SIZE_THRESH_BYTES:
                 typer.echo(
                     f"Adding {path} to DVC since it's greater than 1 MB"
                 )
-                subprocess.call(["dvc", "add", path])
+                subprocess.call([sys.executable, "-m", "dvc", "add", path])
             else:
                 typer.echo(f"Adding {path} to Git")
                 subprocess.call(["git", "add", path])
@@ -452,6 +482,14 @@ def save(
     message: Annotated[
         Optional[str], typer.Option("--message", "-m", help="Commit message.")
     ] = None,
+    auto_commit_message: Annotated[
+        bool,
+        typer.Option(
+            "--auto-message",
+            "-M",
+            help="Commit with an automatically-generated message.",
+        ),
+    ] = False,
     to: Annotated[
         str,
         typer.Option(
@@ -464,6 +502,9 @@ def save(
             "--no-push", help="Do not push to Git and DVC after committing."
         ),
     ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
+    ] = False,
 ):
     """Save paths by committing and pushing.
 
@@ -475,6 +516,25 @@ def save(
         add(paths, to=to)
     elif save_all:
         add(paths=["."])
+    if auto_commit_message and message is None:
+        staged_files = calkit.git.get_staged_files_with_status()
+        if verbose:
+            typer.echo(
+                f"Generating commit message for staged files: {staged_files}"
+            )
+        if len(staged_files) != 1:
+            raise_error(
+                "Automatic commit messages can only be generated when "
+                f"changing one file (changed: {staged_files})"
+            )
+        dvc_paths = calkit.dvc.list_paths()
+        # See if this path is in the repo already
+        staged_file = staged_files[0]["path"]
+        status = staged_files[0]["status"]
+        if staged_file in dvc_paths or status == "M":
+            message = f"Update {staged_file}"
+        else:
+            message = f"Add {staged_file}"
     if message is None:
         typer.echo("No message provided; entering interactive mode")
         typer.echo("Creating a commit including the following paths:")
@@ -483,9 +543,19 @@ def save(
         typer.echo("Please provide a message describing the changes.")
         typer.echo("Example: Add new data to data/raw")
         message = typer.prompt("Message")
+    # Figure out if we have any DVC files in this commit, and if not, we can
+    # skip pushing to DVC
+    any_dvc = any(
+        [
+            path == "dvc.lock" or path.endswith(".dvc")
+            for path in calkit.git.get_staged_files()
+        ]
+    )
     commit(all=True if paths is None else False, message=message)
     if not no_push:
-        push()
+        if verbose and not any_dvc:
+            typer.echo("Not pushing to DVC since no DVC files were staged")
+        push(no_dvc=not any_dvc)
 
 
 @app.command(name="pull")
@@ -507,7 +577,7 @@ def pull(
                 typer.echo(f"Checking authentication for DVC remote: {name}")
                 calkit.dvc.set_remote_auth(remote_name=name)
     try:
-        subprocess.check_call(["dvc", "pull"])
+        subprocess.check_call([sys.executable, "-m", "dvc", "pull"])
     except subprocess.CalledProcessError:
         raise_error("DVC pull failed")
 
@@ -515,6 +585,7 @@ def pull(
 @app.command(name="push")
 def push(
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
+    no_dvc: Annotated[bool, typer.Option("--no-dvc")] = False,
 ):
     """Push with both Git and DVC."""
     typer.echo("Pushing to Git remote")
@@ -522,18 +593,21 @@ def push(
         subprocess.check_call(["git", "push"])
     except subprocess.CalledProcessError:
         raise_error("Git push failed")
-    typer.echo("Pushing to DVC remote")
-    if not no_check_auth:
-        # Check that our dvc remotes all have our DVC token set for them
-        remotes = calkit.dvc.get_remotes()
-        for name, url in remotes.items():
-            if name == "calkit" or name.startswith("calkit:"):
-                typer.echo(f"Checking authentication for DVC remote: {name}")
-                calkit.dvc.set_remote_auth(remote_name=name)
-    try:
-        subprocess.check_call(["dvc", "push"])
-    except subprocess.CalledProcessError:
-        raise_error("DVC push failed")
+    if not no_dvc:
+        typer.echo("Pushing to DVC remote")
+        if not no_check_auth:
+            # Check that our dvc remotes all have our DVC token set for them
+            remotes = calkit.dvc.get_remotes()
+            for name, url in remotes.items():
+                if name == "calkit" or name.startswith("calkit:"):
+                    typer.echo(
+                        f"Checking authentication for DVC remote: {name}"
+                    )
+                    calkit.dvc.set_remote_auth(remote_name=name)
+        try:
+            subprocess.check_call([sys.executable, "-m", "dvc", "push"])
+        except subprocess.CalledProcessError:
+            raise_error("DVC push failed")
 
 
 @app.command(name="sync")
@@ -560,7 +634,7 @@ def ignore(
     repo = git.Repo()
     if repo.ignored(path):
         typer.echo(f"{path} is already ignored")
-        exit(0)
+        return
     typer.echo(f"Adding '{path}' to .gitignore")
     txt = "\n" + path + "\n"
     with open(".gitignore", "a") as f:
@@ -658,7 +732,7 @@ def run(
     if downstream is not None:
         args += downstream
     try:
-        subprocess.check_call(["dvc", "repro"] + args)
+        subprocess.check_call([sys.executable, "-m", "dvc", "repro"] + args)
     except subprocess.CalledProcessError:
         raise_error("DVC pipeline failed")
     # Now parse stage metadata for calkit objects
@@ -835,7 +909,7 @@ def run_in_env(
     docker_wdir = env.get("wdir", "/work")
     docker_wdir_mount = docker_wdir
     if wdir is not None:
-        docker_wdir = os.path.join(docker_wdir, wdir)
+        docker_wdir = posixpath.join(docker_wdir, wdir)
     shell = env.get("shell", "sh")
     platform = env.get("platform")
     if env["kind"] == "docker":
@@ -847,7 +921,7 @@ def run_in_env(
                 fpath=env["path"],
                 platform=env.get("platform"),
                 deps=env.get("deps", []),
-                quiet=True,
+                quiet=not verbose,
             )
         shell_cmd = _to_shell_cmd(cmd)
         docker_cmd = [
@@ -856,6 +930,17 @@ def run_in_env(
         ]
         if platform:
             docker_cmd += ["--platform", platform]
+        docker_user = env.get("user")
+        if docker_user is None:
+            try:
+                uid = os.getuid()
+                gid = os.getgid()
+                docker_user = f"{uid}:{gid}"
+            except AttributeError:
+                # We're probably on Windows, so there is no UID to map
+                pass
+        if docker_user is not None:
+            docker_cmd += ["--user", docker_user]
         docker_cmd += env.get("args", [])
         docker_cmd += [
             "-it" if sys.stdin.isatty() else "-i",
@@ -880,9 +965,18 @@ def run_in_env(
             conda_env = calkit.ryaml.load(f)
         if not no_check:
             check_conda_env(
-                env_fpath=env["path"], relaxed=relaxed_check, quiet=True
+                env_fpath=env["path"],
+                relaxed=relaxed_check,
+                quiet=not verbose,
             )
-        cmd = ["conda", "run", "-n", conda_env["name"]] + cmd
+        # TODO: Prefix should only be in the env file or calkit.yaml, not both?
+        prefix = env.get("prefix")
+        conda_cmd = ["conda", "run"]
+        if prefix is not None:
+            conda_cmd += ["--prefix", os.path.abspath(prefix)]
+        else:
+            conda_cmd += ["-n", conda_env["name"]]
+        cmd = conda_cmd + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
@@ -1301,3 +1395,36 @@ def upgrade():
     else:
         cmd = ["pip", "install", "--upgrade", "calkit-python"]
     subprocess.run(cmd)
+
+
+@app.command(name="switch-branch")
+def switch_branch(name: Annotated[str, typer.Argument(help="Branch name.")]):
+    """Switch to a different branch."""
+    repo = git.Repo()
+    if name not in repo.heads:
+        typer.echo(f"Branch '{name}' does not exist; creating")
+        cmd = ["-b", name]
+    else:
+        cmd = [name]
+    repo.git.checkout(cmd)
+
+
+@app.command(
+    name="dvc",
+    add_help_option=False,
+    context_settings={
+        "ignore_unknown_options": True,
+        "allow_extra_args": True,
+    },
+)
+def call_dvc(
+    ctx: typer.Context,
+    help: Annotated[bool, typer.Option("-h", "--help")] = False,
+):
+    """Run a command with the DVC CLI.
+
+    Useful if Calkit is installed as a tool, e.g., with `uv tool` or `pipx`,
+    and DVC is not installed.
+    """
+    process = subprocess.run([sys.executable, "-m", "dvc"] + sys.argv[2:])
+    sys.exit(process.returncode)

@@ -1,9 +1,12 @@
 """IPython magics."""
 
+from __future__ import annotations
+
 import ast
 import os
 import pathlib
 import subprocess
+import sys
 
 from IPython.core import magic_arguments
 from IPython.core.magic import Magics, cell_magic, magics_class
@@ -25,7 +28,6 @@ def _posix_path(path: str):
 
 @magics_class
 class Calkit(Magics):
-
     @magic_arguments.magic_arguments()
     @magic_arguments.argument(
         "-n",
@@ -222,6 +224,8 @@ class Calkit(Magics):
         # Create a DVC stage that runs the script, defining the appropriate
         # dependencies and outputs, and run it
         cmd = [
+            sys.executable,
+            "-m",
             "dvc",
             "stage",
             "add",
@@ -290,7 +294,7 @@ class Calkit(Magics):
         # If the last line of the cell has no equals signs, run that command,
         # since it's probably meant for display
         last_line = cell.strip().split("\n")[-1]
-        if not "=" in last_line:
+        if "=" not in last_line:
             self.shell.run_cell(last_line)
 
 

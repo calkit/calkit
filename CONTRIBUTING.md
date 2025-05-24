@@ -26,6 +26,7 @@ This guide will help you get started.
    - [Docker](https://docker.com)
    - [Miniforge](https://conda-forge.org/download/)
    - [uv](https://docs.astral.sh/uv/getting-started/installation/)
+   - [Pixi](https://pixi.sh/latest/)
 1. **Run tests** to ensure everything is working:
    ```bash
    uv run pytest

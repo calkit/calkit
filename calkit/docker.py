@@ -46,8 +46,13 @@ RUN pip install --no-cache-dir numpy pandas matplotlib h5py \
     && pip install --no-cache-dir foampy
 """.strip()
 
+UV_LAYER_TEXT = """
+COPY --from=ghcr.io/astral-sh/uv:0.6.14 /uv /uvx /bin/
+"""
+
 LAYERS = {
     "mambaforge": MINIFORGE_LAYER_TXT,
     "miniforge": MINIFORGE_LAYER_TXT,
     "foampy": FOAMPY_LAYER_TEXT,
+    "uv": UV_LAYER_TEXT,
 }

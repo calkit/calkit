@@ -10,6 +10,8 @@ import subprocess
 from typing import Annotated
 
 import checksumdir
+import dotenv
+import git
 import typer
 
 import calkit
@@ -194,3 +196,40 @@ def check_conda_env(
         log_func=log_func,
         relaxed=relaxed,
     )
+
+
+@check_app.command(name="env-vars")
+def check_env_vars():
+    """Check that the project's required environmental variables exist."""
+    typer.echo("Checking project environmental variables")
+    dotenv.load_dotenv(dotenv_path=".env")
+    ck_info = calkit.load_calkit_info()
+    deps = ck_info.get("dependencies", [])
+    env_var_deps = {}
+    for d in deps:
+        if isinstance(d, dict):
+            name = list(d.keys())[0]
+            attrs = list(d.values())[0]
+            if attrs.get("kind") == "env-var":
+                env_var_deps[name] = attrs
+    for name, attrs in env_var_deps.items():
+        if name not in os.environ:
+            typer.echo(f"Missing env var '{name}'")
+            if "default" in attrs:
+                default = attrs["default"]
+            else:
+                default = None
+            value = typer.prompt(
+                f"Enter a value for {name}", default=default, type=str
+            )
+            dotenv.set_key(
+                dotenv_path=".env", key_to_set=name, value_to_set=value
+            )
+    # Ensure that .env is ignored by git
+    repo = git.Repo()
+    if not repo.ignored(".env"):
+        typer.echo("Adding .env to .gitignore")
+        with open(".gitignore", "a") as f:
+            f.write("\n.env\n")
+    message = "✅ All set!"
+    typer.echo(message.encode("utf-8", errors="replace"))

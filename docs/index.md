@@ -1,51 +1,60 @@
 # Home
 
-Calkit is an open source
-framework and toolkit for reproducible research projects.
-It acts as a top-level layer to integrate and simplify the use of enabling
-technologies such as
-[Git](https://git-scm.com/),
-[DVC](https://dvc.org/),
-[Conda](https://docs.conda.io/en/latest/),
-and [Docker](https://docker.com).
-Calkit also adds a domain-specific data model
-such that all aspects of the research process can be fully described in a
-single repository and therefore easily consumed by others.
+Calkit is a language-agnostic project framework and toolkit
+to make your research or analytics project
+reproducible to the highest standard,
+which means:
 
-Our goal is to make reproducibility easier so it becomes more common.
-To do this, we try to make it easy for users to follow two simple rules:
+> Inputs and process definitions are provided and sufficiently described
+> such that anyone can easily verify that they produced the outputs
+> used to support the conclusions.
 
-1. **Keep everything in version control.** This includes large files like
-   datasets, enabled by DVC.
-   The [Calkit Cloud](https://github.com/calkit/calkit-cloud),
-   hosted at [calkit.io](https://calkit.io),
-   serves as a simple default DVC remote storage location for those who do not
-   want to manage their own infrastructure.
-2. **Generate all important artifacts with a single pipeline.** There should be
-   no special instructions required to reproduce a project's artifacts.
-   It should be as simple as calling `calkit run`.
-   The DVC pipeline (in a project's `dvc.yaml` file) is therefore the main
-   thing to "build" throughout a research project.
-   Calkit provides helper functionality to build pipeline stages that
-   keep computational environments up-to-date and label their outputs for
-   convenient reuse.
+"Easily" means that after obtaining your project files,
+it should only require executing a single command
+(like "pressing a single button" in
+[Claerbout and Karrenbach (1992)](https://doi.org/10.1190/1.1822162)),
+which should finish in less than 15 minutes
+(suggested by
+[Vandewalle et al. (2009)](https://doi.org/10.1109/MSP.2009.932122)).
+
+If the processes are too expensive to rerun in under 15 minutes,
+it should be possible to confirm that none of the input data
+or process definitions (e.g., environment specifications, scripts)
+have changed since saving the current versions of each output artifact
+(figure, table, dataset, publication, etc.)
+
+When your project is reproducible,
+you'll be able to iterate more quickly and more often,
+easily onboard collaborators,
+make fewer mistakes,
+and feel confident sharing all of your project materials
+with your research articles,
+because you'll know the code will actually run!
+This will allow others to reuse parts of your project in their own research,
+accelerating the pace of discovery.
+
+Working at this level of automation, discipline, and rigor may sound like
+a lot of effort,
+but Calkit makes it easy!
 
 ## Features
 
-- A [version control interface](version-control.md)
-  that unifies and simplifies interaction with Git and DVC.
-- Automated [environment management](environments.md).
-- A [project metadata model](calkit-yaml.md)
-  to declare global dependencies, environments,
-  and artifacts like datasets, figures, notebooks, and publications
-  to facilitate searchability and reuse.
-- A complementary [cloud platform](https://calkit.io) to interact with
-  the project and its artifacts, which also serves as a DVC remote.
-- Templates for projects, publications, and more.
-- The ability to declare, execute, and track
-  [manual procedures](tutorials/procedures.md) and
-  pipeline stages with [manual steps](pipeline/manual-steps.md).
-- A Jupyter cell magic to
-  [use notebook cells as pipeline stages](tutorials/notebook-pipeline.md).
-- Tools to help improve the reproducibility of workflows that depend on
-  [Microsoft Office](tutorials/office.md).
+- A schema to store structured metadata describing the
+  project's important outputs (in its `calkit.yaml` file)
+  and how they are created
+  (its computational environments and pipeline).
+- A CLI to run the project's pipeline to verify it's reproducible,
+  regenerating outputs as needed and
+  ensuring all
+  computational environments (e.g., [Conda](https://docs.conda.io/en/latest/), [Docker](https://docker.com)) match their specification.
+- A command line interface (CLI) to simplify keeping code, text, and larger
+  data files backed up in the same project repo using both
+  [Git](https://git-scm.com/) and [DVC](https://dvc.org/).
+- A complementary
+  [cloud system](https://github.com/calkit/calkit-cloud)
+  to facilitate backup, collaboration,
+  and sharing throughout the entire research lifecycle.
+
+## Installation
+
+See [installation](installation.md).

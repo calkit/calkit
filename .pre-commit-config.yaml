@@ -15,7 +15,6 @@ repos:
         exclude: calkit
       - id: ruff-format
         args: [--config=pyproject.toml]
-        exclude: calkit
 
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: "v3.0.3"

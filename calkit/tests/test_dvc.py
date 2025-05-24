@@ -10,6 +10,14 @@ def test_get_remotes(tmp_dir):
     assert not calkit.dvc.get_remotes()
     subprocess.call(["dvc", "init"])
     assert not calkit.dvc.get_remotes()
-    subprocess.call(["dvc", "remote", "add", "something", "https://sup.com"])
+    subprocess.call(
+        [
+            "dvc",
+            "remote",
+            "add",
+            "something",
+            "https://sup.com",
+        ]
+    )
     resp = calkit.dvc.get_remotes()
     assert resp == {"something": "https://sup.com"}

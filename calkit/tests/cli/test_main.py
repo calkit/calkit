@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import sys
 
 import dvc.repo
 import git
@@ -14,23 +15,38 @@ from calkit.cli.main import _to_shell_cmd
 
 
 def test_run_in_env(tmp_dir):
-    subprocess.check_call("git init", shell=True)
-    subprocess.check_call("dvc init", shell=True)
+    # If running on Windows we need to set stdin for the subprocesses to
+    # ensure sys.stdin.isatty() is False, otherwise we will run docker with
+    # the -it flag, which will fail due to some strangeness with Pytest
+    if sys.platform == "win32":
+        stdin = subprocess.PIPE
+    else:
+        stdin = None
+    subprocess.check_call("calkit init", shell=True)
     # First create a new Docker environment for this bare project
     subprocess.check_call(
         "calkit new docker-env "
         "--name my-image "
         "--from ubuntu "
-        "--add-layer miniforge "
-        "--description 'This is a test image'",
+        "--add-layer uv "
+        '--description "This is a test image"',
         shell=True,
     )
-    out = (
-        subprocess.check_output("calkit xenv echo sup", shell=True)
-        .decode()
-        .strip()
+    proc = subprocess.run(
+        ["calkit", "xenv", "echo", "sup"],
+        shell=False,
+        capture_output=True,
+        stdin=stdin,
+        text=True,
+        check=True,
     )
-    assert out == "sup"
+    assert proc.stdout.strip() == "sup"
+    # Ensure we can modify a local file
+    subprocess.run(
+        ["calkit", "xenv", "touch", "test.txt"],
+        stdin=stdin,
+        check=True,
+    )
     # Now let's create a 2nd Docker env and make sure we need to call it by
     # name when trying to run
     subprocess.check_call(
@@ -41,12 +57,14 @@ def test_run_in_env(tmp_dir):
         "--from ubuntu "
         "--add-layer miniforge "
         "--add-layer foampy "
-        "--description 'This is a test image 2'",
+        '--description "This is a test image 2"',
         shell=True,
     )
     with pytest.raises(subprocess.CalledProcessError):
         out = (
-            subprocess.check_output("calkit xenv echo sup", shell=True)
+            subprocess.check_output(
+                "calkit xenv echo sup", shell=True, stdin=stdin
+            )
             .decode()
             .strip()
         )
@@ -60,7 +78,8 @@ def test_run_in_env(tmp_dir):
                 "python",
                 "-c",
                 "import foampy; print(foampy.__version__)",
-            ]
+            ],
+            stdin=stdin,
         )
         .decode()
         .strip()
@@ -71,12 +90,14 @@ def test_run_in_env(tmp_dir):
         "calkit new docker-env "
         "--name py3.10 "
         "--image python:3.10.15-bookworm "
-        "--description 'Just Python.'",
+        '--description "Just Python."',
         shell=True,
     )
     out = (
         subprocess.check_output(
-            "calkit xenv -n py3.10 python --version", shell=True
+            "calkit xenv -n py3.10 python --version",
+            shell=True,
+            stdin=stdin,
         )
         .decode()
         .strip()
@@ -91,6 +112,7 @@ def test_run_in_env(tmp_dir):
         subprocess.check_output(
             "calkit xenv -n py3.10 --wdir my-new-dir -- ls",
             shell=True,
+            stdin=stdin,
         )
         .decode()
         .strip()
@@ -100,6 +122,7 @@ def test_run_in_env(tmp_dir):
         subprocess.check_output(
             "calkit xenv -n py3.10 --wdir my-new-dir -- ls ..",
             shell=True,
+            stdin=stdin,
         )
         .decode()
         .strip()
@@ -108,8 +131,7 @@ def test_run_in_env(tmp_dir):
 
 
 def test_run_in_venv(tmp_dir):
-    subprocess.check_call("git init", shell=True)
-    subprocess.check_call("dvc init", shell=True)
+    subprocess.check_call("calkit init", shell=True)
     # Test uv venv
     subprocess.check_call(
         [
@@ -318,3 +340,41 @@ def test_status(tmp_dir):
     calkit.get_project_status_history(as_pydantic=False)
     with pytest.raises(subprocess.CalledProcessError):
         subprocess.check_call(["calkit", "new", "status", "very-cool"])
+
+
+def test_save(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    repo = git.Repo()
+    assert repo.head.commit.message.strip() == "Initialize DVC"
+    with open("test.txt", "w") as f:
+        f.write("sup")
+    subprocess.check_call(["calkit", "save", "-aM", "--no-push"])
+    # Check that the last log message was "Add test.txt"
+    last_commit_message = repo.head.commit.message.strip()
+    assert last_commit_message == "Add test.txt"
+    # Update the file
+    with open("test.txt", "w") as f:
+        f.write("sup sup")
+    subprocess.check_call(["calkit", "save", "-aM", "--no-push"])
+    # Check that the last log message was "Update test.txt"
+    last_commit_message = repo.head.commit.message.strip()
+    assert last_commit_message == "Update test.txt"
+    # Check that we fail to save if there are two changed files
+    with open("test2.txt", "w") as f:
+        f.write("sup")
+    with open("test3.txt", "w") as f:
+        f.write("sup")
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(["calkit", "save", "-aM", "--no-push"])
+    with open("test3.txt", "w") as f:
+        f.write("sup2")
+    subprocess.check_call(
+        ["calkit", "save", "-am", "A unique message", "--no-push"]
+    )
+    last_commit_message = repo.head.commit.message.strip()
+    assert last_commit_message == "A unique message"
+
+
+def test_call_dvc():
+    subprocess.check_call(["calkit", "dvc", "--help"])
+    subprocess.check_call(["calkit", "dvc", "stage", "--help"])

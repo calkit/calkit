@@ -236,6 +236,13 @@ The new Conda environment spec will be written to `environment.yml`
 by default,
 which can be controlled with the `--path` option.
 
+A prefix for the environment can be specified to keep all packages under the
+project directory, e.g., by adding `--prefix .conda-envs/my-conda-env`.
+If this option is omitted, the environment will become part of Conda's
+system-wide collection of environments with a name like
+`{project_name}-{env_name}`,
+where the project name is added to avoid conflicts.
+
 Similar to other environment types,
 any time a command is executed with `calkit xenv`,
 this environment will be checked and created or updated as necessary.

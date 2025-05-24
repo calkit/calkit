@@ -5,14 +5,24 @@ If you want to use [Docker](https://docker.com) containers,
 which is typically a good idea,
 that should also be installed.
 For Python, we recommend
-[Miniforge](https://conda-forge.org/miniforge/).
-If you're a Windows user and decide to install Miniforge or any other
-Conda-based distribution,
-e.g., Anaconda, you'll probably want to ensure that environment is
-[activated by default in Git Bash](https://discuss.codecademy.com/t/setting-up-conda-in-git-bash/534473).
+[uv](https://docs.astral.sh/uv/).
 
-After Python is installed, execute:
+With uv installed, install Calkit with:
+
+```sh
+uv tool install calkit-python
+```
+
+Alternatively, but less ideally, you can install with your system Python:
 
 ```sh
 pip install calkit-python
 ```
+
+For Windows users, the
+[Calkit Assistant](https://github.com/calkit/calkit-assistant)
+app is the easiest way to get everything set up and ready to work in
+VS Code, which can then be used as the primary app for working on
+all scientific or analytical computing projects.
+
+![Calkit Assistant](https://github.com/calkit/calkit-assistant/blob/main/resources/screenshot.png?raw=true)

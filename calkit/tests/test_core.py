@@ -9,13 +9,18 @@ import calkit
 
 
 def test_find_project_dirs():
+    # TODO: We should setup a dummy project for this test so it doesn't depend
+    # on the state of the dev's machine
     calkit.find_project_dirs()
-    assert calkit.find_project_dirs(relative=False)
+    if os.path.isdir(os.path.join(os.path.expanduser("~"), "calkit")):
+        assert calkit.find_project_dirs(relative=False)
 
 
 def test_to_kebab_case():
     assert calkit.to_kebab_case("THIS IS") == "this-is"
     assert calkit.to_kebab_case("this_is_my-Project") == "this-is-my-project"
+    assert calkit.to_kebab_case("this is my project") == "this-is-my-project"
+    assert calkit.to_kebab_case("thisIs/myProject") == "thisis-myproject"
 
 
 def test_detect_project_name(tmp_dir):

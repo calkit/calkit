@@ -57,15 +57,15 @@ def check_call(
             raise_error("Fallback call failed")
 
 
-@check_app.command(
-    name="docker-env",
-    help="Check that Docker image is up-to-date.",
-)
+@check_app.command(name="docker-env")
 def check_docker_env(
     tag: Annotated[str, typer.Argument(help="Image tag.")],
     fpath: Annotated[
-        str, typer.Option("-i", "--input", help="Path to input Dockerfile.")
-    ] = "Dockerfile",
+        str | None,
+        typer.Option(
+            "-i", "--input", help="Path to input Dockerfile, if applicable."
+        ),
+    ] = None,
     lock_fpath: Annotated[
         str | None,
         typer.Option(
@@ -94,6 +94,12 @@ def check_docker_env(
         bool, typer.Option("--quiet", "-q", help="Be quiet.")
     ] = False,
 ):
+    """Check that Docker environment is up-to-date."""
+    if fpath is None and lock_fpath is None:
+        raise_error(
+            "Lock file output path must be provided if input Dockerfile is not"
+        )
+
     def get_docker_inspect():
         out = json.loads(
             subprocess.check_output(["docker", "inspect", tag]).decode()
@@ -122,15 +128,20 @@ def check_docker_env(
     except subprocess.CalledProcessError:
         typer.echo(f"No image with tag {tag} found locally", file=outfile)
         inspect = []
-    typer.echo(f"Reading Dockerfile from {fpath}", file=outfile)
-    dockerfile_md5 = get_md5(fpath)
-    if lock_fpath is None:
+    if fpath is not None:
+        typer.echo(f"Reading Dockerfile from {fpath}", file=outfile)
+        dockerfile_md5 = get_md5(fpath)
+    else:
+        dockerfile_md5 = None
+    if lock_fpath is None and fpath is not None:
         lock_fpath = fpath + "-lock.json"
+    else:
+        lock_fpath = str(lock_fpath)
     # Compute MD5s of any dependencies
     deps_md5s = {}
     for dep in deps:
-        deps_md5s[dep] = get_md5(dep, exclude_files=lock_fpath)
-    rebuild = True
+        deps_md5s[dep] = get_md5(dep, exclude_files=[lock_fpath])
+    rebuild_or_pull = True
     if os.path.isfile(lock_fpath):
         typer.echo(f"Reading lock file: {lock_fpath}", file=outfile)
         with open(lock_fpath) as f:
@@ -142,16 +153,16 @@ def check_docker_env(
         typer.echo(
             "Checking image and Dockerfile against lock file", file=outfile
         )
-        rebuild = inspect[0]["RootFS"]["Layers"] != lock[0]["RootFS"][
+        rebuild_or_pull = inspect[0]["RootFS"]["Layers"] != lock[0]["RootFS"][
             "Layers"
         ] or dockerfile_md5 != lock[0].get("DockerfileMD5")
-        if not rebuild:
+        if not rebuild_or_pull:
             for dep, md5 in deps_md5s.items():
                 if md5 != lock[0].get("DepsMD5s", {}).get(dep):
                     typer.echo(f"Found modified dependency: {dep}")
-                    rebuild = True
+                    rebuild_or_pull = True
                     break
-    if rebuild:
+    if fpath is not None and rebuild_or_pull:
         wdir, fname = os.path.split(fpath)
         if not wdir:
             wdir = None
@@ -160,6 +171,13 @@ def check_docker_env(
             cmd += ["--platform", platform]
         cmd.append(".")
         subprocess.check_output(cmd, cwd=wdir)
+    elif fpath is None and rebuild_or_pull:
+        typer.echo(f"Pulling image: {tag}")
+        cmd = ["docker", "pull", tag]
+        try:
+            subprocess.check_output(cmd)
+        except subprocess.CalledProcessError:
+            raise_error(f"Failed to pull image: {tag}")
     # Write the lock file
     inspect = get_docker_inspect()
     inspect[0]["DockerfileMD5"] = dockerfile_md5

@@ -97,6 +97,10 @@ class Stage(BaseModel):
                 )
         return outs
 
+    @property
+    def xenv_cmd(self) -> str:
+        return f"calkit xenv -n {self.environment} --no-check"
+
     def to_dvc(self) -> dict:
         """Convert to a DVC stage."""
         cmd = self.dvc_cmd
@@ -120,7 +124,7 @@ class PythonScriptStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"calkit xenv -n {self.environment} -- python {self.script_path}"
+        cmd = f"{self.xenv_cmd} -- python {self.script_path}"
         for arg in self.args:
             cmd += f" {arg}"
         return cmd
@@ -137,7 +141,7 @@ class LatexStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         return (
-            f"calkit xenv -n {self.environment} -- "
+            f"{self.xenv_cmd} -- "
             f"latexmk -cd -interaction=nonstopmode -pdf {self.target_path}"
         )
 

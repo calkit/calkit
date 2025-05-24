@@ -65,9 +65,7 @@ class Stage(BaseModel):
     environment: str
     wdir: str | None = None
     inputs: list[str] = []  # TODO: Support other input types
-    outputs: (
-        list[str] | list[PathOutput]
-    ) = []  # TODO: Support database outputs
+    outputs: list[str | PathOutput] = []  # TODO: Support database outputs
     always_run: bool = False
 
     @property

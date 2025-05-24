@@ -6,8 +6,8 @@ from typing import Callable
 import git
 from git.exc import InvalidGitRepositoryError
 from pydantic import BaseModel, computed_field
-import calkit
 
+import calkit
 
 INSTRUCTIONS_NOTE = (
     "Note that these could be as simple as telling the user to "

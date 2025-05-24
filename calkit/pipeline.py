@@ -6,9 +6,10 @@ import calkit
 from calkit.models.pipeline import Pipeline
 
 
-def to_dvc(wdir: str | None = None) -> dict:
+def to_dvc(ck_info: dict | None = None, wdir: str | None = None) -> dict:
     """Transpile a Calkit pipeline to a DVC pipeline."""
-    ck_info = dict(calkit.load_calkit_info(wdir=wdir))
+    if ck_info is None:
+        ck_info = dict(calkit.load_calkit_info(wdir=wdir))
     if "pipeline" not in ck_info:
         raise ValueError("No pipeline found in calkit.yaml")
     try:
@@ -19,8 +20,6 @@ def to_dvc(wdir: str | None = None) -> dict:
     # First, create stages for checking/exporting all environments
     env_lock_fpaths = {}
     env_lock_dir = os.path.join(".calkit/env-locks")
-    os.makedirs(env_lock_dir, exist_ok=True)
-    # TODO
     for env_name, env in ck_info.get("environments", {}).items():
         env_fpath = env.get("path")
         env_kind = env.get("kind")
@@ -47,9 +46,27 @@ def to_dvc(wdir: str | None = None) -> dict:
                 raise ValueError("venvs require a path")
             cmd += f" {env_fpath}"
             lock_fpath += ".txt"
+        elif env_kind == "conda":
+            cmd = "calkit check conda-env"
+            if env_fpath is None:
+                raise ValueError("Conda envs require a path")
+            lock_fpath += ".yml"
+            cmd += f" --file {env_fpath} --output {lock_fpath}"
+            if env.get("relaxed"):
+                cmd += " --relaxed"
+        else:
+            continue
+        # TODO: Add more env types
         outs.append(lock_fpath)
+        stage = dict(cmd=cmd, deps=deps, outs=outs, always_changed=True)
+        dvc_stages[f"_check_env_{env_name}"]
+        env_lock_fpaths[env_name] = lock_fpath
     # Now convert Calkit stages into DVC stages
     for stage_name, stage in pipeline.stages.items():
-        dvc_stages[stage_name] = stage.to_dvc()
-        # TODO: Add environment lock file to deps
+        dvc_stage = stage.to_dvc()
+        # Add environment lock file to deps
+        env_lock_fpath = env_lock_fpaths[stage.environment]
+        if env_lock_fpath not in dvc_stage["deps"]:
+            dvc_stage["deps"].append(env_lock_fpath)
+        dvc_stages[stage_name] = dvc_stage
     return dvc_stages

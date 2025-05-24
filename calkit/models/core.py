@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from calkit.models.pipeline import Stage
+from calkit.models.pipeline import Pipeline
 
 
 class _ImportedFromProject(BaseModel):
@@ -262,7 +262,7 @@ class ProjectInfo(BaseModel):
     derived_from: DerivedFromProject | None = None
     questions: list[str] = []
     dependencies: list = []
-    pipeline: dict[str, Stage] | None = None
+    pipeline: Pipeline | None = None
     datasets: list[Dataset] = []
     figures: list[Figure] = []
     publications: list[Publication] = []

@@ -78,3 +78,7 @@ class PythonScriptStage(Stage):
 class MatlabScriptStage(Stage):
     kind: Literal["matlab-script"]
     script_path: str
+
+
+class Pipeline(BaseModel):
+    stages: dict[str, PythonScriptStage | MatlabScriptStage]

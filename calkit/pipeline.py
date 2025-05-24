@@ -59,7 +59,7 @@ def to_dvc(ck_info: dict | None = None, wdir: str | None = None) -> dict:
         # TODO: Add more env types
         outs.append(lock_fpath)
         stage = dict(cmd=cmd, deps=deps, outs=outs, always_changed=True)
-        dvc_stages[f"_check_env_{env_name}"]
+        dvc_stages[f"_check_env_{env_name}"] = stage
         env_lock_fpaths[env_name] = lock_fpath
     # Now convert Calkit stages into DVC stages
     for stage_name, stage in pipeline.stages.items():

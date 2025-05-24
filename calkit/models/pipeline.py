@@ -134,6 +134,17 @@ class LatexStage(Stage):
     kind: Literal["latex"]
     target_path: str
 
+    @property
+    def dvc_cmd(self) -> str:
+        return (
+            f"calkit xenv -n {self.environment} -- "
+            f"latexmk -cd -interaction=nonstopmode -pdf {self.target_path}"
+        )
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.target_path] + super().dvc_deps
+
 
 class MatlabScriptStage(Stage):
     kind: Literal["matlab-script"]

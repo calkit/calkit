@@ -16,6 +16,7 @@ import git
 import typer
 
 import calkit
+import calkit.pipeline
 from calkit.check import check_reproducibility
 from calkit.cli import raise_error
 
@@ -354,11 +355,20 @@ def check_env_vars():
 
 
 @check_app.command(name="pipeline")
-def check_pipeline():
+def check_pipeline(
+    compile_to_dvc: Annotated[
+        bool,
+        typer.Option(
+            "--compile",
+            "-c",
+            help="Compile the pipeline to DVC stages and merge into dvc.yaml.",
+        ),
+    ] = False,
+):
     """Check that the project pipeline is defined correctly."""
     from calkit.models.pipeline import Pipeline
 
-    ck_info = calkit.load_calkit_info()
+    ck_info = dict(calkit.load_calkit_info())
     if "pipeline" not in ck_info:
         raise_error("No pipeline is defined in calkit.yaml")
     try:
@@ -367,3 +377,21 @@ def check_pipeline():
         raise_error(f"Pipeline is not defined correctly: {e}")
     message = "✅ This project's pipeline is defined correctly!"
     typer.echo(message.encode("utf-8", errors="replace"))
+    if compile_to_dvc:
+        typer.echo("Attempting to compile to DVC stages")
+        try:
+            compiled = calkit.pipeline.to_dvc(ck_info=ck_info)
+        except Exception as e:
+            raise_error(f"Failed to compile pipeline: {e}")
+        if os.path.isfile("dvc.yaml"):
+            with open("dvc.yaml") as f:
+                dvc_yaml = calkit.ryaml.load(f)
+        else:
+            dvc_yaml = {}
+        dvc_stages = dvc_yaml.get("stages", {})
+        for stage_name, stage in compiled.items():
+            dvc_stages[stage_name] = stage
+        dvc_yaml["stages"] = dvc_stages
+        with open("dvc.yaml", "w") as f:
+            typer.echo("Writing to dvc.yaml")
+            calkit.ryaml.dump(dvc_yaml, f)

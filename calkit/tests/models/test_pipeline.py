@@ -1,6 +1,6 @@
 """Tests for ``calkit.models.pipeline``."""
 
-from calkit.models.pipeline import Pipeline, PythonScriptStage
+from calkit.models.pipeline import PythonScriptStage
 
 
 def test_pythonscriptstage():

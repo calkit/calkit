@@ -53,7 +53,6 @@ class Stage(BaseModel):
     """A stage in the pipeline."""
 
     kind: Literal[
-        "dvc",
         "python-script",
         "bash-script",
         "sh-script",

@@ -7,8 +7,50 @@ from typing import Literal
 from pydantic import BaseModel
 
 
-class PipelineStep(BaseModel):
-    """A step in the pipeline, analogous to a stage in DVC syntax."""
+class Input(BaseModel):
+    kind: Literal["path", "python-object", "file-segment", "database-table"]
+
+
+class PathInput(Input):
+    kind: Literal["path"]
+    path: str
+
+
+class PythonObjectInput(Input):
+    kind: Literal["python-object"]
+    module: str
+    object_name: str
+
+
+class FileSegmentInput(Input):
+    kind: Literal["file-segment"]
+    path: str
+    start_line: int
+    end_line: int
+
+
+class DatabaseTableInput(Input):
+    kind: Literal["database-table"]
+    database_uri: str
+    database_name: str | None = None
+    table_name: str
+
+
+class PathOutput(BaseModel):
+    path: str
+    storage: Literal["git", "dvc"] | None = "dvc"
+    delete_before_run: bool = True
+
+
+class DatabaseTableOutput(BaseModel):
+    kind: Literal["database-table"]
+    uri: str
+    database_name: str | None = None
+    table_name: str
+
+
+class Stage(BaseModel):
+    """A stage in the pipeline."""
 
     kind: Literal[
         "dvc",
@@ -18,18 +60,21 @@ class PipelineStep(BaseModel):
         "matlab-script",
         "sh-command",
         "bash-command",
+        "jupyter-notebook",
     ]
-    environment: str | None = None
+    environment: str
     wdir: str | None = None
-    inputs: list[str]
-    outputs: list[str, dict]
+    inputs: list[str]  # TODO: Support other input types
+    outputs: list[str] | list[PathOutput]  # TODO: Support database outputs
     always_run: bool = False
 
 
-class Pipeline(BaseModel):
-    """A computational pipeline, which will typically be transpiled to a DVC
-    pipeline.
-    """
+class PythonScriptStage(Stage):
+    kind: Literal["python-script"]
+    script_path: str
+    args: list[str] = []
 
-    kind: Literal["dvc"] = "dvc"
-    steps: dict[str, PipelineStep] = {}
+
+class MatlabScriptStage(Stage):
+    kind: Literal["matlab-script"]
+    script_path: str

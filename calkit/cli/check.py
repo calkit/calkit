@@ -183,6 +183,9 @@ def check_docker_env(
     inspect = get_docker_inspect()
     inspect[0]["DockerfileMD5"] = dockerfile_md5
     inspect[0]["DepsMD5s"] = deps_md5s
+    lock_dir = os.path.dirname(lock_fpath)
+    if lock_dir:
+        os.makedirs(lock_dir, exist_ok=True)
     with open(lock_fpath, "w") as f:
         json.dump(inspect, f, indent=4)
 
@@ -298,6 +301,9 @@ def check_venv(
         activate_cmd = f"{prefix}\\Scripts\\activate"
     else:
         activate_cmd = f". {prefix}/bin/activate"
+    lock_dir = os.path.dirname(lock_fpath)
+    if lock_dir:
+        os.makedirs(lock_dir, exist_ok=True)
     check_cmd = (
         f"{activate_cmd} "
         f"&& {pip_cmd} install {pip_install_args} -r {path} "
@@ -372,9 +378,14 @@ def check_pipeline(
     if "pipeline" not in ck_info:
         raise_error("No pipeline is defined in calkit.yaml")
     try:
-        Pipeline.model_validate(ck_info["pipeline"])
+        pipeline = Pipeline.model_validate(ck_info["pipeline"])
     except Exception as e:
         raise_error(f"Pipeline is not defined correctly: {e}")
+    # Check that we have no leading underscores in stage names, since those
+    # are reserved for auto-generated stages
+    for stage_name in pipeline.stages.keys():
+        if stage_name.startswith("_"):
+            raise_error("Stage names cannot start with an underscore")
     message = "✅ This project's pipeline is defined correctly!"
     typer.echo(message.encode("utf-8", errors="replace"))
     if compile_to_dvc:

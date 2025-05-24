@@ -328,7 +328,7 @@ def check_env_vars():
     """Check that the project's required environmental variables exist."""
     typer.echo("Checking project environmental variables")
     dotenv.load_dotenv(dotenv_path=".env")
-    ck_info = calkit.load_calkit_info()
+    ck_info = dict(calkit.load_calkit_info())
     deps = ck_info.get("dependencies", [])
     env_var_deps = {}
     for d in deps:

@@ -154,6 +154,14 @@ class MatlabScriptStage(Stage):
     kind: Literal["matlab-script"]
     script_path: str
 
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.script_path] + super().dvc_deps
+
+    @property
+    def dvc_cmd(self) -> str:
+        return f"matlab -noFigureWindows -batch \"run('{self.script_path}');\""
+
 
 class Pipeline(BaseModel):
     stages: dict[str, PythonScriptStage | LatexStage | MatlabScriptStage]

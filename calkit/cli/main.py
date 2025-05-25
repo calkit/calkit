@@ -746,66 +746,6 @@ def run(
         subprocess.check_call([sys.executable, "-m", "dvc", "repro"] + args)
     except subprocess.CalledProcessError:
         raise_error("DVC pipeline failed")
-    # Now parse stage metadata for calkit objects
-    if not os.path.isfile("dvc.yaml"):
-        raise_error("No dvc.yaml file found")
-    objects = []
-    with open("dvc.yaml") as f:
-        pipeline = calkit.ryaml.load(f)
-        if pipeline is None:
-            raise_error("Pipeline is empty")
-        for stage_name, stage_info in pipeline.get("stages", {}).items():
-            ckmeta = stage_info.get("meta", {}).get("calkit")
-            if ckmeta is not None:
-                if not isinstance(ckmeta, dict):
-                    raise_error(
-                        f"Calkit metadata for {stage_name} is not a dictionary"
-                    )
-                # Stage must have a single output
-                outs = stage_info.get("outs", [])
-                if len(outs) != 1:
-                    raise_error(
-                        f"Stage {stage_name} does not have exactly one output"
-                    )
-                cktype = ckmeta.get("type")
-                if cktype not in [
-                    "figure",
-                    "dataset",
-                    "publication",
-                    "notebook",
-                ]:
-                    raise_error(f"Invalid Calkit output type '{cktype}'")
-                if isinstance(outs[0], str):
-                    path = outs[0]
-                else:
-                    path = str(list(outs[0].keys())[0])
-                objects.append(
-                    dict(path=path) | ckmeta | dict(stage=stage_name)
-                )
-    # Now that we've extracted Calkit objects from stage metadata, we can put
-    # them into the calkit.yaml file, overwriting objects with the same path
-    ck_info = calkit.load_calkit_info()
-    for obj in objects:
-        cktype = obj.pop("type")
-        cktype_plural = cktype + "s"
-        existing = ck_info.get(cktype_plural, [])
-        new = []
-        added = False
-        for ex_obj in existing:
-            if ex_obj.get("path") == obj["path"]:
-                typer.echo(f"Updating {cktype} {ex_obj['path']}")
-                new.append(obj)
-                added = True
-            else:
-                new.append(ex_obj)
-        if not added:
-            typer.echo(f"Adding new {cktype} {obj['path']}")
-            new.append(obj)
-        ck_info[cktype_plural] = new
-    if not dry:
-        with open("calkit.yaml", "w") as f:
-            calkit.ryaml.dump(ck_info, f)
-        run_cmd(["git", "add", "calkit.yaml"])
 
 
 @app.command(name="manual-step", help="Execute a manual step.")

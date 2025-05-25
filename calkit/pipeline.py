@@ -62,7 +62,7 @@ def to_dvc(
         elif env_kind == "matlab":
             cmd = "calkit check matlab-env"
             lock_fpath += ".json"
-            cmd += f"--name {env_name} --output {lock_fpath}"
+            cmd += f" --name {env_name} --output {lock_fpath}"
         else:
             continue
         # TODO: Add more env types

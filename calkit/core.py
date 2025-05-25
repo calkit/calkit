@@ -273,7 +273,7 @@ def check_system_deps(wdir: str | None = None) -> None:
     """Check that the dependencies declared in a project's ``calkit.yaml`` file
     exist.
     """
-    ck_info = load_calkit_info(wdir=wdir)
+    ck_info = dict(load_calkit_info(wdir=wdir))
     deps = ck_info.get("dependencies", [])
     if "git" not in deps:
         deps.append("git")
@@ -325,7 +325,7 @@ def project_and_path_from_path(path: str) -> tuple:
     return project, path
 
 
-def read_file(path: str, as_bytes: bool = None) -> str | bytes:
+def read_file(path: str, as_bytes: bool | None = None) -> str | bytes:
     """Read file content from path, which can optionally include a project
     identifier, which if specified will indicate we should read from the API.
     """
@@ -394,7 +394,7 @@ def to_kebab_case(str) -> str:
 
 
 def get_project_status_history(
-    wdir: str = None, as_pydantic=True
+    wdir: str | None = None, as_pydantic=True
 ) -> list[ProjectStatus] | list[dict]:
     statuses = []
     fpath = os.path.join(".calkit", "status.csv")
@@ -408,7 +408,9 @@ def get_project_status_history(
                 ts, status, message = line
                 ts = datetime.fromisoformat(ts)
                 obj = ProjectStatus(
-                    timestamp=ts, status=status, message=message
+                    timestamp=ts,
+                    status=status,  # type: ignore
+                    message=message,
                 )
                 if not as_pydantic:
                     obj = obj.model_dump()
@@ -416,15 +418,15 @@ def get_project_status_history(
     return statuses
 
 
-def get_latest_project_status(wdir: str = None) -> ProjectStatus | None:
+def get_latest_project_status(wdir: str | None = None) -> ProjectStatus | None:
     statuses = get_project_status_history(wdir=wdir)
     if statuses:
-        return statuses[-1]
+        return statuses[-1]  # type: ignore
 
 
-def detect_project_name(wdir: str = None) -> str:
+def detect_project_name(wdir: str | None = None) -> str:
     """Detect a Calkit project owner and name."""
-    ck_info = load_calkit_info(wdir=wdir)
+    ck_info = dict(load_calkit_info(wdir=wdir))
     name = ck_info.get("name")
     owner = ck_info.get("owner")
     if name is None or owner is None:

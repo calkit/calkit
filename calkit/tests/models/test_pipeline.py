@@ -17,7 +17,9 @@ def test_pythonscriptstage():
         )
     )
     sd = s.to_dvc()
-    assert sd["cmd"] == "calkit xenv -n py1 -- python scripts/my-script.py"
+    assert sd["cmd"] == (
+        "calkit xenv -n py1 --no-check -- python scripts/my-script.py"
+    )
     assert "scripts/my-script.py" in sd["deps"]
     s.always_run = True
     sd = s.to_dvc()

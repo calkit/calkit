@@ -55,11 +55,9 @@ class Stage(BaseModel):
     kind: Literal[
         "python-script",
         "latex",
-        "bash-script",
-        "sh-script",
         "matlab-script",
-        "sh-command",
-        "bash-command",
+        "shell-command",
+        "shell-script",
         "jupyter-notebook",
     ]
     environment: str
@@ -163,5 +161,40 @@ class MatlabScriptStage(Stage):
         return f"matlab -noFigureWindows -batch \"run('{self.script_path}');\""
 
 
+class ShellCommandStage(Stage):
+    kind: Literal["shell-command"]
+    command: str
+    shell: str = "bash"
+
+    @property
+    def dvc_cmd(self) -> str:
+        return f'{self.shell} -c "{self.command}"'
+
+
+class ShellScriptStage(Stage):
+    kind: Literal["shell-script"]
+    script_path: str
+    args: list[str] = []
+    shell: str = "bash"
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.script_path] + super().dvc_deps
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f"{self.shell} {self.script_path}"
+        for arg in self.args:
+            cmd += f" {arg}"
+        return cmd
+
+
 class Pipeline(BaseModel):
-    stages: dict[str, PythonScriptStage | LatexStage | MatlabScriptStage]
+    stages: dict[
+        str,
+        PythonScriptStage
+        | LatexStage
+        | MatlabScriptStage
+        | ShellCommandStage
+        | ShellScriptStage,
+    ]

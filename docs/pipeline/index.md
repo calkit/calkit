@@ -1,9 +1,40 @@
 # The pipeline
 
-The pipeline, implemented with
-[DVC](https://dvc.org) and stored in the `dvc.yaml` file,
+The pipeline
 defines the processes that produce
 the project's important artifacts.
+It can either be written in Calkit's syntax in the `pipeline` object
+of `calkit.yaml` or in
+[DVC](https://dvc.org)'s syntax and stored in the `dvc.yaml` file.
+If written in Calkit's syntax, a `dvc.yaml` file will be created at
+run time and executed with DVC.
+
+## Calkit pipeline syntax
+
+Calkit's pipeline syntax defines `steps`,
+each of which can have `inputs`, `outputs`, and a `kind` attribute
+to indicate what kind of process is run,
+e.g., a Python script, MATLAB script, R script, shell command, etc.
+
+In the `calkit.yaml` file, you can define a `pipeline` like:
+
+```yaml
+pipeline:
+  steps:
+    collect-data:
+      kind: python-script
+      environment: main
+      script: scripts/collect-data.py
+      outputs:
+        - data/raw.csv
+        - path: data/raw.csv
+          type: dataset
+          title: The raw data
+          description: Raw voltage, collected from the sensor.
+          store_with: dvc
+```
+
+## DVC pipeline syntax
 
 The command, or `cmd` key, for each stage should typically
 include the `calkit xenv` command,

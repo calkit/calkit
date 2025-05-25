@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from calkit.models.pipeline import Pipeline
+
 
 class _ImportedFromProject(BaseModel):
     project: str
@@ -49,7 +51,7 @@ class Publication(_CalkitObject):
         "blog",
     ]
     is_published: bool = False
-    doi: str = None
+    doi: str | None = None
 
 
 class ReferenceFile(BaseModel):
@@ -150,7 +152,7 @@ class ProcedureInput(BaseModel):
     """
 
     name: str | None = None
-    dtype: Literal["int", "bool", "str", "float"] = None
+    dtype: Literal["int", "bool", "str", "float"] | None = None
     units: str | None = None
     description: str | None = None
 
@@ -259,6 +261,8 @@ class ProjectInfo(BaseModel):
     git_repo_url: str | None = None
     derived_from: DerivedFromProject | None = None
     questions: list[str] = []
+    dependencies: list = []
+    pipeline: Pipeline | None = None
     datasets: list[Dataset] = []
     figures: list[Figure] = []
     publications: list[Publication] = []

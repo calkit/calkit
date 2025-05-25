@@ -69,7 +69,7 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
 
 
 def load_calkit_info(
-    wdir=None,
+    wdir: str | None = None,
     process_includes: bool | str | list[str] = False,
     as_pydantic: bool = False,
 ) -> dict | ProjectInfo:

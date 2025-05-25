@@ -20,6 +20,7 @@ from git.exc import InvalidGitRepositoryError
 from typing_extensions import Annotated, Optional
 
 import calkit
+import calkit.pipeline
 from calkit.cli import print_sep, raise_error, run_cmd, warn
 from calkit.cli.check import (
     check_app,
@@ -707,7 +708,12 @@ def run(
     try:
         calkit.check_system_deps()
     except Exception as e:
-        raise_error(e)
+        raise_error(str(e))
+    # Compile the pipeline
+    ck_info = dict(calkit.load_calkit_info())
+    if ck_info.get("pipeline", {}):
+        typer.echo("Compiling DVC pipeline")
+        calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     if targets is None:
         targets = []
     args = targets

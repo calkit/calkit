@@ -391,20 +391,6 @@ def check_pipeline(
     if compile_to_dvc:
         typer.echo("Attempting to compile to DVC stages")
         try:
-            compiled = calkit.pipeline.to_dvc(ck_info=ck_info)
+            calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
         except Exception as e:
             raise_error(f"Failed to compile pipeline: {e}")
-        if os.path.isfile("dvc.yaml"):
-            with open("dvc.yaml") as f:
-                dvc_yaml = calkit.ryaml.load(f)
-        else:
-            dvc_yaml = {}
-        dvc_stages = compiled
-        existing_stages = dvc_yaml.get("stages", {})
-        for stage_name, stage in existing_stages.items():
-            if stage_name not in dvc_stages:
-                dvc_stages[stage_name] = stage
-        dvc_yaml["stages"] = dvc_stages
-        with open("dvc.yaml", "w") as f:
-            typer.echo("Writing to dvc.yaml")
-            calkit.ryaml.dump(dvc_yaml, f)

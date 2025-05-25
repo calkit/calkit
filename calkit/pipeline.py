@@ -2,11 +2,15 @@
 
 import os
 
+import typer
+
 import calkit
 from calkit.models.pipeline import Pipeline
 
 
-def to_dvc(ck_info: dict | None = None, wdir: str | None = None) -> dict:
+def to_dvc(
+    ck_info: dict | None = None, wdir: str | None = None, write: bool = False
+) -> dict:
     """Transpile a Calkit pipeline to a DVC pipeline."""
     if ck_info is None:
         ck_info = dict(calkit.load_calkit_info(wdir=wdir))
@@ -70,4 +74,18 @@ def to_dvc(ck_info: dict | None = None, wdir: str | None = None) -> dict:
         if env_lock_fpath not in dvc_stage["deps"]:
             dvc_stage["deps"].append(env_lock_fpath)
         dvc_stages[stage_name] = dvc_stage
+    if write:
+        if os.path.isfile("dvc.yaml"):
+            with open("dvc.yaml") as f:
+                dvc_yaml = calkit.ryaml.load(f)
+        else:
+            dvc_yaml = {}
+        existing_stages = dvc_yaml.get("stages", {})
+        for stage_name, stage in existing_stages.items():
+            if stage_name not in dvc_stages:
+                dvc_stages[stage_name] = stage
+        dvc_yaml["stages"] = dvc_stages
+        with open("dvc.yaml", "w") as f:
+            typer.echo("Writing to dvc.yaml")
+            calkit.ryaml.dump(dvc_yaml, f)
     return dvc_stages

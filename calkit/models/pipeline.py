@@ -56,6 +56,7 @@ class Stage(BaseModel):
         "python-script",
         "latex",
         "matlab-script",
+        "docker-command",
         "shell-command",
         "shell-script",
         "jupyter-notebook",
@@ -189,6 +190,15 @@ class ShellScriptStage(Stage):
         return cmd
 
 
+class DockerCommandStage(Stage):
+    kind: Literal["docker-command"]
+    command: str
+
+    @property
+    def dvc_cmd(self) -> str:
+        return self.command
+
+
 class Pipeline(BaseModel):
     stages: dict[
         str,
@@ -196,5 +206,6 @@ class Pipeline(BaseModel):
         | LatexStage
         | MatlabScriptStage
         | ShellCommandStage
-        | ShellScriptStage,
+        | ShellScriptStage
+        | DockerCommandStage,
     ]

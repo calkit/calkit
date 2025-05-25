@@ -70,8 +70,11 @@ def to_dvc(
     for stage_name, stage in pipeline.stages.items():
         dvc_stage = stage.to_dvc()
         # Add environment lock file to deps
-        env_lock_fpath = env_lock_fpaths[stage.environment]
-        if env_lock_fpath not in dvc_stage["deps"]:
+        env_lock_fpath = env_lock_fpaths.get(stage.environment)
+        if (
+            env_lock_fpath is not None
+            and env_lock_fpath not in dvc_stage["deps"]
+        ):
             dvc_stage["deps"].append(env_lock_fpath)
         dvc_stages[stage_name] = dvc_stage
     if write:

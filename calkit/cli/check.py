@@ -393,4 +393,6 @@ def check_pipeline(
         try:
             calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
         except Exception as e:
-            raise_error(f"Failed to compile pipeline: {e}")
+            raise_error(
+                f"Failed to compile pipeline: {e.__class__.__name__}: {e}"
+            )

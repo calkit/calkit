@@ -2,70 +2,68 @@
 
 The pipeline
 defines the processes that produce
-the project's important artifacts.
+the project's important assets or artifacts, such as datasets,
+figures, tables, and publications.
 It can either be written in Calkit's syntax in the `pipeline` object
 of `calkit.yaml` or in
 [DVC](https://dvc.org)'s syntax and stored in the `dvc.yaml` file.
 If written in Calkit's syntax, a `dvc.yaml` file will be created at
 run time and executed with DVC.
 
-## Calkit pipeline syntax
+A pipeline is composed of stages,
+each of which has a specific type or "kind."
+Each stage must specify the environment in which it runs to ensure it's
+reproducible.
+Calkit will automatically generate a "lock file" at the start of running
+and can therefore automatically detect if an environment has changed,
+and the affected stages need to be rerun.
+Stages can also define `inputs` and `outputs`,
+and you can decide how you'd like outputs to be stored, i.e., with Git or DVC.
 
-Calkit's pipeline syntax defines `steps`,
-each of which can have `inputs`, `outputs`, and a `kind` attribute
-to indicate what kind of process is run,
-e.g., a Python script, MATLAB script, R script, shell command, etc.
-
-In the `calkit.yaml` file, you can define a `pipeline` like:
+In the `calkit.yaml` file, you can define a `pipeline`
+(and `environments`) like:
 
 ```yaml
+# Define environments
+environments:
+  main:
+    kind: uv-venv
+    path: requirements.txt
+    python: "3.13"
+# Define the pipeline
 pipeline:
-  steps:
+  stages:
     collect-data:
       kind: python-script
+      script_path: scripts/collect-data.py
       environment: main
-      script: scripts/collect-data.py
       outputs:
         - data/raw.csv
         - path: data/raw.csv
-          type: dataset
-          title: The raw data
-          description: Raw voltage, collected from the sensor.
-          store_with: dvc
+          storage: dvc
+          delete_before_run: false
 ```
 
-## DVC pipeline syntax
+## Stage types and unique attributes
 
-The command, or `cmd` key, for each stage should typically
-include the `calkit xenv` command,
-such that every process is executed in a defined environment.
-This way,
-Calkit will ensure the environment matches its specification
-before execution.
+All stage declarations require a `kind` and an `environment`,
+and can specify `inputs` and `outputs`.
+The different kinds of stages and their unique attributes are listed below.
+For more details, see `calkit.models.pipeline`.
 
-If a stage has a single output,
-it is also possible to define what type of Calkit object it
-produces.
-For example, the stage below `collect-data` produces a dataset.
-When executing `calkit run` this will automatically be
-added to the datasets list in the `calkit.yaml` file,
-allowing other users to search for and use this dataset in their
-own work.
-
-```yaml
-stages:
-  collect-data:
-    cmd: calkit xenv -n main -- python scripts/collect-data.py
-    deps:
-      - scripts/collect-data.py
-    outs:
-      - data/raw.csv
-    meta:
-      calkit:
-        type: dataset
-        title: The raw data
-        description: Raw voltage, collected from the sensor.
-```
-
-To learn more, see
-[DVC's pipeline documentation](https://dvc.org/doc/start/data-pipelines/data-pipelines).
+- `python-script`
+  - `script_path`
+  - `args` (list, optional)
+- `shell-command`
+  - `command`
+  - `shell` (optional, e.g., `bash`, `sh`, `zsh`, etc., default `bash`)
+- `shell-script`
+  - `script_path`
+  - `shell` (optional, e.g., `bash`, `sh`, `zsh`, etc., default `bash`)
+  - `args` (list, optional)
+- `matlab-script`
+  - `script_path`
+- `latex`
+  - `target_path`
+- `docker-command`
+  - `command`

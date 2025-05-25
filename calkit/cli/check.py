@@ -323,6 +323,20 @@ def check_venv(
         raise_error(f"Failed to check {kind}")
 
 
+@check_app.command(name="matlab-env")
+def check_matlab_env(
+    env_name: Annotated[
+        str,
+        typer.Option("--name", "-n", help="Environment name in calkit.yaml."),
+    ],
+    output_fpath: Annotated[str, typer.Option("--output", "-o")],
+) -> None:
+    """Check a MATLAB environment matches its spect and export a JSON lock
+    file.
+    """
+    pass  # TODO
+
+
 @check_app.command(name="env-vars")
 def check_env_vars():
     """Check that the project's required environmental variables exist."""

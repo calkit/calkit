@@ -43,7 +43,7 @@ def test_formula():
 
 
 def test_lookuptable():
-    calc = calkit.calc.LookupTable(
+    _ = calkit.calc.LookupTable(
         inputs=["x"],
         output="something",
         params=calkit.calc.LookupTableParams(

@@ -68,6 +68,8 @@ def to_dvc(
         # TODO: Add more env types
         outs.append({lock_fpath: dict(cache=False, persist=True)})
         stage = dict(cmd=cmd, deps=deps, outs=outs, always_changed=True)
+        # TODO: Rationalize stage naming and ensure we remove all private
+        # stages
         dvc_stages[f"_check_env_{env_name}"] = stage
         env_lock_fpaths[env_name] = lock_fpath
     # Now convert Calkit stages into DVC stages
@@ -89,6 +91,7 @@ def to_dvc(
             dvc_yaml = {}
         existing_stages = dvc_yaml.get("stages", {})
         for stage_name, stage in existing_stages.items():
+            # TODO: Skip private stages
             if stage_name not in dvc_stages:
                 dvc_stages[stage_name] = stage
         dvc_yaml["stages"] = dvc_stages

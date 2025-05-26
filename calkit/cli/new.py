@@ -1474,16 +1474,17 @@ def new_stage(
     ] = False,
 ):
     """Create a new pipeline stage."""
-    ck_info = calkit.load_calkit_info(process_includes="environments")
+    ck_info = dict(calkit.load_calkit_info(process_includes="environments"))
+    environments = ck_info.get("environments", {})
     if environment is None:
         warn("No environment is specified")
         cmd = ""
     else:
-        if environment not in ck_info["environments"] and not no_check:
+        if environment not in environments and not no_check:
             raise_error(f"Environment '{environment}' does not exist")
         cmd = f"calkit xenv -n {environment} -- "
         # Add environment path as a dependency if applicable
-        env_path = ck_info["environments"].get(environment, {}).get("path")
+        env_path = environments.get(environment, {}).get("path")
         if env_path is not None and env_path not in deps:
             deps = [env_path] + deps
     if not os.path.exists(target) and not no_check:

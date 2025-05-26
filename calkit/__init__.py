@@ -8,7 +8,7 @@ from . import jupyter  # noqa: F401
 from . import config  # noqa: F401
 from . import models  # noqa: F401
 from . import office  # noqa: F401
-from . import template  # noqa: F401
+from . import templates  # noqa: F401
 from . import conda  # noqa: F401
 from . import calc  # noqa: F401
 from . import check  # noqa: F401

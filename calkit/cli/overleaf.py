@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from pathlib import PurePosixPath
 
 import git
 import typer
@@ -216,7 +217,7 @@ def import_publication(
             name=stage_name,
             environment=tex_env_name,
             kind=StageKind.latex,
-            target=os.path.join(dest_dir, tex_path),
+            target=PurePosixPath(dest_dir, tex_path),
             outs=[pub_path],
             deps=[os.path.join(dest_dir, p) for p in sync_paths + push_paths],
             no_check=True,

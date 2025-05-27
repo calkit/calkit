@@ -7,7 +7,6 @@ import glob
 import os
 import platform as _platform
 import posixpath
-from pathlib import PurePath
 import subprocess
 import sys
 import time

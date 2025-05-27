@@ -221,11 +221,11 @@ def import_environment(
         ),
     ],
     dest_path: Annotated[
-        str,
+        str | None,
         typer.Option("--path", help="Output path at which to save."),
     ] = None,
     dest_name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--name", "-n", help="Name to use in the destination project."
         ),
@@ -254,15 +254,15 @@ def import_environment(
         raise_error("Invalid source environment specification")
     if os.path.isdir(project):
         typer.echo(f"Importing from local project directory: {project}")
-        src_ck_info = calkit.load_calkit_info(
-            wdir=project, process_includes=True
+        src_ck_info = dict(
+            calkit.load_calkit_info(wdir=project, process_includes=True)
         )
         environments = src_ck_info.get("environments", {})
         if env_name not in environments:
             raise_error(f"Environment {env_name} not found in project")
         src_env = environments[env_name]
         if "path" in src_env:
-            env_path = src_env["path"]
+            env_path = src_env["path"]  # noqa: F841 TODO: Use this variable
         try:
             src_project_name = calkit.detect_project_name(project)
         except Exception as e:
@@ -270,7 +270,7 @@ def import_environment(
     else:
         typer.echo("Importing from Cloud project")
         try:
-            resp = calkit.cloud.get(
+            resp = calkit.cloud.get(  # noqa: F841 TODO: Use this variable
                 f"/projects/{project}/environments/{env_name}"
             )
         except Exception as e:
@@ -278,7 +278,7 @@ def import_environment(
         src_project_name = project
         # TODO: Parse information we need from the response
     # Write environment into current Calkit info
-    ck_info = calkit.load_calkit_info()
+    ck_info = dict(calkit.load_calkit_info())
     environments = ck_info.get("environments", {})
     # Check if an environment with this name already exists
     if dest_name is None:

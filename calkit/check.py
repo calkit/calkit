@@ -6,8 +6,8 @@ from typing import Callable
 import git
 from git.exc import InvalidGitRepositoryError
 from pydantic import BaseModel, computed_field
-import calkit
 
+import calkit
 
 INSTRUCTIONS_NOTE = (
     "Note that these could be as simple as telling the user to "
@@ -194,7 +194,7 @@ def check_reproducibility(
     readme_path = os.path.join(wdir, "README.md")
     if os.path.isfile(readme_path):
         res["has_readme"] = True
-        with open(readme_path) as f:
+        with open(readme_path, encoding="utf-8") as f:
             readme_txt = f.read().lower()
         res["instructions_in_readme"] = (
             ("getting started" in readme_txt)

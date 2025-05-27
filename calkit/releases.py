@@ -152,8 +152,10 @@ def populate_dvc_cache():
             if not os.path.isfile(dvc_cache_fpath):
                 # TODO: Download file from Zenodo and save in the cache
                 release_fpath = f".calkit/releases/{name}/files/{obj['path']}"
+                print(release_fpath)
                 zip_file = obj.get("zipfile")
                 if zip_file is not None:
                     zip_fpath = f".calkit/releases/{name}/files/{zip_file}"
+                    print(zip_fpath)
                 # Extract out of ZIP file if necessary
                 # TODO: Check MD5 before inserting into the cache

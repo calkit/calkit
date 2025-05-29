@@ -67,3 +67,6 @@ For more details, see `calkit.models.pipeline`.
   - `target_path`
 - `docker-command`
   - `command`
+- `r-script`
+  - `script_path`
+  - `args` (list, optional)

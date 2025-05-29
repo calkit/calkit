@@ -29,6 +29,7 @@ def test_to_dvc():
     stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
     stage = stages["get-data"]
     assert stage["outs"][0] == "my-output.out"
+    # TODO: Test other stage types
     # Test when user forgets to add an environment
     ck_info = {
         "pipeline": {

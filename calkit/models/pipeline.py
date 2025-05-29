@@ -62,6 +62,7 @@ class Stage(BaseModel):
         "shell-command",
         "shell-script",
         "jupyter-notebook",
+        "r-script",
     ]
     environment: str
     wdir: str | None = None
@@ -203,6 +204,25 @@ class DockerCommandStage(Stage):
         return self.command
 
 
+class RScriptStage(Stage):
+    kind: Literal["r-script"]
+    script_path: str
+    args: list[str] = []
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.script_path] + super().dvc_deps
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = (
+            f"calkit xenv -n {self.environment} -- Rscript {self.script_path}"
+        )
+        for arg in self.args:
+            cmd += f" {arg}"
+        return cmd
+
+
 class Pipeline(BaseModel):
     stages: dict[
         str,
@@ -211,7 +231,8 @@ class Pipeline(BaseModel):
         | MatlabScriptStage
         | ShellCommandStage
         | ShellScriptStage
-        | DockerCommandStage,
+        | DockerCommandStage
+        | RScriptStage,
     ]
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")

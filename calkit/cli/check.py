@@ -392,7 +392,7 @@ def check_pipeline(
     if "pipeline" not in ck_info:
         raise_error("No pipeline is defined in calkit.yaml")
     try:
-        pipeline = Pipeline.model_validate(ck_info["pipeline"])
+        pipeline = Pipeline.model_validate(ck_info["pipeline"], strict=True)
     except Exception as e:
         raise_error(f"Pipeline is not defined correctly: {e}")
     # Check that we have no leading underscores in stage names, since those

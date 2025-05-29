@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class Input(BaseModel):
@@ -40,6 +40,8 @@ class PathOutput(BaseModel):
     path: str
     storage: Literal["git", "dvc"] | None = "dvc"
     delete_before_run: bool = True
+    # Do not allow extra keys
+    model_config = ConfigDict(extra="forbid")
 
 
 class DatabaseTableOutput(BaseModel):
@@ -66,6 +68,8 @@ class Stage(BaseModel):
     inputs: list[str] = []  # TODO: Support other input types
     outputs: list[str | PathOutput] = []  # TODO: Support database outputs
     always_run: bool = False
+    # Do not allow extra keys
+    model_config = ConfigDict(extra="forbid")
 
     @property
     def dvc_cmd(self) -> str:
@@ -209,3 +213,5 @@ class Pipeline(BaseModel):
         | ShellScriptStage
         | DockerCommandStage,
     ]
+    # Do not allow extra keys
+    model_config = ConfigDict(extra="forbid")

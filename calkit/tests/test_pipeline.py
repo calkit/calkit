@@ -18,7 +18,7 @@ def test_to_dvc():
                         "my-output.out",
                         {
                             "path": "something/else.pickle",
-                            "store_with": "git",
+                            "storage": "git",
                             "delete_before_run": False,
                         },
                     ],

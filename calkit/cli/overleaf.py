@@ -217,7 +217,7 @@ def import_publication(
             name=stage_name,
             environment=tex_env_name,
             kind=StageKind.latex,
-            target=PurePosixPath(dest_dir, tex_path),
+            target=PurePosixPath(dest_dir, tex_path).as_posix(),
             outs=[pub_path],
             deps=[os.path.join(dest_dir, p) for p in sync_paths + push_paths],
             no_check=True,

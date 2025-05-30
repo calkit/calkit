@@ -32,7 +32,7 @@ new_app = typer.Typer(no_args_is_help=True)
 def new_project(
     path: Annotated[str, typer.Argument(help="Where to create the project.")],
     name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--name",
             "-n",
@@ -43,10 +43,10 @@ def new_project(
         ),
     ] = None,
     title: Annotated[
-        str, typer.Option("--title", help="Project title.")
+        str | None, typer.Option("--title", help="Project title.")
     ] = None,
     description: Annotated[
-        str, typer.Option("--description", help="Project description.")
+        str | None, typer.Option("--description", help="Project description.")
     ] = None,
     cloud: Annotated[
         bool,
@@ -63,7 +63,7 @@ def new_project(
         ),
     ] = False,
     git_repo_url: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--git-url",
             help=(
@@ -73,7 +73,7 @@ def new_project(
         ),
     ] = None,
     template: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--template",
             "-t",
@@ -84,7 +84,8 @@ def new_project(
         ),
     ] = None,
     no_commit: Annotated[
-        bool, typer.Option("--no-commit", help="Do not commit changes to Git.")
+        bool | None,
+        typer.Option("--no-commit", help="Do not commit changes to Git."),
     ] = None,
     overwrite: Annotated[
         bool,
@@ -245,7 +246,7 @@ def new_project(
             typer.echo("Setting origin remote URL")
             repo.git.remote(["add", "origin", git_repo_url])
         # Update Calkit info in this project
-        ck_info = calkit.load_calkit_info(wdir=abs_path)
+        ck_info = dict(calkit.load_calkit_info(wdir=abs_path))
         ck_info = ck_info | dict(
             name=name,
             title=title,
@@ -1414,7 +1415,7 @@ def new_stage(
         ),
     ],
     environment: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--environment", "-e", help="Environment to use to run the stage."
         ),

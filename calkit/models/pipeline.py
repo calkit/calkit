@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class Input(BaseModel):
@@ -40,6 +40,8 @@ class PathOutput(BaseModel):
     path: str
     storage: Literal["git", "dvc"] | None = "dvc"
     delete_before_run: bool = True
+    # Do not allow extra keys
+    model_config = ConfigDict(extra="forbid")
 
 
 class DatabaseTableOutput(BaseModel):
@@ -60,12 +62,15 @@ class Stage(BaseModel):
         "shell-command",
         "shell-script",
         "jupyter-notebook",
+        "r-script",
     ]
     environment: str
     wdir: str | None = None
     inputs: list[str] = []  # TODO: Support other input types
     outputs: list[str | PathOutput] = []  # TODO: Support database outputs
     always_run: bool = False
+    # Do not allow extra keys
+    model_config = ConfigDict(extra="forbid")
 
     @property
     def dvc_cmd(self) -> str:
@@ -199,6 +204,25 @@ class DockerCommandStage(Stage):
         return self.command
 
 
+class RScriptStage(Stage):
+    kind: Literal["r-script"]
+    script_path: str
+    args: list[str] = []
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.script_path] + super().dvc_deps
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = (
+            f"calkit xenv -n {self.environment} -- Rscript {self.script_path}"
+        )
+        for arg in self.args:
+            cmd += f" {arg}"
+        return cmd
+
+
 class Pipeline(BaseModel):
     stages: dict[
         str,
@@ -207,5 +231,8 @@ class Pipeline(BaseModel):
         | MatlabScriptStage
         | ShellCommandStage
         | ShellScriptStage
-        | DockerCommandStage,
+        | DockerCommandStage
+        | RScriptStage,
     ]
+    # Do not allow extra keys
+    model_config = ConfigDict(extra="forbid")

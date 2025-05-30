@@ -10,7 +10,7 @@ import posixpath
 import subprocess
 import sys
 import time
-from pathlib import PurePath
+from pathlib import PurePosixPath
 
 import dotenv
 import dvc.repo
@@ -633,9 +633,8 @@ def ignore(
 ):
     """Ignore a file, i.e., keep it out of version control."""
     repo = git.Repo()
-    path = PurePath(
-        path
-    ).as_posix()  # gitignore expects / (not \) regardless of OS
+    # Ensure path makes it into .gitignore as a POSIX path
+    path = PurePosixPath(path).as_posix()
     if repo.ignored(path):
         typer.echo(f"{path} is already ignored")
         return

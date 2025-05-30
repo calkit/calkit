@@ -8,9 +8,14 @@ import json
 import os
 import platform as _platform
 import subprocess
+import warnings
 from typing import Annotated
 
-import checksumdir
+# See https://github.com/calkit/calkit/issues/346
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=UserWarning)
+    import checksumdir
+
 import dotenv
 import git
 import typer

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Discriminator
+from typing_extensions import Annotated
 
 
 class Input(BaseModel):
@@ -226,13 +227,18 @@ class RScriptStage(Stage):
 class Pipeline(BaseModel):
     stages: dict[
         str,
-        PythonScriptStage
-        | LatexStage
-        | MatlabScriptStage
-        | ShellCommandStage
-        | ShellScriptStage
-        | DockerCommandStage
-        | RScriptStage,
+        Annotated[
+            (
+                PythonScriptStage
+                | LatexStage
+                | MatlabScriptStage
+                | ShellCommandStage
+                | ShellScriptStage
+                | DockerCommandStage
+                | RScriptStage
+            ),
+            Discriminator("kind"),
+        ],
     ]
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")

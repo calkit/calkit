@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import functools
 import os
 import pathlib
 import shutil
@@ -11,7 +10,6 @@ import subprocess
 import sys
 import zipfile
 from enum import Enum
-from typing import Optional
 
 import bibtexparser
 import dotenv

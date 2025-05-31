@@ -21,8 +21,14 @@ from git.exc import InvalidGitRepositoryError
 from typing_extensions import Annotated, Optional
 
 import calkit
+import calkit.pipeline
 from calkit.cli import print_sep, raise_error, run_cmd, warn
-from calkit.cli.check import check_app, check_conda_env, check_docker_env
+from calkit.cli.check import (
+    check_app,
+    check_conda_env,
+    check_docker_env,
+    check_venv,
+)
 from calkit.cli.cloud import cloud_app
 from calkit.cli.config import config_app
 from calkit.cli.import_ import import_app
@@ -147,7 +153,7 @@ def init(
 def clone(
     url: Annotated[str, typer.Argument(help="Repo URL.")],
     location: Annotated[
-        str,
+        str | None,
         typer.Argument(
             help="Location to clone to (default will be ./{repo_name})"
         ),
@@ -277,7 +283,7 @@ def diff(
 def add(
     paths: list[str],
     commit_message: Annotated[
-        str,
+        str | None,
         typer.Option(
             "-m",
             "--commit-message",
@@ -299,7 +305,7 @@ def add(
         bool, typer.Option("--push", help="Push after committing.")
     ] = False,
     to: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--to", "-t", help="System with which to add (git or dvc)."
         ),
@@ -396,7 +402,9 @@ def add(
             for untracked_file in repo.untracked_files:
                 paths.append(untracked_file)
             # Now add changed files
-            for changed_file in [d.a_path for d in repo.index.diff(None)]:
+            for changed_file in [
+                d.a_path for d in repo.index.diff(None) if d.a_path is not None
+            ]:
                 paths.append(changed_file)
         for path in paths:
             # Detect if this file should be tracked with Git or DVC
@@ -492,7 +500,7 @@ def save(
         ),
     ] = False,
     to: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--to", "-t", help="System with which to add (git or dvc)."
         ),
@@ -705,7 +713,12 @@ def run(
     try:
         calkit.check_system_deps()
     except Exception as e:
-        raise_error(e)
+        raise_error(str(e))
+    # Compile the pipeline
+    ck_info = dict(calkit.load_calkit_info())
+    if ck_info.get("pipeline", {}):
+        typer.echo("Compiling DVC pipeline")
+        calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     if targets is None:
         targets = []
     args = targets
@@ -738,66 +751,6 @@ def run(
         subprocess.check_call([sys.executable, "-m", "dvc", "repro"] + args)
     except subprocess.CalledProcessError:
         raise_error("DVC pipeline failed")
-    # Now parse stage metadata for calkit objects
-    if not os.path.isfile("dvc.yaml"):
-        raise_error("No dvc.yaml file found")
-    objects = []
-    with open("dvc.yaml") as f:
-        pipeline = calkit.ryaml.load(f)
-        if pipeline is None:
-            raise_error("Pipeline is empty")
-        for stage_name, stage_info in pipeline.get("stages", {}).items():
-            ckmeta = stage_info.get("meta", {}).get("calkit")
-            if ckmeta is not None:
-                if not isinstance(ckmeta, dict):
-                    raise_error(
-                        f"Calkit metadata for {stage_name} is not a dictionary"
-                    )
-                # Stage must have a single output
-                outs = stage_info.get("outs", [])
-                if len(outs) != 1:
-                    raise_error(
-                        f"Stage {stage_name} does not have exactly one output"
-                    )
-                cktype = ckmeta.get("type")
-                if cktype not in [
-                    "figure",
-                    "dataset",
-                    "publication",
-                    "notebook",
-                ]:
-                    raise_error(f"Invalid Calkit output type '{cktype}'")
-                if isinstance(outs[0], str):
-                    path = outs[0]
-                else:
-                    path = str(list(outs[0].keys())[0])
-                objects.append(
-                    dict(path=path) | ckmeta | dict(stage=stage_name)
-                )
-    # Now that we've extracted Calkit objects from stage metadata, we can put
-    # them into the calkit.yaml file, overwriting objects with the same path
-    ck_info = calkit.load_calkit_info()
-    for obj in objects:
-        cktype = obj.pop("type")
-        cktype_plural = cktype + "s"
-        existing = ck_info.get(cktype_plural, [])
-        new = []
-        added = False
-        for ex_obj in existing:
-            if ex_obj.get("path") == obj["path"]:
-                typer.echo(f"Updating {cktype} {ex_obj['path']}")
-                new.append(obj)
-                added = True
-            else:
-                new.append(ex_obj)
-        if not added:
-            typer.echo(f"Adding new {cktype} {obj['path']}")
-            new.append(obj)
-        ck_info[cktype_plural] = new
-    if not dry:
-        with open("calkit.yaml", "w") as f:
-            calkit.ryaml.dump(ck_info, f)
-        run_cmd(["git", "add", "calkit.yaml"])
 
 
 @app.command(name="manual-step", help="Execute a manual step.")
@@ -810,7 +763,9 @@ def manual_step(
             help="Message to display as a prompt.",
         ),
     ],
-    cmd: Annotated[str, typer.Option("--cmd", help="Command to run.")] = None,
+    cmd: Annotated[
+        str | None, typer.Option("--cmd", help="Command to run.")
+    ] = None,
     show_stdout: Annotated[
         bool, typer.Option("--show-stdout", help="Show stdout.")
     ] = False,
@@ -845,7 +800,7 @@ def run_in_env(
         list[str], typer.Argument(help="Command to run in the environment.")
     ],
     env_name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--name",
             "-n",
@@ -856,7 +811,7 @@ def run_in_env(
         ),
     ] = None,
     wdir: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--wdir",
             help=(
@@ -884,12 +839,13 @@ def run_in_env(
     ] = False,
 ):
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
-    ck_info = calkit.load_calkit_info(process_includes="environments")
+    ck_info = dict(calkit.load_calkit_info(process_includes="environments"))
     envs = ck_info.get("environments", {})
     if not envs:
         raise_error("No environments defined in calkit.yaml")
     if isinstance(envs, list):
         raise_error("Error: Environments should be a dict, not a list")
+    assert isinstance(envs, dict)
     if env_name is None:
         # See if there's a default env, or only one env defined
         default_env_name = None
@@ -1005,55 +961,25 @@ def run_in_env(
         prefix = env["prefix"]
         path = env["path"]
         shell_cmd = _to_shell_cmd(cmd)
+        if _platform.system() == "Windows":
+            activate_cmd = f"{prefix}\\Scripts\\activate"
+        else:
+            activate_cmd = f". {prefix}/bin/activate"
         if verbose:
             typer.echo(f"Raw command: {cmd}")
             typer.echo(f"Shell command: {shell_cmd}")
-        create_cmd = (
-            ["uv", "venv"] if kind == "uv-venv" else ["python", "-m", "venv"]
-        )
-        pip_cmd = "pip" if kind == "venv" else "uv pip"
-        pip_install_args = "-q"
-        if "python" in env and kind == "uv-venv":
-            create_cmd += ["--python", env["python"]]
-            pip_install_args += f" --python {env['python']}"
         # Check environment
         if not no_check:
-            if not os.path.isdir(prefix):
-                if verbose:
-                    typer.echo(f"Creating {kind} at {prefix}")
-                try:
-                    subprocess.check_call(create_cmd + [prefix], cwd=wdir)
-                except subprocess.CalledProcessError:
-                    raise_error(f"Failed to create {kind} at {prefix}")
-                # Put a gitignore file in the env dir if one doesn't exist
-                if not os.path.isfile(os.path.join(prefix, ".gitignore")):
-                    with open(os.path.join(prefix, ".gitignore"), "w") as f:
-                        f.write("*\n")
-            fname, ext = os.path.splitext(path)
-            lock_fpath = fname + "-lock" + ext
-            if _platform.system() == "Windows":
-                activate_cmd = f"{prefix}\\Scripts\\activate"
-            else:
-                activate_cmd = f". {prefix}/bin/activate"
-            check_cmd = (
-                f"{activate_cmd} "
-                f"&& {pip_cmd} install {pip_install_args} -r {path} "
-                f"&& {pip_cmd} freeze > {lock_fpath} "
-                "&& deactivate"
+            check_venv(
+                path=path,
+                prefix=prefix,
+                use_uv=kind == "uv-venv",
+                python=env.get("python"),
+                wdir=wdir,
+                verbose=verbose,
             )
-            try:
-                if verbose:
-                    typer.echo(f"Running command: {check_cmd}")
-                subprocess.check_output(
-                    check_cmd,
-                    shell=True,
-                    cwd=wdir,
-                    stderr=subprocess.STDOUT if not verbose else None,
-                )
-            except subprocess.CalledProcessError:
-                raise_error(f"Failed to check {kind}")
         # Now run the command
-        cmd = f"{activate_cmd} && {shell_cmd} && deactivate"
+        cmd = f"{activate_cmd} && {shell_cmd} && deactivate"  # type: ignore
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
@@ -1064,7 +990,7 @@ def run_in_env(
         try:
             host = os.path.expandvars(env["host"])
             user = os.path.expandvars(env["user"])
-            remote_wdir = env["wdir"]
+            remote_wdir: str = env["wdir"]
         except KeyError:
             raise_error(
                 "Host, user, and wdir must be defined for ssh environments"
@@ -1159,7 +1085,7 @@ def run_in_env(
         if get_paths:
             typer.echo("Copying files back from remote directory")
             for src_path in get_paths:
-                src_path = remote_wdir + "/" + src_path
+                src_path = remote_wdir + "/" + src_path  # type: ignore
                 src = f"{user}@{host}:{src_path}"
                 scp_cmd = ["scp", "-r"] + key_cmd + [src, "."]
                 subprocess.check_call(scp_cmd)
@@ -1218,7 +1144,7 @@ def run_procedure(
             return bool(value)
         return value
 
-    ck_info = calkit.load_calkit_info(process_includes="procedures")
+    ck_info = dict(calkit.load_calkit_info(process_includes="procedures"))
     procs = ck_info.get("procedures", {})
     if name not in procs:
         raise_error(f"'{name}' is not defined as a procedure")
@@ -1344,7 +1270,7 @@ def run_calculation(
     ] = False,
 ):
     """Run a project's calculation."""
-    ck_info = calkit.load_calkit_info()
+    ck_info = dict(calkit.load_calkit_info())
     calcs = ck_info.get("calculations", {})
     if name not in calcs:
         raise_error(f"Calculation '{name}' not defined in calkit.yaml")

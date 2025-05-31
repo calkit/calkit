@@ -32,7 +32,7 @@ new_app = typer.Typer(no_args_is_help=True)
 def new_project(
     path: Annotated[str, typer.Argument(help="Where to create the project.")],
     name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--name",
             "-n",
@@ -43,10 +43,10 @@ def new_project(
         ),
     ] = None,
     title: Annotated[
-        str, typer.Option("--title", help="Project title.")
+        str | None, typer.Option("--title", help="Project title.")
     ] = None,
     description: Annotated[
-        str, typer.Option("--description", help="Project description.")
+        str | None, typer.Option("--description", help="Project description.")
     ] = None,
     cloud: Annotated[
         bool,
@@ -63,7 +63,7 @@ def new_project(
         ),
     ] = False,
     git_repo_url: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--git-url",
             help=(
@@ -73,7 +73,7 @@ def new_project(
         ),
     ] = None,
     template: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--template",
             "-t",
@@ -84,7 +84,8 @@ def new_project(
         ),
     ] = None,
     no_commit: Annotated[
-        bool, typer.Option("--no-commit", help="Do not commit changes to Git.")
+        bool | None,
+        typer.Option("--no-commit", help="Do not commit changes to Git."),
     ] = None,
     overwrite: Annotated[
         bool,
@@ -245,7 +246,7 @@ def new_project(
             typer.echo("Setting origin remote URL")
             repo.git.remote(["add", "origin", git_repo_url])
         # Update Calkit info in this project
-        ck_info = calkit.load_calkit_info(wdir=abs_path)
+        ck_info = dict(calkit.load_calkit_info(wdir=abs_path))
         ck_info = ck_info | dict(
             name=name,
             title=title,
@@ -1398,12 +1399,118 @@ class StageKind(str, Enum):
     matlab_script = "matlab-script"
 
 
-@new_app.command(name="stage")
-def new_stage(
-    name: Annotated[
+class StageArgs:
+    """This is just a way to deduplicate stage arguments."""
+
+    name = Annotated[
         str,
         typer.Option("--name", "-n", help="Stage name, typically kebab-case."),
+    ]
+    environment = Annotated[
+        str,
+        typer.Option(
+            "--environment", "-e", help="Environment to use to run the stage."
+        ),
+    ]
+    inputs = Annotated[
+        list[str],
+        typer.Option(
+            "--input", "-i", help="A path on which the stage depends."
+        ),
+    ]
+    outputs = Annotated[
+        list[str],
+        typer.Option(
+            "--output", "-o", help="A path that is produced by the stage."
+        ),
+    ]
+    outs_no_delete = Annotated[
+        list[str],
+        typer.Option(
+            "--out-no-delete",
+            help="An output that should not be deleted before running.",
+        ),
+    ]
+    outs_git = Annotated[
+        list[str],
+        typer.Option(
+            "--out-git",
+            help="An output that should be stored with Git instead of DVC.",
+        ),
+    ]
+    outs_git_no_delete = Annotated[
+        list[str],
+        typer.Option(
+            "--out-git-no-delete",
+            help=(
+                "An output that should be tracked with Git instead of DVC, "
+                "and also should not be deleted before running stage."
+            ),
+        ),
+    ]
+    overwrite = Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "--force",
+            "-f",
+            help="Overwrite an existing stage with this name if necessary.",
+        ),
+    ]
+    no_check = Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Do not check if the target, deps, environment, etc., exist.",
+        ),
+    ]
+    no_commit = Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes to Git.")
+    ]
+
+
+@new_app.command(name="python-script-stage")
+def new_python_script_stage(
+    name: StageArgs.name,
+    environment: StageArgs.environment,
+    script_path: Annotated[
+        str, typer.Option("--script-path", "-s", help="Path to Python script")
     ],
+    inputs: StageArgs.inputs = [],
+    outputs: StageArgs.outputs = [],
+    overwrite: StageArgs.overwrite = False,
+):
+    """Add a stage to the pipeline that runs a Python script."""
+    # TODO: Handle output storage and persistence
+    try:
+        stage = calkit.models.pipeline.PythonScriptStage(
+            kind="python-script",
+            environment=environment,
+            inputs=inputs,
+            outputs=outputs,  # type: ignore
+            script_path=script_path,
+        )
+    except Exception as e:
+        raise_error(f"Invalid stage specification: {e}")
+    # TODO: Check environment exists
+    ck_info = dict(calkit.load_calkit_info())
+    if "pipeline" not in ck_info:
+        ck_info["pipeline"] = {}
+    if "stages" not in ck_info["pipeline"]:
+        ck_info["pipeline"]["stages"] = {}
+    stages = ck_info["stages"]
+    if name in stages and not overwrite:
+        raise_error(
+            f"Stage '{name}' already exists; consider using --overwrite"
+        )
+    stages[name] = stage.model_dump()
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+
+
+@new_app.command(name="stage")
+def new_stage(
+    name: StageArgs.name,
     kind: Annotated[
         StageKind, typer.Option("--kind", help="What kind of stage to create.")
     ],
@@ -1414,7 +1521,7 @@ def new_stage(
         ),
     ],
     environment: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--environment", "-e", help="Environment to use to run the stage."
         ),
@@ -1473,7 +1580,7 @@ def new_stage(
         bool, typer.Option("--no-commit", help="Do not commit changes to Git.")
     ] = False,
 ):
-    """Create a new pipeline stage."""
+    """Create a new DVC pipeline stage."""
     ck_info = dict(calkit.load_calkit_info(process_includes="environments"))
     environments = ck_info.get("environments", {})
     if environment is None:

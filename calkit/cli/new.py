@@ -533,7 +533,7 @@ def new_docker_env(
         str, typer.Option("--name", "-n", help="Environment name.")
     ],
     image_name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--image",
             help=(
@@ -543,14 +543,14 @@ def new_docker_env(
         ),
     ] = None,
     base: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--from",
             help="Base image, e.g., 'ubuntu', if creating a Dockerfile.",
         ),
     ] = None,
     path: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--path",
             help=(
@@ -569,16 +569,17 @@ def new_docker_env(
         str, typer.Option("--wdir", help="Working directory.")
     ] = "/work",
     user: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--user", help="User account to use to run the container."
         ),
     ] = None,
     platform: Annotated[
-        str, typer.Option("--platform", help="Which platform(s) to build for.")
+        str | None,
+        typer.Option("--platform", help="Which platform(s) to build for."),
     ] = None,
     description: Annotated[
-        str, typer.Option("--description", help="Description.")
+        str | None, typer.Option("--description", help="Description.")
     ] = None,
     overwrite: Annotated[
         bool,
@@ -612,7 +613,7 @@ def new_docker_env(
         with open(path, "w") as f:
             f.write(txt)
     # Add environment to Calkit info
-    ck_info = calkit.load_calkit_info()
+    ck_info = dict(calkit.load_calkit_info())
     # If environments is a list instead of a dict, reformulate it
     envs = ck_info.get("environments", {})
     if isinstance(envs, list):

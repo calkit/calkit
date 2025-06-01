@@ -1530,17 +1530,63 @@ def new_python_script_stage(
     script_path: StageArgs.script_path,
     inputs: StageArgs.inputs = [],
     outputs: StageArgs.outputs = [],
+    outs_git: StageArgs.outs_git = [],
+    outs_git_no_delete: StageArgs.outs_git_no_delete = [],
+    outs_no_delete: StageArgs.outs_no_delete = [],
+    outs_no_store: StageArgs.outs_no_store = [],
+    outs_no_store_no_delete: StageArgs.outs_no_store_no_delete = [],
     overwrite: StageArgs.overwrite = False,
     no_commit: StageArgs.no_commit = False,
 ):
     """Add a stage to the pipeline that runs a Python script."""
-    # TODO: Handle output storage and persistence
+    # Handle output storage and persistence
+    ck_outs: list[str | calkit.models.pipeline.PathOutput] = list(outputs)
+    for out in outs_git:
+        ck_outs.append(
+            calkit.models.pipeline.PathOutput(
+                path=out,
+                storage="git",
+                delete_before_run=True,
+            )
+        )
+    for out in outs_git_no_delete:
+        ck_outs.append(
+            calkit.models.pipeline.PathOutput(
+                path=out,
+                storage="git",
+                delete_before_run=False,
+            )
+        )
+    for out in outs_no_delete:
+        ck_outs.append(
+            calkit.models.pipeline.PathOutput(
+                path=out,
+                storage="dvc",
+                delete_before_run=False,
+            )
+        )
+    for out in outs_no_store:
+        ck_outs.append(
+            calkit.models.pipeline.PathOutput(
+                path=out,
+                storage=None,
+                delete_before_run=True,
+            )
+        )
+    for out in outs_no_store_no_delete:
+        ck_outs.append(
+            calkit.models.pipeline.PathOutput(
+                path=out,
+                storage=None,
+                delete_before_run=False,
+            )
+        )
     try:
         stage = calkit.models.pipeline.PythonScriptStage(
             kind="python-script",
             environment=environment,
             inputs=inputs,
-            outputs=outputs,  # type: ignore
+            outputs=ck_outs,
             script_path=script_path,
         )
     except Exception as e:

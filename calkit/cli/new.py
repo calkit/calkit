@@ -1523,23 +1523,15 @@ def _save_stage(
             )
 
 
-@new_app.command(name="python-script-stage")
-def new_python_script_stage(
-    name: StageArgs.name,
-    environment: StageArgs.environment,
-    script_path: StageArgs.script_path,
-    inputs: StageArgs.inputs = [],
-    outputs: StageArgs.outputs = [],
-    outs_git: StageArgs.outs_git = [],
-    outs_git_no_delete: StageArgs.outs_git_no_delete = [],
-    outs_no_delete: StageArgs.outs_no_delete = [],
-    outs_no_store: StageArgs.outs_no_store = [],
-    outs_no_store_no_delete: StageArgs.outs_no_store_no_delete = [],
-    overwrite: StageArgs.overwrite = False,
-    no_commit: StageArgs.no_commit = False,
-):
-    """Add a stage to the pipeline that runs a Python script."""
-    # Handle output storage and persistence
+def _to_ck_outs(
+    outputs: list[str],
+    outs_git: list[str],
+    outs_git_no_delete: list[str],
+    outs_no_delete: list[str],
+    outs_no_store: list[str],
+    outs_no_store_no_delete: list[str],
+) -> list[str | calkit.models.pipeline.PathOutput]:
+    """Format stage outputs from CLI for Calkit pipeline."""
     ck_outs: list[str | calkit.models.pipeline.PathOutput] = list(outputs)
     for out in outs_git:
         ck_outs.append(
@@ -1581,6 +1573,33 @@ def new_python_script_stage(
                 delete_before_run=False,
             )
         )
+    return ck_outs
+
+
+@new_app.command(name="python-script-stage")
+def new_python_script_stage(
+    name: StageArgs.name,
+    environment: StageArgs.environment,
+    script_path: StageArgs.script_path,
+    inputs: StageArgs.inputs = [],
+    outputs: StageArgs.outputs = [],
+    outs_git: StageArgs.outs_git = [],
+    outs_git_no_delete: StageArgs.outs_git_no_delete = [],
+    outs_no_delete: StageArgs.outs_no_delete = [],
+    outs_no_store: StageArgs.outs_no_store = [],
+    outs_no_store_no_delete: StageArgs.outs_no_store_no_delete = [],
+    overwrite: StageArgs.overwrite = False,
+    no_commit: StageArgs.no_commit = False,
+):
+    """Add a stage to the pipeline that runs a Python script."""
+    ck_outs = _to_ck_outs(
+        outputs=outputs,
+        outs_git=outs_git,
+        outs_git_no_delete=outs_git_no_delete,
+        outs_no_delete=outs_no_delete,
+        outs_no_store=outs_no_store,
+        outs_no_store_no_delete=outs_no_store_no_delete,
+    )
     try:
         stage = calkit.models.pipeline.PythonScriptStage(
             kind="python-script",

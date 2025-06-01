@@ -1449,6 +1449,23 @@ class StageArgs:
             ),
         ),
     ]
+    outs_no_store = Annotated[
+        list[str],
+        typer.Option(
+            "--out-no-store",
+            help="An output that should not be stored in version control.",
+        ),
+    ]
+    outs_no_store_no_delete = Annotated[
+        list[str],
+        typer.Option(
+            "--out-no-store-no-delete",
+            help=(
+                "An output that should not be stored in version control, "
+                "and should not be deleted before running."
+            ),
+        ),
+    ]
     overwrite = Annotated[
         bool,
         typer.Option(

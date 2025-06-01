@@ -1516,10 +1516,14 @@ def _save_stage(
             repo = git.Repo()
         except InvalidGitRepositoryError:
             raise_error("Can't commit because this is not a Git repo")
-        repo.git.add("dvc.yaml")
-        if "dvc.yaml" in calkit.git.get_staged_files():
+        repo.git.add("calkit.yaml")
+        if "calkit.yaml" in calkit.git.get_staged_files():
             repo.git.commit(
-                ["dvc.yaml", "-m", f"Add {stage.kind} pipeline stage '{name}'"]
+                [
+                    "calkit.yaml",
+                    "-m",
+                    f"Add {stage.kind} pipeline stage '{name}'",
+                ]
             )
 
 

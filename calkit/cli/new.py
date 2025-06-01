@@ -1490,27 +1490,13 @@ class StageArgs:
     ]
 
 
-@new_app.command(name="python-script-stage")
-def new_python_script_stage(
-    name: StageArgs.name,
-    environment: StageArgs.environment,
-    script_path: StageArgs.script_path,
-    inputs: StageArgs.inputs = [],
-    outputs: StageArgs.outputs = [],
-    overwrite: StageArgs.overwrite = False,
-):
-    """Add a stage to the pipeline that runs a Python script."""
-    # TODO: Handle output storage and persistence
-    try:
-        stage = calkit.models.pipeline.PythonScriptStage(
-            kind="python-script",
-            environment=environment,
-            inputs=inputs,
-            outputs=outputs,  # type: ignore
-            script_path=script_path,
-        )
-    except Exception as e:
-        raise_error(f"Invalid stage specification: {e}")
+def _save_stage(
+    stage: calkit.models.pipeline.Stage,
+    name: str,
+    overwrite: bool = False,
+    no_commit: bool = False,
+) -> None:
+    """Save a Calkit pipeline stage."""
     # TODO: Check environment exists
     ck_info = dict(calkit.load_calkit_info())
     if "pipeline" not in ck_info:
@@ -1525,6 +1511,43 @@ def new_python_script_stage(
     stages[name] = stage.model_dump()
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
+    if not no_commit:
+        try:
+            repo = git.Repo()
+        except InvalidGitRepositoryError:
+            raise_error("Can't commit because this is not a Git repo")
+        repo.git.add("dvc.yaml")
+        if "dvc.yaml" in calkit.git.get_staged_files():
+            repo.git.commit(
+                ["dvc.yaml", "-m", f"Add {stage.kind} pipeline stage '{name}'"]
+            )
+
+
+@new_app.command(name="python-script-stage")
+def new_python_script_stage(
+    name: StageArgs.name,
+    environment: StageArgs.environment,
+    script_path: StageArgs.script_path,
+    inputs: StageArgs.inputs = [],
+    outputs: StageArgs.outputs = [],
+    overwrite: StageArgs.overwrite = False,
+    no_commit: StageArgs.no_commit = False,
+):
+    """Add a stage to the pipeline that runs a Python script."""
+    # TODO: Handle output storage and persistence
+    try:
+        stage = calkit.models.pipeline.PythonScriptStage(
+            kind="python-script",
+            environment=environment,
+            inputs=inputs,
+            outputs=outputs,  # type: ignore
+            script_path=script_path,
+        )
+    except Exception as e:
+        raise_error(f"Invalid stage specification: {e}")
+    _save_stage(
+        stage=stage, name=name, overwrite=overwrite, no_commit=no_commit
+    )
 
 
 @new_app.command(name="stage")

@@ -1468,15 +1468,16 @@ class StageArgs:
     no_commit = Annotated[
         bool, typer.Option("--no-commit", help="Do not commit changes to Git.")
     ]
+    script_path = Annotated[
+        str, typer.Option("--script-path", "-s", help="Path to script.")
+    ]
 
 
 @new_app.command(name="python-script-stage")
 def new_python_script_stage(
     name: StageArgs.name,
     environment: StageArgs.environment,
-    script_path: Annotated[
-        str, typer.Option("--script-path", "-s", help="Path to Python script")
-    ],
+    script_path: StageArgs.script_path,
     inputs: StageArgs.inputs = [],
     outputs: StageArgs.outputs = [],
     overwrite: StageArgs.overwrite = False,

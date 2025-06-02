@@ -577,7 +577,7 @@ and moving any valuable code out into a version-controlled script once it
 works the way you want it to.
 
 After producing a new working script,
-add a new pipeline stage to run that script with `calkit new stage`.
+add a new pipeline stage to run that script with `calkit new`.
 If you need a different environment, you can create one,
 or you can update an existing environment by editing its definition file.
 If you execute `calkit run` again, only the stages that are missing outputs

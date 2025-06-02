@@ -70,3 +70,54 @@ For more details, see `calkit.models.pipeline`.
 - `r-script`
   - `script_path`
   - `args` (list, optional)
+
+## Iteration
+
+### Over a list of values
+
+```yaml
+pipeline:
+  stages:
+    my-iter-stage:
+      kind: python-script
+      script_path: scripts/my-script.py
+      args:
+        - "--model={var}"
+      iterate_over:
+        - arg_name: var
+          values:
+            - some-model
+            - some-other-model
+      inputs:
+        - data/raw
+      outputs:
+        - models/{var}.h5
+```
+
+### Over ranges of numbers
+
+```yaml
+pipeline:
+  stages:
+    my-iter-stage:
+      kind: python-script
+      script_path: scripts/my-script.py
+      args:
+        - "--thresh={thresh}"
+      iterate_over:
+        - arg_name: thresh
+          values:
+            - range:
+                start: 0
+                stop: 20
+                step: 0.5
+            - range:
+                start: 30
+                stop: 35
+                step: 1
+            - 41
+      inputs:
+        - data/raw
+      outputs:
+        - results/{thresh}.csv
+```

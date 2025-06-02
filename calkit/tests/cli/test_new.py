@@ -475,3 +475,45 @@ def test_new_python_script_stage(tmp_dir):
         ["script.py", ".calkit/env-locks/py.txt"]
     )
     assert pipeline["stages"]["run-script"]["outs"] == ["output.txt"]
+
+
+def test_new_latex_stage(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("paper.tex", "w") as f:
+        f.write("Hello, world!")
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "docker-env",
+            "--name",
+            "tex",
+            "--image",
+            "texlive/texlive:latest-full",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "latex-stage",
+            "--name",
+            "build-paper",
+            "--target",
+            "paper.tex",
+            "--environment",
+            "tex",
+            "--output",
+            "paper.pdf",
+        ]
+    )
+    subprocess.check_call(["calkit", "check", "pipeline", "--compile"])
+    pipeline = calkit.dvc.read_pipeline()
+    assert pipeline["stages"]["build-paper"]["cmd"] == (
+        "calkit xenv -n tex --no-check -- "
+        "latexmk -cd -interaction=nonstopmode -pdf paper.tex"
+    )
+    assert set(pipeline["stages"]["build-paper"]["deps"]) == set(
+        ["paper.tex", ".calkit/env-locks/tex.json"]
+    )
+    assert pipeline["stages"]["build-paper"]["outs"] == ["paper.pdf"]

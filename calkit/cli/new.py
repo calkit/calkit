@@ -1498,10 +1498,10 @@ def _save_stage(
     stage: calkit.models.pipeline.Stage,
     name: str,
     overwrite: bool = False,
+    no_check: bool = False,
     no_commit: bool = False,
 ) -> None:
     """Save a Calkit pipeline stage."""
-    # TODO: Check environment exists
     ck_info = dict(calkit.load_calkit_info())
     if "pipeline" not in ck_info:
         ck_info["pipeline"] = {}
@@ -1512,6 +1512,11 @@ def _save_stage(
         raise_error(
             f"Stage '{name}' already exists; consider using --overwrite"
         )
+    # Check environment exists
+    if not no_check:
+        env_names = ck_info.get("environments", {})
+        if stage.environment not in env_names:
+            raise_error(f"Environment {stage.environment} does not exist")
     stages[name] = stage.model_dump()
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
@@ -1598,6 +1603,7 @@ def new_python_script_stage(
     outs_no_store: StageArgs.outs_no_store = [],
     outs_no_store_no_delete: StageArgs.outs_no_store_no_delete = [],
     overwrite: StageArgs.overwrite = False,
+    no_check: StageArgs.no_check = False,
     no_commit: StageArgs.no_commit = False,
 ):
     """Add a stage to the pipeline that runs a Python script."""
@@ -1621,7 +1627,11 @@ def new_python_script_stage(
     except Exception as e:
         raise_error(f"Invalid stage specification: {e}")
     _save_stage(
-        stage=stage, name=name, overwrite=overwrite, no_commit=no_commit
+        stage=stage,
+        name=name,
+        overwrite=overwrite,
+        no_check=no_check,
+        no_commit=no_commit,
     )
 
 
@@ -1638,6 +1648,7 @@ def new_matlab_script_stage(
     outs_no_store: StageArgs.outs_no_store = [],
     outs_no_store_no_delete: StageArgs.outs_no_store_no_delete = [],
     overwrite: StageArgs.overwrite = False,
+    no_check: StageArgs.no_check = False,
     no_commit: StageArgs.no_commit = False,
 ):
     """Add a stage to the pipeline that runs a MATLAB script."""
@@ -1660,7 +1671,11 @@ def new_matlab_script_stage(
     except Exception as e:
         raise_error(f"Invalid stage specification: {e}")
     _save_stage(
-        stage=stage, name=name, overwrite=overwrite, no_commit=no_commit
+        stage=stage,
+        name=name,
+        overwrite=overwrite,
+        no_check=no_check,
+        no_commit=no_commit,
     )
 
 
@@ -1679,6 +1694,7 @@ def new_latex_stage(
     outs_no_store: StageArgs.outs_no_store = [],
     outs_no_store_no_delete: StageArgs.outs_no_store_no_delete = [],
     overwrite: StageArgs.overwrite = False,
+    no_check: StageArgs.no_check = False,
     no_commit: StageArgs.no_commit = False,
 ):
     """Add a stage to the pipeline that compiles a LaTeX document."""
@@ -1701,7 +1717,11 @@ def new_latex_stage(
     except Exception as e:
         raise_error(f"Invalid stage specification: {e}")
     _save_stage(
-        stage=stage, name=name, overwrite=overwrite, no_commit=no_commit
+        stage=stage,
+        name=name,
+        overwrite=overwrite,
+        no_check=no_check,
+        no_commit=no_commit,
     )
 
 

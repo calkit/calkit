@@ -179,15 +179,16 @@ and not rerun simulations when they don't need to be rerun.
 We can create this stage with:
 
 ```sh
-calkit new foreach-stage \
-    --cmd "calkit xenv python run.py --turbulence-model {var} -f" \
+calkit new python-script-stage \
     --name run-sim \
-    --dep system \
-    --dep constant/transportProperties \
-    --dep run.py \
-    --dep Dockerfile \
-    --out "cases/{var}/postProcessing" \
-    "laminar" "k-epsilon" "k-omega"
+    --script-path run.py \
+    --environment foam \
+    --arg "--turbulence-model={var}" \
+    --arg "--overwrite" \
+    --input system \
+    --input constant/transportProperties \
+    --output "cases/{var}/postProcessing" \
+    --iter-arg "{var}" "laminar" "k-epsilon" "k-omega" \
 ```
 
 Another call to `calkit status` shows our pipeline needs to be run,

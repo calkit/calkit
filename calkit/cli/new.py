@@ -1507,7 +1507,7 @@ def _save_stage(
         ck_info["pipeline"] = {}
     if "stages" not in ck_info["pipeline"]:
         ck_info["pipeline"]["stages"] = {}
-    stages = ck_info["stages"]
+    stages = ck_info["pipeline"]["stages"]
     if name in stages and not overwrite:
         raise_error(
             f"Stage '{name}' already exists; consider using --overwrite"

@@ -433,3 +433,45 @@ def test_new_stage(tmp_dir):
                 "nonexistent-env",
             ]
         )
+
+
+def test_new_python_script_stage(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("script.py", "w") as f:
+        f.write("print('Hello, world!')")
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-venv",
+            "--name",
+            "py",
+            "--python",
+            "3.13",
+            "requests",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "python-script-stage",
+            "--name",
+            "run-script",
+            "--script-path",
+            "script.py",
+            "--environment",
+            "py",
+            "--output",
+            "output.txt",
+        ]
+    )
+    subprocess.check_call(["calkit", "check", "pipeline", "--compile"])
+    pipeline = calkit.dvc.read_pipeline()
+    assert pipeline["stages"]["run-script"]["cmd"] == (
+        "calkit xenv -n py --no-check -- python script.py"
+    )
+    assert set(pipeline["stages"]["run-script"]["deps"]) == set(
+        ["script.py", ".calkit/env-locks/py.txt"]
+    )
+    assert pipeline["stages"]["run-script"]["outs"] == ["output.txt"]

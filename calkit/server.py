@@ -535,7 +535,7 @@ def post_pipeline_stage(
     project = get_local_project(owner_name, project_name)
     dvc_fpath = os.path.join(project.wdir, "dvc.yaml")
     if req.calkit_type is not None and req.calkit_object is None:
-        raise HTTPException("Calkit object info must be provided")
+        raise HTTPException(422, "Calkit object info must be provided")
     if req.calkit_type is not None:
         if req.outs is None or len(req.outs) != 1:
             raise HTTPException(400, "One output must be provided")

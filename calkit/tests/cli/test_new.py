@@ -517,3 +517,50 @@ def test_new_latex_stage(tmp_dir):
         ["paper.tex", ".calkit/env-locks/tex.json"]
     )
     assert pipeline["stages"]["build-paper"]["outs"] == ["paper.pdf"]
+
+
+def test_new_matlab_script_stage(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("scripts")
+    with open("scripts/script.m", "w") as f:
+        f.write("disp('Hello, world!')")
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "docker-env",
+            "--name",
+            "matlab1",
+            "--image",
+            "mathworks/matlab:latest",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "matlab-script-stage",
+            "--name",
+            "run-script1",
+            "-e",
+            "matlab1",
+            "--script-path",
+            "scripts/script.m",
+            "--output",
+            "results/output.txt",
+            "--output",
+            "results/output2.txt",
+        ]
+    )
+    subprocess.check_call(["calkit", "check", "pipeline", "--compile"])
+    pipeline = calkit.dvc.read_pipeline()
+    assert pipeline["stages"]["run-script1"]["cmd"] == (
+        "matlab -noFigureWindows -batch \"run('scripts/script.m');\""
+    )
+    assert set(pipeline["stages"]["run-script1"]["deps"]) == set(
+        ["scripts/script.m", ".calkit/env-locks/matlab1.json"]
+    )
+    assert pipeline["stages"]["run-script1"]["outs"] == [
+        "results/output.txt",
+        "results/output2.txt",
+    ]

@@ -399,71 +399,68 @@ and any additional input dependencies or outputs.
 Let's start with data processing:
 
 ```sh
-calkit new stage \
+calkit new python-script-stage \
     --name process-data \
     --environment py \
-    --kind python-script \
-    --target scripts/process.py \
-    --dep data/raw \
-    --out data/processed
+    --script-path scripts/process.py \
+    --input data/raw \
+    --output data/processed
 ```
 
-This will add a stage to the `dvc.yaml` file that looks like:
+This will add a stage to the `calkit.yaml` file that looks like:
 
 ```yaml
-stages:
-  process-data:
-    cmd: calkit xenv -n py -- python scripts/process.py
-    deps:
-      - data/raw
-      - environment.yml
-      - scripts/process.py
-    outs:
-      - data/processed
+pipeline:
+  stages:
+    process-data:
+      kind: python-script
+      script_path: scripts/process.py
+      environment: py
+      inputs:
+        - data/raw
+      outputs:
+        - data/processed
 ```
 
 This stage can also be modified later, e.g.,
-if there end up being additional dependencies
+if there end up being additional inputs
 (files or folders which if changed, require the script to be rerun).
 See the
-[DVC documentation](https://dvc.org/doc/user-guide/pipelines/defining-pipelines#stages)
+[pipeline documentation](../pipeline/index.md)
 for more information about defining pipeline stages.
 
 Next, create a stage for plotting:
 
 ```sh
-calkit new stage \
+calkit new python-script-stage \
     --name plot \
     --environment py \
-    --kind python-script \
-    --target scripts/plot.py \
-    --dep data/processed \
-    --dep data/raw \
-    --out figures
+    --script scripts/plot.py \
+    --input data/processed \
+    --input data/raw \
+    --output figures
 ```
 
 Then add stages to build our LaTeX documents:
 
 ```sh
-calkit new stage \
+calkit new latex-stage \
     --name build-aps-slides \
     --environment tex \
-    --kind latex \
     --target pubs/2025-aps-dfd-slides/slides.tex \
-    --dep figures
+    --input figures
 ```
 
 ```sh
-calkit new stage \
+calkit new latex-stage \
     --name build-article-1 \
     --environment tex \
-    --kind latex \
     --target pubs/2025-article-1/paper.tex \
-    --dep figures
+    --input figures
 ```
 
 If you have other kinds of stages, e.g., MATLAB, R, or shell scripts to run,
-see the output of `calkit new stage --help` for information on how to
+see the output of `calkit new --help` for information on how to
 create those.
 
 ### Check that the pipeline runs and push outputs to the cloud

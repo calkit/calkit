@@ -1488,6 +1488,10 @@ class StageArgs:
     script_path = Annotated[
         str, typer.Option("--script-path", "-s", help="Path to script.")
     ]
+    args = Annotated[
+        list[str],
+        typer.Option("--arg", help="Argument to pass to the script."),
+    ]
 
 
 def _save_stage(
@@ -1585,6 +1589,7 @@ def new_python_script_stage(
     name: StageArgs.name,
     environment: StageArgs.environment,
     script_path: StageArgs.script_path,
+    args: StageArgs.args = [],
     inputs: StageArgs.inputs = [],
     outputs: StageArgs.outputs = [],
     outs_git: StageArgs.outs_git = [],
@@ -1608,6 +1613,7 @@ def new_python_script_stage(
         stage = calkit.models.pipeline.PythonScriptStage(
             kind="python-script",
             environment=environment,
+            args=args,
             inputs=inputs,
             outputs=ck_outs,
             script_path=script_path,

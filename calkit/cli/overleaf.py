@@ -54,7 +54,7 @@ def import_publication(
         ),
     ],
     description: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--description",
             "-d",
@@ -62,7 +62,7 @@ def import_publication(
         ),
     ] = None,
     kind: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--kind",
             help="What of the publication this is, e.g., 'journal-article'.",
@@ -81,7 +81,7 @@ def import_publication(
         ),
     ] = [],
     pdf_path: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--pdf-path",
             "-o",
@@ -107,7 +107,7 @@ def import_publication(
 ):
     """Import a publication from an Overleaf project."""
     from calkit.cli.main import ignore as git_ignore
-    from calkit.cli.new import StageKind, new_stage
+    from calkit.cli.new import new_latex_stage
 
     # First check that the user has an Overleaf token set
     config = calkit.config.read()
@@ -132,7 +132,7 @@ def import_publication(
     overleaf_project_id = src_url.split("/")[-1]
     if not overleaf_project_id:
         raise_error("Invalid Overleaf project ID")
-    ck_info = calkit.load_calkit_info(process_includes="environments")
+    ck_info = dict(calkit.load_calkit_info(process_includes="environments"))
     pubs = ck_info.get("publications", [])
     # TODO: Don't allow the same Overleaf project ID in multiple publications
     # Determine the PDF output path
@@ -192,6 +192,7 @@ def import_publication(
         )
         ck_info["environments"] = envs
     # Check that we have a build stage
+    # TODO: Use Calkit pipeline for this
     typer.echo("Checking for a build stage in the pipeline")
     stage_name = None
     if os.path.isfile("dvc.yaml"):
@@ -213,17 +214,18 @@ def import_publication(
             stage_name = f"{stage_name}-{n}"
             n += 1
         typer.echo(f"Creating build stage '{stage_name}'")
-        new_stage(
+        new_latex_stage(
             name=stage_name,
             environment=tex_env_name,
-            kind=StageKind.latex,
-            target=PurePosixPath(dest_dir, tex_path).as_posix(),
-            outs=[pub_path],
-            deps=[os.path.join(dest_dir, p) for p in sync_paths + push_paths],
+            target_path=PurePosixPath(dest_dir, tex_path).as_posix(),
+            outputs=[pub_path],
+            inputs=[
+                os.path.join(dest_dir, p) for p in sync_paths + push_paths
+            ],
             no_check=True,
             no_commit=True,
         )
-        repo.git.add("dvc.yaml")
+        repo.git.add("calkit.yaml")
     # Add to publications in calkit.yaml
     typer.echo("Adding publication to calkit.yaml")
     new_pub = dict(
@@ -258,7 +260,7 @@ def import_publication(
 @overleaf_app.command(name="sync")
 def sync(
     paths: Annotated[
-        list[str],
+        list[str] | None,
         typer.Argument(
             help=(
                 "Paths to sync with Overleaf, e.g., 'paper/paper.pdf'. "
@@ -284,7 +286,7 @@ def sync(
     """Sync publications with Overleaf."""
     # TODO: We should probably ensure the pipeline isn't stale
     # Find all publications with Overleaf projects linked
-    ck_info = calkit.load_calkit_info()
+    ck_info = dict(calkit.load_calkit_info())
     pubs = ck_info.get("publications", [])
     if paths is not None:
         for path in paths:

@@ -336,10 +336,44 @@ def check_matlab_env(
     ],
     output_fpath: Annotated[str, typer.Option("--output", "-o")],
 ) -> None:
-    """Check a MATLAB environment matches its spect and export a JSON lock
+    """Check a MATLAB environment matches its spec and export a JSON lock
     file.
     """
-    pass  # TODO
+    ck_info = dict(calkit.load_calkit_info())
+    environments = ck_info.get("environments", {})
+    if env_name not in environments:
+        raise_error(f"Environment '{env_name}' not found in calkit.yaml")
+    env = environments[env_name]
+    if env.get("kind") != "matlab":
+        raise_error(f"Environment '{env_name}' is not a MATLAB environment")
+    typer.echo(f"Checking MATLAB environment '{env_name}'")
+    env_lock = {}
+    products_lock = []
+    try:
+        out = subprocess.check_output(["matlab", "-batch", "ver"]).decode()
+        lines = out.split("\n")
+        in_toolboxes = False
+        for n, line in enumerate(lines):
+            if "--------" in line and n > 3:
+                in_toolboxes = True
+            if in_toolboxes and "Version" in line:
+                lsplit = line.split("Version")
+                product_name = lsplit[0].strip()
+                version = lsplit[1].strip().split()[0]
+                products_lock.append(dict(name=product_name, version=version))
+            elif line.lower().startswith("matlab version:"):
+                env_lock["matlab_version"] = line.split()[2]
+        env_lock["products"] = products_lock
+    except subprocess.CalledProcessError:
+        raise_error("Failed to check MATLAB env")
+    # TODO: Check that the products match the env specification and only
+    # export a lock file if one doesn't exist, else delete it, or prompt the
+    # user to install the products?
+    outdir = os.path.dirname(output_fpath)
+    if outdir:
+        os.makedirs(outdir, exist_ok=True)
+    with open(output_fpath, "w") as f:
+        json.dump(env_lock, f, indent=2)
 
 
 @check_app.command(name="env-vars")

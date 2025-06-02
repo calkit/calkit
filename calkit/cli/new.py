@@ -1625,6 +1625,86 @@ def new_python_script_stage(
     )
 
 
+@new_app.command(name="matlab-script-stage")
+def new_matlab_script_stage(
+    name: StageArgs.name,
+    environment: StageArgs.environment,
+    script_path: StageArgs.script_path,
+    inputs: StageArgs.inputs = [],
+    outputs: StageArgs.outputs = [],
+    outs_git: StageArgs.outs_git = [],
+    outs_git_no_delete: StageArgs.outs_git_no_delete = [],
+    outs_no_delete: StageArgs.outs_no_delete = [],
+    outs_no_store: StageArgs.outs_no_store = [],
+    outs_no_store_no_delete: StageArgs.outs_no_store_no_delete = [],
+    overwrite: StageArgs.overwrite = False,
+    no_commit: StageArgs.no_commit = False,
+):
+    """Add a stage to the pipeline that runs a MATLAB script."""
+    ck_outs = _to_ck_outs(
+        outputs=outputs,
+        outs_git=outs_git,
+        outs_git_no_delete=outs_git_no_delete,
+        outs_no_delete=outs_no_delete,
+        outs_no_store=outs_no_store,
+        outs_no_store_no_delete=outs_no_store_no_delete,
+    )
+    try:
+        stage = calkit.models.pipeline.MatlabScriptStage(
+            kind="matlab-script",
+            environment=environment,
+            inputs=inputs,
+            outputs=ck_outs,
+            script_path=script_path,
+        )
+    except Exception as e:
+        raise_error(f"Invalid stage specification: {e}")
+    _save_stage(
+        stage=stage, name=name, overwrite=overwrite, no_commit=no_commit
+    )
+
+
+@new_app.command(name="latex-stage")
+def new_latex_stage(
+    name: StageArgs.name,
+    environment: StageArgs.environment,
+    target_path: Annotated[
+        str, typer.Option("--target", help="Target .tex file path.")
+    ],
+    inputs: StageArgs.inputs = [],
+    outputs: StageArgs.outputs = [],
+    outs_git: StageArgs.outs_git = [],
+    outs_git_no_delete: StageArgs.outs_git_no_delete = [],
+    outs_no_delete: StageArgs.outs_no_delete = [],
+    outs_no_store: StageArgs.outs_no_store = [],
+    outs_no_store_no_delete: StageArgs.outs_no_store_no_delete = [],
+    overwrite: StageArgs.overwrite = False,
+    no_commit: StageArgs.no_commit = False,
+):
+    """Add a stage to the pipeline that compiles a LaTeX document."""
+    ck_outs = _to_ck_outs(
+        outputs=outputs,
+        outs_git=outs_git,
+        outs_git_no_delete=outs_git_no_delete,
+        outs_no_delete=outs_no_delete,
+        outs_no_store=outs_no_store,
+        outs_no_store_no_delete=outs_no_store_no_delete,
+    )
+    try:
+        stage = calkit.models.pipeline.LatexStage(
+            kind="latex",
+            environment=environment,
+            target_path=target_path,
+            inputs=inputs,
+            outputs=ck_outs,
+        )
+    except Exception as e:
+        raise_error(f"Invalid stage specification: {e}")
+    _save_stage(
+        stage=stage, name=name, overwrite=overwrite, no_commit=no_commit
+    )
+
+
 @new_app.command(name="release")
 def new_release(
     name: Annotated[

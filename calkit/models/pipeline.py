@@ -56,6 +56,25 @@ class DatabaseTableOutput(BaseModel):
     table_name: str
 
 
+class RangeIterationParams(BaseModel):
+    start: int | float
+    stop: int | float
+    step: int | float = 1
+
+
+class RangeIteration(BaseModel):
+    range: RangeIterationParams
+
+
+class ParameterIteration(BaseModel):
+    parameter: str
+
+
+class StageIteration(BaseModel):
+    arg_name: str
+    values: list[int | float | str | RangeIteration | ParameterIteration]
+
+
 class Stage(BaseModel):
     """A stage in the pipeline."""
 
@@ -75,6 +94,7 @@ class Stage(BaseModel):
     inputs: list[str | InputsFromStageOutputs] = []
     outputs: list[str | PathOutput] = []  # TODO: Support database outputs
     always_run: bool = False
+    iterate_over: list[StageIteration] | None = None
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
 

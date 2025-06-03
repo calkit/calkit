@@ -596,14 +596,13 @@ def new_docker_env(
     """Create a new Docker environment."""
     if base is not None and path is None:
         path = "Dockerfile"
-    assert isinstance(path, str)
-    if base and os.path.isfile(path) and not overwrite:
+    if path is not None and base and os.path.isfile(path) and not overwrite:
         raise_error("Output path already exists (use -f to overwrite)")
     if image_name is None:
         typer.echo("No image name specified; using environment name")
         image_name = name
     repo = git.Repo()
-    if base:
+    if base and path is not None:
         txt = "FROM " + base + "\n\n"
         for layer in layers:
             if layer not in LAYERS:

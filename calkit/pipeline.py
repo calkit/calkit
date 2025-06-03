@@ -5,7 +5,7 @@ import os
 import typer
 
 import calkit
-from calkit.models.pipeline import Pipeline
+from calkit.models.pipeline import InputsFromStageOutputs, Pipeline
 
 
 def to_dvc(
@@ -83,6 +83,14 @@ def to_dvc(
         ):
             dvc_stage["deps"].append(env_lock_fpath)
         dvc_stages[stage_name] = dvc_stage
+    # Now process any inputs from stage outputs
+    for stage_name, stage in pipeline.stages.items():
+        for i in stage.inputs:
+            if isinstance(i, InputsFromStageOutputs):
+                dvc_outs = dvc_stages[i.from_stage_outputs]["outs"]
+                for out in dvc_outs:
+                    if out not in dvc_stages[stage_name]["deps"]:
+                        dvc_stages[stage_name]["deps"].append(out)
     if write:
         if os.path.isfile("dvc.yaml"):
             with open("dvc.yaml") as f:

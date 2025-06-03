@@ -37,6 +37,10 @@ class DatabaseTableInput(Input):
     table_name: str
 
 
+class InputsFromStageOutputs(BaseModel):
+    from_stage_outputs: str
+
+
 class PathOutput(BaseModel):
     path: str
     storage: Literal["git", "dvc"] | None = "dvc"
@@ -67,7 +71,8 @@ class Stage(BaseModel):
     ]
     environment: str
     wdir: str | None = None
-    inputs: list[str] = []  # TODO: Support other input types
+    # TODO: Support other input types
+    inputs: list[str | InputsFromStageOutputs] = []
     outputs: list[str | PathOutput] = []  # TODO: Support database outputs
     always_run: bool = False
     # Do not allow extra keys
@@ -81,7 +86,7 @@ class Stage(BaseModel):
     def dvc_deps(self) -> list[str]:
         deps = []
         for i in self.inputs:
-            if i not in deps:
+            if isinstance(i, str) and i not in deps:
                 deps.append(i)
         return deps
 
@@ -107,11 +112,15 @@ class Stage(BaseModel):
         return f"calkit xenv -n {self.environment} --no-check"
 
     def to_dvc(self) -> dict:
-        """Convert to a DVC stage."""
+        """Convert to a DVC stage.
+
+        Note that this does not handle ``from_stage_outputs`` input types,
+        since that requires the entire pipeline.
+        """
         cmd = self.dvc_cmd
         deps = self.dvc_deps
         for i in self.inputs:
-            if i not in deps:
+            if isinstance(i, str) and i not in deps:
                 deps.append(i)
         outs = self.dvc_outs
         stage = {"cmd": cmd, "deps": deps, "outs": outs}

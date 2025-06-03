@@ -114,8 +114,8 @@ def to_dvc(
             dvc_yaml = {}
         existing_stages = dvc_yaml.get("stages", {})
         for stage_name, stage in existing_stages.items():
-            # TODO: Skip private stages
-            if stage_name not in dvc_stages:
+            # Skip private stages (ones whose names start with an underscore)
+            if not stage_name.startwith("_") and stage_name not in dvc_stages:
                 dvc_stages[stage_name] = stage
         dvc_yaml["stages"] = dvc_stages
         with open("dvc.yaml", "w") as f:

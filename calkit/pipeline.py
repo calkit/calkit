@@ -71,7 +71,7 @@ def to_dvc(
         stage = dict(cmd=cmd, deps=deps, outs=outs, always_changed=True)
         # TODO: Rationalize stage naming and ensure we remove all private
         # stages
-        dvc_stages[f"_check_env_{env_name}"] = stage
+        dvc_stages[f"_check-env-{env_name}"] = stage
         env_lock_fpaths[env_name] = lock_fpath
     # Now convert Calkit stages into DVC stages
     for stage_name, stage in pipeline.stages.items():

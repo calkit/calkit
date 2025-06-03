@@ -119,7 +119,7 @@ def load_calkit_info_object(
     wdir: str | None = None,
     process_includes: bool | str | list[str] = False,
 ) -> ProjectInfo:
-    """Load Calkit project information as a ProjectInfo object."""
+    """Load Calkit project information as a ``ProjectInfo`` object."""
     return ProjectInfo.model_validate(
         load_calkit_info(wdir=wdir, process_includes=process_includes)
     )

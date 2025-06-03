@@ -2,10 +2,11 @@
 
 import os
 
+import git
 import typer
 
 import calkit
-from calkit.models.pipeline import InputsFromStageOutputs, Pipeline
+from calkit.models.pipeline import InputsFromStageOutputs, PathOutput, Pipeline
 
 
 def to_dvc(
@@ -83,6 +84,20 @@ def to_dvc(
         ):
             dvc_stage["deps"].append(env_lock_fpath)
         dvc_stages[stage_name] = dvc_stage
+        # Check for any outputs that should be ignored
+        if write:
+            repo = git.Repo(wdir)
+            for out in stage.outputs:
+                if (
+                    isinstance(out, PathOutput)
+                    and out.storage is None
+                    and not repo.ignored(out.path)
+                ):
+                    gitignore_path = ".gitignore"
+                    if wdir is not None:
+                        gitignore_path = os.path.join(wdir, gitignore_path)
+                    with open(gitignore_path, "a") as f:
+                        f.write("\n" + out.path + "\n")
     # Now process any inputs from stage outputs
     for stage_name, stage in pipeline.stages.items():
         for i in stage.inputs:

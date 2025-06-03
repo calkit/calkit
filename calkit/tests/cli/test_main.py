@@ -208,7 +208,7 @@ def test_run_in_venv(tmp_dir):
             "polars==1.16.0",
         ]
     )
-    ck_info = calkit.load_calkit_info(as_pydantic=True)
+    ck_info = calkit.load_calkit_info_object()
     envs = ck_info.environments
     assert "my-pixi" in envs
     out = (
@@ -326,6 +326,7 @@ def test_status(tmp_dir):
     subprocess.check_call(["calkit", "new", "status", "in-progress"])
     subprocess.check_call(["calkit", "status"])
     status = calkit.get_latest_project_status()
+    assert status is not None
     assert status.status == "in-progress"
     assert not status.message
     subprocess.check_call(
@@ -333,11 +334,12 @@ def test_status(tmp_dir):
     )
     subprocess.check_call(["calkit", "status"])
     status = calkit.get_latest_project_status()
+    assert status is not None
     assert status.status == "completed"
     assert status.message == "We're done."
     history = calkit.get_project_status_history()
     assert history[-1] == status
-    calkit.get_project_status_history(as_pydantic=False)
+    calkit.get_project_status_history()
     with pytest.raises(subprocess.CalledProcessError):
         subprocess.check_call(["calkit", "new", "status", "very-cool"])
 

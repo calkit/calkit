@@ -182,9 +182,10 @@ def test_new_uv_venv(tmp_dir):
             "matplotlib",
         ]
     )
-    ck_info = calkit.load_calkit_info(as_pydantic=True)
+    ck_info = calkit.load_calkit_info_object()
     envs = ck_info.environments
     env = envs["my-uv-venv"]
+    assert isinstance(env, calkit.models.UvVenvEnvironment)
     assert env.path == "requirements.txt"
     assert env.prefix == ".venv"
     assert env.kind == "uv-venv"
@@ -203,9 +204,10 @@ def test_new_uv_venv(tmp_dir):
             "matplotlib",
         ]
     )
-    ck_info = calkit.load_calkit_info(as_pydantic=True)
+    ck_info = calkit.load_calkit_info_object()
     envs = ck_info.environments
     env = envs["my-uv-venv2"]
+    assert isinstance(env, calkit.models.UvVenvEnvironment)
     assert env.path == "requirements-2.txt"
     assert env.prefix == ".venv2"
     assert env.kind == "uv-venv"

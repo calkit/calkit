@@ -13,7 +13,7 @@ def to_dvc(
 ) -> dict:
     """Transpile a Calkit pipeline to a DVC pipeline."""
     if ck_info is None:
-        ck_info = dict(calkit.load_calkit_info(wdir=wdir))
+        ck_info = calkit.load_calkit_info(wdir=wdir)
     if "pipeline" not in ck_info:
         raise ValueError("No pipeline found in calkit.yaml")
     try:

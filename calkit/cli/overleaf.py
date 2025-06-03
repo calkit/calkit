@@ -132,7 +132,7 @@ def import_publication(
     overleaf_project_id = src_url.split("/")[-1]
     if not overleaf_project_id:
         raise_error("Invalid Overleaf project ID")
-    ck_info = dict(calkit.load_calkit_info(process_includes="environments"))
+    ck_info = calkit.load_calkit_info(process_includes="environments")
     pubs = ck_info.get("publications", [])
     # TODO: Don't allow the same Overleaf project ID in multiple publications
     # Determine the PDF output path
@@ -286,7 +286,7 @@ def sync(
     """Sync publications with Overleaf."""
     # TODO: We should probably ensure the pipeline isn't stale
     # Find all publications with Overleaf projects linked
-    ck_info = dict(calkit.load_calkit_info())
+    ck_info = calkit.load_calkit_info()
     pubs = ck_info.get("publications", [])
     if paths is not None:
         for path in paths:

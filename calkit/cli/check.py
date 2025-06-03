@@ -339,7 +339,7 @@ def check_matlab_env(
     """Check a MATLAB environment matches its spec and export a JSON lock
     file.
     """
-    ck_info = dict(calkit.load_calkit_info())
+    ck_info = calkit.load_calkit_info()
     environments = ck_info.get("environments", {})
     if env_name not in environments:
         raise_error(f"Environment '{env_name}' not found in calkit.yaml")
@@ -381,7 +381,7 @@ def check_env_vars():
     """Check that the project's required environmental variables exist."""
     typer.echo("Checking project environmental variables")
     dotenv.load_dotenv(dotenv_path=".env")
-    ck_info = dict(calkit.load_calkit_info())
+    ck_info = calkit.load_calkit_info()
     deps = ck_info.get("dependencies", [])
     env_var_deps = {}
     for d in deps:
@@ -427,7 +427,7 @@ def check_pipeline(
     """Check that the project pipeline is defined correctly."""
     from calkit.models.pipeline import Pipeline
 
-    ck_info = dict(calkit.load_calkit_info())
+    ck_info = calkit.load_calkit_info()
     if "pipeline" not in ck_info:
         raise_error("No pipeline is defined in calkit.yaml")
     try:

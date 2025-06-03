@@ -71,9 +71,8 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
 def load_calkit_info(
     wdir: str | None = None,
     process_includes: bool | str | list[str] = False,
-    as_pydantic: bool = False,
-) -> dict | ProjectInfo:
-    """Load Calkit project information.
+) -> dict:
+    """Load Calkit project information as a dictionary.
 
     Parameters
     ----------
@@ -113,9 +112,17 @@ def load_calkit_info(
                             with open(include_fpath) as f:
                                 include_data = ryaml.load(f)
                             info[kind][obj_name] |= include_data
-    if as_pydantic:
-        return ProjectInfo.model_validate(info)
     return info
+
+
+def load_calkit_info_object(
+    wdir: str | None = None,
+    process_includes: bool | str | list[str] = False,
+) -> ProjectInfo:
+    """Load Calkit project information as a ProjectInfo object."""
+    return ProjectInfo.model_validate(
+        load_calkit_info(wdir=wdir, process_includes=process_includes)
+    )
 
 
 def utcnow(remove_tz=True) -> datetime:
@@ -273,7 +280,7 @@ def check_system_deps(wdir: str | None = None) -> None:
     """Check that the dependencies declared in a project's ``calkit.yaml`` file
     exist.
     """
-    ck_info = dict(load_calkit_info(wdir=wdir))
+    ck_info = load_calkit_info(wdir=wdir)
     deps = ck_info.get("dependencies", [])
     if "git" not in deps:
         deps.append("git")
@@ -426,7 +433,7 @@ def get_latest_project_status(wdir: str | None = None) -> ProjectStatus | None:
 
 def detect_project_name(wdir: str | None = None) -> str:
     """Detect a Calkit project owner and name."""
-    ck_info = dict(load_calkit_info(wdir=wdir))
+    ck_info = load_calkit_info(wdir=wdir)
     name = ck_info.get("name")
     owner = ck_info.get("owner")
     if name is None or owner is None:

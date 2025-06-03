@@ -246,7 +246,7 @@ def new_project(
             typer.echo("Setting origin remote URL")
             repo.git.remote(["add", "origin", git_repo_url])
         # Update Calkit info in this project
-        ck_info = dict(calkit.load_calkit_info(wdir=abs_path))
+        ck_info = calkit.load_calkit_info(wdir=abs_path)
         ck_info = ck_info | dict(
             name=name,
             title=title,
@@ -596,6 +596,7 @@ def new_docker_env(
     """Create a new Docker environment."""
     if base is not None and path is None:
         path = "Dockerfile"
+    assert isinstance(path, str)
     if base and os.path.isfile(path) and not overwrite:
         raise_error("Output path already exists (use -f to overwrite)")
     if image_name is None:
@@ -613,7 +614,7 @@ def new_docker_env(
         with open(path, "w") as f:
             f.write(txt)
     # Add environment to Calkit info
-    ck_info = dict(calkit.load_calkit_info())
+    ck_info = calkit.load_calkit_info()
     # If environments is a list instead of a dict, reformulate it
     envs = ck_info.get("environments", {})
     if isinstance(envs, list):
@@ -1502,7 +1503,7 @@ def _save_stage(
     no_commit: bool = False,
 ) -> None:
     """Save a Calkit pipeline stage."""
-    ck_info = dict(calkit.load_calkit_info())
+    ck_info = calkit.load_calkit_info()
     if "pipeline" not in ck_info:
         ck_info["pipeline"] = {}
     if "stages" not in ck_info["pipeline"]:
@@ -2241,7 +2242,7 @@ def new_stage(
     ] = False,
 ):
     """Create a new DVC pipeline stage (deprecated)."""
-    ck_info = dict(calkit.load_calkit_info(process_includes="environments"))
+    ck_info = calkit.load_calkit_info(process_includes="environments")
     environments = ck_info.get("environments", {})
     if environment is None:
         warn("No environment is specified")

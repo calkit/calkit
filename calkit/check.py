@@ -206,7 +206,7 @@ def check_reproducibility(
     else:
         res["has_readme"] = False
         res["instructions_in_readme"] = False
-    ck_info = dict(calkit.load_calkit_info(wdir=wdir, process_includes=False))
+    ck_info = calkit.load_calkit_info(wdir=wdir, process_includes=False)
     pipeline = calkit.dvc.read_pipeline(wdir=wdir)
     # Check for non-imported artifacts not produced by the pipeline
     for artifact_type in ["datasets", "figures", "publications"]:

@@ -278,7 +278,7 @@ def import_environment(
         src_project_name = project
         # TODO: Parse information we need from the response
     # Write environment into current Calkit info
-    ck_info = dict(calkit.load_calkit_info())
+    ck_info = calkit.load_calkit_info()
     environments = ck_info.get("environments", {})
     # Check if an environment with this name already exists
     if dest_name is None:

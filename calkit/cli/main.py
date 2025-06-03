@@ -715,7 +715,7 @@ def run(
     except Exception as e:
         raise_error(str(e))
     # Compile the pipeline
-    ck_info = dict(calkit.load_calkit_info())
+    ck_info = calkit.load_calkit_info()
     if ck_info.get("pipeline", {}):
         typer.echo("Compiling DVC pipeline")
         calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
@@ -839,7 +839,7 @@ def run_in_env(
     ] = False,
 ):
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
-    ck_info = dict(calkit.load_calkit_info(process_includes="environments"))
+    ck_info = calkit.load_calkit_info(process_includes="environments")
     envs = ck_info.get("environments", {})
     if not envs:
         raise_error("No environments defined in calkit.yaml")
@@ -1144,7 +1144,7 @@ def run_procedure(
             return bool(value)
         return value
 
-    ck_info = dict(calkit.load_calkit_info(process_includes="procedures"))
+    ck_info = calkit.load_calkit_info(process_includes="procedures")
     procs = ck_info.get("procedures", {})
     if name not in procs:
         raise_error(f"'{name}' is not defined as a procedure")
@@ -1270,7 +1270,7 @@ def run_calculation(
     ] = False,
 ):
     """Run a project's calculation."""
-    ck_info = dict(calkit.load_calkit_info())
+    ck_info = calkit.load_calkit_info()
     calcs = ck_info.get("calculations", {})
     if name not in calcs:
         raise_error(f"Calculation '{name}' not defined in calkit.yaml")

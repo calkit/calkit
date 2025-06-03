@@ -253,6 +253,34 @@ class RScriptStage(Stage):
         return cmd
 
 
+class JupyterNotebookStage(Stage):
+    """A stage that runs a Jupyter notebook.
+
+    Notebooks need to be cleaned of outputs so they can be used as DVC
+    dependencies. This means we will have two DVC stages:
+
+    1. Notebook cleaning.
+    2. Notebook running, depending on the cleaned notebook, and optionally
+       producing HTML output.
+
+    TODO: Can/should we do something like Papermill and let users modify
+    parameters in the notebook?
+
+    With this paradigm, we want to force users treat their notebooks as
+    needing to be run from top to bottom every time they change.
+    """
+
+    kind: Literal["jupyter-notebook"]
+    notebook_path: str
+    store_cleaned_with: Literal["git", "dvc"] | None = "git"
+    store_executed_ipynb_with: Literal["git", "dvc"] | None = "dvc"
+    store_executed_html_with: Literal["git", "dvc"] | None = "dvc"
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.notebook_path] + super().dvc_deps
+
+
 class Pipeline(BaseModel):
     stages: dict[
         str,

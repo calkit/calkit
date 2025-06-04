@@ -92,7 +92,7 @@ def to_dvc(
             for iteration in stage.iterate_over:
                 arg_name = iteration.arg_name
                 dvc_matrix[arg_name] = iteration.expand_values(
-                    params=ck_info["parameters"]
+                    params=ck_info.get("parameters", {})
                 )
                 # Now replace arg name in cmd, deps, and outs with
                 # ${item.{arg_name}}

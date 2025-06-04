@@ -197,7 +197,7 @@ class MatlabScriptStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        return f"matlab -noFigureWindows -batch \"run('{self.script_path}');\""
+        return f"{self.xenv_cmd} -- \"run('{self.script_path}');\""
 
 
 class ShellCommandStage(Stage):

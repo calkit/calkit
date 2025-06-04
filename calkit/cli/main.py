@@ -1152,6 +1152,9 @@ def run_in_env(
             "-e",
             f"MLM_LICENSE_FILE={license_server}",
             image_name,
+            "-sd",
+            "/work",
+            "-noFigureWindows",
             "-batch",
             " ".join(cmd),
         ]

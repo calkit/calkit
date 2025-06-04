@@ -21,6 +21,7 @@ from git.exc import InvalidGitRepositoryError
 from typing_extensions import Annotated, Optional
 
 import calkit
+import calkit.matlab
 import calkit.pipeline
 from calkit.cli import print_sep, raise_error, run_cmd, warn
 from calkit.cli.check import (
@@ -1128,14 +1129,36 @@ def run_in_env(
                     env=env, env_name=env_name, as_posix=False
                 ),  # type: ignore
             )
-        matlab_cmd = [
-            "matlab",
-            "-noFigureWindows",
+        image_name = calkit.matlab.get_docker_image_name(
+            ck_info=ck_info,
+            env_name=env_name,
+        )
+        license_server = os.getenv("MATLAB_LICENSE_SERVER")
+        if license_server is None:
+            raise_error(
+                "MATLAB_LICENSE_SERVER environment variable must be set"
+            )
+        docker_cmd = [
+            "docker",
+            "run",
+            "--platform",
+            "linux/amd64",  # Ensure compatibility with MATLAB
+            "-it" if sys.stdin.isatty() else "-i",
+            "--rm",
+            "-w",
+            "/work",
+            "-v",
+            f"{os.getcwd()}:/work",
+            "-e",
+            f"MLM_LICENSE_FILE={license_server}",
+            image_name,
             "-batch",
             " ".join(cmd),
         ]
+        if verbose:
+            typer.echo(f"Running command: {docker_cmd}")
         try:
-            subprocess.check_call(matlab_cmd, cwd=wdir)
+            subprocess.check_call(docker_cmd, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error("Failed to run in MATLAB environment")
     else:

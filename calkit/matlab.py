@@ -108,3 +108,8 @@ def create_dockerfile(
         with open(fpath_out, "w") as f:
             f.write(dockerfile_txt)
     return dockerfile_txt
+
+
+def get_docker_image_name(ck_info: dict, env_name: str) -> str:
+    project_name = ck_info.get("name", "calkit")
+    return f"{project_name.lower()}-{env_name.lower()}"

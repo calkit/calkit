@@ -57,7 +57,7 @@ def to_dvc(
             cmd = "calkit check venv"
             if env_fpath is None:
                 raise ValueError("venvs require a path")
-            cmd += f" {env_fpath}"
+            cmd += f" {env_fpath} -o {lock_fpath}"
         elif env_kind == "conda":
             cmd = "calkit check conda-env"
             if env_fpath is None:

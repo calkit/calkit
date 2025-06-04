@@ -1,5 +1,6 @@
 """Pipeline-related functionality."""
 
+import itertools
 import os
 
 import git
@@ -12,6 +13,22 @@ from calkit.models.pipeline import (
     PathOutput,
     Pipeline,
 )
+
+
+def _expand_matrix(input_dict: dict[str, list]) -> list[dict]:
+    """Restructure a dictionary with list values into a list of dictionaries,
+    where each dictionary represents a permutation of the input dictionary's
+    values.
+    """
+    keys = list(input_dict.keys())
+    values = list(input_dict.values())
+    # Create all combinations of values using itertools.product
+    combinations = itertools.product(*values)
+    # Create a list of dictionaries
+    list_of_dicts = []
+    for combination in combinations:
+        list_of_dicts.append(dict(zip(keys, combination)))
+    return list_of_dicts
 
 
 def to_dvc(
@@ -156,10 +173,30 @@ def to_dvc(
                 dvc_outs = dvc_stages[i.from_stage_outputs]["outs"]
                 for out in dvc_outs:
                     if out not in dvc_stages[stage_name]["deps"]:
-                        # TODO: Handle cases where outs are from a matrix
+                        # Handle cases where outs are from a matrix,
+                        # in which case this output could become a list of
+                        # outputs
                         if isinstance(out, dict):
                             out = list(out.keys())[0]
-                        dvc_stages[stage_name]["deps"].append(out)
+                        if "${item." in out:
+                            extra_outs = []
+                            dvc_matrix = dvc_stages[i.from_stage_outputs][
+                                "matrix"
+                            ]
+                            replacements = _expand_matrix(dvc_matrix)
+                            for r in replacements:
+                                out_i = out
+                                for var_name, var_val in r.items():
+                                    out_i = out_i.replace(
+                                        f"${{item.{var_name}}}",
+                                        str(var_val),
+                                    )
+                                extra_outs.append(out_i)
+                            extra_outs = list(set(extra_outs))
+                            for out_i in extra_outs:
+                                dvc_stages[stage_name]["deps"].append(out_i)
+                        else:
+                            dvc_stages[stage_name]["deps"].append(out)
     if write:
         if os.path.isfile("dvc.yaml"):
             with open("dvc.yaml") as f:

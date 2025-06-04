@@ -124,3 +124,42 @@ def test_to_dvc():
     outs = dvc_stages["process-data"]["outs"]
     assert outs[0] == "out-${item.param_a}.txt"
     print(dvc_stages)
+
+
+def test_to_dvc_from_matrix_outs():
+    # Test that we can define inputs from matrix stage outputs
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "get-data": {
+                    "kind": "python-script",
+                    "environment": "something",
+                    "script_path": "something/my-cool-script.py",
+                    "iterate_over": [
+                        {"arg_name": "var1", "values": [1, 2, 3]},
+                        {"arg_name": "var2", "values": ["a", "b", "c"]},
+                    ],
+                    "outputs": [
+                        "out-{var1}-{var2}.out",
+                    ],
+                },
+                "process-data": {
+                    "kind": "python-script",
+                    "script_path": "something.py",
+                    "environment": "py",
+                    "inputs": [
+                        {"from_stage_outputs": "get-data"},
+                        "something.else.txt",
+                    ],
+                },
+            }
+        }
+    }
+    dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    print(dvc_stages)
+    for var1 in [1, 2, 3]:
+        for var2 in ["a", "b", "c"]:
+            assert (
+                f"out-{var1}-{var2}.out" in dvc_stages["process-data"]["deps"]
+            )
+    assert "something.else.txt" in dvc_stages["process-data"]["deps"]

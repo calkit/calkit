@@ -156,6 +156,7 @@ def to_dvc(
                 dvc_outs = dvc_stages[i.from_stage_outputs]["outs"]
                 for out in dvc_outs:
                     if out not in dvc_stages[stage_name]["deps"]:
+                        # TODO: Handle cases where outs are from a matrix
                         if isinstance(out, dict):
                             out = list(out.keys())[0]
                         dvc_stages[stage_name]["deps"].append(out)

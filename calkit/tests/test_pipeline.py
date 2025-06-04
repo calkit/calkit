@@ -74,3 +74,53 @@ def test_to_dvc():
     print(dvc_stages)
     assert "my-output.out" in dvc_stages["process-data"]["deps"]
     assert "something.else.txt" in dvc_stages["process-data"]["deps"]
+    # Test a complex pipeline with iterations and parameters
+    ck_info = {
+        "parameters": {
+            "param1": [{"range": {"start": 5, "stop": 23, "step": 2}}],
+            "param2": ["s", "m", "l"],
+            "param3": [
+                {"range": {"start": 0.1, "stop": 1.1, "step": 0.11}},
+                55,
+                "something",
+            ],
+        },
+        "pipeline": {
+            "stages": {
+                "get-data": {
+                    "kind": "python-script",
+                    "environment": "something",
+                    "script_path": "something/my-cool-script.py",
+                    "args": ["{my_parameter}"],
+                    "outputs": [
+                        "my-output.out",
+                    ],
+                    "iterate_over": [
+                        {"arg_name": "my_parameter", "values": [1, 2, 3.5]}
+                    ],
+                },
+                "process-data": {
+                    "kind": "python-script",
+                    "script_path": "something.py",
+                    "args": ["--something", "{param_a}"],
+                    "environment": "py",
+                    "inputs": ["my-input-{param_a}"],
+                    "outputs": ["out-{param_a}.txt"],
+                    "iterate_over": [
+                        {
+                            "arg_name": "param_a",
+                            "values": [{"parameter": "param3"}],
+                        }
+                    ],
+                },
+            }
+        },
+    }
+    dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    matrix = dvc_stages["process-data"]["matrix"]
+    assert matrix["param_a"][0] == 0.1
+    assert 55 in matrix["param_a"]
+    assert "something" in matrix["param_a"]
+    outs = dvc_stages["process-data"]["outs"]
+    assert outs[0] == "out-${item.param_a}.txt"
+    print(dvc_stages)

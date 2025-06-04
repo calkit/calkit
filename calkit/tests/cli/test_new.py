@@ -557,7 +557,7 @@ def test_new_matlab_script_stage(tmp_dir):
     subprocess.check_call(["calkit", "check", "pipeline", "--compile"])
     pipeline = calkit.dvc.read_pipeline()
     assert pipeline["stages"]["run-script1"]["cmd"] == (
-        "matlab -noFigureWindows -batch \"run('scripts/script.m');\""
+        "calkit xenv -n matlab1 --no-check -- \"run('scripts/script.m');\""
     )
     assert set(pipeline["stages"]["run-script1"]["deps"]) == set(
         ["scripts/script.m", ".calkit/env-locks/matlab1.json"]

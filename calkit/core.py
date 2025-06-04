@@ -293,6 +293,10 @@ def check_system_deps(wdir: str | None = None) -> None:
             deps.append("uv")
         elif kind == "renv" and "Rscript" not in deps:
             deps.append("Rscript")
+        elif kind == "matlab":
+            if "docker" not in deps:
+                deps.append("docker")
+            deps.append({"MATLAB_LICENSE_SERVER": {"kind": "env-var"}})
     for dep in deps:
         if isinstance(dep, dict):
             keys = list(dep.keys())

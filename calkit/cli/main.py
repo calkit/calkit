@@ -27,6 +27,7 @@ from calkit.cli.check import (
     check_app,
     check_conda_env,
     check_docker_env,
+    check_matlab_env,
     check_venv,
 )
 from calkit.cli.cloud import cloud_app
@@ -1119,6 +1120,24 @@ def run_in_env(
             subprocess.check_call(cmd, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error("Failed to run in renv")
+    elif env["kind"] == "matlab":
+        if not no_check:
+            check_matlab_env(
+                env_name=env_name,
+                output_fpath=get_env_lock_fpath(
+                    env=env, env_name=env_name, as_posix=False
+                ), # type: ignore
+            )
+        matlab_cmd = [
+            "matlab",
+            "-noFigureWindows",
+            "-batch",
+            " ".join(cmd),
+        ]
+        try:
+            subprocess.check_call(matlab_cmd, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in MATLAB environment")
     else:
         raise_error("Environment kind not supported")
 

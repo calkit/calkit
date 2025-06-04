@@ -7,6 +7,12 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Discriminator
 from typing_extensions import Annotated
 
+from calkit.models.iteration import (
+    ParameterIteration,
+    ParametersType,
+    RangeIteration,
+)
+
 
 class Input(BaseModel):
     kind: Literal["path", "python-object", "file-segment", "database-table"]
@@ -56,23 +62,20 @@ class DatabaseTableOutput(BaseModel):
     table_name: str
 
 
-class RangeIterationParams(BaseModel):
-    start: int | float
-    stop: int | float
-    step: int | float = 1
-
-
-class RangeIteration(BaseModel):
-    range: RangeIterationParams
-
-
-class ParameterIteration(BaseModel):
-    parameter: str
-
-
 class StageIteration(BaseModel):
     arg_name: str
     values: list[int | float | str | RangeIteration | ParameterIteration]
+
+    def expand_values(self, params: ParametersType) -> list[int | float | str]:
+        vals = []
+        for vals_i in self.values:
+            if isinstance(vals_i, ParameterIteration):
+                vals += vals_i.values_from_params(params)
+            elif isinstance(vals_i, RangeIteration):
+                vals += vals_i.values
+            else:
+                vals.append(vals_i)
+        return vals
 
 
 class Stage(BaseModel):

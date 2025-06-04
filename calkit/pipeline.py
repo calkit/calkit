@@ -7,7 +7,11 @@ import typer
 
 import calkit
 from calkit.environments import get_env_lock_fpath
-from calkit.models.pipeline import InputsFromStageOutputs, PathOutput, Pipeline
+from calkit.models.pipeline import (
+    InputsFromStageOutputs,
+    PathOutput,
+    Pipeline,
+)
 
 
 def to_dvc(
@@ -79,6 +83,57 @@ def to_dvc(
             and env_lock_fpath not in dvc_stage["deps"]
         ):
             dvc_stage["deps"].append(env_lock_fpath)
+        # Check if this stage iterates, which means we should create a matrix
+        # stage
+        if stage.iterate_over is not None:
+            # Process a list of iterations into a DVC matrix stage
+            dvc_matrix = {}
+            format_dict = {}
+            for iteration in stage.iterate_over:
+                arg_name = iteration.arg_name
+                dvc_matrix[arg_name] = iteration.expand_values(
+                    params=ck_info["parameters"]
+                )
+                # Now replace arg name in cmd, deps, and outs with
+                # ${item.{arg_name}}
+                format_dict[arg_name] = f"${{item.{arg_name}}}"
+            try:
+                cmd = dvc_stage["cmd"]
+                cmd = cmd.format(**format_dict)
+                dvc_stage["cmd"] = cmd
+            except Exception as e:
+                raise ValueError(
+                    (
+                        f"Failed to format cmd '{cmd}': "
+                        f"{e.__class__.__name__}: {e}"
+                    )
+                )
+            formatted_deps = []
+            formatted_outs = []
+            for dep in dvc_stage.get("deps", []):
+                try:
+                    formatted_deps.append(dep.format(**format_dict))
+                except Exception as e:
+                    raise ValueError(
+                        (
+                            f"Failed to format dep '{dep}': "
+                            f"{e.__class__.__name__}: {e}"
+                        )
+                    )
+            for out in dvc_stage.get("outs", []):
+                if isinstance(out, dict):
+                    formatted_outs.append(
+                        {
+                            str(list(out.keys())[0]).format(
+                                **format_dict
+                            ): dict(list(out.values())[0])
+                        }
+                    )
+                else:
+                    formatted_outs.append(out.format(**format_dict))
+            dvc_stage["deps"] = formatted_deps
+            dvc_stage["outs"] = formatted_outs
+            dvc_stage["matrix"] = dvc_matrix
         dvc_stages[stage_name] = dvc_stage
         # Check for any outputs that should be ignored
         if write:
@@ -101,12 +156,16 @@ def to_dvc(
                 dvc_outs = dvc_stages[i.from_stage_outputs]["outs"]
                 for out in dvc_outs:
                     if out not in dvc_stages[stage_name]["deps"]:
+                        if isinstance(out, dict):
+                            out = list(out.keys())[0]
                         dvc_stages[stage_name]["deps"].append(out)
     if write:
         if os.path.isfile("dvc.yaml"):
             with open("dvc.yaml") as f:
                 dvc_yaml = calkit.ryaml.load(f)
         else:
+            dvc_yaml = {}
+        if dvc_yaml is None:
             dvc_yaml = {}
         existing_stages = dvc_yaml.get("stages", {})
         for stage_name, stage in existing_stages.items():

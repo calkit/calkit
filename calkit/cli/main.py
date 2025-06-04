@@ -38,6 +38,7 @@ from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
 from calkit.cli.overleaf import overleaf_app
 from calkit.cli.update import update_app
+from calkit.environments import get_env_lock_fpath
 from calkit.models import Procedure
 
 app = typer.Typer(
@@ -861,6 +862,7 @@ def run_in_env(
         env_name = default_env_name
     if env_name is None:
         raise_error("Environment must be specified if there are multiple")
+    assert isinstance(env_name, str)
     if env_name not in envs:
         raise_error(f"Environment '{env_name}' does not exist")
     env = envs[env_name]
@@ -878,6 +880,9 @@ def run_in_env(
             check_docker_env(
                 tag=env["image"],
                 fpath=env["path"],
+                lock_fpath=get_env_lock_fpath(
+                    env=env, env_name=env_name, as_posix=False
+                ),
                 platform=env.get("platform"),
                 deps=env.get("deps", []),
                 quiet=not verbose,
@@ -925,6 +930,9 @@ def run_in_env(
         if not no_check:
             check_conda_env(
                 env_fpath=env["path"],
+                output_fpath=get_env_lock_fpath(
+                    env=env, env_name=env_name, as_posix=False
+                ),
                 relaxed=relaxed_check,
                 quiet=not verbose,
             )
@@ -975,6 +983,9 @@ def run_in_env(
                 prefix=prefix,
                 use_uv=kind == "uv-venv",
                 python=env.get("python"),
+                lock_fpath=get_env_lock_fpath(
+                    env=env, env_name=env_name, as_posix=False
+                ),
                 wdir=wdir,
                 verbose=verbose,
             )

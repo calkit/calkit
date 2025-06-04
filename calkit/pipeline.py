@@ -6,6 +6,7 @@ import git
 import typer
 
 import calkit
+from calkit.environments import get_env_lock_fpath
 from calkit.models.pipeline import InputsFromStageOutputs, PathOutput, Pipeline
 
 
@@ -24,11 +25,14 @@ def to_dvc(
     dvc_stages = {}
     # First, create stages for checking/exporting all environments
     env_lock_fpaths = {}
-    env_lock_dir = os.path.join(".calkit/env-locks")
     for env_name, env in ck_info.get("environments", {}).items():
         env_fpath = env.get("path")
         env_kind = env.get("kind")
-        lock_fpath = os.path.join(env_lock_dir, env_name)
+        lock_fpath = get_env_lock_fpath(
+            env=env, env_name=env_name, as_posix=True
+        )
+        if lock_fpath is None:
+            continue
         deps = []
         outs = []
         if env_fpath is not None:
@@ -39,7 +43,6 @@ def to_dvc(
             if image is None:
                 raise ValueError("Docker image must be specified")
             cmd += f" {image}"
-            lock_fpath += ".json"
             if env_fpath is not None:
                 cmd += f" -i {env_fpath}"
             cmd += f" -o {lock_fpath}"
@@ -51,21 +54,16 @@ def to_dvc(
             if env_fpath is None:
                 raise ValueError("venvs require a path")
             cmd += f" {env_fpath}"
-            lock_fpath += ".txt"
         elif env_kind == "conda":
             cmd = "calkit check conda-env"
             if env_fpath is None:
                 raise ValueError("Conda envs require a path")
-            lock_fpath += ".yml"
             cmd += f" --file {env_fpath} --output {lock_fpath}"
             if env.get("relaxed"):
                 cmd += " --relaxed"
         elif env_kind == "matlab":
             cmd = "calkit check matlab-env"
-            lock_fpath += ".json"
             cmd += f" --name {env_name} --output {lock_fpath}"
-        else:
-            continue
         # TODO: Add more env types
         outs.append({lock_fpath: dict(cache=False, persist=True)})
         stage = dict(cmd=cmd, deps=deps, outs=outs, always_changed=True)

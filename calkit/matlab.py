@@ -1,5 +1,6 @@
 """Functionality for working with MATLAB."""
 
+import hashlib
 from typing import Literal
 
 DOCKERFILE_TEMPLATE = r"""
@@ -111,5 +112,11 @@ def create_dockerfile(
 
 
 def get_docker_image_name(ck_info: dict, env_name: str) -> str:
-    project_name = ck_info.get("name", "calkit")
-    return f"{project_name.lower()}-{env_name.lower()}"
+    env = ck_info["environments"][env_name]
+    products = env.get("products", [])
+    version = env.get("version")
+    # Compute MD5 hash of products list to create a unique image tag
+    products_md5 = hashlib.md5(
+        " ".join(sorted(products)).encode("utf-8")
+    ).hexdigest()[:8]
+    return f"matlab:{version.lower()}-{products_md5}"

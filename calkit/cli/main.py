@@ -1126,7 +1126,7 @@ def run_in_env(
                 env_name=env_name,
                 output_fpath=get_env_lock_fpath(
                     env=env, env_name=env_name, as_posix=False
-                ), # type: ignore
+                ),  # type: ignore
             )
         matlab_cmd = [
             "matlab",

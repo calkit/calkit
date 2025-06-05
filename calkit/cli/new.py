@@ -1616,7 +1616,7 @@ def new_python_script_stage(
     overwrite: StageArgs.overwrite = False,
     no_check: StageArgs.no_check = False,
     no_commit: StageArgs.no_commit = False,
-):
+) -> None:
     """Add a stage to the pipeline that runs a Python script."""
     ck_outs = _to_ck_outs(
         outputs=outputs,

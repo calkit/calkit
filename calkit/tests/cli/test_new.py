@@ -159,14 +159,11 @@ def test_new_publication(tmp_dir):
         "_include": ".calkit/environments/my-latex-env.yaml"
     }
     assert ck_info["publications"][0]["path"] == "my-paper/paper.pdf"
-    with open("dvc.yaml") as f:
-        dvc_pipeline = calkit.ryaml.load(f)
-    print(dvc_pipeline)
-    stage = dvc_pipeline["stages"]["build-latex-article"]
-    assert stage["cmd"] == (
-        "calkit xenv -n my-latex-env -- "
-        "latexmk -cd -interaction=nonstopmode -pdf my-paper/paper.tex"
-    )
+    stage = ck_info["pipeline"]["stages"]["build-latex-article"]
+    assert stage["kind"] == "latex"
+    assert stage["environment"] == "my-latex-env"
+    assert stage["target"] == "my-paper/paper.tex"
+    assert stage["outputs"] == ["my-paper/paper.pdf"]
 
 
 def test_new_uv_venv(tmp_dir):

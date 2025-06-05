@@ -6,7 +6,8 @@ for the project's important metadata, which includes its:
 - Global or system-level dependencies
   (applications, libraries, environmental variables)
 - Questions the project seeks to answer
-- Environments
+- [Environments](environments.md)
+- [The pipeline](pipeline/index.md)
 - [Datasets](datasets.md)
 - Figures
 - Publications (journal articles, conference papers, presentations, posters)

@@ -56,14 +56,16 @@ but Calkit makes it easy!
 
 ## Features
 
-- A schema to store structured metadata describing the
-  project's important outputs (in its `calkit.yaml` file)
-  and how they are created
-  (its computational environments and pipeline).
+- A declarative pipeline that forces users to define an environment
+  for every stage, so "but it works on my machine" is a thing of the past.
 - A CLI to run the project's pipeline to verify it's reproducible,
   regenerating outputs as needed and
   ensuring all
   computational environments (e.g., [Conda](https://docs.conda.io/en/latest/), [Docker](https://docker.com)) match their specification.
+- A schema to store structured metadata describing the
+  project's important outputs (in its `calkit.yaml` file)
+  and how they are created
+  (its computational environments and pipeline).
 - A command line interface (CLI) to simplify keeping code, text, and larger
   data files backed up in the same project repo using both
   [Git](https://git-scm.com/) and [DVC](https://dvc.org/).

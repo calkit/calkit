@@ -15,6 +15,7 @@ execute a command to open ParaView,
 and display a message with instructions.
 
 ```yaml
+# In dvc.yaml
 stages:
   save-mesh-snapshot-isometric:
     cmd: >
@@ -27,11 +28,6 @@ stages:
       - sim/cases/k-epsilon-ny-40/constant/polyMesh
     outs:
       - figures/rans-mesh-snapshot-isometric.png
-    meta:
-      calkit:
-        type: figure
-        title: RANS simulation mesh snapshot
-        description: A snapshot of the RANS simulation mesh.
 ```
 
 After confirming, DVC will check that the defined outputs exist,

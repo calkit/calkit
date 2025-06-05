@@ -172,10 +172,8 @@ to create and run variants of a case with a "templatized"
 which we're going to run in our Docker environment.
 
 To simulate the same case for multiple turbulence models,
-we're going to create a "foreach" DVC stage to run our
-script over a sequence of values.
-When setup properly, DVC will be smart enough to cache the results
-and not rerun simulations when they don't need to be rerun.
+we're going to create a stage to run our
+script, iterating over a sequence of values.
 We can create this stage with:
 
 ```sh
@@ -183,12 +181,12 @@ calkit new python-script-stage \
     --name run-sim \
     --script-path run.py \
     --environment foam \
-    --arg "--turbulence-model={var}" \
+    --arg "--turbulence-model={turb_model}" \
     --arg "--overwrite" \
     --input system \
     --input constant/transportProperties \
-    --output "cases/{var}/postProcessing" \
-    --iter-arg "{var}" "laminar" "k-epsilon" "k-omega" \
+    --output "cases/{turb_model}/postProcessing" \
+    --iter turb_model laminar,k-epsilon,k-omega \
 ```
 
 Another call to `calkit status` shows our pipeline needs to be run,

@@ -477,6 +477,39 @@ def test_new_python_script_stage(tmp_dir):
         ["script.py", ".calkit/env-locks/py.txt"]
     )
     assert pipeline["stages"]["run-script"]["outs"] == ["output.txt"]
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "python-script-stage",
+            "--name",
+            "run-script-2",
+            "--script-path",
+            "script2.py",
+            "--arg",
+            "{name}",
+            "--environment",
+            "py",
+            "--output",
+            "output-{name}.txt",
+            "--iter",
+            "name",
+            "bob,joe,sally",
+        ]
+    )
+    subprocess.check_call(["calkit", "check", "pipeline", "--compile"])
+    pipeline = calkit.dvc.read_pipeline()
+    assert pipeline["stages"]["run-script-2"]["cmd"] == (
+        "calkit xenv -n py --no-check -- python script2.py ${item.name}"
+    )
+    assert pipeline["stages"]["run-script-2"]["outs"] == [
+        "output-${item.name}.txt"
+    ]
+    assert pipeline["stages"]["run-script-2"]["matrix"]["name"] == [
+        "bob",
+        "joe",
+        "sally",
+    ]
 
 
 def test_new_latex_stage(tmp_dir):

@@ -24,6 +24,7 @@ from calkit.cli import raise_error, warn
 from calkit.cli.update import update_devcontainer
 from calkit.core import ryaml
 from calkit.docker import LAYERS
+from calkit.models.pipeline import StageIteration
 
 new_app = typer.Typer(no_args_is_help=True)
 
@@ -1602,6 +1603,16 @@ def new_python_script_stage(
     outs_no_delete: StageArgs.outs_no_delete = [],
     outs_no_store: StageArgs.outs_no_store = [],
     outs_no_store_no_delete: StageArgs.outs_no_store_no_delete = [],
+    iter_arg: Annotated[
+        tuple[str, str] | None,
+        typer.Option(
+            "--iter",
+            help=(
+                "Iterate over an argument with a comma-separated list, e.g., "
+                "--iter-arg var_name val1,val2,val3."
+            ),
+        ),
+    ] = None,
     overwrite: StageArgs.overwrite = False,
     no_check: StageArgs.no_check = False,
     no_commit: StageArgs.no_commit = False,
@@ -1616,13 +1627,19 @@ def new_python_script_stage(
         outs_no_store_no_delete=outs_no_store_no_delete,
     )
     try:
+        if iter_arg is not None:
+            arg_name, vals = iter_arg
+            i = [StageIteration(arg_name=arg_name, values=vals.split(","))]  # type: ignore
+        else:
+            i = None
         stage = calkit.models.pipeline.PythonScriptStage(
             kind="python-script",
             environment=environment,
             args=args,
-            inputs=inputs,
+            inputs=inputs,  # type: ignore
             outputs=ck_outs,
             script_path=script_path,
+            iterate_over=i,
         )
     except Exception as e:
         raise_error(f"Invalid stage specification: {e}")

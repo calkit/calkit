@@ -203,18 +203,26 @@ class MatlabScriptStage(Stage):
 class ShellCommandStage(Stage):
     kind: Literal["shell-command"]
     command: str
-    shell: str = "bash"
+    shell: Literal["sh", "bash", "zsh"] = "bash"
 
     @property
     def dvc_cmd(self) -> str:
-        return f'{self.shell} -c "{self.command}"'
+        cmd = ""
+        if self.environment != "_system":
+            cmd = f"{self.xenv_cmd} -- "
+        if self.shell == "zsh":
+            norc_args = "-f"
+        else:
+            norc_args = "--noprofile --norc"
+        cmd += f'{self.shell} {norc_args} -c "{self.command}"'
+        return cmd
 
 
 class ShellScriptStage(Stage):
     kind: Literal["shell-script"]
     script_path: str
     args: list[str] = []
-    shell: str = "bash"
+    shell: Literal["sh", "bash", "zsh"] = "bash"
 
     @property
     def dvc_deps(self) -> list[str]:
@@ -222,7 +230,14 @@ class ShellScriptStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"{self.shell} {self.script_path}"
+        cmd = ""
+        if self.environment != "_system":
+            cmd = f"{self.xenv_cmd} -- "
+        if self.shell == "zsh":
+            norc_args = "-f"
+        else:
+            norc_args = "--noprofile --norc"
+        cmd += f"{self.shell} {norc_args} {self.script_path}"
         for arg in self.args:
             cmd += f" {arg}"
         return cmd

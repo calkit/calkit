@@ -24,7 +24,8 @@ from calkit.cli import raise_error, warn
 from calkit.cli.update import update_devcontainer
 from calkit.core import ryaml
 from calkit.docker import LAYERS
-from calkit.models.pipeline import StageIteration
+from calkit.models.pipeline import LatexStage, StageIteration
+from calkit.templates import LatexTemplate
 
 new_app = typer.Typer(no_args_is_help=True)
 
@@ -840,7 +841,7 @@ def new_publication(
         ),
     ],
     stage_name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--stage",
             help="Name of the pipeline stage to build the output file.",
@@ -850,14 +851,14 @@ def new_publication(
         list[str], typer.Option("--dep", help="Path to stage dependency.")
     ] = [],
     outs_from_stage: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--deps-from-stage-outs",
             help="Stage name from which to add outputs as dependencies.",
         ),
     ] = None,
     template: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--template",
             "-t",
@@ -868,7 +869,7 @@ def new_publication(
         ),
     ] = None,
     env_name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--environment",
             help="Name of the build environment to create, if desired.",
@@ -888,7 +889,7 @@ def new_publication(
             help="Overwrite existing objects if they already exist.",
         ),
     ] = False,
-):
+) -> None:
     ck_info = calkit.load_calkit_info(process_includes=False)
     pubs = ck_info.get("publications", [])
     envs = ck_info.get("environments", {})
@@ -950,19 +951,30 @@ def new_publication(
     repo = git.Repo()
     # Create environment if applicable
     if env_name is not None and template_type == "latex":
-        env_path = f".calkit/environments/{env_name}.yaml"
-        os.makedirs(".calkit/environments", exist_ok=True)
-        env = {"_include": env_path}
-        envs[env_name] = env
-        env_remote = dict(
+        env = dict(
             kind="docker",
             image="texlive/texlive:latest-full",
             description="TeXlive full.",
         )
-        with open(env_path, "w") as f:
-            calkit.ryaml.dump(env_remote, f)
+        envs[env_name] = env
         ck_info["environments"] = envs
-        repo.git.add(env_path)
+    # Create stage if applicable
+    if (
+        stage_name is not None
+        and template_type == "latex"
+        and env_name is not None
+    ):
+        stage = LatexStage(
+            kind="latex",
+            environment=env_name,
+            target_path=os.path.join(path, template_obj.target),
+            outputs=[pub_fpath],
+        ).model_dump()
+        if "pipeline" not in ck_info:
+            ck_info["pipeline"] = {}
+        if "stages" not in ck_info["pipeline"]:
+            ck_info["pipeline"]["stages"] = {}
+        ck_info["pipeline"]["stages"][stage_name] = stage
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
@@ -974,37 +986,6 @@ def new_publication(
             name=template, dest_dir=path, title=title
         )
         repo.git.add(path)
-    # Create stage if applicable
-    if stage_name is not None and template_type == "latex":
-        cmd = (
-            "latexmk -cd -interaction=nonstopmode -pdf "
-            f"{path}/{template_obj.target}"
-        )
-        if env_name is not None:
-            cmd = f"calkit xenv -n {env_name} -- {cmd}"
-        target_dep = os.path.join(path, template_obj.target)
-        dvc_cmd = [
-            sys.executable,
-            "-m",
-            "dvc",
-            "stage",
-            "add",
-            "-n",
-            stage_name,
-            "-o",
-            pub_fpath,
-            "-d",
-            target_dep,
-        ]
-        if env_name is not None:
-            dvc_cmd += ["-d", env_path]
-        for dep in deps:
-            dvc_cmd += ["-d", dep]
-        if overwrite:
-            dvc_cmd.append("-f")
-        dvc_cmd.append(cmd)
-        subprocess.check_call(dvc_cmd)
-        repo.git.add("dvc.yaml")
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add new publication {pub_fpath}"])
 

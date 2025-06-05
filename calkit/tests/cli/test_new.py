@@ -155,14 +155,16 @@ def test_new_publication(tmp_dir):
     )
     ck_info = calkit.load_calkit_info()
     print(ck_info)
-    assert ck_info["environments"]["my-latex-env"] == {
-        "_include": ".calkit/environments/my-latex-env.yaml"
-    }
+    assert ck_info["environments"]["my-latex-env"] == dict(
+        kind="docker",
+        image="texlive/texlive:latest-full",
+        description="TeXlive full.",
+    )
     assert ck_info["publications"][0]["path"] == "my-paper/paper.pdf"
     stage = ck_info["pipeline"]["stages"]["build-latex-article"]
     assert stage["kind"] == "latex"
     assert stage["environment"] == "my-latex-env"
-    assert stage["target"] == "my-paper/paper.tex"
+    assert stage["target_path"] == "my-paper/paper.tex"
     assert stage["outputs"] == ["my-paper/paper.pdf"]
 
 

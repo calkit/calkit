@@ -25,7 +25,6 @@ from calkit.cli.update import update_devcontainer
 from calkit.core import ryaml
 from calkit.docker import LAYERS
 from calkit.models.pipeline import LatexStage, StageIteration
-from calkit.templates import LatexTemplate
 
 new_app = typer.Typer(no_args_is_help=True)
 

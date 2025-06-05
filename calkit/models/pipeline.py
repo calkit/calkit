@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Discriminator
@@ -185,6 +186,16 @@ class LatexStage(Stage):
     @property
     def dvc_deps(self) -> list[str]:
         return [self.target_path] + super().dvc_deps
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs = super().dvc_outs
+        out_path = PurePosixPath(
+            self.target_path.removesuffix(".tex") + ".pdf"
+        ).as_posix()
+        if out_path not in outs:
+            outs.append(out_path)
+        return outs
 
 
 class MatlabScriptStage(Stage):

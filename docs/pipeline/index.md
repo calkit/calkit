@@ -4,11 +4,9 @@ The pipeline
 defines the processes that produce
 the project's important assets or artifacts, such as datasets,
 figures, tables, and publications.
-It can either be written in Calkit's syntax in the `pipeline` object
-of `calkit.yaml` or in
-[DVC](https://dvc.org)'s syntax and stored in the `dvc.yaml` file.
-If written in Calkit's syntax, a `dvc.yaml` file will be created at
-run time and executed with DVC.
+It is saved in the `pipeline` section of the `calkit.yaml` file,
+and is compiled to a [DVC](https://dvc.org) pipeline (saved in `dvc.yaml`)
+when `calkit run` is called.
 
 A pipeline is composed of stages,
 each of which has a specific type or "kind."

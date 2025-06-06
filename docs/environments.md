@@ -307,14 +307,45 @@ ssh-copy-id -i ~/.ssh/id_ed25519 my-user-name@10.225.22.25
 ```
 
 To execute a command in this environment, we can add a stage like this
-to our DVC pipeline in `dvc.yaml`:
+to our pipeline in `calkit.yaml`:
 
 ```yaml
-stages:
-  run-simulation:
-    cmd: calkit xenv -n cluster bash script.sh
-    deps:
-      - script.sh
-    outs:
-      - results
+pipeline:
+  stages:
+    run-simulation:
+      kind: shell-script
+      script_path: script.sh
+      outputs:
+        - results
+```
+
+## MATLAB
+
+Adding a MATLAB environment to a project will cause Calkit to automatically
+generate a Docker image based on its `version` and `products`
+attributes.
+A `MATLAB_LICENSE_SERVER` environmental variable must be set so the
+container can properly contact a license server.
+This can be done with:
+
+```sh
+calkit set-env-var MATLAB_LICENSE_SERVER <XXXX@some.server.edu>
+```
+
+Note that environmental variables set this way will be ignored by Git,
+and so will need to be set on each new machine on which the project is to
+be run.
+
+A MATLAB environment looks like:
+
+```yaml
+# In calkit.yaml
+environments:
+  my-matlab-2024b:
+    kind: matlab
+    version: R2024b
+    products:
+      - Simulink
+      - Global_Optimization_Toolbox
+      - Parallel_Computing_Toolbox
 ```

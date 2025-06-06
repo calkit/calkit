@@ -155,7 +155,7 @@ def read_pipeline(wdir: str = ".") -> dict:
         return calkit.ryaml.load(f)
 
 
-def get_remotes(wdir: str = None) -> dict[str, str]:
+def get_remotes(wdir: str | None = None) -> dict[str, str]:
     """Get a dictionary of DVC remotes, keyed by name, with URL as the
     value.
     """
@@ -169,13 +169,17 @@ def get_remotes(wdir: str = None) -> dict[str, str]:
     if not out:
         return {}
     resp = {}
-    for line in out.split("\n"):
-        split_line = line.split()
-        if len(split_line) >= 2:
-            # This is a remote
-            name = split_line[0]
-            url = split_line[1]
+    out = out.replace("(default)", "").strip()
+    is_name = True
+    for token in out.split():
+        token = token.strip()
+        print(token)
+        if is_name:
+            name = token
+        else:
+            url = token
             resp[name] = url
+        is_name = not is_name
     return resp
 
 

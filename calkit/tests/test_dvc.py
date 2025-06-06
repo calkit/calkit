@@ -19,5 +19,19 @@ def test_get_remotes(tmp_dir):
             "https://sup.com",
         ]
     )
+    subprocess.call(
+        [
+            "dvc",
+            "remote",
+            "add",
+            "something-very-long-remote-that-will-be-more-than-one-line",
+            "https://sup.com/this/is/a/long/remote/url/so/test/this",
+        ]
+    )
     resp = calkit.dvc.get_remotes()
-    assert resp == {"something": "https://sup.com"}
+    assert resp == {
+        "something": "https://sup.com",
+        "something-very-long-remote-that-will-be-more-than-one-line": (
+            "https://sup.com/this/is/a/long/remote/url/so/test/this"
+        ),
+    }

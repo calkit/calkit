@@ -27,7 +27,7 @@ def _get_df_lib(engine: str):
 
 def list_datasets() -> list[dict]:
     """Read the Calkit metadata file and list out our datasets."""
-    ck_info = calkit.load_calkit_info(as_pydantic=False, process_includes=True)
+    ck_info = calkit.load_calkit_info(process_includes=True)
     return ck_info.get("datasets", [])
 
 

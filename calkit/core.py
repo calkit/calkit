@@ -69,11 +69,10 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
 
 
 def load_calkit_info(
-    wdir=None,
+    wdir: str | None = None,
     process_includes: bool | str | list[str] = False,
-    as_pydantic: bool = False,
-) -> dict | ProjectInfo:
-    """Load Calkit project information.
+) -> dict:
+    """Load Calkit project information as a dictionary.
 
     Parameters
     ----------
@@ -113,9 +112,17 @@ def load_calkit_info(
                             with open(include_fpath) as f:
                                 include_data = ryaml.load(f)
                             info[kind][obj_name] |= include_data
-    if as_pydantic:
-        return ProjectInfo.model_validate(info)
     return info
+
+
+def load_calkit_info_object(
+    wdir: str | None = None,
+    process_includes: bool | str | list[str] = False,
+) -> ProjectInfo:
+    """Load Calkit project information as a ``ProjectInfo`` object."""
+    return ProjectInfo.model_validate(
+        load_calkit_info(wdir=wdir, process_includes=process_includes)
+    )
 
 
 def utcnow(remove_tz=True) -> datetime:
@@ -286,6 +293,10 @@ def check_system_deps(wdir: str | None = None) -> None:
             deps.append("uv")
         elif kind == "renv" and "Rscript" not in deps:
             deps.append("Rscript")
+        elif kind == "matlab":
+            if "docker" not in deps:
+                deps.append("docker")
+            deps.append({"MATLAB_LICENSE_SERVER": {"kind": "env-var"}})
     for dep in deps:
         if isinstance(dep, dict):
             keys = list(dep.keys())
@@ -325,7 +336,7 @@ def project_and_path_from_path(path: str) -> tuple:
     return project, path
 
 
-def read_file(path: str, as_bytes: bool = None) -> str | bytes:
+def read_file(path: str, as_bytes: bool | None = None) -> str | bytes:
     """Read file content from path, which can optionally include a project
     identifier, which if specified will indicate we should read from the API.
     """
@@ -394,7 +405,7 @@ def to_kebab_case(str) -> str:
 
 
 def get_project_status_history(
-    wdir: str = None, as_pydantic=True
+    wdir: str | None = None, as_pydantic=True
 ) -> list[ProjectStatus] | list[dict]:
     statuses = []
     fpath = os.path.join(".calkit", "status.csv")
@@ -408,7 +419,9 @@ def get_project_status_history(
                 ts, status, message = line
                 ts = datetime.fromisoformat(ts)
                 obj = ProjectStatus(
-                    timestamp=ts, status=status, message=message
+                    timestamp=ts,
+                    status=status,  # type: ignore
+                    message=message,
                 )
                 if not as_pydantic:
                     obj = obj.model_dump()
@@ -416,13 +429,13 @@ def get_project_status_history(
     return statuses
 
 
-def get_latest_project_status(wdir: str = None) -> ProjectStatus | None:
+def get_latest_project_status(wdir: str | None = None) -> ProjectStatus | None:
     statuses = get_project_status_history(wdir=wdir)
     if statuses:
-        return statuses[-1]
+        return statuses[-1]  # type: ignore
 
 
-def detect_project_name(wdir: str = None) -> str:
+def detect_project_name(wdir: str | None = None) -> str:
     """Detect a Calkit project owner and name."""
     ck_info = load_calkit_info(wdir=wdir)
     name = ck_info.get("name")

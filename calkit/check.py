@@ -16,7 +16,7 @@ INSTRUCTIONS_NOTE = (
 )
 
 
-def _bool_to_check_x(val: bool) -> str:
+def _bool_to_check_x(val: bool | int) -> str:
     """Convert a boolean to a checkmark or an X."""
     if val:
         return "✅"
@@ -173,7 +173,7 @@ class ReproCheck(BaseModel):
 
 
 def check_reproducibility(
-    wdir: str = ".", log_func: Callable = None
+    wdir: str = ".", log_func: Callable | None = None
 ) -> ReproCheck:
     """Check the reproducibility of a project."""
     res = dict()

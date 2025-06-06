@@ -6,15 +6,23 @@ import functools
 import hashlib
 import json
 import os
+import platform as _platform
 import subprocess
+import warnings
 from typing import Annotated
 
-import checksumdir
+# See https://github.com/calkit/calkit/issues/346
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=UserWarning)
+    import checksumdir
+
 import dotenv
 import git
 import typer
 
 import calkit
+import calkit.matlab
+import calkit.pipeline
 from calkit.check import check_reproducibility
 from calkit.cli import raise_error
 
@@ -56,17 +64,30 @@ def check_call(
             raise_error("Fallback call failed")
 
 
-@check_app.command(
-    name="docker-env",
-    help="Check that Docker image is up-to-date.",
-)
+@check_app.command(name="docker-env")
 def check_docker_env(
     tag: Annotated[str, typer.Argument(help="Image tag.")],
     fpath: Annotated[
-        str, typer.Option("-i", "--input", help="Path to input Dockerfile.")
-    ] = "Dockerfile",
+        str | None,
+        typer.Option(
+            "-i", "--input", help="Path to input Dockerfile, if applicable."
+        ),
+    ] = None,
+    lock_fpath: Annotated[
+        str | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help=(
+                "Path to which existing environment should be exported. "
+                "If not specified, will have the same filename with '-lock' "
+                "appended to it, keeping the same extension."
+            ),
+        ),
+    ] = None,
     platform: Annotated[
-        str, typer.Option("--platform", help="Which platform(s) to build for.")
+        str | None,
+        typer.Option("--platform", help="Which platform(s) to build for."),
     ] = None,
     deps: Annotated[
         list[str],
@@ -80,6 +101,12 @@ def check_docker_env(
         bool, typer.Option("--quiet", "-q", help="Be quiet.")
     ] = False,
 ):
+    """Check that Docker environment is up-to-date."""
+    if fpath is None and lock_fpath is None:
+        raise_error(
+            "Lock file output path must be provided if input Dockerfile is not"
+        )
+
     def get_docker_inspect():
         out = json.loads(
             subprocess.check_output(["docker", "inspect", tag]).decode()
@@ -108,14 +135,20 @@ def check_docker_env(
     except subprocess.CalledProcessError:
         typer.echo(f"No image with tag {tag} found locally", file=outfile)
         inspect = []
-    typer.echo(f"Reading Dockerfile from {fpath}", file=outfile)
-    dockerfile_md5 = get_md5(fpath)
-    lock_fpath = fpath + "-lock.json"
+    if fpath is not None:
+        typer.echo(f"Reading Dockerfile from {fpath}", file=outfile)
+        dockerfile_md5 = get_md5(fpath)
+    else:
+        dockerfile_md5 = None
+    if lock_fpath is None and fpath is not None:
+        lock_fpath = fpath + "-lock.json"
+    else:
+        lock_fpath = str(lock_fpath)
     # Compute MD5s of any dependencies
     deps_md5s = {}
     for dep in deps:
-        deps_md5s[dep] = get_md5(dep, exclude_files=lock_fpath)
-    rebuild = True
+        deps_md5s[dep] = get_md5(dep, exclude_files=[lock_fpath])
+    rebuild_or_pull = True
     if os.path.isfile(lock_fpath):
         typer.echo(f"Reading lock file: {lock_fpath}", file=outfile)
         with open(lock_fpath) as f:
@@ -127,16 +160,16 @@ def check_docker_env(
         typer.echo(
             "Checking image and Dockerfile against lock file", file=outfile
         )
-        rebuild = inspect[0]["RootFS"]["Layers"] != lock[0]["RootFS"][
+        rebuild_or_pull = inspect[0]["RootFS"]["Layers"] != lock[0]["RootFS"][
             "Layers"
         ] or dockerfile_md5 != lock[0].get("DockerfileMD5")
-        if not rebuild:
+        if not rebuild_or_pull:
             for dep, md5 in deps_md5s.items():
                 if md5 != lock[0].get("DepsMD5s", {}).get(dep):
                     typer.echo(f"Found modified dependency: {dep}")
-                    rebuild = True
+                    rebuild_or_pull = True
                     break
-    if rebuild:
+    if fpath is not None and rebuild_or_pull:
         wdir, fname = os.path.split(fpath)
         if not wdir:
             wdir = None
@@ -145,10 +178,20 @@ def check_docker_env(
             cmd += ["--platform", platform]
         cmd.append(".")
         subprocess.check_output(cmd, cwd=wdir)
+    elif fpath is None and rebuild_or_pull:
+        typer.echo(f"Pulling image: {tag}")
+        cmd = ["docker", "pull", tag]
+        try:
+            subprocess.check_output(cmd)
+        except subprocess.CalledProcessError:
+            raise_error(f"Failed to pull image: {tag}")
     # Write the lock file
     inspect = get_docker_inspect()
     inspect[0]["DockerfileMD5"] = dockerfile_md5
     inspect[0]["DepsMD5s"] = deps_md5s
+    lock_dir = os.path.dirname(lock_fpath)
+    if lock_dir:
+        os.makedirs(lock_dir, exist_ok=True)
     with open(lock_fpath, "w") as f:
         json.dump(inspect, f, indent=4)
 
@@ -165,7 +208,7 @@ def check_conda_env(
         ),
     ] = "environment.yml",
     output_fpath: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--output",
             "-o",
@@ -195,6 +238,138 @@ def check_conda_env(
         output_fpath=output_fpath,
         log_func=log_func,
         relaxed=relaxed,
+    )
+
+
+@check_app.command(name="venv")
+def check_venv(
+    path: Annotated[
+        str, typer.Argument(help="Path to requirements file.")
+    ] = "requirements.txt",
+    prefix: Annotated[str, typer.Option("--prefix", help="Prefix.")] = ".venv",
+    lock_fpath: Annotated[
+        str | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help=(
+                "Path to which existing environment should be exported. "
+                "If not specified, will have the same filename with '-lock' "
+                "appended to it, keeping the same extension."
+            ),
+        ),
+    ] = None,
+    wdir: Annotated[
+        str | None,
+        typer.Option(
+            "--wdir",
+            help="Working directory. Defaults to current working directory.",
+        ),
+    ] = None,
+    use_uv: Annotated[bool, typer.Option("--uv", help="Use uv.")] = True,
+    python: Annotated[
+        str | None,
+        typer.Option(
+            "--python", help="Python version to specify if using uv."
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Print verbose output.")
+    ] = False,
+):
+    """Check a Python virtual environment (uv or virtualenv)."""
+    kind = "uv-venv" if use_uv else "venv"
+    create_cmd = (
+        ["uv", "venv"] if kind == "uv-venv" else ["python", "-m", "venv"]
+    )
+    pip_cmd = "pip" if kind == "venv" else "uv pip"
+    pip_install_args = "-q"
+    if python is not None and not use_uv:
+        raise_error("Python version cannot be specified if not using uv")
+    if python is not None and use_uv:
+        create_cmd += ["--python", python]
+        pip_install_args += f" --python {python}"
+    if not os.path.isdir(prefix):
+        if verbose:
+            typer.echo(f"Creating {kind} at {prefix}")
+        try:
+            subprocess.check_call(create_cmd + [prefix], cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error(f"Failed to create {kind} at {prefix}")
+        # Put a gitignore file in the env dir if one doesn't exist
+        if not os.path.isfile(os.path.join(prefix, ".gitignore")):
+            with open(os.path.join(prefix, ".gitignore"), "w") as f:
+                f.write("*\n")
+    if lock_fpath is None:
+        fname, ext = os.path.splitext(path)
+        lock_fpath = fname + "-lock" + ext
+    if _platform.system() == "Windows":
+        activate_cmd = f"{prefix}\\Scripts\\activate"
+    else:
+        activate_cmd = f". {prefix}/bin/activate"
+    lock_dir = os.path.dirname(lock_fpath)
+    if lock_dir:
+        os.makedirs(lock_dir, exist_ok=True)
+    check_cmd = (
+        f"{activate_cmd} "
+        f"&& {pip_cmd} install {pip_install_args} -r {path} "
+        f"&& {pip_cmd} freeze > {lock_fpath} "
+        "&& deactivate"
+    )
+    try:
+        if verbose:
+            typer.echo(f"Running command: {check_cmd}")
+        subprocess.check_output(
+            check_cmd,
+            shell=True,
+            cwd=wdir,
+            stderr=subprocess.STDOUT if not verbose else None,
+        )
+    except subprocess.CalledProcessError:
+        raise_error(f"Failed to check {kind}")
+
+
+@check_app.command(name="matlab-env")
+def check_matlab_env(
+    env_name: Annotated[
+        str,
+        typer.Option("--name", "-n", help="Environment name in calkit.yaml."),
+    ],
+    output_fpath: Annotated[str, typer.Option("--output", "-o")],
+) -> None:
+    """Check a MATLAB environment matches its spec and export a JSON lock
+    file.
+    """
+    ck_info = calkit.load_calkit_info()
+    environments = ck_info.get("environments", {})
+    if env_name not in environments:
+        raise_error(f"Environment '{env_name}' not found in calkit.yaml")
+    env = environments[env_name]
+    if env.get("kind") != "matlab":
+        raise_error(f"Environment '{env_name}' is not a MATLAB environment")
+    if "version" not in env:
+        raise_error("A MATLAB version must be specified")
+    typer.echo(f"Checking MATLAB environment '{env_name}'")
+    # First generate a Dockerfile for this environment
+    out_dir = os.path.join(".calkit", "environments", env_name)
+    os.makedirs(out_dir, exist_ok=True)
+    dockerfile_fpath = os.path.join(out_dir, "Dockerfile")
+    calkit.matlab.create_dockerfile(
+        matlab_version=env["version"],
+        additional_products=env.get("products", []),
+        write=True,
+        fpath_out=dockerfile_fpath,
+    )
+    # Now check that Docker environment
+    tag = calkit.matlab.get_docker_image_name(
+        ck_info=ck_info,
+        env_name=env_name,
+    )
+    check_docker_env(
+        tag=tag,
+        fpath=dockerfile_fpath,
+        lock_fpath=output_fpath,
+        platform="linux/amd64",  # Only one available for now
     )
 
 
@@ -233,3 +408,41 @@ def check_env_vars():
             f.write("\n.env\n")
     message = "✅ All set!"
     typer.echo(message.encode("utf-8", errors="replace"))
+
+
+@check_app.command(name="pipeline")
+def check_pipeline(
+    compile_to_dvc: Annotated[
+        bool,
+        typer.Option(
+            "--compile",
+            "-c",
+            help="Compile the pipeline to DVC stages and merge into dvc.yaml.",
+        ),
+    ] = False,
+):
+    """Check that the project pipeline is defined correctly."""
+    from calkit.models.pipeline import Pipeline
+
+    ck_info = calkit.load_calkit_info()
+    if "pipeline" not in ck_info:
+        raise_error("No pipeline is defined in calkit.yaml")
+    try:
+        pipeline = Pipeline.model_validate(ck_info["pipeline"], strict=True)
+    except Exception as e:
+        raise_error(f"Pipeline is not defined correctly: {e}")
+    # Check that we have no leading underscores in stage names, since those
+    # are reserved for auto-generated stages
+    for stage_name in pipeline.stages.keys():
+        if stage_name.startswith("_"):
+            raise_error("Stage names cannot start with an underscore")
+    message = "✅ This project's pipeline is defined correctly!"
+    typer.echo(message.encode("utf-8", errors="replace"))
+    if compile_to_dvc:
+        typer.echo("Attempting to compile to DVC stages")
+        try:
+            calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+        except Exception as e:
+            raise_error(
+                f"Failed to compile pipeline: {e.__class__.__name__}: {e}"
+            )

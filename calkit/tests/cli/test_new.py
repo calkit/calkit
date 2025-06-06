@@ -155,18 +155,17 @@ def test_new_publication(tmp_dir):
     )
     ck_info = calkit.load_calkit_info()
     print(ck_info)
-    assert ck_info["environments"]["my-latex-env"] == {
-        "_include": ".calkit/environments/my-latex-env.yaml"
-    }
-    assert ck_info["publications"][0]["path"] == "my-paper/paper.pdf"
-    with open("dvc.yaml") as f:
-        dvc_pipeline = calkit.ryaml.load(f)
-    print(dvc_pipeline)
-    stage = dvc_pipeline["stages"]["build-latex-article"]
-    assert stage["cmd"] == (
-        "calkit xenv -n my-latex-env -- "
-        "latexmk -cd -interaction=nonstopmode -pdf my-paper/paper.tex"
+    assert ck_info["environments"]["my-latex-env"] == dict(
+        kind="docker",
+        image="texlive/texlive:latest-full",
+        description="TeXlive full.",
     )
+    assert ck_info["publications"][0]["path"] == "my-paper/paper.pdf"
+    stage = ck_info["pipeline"]["stages"]["build-latex-article"]
+    assert stage["kind"] == "latex"
+    assert stage["environment"] == "my-latex-env"
+    assert stage["target_path"] == "my-paper/paper.tex"
+    assert stage["outputs"] == ["my-paper/paper.pdf"]
 
 
 def test_new_uv_venv(tmp_dir):
@@ -182,9 +181,10 @@ def test_new_uv_venv(tmp_dir):
             "matplotlib",
         ]
     )
-    ck_info = calkit.load_calkit_info(as_pydantic=True)
+    ck_info = calkit.load_calkit_info_object()
     envs = ck_info.environments
     env = envs["my-uv-venv"]
+    assert isinstance(env, calkit.models.UvVenvEnvironment)
     assert env.path == "requirements.txt"
     assert env.prefix == ".venv"
     assert env.kind == "uv-venv"
@@ -203,9 +203,10 @@ def test_new_uv_venv(tmp_dir):
             "matplotlib",
         ]
     )
-    ck_info = calkit.load_calkit_info(as_pydantic=True)
+    ck_info = calkit.load_calkit_info_object()
     envs = ck_info.environments
     env = envs["my-uv-venv2"]
+    assert isinstance(env, calkit.models.UvVenvEnvironment)
     assert env.path == "requirements-2.txt"
     assert env.prefix == ".venv2"
     assert env.kind == "uv-venv"
@@ -433,3 +434,167 @@ def test_new_stage(tmp_dir):
                 "nonexistent-env",
             ]
         )
+
+
+def test_new_python_script_stage(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("script.py", "w") as f:
+        f.write("print('Hello, world!')")
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-venv",
+            "--name",
+            "py",
+            "--python",
+            "3.13",
+            "requests",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "python-script-stage",
+            "--name",
+            "run-script",
+            "--script-path",
+            "script.py",
+            "--environment",
+            "py",
+            "--output",
+            "output.txt",
+        ]
+    )
+    subprocess.check_call(["calkit", "check", "pipeline", "--compile"])
+    pipeline = calkit.dvc.read_pipeline()
+    assert pipeline["stages"]["run-script"]["cmd"] == (
+        "calkit xenv -n py --no-check -- python script.py"
+    )
+    assert set(pipeline["stages"]["run-script"]["deps"]) == set(
+        ["script.py", ".calkit/env-locks/py.txt"]
+    )
+    assert pipeline["stages"]["run-script"]["outs"] == ["output.txt"]
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "python-script-stage",
+            "--name",
+            "run-script-2",
+            "--script-path",
+            "script2.py",
+            "--arg",
+            "{name}",
+            "--environment",
+            "py",
+            "--output",
+            "output-{name}.txt",
+            "--iter",
+            "name",
+            "bob,joe,sally",
+        ]
+    )
+    subprocess.check_call(["calkit", "check", "pipeline", "--compile"])
+    pipeline = calkit.dvc.read_pipeline()
+    assert pipeline["stages"]["run-script-2"]["cmd"] == (
+        "calkit xenv -n py --no-check -- python script2.py ${item.name}"
+    )
+    assert pipeline["stages"]["run-script-2"]["outs"] == [
+        "output-${item.name}.txt"
+    ]
+    assert pipeline["stages"]["run-script-2"]["matrix"]["name"] == [
+        "bob",
+        "joe",
+        "sally",
+    ]
+
+
+def test_new_latex_stage(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("paper.tex", "w") as f:
+        f.write("Hello, world!")
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "docker-env",
+            "--name",
+            "tex",
+            "--image",
+            "texlive/texlive:latest-full",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "latex-stage",
+            "--name",
+            "build-paper",
+            "--target",
+            "paper.tex",
+            "--environment",
+            "tex",
+            "--output",
+            "paper.pdf",
+        ]
+    )
+    subprocess.check_call(["calkit", "check", "pipeline", "--compile"])
+    pipeline = calkit.dvc.read_pipeline()
+    assert pipeline["stages"]["build-paper"]["cmd"] == (
+        "calkit xenv -n tex --no-check -- "
+        "latexmk -cd -interaction=nonstopmode -pdf paper.tex"
+    )
+    assert set(pipeline["stages"]["build-paper"]["deps"]) == set(
+        ["paper.tex", ".calkit/env-locks/tex.json"]
+    )
+    assert pipeline["stages"]["build-paper"]["outs"] == ["paper.pdf"]
+
+
+def test_new_matlab_script_stage(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("scripts")
+    with open("scripts/script.m", "w") as f:
+        f.write("disp('Hello, world!')")
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "docker-env",
+            "--name",
+            "matlab1",
+            "--image",
+            "mathworks/matlab:latest",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "matlab-script-stage",
+            "--name",
+            "run-script1",
+            "-e",
+            "matlab1",
+            "--script-path",
+            "scripts/script.m",
+            "--output",
+            "results/output.txt",
+            "--output",
+            "results/output2.txt",
+        ]
+    )
+    subprocess.check_call(["calkit", "check", "pipeline", "--compile"])
+    pipeline = calkit.dvc.read_pipeline()
+    assert pipeline["stages"]["run-script1"]["cmd"] == (
+        "calkit xenv -n matlab1 --no-check -- \"run('scripts/script.m');\""
+    )
+    assert set(pipeline["stages"]["run-script1"]["deps"]) == set(
+        ["scripts/script.m", ".calkit/env-locks/matlab1.json"]
+    )
+    assert pipeline["stages"]["run-script1"]["outs"] == [
+        "results/output.txt",
+        "results/output2.txt",
+    ]

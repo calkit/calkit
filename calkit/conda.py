@@ -241,6 +241,9 @@ def check_env(
         if prefix is not None:
             _ = env_export.pop("name")
             env_export["prefix"] = prefix_orig
+        out_dir = os.path.dirname(output_fpath)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
         with open(output_fpath, "w") as f:
             ryaml.dump(env_export, f)
     return res

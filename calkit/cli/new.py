@@ -24,6 +24,7 @@ from calkit.cli import raise_error, warn
 from calkit.cli.update import update_devcontainer
 from calkit.core import ryaml
 from calkit.docker import LAYERS
+from calkit.models.pipeline import LatexStage, StageIteration
 
 new_app = typer.Typer(no_args_is_help=True)
 
@@ -32,7 +33,7 @@ new_app = typer.Typer(no_args_is_help=True)
 def new_project(
     path: Annotated[str, typer.Argument(help="Where to create the project.")],
     name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--name",
             "-n",
@@ -43,10 +44,10 @@ def new_project(
         ),
     ] = None,
     title: Annotated[
-        str, typer.Option("--title", help="Project title.")
+        str | None, typer.Option("--title", help="Project title.")
     ] = None,
     description: Annotated[
-        str, typer.Option("--description", help="Project description.")
+        str | None, typer.Option("--description", help="Project description.")
     ] = None,
     cloud: Annotated[
         bool,
@@ -63,7 +64,7 @@ def new_project(
         ),
     ] = False,
     git_repo_url: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--git-url",
             help=(
@@ -73,7 +74,7 @@ def new_project(
         ),
     ] = None,
     template: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--template",
             "-t",
@@ -84,7 +85,8 @@ def new_project(
         ),
     ] = None,
     no_commit: Annotated[
-        bool, typer.Option("--no-commit", help="Do not commit changes to Git.")
+        bool | None,
+        typer.Option("--no-commit", help="Do not commit changes to Git."),
     ] = None,
     overwrite: Annotated[
         bool,
@@ -532,7 +534,7 @@ def new_docker_env(
         str, typer.Option("--name", "-n", help="Environment name.")
     ],
     image_name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--image",
             help=(
@@ -542,14 +544,14 @@ def new_docker_env(
         ),
     ] = None,
     base: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--from",
             help="Base image, e.g., 'ubuntu', if creating a Dockerfile.",
         ),
     ] = None,
     path: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--path",
             help=(
@@ -568,16 +570,17 @@ def new_docker_env(
         str, typer.Option("--wdir", help="Working directory.")
     ] = "/work",
     user: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--user", help="User account to use to run the container."
         ),
     ] = None,
     platform: Annotated[
-        str, typer.Option("--platform", help="Which platform(s) to build for.")
+        str | None,
+        typer.Option("--platform", help="Which platform(s) to build for."),
     ] = None,
     description: Annotated[
-        str, typer.Option("--description", help="Description.")
+        str | None, typer.Option("--description", help="Description.")
     ] = None,
     overwrite: Annotated[
         bool,
@@ -594,13 +597,13 @@ def new_docker_env(
     """Create a new Docker environment."""
     if base is not None and path is None:
         path = "Dockerfile"
-    if base and os.path.isfile(path) and not overwrite:
+    if path is not None and base and os.path.isfile(path) and not overwrite:
         raise_error("Output path already exists (use -f to overwrite)")
     if image_name is None:
         typer.echo("No image name specified; using environment name")
         image_name = name
     repo = git.Repo()
-    if base:
+    if base and path is not None:
         txt = "FROM " + base + "\n\n"
         for layer in layers:
             if layer not in LAYERS:
@@ -837,7 +840,7 @@ def new_publication(
         ),
     ],
     stage_name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--stage",
             help="Name of the pipeline stage to build the output file.",
@@ -847,14 +850,14 @@ def new_publication(
         list[str], typer.Option("--dep", help="Path to stage dependency.")
     ] = [],
     outs_from_stage: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--deps-from-stage-outs",
             help="Stage name from which to add outputs as dependencies.",
         ),
     ] = None,
     template: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--template",
             "-t",
@@ -865,7 +868,7 @@ def new_publication(
         ),
     ] = None,
     env_name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--environment",
             help="Name of the build environment to create, if desired.",
@@ -885,7 +888,7 @@ def new_publication(
             help="Overwrite existing objects if they already exist.",
         ),
     ] = False,
-):
+) -> None:
     ck_info = calkit.load_calkit_info(process_includes=False)
     pubs = ck_info.get("publications", [])
     envs = ck_info.get("environments", {})
@@ -947,19 +950,30 @@ def new_publication(
     repo = git.Repo()
     # Create environment if applicable
     if env_name is not None and template_type == "latex":
-        env_path = f".calkit/environments/{env_name}.yaml"
-        os.makedirs(".calkit/environments", exist_ok=True)
-        env = {"_include": env_path}
-        envs[env_name] = env
-        env_remote = dict(
+        env = dict(
             kind="docker",
             image="texlive/texlive:latest-full",
             description="TeXlive full.",
         )
-        with open(env_path, "w") as f:
-            calkit.ryaml.dump(env_remote, f)
+        envs[env_name] = env
         ck_info["environments"] = envs
-        repo.git.add(env_path)
+    # Create stage if applicable
+    if (
+        stage_name is not None
+        and template_type == "latex"
+        and env_name is not None
+    ):
+        stage = LatexStage(
+            kind="latex",
+            environment=env_name,
+            target_path=os.path.join(path, template_obj.target),
+            outputs=[pub_fpath],
+        ).model_dump()
+        if "pipeline" not in ck_info:
+            ck_info["pipeline"] = {}
+        if "stages" not in ck_info["pipeline"]:
+            ck_info["pipeline"]["stages"] = {}
+        ck_info["pipeline"]["stages"][stage_name] = stage
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
@@ -971,37 +985,6 @@ def new_publication(
             name=template, dest_dir=path, title=title
         )
         repo.git.add(path)
-    # Create stage if applicable
-    if stage_name is not None and template_type == "latex":
-        cmd = (
-            "latexmk -cd -interaction=nonstopmode -pdf "
-            f"{path}/{template_obj.target}"
-        )
-        if env_name is not None:
-            cmd = f"calkit xenv -n {env_name} -- {cmd}"
-        target_dep = os.path.join(path, template_obj.target)
-        dvc_cmd = [
-            sys.executable,
-            "-m",
-            "dvc",
-            "stage",
-            "add",
-            "-n",
-            stage_name,
-            "-o",
-            pub_fpath,
-            "-d",
-            target_dep,
-        ]
-        if env_name is not None:
-            dvc_cmd += ["-d", env_path]
-        for dep in deps:
-            dvc_cmd += ["-d", dep]
-        if overwrite:
-            dvc_cmd.append("-f")
-        dvc_cmd.append(cmd)
-        subprocess.check_call(dvc_cmd)
-        repo.git.add("dvc.yaml")
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add new publication {pub_fpath}"])
 
@@ -1398,62 +1381,73 @@ class StageKind(str, Enum):
     matlab_script = "matlab-script"
 
 
-@new_app.command(name="stage")
-def new_stage(
-    name: Annotated[
+class StageArgs:
+    """This is just a way to deduplicate stage arguments."""
+
+    name = Annotated[
         str,
         typer.Option("--name", "-n", help="Stage name, typically kebab-case."),
-    ],
-    kind: Annotated[
-        StageKind, typer.Option("--kind", help="What kind of stage to create.")
-    ],
-    target: Annotated[
-        str,
-        typer.Option(
-            "--target", "-t", help="Target file, e.g., the script to run."
-        ),
-    ],
-    environment: Annotated[
+    ]
+    environment = Annotated[
         str,
         typer.Option(
             "--environment", "-e", help="Environment to use to run the stage."
         ),
-    ] = None,
-    deps: Annotated[
-        list[str],
-        typer.Option("--dep", "-d", help="A path on which the stage depends."),
-    ] = [],
-    outs: Annotated[
+    ]
+    inputs = Annotated[
         list[str],
         typer.Option(
-            "--out", "-o", help="A path that is produced by the stage."
+            "--input", "-i", help="A path on which the stage depends."
         ),
-    ] = [],
-    outs_persist: Annotated[
+    ]
+    outputs = Annotated[
         list[str],
         typer.Option(
-            "--out-persist",
+            "--output", "-o", help="A path that is produced by the stage."
+        ),
+    ]
+    outs_no_delete = Annotated[
+        list[str],
+        typer.Option(
+            "--out-no-delete",
             help="An output that should not be deleted before running.",
         ),
-    ] = [],
-    outs_no_cache: Annotated[
+    ]
+    outs_git = Annotated[
         list[str],
         typer.Option(
             "--out-git",
-            help="An output that should be tracked with Git instead of DVC.",
+            help="An output that should be stored with Git instead of DVC.",
         ),
-    ] = [],
-    outs_persist_no_cache: Annotated[
+    ]
+    outs_git_no_delete = Annotated[
         list[str],
         typer.Option(
-            "--out-git-persist",
+            "--out-git-no-delete",
             help=(
                 "An output that should be tracked with Git instead of DVC, "
                 "and also should not be deleted before running stage."
             ),
         ),
-    ] = [],
-    overwrite: Annotated[
+    ]
+    outs_no_store = Annotated[
+        list[str],
+        typer.Option(
+            "--out-no-store",
+            help="An output that should not be stored in version control.",
+        ),
+    ]
+    outs_no_store_no_delete = Annotated[
+        list[str],
+        typer.Option(
+            "--out-no-store-no-delete",
+            help=(
+                "An output that should not be stored in version control, "
+                "and should not be deleted before running."
+            ),
+        ),
+    ]
+    overwrite = Annotated[
         bool,
         typer.Option(
             "--overwrite",
@@ -1461,83 +1455,271 @@ def new_stage(
             "-f",
             help="Overwrite an existing stage with this name if necessary.",
         ),
-    ] = False,
-    no_check: Annotated[
+    ]
+    no_check = Annotated[
         bool,
         typer.Option(
             "--no-check",
             help="Do not check if the target, deps, environment, etc., exist.",
         ),
-    ] = False,
-    no_commit: Annotated[
+    ]
+    no_commit = Annotated[
         bool, typer.Option("--no-commit", help="Do not commit changes to Git.")
-    ] = False,
-):
-    """Create a new pipeline stage."""
-    ck_info = dict(calkit.load_calkit_info(process_includes="environments"))
-    environments = ck_info.get("environments", {})
-    if environment is None:
-        warn("No environment is specified")
-        cmd = ""
-    else:
-        if environment not in environments and not no_check:
-            raise_error(f"Environment '{environment}' does not exist")
-        cmd = f"calkit xenv -n {environment} -- "
-        # Add environment path as a dependency if applicable
-        env_path = environments.get(environment, {}).get("path")
-        if env_path is not None and env_path not in deps:
-            deps = [env_path] + deps
-    if not os.path.exists(target) and not no_check:
-        raise_error(f"Target '{target}' does not exist")
-    if kind.value == "python-script":
-        cmd += f"python {target}"
-    elif kind.value == "latex":
-        cmd += f"latexmk -cd -interaction=nonstopmode -pdf {target}"
-        out_target = target.removesuffix(".tex") + ".pdf"
-        if out_target not in (
-            outs + outs_no_cache + outs_persist + outs_persist_no_cache
-        ):
-            outs = [out_target] + outs
-    elif kind.value == "matlab-script":
-        cmd += f"matlab -noFigureWindows -batch \"run('{target}');\""
-    elif kind.value == "sh-script":
-        cmd += f"sh {target}"
-    elif kind.value == "bash-script":
-        cmd += f"bash {target}"
-    elif kind.value == "zsh-script":
-        cmd += f"zsh {target}"
-    elif kind.value == "r-script":
-        cmd += f"Rscript {target}"
-    add_cmd = [sys.executable, "-m", "dvc", "stage", "add", "-n", name]
-    if target not in deps:
-        deps = [target] + deps
-    for dep in deps:
-        add_cmd += ["-d", dep]
-    for out in outs:
-        add_cmd += ["-o", out]
-    for out in outs_no_cache:
-        add_cmd += ["--outs-no-cache", out]
-    for out in outs_persist:
-        add_cmd += ["--outs-persist", out]
-    for out in outs_persist_no_cache:
-        add_cmd += ["--outs-persist-no-cache", out]
-    if overwrite:
-        add_cmd.append("-f")
-    add_cmd.append(cmd)
-    try:
-        subprocess.check_call(add_cmd)
-    except subprocess.CalledProcessError:
-        raise_error("Failed to create stage")
+    ]
+    script_path = Annotated[
+        str, typer.Option("--script-path", "-s", help="Path to script.")
+    ]
+    args = Annotated[
+        list[str],
+        typer.Option("--arg", help="Argument to pass to the script."),
+    ]
+
+
+def _save_stage(
+    stage: calkit.models.pipeline.Stage,
+    name: str,
+    overwrite: bool = False,
+    no_check: bool = False,
+    no_commit: bool = False,
+) -> None:
+    """Save a Calkit pipeline stage."""
+    ck_info = calkit.load_calkit_info()
+    if "pipeline" not in ck_info:
+        ck_info["pipeline"] = {}
+    if "stages" not in ck_info["pipeline"]:
+        ck_info["pipeline"]["stages"] = {}
+    stages = ck_info["pipeline"]["stages"]
+    if name in stages and not overwrite:
+        raise_error(
+            f"Stage '{name}' already exists; consider using --overwrite"
+        )
+    # Check environment exists
+    if not no_check:
+        env_names = ck_info.get("environments", {})
+        if stage.environment not in env_names:
+            raise_error(f"Environment {stage.environment} does not exist")
+    stages[name] = stage.model_dump()
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
     if not no_commit:
         try:
             repo = git.Repo()
         except InvalidGitRepositoryError:
             raise_error("Can't commit because this is not a Git repo")
-        repo.git.add("dvc.yaml")
-        if "dvc.yaml" in calkit.git.get_staged_files():
+        repo.git.add("calkit.yaml")
+        if "calkit.yaml" in calkit.git.get_staged_files():
             repo.git.commit(
-                ["dvc.yaml", "-m", f"Add {kind.value} pipeline stage '{name}'"]
+                [
+                    "calkit.yaml",
+                    "-m",
+                    f"Add {stage.kind} pipeline stage '{name}'",
+                ]
             )
+
+
+def _to_ck_outs(
+    outputs: list[str],
+    outs_git: list[str],
+    outs_git_no_delete: list[str],
+    outs_no_delete: list[str],
+    outs_no_store: list[str],
+    outs_no_store_no_delete: list[str],
+) -> list[str | calkit.models.pipeline.PathOutput]:
+    """Format stage outputs from CLI for Calkit pipeline."""
+    ck_outs: list[str | calkit.models.pipeline.PathOutput] = list(outputs)
+    for out in outs_git:
+        ck_outs.append(
+            calkit.models.pipeline.PathOutput(
+                path=out,
+                storage="git",
+                delete_before_run=True,
+            )
+        )
+    for out in outs_git_no_delete:
+        ck_outs.append(
+            calkit.models.pipeline.PathOutput(
+                path=out,
+                storage="git",
+                delete_before_run=False,
+            )
+        )
+    for out in outs_no_delete:
+        ck_outs.append(
+            calkit.models.pipeline.PathOutput(
+                path=out,
+                storage="dvc",
+                delete_before_run=False,
+            )
+        )
+    for out in outs_no_store:
+        ck_outs.append(
+            calkit.models.pipeline.PathOutput(
+                path=out,
+                storage=None,
+                delete_before_run=True,
+            )
+        )
+    for out in outs_no_store_no_delete:
+        ck_outs.append(
+            calkit.models.pipeline.PathOutput(
+                path=out,
+                storage=None,
+                delete_before_run=False,
+            )
+        )
+    return ck_outs
+
+
+@new_app.command(name="python-script-stage")
+def new_python_script_stage(
+    name: StageArgs.name,
+    environment: StageArgs.environment,
+    script_path: StageArgs.script_path,
+    args: StageArgs.args = [],
+    inputs: StageArgs.inputs = [],
+    outputs: StageArgs.outputs = [],
+    outs_git: StageArgs.outs_git = [],
+    outs_git_no_delete: StageArgs.outs_git_no_delete = [],
+    outs_no_delete: StageArgs.outs_no_delete = [],
+    outs_no_store: StageArgs.outs_no_store = [],
+    outs_no_store_no_delete: StageArgs.outs_no_store_no_delete = [],
+    iter_arg: Annotated[
+        tuple[str, str] | None,
+        typer.Option(
+            "--iter",
+            help=(
+                "Iterate over an argument with a comma-separated list, e.g., "
+                "--iter-arg var_name val1,val2,val3."
+            ),
+        ),
+    ] = None,
+    overwrite: StageArgs.overwrite = False,
+    no_check: StageArgs.no_check = False,
+    no_commit: StageArgs.no_commit = False,
+) -> None:
+    """Add a stage to the pipeline that runs a Python script."""
+    ck_outs = _to_ck_outs(
+        outputs=outputs,
+        outs_git=outs_git,
+        outs_git_no_delete=outs_git_no_delete,
+        outs_no_delete=outs_no_delete,
+        outs_no_store=outs_no_store,
+        outs_no_store_no_delete=outs_no_store_no_delete,
+    )
+    try:
+        if iter_arg is not None:
+            arg_name, vals = iter_arg
+            i = [StageIteration(arg_name=arg_name, values=vals.split(","))]  # type: ignore
+        else:
+            i = None
+        stage = calkit.models.pipeline.PythonScriptStage(
+            kind="python-script",
+            environment=environment,
+            args=args,
+            inputs=inputs,  # type: ignore
+            outputs=ck_outs,
+            script_path=script_path,
+            iterate_over=i,
+        )
+    except Exception as e:
+        raise_error(f"Invalid stage specification: {e}")
+    _save_stage(
+        stage=stage,
+        name=name,
+        overwrite=overwrite,
+        no_check=no_check,
+        no_commit=no_commit,
+    )
+
+
+@new_app.command(name="matlab-script-stage")
+def new_matlab_script_stage(
+    name: StageArgs.name,
+    environment: StageArgs.environment,
+    script_path: StageArgs.script_path,
+    inputs: StageArgs.inputs = [],
+    outputs: StageArgs.outputs = [],
+    outs_git: StageArgs.outs_git = [],
+    outs_git_no_delete: StageArgs.outs_git_no_delete = [],
+    outs_no_delete: StageArgs.outs_no_delete = [],
+    outs_no_store: StageArgs.outs_no_store = [],
+    outs_no_store_no_delete: StageArgs.outs_no_store_no_delete = [],
+    overwrite: StageArgs.overwrite = False,
+    no_check: StageArgs.no_check = False,
+    no_commit: StageArgs.no_commit = False,
+):
+    """Add a stage to the pipeline that runs a MATLAB script."""
+    ck_outs = _to_ck_outs(
+        outputs=outputs,
+        outs_git=outs_git,
+        outs_git_no_delete=outs_git_no_delete,
+        outs_no_delete=outs_no_delete,
+        outs_no_store=outs_no_store,
+        outs_no_store_no_delete=outs_no_store_no_delete,
+    )
+    try:
+        stage = calkit.models.pipeline.MatlabScriptStage(
+            kind="matlab-script",
+            environment=environment,
+            inputs=inputs,
+            outputs=ck_outs,
+            script_path=script_path,
+        )
+    except Exception as e:
+        raise_error(f"Invalid stage specification: {e}")
+    _save_stage(
+        stage=stage,
+        name=name,
+        overwrite=overwrite,
+        no_check=no_check,
+        no_commit=no_commit,
+    )
+
+
+@new_app.command(name="latex-stage")
+def new_latex_stage(
+    name: StageArgs.name,
+    environment: StageArgs.environment,
+    target_path: Annotated[
+        str, typer.Option("--target", help="Target .tex file path.")
+    ],
+    inputs: StageArgs.inputs = [],
+    outputs: StageArgs.outputs = [],
+    outs_git: StageArgs.outs_git = [],
+    outs_git_no_delete: StageArgs.outs_git_no_delete = [],
+    outs_no_delete: StageArgs.outs_no_delete = [],
+    outs_no_store: StageArgs.outs_no_store = [],
+    outs_no_store_no_delete: StageArgs.outs_no_store_no_delete = [],
+    overwrite: StageArgs.overwrite = False,
+    no_check: StageArgs.no_check = False,
+    no_commit: StageArgs.no_commit = False,
+):
+    """Add a stage to the pipeline that compiles a LaTeX document."""
+    ck_outs = _to_ck_outs(
+        outputs=outputs,
+        outs_git=outs_git,
+        outs_git_no_delete=outs_git_no_delete,
+        outs_no_delete=outs_no_delete,
+        outs_no_store=outs_no_store,
+        outs_no_store_no_delete=outs_no_store_no_delete,
+    )
+    try:
+        stage = calkit.models.pipeline.LatexStage(
+            kind="latex",
+            environment=environment,
+            target_path=target_path,
+            inputs=inputs,
+            outputs=ck_outs,
+        )
+    except Exception as e:
+        raise_error(f"Invalid stage specification: {e}")
+    _save_stage(
+        stage=stage,
+        name=name,
+        overwrite=overwrite,
+        no_check=no_check,
+        no_commit=no_commit,
+    )
 
 
 @new_app.command(name="release")
@@ -1981,3 +2163,142 @@ def new_release(
         typer.echo(f"Created GitHub release at: {resp['url']}")
         # TODO: Upload assets for GitHub release if they're not too big?
     typer.echo(f"New {release_type} release {name} successfully created")
+
+
+@new_app.command(name="stage")
+def new_stage(
+    name: StageArgs.name,
+    kind: Annotated[
+        StageKind, typer.Option("--kind", help="What kind of stage to create.")
+    ],
+    target: Annotated[
+        str,
+        typer.Option(
+            "--target", "-t", help="Target file, e.g., the script to run."
+        ),
+    ],
+    environment: Annotated[
+        str | None,
+        typer.Option(
+            "--environment", "-e", help="Environment to use to run the stage."
+        ),
+    ] = None,
+    deps: Annotated[
+        list[str],
+        typer.Option("--dep", "-d", help="A path on which the stage depends."),
+    ] = [],
+    outs: Annotated[
+        list[str],
+        typer.Option(
+            "--out", "-o", help="A path that is produced by the stage."
+        ),
+    ] = [],
+    outs_persist: Annotated[
+        list[str],
+        typer.Option(
+            "--out-persist",
+            help="An output that should not be deleted before running.",
+        ),
+    ] = [],
+    outs_no_cache: Annotated[
+        list[str],
+        typer.Option(
+            "--out-git",
+            help="An output that should be tracked with Git instead of DVC.",
+        ),
+    ] = [],
+    outs_persist_no_cache: Annotated[
+        list[str],
+        typer.Option(
+            "--out-git-persist",
+            help=(
+                "An output that should be tracked with Git instead of DVC, "
+                "and also should not be deleted before running stage."
+            ),
+        ),
+    ] = [],
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "--force",
+            "-f",
+            help="Overwrite an existing stage with this name if necessary.",
+        ),
+    ] = False,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Do not check if the target, deps, environment, etc., exist.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes to Git.")
+    ] = False,
+):
+    """Create a new DVC pipeline stage (deprecated)."""
+    ck_info = calkit.load_calkit_info(process_includes="environments")
+    environments = ck_info.get("environments", {})
+    if environment is None:
+        warn("No environment is specified")
+        cmd = ""
+    else:
+        if environment not in environments and not no_check:
+            raise_error(f"Environment '{environment}' does not exist")
+        cmd = f"calkit xenv -n {environment} -- "
+        # Add environment path as a dependency if applicable
+        env_path = environments.get(environment, {}).get("path")
+        if env_path is not None and env_path not in deps:
+            deps = [env_path] + deps
+    if not os.path.exists(target) and not no_check:
+        raise_error(f"Target '{target}' does not exist")
+    if kind.value == "python-script":
+        cmd += f"python {target}"
+    elif kind.value == "latex":
+        cmd += f"latexmk -cd -interaction=nonstopmode -pdf {target}"
+        out_target = target.removesuffix(".tex") + ".pdf"
+        if out_target not in (
+            outs + outs_no_cache + outs_persist + outs_persist_no_cache
+        ):
+            outs = [out_target] + outs
+    elif kind.value == "matlab-script":
+        cmd += f"matlab -noFigureWindows -batch \"run('{target}');\""
+    elif kind.value == "sh-script":
+        cmd += f"sh {target}"
+    elif kind.value == "bash-script":
+        cmd += f"bash {target}"
+    elif kind.value == "zsh-script":
+        cmd += f"zsh {target}"
+    elif kind.value == "r-script":
+        cmd += f"Rscript {target}"
+    add_cmd = [sys.executable, "-m", "dvc", "stage", "add", "-n", name]
+    if target not in deps:
+        deps = [target] + deps
+    for dep in deps:
+        add_cmd += ["-d", dep]
+    for out in outs:
+        add_cmd += ["-o", out]
+    for out in outs_no_cache:
+        add_cmd += ["--outs-no-cache", out]
+    for out in outs_persist:
+        add_cmd += ["--outs-persist", out]
+    for out in outs_persist_no_cache:
+        add_cmd += ["--outs-persist-no-cache", out]
+    if overwrite:
+        add_cmd.append("-f")
+    add_cmd.append(cmd)
+    try:
+        subprocess.check_call(add_cmd)
+    except subprocess.CalledProcessError:
+        raise_error("Failed to create stage")
+    if not no_commit:
+        try:
+            repo = git.Repo()
+        except InvalidGitRepositoryError:
+            raise_error("Can't commit because this is not a Git repo")
+        repo.git.add("dvc.yaml")
+        if "dvc.yaml" in calkit.git.get_staged_files():
+            repo.git.commit(
+                ["dvc.yaml", "-m", f"Add {kind.value} pipeline stage '{name}'"]
+            )

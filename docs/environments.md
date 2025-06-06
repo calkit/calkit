@@ -336,7 +336,7 @@ Note that environmental variables set this way will be ignored by Git,
 and so will need to be set on each new machine on which the project is to
 be run.
 
-A MATLAB environment looks like:
+A MATLAB environment (and a pipeline stage that uses it) looks like:
 
 ```yaml
 # In calkit.yaml
@@ -348,4 +348,14 @@ environments:
       - Simulink
       - Global_Optimization_Toolbox
       - Parallel_Computing_Toolbox
+pipeline:
+  stages:
+    my-matlab-script:
+      kind: matlab-script
+      script_path: scripts/run_sim.m
+      environment: my-matlab-2024b
+      inputs:
+        - config/my-sim-config.json
+      outputs:
+        - results/sim-results.h5
 ```

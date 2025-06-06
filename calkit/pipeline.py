@@ -192,9 +192,11 @@ def to_dvc(
                                         str(var_val),
                                     )
                                 extra_outs.append(out_i)
-                            extra_outs = list(set(extra_outs))
                             for out_i in extra_outs:
-                                dvc_stages[stage_name]["deps"].append(out_i)
+                                if out_i not in dvc_stages[stage_name]["deps"]:
+                                    dvc_stages[stage_name]["deps"].append(
+                                        out_i
+                                    )
                         else:
                             dvc_stages[stage_name]["deps"].append(out)
     if write:

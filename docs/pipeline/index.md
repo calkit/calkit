@@ -37,8 +37,8 @@ pipeline:
       environment: main
       outputs:
         - data/raw.csv
-        - path: data/raw.csv
-          storage: dvc
+        - path: data/meta.json
+          storage: git
           delete_before_run: false
 ```
 

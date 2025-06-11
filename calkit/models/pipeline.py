@@ -310,6 +310,37 @@ class JupyterNotebookStage(Stage):
         return [self.notebook_path] + super().dvc_deps
 
 
+class WordToPdfStage(Stage):
+    kind: Literal["word-to-pdf"] = "word-to-pdf"
+    word_doc_path: str
+    environment: str = "_system"
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.word_doc_path] + super().dvc_deps
+
+    @property
+    def out_path(self) -> str:
+        return PurePosixPath(
+            self.word_doc_path.removesuffix(".docx") + ".pdf"
+        ).as_posix()
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs = super().dvc_outs
+        out_path = self.out_path
+        if out_path not in outs:
+            outs.append(out_path)
+        return outs
+
+    @property
+    def dvc_cmd(self) -> str:
+        return (
+            f'calkit office word-to-pdf "{self.word_doc_path}" '
+            f'-o "{self.out_path}"'
+        )
+
+
 class Pipeline(BaseModel):
     stages: dict[
         str,
@@ -322,6 +353,7 @@ class Pipeline(BaseModel):
                 | ShellScriptStage
                 | DockerCommandStage
                 | RScriptStage
+                | WordToPdfStage
             ),
             Discriminator("kind"),
         ],

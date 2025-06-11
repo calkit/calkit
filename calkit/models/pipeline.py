@@ -156,7 +156,7 @@ class Stage(BaseModel):
 
 
 class PythonScriptStage(Stage):
-    kind: Literal["python-script"]
+    kind: Literal["python-script"] = "python-script"
     script_path: str
     args: list[str] = []
 

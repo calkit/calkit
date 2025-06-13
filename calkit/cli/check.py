@@ -358,7 +358,7 @@ def check_venv(
         ["uv", "venv"] if kind == "uv-venv" else ["python", "-m", "venv"]
     )
     pip_cmd = "pip" if kind == "venv" else "uv pip"
-    pip_install_args = "-q"
+    pip_install_args = ""
     if python is not None and not use_uv:
         raise_error("Python version cannot be specified if not using uv")
     if python is not None and use_uv:

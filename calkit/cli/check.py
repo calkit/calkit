@@ -11,6 +11,8 @@ import subprocess
 import warnings
 from typing import Annotated
 
+from calkit.environments import get_env_lock_fpath
+
 # See https://github.com/calkit/calkit/issues/346
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=UserWarning)
@@ -40,28 +42,98 @@ def check_repro(
     typer.echo(res.to_pretty().encode("utf-8", errors="replace"))
 
 
-@check_app.command(name="call")
-def check_call(
-    cmd: Annotated[str, typer.Argument(help="Command to check.")],
-    if_error: Annotated[
+@check_app.command(name="env")
+@check_app.command(name="environment")
+def check_environment(
+    env_name: Annotated[
         str,
-        typer.Option(
-            "--if-error", help="Command to run if there is an error."
-        ),
+        typer.Option("--name", "-n", help="Name of the environment to check."),
     ],
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Print verbose output.")
+    ] = False,
 ):
-    """Check that a command succeeds and run an alternate if not."""
-    try:
-        subprocess.check_call(cmd, shell=True)
-        typer.echo("Command succeeded")
-    except subprocess.CalledProcessError:
-        typer.echo("Command failed")
+    """Check that an environment is up to date."""
+    dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    ck_info = calkit.load_calkit_info(process_includes="environments")
+    envs = ck_info.get("environments", {})
+    if not envs:
+        raise_error("No environments defined in calkit.yaml")
+    if isinstance(envs, list):
+        raise_error("Error: Environments should be a dict, not a list")
+    assert isinstance(envs, dict)
+    if env_name not in envs:
+        raise_error(f"Environment '{env_name}' does not exist")
+    env = envs[env_name]
+    if env["kind"] == "docker":
+        if "image" not in env:
+            raise_error("Image must be defined for Docker environments")
+        if "path" in env:
+            check_docker_env(
+                tag=env["image"],
+                fpath=env["path"],
+                lock_fpath=get_env_lock_fpath(
+                    env=env, env_name=env_name, as_posix=False
+                ),
+                platform=env.get("platform"),
+                deps=env.get("deps", []),
+                quiet=not verbose,
+            )
+    elif env["kind"] == "conda":
+        check_conda_env(
+            env_fpath=env["path"],
+            output_fpath=get_env_lock_fpath(
+                env=env, env_name=env_name, as_posix=False
+            ),
+            relaxed=True,  # TODO: Add option?
+            quiet=not verbose,
+        )
+    elif env["kind"] in ["pixi", "uv"]:
+        cmd = [env["kind"], "lock"]
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
         try:
-            typer.echo("Attempting fallback call")
-            subprocess.check_call(if_error, shell=True)
-            typer.echo("Fallback call succeeded")
+            subprocess.check_call(cmd)
         except subprocess.CalledProcessError:
-            raise_error("Fallback call failed")
+            raise_error(f"Failed to check {env['kind']} environment")
+    elif (kind := env["kind"]) in ["uv-venv", "venv"]:
+        if "prefix" not in env:
+            raise_error("venv environments require a prefix")
+        if "path" not in env:
+            raise_error("venv environments require a path")
+        prefix = env["prefix"]
+        path = env["path"]
+        # Check environment
+        check_venv(
+            path=path,
+            prefix=prefix,
+            use_uv=kind == "uv-venv",
+            python=env.get("python"),
+            lock_fpath=get_env_lock_fpath(
+                env=env, env_name=env_name, as_posix=False
+            ),
+            verbose=verbose,
+        )
+    elif env["kind"] == "ssh":
+        # TODO: How to check SSH environments?
+        # Maybe just check that we can connect
+        raise_error(
+            "Environment checking not implemented for SSH environments"
+        )
+    elif env["kind"] == "renv":
+        try:
+            subprocess.check_call(["Rscript", "-e", "'renv::restore()'"])
+        except subprocess.CalledProcessError:
+            raise_error("Failed to check renv")
+    elif env["kind"] == "matlab":
+        check_matlab_env(
+            env_name=env_name,
+            output_fpath=get_env_lock_fpath(
+                env=env, env_name=env_name, as_posix=False
+            ),  # type: ignore
+        )
+    else:
+        raise_error(f"Environment kind '{env['kind']}' not supported")
 
 
 @check_app.command(name="docker-env")
@@ -319,7 +391,7 @@ def check_venv(
     try:
         if verbose:
             typer.echo(f"Running command: {check_cmd}")
-        subprocess.check_output(
+        subprocess.check_call(
             check_cmd,
             shell=True,
             cwd=wdir,
@@ -446,3 +518,27 @@ def check_pipeline(
             raise_error(
                 f"Failed to compile pipeline: {e.__class__.__name__}: {e}"
             )
+
+
+@check_app.command(name="call")
+def check_call(
+    cmd: Annotated[str, typer.Argument(help="Command to check.")],
+    if_error: Annotated[
+        str,
+        typer.Option(
+            "--if-error", help="Command to run if there is an error."
+        ),
+    ],
+):
+    """Check that a command succeeds and run an alternate if not."""
+    try:
+        subprocess.check_call(cmd, shell=True)
+        typer.echo("Command succeeded")
+    except subprocess.CalledProcessError:
+        typer.echo("Command failed")
+        try:
+            typer.echo("Attempting fallback call")
+            subprocess.check_call(if_error, shell=True)
+            typer.echo("Fallback call succeeded")
+        except subprocess.CalledProcessError:
+            raise_error("Fallback call failed")

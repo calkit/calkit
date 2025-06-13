@@ -42,7 +42,10 @@ def check_repro(
     typer.echo(res.to_pretty().encode("utf-8", errors="replace"))
 
 
-@check_app.command(name="env")
+@check_app.command(
+    name="env",
+    help="Check that an environment is up-to-date (alias for 'environment').",
+)
 @check_app.command(name="environment")
 def check_environment(
     env_name: Annotated[
@@ -53,7 +56,7 @@ def check_environment(
         bool, typer.Option("--verbose", help="Print verbose output.")
     ] = False,
 ):
-    """Check that an environment is up to date."""
+    """Check that an environment is up-to-date."""
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info(process_includes="environments")
     envs = ck_info.get("environments", {})

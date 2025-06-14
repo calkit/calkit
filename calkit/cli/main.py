@@ -989,6 +989,7 @@ def run_in_env(
                     env=env, env_name=env_name, as_posix=False
                 ),
                 wdir=wdir,
+                quiet=True,
                 verbose=verbose,
             )
         # Now run the command

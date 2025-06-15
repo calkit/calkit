@@ -32,6 +32,7 @@ changing anything.
 
 ```yaml
 dependencies:
+  - docker
   - STRAVA_CLIENT_ID:
       kind: env-var
       notes: >
@@ -46,3 +47,5 @@ As we can see, a `.env` file, which is kept out of version control,
 can be used to define these variables.
 `calkit set-env-var` can be used as a shortcut to set one of these
 in lieu of directly editing `.env`.
+`calkit check env-vars` can also be run to check for missing variables,
+prompting the user for their values and setting them in `.env`.

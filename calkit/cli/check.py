@@ -452,7 +452,11 @@ def check_matlab_env(
 
 
 @check_app.command(name="env-vars")
-def check_env_vars():
+def check_env_vars(
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output")
+    ] = False,
+):
     """Check that the project's required environmental variables exist."""
     typer.echo("Checking project environmental variables")
     dotenv.load_dotenv(dotenv_path=".env")
@@ -461,11 +465,20 @@ def check_env_vars():
     env_var_deps = {}
     for d in deps:
         if isinstance(d, dict):
-            name = list(d.keys())[0]
+            keys = list(d.keys())
+            if len(keys) > 1:
+                raise_error(
+                    f"Malformed dependency: {d}\n"
+                    "Dependencies with attributes should have a single key "
+                    "(their name)"
+                )
+            name = keys[0]
             attrs = list(d.values())[0]
             if attrs.get("kind") == "env-var":
                 env_var_deps[name] = attrs
     for name, attrs in env_var_deps.items():
+        if verbose:
+            typer.echo(f"Checking for environmental variable '{name}'")
         if name not in os.environ:
             typer.echo(f"Missing env var '{name}'")
             if "default" in attrs:

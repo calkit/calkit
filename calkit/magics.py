@@ -38,6 +38,8 @@ class Calkit(Magics):
     )
     @magic_arguments.argument(
         "--env",
+        "--environment",
+        "-e",
         nargs="?",
         const=True,
         help=(
@@ -111,6 +113,13 @@ class Calkit(Magics):
         "--out-desc",
         help="Description for Calkit output object.",
         type=_parse_string_arg,
+    )
+    # TODO: Add options for output storage type
+    @magic_arguments.argument(
+        "--verbose",
+        help="Print verbose output.",
+        default=False,
+        action="store_true",
     )
     @cell_magic
     def stage(self, line, cell):
@@ -229,7 +238,6 @@ class Calkit(Magics):
             "dvc",
             "stage",
             "add",
-            "-q",
             "-n",
             args.name,
             "--run",
@@ -237,6 +245,8 @@ class Calkit(Magics):
             "-d",
             _posix_path(script_fpath),
         ]
+        if not args.verbose:
+            cmd.append("-q")
         if args.dep:
             for dep in args.dep:
                 dep_split = dep.split(":")
@@ -274,7 +284,7 @@ class Calkit(Magics):
             stage_cmd = xenv + " -- " + stage_cmd
         cmd.append(stage_cmd)
         try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            subprocess.run(cmd, check=True, capture_output=False, text=True)
         except subprocess.CalledProcessError as e:
             print(f"Error: {e.stderr}")
             raise e

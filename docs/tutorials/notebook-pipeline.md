@@ -78,7 +78,7 @@ Next we simply call the `%%stage` magic with the appropriate arguments to
 convert the cell into a pipeline stage and run it externally with DVC:
 
 ```python
-%%stage --name get-data --out df
+%%stage --name get-data --environment main --out df
 
 import pandas as pd
 import time
@@ -89,7 +89,9 @@ df = pd.DataFrame({"col1": range(1000)})
 df.describe()
 ```
 
-In the magic call, we gave the stage a name and declared an output `df`.
+In the magic call, we gave the stage a name,
+specified the environment in which it should run,
+and declared an output `df`.
 When we run the cell, we'll see it takes at least 10 seconds the first time,
 but if we run it a second time,
 it will be much faster, since our output is being fetched from the DVC cache.
@@ -109,7 +111,7 @@ and DataFrame library
 So change the call to the magic to be:
 
 ```python
-%%stage --name get-data --out df:parquet:pandas
+%%stage --name get-data --environment main --out df:parquet:pandas
 ```
 
 ## Using the output of one cell as a dependency in another
@@ -121,7 +123,7 @@ we can declare a cell to depend on the output of another cell with the
 For example:
 
 ```python
-%%stage --name plot --dep get-data:df:parquet:pandas --out fig
+%%stage --name plot --environment main --dep get-data:df:parquet:pandas --out fig
 
 fig = df.plot(backend="plotly")
 fig
@@ -146,6 +148,7 @@ and metadata like (note this requires `plotly` and `kaleido` to be installed):
 ```python
 %%stage \
    --name plot \
+   --environment main \
    --dep get-data:df:parquet:pandas \
    --out fig \
    --out-path figures/plot.png \

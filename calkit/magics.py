@@ -40,12 +40,9 @@ class Calkit(Magics):
         "--env",
         "--environment",
         "-e",
-        nargs="?",
-        const=True,
-        help=(
-            "Whether or not this cell should be run in an environment. "
-            "If no environment name is provided, the default will be used."
-        ),
+        required=True,
+        help=("Environment with which to run this cell."),
+        type=_parse_string_arg,
     )
     @magic_arguments.argument(
         "--dep",

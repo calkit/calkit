@@ -114,7 +114,13 @@ class Calkit(Magics):
         help="Description for Calkit output object.",
         type=_parse_string_arg,
     )
-    # TODO: Add options for output storage type
+    @magic_arguments.argument(
+        "--out-storage",
+        choices=["dvc", "git", "none"],
+        help="Which version control system to use to store the output.",
+        default="dvc",
+        type=_parse_string_arg,
+    )
     @magic_arguments.argument(
         "--verbose",
         help="Print verbose output.",
@@ -269,8 +275,13 @@ class Calkit(Magics):
                 kws = dict(stage_name=args.name, out_name=out_name)
                 if len(out_split) > 1:
                     kws["fmt"] = out_split[1]
+                # Figure out DVC caching
+                if args.out_storage == "dvc":
+                    out_flag = "-o"
+                else:
+                    out_flag = "--outs-no-cache"
                 cmd += [
-                    "-o",
+                    out_flag,
                     _posix_path(calkit.get_notebook_stage_out_path(**kws)),
                 ]
         if args.out_path:

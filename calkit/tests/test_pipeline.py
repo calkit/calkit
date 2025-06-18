@@ -194,9 +194,9 @@ def test_to_dvc_notebook_stage():
                     "outputs": [
                         "figures/fig1.png",
                     ],
-                    "html_storage": "git",
-                    "cleaned_ipynb_storage": None,
-                    "executed_ipynb_storage": "dvc",
+                    "html_storage": "dvc",
+                    "cleaned_ipynb_storage": "git",
+                    "executed_ipynb_storage": None,
                 },
             }
         }
@@ -208,3 +208,12 @@ def test_to_dvc_notebook_stage():
     assert clean_stage["desc"].startswith("Automatically generated")
     stage = dvc_stages["notebook-1"]
     assert "--to html" in stage["cmd"]
+    found_html = False
+    for out in stage["outs"]:
+        if not isinstance(out, dict):
+            continue
+        p = list(out.keys())[0]
+        if p.endswith(".html"):
+            found_html = True
+            assert out[p]["cache"]
+    assert found_html

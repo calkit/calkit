@@ -334,10 +334,11 @@ class JupyterNotebookStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        return (
-            f"calkit nb execute --environment {self.environment} --no-check "
-            f'"{self.notebook_path}"'
-        )
+        cmd = f"calkit nb execute --environment {self.environment} --no-check"
+        if self.html_storage:
+            cmd += " --to html"
+        cmd += f' "{self.notebook_path}"'
+        return cmd
 
     @property
     def dvc_outs(self) -> list[str | dict]:

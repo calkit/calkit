@@ -15,7 +15,9 @@ def get_executed_notebook_path(
         fname_out = nb_fname.removesuffix(".ipynb") + ".html"
     else:
         fname_out = nb_fname
-    p = os.path.join(".calkit", "notebooks", "executed", nb_dir, fname_out)
+    # Different output types go to different subdirectories
+    subdirs = {"html": "html", "notebook": "executed"}
+    p = os.path.join(".calkit", "notebooks", subdirs[to], nb_dir, fname_out)
     if as_posix:
         p = PurePosixPath(p).as_posix()
     return p

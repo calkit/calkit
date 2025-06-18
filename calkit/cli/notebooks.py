@@ -53,8 +53,9 @@ def execute_notebook(
         ),
     ],
     to: Annotated[
-        str, typer.Option("--to", help="Output format ('html' or 'notebook').")
-    ] = "notebook",
+        list[str],
+        typer.Option("--to", help="Output format ('html' or 'notebook')."),
+    ] = ["notebook"],
     no_check: Annotated[
         bool,
         typer.Option(
@@ -71,24 +72,45 @@ def execute_notebook(
 
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
-    try:
-        fpath_out = calkit.notebooks.get_executed_notebook_path(
-            notebook_path=path,
-            to=to,  # type: ignore
-        )
-    except ValueError:
-        raise_error(f"Invalid output format: '{to}'")
-    folder = os.path.dirname(fpath_out)
+    # First, always execute the notebook and save as ipynb
+    fpath_out_exec = calkit.notebooks.get_executed_notebook_path(
+        notebook_path=path, to="notebook", as_posix=True
+    )
+    folder = os.path.dirname(fpath_out_exec)
     os.makedirs(folder, exist_ok=True)
-    fpath_out = os.path.abspath(fpath_out)
+    fpath_out_exec = os.path.abspath(fpath_out_exec)
     cmd = [
         "jupyter",
         "nbconvert",
         path,
         "--execute",
         "--to",
-        to,
+        "notebook",
         "--output",
-        fpath_out,
+        fpath_out_exec,
     ]
     run_in_env(cmd=cmd, env_name=env_name, no_check=no_check)
+    for to_fmt in to:
+        if to_fmt != "notebook":
+            try:
+                fpath_out = calkit.notebooks.get_executed_notebook_path(
+                    notebook_path=path,
+                    to=to_fmt,  # type: ignore
+                )
+            except ValueError:
+                raise_error(f"Invalid output format: '{to}'")
+            folder = os.path.dirname(fpath_out)
+            os.makedirs(folder, exist_ok=True)
+            fpath_out = os.path.abspath(fpath_out)
+            # Now convert without executing or checking the environment
+            cmd = [
+                "jupyter",
+                "nbconvert",
+                fpath_out_exec,
+                "--to",
+                to_fmt,
+                "--output",
+                fpath_out,
+            ]
+            typer.echo(f"Exporting {to_fmt}")
+            run_in_env(cmd=cmd, env_name=env_name, no_check=True)

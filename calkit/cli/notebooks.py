@@ -40,6 +40,14 @@ def clean_notebook_outputs(path: str):
 @notebooks_app.command("execute")
 def execute_notebook(
     path: str,
+    env_name: Annotated[
+        str,
+        typer.Option(
+            "--environment",
+            "-e",
+            help="Environment name in which to run the notebook.",
+        ),
+    ],
     to: Annotated[
         str, typer.Option("--to", help="Output format ('html' or 'notebook').")
     ] = "notebook",
@@ -49,6 +57,8 @@ def execute_notebook(
     This can be useful to use as a preprocessing DVC stage to use a clean
     notebook as a dependency for a stage that caches and executed notebook.
     """
+    from calkit.cli.main import run_in_env
+
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
     if to == "html":
@@ -62,15 +72,15 @@ def execute_notebook(
     fpath_out = os.path.join(".calkit", "notebooks", subdir, fname_out)
     folder = os.path.dirname(fpath_out)
     os.makedirs(folder, exist_ok=True)
-    subprocess.call(
-        [
-            "jupyter",
-            "nbconvert",
-            path,
-            "--execute",
-            "--to",
-            to,
-            "--output",
-            fpath_out,
-        ]
-    )
+    fpath_out = os.path.abspath(fpath_out)
+    cmd = [
+        "jupyter",
+        "nbconvert",
+        path,
+        "--execute",
+        "--to",
+        to,
+        "--output",
+        fpath_out,
+    ]
+    run_in_env(cmd=cmd, env_name=env_name)

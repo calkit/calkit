@@ -313,10 +313,24 @@ class JupyterNotebookStage(Stage):
     html_storage: Literal["git", "dvc"] | None = "dvc"
 
     @property
+    def cleaned_notebook_path(self) -> str:
+        return get_cleaned_notebook_path(self.notebook_path, as_posix=True)
+
+    @property
+    def executed_notebook_path(self) -> str:
+        return get_executed_notebook_path(
+            self.notebook_path, to="notebook", as_posix=True
+        )
+
+    @property
+    def html_path(self) -> str:
+        return get_executed_notebook_path(
+            self.notebook_path, to="html", as_posix=True
+        )
+
+    @property
     def dvc_deps(self) -> list[str]:
-        return [
-            get_cleaned_notebook_path(self.notebook_path)
-        ] + super().dvc_deps
+        return [self.cleaned_notebook_path] + super().dvc_deps
 
     @property
     def dvc_cmd(self) -> str:
@@ -329,9 +343,7 @@ class JupyterNotebookStage(Stage):
     def dvc_outs(self) -> list[str | dict]:
         outs = super().dvc_outs
         # TODO: This should also export HTML?
-        exec_nb_path = get_executed_notebook_path(
-            self.notebook_path, to="notebook", as_posix=True
-        )
+        exec_nb_path = self.executed_notebook_path
         exec_nb_out = {
             exec_nb_path: {"cache": self.executed_ipynb_storage == "dvc"}
         }
@@ -345,9 +357,7 @@ class JupyterNotebookStage(Stage):
 
         TODO: Should we use Jupytext for this so diffs are nice?
         """
-        clean_nb_path = get_cleaned_notebook_path(
-            self.notebook_path, as_posix=True
-        )
+        clean_nb_path = self.cleaned_notebook_path
         stage = {
             "cmd": f'calkit nb clean "{self.notebook_path}"',
             "deps": [self.notebook_path],
@@ -356,6 +366,23 @@ class JupyterNotebookStage(Stage):
             ],
         }
         return stage
+
+    @property
+    def notebook_outputs(self) -> list[PathOutput]:
+        """Return a list of special notebook outputs so their storage can be
+        respected.
+        """
+        return [
+            PathOutput(
+                path=self.cleaned_notebook_path,
+                storage=self.cleaned_ipynb_storage,
+            ),
+            PathOutput(
+                path=self.executed_notebook_path,
+                storage=self.executed_ipynb_storage,
+            ),
+            PathOutput(path=self.html_path, storage=self.html_storage),
+        ]
 
 
 class WordToPdfStage(Stage):

@@ -142,7 +142,11 @@ def to_dvc(
         # Check for any outputs that should be ignored
         if write:
             repo = git.Repo(wdir)
-            for out in stage.outputs:
+            # Ensure we catch any Jupyter Notebook outputs
+            outputs = stage.outputs.copy()
+            if stage.kind == "jupyter-notebook":
+                outputs += stage.notebook_outputs
+            for out in outputs:
                 if (
                     isinstance(out, PathOutput)
                     and out.storage is None

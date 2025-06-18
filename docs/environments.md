@@ -41,6 +41,16 @@ matplotlib
 
 ## Checking, syncing, and executing
 
+An environment can be checked that it matches its specification with:
+
+```sh
+calkit check env --name {env-name}
+```
+
+This will produce a "lock file" inside the project's `.calkit/env-locks`
+directory, which uniquely identifies the actual environment that was
+created to help diagnose reproducibility issues down the road.
+
 A command can be executed in an environment with:
 
 ```sh
@@ -51,9 +61,6 @@ Before the command is executed,
 Calkit will check that the environment matches its specification,
 and if it needs to be updated,
 that will be done before execution.
-Typically this will produce a "lock file" describing the exact
-dependencies that made it into that environment
-to help with diagnosing reproducibility issues down the road.
 
 ## Choosing an environment type
 

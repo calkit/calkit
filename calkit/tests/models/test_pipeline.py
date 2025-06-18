@@ -1,6 +1,6 @@
 """Tests for ``calkit.models.pipeline``."""
 
-from calkit.models.pipeline import PythonScriptStage
+from calkit.models.pipeline import PythonScriptStage, WordToPdfStage
 
 
 def test_pythonscriptstage():
@@ -28,3 +28,13 @@ def test_pythonscriptstage():
     assert sd["outs"][1] == {
         "data/something.csv": dict(cache=False, persist=False)
     }
+
+
+def test_wordtopdfstage():
+    s = WordToPdfStage(
+        word_doc_path="my word doc.docx",
+    )
+    sd = s.to_dvc()
+    assert sd["cmd"] == (
+        'calkit office word-to-pdf "my word doc.docx" -o "my word doc.pdf"'
+    )

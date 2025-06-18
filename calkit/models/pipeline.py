@@ -13,6 +13,10 @@ from calkit.models.iteration import (
     ParametersType,
     RangeIteration,
 )
+from calkit.notebooks import (
+    get_cleaned_notebook_path,
+    get_executed_notebook_path,
+)
 
 
 class Input(BaseModel):
@@ -156,7 +160,7 @@ class Stage(BaseModel):
 
 
 class PythonScriptStage(Stage):
-    kind: Literal["python-script"]
+    kind: Literal["python-script"] = "python-script"
     script_path: str
     args: list[str] = []
 
@@ -292,6 +296,9 @@ class JupyterNotebookStage(Stage):
     2. Notebook running, depending on the cleaned notebook, and optionally
        producing HTML output.
 
+    Alternatively, we could force the use of ``nbstripout`` so the cleaned
+    notebook is saved at the notebook path.
+
     TODO: Can/should we do something like Papermill and let users modify
     parameters in the notebook?
 
@@ -299,15 +306,115 @@ class JupyterNotebookStage(Stage):
     needing to be run from top to bottom every time they change.
     """
 
-    kind: Literal["jupyter-notebook"]
+    kind: Literal["jupyter-notebook"] = "jupyter-notebook"
     notebook_path: str
-    store_cleaned_with: Literal["git", "dvc"] | None = "git"
-    store_executed_ipynb_with: Literal["git", "dvc"] | None = "dvc"
-    store_executed_html_with: Literal["git", "dvc"] | None = "dvc"
+    cleaned_ipynb_storage: Literal["git", "dvc"] | None = "git"
+    executed_ipynb_storage: Literal["git", "dvc"] | None = "dvc"
+    html_storage: Literal["git", "dvc"] | None = "dvc"
+
+    @property
+    def cleaned_notebook_path(self) -> str:
+        return get_cleaned_notebook_path(self.notebook_path, as_posix=True)
+
+    @property
+    def executed_notebook_path(self) -> str:
+        return get_executed_notebook_path(
+            self.notebook_path, to="notebook", as_posix=True
+        )
+
+    @property
+    def html_path(self) -> str:
+        return get_executed_notebook_path(
+            self.notebook_path, to="html", as_posix=True
+        )
 
     @property
     def dvc_deps(self) -> list[str]:
-        return [self.notebook_path] + super().dvc_deps
+        return [self.cleaned_notebook_path] + super().dvc_deps
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f"calkit nb execute --environment {self.environment} --no-check"
+        if self.html_storage:
+            cmd += " --to html"
+        cmd += f' "{self.notebook_path}"'
+        return cmd
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs = super().dvc_outs
+        # TODO: This should also export HTML?
+        exec_nb_path = self.executed_notebook_path
+        exec_nb_out = {
+            exec_nb_path: {"cache": self.executed_ipynb_storage == "dvc"}
+        }
+        outs = outs + [exec_nb_out]
+        return outs
+
+    @property
+    def dvc_clean_stage(self) -> dict:
+        """Create a DVC stage for notebook cleaning so the cleaned notebook
+        can be used as a DVC dependency.
+
+        TODO: Should we use Jupytext for this so diffs are nice?
+        """
+        clean_nb_path = self.cleaned_notebook_path
+        stage = {
+            "cmd": f'calkit nb clean "{self.notebook_path}"',
+            "deps": [self.notebook_path],
+            "outs": [
+                {clean_nb_path: {"cache": self.cleaned_ipynb_storage == "dvc"}}
+            ],
+        }
+        return stage
+
+    @property
+    def notebook_outputs(self) -> list[PathOutput]:
+        """Return a list of special notebook outputs so their storage can be
+        respected.
+        """
+        return [
+            PathOutput(
+                path=self.cleaned_notebook_path,
+                storage=self.cleaned_ipynb_storage,
+            ),
+            PathOutput(
+                path=self.executed_notebook_path,
+                storage=self.executed_ipynb_storage,
+            ),
+            PathOutput(path=self.html_path, storage=self.html_storage),
+        ]
+
+
+class WordToPdfStage(Stage):
+    kind: Literal["word-to-pdf"] = "word-to-pdf"
+    word_doc_path: str
+    environment: str = "_system"
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.word_doc_path] + super().dvc_deps
+
+    @property
+    def out_path(self) -> str:
+        return PurePosixPath(
+            self.word_doc_path.removesuffix(".docx") + ".pdf"
+        ).as_posix()
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs = super().dvc_outs
+        out_path = self.out_path
+        if out_path not in outs:
+            outs.append(out_path)
+        return outs
+
+    @property
+    def dvc_cmd(self) -> str:
+        return (
+            f'calkit office word-to-pdf "{self.word_doc_path}" '
+            f'-o "{self.out_path}"'
+        )
 
 
 class Pipeline(BaseModel):
@@ -322,6 +429,8 @@ class Pipeline(BaseModel):
                 | ShellScriptStage
                 | DockerCommandStage
                 | RScriptStage
+                | WordToPdfStage
+                | JupyterNotebookStage
             ),
             Discriminator("kind"),
         ],

@@ -38,12 +38,11 @@ class Calkit(Magics):
     )
     @magic_arguments.argument(
         "--env",
-        nargs="?",
-        const=True,
-        help=(
-            "Whether or not this cell should be run in an environment. "
-            "If no environment name is provided, the default will be used."
-        ),
+        "--environment",
+        "-e",
+        required=True,
+        help=("Environment with which to run this cell."),
+        type=_parse_string_arg,
     )
     @magic_arguments.argument(
         "--dep",
@@ -111,6 +110,19 @@ class Calkit(Magics):
         "--out-desc",
         help="Description for Calkit output object.",
         type=_parse_string_arg,
+    )
+    @magic_arguments.argument(
+        "--out-storage",
+        choices=["dvc", "git", "none"],
+        help="Which version control system to use to store the output.",
+        default="dvc",
+        type=_parse_string_arg,
+    )
+    @magic_arguments.argument(
+        "--verbose",
+        help="Print verbose output.",
+        default=False,
+        action="store_true",
     )
     @cell_magic
     def stage(self, line, cell):
@@ -222,21 +234,22 @@ class Calkit(Magics):
         with open(script_fpath, "w") as f:
             f.write(script_txt)
         # Create a DVC stage that runs the script, defining the appropriate
-        # dependencies and outputs, and run it
+        # dependencies and outputs
+        # TODO: Insert this into dvc.yaml directly, since DVC reformats
         cmd = [
             sys.executable,
             "-m",
             "dvc",
             "stage",
             "add",
-            "-q",
             "-n",
             args.name,
-            "--run",
             "--force",
             "-d",
             _posix_path(script_fpath),
         ]
+        if not args.verbose:
+            cmd.append("-q")
         if args.dep:
             for dep in args.dep:
                 dep_split = dep.split(":")
@@ -259,8 +272,13 @@ class Calkit(Magics):
                 kws = dict(stage_name=args.name, out_name=out_name)
                 if len(out_split) > 1:
                     kws["fmt"] = out_split[1]
+                # Figure out DVC caching
+                if args.out_storage == "dvc":
+                    out_flag = "-o"
+                else:
+                    out_flag = "--outs-no-cache"
                 cmd += [
-                    "-o",
+                    out_flag,
                     _posix_path(calkit.get_notebook_stage_out_path(**kws)),
                 ]
         if args.out_path:
@@ -274,7 +292,18 @@ class Calkit(Magics):
             stage_cmd = xenv + " -- " + stage_cmd
         cmd.append(stage_cmd)
         try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            subprocess.run(
+                cmd, check=True, capture_output=not args.verbose, text=True
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"Error: {e.stderr}")
+            raise e
+        # Now run the stage
+        run_cmd = [sys.executable, "-m", "dvc", "repro", args.name]
+        try:
+            subprocess.run(
+                run_cmd, check=True, capture_output=False, text=True
+            )
         except subprocess.CalledProcessError as e:
             print(f"Error: {e.stderr}")
             raise e

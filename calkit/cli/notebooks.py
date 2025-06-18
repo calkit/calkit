@@ -8,6 +8,9 @@ import subprocess
 import typer
 from typing_extensions import Annotated
 
+import calkit.notebooks
+from calkit.cli.core import raise_error
+
 notebooks_app = typer.Typer(no_args_is_help=True)
 
 
@@ -20,7 +23,7 @@ def clean_notebook_outputs(path: str):
     """
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
-    fpath_out = os.path.join(".calkit", "notebooks", "cleaned", path)
+    fpath_out = calkit.notebooks.get_cleaned_notebook_path(path)
     folder = os.path.dirname(fpath_out)
     os.makedirs(folder, exist_ok=True)
     subprocess.call(
@@ -67,15 +70,13 @@ def execute_notebook(
 
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
-    if to == "html":
-        subdir = "html"
-        fname_out = path.removesuffix(".ipynb") + ".html"
-    elif to == "notebook":
-        subdir = "executed"
-        fname_out = path
-    else:
-        raise ValueError(f"Invalid output format: '{to}'")
-    fpath_out = os.path.join(".calkit", "notebooks", subdir, fname_out)
+    try:
+        fpath_out = calkit.notebooks.get_executed_notebook_path(
+            notebook_path=path,
+            to=to,  # type: ignore
+        )
+    except ValueError:
+        raise_error(f"Invalid output format: '{to}'")
     folder = os.path.dirname(fpath_out)
     os.makedirs(folder, exist_ok=True)
     fpath_out = os.path.abspath(fpath_out)

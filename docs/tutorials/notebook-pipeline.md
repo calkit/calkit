@@ -175,10 +175,30 @@ for searchability and reuse.
 
 ## Running the pipeline outside the notebook
 
-One cool feature about building the pipeline this way is that it actually
-creates runnable stages in `dvc.yaml`,
-so `calkit run` or `dvc repro` will run all the same operations that
-executing the notebook would.
+To incorporate the notebook into the project pipeline in `calkit.yaml`,
+e.g., if it's called `notebook.ipynb`, it can be added like:
+
+```yaml
+# In calkit.yaml
+environments:
+  main:
+    kind: venv # Use python's built in venv module
+    path: requirements.txt
+    prefix: .venv
+pipeline:
+  stages:
+    run-notebook:
+      kind: jupyter-notebook
+      notebook_path: notebook.ipynb
+      environment: main
+      html_storage: dvc
+```
+
+Executing `calkit run` will then execute the notebook,
+and any cached cell stages will not be rerun,
+but their outputs will make there way back into the notebook.
+Lastly, an HTML version of the notebook will be exported and versioned
+with DVC (though the storage location is configurable).
 
 ## Further exploration
 

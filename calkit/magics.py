@@ -237,7 +237,8 @@ class Calkit(Magics):
         with open(script_fpath, "w") as f:
             f.write(script_txt)
         # Create a DVC stage that runs the script, defining the appropriate
-        # dependencies and outputs, and run it
+        # dependencies and outputs
+        # TODO: Insert this into dvc.yaml directly, since DVC reformats
         cmd = [
             sys.executable,
             "-m",
@@ -246,7 +247,6 @@ class Calkit(Magics):
             "add",
             "-n",
             args.name,
-            "--run",
             "--force",
             "-d",
             _posix_path(script_fpath),
@@ -295,7 +295,18 @@ class Calkit(Magics):
             stage_cmd = xenv + " -- " + stage_cmd
         cmd.append(stage_cmd)
         try:
-            subprocess.run(cmd, check=True, capture_output=False, text=True)
+            subprocess.run(
+                cmd, check=True, capture_output=not args.verbose, text=True
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"Error: {e.stderr}")
+            raise e
+        # Now run the stage
+        run_cmd = [sys.executable, "-m", "dvc", "repro", args.name]
+        try:
+            subprocess.run(
+                run_cmd, check=True, capture_output=False, text=True
+            )
         except subprocess.CalledProcessError as e:
             print(f"Error: {e.stderr}")
             raise e

@@ -51,6 +51,12 @@ def execute_notebook(
     to: Annotated[
         str, typer.Option("--to", help="Output format ('html' or 'notebook').")
     ] = "notebook",
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check", help="Do not check environment before executing."
+        ),
+    ] = False,
 ):
     """Execute notebook and place a copy in the relevant directory.
 
@@ -83,4 +89,4 @@ def execute_notebook(
         "--output",
         fpath_out,
     ]
-    run_in_env(cmd=cmd, env_name=env_name)
+    run_in_env(cmd=cmd, env_name=env_name, no_check=no_check)

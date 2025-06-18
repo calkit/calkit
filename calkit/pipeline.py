@@ -48,44 +48,16 @@ def to_dvc(
     env_lock_fpaths = {}
     for env_name, env in ck_info.get("environments", {}).items():
         env_fpath = env.get("path")
-        env_kind = env.get("kind")
         lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=True
         )
+        cmd = f"calkit check environment --name {env_name}"
         if lock_fpath is None:
             continue
         deps = []
         outs = []
         if env_fpath is not None:
             deps.append(env_fpath)
-        if env_kind == "docker":
-            cmd = "calkit check docker-env"
-            image = env.get("image")
-            if image is None:
-                raise ValueError("Docker image must be specified")
-            cmd += f" {image}"
-            if env_fpath is not None:
-                cmd += f" -i {env_fpath}"
-            cmd += f" -o {lock_fpath}"
-        elif env_kind == "uv":
-            lock_fpath = "uv.lock"
-            cmd = "uv sync"
-        elif env_kind in ["venv", "uv-venv"]:
-            cmd = "calkit check venv"
-            if env_fpath is None:
-                raise ValueError("venvs require a path")
-            cmd += f" {env_fpath} -o {lock_fpath}"
-        elif env_kind == "conda":
-            cmd = "calkit check conda-env"
-            if env_fpath is None:
-                raise ValueError("Conda envs require a path")
-            cmd += f" --file {env_fpath} --output {lock_fpath}"
-            if env.get("relaxed"):
-                cmd += " --relaxed"
-        elif env_kind == "matlab":
-            cmd = "calkit check matlab-env"
-            cmd += f" --name {env_name} --output {lock_fpath}"
-        # TODO: Add more env types
         outs.append({lock_fpath: dict(cache=False, persist=True)})
         stage = dict(cmd=cmd, deps=deps, outs=outs, always_changed=True)
         stage["desc"] = (

@@ -8,6 +8,13 @@ import calkit.pipeline
 def test_to_dvc():
     # Test typical proper usage
     ck_info = {
+        "environments": {
+            "py": {
+                "kind": "venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+            }
+        },
         "pipeline": {
             "stages": {
                 "get-data": {
@@ -24,11 +31,19 @@ def test_to_dvc():
                     ],
                 }
             }
-        }
+        },
     }
     stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
     stage = stages["get-data"]
     assert stage["outs"][0] == "my-output.out"
+    stage = stages["_check-env-py"]
+    assert stage["deps"] == ["requirements.txt"]
+    assert stage["cmd"] == "calkit check environment --name py"
+    assert stage["desc"].startswith("Automatically generated")
+    out = stage["outs"][0]
+    out_path = list(out.keys())[0]
+    assert out_path == ".calkit/env-locks/py.txt"
+    assert not out[out_path]["cache"]
     # TODO: Test other stage types
     # Test when user forgets to add an environment
     ck_info = {

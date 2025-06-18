@@ -339,7 +339,9 @@ class JupyterNotebookStage(Stage):
 
     @property
     def dvc_clean_stage(self) -> dict:
-        """Create a DVC stage for notebook cleaning."""
+        """Create a DVC stage for notebook cleaning so the cleaned notebook
+        can be used as a DVC dependency.
+        """
         stage = {
             "cmd": f'calkit nb clean "{self.notebook_path}"',
             "deps": [self.notebook_path],

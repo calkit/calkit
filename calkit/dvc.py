@@ -173,7 +173,6 @@ def get_remotes(wdir: str | None = None) -> dict[str, str]:
     is_name = True
     for token in out.split():
         token = token.strip()
-        print(token)
         if is_name:
             name = token
         else:

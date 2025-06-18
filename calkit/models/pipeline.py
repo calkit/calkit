@@ -306,7 +306,7 @@ class JupyterNotebookStage(Stage):
     needing to be run from top to bottom every time they change.
     """
 
-    kind: Literal["jupyter-notebook"]
+    kind: Literal["jupyter-notebook"] = "jupyter-notebook"
     notebook_path: str
     clean_ipynb_storage: Literal["git", "dvc"] | None = "git"
     executed_ipynb_storage: Literal["git", "dvc"] | None = "dvc"
@@ -341,6 +341,8 @@ class JupyterNotebookStage(Stage):
     def dvc_clean_stage(self) -> dict:
         """Create a DVC stage for notebook cleaning so the cleaned notebook
         can be used as a DVC dependency.
+
+        TODO: Should we use Jupytext for this so diffs are nice?
         """
         stage = {
             "cmd": f'calkit nb clean "{self.notebook_path}"',
@@ -394,6 +396,7 @@ class Pipeline(BaseModel):
                 | DockerCommandStage
                 | RScriptStage
                 | WordToPdfStage
+                | JupyterNotebookStage
             ),
             Discriminator("kind"),
         ],

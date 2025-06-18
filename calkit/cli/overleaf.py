@@ -141,7 +141,7 @@ def import_publication(
         pdf_path = sync_paths[0].removesuffix(".tex") + ".pdf"
         typer.echo(f"Using PDF path: {pdf_path}")
     tex_path = pdf_path.removesuffix(".pdf") + ".tex"
-    pub_path = os.path.join(dest_dir, pdf_path)
+    pub_path = PurePosixPath(dest_dir, pdf_path).as_posix()
     pub_paths = [pub.get("path") for pub in pubs]
     if not overwrite and pub_path in pub_paths:
         raise_error(

@@ -178,3 +178,28 @@ def test_to_dvc_from_matrix_outs():
                 f"out-{var1}-{var2}.out" in dvc_stages["process-data"]["deps"]
             )
     assert "something.else.txt" in dvc_stages["process-data"]["deps"]
+
+
+def test_to_dvc_notebook_stage():
+    # Test we can create a notebook stage properly, which involves a cleaning
+    # stage to use as a DVC dependency
+    nb_path = "something/my-cool-notebook.ipynb"
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "notebook-1": {
+                    "kind": "jupyter-notebook",
+                    "environment": "something",
+                    "notebook_path": nb_path,
+                    "outputs": [
+                        "figures/fig1.png",
+                    ],
+                },
+            }
+        }
+    }
+    dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    print(dvc_stages)
+    clean_stage = dvc_stages["_clean-nb-notebook-1"]
+    assert clean_stage["cmd"] == f'calkit nb clean "{nb_path}"'
+    assert clean_stage["desc"].startswith("Automatically generated")

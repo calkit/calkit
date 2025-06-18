@@ -309,6 +309,13 @@ class JupyterNotebookStage(Stage):
     def dvc_deps(self) -> list[str]:
         return [self.notebook_path] + super().dvc_deps
 
+    @property
+    def dvc_cmd(self) -> str:
+        return (
+            f"calkit nb execute --environment {self.environment} --no-check "
+            f'"{self.notebook_path}"'
+        )
+
 
 class WordToPdfStage(Stage):
     kind: Literal["word-to-pdf"] = "word-to-pdf"

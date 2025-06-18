@@ -194,6 +194,9 @@ def test_to_dvc_notebook_stage():
                     "outputs": [
                         "figures/fig1.png",
                     ],
+                    "html_storage": "git",
+                    "cleaned_ipynb_storage": None,
+                    "executed_ipynb_storage": "dvc",
                 },
             }
         }

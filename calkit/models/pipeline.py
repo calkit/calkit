@@ -308,7 +308,7 @@ class JupyterNotebookStage(Stage):
 
     kind: Literal["jupyter-notebook"] = "jupyter-notebook"
     notebook_path: str
-    clean_ipynb_storage: Literal["git", "dvc"] | None = "git"
+    cleaned_ipynb_storage: Literal["git", "dvc"] | None = "git"
     executed_ipynb_storage: Literal["git", "dvc"] | None = "dvc"
     html_storage: Literal["git", "dvc"] | None = "dvc"
 
@@ -330,11 +330,12 @@ class JupyterNotebookStage(Stage):
         outs = super().dvc_outs
         # TODO: This should also export HTML?
         exec_nb_path = get_executed_notebook_path(
-            self.notebook_path, to="notebook"
+            self.notebook_path, to="notebook", as_posix=True
         )
-        out_path = PurePosixPath(exec_nb_path).as_posix()
-        if out_path not in outs:
-            outs.append(out_path)
+        exec_nb_out = {
+            exec_nb_path: {"cache": self.executed_ipynb_storage == "dvc"}
+        }
+        outs = outs + [exec_nb_out]
         return outs
 
     @property
@@ -344,10 +345,15 @@ class JupyterNotebookStage(Stage):
 
         TODO: Should we use Jupytext for this so diffs are nice?
         """
+        clean_nb_path = get_cleaned_notebook_path(
+            self.notebook_path, as_posix=True
+        )
         stage = {
             "cmd": f'calkit nb clean "{self.notebook_path}"',
             "deps": [self.notebook_path],
-            "outs": [get_cleaned_notebook_path(self.notebook_path)],
+            "outs": [
+                {clean_nb_path: {"cache": self.cleaned_ipynb_storage == "dvc"}}
+            ],
         }
         return stage
 

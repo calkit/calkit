@@ -13,6 +13,10 @@ from calkit.models.iteration import (
     ParametersType,
     RangeIteration,
 )
+from calkit.notebooks import (
+    get_cleaned_notebook_path,
+    get_executed_notebook_path,
+)
 
 
 class Input(BaseModel):
@@ -292,6 +296,9 @@ class JupyterNotebookStage(Stage):
     2. Notebook running, depending on the cleaned notebook, and optionally
        producing HTML output.
 
+    Alternatively, we could force the use of ``nbstripout`` so the cleaned
+    notebook is saved at the notebook path.
+
     TODO: Can/should we do something like Papermill and let users modify
     parameters in the notebook?
 
@@ -301,13 +308,15 @@ class JupyterNotebookStage(Stage):
 
     kind: Literal["jupyter-notebook"]
     notebook_path: str
-    store_cleaned_with: Literal["git", "dvc"] | None = "git"
-    store_executed_ipynb_with: Literal["git", "dvc"] | None = "dvc"
-    store_executed_html_with: Literal["git", "dvc"] | None = "dvc"
+    clean_ipynb_storage: Literal["git", "dvc"] | None = "git"
+    executed_ipynb_storage: Literal["git", "dvc"] | None = "dvc"
+    html_storage: Literal["git", "dvc"] | None = "dvc"
 
     @property
     def dvc_deps(self) -> list[str]:
-        return [self.notebook_path] + super().dvc_deps
+        return [
+            get_cleaned_notebook_path(self.notebook_path)
+        ] + super().dvc_deps
 
     @property
     def dvc_cmd(self) -> str:
@@ -315,6 +324,28 @@ class JupyterNotebookStage(Stage):
             f"calkit nb execute --environment {self.environment} --no-check "
             f'"{self.notebook_path}"'
         )
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs = super().dvc_outs
+        # TODO: This should also export HTML?
+        exec_nb_path = get_executed_notebook_path(
+            self.notebook_path, to="notebook"
+        )
+        out_path = PurePosixPath(exec_nb_path).as_posix()
+        if out_path not in outs:
+            outs.append(out_path)
+        return outs
+
+    @property
+    def dvc_clean_stage(self) -> dict:
+        """Create a DVC stage for notebook cleaning."""
+        stage = {
+            "cmd": f'calkit nb clean "{self.notebook_path}"',
+            "deps": [self.notebook_path],
+            "outs": [get_cleaned_notebook_path(self.notebook_path)],
+        }
+        return stage
 
 
 class WordToPdfStage(Stage):

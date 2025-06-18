@@ -26,6 +26,7 @@ def clean_notebook_outputs(path: str):
     fpath_out = calkit.notebooks.get_cleaned_notebook_path(path)
     folder = os.path.dirname(fpath_out)
     os.makedirs(folder, exist_ok=True)
+    fpath_out = os.path.abspath(fpath_out)
     subprocess.call(
         [
             "jupyter",

@@ -361,6 +361,11 @@ def check_venv(
         ["uv", "venv"] if kind == "uv-venv" else ["python", "-m", "venv"]
     )
     pip_cmd = "pip" if kind == "venv" else "uv pip"
+    pip_freeze_cmd = f"{pip_cmd} freeze"
+    if kind == "uv-venv":
+        pip_freeze_cmd += " --color never"
+    else:
+        pip_freeze_cmd += " --no-color"
     pip_install_args = "-q" if quiet else ""
     if python is not None and not use_uv:
         raise_error("Python version cannot be specified if not using uv")
@@ -391,7 +396,7 @@ def check_venv(
     check_cmd = (
         f"{activate_cmd} "
         f"&& {pip_cmd} install {pip_install_args} -r {path} "
-        f"&& {pip_cmd} freeze > {lock_fpath} "
+        f"&& {pip_freeze_cmd} > {lock_fpath} "
         "&& deactivate"
     )
     try:

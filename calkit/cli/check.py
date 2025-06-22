@@ -71,17 +71,16 @@ def check_environment(
     if env["kind"] == "docker":
         if "image" not in env:
             raise_error("Image must be defined for Docker environments")
-        if "path" in env:
-            check_docker_env(
-                tag=env["image"],
-                fpath=env["path"],
-                lock_fpath=get_env_lock_fpath(
-                    env=env, env_name=env_name, as_posix=False
-                ),
-                platform=env.get("platform"),
-                deps=env.get("deps", []),
-                quiet=not verbose,
-            )
+        check_docker_env(
+            tag=env["image"],
+            fpath=env.get("path"),
+            lock_fpath=get_env_lock_fpath(
+                env=env, env_name=env_name, as_posix=False
+            ),
+            platform=env.get("platform"),
+            deps=env.get("deps", []),
+            quiet=not verbose,
+        )
     elif env["kind"] == "conda":
         check_conda_env(
             env_fpath=env["path"],

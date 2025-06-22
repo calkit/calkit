@@ -878,10 +878,10 @@ def run_in_env(
     if env["kind"] == "docker":
         if "image" not in env:
             raise_error("Image must be defined for Docker environments")
-        if "path" in env and not no_check:
+        if not no_check:
             check_docker_env(
                 tag=env["image"],
-                fpath=env["path"],
+                fpath=env.get("path"),
                 lock_fpath=get_env_lock_fpath(
                     env=env, env_name=env_name, as_posix=False
                 ),

@@ -177,15 +177,17 @@ class PythonScriptStage(Stage):
 
 
 class LatexStage(Stage):
-    kind: Literal["latex"]
+    kind: Literal["latex"] = "latex"
     target_path: str
+    silent: bool = False
 
     @property
     def dvc_cmd(self) -> str:
-        return (
-            f"{self.xenv_cmd} -- "
-            f"latexmk -cd -interaction=nonstopmode -pdf {self.target_path}"
-        )
+        cmd = f"{self.xenv_cmd} -- latexmk -cd -interaction=nonstopmode"
+        if self.silent:
+            cmd += " -silent"
+        cmd += f" -pdf {self.target_path}"
+        return cmd
 
     @property
     def dvc_deps(self) -> list[str]:

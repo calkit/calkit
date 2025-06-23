@@ -272,7 +272,20 @@ def sync(
         bool,
         typer.Option(
             "--no-commit",
-            help="Do not commit the changes.",
+            help=(
+                "Do not commit the changes to the project repo. "
+                "Changes will always be committed to Overleaf."
+            ),
+        ),
+    ] = False,
+    push: Annotated[
+        bool,
+        typer.Option(
+            "--push",
+            help=(
+                "Push the changes to the project repo. "
+                "Changes will always be pushed to Overleaf."
+            ),
         ),
     ] = False,
     verbose: Annotated[
@@ -423,18 +436,14 @@ def sync(
                 continue
         # Stage the changes in the Overleaf project
         overleaf_repo.git.add(sync_paths + push_paths)
-        if (
-            overleaf_repo.git.diff("--staged", sync_paths + push_paths)
-            and not no_commit
-        ):
+        if overleaf_repo.git.diff("--staged", sync_paths + push_paths):
+            typer.echo("Committing changes to Overleaf")
             commit_message = "Sync with Calkit project"
             overleaf_repo.git.commit(
                 *(sync_paths + push_paths),
                 "-m",
                 commit_message,
             )
-            # TODO: We should probably always push and pull to we can
-            # idempotently run this command
             typer.echo("Pushing changes to Overleaf")
             overleaf_repo.git.push()
         # Update the last sync commit
@@ -478,7 +487,10 @@ def sync(
                 "-m",
                 commit_message,
             )
-    # Push to the project remote
-    typer.echo("Pushing changes to project Git remote")
-    repo.git.push()
+    if push and not no_commit:
+        # Push to the project remote
+        typer.echo("Pushing changes to project Git remote")
+        repo.git.push()
+        if dvc_sync_paths:
+            subprocess.run(["python", "-m", "dvc", "push"])
     # TODO: Add option to run the pipeline after?

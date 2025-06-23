@@ -278,12 +278,12 @@ def sync(
             ),
         ),
     ] = False,
-    push: Annotated[
+    no_push: Annotated[
         bool,
         typer.Option(
-            "--push",
+            "--no-push",
             help=(
-                "Push the changes to the project repo. "
+                "Do not push the changes to the project remote. "
                 "Changes will always be pushed to Overleaf."
             ),
         ),
@@ -487,7 +487,7 @@ def sync(
                 "-m",
                 commit_message,
             )
-    if push and not no_commit:
+    if not no_push and not no_commit:
         # Push to the project remote
         typer.echo("Pushing changes to project Git remote")
         repo.git.push()

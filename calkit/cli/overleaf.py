@@ -342,16 +342,27 @@ def sync(
         last_sync_commit = pub["overleaf"].get("last_sync_commit")
         # Determine which paths to sync and push
         # TODO: Support glob patterns
-        sync_paths = pub["overleaf"].get("sync_paths", [])
+        git_sync_paths = pub["overleaf"].get("sync_paths", [])
+        git_sync_paths += pub["overleaf"].get("git_sync_paths", [])
+        dvc_sync_paths = pub["overleaf"].get("dvc_sync_paths", [])
+        sync_paths = git_sync_paths + dvc_sync_paths
         push_paths = pub["overleaf"].get("push_paths", [])
-        sync_paths_in_project = [os.path.join(wdir, p) for p in sync_paths]
+        git_sync_paths_in_project = [
+            os.path.join(wdir, p) for p in git_sync_paths
+        ]
+        dvc_sync_paths_in_project = [
+            os.path.join(wdir, p) for p in dvc_sync_paths
+        ]
         if not sync_paths:
-            warn("No sync paths defined in the publication's Overleaf config")
+            warn(
+                "No sync paths or DVC sync paths defined in the publication's "
+                "Overleaf config"
+            )
         elif last_sync_commit:
             # Compute a diff in the Overleaf project between HEAD and the last
             # sync
             diff = overleaf_repo.git.diff(
-                [last_sync_commit, "HEAD", "--"] + sync_paths
+                [last_sync_commit, "HEAD", "--"] + git_sync_paths
             )
             # Ensure the diff ends with a new line
             if diff and not diff.endswith("\n"):
@@ -436,15 +447,34 @@ def sync(
             calkit.ryaml.dump(ck_info, f)
         repo.git.add("calkit.yaml")
         # Stage the changes in the project repo
-        repo.git.add(sync_paths_in_project)
+        # Add any DVC sync paths to DVC
+        for dvc_sync_path in dvc_sync_paths_in_project:
+            if not os.path.isfile(dvc_sync_path):
+                raise_error(
+                    f"DVC sync path {dvc_sync_path} does not exist; "
+                    "please check your Overleaf config"
+                )
+            typer.echo(f"Adding DVC sync path {dvc_sync_path} to DVC")
+            try:
+                subprocess.run(
+                    ["python", "-m", "dvc", "-q", "add", dvc_sync_path],
+                    check=True,
+                )
+            except subprocess.CalledProcessError as e:
+                raise_error(
+                    f"Failed to add DVC sync path {dvc_sync_path}: {e}"
+                )
+        repo.git.add(git_sync_paths_in_project)
         if (
-            repo.git.diff("--staged", sync_paths_in_project + ["calkit.yaml"])
+            repo.git.diff(
+                "--staged", git_sync_paths_in_project + ["calkit.yaml"]
+            )
             and not no_commit
         ):
             typer.echo("Committing changes to project repo")
             commit_message = f"Sync {wdir} with Overleaf project"
             repo.git.commit(
-                *(sync_paths_in_project + ["calkit.yaml"]),
+                *(git_sync_paths_in_project + ["calkit.yaml"]),
                 "-m",
                 commit_message,
             )

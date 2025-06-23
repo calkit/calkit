@@ -180,12 +180,15 @@ class LatexStage(Stage):
     kind: Literal["latex"] = "latex"
     target_path: str
     silent: bool = False
+    force: bool = False
 
     @property
     def dvc_cmd(self) -> str:
         cmd = f"{self.xenv_cmd} -- latexmk -cd -interaction=nonstopmode"
         if self.silent:
             cmd += " -silent"
+        if self.force:
+            cmd += " -f"
         cmd += f" -pdf {self.target_path}"
         return cmd
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import PurePosixPath
 
 import git
@@ -466,7 +467,7 @@ def sync(
             typer.echo(f"Adding DVC sync path {dvc_sync_path} to DVC")
             try:
                 subprocess.run(
-                    ["python", "-m", "dvc", "-q", "add", dvc_sync_path],
+                    [sys.executable, "-m", "dvc", "-q", "add", dvc_sync_path],
                     check=True,
                 )
             except subprocess.CalledProcessError as e:
@@ -492,5 +493,5 @@ def sync(
         typer.echo("Pushing changes to project Git remote")
         repo.git.push()
         if dvc_sync_paths:
-            subprocess.run(["python", "-m", "dvc", "push"])
+            subprocess.run([sys.executable, "-m", "dvc", "push"])
     # TODO: Add option to run the pipeline after?

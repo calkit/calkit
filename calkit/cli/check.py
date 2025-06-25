@@ -181,17 +181,27 @@ def check_docker_env(
             "Lock file output path must be provided if input Dockerfile is not"
         )
 
-    def get_docker_inspect():
+    def get_docker_inspect() -> dict:
+        # This command returns a list, of which we want the first object
         out = json.loads(
             subprocess.check_output(["docker", "inspect", tag]).decode()
         )
         # Remove some keys that can change without the important aspects of
         # the image changing
-        _ = out[0].pop("Id")
-        _ = out[0].pop("RepoDigests")
-        _ = out[0].pop("Metadata")
-        _ = out[0].pop("DockerVersion")
-        return out
+        # Only keep certain keys that are relevant for identifying the
+        # content in the image
+        keys = [
+            "RepoTags",
+            "Architecture",
+            "Os",
+            "Size",
+            "RootFS",
+            "Descriptor",
+        ]
+        resp = {}
+        for key in keys:
+            resp[key] = out[0].get(key)
+        return resp
 
     def get_md5(path: str, exclude_files: list[str] | None = None) -> str:
         if os.path.isdir(path):
@@ -208,7 +218,7 @@ def check_docker_env(
         inspect = get_docker_inspect()
     except subprocess.CalledProcessError:
         typer.echo(f"No image with tag {tag} found locally", file=outfile)
-        inspect = []
+        inspect = {}
     if fpath is not None:
         typer.echo(f"Reading Dockerfile from {fpath}", file=outfile)
         dockerfile_md5 = get_md5(fpath)
@@ -227,6 +237,9 @@ def check_docker_env(
         typer.echo(f"Reading lock file: {lock_fpath}", file=outfile)
         with open(lock_fpath) as f:
             lock = json.load(f)
+        # Handle legacy lock files that are lists
+        if isinstance(lock, list):
+            lock = lock[0]
     else:
         typer.echo(f"Lock file ({lock_fpath}) does not exist", file=outfile)
         lock = None
@@ -234,12 +247,12 @@ def check_docker_env(
         typer.echo(
             "Checking image and Dockerfile against lock file", file=outfile
         )
-        rebuild_or_pull = inspect[0]["RootFS"]["Layers"] != lock[0]["RootFS"][
+        rebuild_or_pull = inspect["RootFS"]["Layers"] != lock["RootFS"][
             "Layers"
-        ] or dockerfile_md5 != lock[0].get("DockerfileMD5")
+        ] or dockerfile_md5 != lock.get("DockerfileMD5")
         if not rebuild_or_pull:
             for dep, md5 in deps_md5s.items():
-                if md5 != lock[0].get("DepsMD5s", {}).get(dep):
+                if md5 != lock.get("DepsMD5s", {}).get(dep):
                     typer.echo(f"Found modified dependency: {dep}")
                     rebuild_or_pull = True
                     break
@@ -261,8 +274,8 @@ def check_docker_env(
             raise_error(f"Failed to pull image: {tag}")
     # Write the lock file
     inspect = get_docker_inspect()
-    inspect[0]["DockerfileMD5"] = dockerfile_md5
-    inspect[0]["DepsMD5s"] = deps_md5s
+    inspect["DockerfileMD5"] = dockerfile_md5
+    inspect["DepsMD5s"] = deps_md5s
     lock_dir = os.path.dirname(lock_fpath)
     if lock_dir:
         os.makedirs(lock_dir, exist_ok=True)

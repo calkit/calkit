@@ -196,7 +196,6 @@ def check_docker_env(
             "Os",
             "Size",
             "RootFS",
-            "Descriptor",
         ]
         resp = {}
         for key in keys:

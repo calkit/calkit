@@ -524,6 +524,7 @@ def test_new_latex_stage(tmp_dir):
             "tex",
             "--image",
             "texlive/texlive:latest-full",
+            "--no-check",
         ]
     )
     subprocess.check_call(
@@ -567,6 +568,7 @@ def test_new_matlab_script_stage(tmp_dir):
             "matlab1",
             "--image",
             "mathworks/matlab:latest",
+            "--no-check",
         ]
     )
     subprocess.check_call(

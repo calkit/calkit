@@ -207,7 +207,6 @@ def test_run_in_venv(tmp_dir):
             "pandas=2.0.0",
             "--pip",
             "polars==1.16.0",
-            "--no-check",
         ]
     )
     ck_info = calkit.load_calkit_info_object()

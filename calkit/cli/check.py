@@ -55,7 +55,7 @@ def check_environment(
     verbose: Annotated[
         bool, typer.Option("--verbose", help="Print verbose output.")
     ] = False,
-):
+) -> str | None:
     """Check that an environment is up-to-date."""
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info(process_includes="environments")
@@ -136,6 +136,7 @@ def check_environment(
         )
     else:
         raise_error(f"Environment kind '{env['kind']}' not supported")
+    return get_env_lock_fpath(env=env, env_name=env_name, as_posix=False)
 
 
 @check_app.command(name="docker-env")

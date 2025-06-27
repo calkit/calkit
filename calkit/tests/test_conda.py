@@ -191,6 +191,7 @@ def test_check_prefix_env(tmp_dir, conda_env_prefix):
             "python=3.12",
             "--prefix",
             conda_env_prefix,
+            "--no-check",
         ]
     )
     res = check_env()

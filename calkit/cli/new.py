@@ -21,6 +21,7 @@ from typing_extensions import Annotated
 
 import calkit
 from calkit.cli import raise_error, warn
+from calkit.cli.check import check_environment
 from calkit.cli.update import update_devcontainer
 from calkit.core import ryaml
 from calkit.docker import LAYERS
@@ -593,6 +594,13 @@ def new_docker_env(
     no_commit: Annotated[
         bool, typer.Option("--no-commit", help="Do not commit changes.")
     ] = False,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Do not check environment is up-to-date after creation.",
+        ),
+    ] = False,
 ):
     """Create a new Docker environment."""
     if base is not None and path is None:
@@ -648,6 +656,10 @@ def new_docker_env(
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
+    if not no_check:
+        env_lock_fpath = check_environment(env_name=name)
+        if env_lock_fpath is not None:
+            repo.git.add(env_lock_fpath)
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add Docker environment {name}"])
 
@@ -1033,6 +1045,13 @@ def new_conda_env(
     no_commit: Annotated[
         bool, typer.Option("--no-commit", help="Do not commit changes.")
     ] = False,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Do not check environment is up-to-date after creation.",
+        ),
+    ] = False,
 ):
     """Create a new Conda environment."""
     if os.path.isfile(path) and not overwrite:
@@ -1081,6 +1100,10 @@ def new_conda_env(
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
+    if not no_check:
+        env_lock_fpath = check_environment(env_name=name)
+        if env_lock_fpath is not None:
+            repo.git.add(env_lock_fpath)
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add Conda environment {name}"])
 
@@ -1116,6 +1139,13 @@ def new_uv_venv(
     ] = False,
     no_commit: Annotated[
         bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Do not check environment is up-to-date after creation.",
+        ),
     ] = False,
 ):
     """Create a new uv virtual environment."""
@@ -1158,6 +1188,10 @@ def new_uv_venv(
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
+    if not no_check:
+        env_lock_fpath = check_environment(env_name=name)
+        if env_lock_fpath is not None:
+            repo.git.add(env_lock_fpath)
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add uv venv {name}"])
 
@@ -1190,6 +1224,13 @@ def new_venv(
     ] = False,
     no_commit: Annotated[
         bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Do not check environment is up-to-date after creation.",
+        ),
     ] = False,
 ):
     """Create a new Python virtual environment with venv."""
@@ -1230,6 +1271,10 @@ def new_venv(
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
+    if not no_check:
+        env_lock_fpath = check_environment(env_name=name)
+        if env_lock_fpath is not None:
+            repo.git.add(env_lock_fpath)
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add venv {name}"])
 
@@ -1262,6 +1307,13 @@ def new_pixi_env(
     ] = False,
     no_commit: Annotated[
         bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Do not check environment is up-to-date after creation.",
+        ),
     ] = False,
 ):
     """Create a new pixi virtual environment."""
@@ -1321,6 +1373,10 @@ def new_pixi_env(
         ryaml.dump(ck_info, f)
     repo.git.add("pixi.toml")
     repo.git.add("calkit.yaml")
+    if not no_check:
+        env_lock_fpath = check_environment(env_name=name)
+        if env_lock_fpath is not None:
+            repo.git.add(env_lock_fpath)
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add pixi env {name}"])
 

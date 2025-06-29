@@ -193,6 +193,7 @@ def check_docker_env(
         # content in the image
         keys = [
             "RepoTags",
+            "RepoDigests",
             "Architecture",
             "Os",
             "Size",

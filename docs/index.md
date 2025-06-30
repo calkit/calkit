@@ -1,27 +1,16 @@
 # Home
 
-Calkit is a language-agnostic project framework and toolkit
-to make your research or analytics project
-reproducible to the highest standard,
-which means:
+Calkit's mission is to make every scientific study reproducible.
+That is,
+it should be possible to go from raw data to research article
+by "pressing a single button"
+([Claerbout and Karrenbach (1992)](https://doi.org/10.1190/1.1822162)).
 
-> Inputs and process definitions are provided and sufficiently described
-> such that anyone can easily verify that they produced the outputs
-> used to support the conclusions.
-
-"Easily" means that after obtaining your project files,
-it should only require executing a single command
-(like "pressing a single button" in
-[Claerbout and Karrenbach (1992)](https://doi.org/10.1190/1.1822162)),
-which should finish in less than 15 minutes
-(suggested by
-[Vandewalle et al. (2009)](https://doi.org/10.1109/MSP.2009.932122)).
-
-If the processes are too expensive to rerun in under 15 minutes,
-it should be possible to confirm that none of the input data
-or process definitions (e.g., environment specifications, scripts)
-have changed since saving the current versions of each output artifact
-(figure, table, dataset, publication, etc.)
+Calkit makes this level of automation possible without extensive software
+engineering expertise by providing a project framework and toolset that unifies
+and simplifies the use of enabling technologies like Git,
+DVC, Conda, Docker, and more,
+while guiding users away from common reproducibility pitfalls.
 
 When your project is reproducible,
 you'll be able to iterate more quickly and more often,
@@ -33,14 +22,11 @@ because you'll know the code will actually run!
 This will allow others to reuse parts of your project in their own research,
 accelerating the pace of discovery.
 
-Working at this level of automation, discipline, and rigor may sound like
-a lot of effort,
-but Calkit makes it easy!
-
 ## Features
 
 - A declarative pipeline that forces users to define an environment
-  for every stage, so "but it works on my machine" is a thing of the past.
+  for every stage, so long lists of instructions in a README and
+  "but it works on my machine" are things of the past.
 - A CLI to run the project's pipeline to verify it's reproducible,
   regenerating outputs as needed and
   ensuring all
@@ -52,7 +38,7 @@ but Calkit makes it easy!
 - A command line interface (CLI) to simplify keeping code, text, and larger
   data files backed up in the same project repo using both
   [Git](https://git-scm.com/) and [DVC](https://dvc.org/).
-- A complementary
+- A complementary self-hostable and GitHub-integrated
   [cloud system](https://github.com/calkit/calkit-cloud)
   to facilitate backup, collaboration,
   and sharing throughout the entire research lifecycle.

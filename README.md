@@ -49,6 +49,9 @@ while guiding users away from common reproducibility pitfalls.
   [cloud system](https://github.com/calkit/calkit-cloud)
   to facilitate backup, collaboration,
   and sharing throughout the entire research lifecycle.
+- [Overleaf integration](https://docs.calkit.org/overleaf/), so code,
+  data, and LaTeX documents can all live in the same repo and be part of a
+  single pipeline (no more manual uploads!)
 
 ## Installation
 

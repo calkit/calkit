@@ -11,6 +11,8 @@ import subprocess
 import warnings
 from typing import Annotated
 
+from calkit.environments import get_env_lock_fpath
+
 # See https://github.com/calkit/calkit/issues/346
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=UserWarning)
@@ -40,28 +42,101 @@ def check_repro(
     typer.echo(res.to_pretty().encode("utf-8", errors="replace"))
 
 
-@check_app.command(name="call")
-def check_call(
-    cmd: Annotated[str, typer.Argument(help="Command to check.")],
-    if_error: Annotated[
+@check_app.command(
+    name="env",
+    help="Check that an environment is up-to-date (alias for 'environment').",
+)
+@check_app.command(name="environment")
+def check_environment(
+    env_name: Annotated[
         str,
-        typer.Option(
-            "--if-error", help="Command to run if there is an error."
-        ),
+        typer.Option("--name", "-n", help="Name of the environment to check."),
     ],
-):
-    """Check that a command succeeds and run an alternate if not."""
-    try:
-        subprocess.check_call(cmd, shell=True)
-        typer.echo("Command succeeded")
-    except subprocess.CalledProcessError:
-        typer.echo("Command failed")
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Print verbose output.")
+    ] = False,
+) -> str | None:
+    """Check that an environment is up-to-date."""
+    dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    ck_info = calkit.load_calkit_info(process_includes="environments")
+    envs = ck_info.get("environments", {})
+    if not envs:
+        raise_error("No environments defined in calkit.yaml")
+    if isinstance(envs, list):
+        raise_error("Error: Environments should be a dict, not a list")
+    assert isinstance(envs, dict)
+    if env_name not in envs:
+        raise_error(f"Environment '{env_name}' does not exist")
+    env = envs[env_name]
+    if env["kind"] == "docker":
+        if "image" not in env:
+            raise_error("Image must be defined for Docker environments")
+        check_docker_env(
+            tag=env["image"],
+            fpath=env.get("path"),
+            lock_fpath=get_env_lock_fpath(
+                env=env, env_name=env_name, as_posix=False
+            ),
+            platform=env.get("platform"),
+            deps=env.get("deps", []),
+            quiet=not verbose,
+        )
+    elif env["kind"] == "conda":
+        check_conda_env(
+            env_fpath=env["path"],
+            output_fpath=get_env_lock_fpath(
+                env=env, env_name=env_name, as_posix=False
+            ),
+            relaxed=True,  # TODO: Add option?
+            quiet=not verbose,
+        )
+    elif env["kind"] in ["pixi", "uv"]:
+        cmd = [env["kind"], "lock"]
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
         try:
-            typer.echo("Attempting fallback call")
-            subprocess.check_call(if_error, shell=True)
-            typer.echo("Fallback call succeeded")
+            subprocess.check_call(cmd)
         except subprocess.CalledProcessError:
-            raise_error("Fallback call failed")
+            raise_error(f"Failed to check {env['kind']} environment")
+    elif (kind := env["kind"]) in ["uv-venv", "venv"]:
+        if "prefix" not in env:
+            raise_error("venv environments require a prefix")
+        if "path" not in env:
+            raise_error("venv environments require a path")
+        prefix = env["prefix"]
+        path = env["path"]
+        # Check environment
+        check_venv(
+            path=path,
+            prefix=prefix,
+            use_uv=kind == "uv-venv",
+            python=env.get("python"),
+            lock_fpath=get_env_lock_fpath(
+                env=env, env_name=env_name, as_posix=False
+            ),
+            verbose=verbose,
+        )
+    elif env["kind"] == "ssh":
+        # TODO: How to check SSH environments?
+        # Maybe just check that we can connect
+        raise_error(
+            "Environment checking not implemented for SSH environments"
+        )
+    elif env["kind"] == "renv":
+        try:
+            subprocess.check_call(["Rscript", "-e", "'renv::restore()'"])
+        except subprocess.CalledProcessError:
+            raise_error("Failed to check renv")
+    elif env["kind"] == "matlab":
+        check_matlab_env(
+            env_name=env_name,
+            output_fpath=get_env_lock_fpath(
+                env=env, env_name=env_name, as_posix=False
+            ),  # type: ignore
+        )
+    else:
+        raise_error(f"Environment kind '{env['kind']}' not supported")
+    return get_env_lock_fpath(env=env, env_name=env_name, as_posix=False)
 
 
 @check_app.command(name="docker-env")
@@ -107,17 +182,27 @@ def check_docker_env(
             "Lock file output path must be provided if input Dockerfile is not"
         )
 
-    def get_docker_inspect():
+    def get_docker_inspect() -> dict:
+        # This command returns a list, of which we want the first object
         out = json.loads(
             subprocess.check_output(["docker", "inspect", tag]).decode()
         )
         # Remove some keys that can change without the important aspects of
         # the image changing
-        _ = out[0].pop("Id")
-        _ = out[0].pop("RepoDigests")
-        _ = out[0].pop("Metadata")
-        _ = out[0].pop("DockerVersion")
-        return out
+        # Only keep certain keys that are relevant for identifying the
+        # content in the image
+        keys = [
+            "RepoTags",
+            "RepoDigests",
+            "Architecture",
+            "Os",
+            "Size",
+            "RootFS",
+        ]
+        resp = {}
+        for key in keys:
+            resp[key] = out[0].get(key)
+        return resp
 
     def get_md5(path: str, exclude_files: list[str] | None = None) -> str:
         if os.path.isdir(path):
@@ -134,7 +219,7 @@ def check_docker_env(
         inspect = get_docker_inspect()
     except subprocess.CalledProcessError:
         typer.echo(f"No image with tag {tag} found locally", file=outfile)
-        inspect = []
+        inspect = {}
     if fpath is not None:
         typer.echo(f"Reading Dockerfile from {fpath}", file=outfile)
         dockerfile_md5 = get_md5(fpath)
@@ -153,6 +238,9 @@ def check_docker_env(
         typer.echo(f"Reading lock file: {lock_fpath}", file=outfile)
         with open(lock_fpath) as f:
             lock = json.load(f)
+        # Handle legacy lock files that are lists
+        if isinstance(lock, list):
+            lock = lock[0]
     else:
         typer.echo(f"Lock file ({lock_fpath}) does not exist", file=outfile)
         lock = None
@@ -160,12 +248,12 @@ def check_docker_env(
         typer.echo(
             "Checking image and Dockerfile against lock file", file=outfile
         )
-        rebuild_or_pull = inspect[0]["RootFS"]["Layers"] != lock[0]["RootFS"][
+        rebuild_or_pull = inspect["RootFS"]["Layers"] != lock["RootFS"][
             "Layers"
-        ] or dockerfile_md5 != lock[0].get("DockerfileMD5")
+        ] or dockerfile_md5 != lock.get("DockerfileMD5")
         if not rebuild_or_pull:
             for dep, md5 in deps_md5s.items():
-                if md5 != lock[0].get("DepsMD5s", {}).get(dep):
+                if md5 != lock.get("DepsMD5s", {}).get(dep):
                     typer.echo(f"Found modified dependency: {dep}")
                     rebuild_or_pull = True
                     break
@@ -187,8 +275,8 @@ def check_docker_env(
             raise_error(f"Failed to pull image: {tag}")
     # Write the lock file
     inspect = get_docker_inspect()
-    inspect[0]["DockerfileMD5"] = dockerfile_md5
-    inspect[0]["DepsMD5s"] = deps_md5s
+    inspect["DockerfileMD5"] = dockerfile_md5
+    inspect["DepsMD5s"] = deps_md5s
     lock_dir = os.path.dirname(lock_fpath)
     if lock_dir:
         os.makedirs(lock_dir, exist_ok=True)
@@ -273,6 +361,9 @@ def check_venv(
             "--python", help="Python version to specify if using uv."
         ),
     ] = None,
+    quiet: Annotated[
+        bool, typer.Option("--quiet", help="Do not print any output")
+    ] = False,
     verbose: Annotated[
         bool, typer.Option("--verbose", help="Print verbose output.")
     ] = False,
@@ -283,7 +374,12 @@ def check_venv(
         ["uv", "venv"] if kind == "uv-venv" else ["python", "-m", "venv"]
     )
     pip_cmd = "pip" if kind == "venv" else "uv pip"
-    pip_install_args = "-q"
+    pip_freeze_cmd = f"{pip_cmd} freeze"
+    if kind == "uv-venv":
+        pip_freeze_cmd += " --color never"
+    else:
+        pip_freeze_cmd += " --no-color"
+    pip_install_args = "-q" if quiet else ""
     if python is not None and not use_uv:
         raise_error("Python version cannot be specified if not using uv")
     if python is not None and use_uv:
@@ -313,13 +409,13 @@ def check_venv(
     check_cmd = (
         f"{activate_cmd} "
         f"&& {pip_cmd} install {pip_install_args} -r {path} "
-        f"&& {pip_cmd} freeze > {lock_fpath} "
+        f"&& {pip_freeze_cmd} > {lock_fpath} "
         "&& deactivate"
     )
     try:
         if verbose:
             typer.echo(f"Running command: {check_cmd}")
-        subprocess.check_output(
+        subprocess.check_call(
             check_cmd,
             shell=True,
             cwd=wdir,
@@ -374,7 +470,11 @@ def check_matlab_env(
 
 
 @check_app.command(name="env-vars")
-def check_env_vars():
+def check_env_vars(
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output")
+    ] = False,
+):
     """Check that the project's required environmental variables exist."""
     typer.echo("Checking project environmental variables")
     dotenv.load_dotenv(dotenv_path=".env")
@@ -383,11 +483,20 @@ def check_env_vars():
     env_var_deps = {}
     for d in deps:
         if isinstance(d, dict):
-            name = list(d.keys())[0]
+            keys = list(d.keys())
+            if len(keys) > 1:
+                raise_error(
+                    f"Malformed dependency: {d}\n"
+                    "Dependencies with attributes should have a single key "
+                    "(their name)"
+                )
+            name = keys[0]
             attrs = list(d.values())[0]
             if attrs.get("kind") == "env-var":
                 env_var_deps[name] = attrs
     for name, attrs in env_var_deps.items():
+        if verbose:
+            typer.echo(f"Checking for environmental variable '{name}'")
         if name not in os.environ:
             typer.echo(f"Missing env var '{name}'")
             if "default" in attrs:
@@ -446,3 +555,27 @@ def check_pipeline(
             raise_error(
                 f"Failed to compile pipeline: {e.__class__.__name__}: {e}"
             )
+
+
+@check_app.command(name="call")
+def check_call(
+    cmd: Annotated[str, typer.Argument(help="Command to check.")],
+    if_error: Annotated[
+        str,
+        typer.Option(
+            "--if-error", help="Command to run if there is an error."
+        ),
+    ],
+):
+    """Check that a command succeeds and run an alternate if not."""
+    try:
+        subprocess.check_call(cmd, shell=True)
+        typer.echo("Command succeeded")
+    except subprocess.CalledProcessError:
+        typer.echo("Command failed")
+        try:
+            typer.echo("Attempting fallback call")
+            subprocess.check_call(if_error, shell=True)
+            typer.echo("Fallback call succeeded")
+        except subprocess.CalledProcessError:
+            raise_error("Fallback call failed")

@@ -93,6 +93,7 @@ def test_run_in_env(tmp_dir):
         '--description "Just Python."',
         shell=True,
     )
+    subprocess.check_call(["calkit", "check", "env", "-n", "py3.10"])
     out = (
         subprocess.check_output(
             "calkit xenv -n py3.10 python --version",

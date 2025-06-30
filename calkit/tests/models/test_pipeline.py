@@ -1,6 +1,10 @@
 """Tests for ``calkit.models.pipeline``."""
 
-from calkit.models.pipeline import PythonScriptStage
+from calkit.models.pipeline import (
+    LatexStage,
+    PythonScriptStage,
+    WordToPdfStage,
+)
 
 
 def test_pythonscriptstage():
@@ -28,3 +32,22 @@ def test_pythonscriptstage():
     assert sd["outs"][1] == {
         "data/something.csv": dict(cache=False, persist=False)
     }
+
+
+def test_wordtopdfstage():
+    s = WordToPdfStage(
+        word_doc_path="my word doc.docx",
+    )
+    sd = s.to_dvc()
+    assert sd["cmd"] == (
+        'calkit office word-to-pdf "my word doc.docx" -o "my word doc.pdf"'
+    )
+
+
+def test_latexstage():
+    s = LatexStage(environment="tex", target_path="my-paper.tex")
+    assert " -silent " not in s.dvc_cmd
+    s.silent = True
+    assert " -silent " in s.dvc_cmd
+    assert "my-paper.tex" in s.dvc_deps
+    assert "my-paper.pdf" in s.dvc_outs

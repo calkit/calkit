@@ -25,12 +25,12 @@ accelerating the pace of discovery.
 ## Features
 
 - A declarative pipeline that forces users to define an environment
-  for every stage, so "but it works on my machine" is a thing of the past.
+  for every stage, so long lists of instructions in a README and
+  "but it works on my machine" are things of the past.
 - A CLI to run the project's pipeline to verify it's reproducible,
   regenerating outputs as needed and
   ensuring all
   computational environments (e.g., [Conda](https://docs.conda.io/en/latest/), [Docker](https://docker.com)) match their specification.
-  No more long lists of instructions in your README!
 - A schema to store structured metadata describing the
   project's important outputs (in its `calkit.yaml` file)
   and how they are created

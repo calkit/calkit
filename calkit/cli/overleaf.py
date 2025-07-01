@@ -389,6 +389,7 @@ def sync(
                     ["git", "apply", "--directory", wdir, "-"],
                     input=diff,
                     text=True,
+                    encoding="utf-8",
                 )
                 if process.returncode != 0:
                     raise_error("Failed to apply diff")

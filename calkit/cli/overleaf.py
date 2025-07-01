@@ -399,7 +399,10 @@ def sync(
                 )
                 if process.returncode != 0:
                     if force:
-                        typer.echo("Failed to apply Overleaf diff to project repo. Proceeding to push project changes to Overleaf anyway.")
+                        typer.echo(
+                            "Failed to apply Overleaf diff to project repo. "
+                            "Proceeding to push project changes to Overleaf anyway."
+                        )
                     else:
                         raise_error("Failed to apply Overleaf diff to project repo. Check the .rej files and manually apply changes, then rerun with --force.")
             else:

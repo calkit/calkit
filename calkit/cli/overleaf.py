@@ -373,26 +373,39 @@ def sync(
                 "Overleaf config"
             )
         elif last_sync_commit:
-            # Compute a diff in the Overleaf project between HEAD and the last
+            # Compute a patch in the Overleaf project between HEAD and the last
             # sync
-            diff = overleaf_repo.git.diff(
-                [last_sync_commit, "HEAD", "--"] + git_sync_paths
+            patch = overleaf_repo.git.format_patch(
+                [f"{last_sync_commit}..HEAD", "--stdout", "--"]
+                + git_sync_paths
             )
-            # Ensure the diff ends with a new line
-            if diff and not diff.endswith("\n"):
-                diff += "\n"
+            # Replace any Overleaf commit messages to make them more meaningful
+            patch = patch.replace(
+                "Update on Overleaf.", f"Update {wdir} on Overleaf"
+            )
+            # Ensure the patch ends with a new line
+            if patch and not patch.endswith("\n"):
+                patch += "\n"
             if verbose:
-                typer.echo(f"Git diff:\n{diff}")
-            if diff:
+                typer.echo(f"Git patch:\n{patch}")
+            if patch:
                 typer.echo("Applying to project repo")
                 process = subprocess.run(
-                    ["git", "apply", "--directory", wdir, "-"],
-                    input=diff,
+                    [
+                        "git",
+                        "am",
+                        "--3way",
+                        "--reject",
+                        "--directory",
+                        wdir,
+                        "-",
+                    ],
+                    input=patch,
                     text=True,
                     encoding="utf-8",
                 )
                 if process.returncode != 0:
-                    raise_error("Failed to apply diff")
+                    raise_error("Failed to apply patch")
             else:
                 typer.echo("No changes to apply")
         else:

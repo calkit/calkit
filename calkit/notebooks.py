@@ -106,13 +106,13 @@ def declare_notebook(
     if outputs:
         new_stage_dict["outputs"] = new_stage_dump["outputs"]
     if always_run:
-        new_stage_dict["always_run"] = always_run
+        new_stage_dict["always_run"] = always_run  # type: ignore
     new_stage_dict.update(
         {
             "html_storage": html_storage,
             "executed_ipynb_storage": executed_ipynb_storage,
             "cleaned_ipynb_storage": cleaned_ipynb_storage,
-        }
+        }  # type: ignore
     )
     pipeline_dict["stages"][stage_name] = new_stage_dict
     # Update existing notebook if it exists, else append

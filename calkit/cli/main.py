@@ -709,7 +709,7 @@ def run(
     no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
     no_run_cache: Annotated[bool, typer.Option("--no-run-cache")] = False,
 ):
-    """Check dependencies, run DVC pipeline, and update Calkit objects."""
+    """Check dependencies and run the pipeline."""
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     # First check any system-level dependencies exist

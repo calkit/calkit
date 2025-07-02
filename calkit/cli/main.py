@@ -710,18 +710,24 @@ def run(
     no_run_cache: Annotated[bool, typer.Option("--no-run-cache")] = False,
 ):
     """Check dependencies, run DVC pipeline, and update Calkit objects."""
+    os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     # First check any system-level dependencies exist
     typer.echo("Checking system-level dependencies")
     try:
         calkit.check_system_deps()
     except Exception as e:
+        os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(str(e))
     # Compile the pipeline
     ck_info = calkit.load_calkit_info()
     if ck_info.get("pipeline", {}):
         typer.echo("Compiling DVC pipeline")
-        calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+        try:
+            calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+        except Exception as e:
+            os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+            raise_error(f"Pipeline compilation failed: {e}")
     if targets is None:
         targets = []
     args = targets
@@ -753,6 +759,7 @@ def run(
     try:
         subprocess.check_call([sys.executable, "-m", "dvc", "repro"] + args)
     except subprocess.CalledProcessError:
+        os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error("DVC pipeline failed")
 
 

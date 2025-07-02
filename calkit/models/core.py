@@ -85,23 +85,28 @@ class Environment(BaseModel):
     default: bool | None = None
 
 
+class CondaEnvironment(Environment):
+    kind: Literal["conda"] = "conda"
+    prefix: str | None = None
+
+
 class VenvEnvironment(Environment):
-    kind: Literal["venv"]
+    kind: Literal["venv"] = "venv"
     prefix: str
 
 
 class UvVenvEnvironment(Environment):
-    kind: Literal["uv-venv"]
+    kind: Literal["uv-venv"] = "uv-venv"
     prefix: str
 
 
 class PixiEnvironment(Environment):
-    kind: Literal["pixi"]
+    kind: Literal["pixi"] = "pixi"
     name: str | None = None
 
 
 class DockerEnvironment(Environment):
-    kind: Literal["docker"]
+    kind: Literal["docker"] = "docker"
     image: str
     layers: list[str] | None = None
     shell: Literal["bash", "sh"] = "sh"
@@ -109,12 +114,12 @@ class DockerEnvironment(Environment):
 
 
 class REnvironment(Environment):
-    kind: Literal["renv"]
+    kind: Literal["renv"] = "renv"
     prefix: str
 
 
 class SSHEnvironment(BaseModel):
-    kind: Literal["ssh"]
+    kind: Literal["ssh"] = "ssh"
     host: str
     user: str
     wdir: str

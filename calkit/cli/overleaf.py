@@ -404,7 +404,11 @@ def sync(
                             "Proceeding to push project changes to Overleaf anyway."
                         )
                     else:
-                        raise_error("Failed to apply Overleaf diff to project repo. Check the .rej files and manually apply changes, then rerun with --force.")
+                        raise_error(
+                            "Failed to apply Overleaf diff to project repo. "
+                            "Check the .rej files and manually apply changes, "
+                            "then rerun with --force."
+                        )
             else:
                 typer.echo("No changes to apply")
         else:

@@ -64,8 +64,6 @@ def declare_notebook(
         raise FileNotFoundError(
             f"Notebook '{path}' does not exist in the project directory"
         )
-    # TODO: If pipeline is running, check that we are running in the
-    # correct environment
     pipeline_running = os.getenv("CALKIT_PIPELINE_RUNNING", "0") == "1"
     ck_info = calkit.load_calkit_info(wdir=str(wdir))
     envs = ck_info.get("environments", {})
@@ -73,6 +71,8 @@ def declare_notebook(
         raise ValueError(
             f"Environment '{environment_name}' does not exist in calkit.yaml"
         )
+    # TODO: Check that we are running in the correct environment
+    # This could be tricky depending on what type of environment it is
     pipeline_dict = ck_info.get("pipeline", {})
     if "stages" not in pipeline_dict:
         pipeline_dict["stages"] = {}

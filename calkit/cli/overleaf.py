@@ -296,6 +296,13 @@ def sync(
             help="Enable verbose output.",
         ),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Force push to Overleaf even if there are conflicts.",
+        ),
+    ] = False,
 ):
     """Sync publications with Overleaf."""
     # TODO: We should probably ensure the pipeline isn't stale
@@ -386,13 +393,23 @@ def sync(
             if diff:
                 typer.echo("Applying to project repo")
                 process = subprocess.run(
-                    ["git", "apply", "--directory", wdir, "-"],
+                    ["git", "apply", "--reject", "--directory", wdir, "-"],
                     input=diff,
                     text=True,
                     encoding="utf-8",
                 )
                 if process.returncode != 0:
-                    raise_error("Failed to apply diff")
+                    if force:
+                        typer.echo(
+                            "Failed to apply Overleaf diff to project repo. "
+                            "Proceeding to push project changes to Overleaf anyway."
+                        )
+                    else:
+                        raise_error(
+                            "Failed to apply Overleaf diff to project repo. "
+                            "Check the .rej files and manually apply changes, "
+                            "then rerun with --force."
+                        )
             else:
                 typer.echo("No changes to apply")
         else:

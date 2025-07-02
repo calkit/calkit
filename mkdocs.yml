@@ -45,6 +45,7 @@ nav:
   - The pipeline:
       - pipeline/index.md
       - pipeline/manual-steps.md
+  - Notebooks: notebooks.md
   - Datasets: datasets.md
   - References: references.md
   - Calculations: calculations.md

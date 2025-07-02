@@ -761,6 +761,7 @@ def run(
     except subprocess.CalledProcessError:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error("DVC pipeline failed")
+    os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
 
 
 @app.command(name="manual-step", help="Execute a manual step.")

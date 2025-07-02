@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Discriminator
 from typing_extensions import Annotated
 
-from calkit.models.io import PathOutput
+from calkit.models.io import InputsFromStageOutputs, PathOutput
 from calkit.models.iteration import (
     ParameterIteration,
     ParametersType,
@@ -18,10 +18,6 @@ from calkit.notebooks import (
     get_cleaned_notebook_path,
     get_executed_notebook_path,
 )
-
-
-class InputsFromStageOutputs(BaseModel):
-    from_stage_outputs: str
 
 
 class StageIteration(BaseModel):

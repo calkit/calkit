@@ -5,6 +5,10 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 
+class InputsFromStageOutputs(BaseModel):
+    from_stage_outputs: str
+
+
 class Input(BaseModel):
     kind: Literal["path", "python-object", "file-segment", "database-table"]
 

@@ -1,5 +1,7 @@
 """Tests for ``calkit.pipeline``."""
 
+import subprocess
+
 import pytest
 
 import calkit.pipeline
@@ -217,3 +219,51 @@ def test_to_dvc_notebook_stage():
             found_html = True
             assert out[p]["cache"]
     assert found_html
+
+
+def test_remove_stage(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # Test that we can remove a stage from the pipeline
+    ck_info = {
+        "environments": {
+            "py": {
+                "kind": "venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+            }
+        },
+        "pipeline": {
+            "stages": {
+                "get-data": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "something/my-cool-script.py",
+                    "outputs": [
+                        "my-output.out",
+                    ],
+                },
+                "process-data": {
+                    "kind": "python-script",
+                    "script_path": "something.py",
+                    "environment": "py",
+                    "inputs": ["my-input.txt"],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "check", "pipeline", "-c"])
+    with open("dvc.yaml", "r") as f:
+        dvc_yaml = calkit.ryaml.load(f)
+    assert "get-data" in dvc_yaml["stages"]
+    assert "process-data" in dvc_yaml["stages"]
+    # Now remove the get-data stage
+    ck_info["pipeline"]["stages"].pop("get-data")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "check", "pipeline", "-c"])
+    with open("dvc.yaml", "r") as f:
+        dvc_yaml = calkit.ryaml.load(f)
+    assert "get-data" not in dvc_yaml["stages"]
+    assert "process-data" in dvc_yaml["stages"]

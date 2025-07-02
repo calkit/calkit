@@ -300,6 +300,7 @@ def sync(
         bool,
         typer.Option(
             "--force",
+            "-f",
             help="Force push to Overleaf even if there are conflicts.",
         ),
     ] = False,
@@ -413,6 +414,11 @@ def sync(
                 )
                 if process.returncode != 0:
                     if force:
+                        # Skip any patches we might be in the middle of
+                        try:
+                            repo.git.am("--skip")
+                        except Exception:
+                            pass
                         typer.echo(
                             "Failed to apply Overleaf patch to project repo. "
                             "Proceeding to push project changes to Overleaf "
@@ -422,7 +428,7 @@ def sync(
                         raise_error(
                             "Failed to apply Overleaf patch to project repo. "
                             "Check the .rej files and manually apply changes, "
-                            "then rerun with --force."
+                            "delete them, then rerun with --force."
                         )
             else:
                 typer.echo("No changes to apply")

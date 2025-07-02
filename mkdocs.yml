@@ -40,7 +40,7 @@ nav:
   - Cloud integration: cloud-integration.md
   - Version control: version-control.md
   - The calkit.yaml file: calkit-yaml.md
-  - Dependencies: dependencies.md
+  - Dependencies, configuration, and secrets: dependencies.md
   - Environments: environments.md
   - The pipeline:
       - pipeline/index.md

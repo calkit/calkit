@@ -192,10 +192,12 @@ fig.savefig("figures/my-plot.png")
 So, with a fresh Jupyter kernel we'll need to run cell 1 in order to generate
 `result` so we can iterate on cell 2 to get the plot looking the way
 we want it to.
-But what if that's a very expensive process and we don't want to run it
-every single time we restart the notebook?
+But what if `run_data_processing`
+takes minutes, hours, or even days, so therefore we don't want to run it
+every time we restart the notebook?
 Well, we can use the Calkit `%%stage` cell magic to automatically cache
 and retrieve the result.
+
 After adding a cell with:
 
 ```python

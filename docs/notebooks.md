@@ -4,9 +4,8 @@ While working on a research project,
 Jupyter notebooks can be useful for prototyping and data exploration.
 If while working interactively in a notebook
 you get an output you like, e.g., a figure,
-it can be tempting to simply stop right there,
-save the figure,
-and copy it into a research article.
+it can be tempting to simply stop right there
+and copy/paste it into a research article.
 However, that is not reproducible, since by definition, reproducibility means
 we need to be able to go from raw data to research article with a single
 command.

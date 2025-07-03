@@ -131,6 +131,8 @@ The executed `.ipynb` can be rendered on GitHub or
 [nbviewer.org](https://nbviewer.org),
 and the HTML can be viewed on [calkit.io](https://calkit.io),
 which allows some level of interactivity, e.g., Plotly figures.
+The cleaned `.ipynb` can be useful for diffing with Git in cases where
+`nbstripout` is not activated.
 
 It's also possible to add a notebook to the pipeline
 inside a notebook with the `declare_notebook` function,

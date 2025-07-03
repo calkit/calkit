@@ -126,7 +126,7 @@ and they will live inside the project's `.calkit` subdirectory.
 The executed `.ipynb` can be rendered on GitHub or
 [nbviewer.org](https://nbviewer.org),
 and the HTML can be viewed on [calkit.io](https://calkit.io),
-which allows some level of interactivity, e.g., Plotly figures.
+the latter of which allows some level of interactivity, e.g., Plotly figures.
 The cleaned `.ipynb` can be useful for diffing with Git in cases where
 `nbstripout` is not activated.
 

@@ -28,8 +28,11 @@ avoiding some of the pitfalls that have caused a bit of a
 Returning to the "one project, one command" requirement,
 we can focus on three rules:
 
-1. The notebook must be kept in version control, ideally with its outputs
-   removed. This can be done by installing `nbstripout` and running
+1. The notebook must be kept in version control.
+   This happens naturally as any file included in a Calkit project is
+   kept in version control.
+   However, it's usually a good idea to exclude notebook output from commits.
+   This can be done by installing `nbstripout` and running
    `nbstripout --install` in the project directory.
 1. A notebook must run in one of the project's [environments](environments.md).
 1. Notebooks should be incorporated into the project's

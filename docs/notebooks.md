@@ -21,8 +21,6 @@ there are probably better tools out there, e.g.,
 [Voila](https://voila.readthedocs.io/en/stable/),
 or [Gradio](https://www.gradio.app/).
 
-TODO: prototyping software is generating evidence.
-
 Here we'll talk about how to take advantage of the interactive nature
 of Jupyter notebooks while incorporating them into a reproducible workflow,
 avoiding some of the pitfalls that have caused a bit of a

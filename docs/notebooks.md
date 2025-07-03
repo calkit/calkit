@@ -54,7 +54,6 @@ calkit new uv-venv \
     --python 3.13 \
     --path requirements.txt \
     jupyter \
-    "calkit-python>=0.25.0" \
     "pandas>=2" \
     numpy \
     plotly \

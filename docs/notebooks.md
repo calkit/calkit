@@ -1,15 +1,48 @@
 # Working with notebooks
 
-Jupyter notebooks are great for prototyping software and data exploration,
+Jupyter notebooks are great for prototyping and data exploration,
 but can also be useful in generating evidence to support answers to
 research questions.
-An executed notebook can be evidence itself!
+In fact, for software prototyping, an executed notebook can be evidence
+itself---evidence that answers questions regarding an idea's feasibility,
+scalability, performance, etc.
+In research projects, typically data and results may be explored interactively
+in a notebook, with some figures and tables saved to be included in
+a PDF of a research article.
+
+To be clear, here we're not talking about using notebooks to build interactive
+[apps](apps.md).
+For that, a standard Jupyter notebook is probably not the best tool.
+If you're looking to build an app to allow others to interact
+with your data and/or results, check out
+[marimo](https://marimo.io/),
+[Dash](https://dash.plotly.com/),
+[Streamlit](https://streamlit.io/),
+[Panel](https://panel.holoviz.org/),
+[Voila](https://voila.readthedocs.io/en/stable/),
+[Gradio](https://www.gradio.app/),
+or any of the others in this popular space.
+
+So, here we're talking about using notebooks to generate
+evidence to support research conclusions.
+Calkit seeks to make it easier to incorporate notebooks into a
+reproducible research project.
+
+TODO: Talk about when and how to do interactive work.
+For example, if you need to tweak a figure,
+you can keep tweaking the cell that generates the figure,
+but you'll want to ensure the version used in the paper is generated
+with the pipeline.
+That's reproducibility.
 
 TODO: Talk about reproducibility crisis.
 
 However, to keep a project reproducible, i.e., all evidence is generated
 with a single command,
 it's not okay to save TODO.
+
+If a notebook is used to generate figures interactively, for example,
+that is by definition leading to a non-reproducible project.
 
 If you want to use a notebook to generate evidence to support conclusions
 of a research project,

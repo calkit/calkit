@@ -70,7 +70,8 @@ the environment does not need to be recreated,
 since that will be done automatically when the project is run.
 Also note that it's totally fine and perhaps even preferable to create
 a new environment for each notebook, so long as they have different
-names, prefixes, and paths.
+names, prefixes, and paths---there is no limit to the number
+of environments a project can use, and they can be of any type.
 
 ## Adding a notebook to the pipeline
 

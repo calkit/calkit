@@ -30,6 +30,13 @@ from calkit.models.pipeline import LatexStage, StageIteration
 new_app = typer.Typer(no_args_is_help=True)
 
 
+def _check_path_dir(path: str):
+    """If path is in a subdirectory, check that it exists."""
+    dirname = os.path.dirname(path)
+    if dirname:
+        os.makedirs(dirname, exist_ok=True)
+
+
 @new_app.command(name="project")
 def new_project(
     path: Annotated[str, typer.Argument(help="Where to create the project.")],
@@ -1075,6 +1082,7 @@ def new_conda_env(
             project_name = os.path.basename(os.getcwd())
         conda_name = calkit.to_kebab_case(project_name) + "-" + name
     # Write environment to path
+    _check_path_dir(path)
     conda_env = dict(
         name=conda_name, channels=["conda-forge"], dependencies=packages
     )
@@ -1174,6 +1182,7 @@ def new_uv_venv(
                 )
     packages_txt = "\n".join(packages)
     # Write environment to path
+    _check_path_dir(path)
     with open(path, "w") as f:
         f.write(packages_txt)
     repo.git.add(path)
@@ -1259,6 +1268,7 @@ def new_venv(
                 )
     packages_txt = "\n".join(packages)
     # Write environment to path
+    _check_path_dir(path)
     with open(path, "w") as f:
         f.write(packages_txt)
     repo.git.add(path)

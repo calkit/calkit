@@ -166,8 +166,8 @@ The environment will be updated before starting JupyterLab.
 The main advantage of Jupyter notebooks is the ability to work interactively,
 allowing us to quickly iterate on a smaller chunk of the process
 while the rest remains constant.
-For example, if you need to tweak a figure,
-you can keep tweaking the cell that generates the figure,
+For example, if you need to refine a figure,
+you can keep updating and running the cell that generates the figure,
 without needing to rerun the expensive cell above that generates
 or processes the data for it.
 In this case our notebook might look like this:

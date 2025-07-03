@@ -1,5 +1,12 @@
 # Working with notebooks
 
+In a Calkit project, notebooks are used to generate evidence
+to support conclusions or answers to research questions.
+Their interactive nature makes them ideal for prototyping,
+data exploration, and fast iteration on smaller chunks of an analysis
+workflow.
+However, this interactivity can make reproducibility a challenge.
+
 Jupyter notebooks are great for prototyping and data exploration,
 but can also be useful in generating evidence to support answers to
 research questions.

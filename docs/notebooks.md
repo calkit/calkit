@@ -111,9 +111,10 @@ notebooks:
     stage: my-notebook
 ```
 
-For this example, we're declaring that the notebook will read an input
-file `config/my-params.json` and will produce an output
-file at `data/raw/data.csv`.
+For this example, we're declaring that the notebook
+should use the `py` environment, and that it will read an input
+file `config/my-params.json` and produce an output
+file `data/raw/data.csv`.
 These inputs and outputs will be tracked
 along with the notebook and environment content,
 to automatically determine if and when the notebook needs to be rerun.

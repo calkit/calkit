@@ -25,7 +25,7 @@ Here we'll talk about how to take advantage of the interactive nature
 of Jupyter notebooks while incorporating them into a reproducible workflow,
 avoiding some of the pitfalls that have caused a bit of a
 [notebook reproducibility crisis](https://leomurta.github.io/papers/pimentel2019a.pdf).
-Returning to the "one project, one command" requirement for reproducibility,
+Returning to the "one project, one command" requirement,
 we can focus on three rules:
 
 1. The notebook must be kept in version control, ideally with its outputs

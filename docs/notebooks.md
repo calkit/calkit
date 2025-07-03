@@ -122,6 +122,16 @@ without bloating the Git repo.
 Output storage is configurable, however, e.g., if you'd like to keep
 smaller and/or text-based outputs in Git for simplicity's sake.
 
+Copies of the notebook with and without outputs will be generated as the
+notebook is executed, along with an HTML export of the latter.
+Storage for these outputs can be controlled with the `html_storage`,
+`executed_ipynb_storage`, `cleaned_ipynb_storage` properties,
+and they will live inside the project's `.calkit` subdirectory.
+The executed `.ipynb` can be rendered on GitHub or
+[nbviewer.org](https://nbviewer.org),
+and the HTML can be viewed on [calkit.io](https://calkit.io),
+which allows some level of interactivity, e.g., Plotly figures.
+
 It's also possible to add a notebook to the pipeline
 inside a notebook with the `declare_notebook` function,
 which will update `calkit.yaml` automatically.

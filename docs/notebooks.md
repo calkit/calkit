@@ -28,7 +28,7 @@ Here we'll talk about how to take advantage of the interactive nature
 of Jupyter notebooks while incorporating them into a reproducible workflow,
 avoiding some of the pitfalls that have caused a bit of a
 [notebook reproducibility crisis](https://leomurta.github.io/papers/pimentel2019a.pdf).
-Returning to the "single command" requirement for reproducibility,
+Returning to the "one project, one command" requirement for reproducibility,
 we can focus on three rules:
 
 1. The notebook must be kept in version control, ideally with its outputs
@@ -150,14 +150,65 @@ The environment will be updated before starting JupyterLab.
 
 ## Working interactively
 
+The main advantage of Jupyter notebooks is the ability to work interactively,
+allowing us to quickly iterate on a smaller chunk of the process
+while the rest remains constant.
 For example, if you need to tweak a figure,
 you can keep tweaking the cell that generates the figure,
-but you'll want to ensure the version used in the paper is generated
-with the pipeline.
-That's reproducibility.
+without needing to rerun the expensive cell above that generates
+or processes the data for it.
+In this case our notebook might look like this:
 
-### Expensive cells
+```python
+from some_package import run_data_processing
 
-Sometimes it can get painful restarting and rerunning a notebook over and over
-again.
-TODO: More.
+result = run_data_processing(param1=55)
+```
+
+```python
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots()
+ax.plot(result["x"], result["y"])
+```
+
+```python
+fig.savefig("figures/my-plot.png")
+```
+
+So, with a fresh Jupyter kernel we'll need to run cell 1 in order to generate
+`result` so we can iterate on cell 2 to get the plot looking the way
+we want it to.
+But what if that's a very expensive process and we don't want to run it
+every single time we restart the notebook?
+Well, we can use the Calkit `%%stage` cell magic to automatically cache
+and retrieve the result.
+After adding a cell with:
+
+```python
+%load_ext calkit.magics
+```
+
+the first cell can be turned into a pipeline stage by changing it to:
+
+```python
+%%stage --name run-nb-proc --environment py --out result
+
+from some_package import run_data_processing
+
+result = run_data_processing(param1=55)
+```
+
+Now, the kernel can be restarted and we can use "run all cells above"
+when working on the figure,
+and we'll have `result` nearly instantaneously.
+`result` will also be versioned with DVC and pushed to the cloud by default,
+so our collaborators can also take advantage of the caching
+without bloating the Git repo.
+Execution as part of the project's pipeline will also take advantage of
+the caching and will not rerun data processing unless something
+about that cell or environment
+(`py` above, but it can be any environment in the project) has changed.
+
+For a more in-depth look at using the `%%stage` cell magic,
+see [this tutorial](tutorials/notebook-pipeline.md).

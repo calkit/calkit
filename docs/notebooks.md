@@ -29,7 +29,7 @@ Returning to the "one project, one command" requirement,
 we can focus on three rules:
 
 1. The notebook must be kept in version control.
-   This happens naturally as any file included in a Calkit project is
+   This happens naturally since any file included in a Calkit project is
    kept in version control.
    However, it's usually a good idea to exclude notebook output from
    Git commits.

@@ -43,28 +43,6 @@ we can focus on three rules:
    This means notebooks need to be able to run from top-to-bottom with no
    manual intervention. We'll see how below.
 
-Jupyter notebooks are great for prototyping and data exploration,
-but can also be useful in generating evidence to support answers to
-research questions.
-In fact, for software prototyping, an executed notebook can be evidence
-itself---evidence that answers questions regarding an idea's feasibility,
-scalability, performance, etc.
-In research projects, typically data and results may be explored interactively
-in a notebook, with some figures and tables saved to be included in
-a PDF of a research article.
-
-So, here we're talking about using notebooks to generate
-evidence to support research conclusions.
-Calkit seeks to make it easier to incorporate notebooks into a
-reproducible research project.
-
-TODO: Talk about when and how to do interactive work.
-For example, if you need to tweak a figure,
-you can keep tweaking the cell that generates the figure,
-but you'll want to ensure the version used in the paper is generated
-with the pipeline.
-That's reproducibility.
-
 ## Creating an environment for a notebook
 
 Assuming you want to run Python in the notebook, you can create an environment
@@ -90,10 +68,13 @@ You can then start JupyterLab in this environment with
 `calkit xenv -n py jupyter lab`, or execute the entire notebook
 with `calkit nb execute -e py path/to/the/notebook.ipynb`.
 
-Note the environment only need to be created once per project.
+Note the environment only needs to be created once per project.
 If the project is cloned onto a new machine,
 the environment does not need to be recreated,
 since that will be done automatically when the project is run.
+Also note that it's totally fine and perhaps even preferable to create
+a new environment for each notebook, so long as they have different
+names, prefixes, and paths.
 
 ## Adding a notebook to the pipeline
 
@@ -167,7 +148,15 @@ we can simply add `calkit-python` to the `requirements.txt` file and rerun
 `calkit xenv -n py jupyter lab`.
 The environment will be updated before starting JupyterLab.
 
-## Expensive cells
+## Working interactively
+
+For example, if you need to tweak a figure,
+you can keep tweaking the cell that generates the figure,
+but you'll want to ensure the version used in the paper is generated
+with the pipeline.
+That's reproducibility.
+
+### Expensive cells
 
 Sometimes it can get painful restarting and rerunning a notebook over and over
 again.

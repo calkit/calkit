@@ -199,6 +199,12 @@ from some_package import run_data_processing
 result = run_data_processing(param1=55)
 ```
 
+In the magic command we're giving the cell a unique name,
+declaring which environment it should run in
+(`py` above, but it can be any environment in the project),
+and declaring an output from the cell that we want to be available to
+cells below.
+
 Now, the kernel can be restarted and we can use "run all cells above"
 when working on the figure,
 and we'll have `result` nearly instantaneously.
@@ -207,8 +213,7 @@ so our collaborators can also take advantage of the caching
 without bloating the Git repo.
 Execution as part of the project's pipeline will also take advantage of
 the caching and will not rerun data processing unless something
-about that cell or environment
-(`py` above, but it can be any environment in the project) has changed.
+about that cell's code or environment has changed.
 
 For a more in-depth look at using the `%%stage` cell magic,
 see [this tutorial](tutorials/notebook-pipeline.md).

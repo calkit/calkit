@@ -65,8 +65,7 @@ calkit new uv-venv \
 ```
 
 You can then start JupyterLab in this environment with
-`calkit xenv -n py jupyter lab`, or execute the entire notebook
-with `calkit nb execute -e py path/to/the/notebook.ipynb`.
+`calkit xenv -n py jupyter lab`.
 
 Note the environment only needs to be created once per project.
 If the project is cloned onto a new machine,

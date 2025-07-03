@@ -7,8 +7,8 @@ you get an output you like, e.g., a figure,
 it can be tempting to simply stop right there
 and copy/paste it into a research article.
 However, that is not reproducible, since by definition, reproducibility means
-we need to be able to go from raw data to research article with a single
-command.
+we need to be able to go from raw data to research article
+[with a single command](https://doi.org/10.1190/1.1822162).
 
 This is the primary notebook use case Calkit is concerned with:
 generating evidence to back up conclusions or answers to research questions.

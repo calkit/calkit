@@ -66,7 +66,7 @@ app.add_typer(overleaf_app, name="overleaf", help="Interact with Overleaf.")
 app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
 
 # Constants for version control auto-ignore
-AUTO_IGNORE_SUFFIXES = [".DS_Store", ".env", ".pyc"]
+AUTO_IGNORE_SUFFIXES = [".DS_Store", ".env", ".pyc", ".synctex.gz"]
 AUTO_IGNORE_PATHS = [os.path.join(".dvc", "config.local")]
 AUTO_IGNORE_PREFIXES = [".venv", "__pycache__"]
 # Constants for version control auto-add to DVC

@@ -66,7 +66,7 @@ app.add_typer(overleaf_app, name="overleaf", help="Interact with Overleaf.")
 app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
 
 # Constants for version control auto-ignore
-AUTO_IGNORE_SUFFIXES = [".DS_Store", ".env", ".pyc"]
+AUTO_IGNORE_SUFFIXES = [".DS_Store", ".env", ".pyc", ".synctex.gz"]
 AUTO_IGNORE_PATHS = [os.path.join(".dvc", "config.local")]
 AUTO_IGNORE_PREFIXES = [".venv", "__pycache__"]
 # Constants for version control auto-add to DVC
@@ -675,45 +675,127 @@ def run_local_server():
     )
 
 
-@app.command(
-    name="run",
-    add_help_option=False,
-)
+@app.command(name="run")
 def run(
-    targets: Optional[list[str]] = typer.Argument(default=None),
-    help: Annotated[bool, typer.Option("-h", "--help")] = False,
-    quiet: Annotated[bool, typer.Option("-q", "--quiet")] = False,
-    verbose: Annotated[bool, typer.Option("-v", "--verbose")] = False,
-    force: Annotated[bool, typer.Option("-f", "--force")] = False,
-    interactive: Annotated[bool, typer.Option("-i", "--interactive")] = False,
-    single_item: Annotated[bool, typer.Option("-s", "--single-item")] = False,
+    targets: Optional[list[str]] = typer.Argument(
+        default=None, help="Stages to run."
+    ),
+    quiet: Annotated[
+        bool, typer.Option("-q", "--quiet", help="Be quiet.")
+    ] = False,
+    verbose: Annotated[
+        bool, typer.Option("-v", "--verbose", help="Print verbose output.")
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "-f",
+            "--force",
+            help="Run even if stages or inputs have not changed.",
+        ),
+    ] = False,
+    interactive: Annotated[
+        bool,
+        typer.Option(
+            "-i",
+            "--interactive",
+            help="Ask for confirmation before running each stage.",
+        ),
+    ] = False,
+    single_item: Annotated[
+        bool,
+        typer.Option(
+            "-s",
+            "--single-item",
+            help="Run only a single stage without any dependents.",
+        ),
+    ] = False,
     pipeline: Annotated[
         Optional[str], typer.Option("-p", "--pipeline")
     ] = None,
     all_pipelines: Annotated[
-        bool, typer.Option("-P", "--all-pipelines")
+        bool,
+        typer.Option(
+            "-P", "--all-pipelines", help="Run all pipelines in the repo."
+        ),
     ] = False,
-    recursive: Annotated[bool, typer.Option("-R", "--recursive")] = False,
+    recursive: Annotated[
+        bool,
+        typer.Option(
+            "-R", "--recursive", help="Run pipelines in subdirectories."
+        ),
+    ] = False,
     downstream: Annotated[
-        Optional[list[str]], typer.Option("--downstream")
+        Optional[list[str]],
+        typer.Option(
+            "--downstream",
+            help="Start from the specified stage and run all downstream.",
+        ),
     ] = None,
     force_downstream: Annotated[
-        bool, typer.Option("--force-downstream")
+        bool,
+        typer.Option(
+            "--force-downstream",
+            help=(
+                "Force downstream stages to run even if "
+                "they are still up-to-date."
+            ),
+        ),
     ] = False,
-    pull: Annotated[bool, typer.Option("--pull")] = False,
-    allow_missing: Annotated[bool, typer.Option("--allow-missing")] = False,
-    dry: Annotated[bool, typer.Option("--dry")] = False,
-    keep_going: Annotated[bool, typer.Option("--keep-going", "-k")] = False,
-    ignore_errors: Annotated[bool, typer.Option("--ignore-errors")] = False,
-    glob: Annotated[bool, typer.Option("--glob")] = False,
-    no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
-    no_run_cache: Annotated[bool, typer.Option("--no-run-cache")] = False,
+    pull: Annotated[
+        bool,
+        typer.Option("--pull", help="Try automatically pulling missing data."),
+    ] = False,
+    allow_missing: Annotated[
+        bool,
+        typer.Option("--allow-missing", help="Skip stages with missing data."),
+    ] = False,
+    dry: Annotated[
+        bool,
+        typer.Option("--dry", help="Only print commands that would execute."),
+    ] = False,
+    keep_going: Annotated[
+        bool,
+        typer.Option(
+            "--keep-going",
+            "-k",
+            help=(
+                "Continue executing, skipping stages with failed "
+                "inputs from other stages."
+            ),
+        ),
+    ] = False,
+    ignore_errors: Annotated[
+        bool,
+        typer.Option("--ignore-errors", help="Ignore errors from stages."),
+    ] = False,
+    glob: Annotated[
+        bool,
+        typer.Option("--glob", help="Match stages with glob-style patterns."),
+    ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not save to the run cache.")
+    ] = False,
+    no_run_cache: Annotated[
+        bool, typer.Option("--no-run-cache", help="Ignore the run cache.")
+    ] = False,
+    save_after_run: Annotated[
+        bool,
+        typer.Option("--save", "-S", help="Save the project after running."),
+    ] = False,
+    save_message: Annotated[
+        str | None,
+        typer.Option(
+            "--save-message", "-m", help="Commit message for saving."
+        ),
+    ] = None,
 ):
     """Check dependencies and run the pipeline."""
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     # First check any system-level dependencies exist
-    typer.echo("Checking system-level dependencies")
+    if not quiet:
+        typer.echo("Checking system-level dependencies")
     try:
         calkit.check_system_deps()
     except Exception as e:
@@ -722,7 +804,8 @@ def run(
     # Compile the pipeline
     ck_info = calkit.load_calkit_info()
     if ck_info.get("pipeline", {}):
-        typer.echo("Compiling DVC pipeline")
+        if not quiet:
+            typer.echo("Compiling DVC pipeline")
         try:
             calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
         except Exception as e:
@@ -733,7 +816,6 @@ def run(
     args = targets
     # Extract any boolean args
     for name in [
-        "help",
         "quiet",
         "verbose",
         "force",
@@ -762,6 +844,12 @@ def run(
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error("DVC pipeline failed")
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+    if save_after_run or save_message is not None:
+        if save_message is None:
+            save_message = "Run pipeline"
+        if not quiet:
+            typer.echo("Saving the project after successful run")
+        save(save_all=True, message=save_message)
 
 
 @app.command(name="manual-step", help="Execute a manual step.")

@@ -44,9 +44,13 @@ def to_dvc(
     except Exception as e:
         raise ValueError(f"Pipeline is not defined properly: {e}")
     dvc_stages = {}
-    # First, create stages for checking/exporting all environments
+    # First, create stages for checking/exporting all environments used in the
+    # pipeline
+    used_envs = set([stage.environment for stage in pipeline.stages.values()])
     env_lock_fpaths = {}
     for env_name, env in ck_info.get("environments", {}).items():
+        if env_name not in used_envs:
+            continue
         env_fpath = env.get("path")
         lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=True

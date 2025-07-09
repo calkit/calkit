@@ -21,7 +21,7 @@ def test_to_dvc():
             "stages": {
                 "get-data": {
                     "kind": "python-script",
-                    "environment": "my-env",
+                    "environment": "py",
                     "script_path": "something/my-cool-script.py",
                     "outputs": [
                         "my-output.out",

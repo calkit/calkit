@@ -794,7 +794,8 @@ def run(
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     # First check any system-level dependencies exist
-    typer.echo("Checking system-level dependencies")
+    if not quiet:
+        typer.echo("Checking system-level dependencies")
     try:
         calkit.check_system_deps()
     except Exception as e:
@@ -803,7 +804,8 @@ def run(
     # Compile the pipeline
     ck_info = calkit.load_calkit_info()
     if ck_info.get("pipeline", {}):
-        typer.echo("Compiling DVC pipeline")
+        if not quiet:
+            typer.echo("Compiling DVC pipeline")
         try:
             calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
         except Exception as e:
@@ -845,7 +847,8 @@ def run(
     if save_after_run or save_message is not None:
         if save_message is None:
             save_message = "Run pipeline"
-        typer.echo("Saving the project after successful run")
+        if not quiet:
+            typer.echo("Saving the project after successful run")
         save(save_all=True, message=save_message)
 
 

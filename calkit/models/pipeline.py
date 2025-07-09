@@ -132,16 +132,19 @@ class PythonScriptStage(Stage):
 class LatexStage(Stage):
     kind: Literal["latex"] = "latex"
     target_path: str
-    silent: bool = False
+    verbose: bool = False
     force: bool = False
+    synctex: bool = True
 
     @property
     def dvc_cmd(self) -> str:
         cmd = f"{self.xenv_cmd} -- latexmk -cd -interaction=nonstopmode"
-        if self.silent:
+        if not self.verbose:
             cmd += " -silent"
         if self.force:
             cmd += " -f"
+        if self.synctex:
+            cmd += " -synctex=1"
         cmd += f" -pdf {self.target_path}"
         return cmd
 

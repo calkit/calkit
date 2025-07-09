@@ -46,8 +46,8 @@ def test_wordtopdfstage():
 
 def test_latexstage():
     s = LatexStage(environment="tex", target_path="my-paper.tex")
-    assert " -silent " not in s.dvc_cmd
-    s.silent = True
     assert " -silent " in s.dvc_cmd
+    s.verbose = True
+    assert " -silent " not in s.dvc_cmd
     assert "my-paper.tex" in s.dvc_deps
     assert "my-paper.pdf" in s.dvc_outs

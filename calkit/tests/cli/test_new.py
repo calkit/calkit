@@ -548,7 +548,7 @@ def test_new_latex_stage(tmp_dir):
     pipeline = calkit.dvc.read_pipeline()
     assert pipeline["stages"]["build-paper"]["cmd"] == (
         "calkit xenv -n tex --no-check -- "
-        "latexmk -cd -interaction=nonstopmode -pdf paper.tex"
+        "latexmk -cd -interaction=nonstopmode -silent -synctex=1 -pdf paper.tex"
     )
     assert set(pipeline["stages"]["build-paper"]["deps"]) == set(
         ["paper.tex", ".calkit/env-locks/tex.json"]

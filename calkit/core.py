@@ -462,12 +462,12 @@ def detect_project_name(wdir: str | None = None) -> str:
 def describe_system() -> dict:
     """Describe the system on which we're currently running."""
     os_name = platform.system()
-
     system_info = {
         "os": os_name,
         "os_version": platform.release(),
         "python_version": platform.python_version(),
         "calkit_version": calkit.__version__,
+        "calkit_git_rev": None,
         "hostname": socket.gethostname(),
         "processor": platform.processor(),
         "platform": platform.platform(),
@@ -475,9 +475,7 @@ def describe_system() -> dict:
         "python_implementation": platform.python_implementation(),
         "python_compiler": platform.python_compiler(),
     }
-
     node_id = uuid.getnode()
-
     # The multicast bit is the 40th bit from the right (0-indexed)
     # This corresponds to the least significant bit of the first octet
     # A standard unicast MAC address has this bit as 0
@@ -485,9 +483,7 @@ def describe_system() -> dict:
     is_random_fallback = bool(node_id & 0x010000000000)
     if is_random_fallback:
         node_id = None
-
     system_info["node_id"] = node_id
-
     # See if we can detect Calkit Git rev
     try:
         repo = Repo(
@@ -495,12 +491,8 @@ def describe_system() -> dict:
             search_parent_directories=True,
         )
         system_info["calkit_git_rev"] = repo.head.commit.hexsha
-    except Exception as e:
-        # If we can't get the Git revision, just log a warning
-        print(f"Could not get Calkit Git revision: {e}")
-        system_info["calkit_git_rev"] = None
-
+    except Exception:
+        pass
     system_info_str = json.dumps(system_info, sort_keys=True).encode()
     system_info["id"] = hashlib.sha256(system_info_str).hexdigest()
-
     return system_info

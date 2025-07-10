@@ -6,8 +6,8 @@ import json
 import os
 import re
 import subprocess
-import warnings
 import sys
+import warnings
 
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version

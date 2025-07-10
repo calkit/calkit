@@ -459,7 +459,6 @@ def describe_system() -> dict:
     import os
     import platform
     import socket
-    import subprocess
     import uuid
 
     import calkit
@@ -502,53 +501,6 @@ def describe_system() -> dict:
         # If we can't get the Git revision, just log a warning
         print(f"Could not get Calkit Git revision: {e}")
         system_info["calkit_git_rev"] = None
-
-    # System UUID (most robust identifier for the machine itself)
-    # This often aligns with what 'dmidecode -s system-uuid' on Linux or 'wmic csproduct get uuid' on Windows gives
-    try:
-        if os_name == "Windows":
-            # WMIC may be deprecated, consider powershell "Get-CimInstance Win32_ComputerSystemProduct | Select-Object UUID"
-            result = subprocess.check_output(
-                ["wmic", "csproduct", "get", "uuid"], text=True
-            )
-            system_info["machine_id"] = result.split("\n")[1].strip().upper()
-        elif os_name == "Linux":
-            # Requires dmidecode to be installed and run with sudo privileges
-            try:
-                result = subprocess.check_output(
-                    ["sudo", "dmidecode", "-s", "system-uuid"], text=True
-                )
-                system_info["machine_id"] = (
-                    result.strip().split("\n")[-1].strip().upper()
-                )  # Last line is usually the UUID
-            except (FileNotFoundError, subprocess.CalledProcessError):
-                # Fallback if dmidecode not found or no sudo access
-                # Linux UUID can often be found in /etc/machine-id
-                if os.path.exists("/etc/machine-id"):
-                    with open("/etc/machine-id", "r") as f:
-                        system_info["machine_id"] = f.read().strip().upper()
-                else:
-                    system_info["machine_id"] = str(
-                        uuid.getnode()
-                    )  # MAC-based UUID, less unique across reboots/NIC changes
-        elif os_name == "Darwin":  # macOS
-            result = subprocess.check_output(
-                ["ioreg", "-l", "-d1", "-br", "IOPlatformUUID"], text=True
-            )
-            # Expected format: | "IOPlatformUUID" = "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX"
-            import re
-
-            print(result)
-
-            match = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', result)
-            if match:
-                system_info["machine_id"] = match.group(1).strip().upper()
-        else:
-            system_info["machine_id"] = str(
-                uuid.getnode()
-            )  # Fallback for other OS or if platform-specific fails
-    except Exception as e:
-        print(f"Warning: Could not get system UUID: {e}")
 
     # Hash system info to create a unique ID
     import hashlib

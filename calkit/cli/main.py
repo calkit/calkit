@@ -33,6 +33,7 @@ from calkit.cli.check import (
 )
 from calkit.cli.cloud import cloud_app
 from calkit.cli.config import config_app
+from calkit.cli.describe import describe_app
 from calkit.cli.import_ import import_app
 from calkit.cli.list import list_app
 from calkit.cli.new import new_app
@@ -58,6 +59,7 @@ app.add_typer(
 )
 app.add_typer(notebooks_app, name="nb", help="Work with Jupyter notebooks.")
 app.add_typer(list_app, name="list", help="List Calkit objects.")
+app.add_typer(describe_app, name="describe", help="Describe things.")
 app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(update_app, name="update", help="Update objects.")

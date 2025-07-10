@@ -452,3 +452,108 @@ def detect_project_name(wdir: str | None = None) -> str:
     if owner is None:
         owner = owner_name
     return f"{owner}/{name}"
+
+
+def describe_system() -> dict:
+    """Describe the system on which we're currently running."""
+    import os
+    import platform
+    import socket
+    import subprocess
+    import uuid
+
+    import calkit
+
+    os_name = platform.system()
+
+    system_info = {
+        "os": os_name,
+        "os_version": platform.release(),
+        "python_version": platform.python_version(),
+        "calkit_version": calkit.__version__,
+        "hostname": socket.gethostname(),
+        "processor": platform.processor(),
+        "platform": platform.platform(),
+        "machine": platform.machine(),
+        "python_implementation": platform.python_implementation(),
+        "python_compiler": platform.python_compiler(),
+    }
+
+    node_id = uuid.getnode()
+
+    # The multicast bit is the 40th bit from the right (0-indexed)
+    # This corresponds to the least significant bit of the first octet
+    # A standard unicast MAC address has this bit as 0
+    # A randomly generated node ID by uuid.getnode() will have this bit as 1
+    is_random_fallback = bool(node_id & 0x010000000000)
+    if is_random_fallback:
+        node_id = None
+
+    system_info["node_id"] = node_id
+
+    # See if we can detect Calkit Git rev
+    try:
+        repo = Repo(
+            path=os.path.dirname(calkit.__file__),
+            search_parent_directories=True,
+        )
+        system_info["calkit_git_rev"] = repo.head.commit.hexsha
+    except Exception as e:
+        # If we can't get the Git revision, just log a warning
+        print(f"Could not get Calkit Git revision: {e}")
+        system_info["calkit_git_rev"] = None
+
+    # System UUID (most robust identifier for the machine itself)
+    # This often aligns with what 'dmidecode -s system-uuid' on Linux or 'wmic csproduct get uuid' on Windows gives
+    try:
+        if os_name == "Windows":
+            # WMIC may be deprecated, consider powershell "Get-CimInstance Win32_ComputerSystemProduct | Select-Object UUID"
+            result = subprocess.check_output(
+                ["wmic", "csproduct", "get", "uuid"], text=True
+            )
+            system_info["machine_id"] = result.split("\n")[1].strip().upper()
+        elif os_name == "Linux":
+            # Requires dmidecode to be installed and run with sudo privileges
+            try:
+                result = subprocess.check_output(
+                    ["sudo", "dmidecode", "-s", "system-uuid"], text=True
+                )
+                system_info["machine_id"] = (
+                    result.strip().split("\n")[-1].strip().upper()
+                )  # Last line is usually the UUID
+            except (FileNotFoundError, subprocess.CalledProcessError):
+                # Fallback if dmidecode not found or no sudo access
+                # Linux UUID can often be found in /etc/machine-id
+                if os.path.exists("/etc/machine-id"):
+                    with open("/etc/machine-id", "r") as f:
+                        system_info["machine_id"] = f.read().strip().upper()
+                else:
+                    system_info["machine_id"] = str(
+                        uuid.getnode()
+                    )  # MAC-based UUID, less unique across reboots/NIC changes
+        elif os_name == "Darwin":  # macOS
+            result = subprocess.check_output(
+                ["ioreg", "-l", "-d1", "-br", "IOPlatformUUID"], text=True
+            )
+            # Expected format: | "IOPlatformUUID" = "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX"
+            import re
+
+            print(result)
+
+            match = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', result)
+            if match:
+                system_info["machine_id"] = match.group(1).strip().upper()
+        else:
+            system_info["machine_id"] = str(
+                uuid.getnode()
+            )  # Fallback for other OS or if platform-specific fails
+    except Exception as e:
+        print(f"Warning: Could not get system UUID: {e}")
+
+    # Hash system info to create a unique ID
+    import hashlib
+
+    system_info_str = json.dumps(system_info, sort_keys=True).encode()
+    system_info["id"] = hashlib.sha256(system_info_str).hexdigest()
+
+    return system_info

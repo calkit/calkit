@@ -5,15 +5,20 @@ from __future__ import annotations
 import base64
 import csv
 import glob
+import hashlib
 import json
 import logging
 import os
 import pickle
+import platform
 import re
+import socket
 import subprocess
+import uuid
 
 import requests
 
+import calkit
 from calkit.models import ProjectStatus
 
 try:
@@ -456,13 +461,6 @@ def detect_project_name(wdir: str | None = None) -> str:
 
 def describe_system() -> dict:
     """Describe the system on which we're currently running."""
-    import os
-    import platform
-    import socket
-    import uuid
-
-    import calkit
-
     os_name = platform.system()
 
     system_info = {
@@ -501,9 +499,6 @@ def describe_system() -> dict:
         # If we can't get the Git revision, just log a warning
         print(f"Could not get Calkit Git revision: {e}")
         system_info["calkit_git_rev"] = None
-
-    # Hash system info to create a unique ID
-    import hashlib
 
     system_info_str = json.dumps(system_info, sort_keys=True).encode()
     system_info["id"] = hashlib.sha256(system_info_str).hexdigest()

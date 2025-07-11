@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from calkit.models.iteration import ParametersType
+from calkit.models.iteration import Metric, ParametersType
 from calkit.models.pipeline import Pipeline
 
 
@@ -269,6 +269,7 @@ class ProjectInfo(BaseModel):
     questions: list[str] = []
     dependencies: list = []
     parameters: ParametersType | None = None
+    metrics: dict[str, Metric] | None = None
     pipeline: Pipeline | None = None
     datasets: list[Dataset] = []
     figures: list[Figure] = []

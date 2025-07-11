@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import glob
+import json
 import os
 import platform as _platform
 import posixpath
@@ -795,11 +796,26 @@ def run(
     """Check dependencies and run the pipeline."""
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    if not quiet:
+        typer.echo("Getting system information")
+    system_info = calkit.get_system_info()
+    # Save the system to .calkit/systems
+    if not quiet:
+        typer.echo("Saving system information")
+    if verbose:
+        typer.echo("System information:")
+        typer.echo(system_info)
+    sysinfo_fpath = os.path.join(
+        ".calkit", "systems", system_info["id"] + ".json"
+    )
+    os.makedirs(os.path.dirname(sysinfo_fpath), exist_ok=True)
+    with open(sysinfo_fpath, "w") as f:
+        json.dump(system_info, f, indent=2)
     # First check any system-level dependencies exist
     if not quiet:
         typer.echo("Checking system-level dependencies")
     try:
-        calkit.check_system_deps()
+        calkit.check_system_deps(system_info=system_info)
     except Exception as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(str(e))

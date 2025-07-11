@@ -912,7 +912,10 @@ def run(
                     remove_tz=False
                 ).isoformat()
                 line = f"Running stage '{stage_name}'\n"
-            elif "didn't change, skipping" in line:
+            elif "Stage" not in line and "didn't change, skipping" in line:
+                # This is a data status line
+                continue
+            elif "Stage" in line and "didn't change, skipping" in line:
                 # Track previous stage's end time, if we ran one
                 if stage_name is not None:
                     if stage_name not in stage_run_info:

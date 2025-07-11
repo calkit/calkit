@@ -866,12 +866,11 @@ def run(
         args += ["--pipeline", pipeline]
     if downstream is not None:
         args += downstream
+    stage_run_info = {}
+    start_time_no_tz = calkit.utcnow(remove_tz=True)
+    start_time = calkit.utcnow(remove_tz=False)
+    run_id = uuid.uuid4().hex
     if not no_log:
-        stage_run_info = {}
-        stage_name = None
-        start_time_no_tz = calkit.utcnow(remove_tz=True)
-        start_time = calkit.utcnow(remove_tz=False)
-        run_id = uuid.uuid4().hex
         log_fpath = os.path.join(
             ".calkit",
             "logs",
@@ -892,12 +891,13 @@ def run(
         )
         file_handler.setFormatter(formatter)
         dvc.stage.logger.addHandler(file_handler)
-        # Remove annoying newline logging in dvc.repo.reproduce
-        dvc.repo.reproduce.logger.setLevel(logging.ERROR)
-        # Disable other DVC outputs
-        dvc.ui.ui.write = lambda *args, **kwargs: None
-        res = dvc_cli_main(["repro"] + args)
-        failed = res != 0
+    # Remove newline logging in dvc.repo.reproduce
+    dvc.repo.reproduce.logger.setLevel(logging.ERROR)
+    # Disable other DVC outputs
+    dvc.ui.ui.write = lambda *args, **kwargs: None
+    res = dvc_cli_main(["repro"] + args)
+    failed = res != 0
+    if not no_log:
         # TODO: Parse log to get timing
         # Save run information to a file
         if verbose:
@@ -922,24 +922,15 @@ def run(
         os.makedirs(os.path.dirname(run_info_fpath), exist_ok=True)
         with open(run_info_fpath, "w") as f:
             json.dump(run_info, f, indent=2)
-        if failed:
-            os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-            raise_error("Pipeline failed")
-        else:
-            typer.echo(
-                "Pipeline completed successfully ✅".encode(
-                    "utf-8", errors="replace"
-                )
-            )
-    # No run logging here
+    os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+    if failed:
+        raise_error("Pipeline failed")
     else:
-        try:
-            subprocess.check_call(
-                [sys.executable, "-m", "dvc", "repro"] + args
+        typer.echo(
+            "Pipeline completed successfully ✅".encode(
+                "utf-8", errors="replace"
             )
-        except subprocess.CalledProcessError:
-            os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-            raise_error("Pipeline failed")
+        )
     if save_after_run or save_message is not None:
         if save_message is None:
             save_message = "Run pipeline"

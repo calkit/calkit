@@ -865,10 +865,13 @@ def run(
     )
     stage_run_info = {}
     stage_name = None
+    start_time_no_tz = calkit.utcnow(remove_tz=True)
     start_time = calkit.utcnow(remove_tz=False)
     run_id = uuid.uuid4().hex
     log_fpath = os.path.join(
-        ".calkit", "logs", start_time.isoformat() + "-" + run_id + ".log"
+        ".calkit",
+        "logs",
+        start_time_no_tz.isoformat(timespec="seconds") + "-" + run_id + ".log",
     )
     if verbose:
         typer.echo(f"Starting run ID: {run_id}")
@@ -876,7 +879,9 @@ def run(
     os.makedirs(os.path.dirname(log_fpath), exist_ok=True)
     with open(log_fpath, "a") as log_file:
         for line in process.stdout:  # type: ignore
-            log_file.write(calkit.utcnow().isoformat() + " " + line)
+            log_file.write(
+                calkit.utcnow(remove_tz=False).isoformat() + " " + line
+            )
             skip_if_not_includes = [
                 "Running stage",
                 "ERROR: failed to reproduce",
@@ -994,7 +999,12 @@ def run(
         "stages": stage_run_info,
     }
     run_info_fpath = os.path.join(
-        ".calkit", "runs", start_time.isoformat() + "-" + run_id + ".json"
+        ".calkit",
+        "runs",
+        start_time_no_tz.isoformat(timespec="seconds")
+        + "-"
+        + run_id
+        + ".json",
     )
     os.makedirs(os.path.dirname(run_info_fpath), exist_ok=True)
     with open(run_info_fpath, "w") as f:

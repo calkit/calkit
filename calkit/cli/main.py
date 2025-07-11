@@ -865,7 +865,6 @@ def run(
         stderr=subprocess.STDOUT,
         bufsize=1,
     )
-    all_output = ""
     stage_run_info = {}
     stage_name = None
     start_time = calkit.utcnow(remove_tz=False)
@@ -879,7 +878,6 @@ def run(
     with open(log_fpath, "a") as log_file:
         for line in process.stdout:  # type: ignore
             log_file.write(calkit.utcnow().isoformat() + " " + line)
-            all_output += line
             skip_if_not_includes = [
                 "Running stage",
                 "ERROR",

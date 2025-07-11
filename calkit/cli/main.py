@@ -997,7 +997,7 @@ def run(
                         f"ERROR: failed to reproduce '{stage_name}': "
                     ).strip()
                     line = f"Stage '{stage_name}' failed: {error_msg}\n"
-                    typer.echo(typer.style(line, fg="red"), err=line, nl=False)
+                    typer.echo(typer.style(line, fg="red"), err=True, nl=False)
                     continue
                 if not quiet:
                     typer.echo(

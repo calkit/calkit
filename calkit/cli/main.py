@@ -879,7 +879,7 @@ def run(
             log_file.write(calkit.utcnow().isoformat() + " " + line)
             skip_if_not_includes = [
                 "Running stage",
-                "ERROR",
+                "ERROR: failed to reproduce",
                 "didn't change, skipping",
                 "Updating lock file",
             ]
@@ -906,6 +906,7 @@ def run(
                 stage_run_info[stage_name]["start_time"] = calkit.utcnow(
                     remove_tz=False
                 ).isoformat()
+                line = f"Running stage '{stage_name}'\n"
             elif "didn't change, skipping" in line:
                 # Track previous stage's end time, if we ran one
                 if stage_name is not None:
@@ -957,7 +958,7 @@ def run(
                 ).isoformat()
             # If this is an env check stage, reformat line
             if (
-                line.startswith("Running stage ")
+                line.startswith("Running stage")
                 and stage_name is not None
                 and stage_name.startswith("_check-env-")
             ):

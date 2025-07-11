@@ -921,7 +921,7 @@ def run(
                         # Only set status if it wasn't already set
                         stage_run_info[stage_name]["status"] = "completed"
                 stage_name = line.split()[1].replace("'", "")
-                line = f"Stage '{stage_name}' is up-to-date ✅\n"
+                line = f"Stage '{stage_name}' is up-to-date\n"
                 if stage_name not in stage_run_info:
                     stage_run_info[stage_name] = {}
                 stage_run_info[stage_name]["status"] = "skipped"
@@ -976,7 +976,7 @@ def run(
                 error_msg = line.removeprefix(
                     f"ERROR: failed to reproduce '{stage_name}': "
                 ).strip()
-                line = f"Stage '{stage_name}' failed ❌: {error_msg}\n"
+                line = f"Stage '{stage_name}' failed: {error_msg}\n"
                 typer.echo(typer.style(line, fg="red"), err=line, nl=False)
                 continue
             if not quiet:
@@ -999,7 +999,7 @@ def run(
         json.dump(run_info, f, indent=2)
     if process.returncode != 0:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-        raise_error("Pipeline failed ❌")
+        raise_error("Pipeline failed")
     else:
         typer.echo(
             "Pipeline completed successfully ✅".encode(

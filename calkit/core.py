@@ -472,7 +472,6 @@ def get_dep_version(dep_name: str) -> str | None:
         result = subprocess.run(
             cmd, capture_output=True, text=True, check=True
         )
-        # The version is usually the first word in the output
         return result.stdout.strip()
     except Exception:
         return None
@@ -516,11 +515,12 @@ def get_system_info() -> dict:
     for dep in [
         "docker",
         "conda",
+        "mamba",
         "uv",
         "pixi",
         "Rscript",
     ]:
         system_info[f"{dep}_version"] = get_dep_version(dep)
     system_info_str = json.dumps(system_info, sort_keys=True).encode()
-    system_info["id"] = hashlib.sha256(system_info_str).hexdigest()
+    system_info["id"] = hashlib.sha1(system_info_str).hexdigest()
     return system_info

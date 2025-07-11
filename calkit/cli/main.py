@@ -856,6 +856,7 @@ def run(
         args += ["--pipeline", pipeline]
     if downstream is not None:
         args += downstream
+    # Capture output from dvc repro and send some to stdout
     try:
         subprocess.check_call([sys.executable, "-m", "dvc", "repro"] + args)
     except subprocess.CalledProcessError:

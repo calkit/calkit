@@ -11,6 +11,7 @@ import posixpath
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import PurePosixPath
 
 import dotenv
@@ -857,11 +858,79 @@ def run(
     if downstream is not None:
         args += downstream
     # Capture output from dvc repro and send some to stdout
-    try:
-        subprocess.check_call([sys.executable, "-m", "dvc", "repro"] + args)
-    except subprocess.CalledProcessError:
+    process = subprocess.Popen(
+        [sys.executable, "-m", "dvc", "repro"] + args,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=1,
+    )
+    all_output = ""
+    stage_run_info = {}
+    stage_name = None
+    # TODO: Send output to log file with timestamps
+    # TODO: Generate a random run ID
+    start_time = calkit.utcnow(remove_tz=False)
+    run_id = calkit.utcnow().isoformat() + "-" + uuid.uuid4().hex
+    log_fpath = os.path.join(".calkit", "logs", run_id + ".log")
+    if not quiet:
+        typer.echo(f"Starting run ID: {run_id}")
+    if verbose:
+        typer.echo(f"Saving logs to {log_fpath}")
+    os.makedirs(os.path.dirname(log_fpath), exist_ok=True)
+    with open(log_fpath, "a") as log_file:
+        for line in process.stdout:  # type: ignore
+            log_file.write(calkit.utcnow().isoformat() + " " + line)
+            all_output += line
+            skip_if_not_includes = [
+                "Running stage",
+                "ERROR",
+                "didn't change, skipping",
+                "Updating lock file",
+            ]
+            if not any([s in line for s in skip_if_not_includes]):
+                continue
+            if line.startswith("Running stage '"):
+                stage_name = line.removeprefix("Running stage '").split("'")[0]
+            elif "didn't change, skipping" in line:
+                stage_name = line.split()[1].replace("'", "")
+                line = f"✅ Stage '{stage_name}' is up-to-date\n"
+            elif line.startswith("ERROR: failed to reproduce "):
+                stage_name = (
+                    line.split("ERROR: failed to reproduce ")[-1]
+                    .split()[0]
+                    .replace("'", "")
+                    .replace(":", "")
+                )
+            # If this is an env check stage, reformat line
+            if (
+                line.startswith("Running stage ")
+                and stage_name is not None
+                and stage_name.startswith("_check-env-")
+            ):
+                env_name = stage_name.removeprefix("_check-env-")
+                line = f"Checking environment '{env_name}'\n"
+            if line.startswith("Updating lock file") and not verbose:
+                continue
+            if line.startswith(">") or not line.strip() or "\r" in line:
+                continue
+            if line.strip().endswith(":"):
+                line = line.strip().removesuffix(":") + "\n"
+            if "`dvc push`" in line:
+                line = "Use 'calkit save' to back up results to the cloud\n"
+            if line.startswith("ERROR: failed to reproduce "):
+                error_msg = line.removeprefix(
+                    f"ERROR: failed to reproduce '{stage_name}': "
+                ).strip()
+                line = f"❌ Stage '{stage_name}' failed: {error_msg}\n"
+                typer.echo(typer.style(line, fg="red"), err=line)
+                continue
+            if not quiet:
+                typer.echo(line.encode("utf-8", errors="replace"), nl=False)
+    process.wait()
+    if process.returncode != 0:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-        raise_error("DVC pipeline failed")
+        raise_error("Pipeline failed")
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
     if save_after_run or save_message is not None:
         if save_message is None:

@@ -896,7 +896,6 @@ def run(
         dvc.repo.reproduce.logger.setLevel(logging.ERROR)
         # Disable other DVC outputs
         dvc.ui.ui.write = lambda *args, **kwargs: None
-        dvc.stage.run.display_command = lambda *args, **kwargs: None
         res = dvc_cli_main(["repro"] + args)
         failed = res != 0
         # TODO: Parse log to get timing

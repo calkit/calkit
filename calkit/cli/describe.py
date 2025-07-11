@@ -1,4 +1,4 @@
-"""CLI for describing thing."""
+"""CLI for describing things."""
 
 from __future__ import annotations
 

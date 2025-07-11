@@ -801,10 +801,8 @@ def run(
         typer.echo("Getting system information")
     system_info = calkit.get_system_info()
     # Save the system to .calkit/systems
-    if not quiet:
-        typer.echo("Saving system information")
     if verbose:
-        typer.echo("System information:")
+        typer.echo("Saving system information:")
         typer.echo(system_info)
     sysinfo_fpath = os.path.join(
         ".calkit", "systems", system_info["id"] + ".json"

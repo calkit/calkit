@@ -868,10 +868,8 @@ def run(
     all_output = ""
     stage_run_info = {}
     stage_name = None
-    # TODO: Send output to log file with timestamps
-    # TODO: Generate a random run ID
     start_time = calkit.utcnow(remove_tz=False)
-    run_id = calkit.utcnow().isoformat() + "-" + uuid.uuid4().hex
+    run_id = start_time.isoformat() + "-" + uuid.uuid4().hex
     log_fpath = os.path.join(".calkit", "logs", run_id + ".log")
     if not quiet:
         typer.echo(f"Starting run ID: {run_id}")

@@ -783,6 +783,10 @@ def run(
     no_run_cache: Annotated[
         bool, typer.Option("--no-run-cache", help="Ignore the run cache.")
     ] = False,
+    no_log: Annotated[
+        bool,
+        typer.Option("--no-log", help="Do not log the run."),
+    ] = False,
     save_after_run: Annotated[
         bool,
         typer.Option("--save", "-S", help="Save the project after running."),
@@ -855,173 +859,191 @@ def run(
         args += ["--pipeline", pipeline]
     if downstream is not None:
         args += downstream
-    # Capture output from dvc repro and send some to stdout
-    process = subprocess.Popen(
-        [sys.executable, "-m", "dvc", "repro"] + args,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        bufsize=1,
-    )
-    stage_run_info = {}
-    stage_name = None
-    start_time_no_tz = calkit.utcnow(remove_tz=True)
-    start_time = calkit.utcnow(remove_tz=False)
-    run_id = uuid.uuid4().hex
-    log_fpath = os.path.join(
-        ".calkit",
-        "logs",
-        start_time_no_tz.isoformat(timespec="seconds") + "-" + run_id + ".log",
-    )
-    if verbose:
-        typer.echo(f"Starting run ID: {run_id}")
-        typer.echo(f"Saving logs to {log_fpath}")
-    os.makedirs(os.path.dirname(log_fpath), exist_ok=True)
-    with open(log_fpath, "a") as log_file:
-        for line in process.stdout:  # type: ignore
-            log_file.write(
-                calkit.utcnow(remove_tz=False).isoformat() + " " + line
-            )
-            skip_if_not_includes = [
-                "Running stage",
-                "ERROR: failed to reproduce",
-                "didn't change, skipping",
-                "Updating lock file",
-            ]
-            if not verbose and not any(
-                [s in line for s in skip_if_not_includes]
-            ):
-                continue
-            if line.startswith("Running stage '"):
-                # Track previous stage's end time, if we ran one
-                if stage_name is not None:
-                    if stage_name not in stage_run_info:
-                        stage_run_info[stage_name] = {}
-                    if "end_time" not in stage_run_info[stage_name]:
-                        # Only set end time if it wasn't already set
-                        stage_run_info[stage_name]["end_time"] = calkit.utcnow(
-                            remove_tz=False
-                        ).isoformat()
-                    if "status" not in stage_run_info[stage_name]:
-                        # Only set status if it wasn't already set
-                        stage_run_info[stage_name]["status"] = "completed"
-                stage_name = line.removeprefix("Running stage '").split("'")[0]
-                if stage_name not in stage_run_info:
-                    stage_run_info[stage_name] = {}
-                stage_run_info[stage_name]["start_time"] = calkit.utcnow(
-                    remove_tz=False
-                ).isoformat()
-                line = f"Running stage '{stage_name}'\n"
-            elif "Stage" not in line and "didn't change, skipping" in line:
-                # This is a data status line
-                continue
-            elif "Stage" in line and "didn't change, skipping" in line:
-                # Track previous stage's end time, if we ran one
-                if stage_name is not None:
-                    if stage_name not in stage_run_info:
-                        stage_run_info[stage_name] = {}
-                    if "end_time" not in stage_run_info[stage_name]:
-                        # Only set end time if it wasn't already set
-                        stage_run_info[stage_name]["end_time"] = calkit.utcnow(
-                            remove_tz=False
-                        ).isoformat()
-                    if "status" not in stage_run_info[stage_name]:
-                        # Only set status if it wasn't already set
-                        stage_run_info[stage_name]["status"] = "completed"
-                stage_name = line.split()[1].replace("'", "")
-                line = f"Stage '{stage_name}' is up-to-date\n"
-                if stage_name not in stage_run_info:
-                    stage_run_info[stage_name] = {}
-                stage_run_info[stage_name]["status"] = "skipped"
-                stage_run_info[stage_name]["start_time"] = calkit.utcnow(
-                    remove_tz=False
-                ).isoformat()
-                stage_run_info[stage_name]["end_time"] = calkit.utcnow(
-                    remove_tz=False
-                ).isoformat()
-            elif line.startswith("ERROR: failed to reproduce "):
-                # Track previous stage's end time, if we ran one
-                if stage_name is not None:
-                    if stage_name not in stage_run_info:
-                        stage_run_info[stage_name] = {}
-                    if "end_time" not in stage_run_info[stage_name]:
-                        # Only set end time if it wasn't already set
-                        stage_run_info[stage_name]["end_time"] = calkit.utcnow(
-                            remove_tz=False
-                        ).isoformat()
-                    if "status" not in stage_run_info[stage_name]:
-                        # Only set status if it wasn't already set
-                        stage_run_info[stage_name]["status"] = "completed"
-                stage_name = (
-                    line.split("ERROR: failed to reproduce ")[-1]
-                    .split()[0]
-                    .replace("'", "")
-                    .replace(":", "")
-                )
-                if stage_name not in stage_run_info:
-                    stage_run_info[stage_name] = {}
-                stage_run_info[stage_name]["status"] = "failed"
-                stage_run_info[stage_name]["end_time"] = calkit.utcnow(
-                    remove_tz=False
-                ).isoformat()
-            # If this is an env check stage, reformat line
-            if (
-                line.startswith("Running stage")
-                and stage_name is not None
-                and stage_name.startswith("_check-env-")
-            ):
-                env_name = stage_name.removeprefix("_check-env-")
-                line = f"Checking environment '{env_name}'\n"
-            if line.startswith("Updating lock file") and not verbose:
-                continue
-            if line.startswith(">") or not line.strip() or "\r" in line:
-                continue
-            if line.strip().endswith(":"):
-                line = line.strip().removesuffix(":") + "\n"
-            if "`dvc push`" in line:
-                line = "Use 'calkit save' to back up results to the cloud\n"
-            if line.startswith("ERROR: failed to reproduce "):
-                error_msg = line.removeprefix(
-                    f"ERROR: failed to reproduce '{stage_name}': "
-                ).strip()
-                line = f"Stage '{stage_name}' failed: {error_msg}\n"
-                typer.echo(typer.style(line, fg="red"), err=line, nl=False)
-                continue
-            if not quiet:
-                typer.echo(line.encode("utf-8", errors="replace"), nl=False)
-    process.wait()
-    # Save run information to a file
-    if verbose:
-        typer.echo("Saving run info")
-    run_info = {
-        "id": run_id,
-        "system_id": system_info["id"],
-        "start_time": start_time.isoformat(),
-        "end_time": calkit.utcnow(remove_tz=False).isoformat(),
-        "status": "completed" if process.returncode == 0 else "failed",
-        "stages": stage_run_info,
-    }
-    run_info_fpath = os.path.join(
-        ".calkit",
-        "runs",
-        start_time_no_tz.isoformat(timespec="seconds")
-        + "-"
-        + run_id
-        + ".json",
-    )
-    os.makedirs(os.path.dirname(run_info_fpath), exist_ok=True)
-    with open(run_info_fpath, "w") as f:
-        json.dump(run_info, f, indent=2)
-    if process.returncode != 0:
-        os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-        raise_error("Pipeline failed")
-    else:
-        typer.echo(
-            "Pipeline completed successfully ✅".encode(
-                "utf-8", errors="replace"
-            )
+    if not no_log:
+        # Capture output from dvc repro and send some to stdout
+        process = subprocess.Popen(
+            [sys.executable, "-m", "dvc", "repro"] + args,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
         )
-    os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+        stage_run_info = {}
+        stage_name = None
+        start_time_no_tz = calkit.utcnow(remove_tz=True)
+        start_time = calkit.utcnow(remove_tz=False)
+        run_id = uuid.uuid4().hex
+        log_fpath = os.path.join(
+            ".calkit",
+            "logs",
+            start_time_no_tz.isoformat(timespec="seconds")
+            + "-"
+            + run_id
+            + ".log",
+        )
+        if verbose:
+            typer.echo(f"Starting run ID: {run_id}")
+            typer.echo(f"Saving logs to {log_fpath}")
+        os.makedirs(os.path.dirname(log_fpath), exist_ok=True)
+        with open(log_fpath, "a") as log_file:
+            for line in process.stdout:  # type: ignore
+                log_file.write(
+                    calkit.utcnow(remove_tz=False).isoformat() + " " + line
+                )
+                skip_if_not_includes = [
+                    "Running stage",
+                    "ERROR: failed to reproduce",
+                    "didn't change, skipping",
+                    "Updating lock file",
+                ]
+                if not verbose and not any(
+                    [s in line for s in skip_if_not_includes]
+                ):
+                    continue
+                if line.startswith("Running stage '"):
+                    # Track previous stage's end time, if we ran one
+                    if stage_name is not None:
+                        if stage_name not in stage_run_info:
+                            stage_run_info[stage_name] = {}
+                        if "end_time" not in stage_run_info[stage_name]:
+                            # Only set end time if it wasn't already set
+                            stage_run_info[stage_name]["end_time"] = (
+                                calkit.utcnow(remove_tz=False).isoformat()
+                            )
+                        if "status" not in stage_run_info[stage_name]:
+                            # Only set status if it wasn't already set
+                            stage_run_info[stage_name]["status"] = "completed"
+                    stage_name = line.removeprefix("Running stage '").split(
+                        "'"
+                    )[0]
+                    if stage_name not in stage_run_info:
+                        stage_run_info[stage_name] = {}
+                    stage_run_info[stage_name]["start_time"] = calkit.utcnow(
+                        remove_tz=False
+                    ).isoformat()
+                    line = f"Running stage '{stage_name}'\n"
+                elif "Stage" not in line and "didn't change, skipping" in line:
+                    # This is a data status line
+                    continue
+                elif "Stage" in line and "didn't change, skipping" in line:
+                    # Track previous stage's end time, if we ran one
+                    if stage_name is not None:
+                        if stage_name not in stage_run_info:
+                            stage_run_info[stage_name] = {}
+                        if "end_time" not in stage_run_info[stage_name]:
+                            # Only set end time if it wasn't already set
+                            stage_run_info[stage_name]["end_time"] = (
+                                calkit.utcnow(remove_tz=False).isoformat()
+                            )
+                        if "status" not in stage_run_info[stage_name]:
+                            # Only set status if it wasn't already set
+                            stage_run_info[stage_name]["status"] = "completed"
+                    stage_name = line.split()[1].replace("'", "")
+                    line = f"Stage '{stage_name}' is up-to-date\n"
+                    if stage_name not in stage_run_info:
+                        stage_run_info[stage_name] = {}
+                    stage_run_info[stage_name]["status"] = "skipped"
+                    stage_run_info[stage_name]["start_time"] = calkit.utcnow(
+                        remove_tz=False
+                    ).isoformat()
+                    stage_run_info[stage_name]["end_time"] = calkit.utcnow(
+                        remove_tz=False
+                    ).isoformat()
+                elif line.startswith("ERROR: failed to reproduce "):
+                    # Track previous stage's end time, if we ran one
+                    if stage_name is not None:
+                        if stage_name not in stage_run_info:
+                            stage_run_info[stage_name] = {}
+                        if "end_time" not in stage_run_info[stage_name]:
+                            # Only set end time if it wasn't already set
+                            stage_run_info[stage_name]["end_time"] = (
+                                calkit.utcnow(remove_tz=False).isoformat()
+                            )
+                        if "status" not in stage_run_info[stage_name]:
+                            # Only set status if it wasn't already set
+                            stage_run_info[stage_name]["status"] = "completed"
+                    stage_name = (
+                        line.split("ERROR: failed to reproduce ")[-1]
+                        .split()[0]
+                        .replace("'", "")
+                        .replace(":", "")
+                    )
+                    if stage_name not in stage_run_info:
+                        stage_run_info[stage_name] = {}
+                    stage_run_info[stage_name]["status"] = "failed"
+                    stage_run_info[stage_name]["end_time"] = calkit.utcnow(
+                        remove_tz=False
+                    ).isoformat()
+                # If this is an env check stage, reformat line
+                if (
+                    line.startswith("Running stage")
+                    and stage_name is not None
+                    and stage_name.startswith("_check-env-")
+                ):
+                    env_name = stage_name.removeprefix("_check-env-")
+                    line = f"Checking environment '{env_name}'\n"
+                if line.startswith("Updating lock file") and not verbose:
+                    continue
+                if line.startswith(">") or not line.strip() or "\r" in line:
+                    continue
+                if line.strip().endswith(":"):
+                    line = line.strip().removesuffix(":") + "\n"
+                if "`dvc push`" in line:
+                    line = (
+                        "Use 'calkit save' to back up results to the cloud\n"
+                    )
+                if line.startswith("ERROR: failed to reproduce "):
+                    error_msg = line.removeprefix(
+                        f"ERROR: failed to reproduce '{stage_name}': "
+                    ).strip()
+                    line = f"Stage '{stage_name}' failed: {error_msg}\n"
+                    typer.echo(typer.style(line, fg="red"), err=line, nl=False)
+                    continue
+                if not quiet:
+                    typer.echo(
+                        line.encode("utf-8", errors="replace"), nl=False
+                    )
+        process.wait()
+        # Save run information to a file
+        if verbose:
+            typer.echo("Saving run info")
+        run_info = {
+            "id": run_id,
+            "system_id": system_info["id"],
+            "start_time": start_time.isoformat(),
+            "end_time": calkit.utcnow(remove_tz=False).isoformat(),
+            "status": "completed" if process.returncode == 0 else "failed",
+            "stages": stage_run_info,
+        }
+        run_info_fpath = os.path.join(
+            ".calkit",
+            "runs",
+            start_time_no_tz.isoformat(timespec="seconds")
+            + "-"
+            + run_id
+            + ".json",
+        )
+        os.makedirs(os.path.dirname(run_info_fpath), exist_ok=True)
+        with open(run_info_fpath, "w") as f:
+            json.dump(run_info, f, indent=2)
+        if process.returncode != 0:
+            os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+            raise_error("Pipeline failed")
+        else:
+            typer.echo(
+                "Pipeline completed successfully ✅".encode(
+                    "utf-8", errors="replace"
+                )
+            )
+    # No run logging here
+    else:
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "dvc", "repro"] + args
+            )
+        except subprocess.CalledProcessError:
+            os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+            raise_error("Pipeline failed")
     if save_after_run or save_message is not None:
         if save_message is None:
             save_message = "Run pipeline"

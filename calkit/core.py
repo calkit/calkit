@@ -250,7 +250,9 @@ def make_readme_content(
 
 
 def check_dep_exists(
-    name: str, kind: Literal["app", "env-var", "calkit-config"] = "app"
+    name: str,
+    kind: Literal["app", "env-var", "calkit-config"] = "app",
+    system_info: dict | None = None,
 ) -> bool:
     """Check that a dependency exists.
 
@@ -264,6 +266,8 @@ def check_dep_exists(
         cfg = calkit.config.read()
         return getattr(cfg, name, None) is not None
     if name == "calkit":
+        return True
+    if system_info is not None and system_info.get(f"{name}_version"):
         return True
     cmd = [name]
     # Executables with non-conventional CLIs
@@ -281,7 +285,9 @@ def check_dep_exists(
         return False
 
 
-def check_system_deps(wdir: str | None = None) -> None:
+def check_system_deps(
+    wdir: str | None = None, system_info: dict | None = None
+) -> None:
     """Check that the dependencies declared in a project's ``calkit.yaml`` file
     exist.
     """
@@ -312,7 +318,7 @@ def check_system_deps(wdir: str | None = None) -> None:
         else:
             dep_name = re.split("[=<>]", dep)[0]
             dep_kind = "app"
-        if not check_dep_exists(dep_name, dep_kind):
+        if not check_dep_exists(dep_name, dep_kind, system_info=system_info):
             raise ValueError(f"{dep_kind} '{dep_name}' not found")
 
 
@@ -459,8 +465,21 @@ def detect_project_name(wdir: str | None = None) -> str:
     return f"{owner}/{name}"
 
 
-def describe_system() -> dict:
-    """Describe the system on which we're currently running."""
+def get_dep_version(dep_name: str) -> str | None:
+    """Get the version of a system-level dependency."""
+    try:
+        cmd = [dep_name, "--version"]
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=True
+        )
+        # The version is usually the first word in the output
+        return result.stdout.strip()
+    except Exception:
+        return None
+
+
+def get_system_info() -> dict:
+    """Get information about the system on which we're currently running."""
     os_name = platform.system()
     system_info = {
         "os": os_name,
@@ -493,6 +512,15 @@ def describe_system() -> dict:
         system_info["calkit_git_rev"] = repo.head.commit.hexsha
     except Exception:
         pass
+    # Get versions of important foundational dependencies
+    for dep in [
+        "docker",
+        "conda",
+        "uv",
+        "pixi",
+        "Rscript",
+    ]:
+        system_info[f"{dep}_version"] = get_dep_version(dep)
     system_info_str = json.dumps(system_info, sort_keys=True).encode()
     system_info["id"] = hashlib.sha256(system_info_str).hexdigest()
     return system_info

@@ -870,9 +870,8 @@ def run(
     start_time = calkit.utcnow(remove_tz=False)
     run_id = start_time.isoformat() + "-" + uuid.uuid4().hex
     log_fpath = os.path.join(".calkit", "logs", run_id + ".log")
-    if not quiet:
-        typer.echo(f"Starting run ID: {run_id}")
     if verbose:
+        typer.echo(f"Starting run ID: {run_id}")
         typer.echo(f"Saving logs to {log_fpath}")
     os.makedirs(os.path.dirname(log_fpath), exist_ok=True)
     with open(log_fpath, "a") as log_file:
@@ -983,7 +982,7 @@ def run(
                 typer.echo(line.encode("utf-8", errors="replace"), nl=False)
     process.wait()
     # Save run information to a file
-    if not quiet:
+    if verbose:
         typer.echo("Saving run info")
     run_info = {
         "id": run_id,

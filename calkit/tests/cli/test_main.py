@@ -381,3 +381,28 @@ def test_save(tmp_dir):
 def test_call_dvc():
     subprocess.check_call(["calkit", "dvc", "--help"])
     subprocess.check_call(["calkit", "dvc", "stage", "--help"])
+
+
+def test_run(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        ["calkit", "new", "uv-venv", "-n", "main", "requests"]
+    )
+    # Test that we can run a Python script
+    with open("script.py", "w") as f:
+        f.write("print('Hello from script.py')")
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "python-script-stage",
+            "--name",
+            "stage-1",
+            "--script-path",
+            "script.py",
+            "-e",
+            "main",
+        ]
+    )
+    out = subprocess.check_output(["calkit", "run"], text=True)
+    print(out)

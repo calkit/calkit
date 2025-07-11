@@ -18,6 +18,7 @@ from pathlib import PurePosixPath
 import dotenv
 import dvc
 import dvc.exceptions
+import dvc.log
 import dvc.repo
 import dvc.repo.reproduce
 import dvc.stage
@@ -890,7 +891,7 @@ def run(
             "%(asctime)s - %(levelname)s - %(message)s"
         )
         file_handler.setFormatter(formatter)
-        dvc.stage.logger.addHandler(file_handler)
+        dvc.log.logger.addHandler(file_handler)
     # Remove newline logging in dvc.repo.reproduce
     dvc.repo.reproduce.logger.setLevel(logging.ERROR)
     # Disable other DVC outputs

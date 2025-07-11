@@ -866,8 +866,10 @@ def run(
     stage_run_info = {}
     stage_name = None
     start_time = calkit.utcnow(remove_tz=False)
-    run_id = start_time.isoformat() + "-" + uuid.uuid4().hex
-    log_fpath = os.path.join(".calkit", "logs", run_id + ".log")
+    run_id = uuid.uuid4().hex
+    log_fpath = os.path.join(
+        ".calkit", "logs", start_time.isoformat() + "-" + run_id + ".log"
+    )
     if verbose:
         typer.echo(f"Starting run ID: {run_id}")
         typer.echo(f"Saving logs to {log_fpath}")
@@ -991,7 +993,9 @@ def run(
         "status": "completed" if process.returncode == 0 else "failed",
         "stages": stage_run_info,
     }
-    run_info_fpath = os.path.join(".calkit", "runs", run_id + ".json")
+    run_info_fpath = os.path.join(
+        ".calkit", "runs", start_time.isoformat() + "-" + run_id + ".json"
+    )
     os.makedirs(os.path.dirname(run_info_fpath), exist_ok=True)
     with open(run_info_fpath, "w") as f:
         json.dump(run_info, f, indent=2)

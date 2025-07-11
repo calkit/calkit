@@ -454,7 +454,7 @@ requires-dist = [
     { name = "bibtexparser" },
     { name = "checksumdir" },
     { name = "docx2pdf" },
-    { name = "dvc", specifier = ">=3.59.0" },
+    { name = "dvc", specifier = "==3.61.0" },
     { name = "fastapi" },
     { name = "gitpython" },
     { name = "keyring" },
@@ -1037,7 +1037,7 @@ wheels = [
 
 [[package]]
 name = "dvc"
-version = "3.59.1"
+version = "3.61.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
@@ -1083,9 +1083,9 @@ dependencies = [
     { name = "voluptuous" },
     { name = "zc-lockfile" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ec/3b/fb2256d3637dcf42cf8351356a6edda15173f62fea852fc3b31b2a883736/dvc-3.59.1.tar.gz", hash = "sha256:76c9cadc97a458321845424ff91489e8a2c5c6eaf36e52a79d8609beaed78cd6", size = 652872, upload-time = "2025-02-15T11:14:45.715Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/72/0e/5552098e86ca6da066010952e983e5fa5f01642db2d256ca38f7a66b1786/dvc-3.61.0.tar.gz", hash = "sha256:313c92d25c19352b0ec4b77f2ed68666e15093735752417601cf6e88d7598dbe", size = 658712, upload-time = "2025-07-07T11:23:57.853Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/41/65/46cbbe4907a14d458be93e4f3fdc6b25011623aa705ef0d9bbce11b53509/dvc-3.59.1-py3-none-any.whl", hash = "sha256:445c66f5d8304cf868ecff7b6d9428bff7879cff9545f0ac5a896572e14e14dd", size = 457702, upload-time = "2025-02-15T11:14:43.216Z" },
+    { url = "https://files.pythonhosted.org/packages/93/e2/30a3985732b3ebe2aad2e3a974b85c1c91af56f5c0a11bc545cca4bddc12/dvc-3.61.0-py3-none-any.whl", hash = "sha256:f78c36a39a585060320300a5e3c975ffee109a573d9ebc37bbe541e15a797cfc", size = 461036, upload-time = "2025-07-07T11:23:55.76Z" },
 ]
 
 [[package]]

@@ -37,8 +37,8 @@ from git.exc import InvalidGitRepositoryError
 
 from calkit.models import ProjectInfo
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__package__)
+logger.setLevel(logging.INFO)
 
 ryaml = ruamel.yaml.YAML()
 ryaml.indent(mapping=2, sequence=4, offset=2)

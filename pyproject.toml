@@ -16,7 +16,7 @@ dependencies = [
   "bibtexparser",
   "checksumdir",
   "docx2pdf",
-  "dvc>=3.59.0",
+  "dvc==3.61.0",
   "fastapi",
   "gitpython",
   "keyring",

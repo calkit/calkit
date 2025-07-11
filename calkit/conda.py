@@ -81,7 +81,7 @@ def check_env(
     info = json.loads(subprocess.check_output(["conda", "info", "--json"]))
     root_prefix = info["root_prefix"]
     envs_dir = os.path.join(root_prefix, "envs")
-    if "mamba" in sys.modules:
+    if calkit.check_dep_exists("mamba"):
         # Use mamba by default because it's faster and produces less output
         conda_name = "mamba"
     else:

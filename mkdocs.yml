@@ -44,6 +44,7 @@ nav:
   - Environments: environments.md
   - The pipeline:
       - pipeline/index.md
+      - pipeline/running-and-logging.md
       - pipeline/manual-steps.md
   - Notebooks: notebooks.md
   - Datasets: datasets.md

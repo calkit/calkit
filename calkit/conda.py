@@ -6,7 +6,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 import warnings
 
 from packaging.specifiers import SpecifierSet

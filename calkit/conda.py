@@ -76,12 +76,16 @@ def check_env(
         log_func = calkit.logger.info
     log_func(f"Checking conda env defined in {env_fpath}")
     res = EnvCheckResult()
-    # Use mamba here because it's faster and produces less output
     info = json.loads(subprocess.check_output(["conda", "info", "--json"]))
     root_prefix = info["root_prefix"]
     envs_dir = os.path.join(root_prefix, "envs")
+    if calkit.check_dep_exists("mamba"):
+        # Use mamba by default because it's faster and produces less output
+        conda_name = "mamba"
+    else:
+        conda_name = "conda"
     envs = json.loads(
-        subprocess.check_output(["mamba", "env", "list", "--json"]).decode()
+        subprocess.check_output([conda_name, "env", "list", "--json"]).decode()
     )["envs"]
     # Get existing env names for those in the envs directory
     existing_env_names = [

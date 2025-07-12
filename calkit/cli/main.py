@@ -687,6 +687,12 @@ def run_local_server():
     )
 
 
+def _stage_run_info_from_log_content(log_content: str) -> dict:
+    res = {}
+
+    return res
+
+
 @app.command(name="run")
 def run(
     targets: Optional[list[str]] = typer.Argument(
@@ -867,7 +873,6 @@ def run(
         args += ["--pipeline", pipeline]
     if downstream is not None:
         args += downstream
-    stage_run_info = {}
     start_time_no_tz = calkit.utcnow(remove_tz=True)
     start_time = calkit.utcnow(remove_tz=False)
     run_id = uuid.uuid4().hex
@@ -894,12 +899,15 @@ def run(
         dvc.log.logger.addHandler(file_handler)
     # Remove newline logging in dvc.repo.reproduce
     dvc.repo.reproduce.logger.setLevel(logging.ERROR)
-    # Disable other DVC outputs
+    # Disable other misc DVC output
     dvc.ui.ui.write = lambda *args, **kwargs: None
     res = dvc_cli_main(["repro"] + args)
     failed = res != 0
     if not no_log:
-        # TODO: Parse log to get timing
+        # Parse log to get timing
+        with open(log_fpath, "r") as f:
+            log_content = f.read()
+            stage_run_info = _stage_run_info_from_log_content(log_content)
         # Save run information to a file
         if verbose:
             typer.echo("Saving run info")
@@ -909,7 +917,7 @@ def run(
             "start_time": start_time.isoformat(),
             "end_time": calkit.utcnow(remove_tz=False).isoformat(),
             "targets": targets,
-            "status": None,  # TODO
+            "status": "failure" if failed else "success",
             "stages": stage_run_info,
         }
         run_info_fpath = os.path.join(

@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+from datetime import datetime
 
 import dvc.repo
 import git
@@ -11,7 +12,7 @@ from dvc.exceptions import NotDvcRepoError
 from git.exc import InvalidGitRepositoryError
 
 import calkit
-from calkit.cli.main import _to_shell_cmd
+from calkit.cli.main import _stage_run_info_from_log_content, _to_shell_cmd
 
 
 def test_run_in_env(tmp_dir):
@@ -406,3 +407,39 @@ def test_run(tmp_dir):
     )
     out = subprocess.check_output(["calkit", "run"], text=True)
     print(out)
+
+
+def test_stage_run_info_from_log_content():
+    fpath = os.path.join(
+        os.path.dirname(__file__), "..", "..", "test", "test-log.log"
+    )
+    with open(fpath, "r") as f:
+        content = f.read()
+    info = _stage_run_info_from_log_content(content)
+    assert info == {
+        "_check-env-py": {
+            "start_time": datetime.fromisoformat("2025-07-11 18:25:43,557"),
+            "end_time": datetime.fromisoformat("2025-07-11 18:25:44,860"),
+            "status": "success",
+        },
+        "_check-env-tex": {
+            "start_time": datetime.fromisoformat("2025-07-11 18:25:44,860"),
+            "end_time": datetime.fromisoformat("2025-07-11 18:25:45,710"),
+            "status": "success",
+        },
+        "get-data": {
+            "start_time": datetime.fromisoformat("2025-07-11 18:25:45,710"),
+            "end_time": datetime.fromisoformat("2025-07-11 18:25:45,710"),
+            "status": "skipped",
+        },
+        "plot-voltage": {
+            "start_time": datetime.fromisoformat("2025-07-11 18:25:45,714"),
+            "end_time": datetime.fromisoformat("2025-07-11 18:25:45,714"),
+            "status": "skipped",
+        },
+        "this-fails": {
+            "start_time": datetime.fromisoformat("2025-07-11 18:25:45,722"),
+            "end_time": None,
+            "status": "failure",
+        },
+    }

@@ -983,6 +983,7 @@ def run(
         formatter = logging.Formatter(
             "%(asctime)s - %(levelname)s - %(message)s"
         )
+        formatter.converter = time.gmtime  # Use UTC time for asctime
         file_handler.setFormatter(formatter)
         dvc.log.logger.addHandler(file_handler)
     # Remove newline logging in dvc.repo.reproduce

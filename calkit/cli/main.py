@@ -19,11 +19,9 @@ from pathlib import PurePosixPath
 
 import dotenv
 import dvc
-import dvc.exceptions
 import dvc.log
 import dvc.repo
 import dvc.repo.reproduce
-import dvc.stage
 import dvc.ui
 import git
 import typer

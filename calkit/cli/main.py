@@ -702,7 +702,6 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
     current_stage_name = None
     current_stage_status = None
     for line in lines:
-        # This was a failed stage
         # Log lines should be able to be split into timestamp, type, message
         ls = line.split(" -", maxsplit=2)
         if len(ls) < 2:

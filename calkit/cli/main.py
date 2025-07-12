@@ -978,9 +978,7 @@ def run(
             typer.echo(f"Saving logs to {log_fpath}")
         os.makedirs(os.path.dirname(log_fpath), exist_ok=True)
         # Create a file handler for dvc.stage.run logger
-        file_handler = logging.FileHandler(
-            PurePosixPath(log_fpath).as_posix(), mode="w"
-        )
+        file_handler = logging.FileHandler(log_fpath, mode="w")
         file_handler.setLevel(logging.DEBUG)
         formatter = logging.Formatter(
             "%(asctime)s - %(levelname)s - %(message)s"

@@ -3,6 +3,8 @@
 import os
 import subprocess
 import sys
+from datetime import datetime
+from pprint import pprint
 
 import dvc.repo
 import git
@@ -11,7 +13,7 @@ from dvc.exceptions import NotDvcRepoError
 from git.exc import InvalidGitRepositoryError
 
 import calkit
-from calkit.cli.main import _to_shell_cmd
+from calkit.cli.main import _stage_run_info_from_log_content, _to_shell_cmd
 
 
 def test_run_in_env(tmp_dir):
@@ -381,3 +383,82 @@ def test_save(tmp_dir):
 def test_call_dvc():
     subprocess.check_call(["calkit", "dvc", "--help"])
     subprocess.check_call(["calkit", "dvc", "stage", "--help"])
+
+
+def test_run(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        ["calkit", "new", "uv-venv", "-n", "main", "requests"]
+    )
+    # Test that we can run a Python script
+    with open("script.py", "w") as f:
+        f.write("print('Hello from script.py')")
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "python-script-stage",
+            "--name",
+            "stage-1",
+            "--script-path",
+            "script.py",
+            "-e",
+            "main",
+        ]
+    )
+    out = subprocess.check_output(["calkit", "run"], text=True)
+    print(out)
+
+
+def test_stage_run_info_from_log_content():
+    fpath = os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "test", "test-log.log"
+    )
+    with open(fpath, "r") as f:
+        content = f.read()
+    info = _stage_run_info_from_log_content(content)
+    pprint(info)
+    assert info == {
+        "_check-env-py": {
+            "start_time": datetime.fromisoformat(
+                "2025-07-11 18:25:43,557"
+            ).isoformat(),
+            "end_time": datetime.fromisoformat(
+                "2025-07-11 18:25:44,860"
+            ).isoformat(),
+            "status": "completed",
+        },
+        "_check-env-tex": {
+            "start_time": datetime.fromisoformat(
+                "2025-07-11 18:25:44,860"
+            ).isoformat(),
+            "end_time": datetime.fromisoformat(
+                "2025-07-11 18:25:45,710"
+            ).isoformat(),
+            "status": "completed",
+        },
+        "collect-data": {
+            "start_time": datetime.fromisoformat(
+                "2025-07-11 18:25:45,710"
+            ).isoformat(),
+            "end_time": datetime.fromisoformat(
+                "2025-07-11 18:25:45,710"
+            ).isoformat(),
+            "status": "skipped",
+        },
+        "plot-voltage": {
+            "start_time": datetime.fromisoformat(
+                "2025-07-11 18:25:45,714"
+            ).isoformat(),
+            "end_time": datetime.fromisoformat(
+                "2025-07-11 18:25:45,714"
+            ).isoformat(),
+            "status": "skipped",
+        },
+        "this-fails": {
+            "end_time": datetime.fromisoformat(
+                "2025-07-11 18:25:45,722"
+            ).isoformat(),
+            "status": "failed",
+        },
+    }

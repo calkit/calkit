@@ -32,7 +32,10 @@ def _expand_matrix(input_dict: dict[str, list]) -> list[dict]:
 
 
 def to_dvc(
-    ck_info: dict | None = None, wdir: str | None = None, write: bool = False
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    write: bool = False,
+    verbose: bool = False,
 ) -> dict:
     """Transpile a Calkit pipeline to a DVC pipeline."""
     if ck_info is None:
@@ -216,6 +219,7 @@ def to_dvc(
                 dvc_stages[stage_name] = stage
         dvc_yaml["stages"] = dvc_stages
         with open("dvc.yaml", "w") as f:
-            typer.echo("Writing to dvc.yaml")
+            if verbose:
+                typer.echo("Writing to dvc.yaml")
             calkit.ryaml.dump(dvc_yaml, f)
     return dvc_stages

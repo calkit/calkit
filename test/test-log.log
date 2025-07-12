@@ -1,0 +1,105 @@
+2025-07-11 18:25:43,557 - INFO - Running stage '_check-env-py':
+2025-07-11 18:25:43,557 - INFO - > calkit check environment --name py
+2025-07-11 18:25:44,860 - INFO - Running stage '_check-env-tex':
+2025-07-11 18:25:44,860 - INFO - > calkit check environment --name tex
+2025-07-11 18:25:45,710 - INFO - Stage 'collect-data' didn't change, skipping
+2025-07-11 18:25:45,714 - INFO - Stage 'plot-voltage' is cached - skipping run, checking out outputs
+2025-07-11 18:25:45,722 - ERROR -
+Traceback (most recent call last):
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/repo/reproduce.py", line 187, in _reproduce
+    ret = repro_fn(stage, upstream=upstream, force=force_stage, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/repo/reproduce.py", line 117, in _reproduce_stage
+    ret = stage.reproduce(**kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/funcy/decorators.py", line 47, in wrapper
+    return deco(call, *dargs, **dkwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/stage/decorators.py", line 44, in rwlocked
+    return call()
+           ^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/funcy/decorators.py", line 68, in __call__
+    return self._func(*self._args, **self._kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/stage/__init__.py", line 448, in reproduce
+    self.run(**kwargs)
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/funcy/decorators.py", line 47, in wrapper
+    return deco(call, *dargs, **dkwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/stage/decorators.py", line 44, in rwlocked
+    return call()
+           ^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/funcy/decorators.py", line 68, in __call__
+    return self._func(*self._args, **self._kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/stage/__init__.py", line 614, in run
+    self._run_stage(dry, force, **kwargs)
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/funcy/decorators.py", line 47, in wrapper
+    return deco(call, *dargs, **dkwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/stage/decorators.py", line 44, in rwlocked
+    return call()
+           ^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/funcy/decorators.py", line 68, in __call__
+    return self._func(*self._args, **self._kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/stage/__init__.py", line 641, in _run_stage
+    return run_stage(self, dry, force, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/stage/run.py", line 174, in run_stage
+    stage.repo.stage_cache.restore(stage, dry=dry, **kwargs)
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/stage/cache.py", line 195, in restore
+    if not _can_hash(stage):
+           ^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/stage/cache.py", line 44, in _can_hash
+    if not (dep.protocol == "local" and dep.def_path and dep.get_hash()):
+                                                         ^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/output.py", line 532, in get_hash
+    _, hash_info = self._get_hash_meta()
+                   ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/output.py", line 554, in _get_hash_meta
+    _, meta, obj = self._build(
+                   ^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/output.py", line 547, in _build
+    return build(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc_data/hashfile/build.py", line 407, in build
+    details = fs.info(path)
+              ^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc_objects/fs/base.py", line 592, in info
+    return self.fs.info(path, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc_objects/fs/local.py", line 39, in info
+    return self.fs.info(path)
+           ^^^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/fsspec/implementations/local.py", line 99, in info
+    out = os.stat(path, follow_symlinks=False)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/Users/pete/calkit/example-basic/scripts/this-fails.py'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/cli/__init__.py", line 211, in main
+    ret = cmd.do_run()
+          ^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/cli/command.py", line 30, in do_run
+    return self.run()
+           ^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/commands/repro.py", line 11, in run
+    stages = self.repo.reproduce(**self._common_kwargs, **self._repro_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/repo/__init__.py", line 58, in wrapper
+    return f(repo, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/repo/scm_context.py", line 143, in run
+    return method(repo, *args, **kw)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/repo/reproduce.py", line 248, in reproduce
+    return _reproduce(steps, graph=graph, on_error=on_error or "fail", **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/repo/reproduce.py", line 191, in _reproduce
+    _raise_error(exc, stage)
+  File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/repo/reproduce.py", line 155, in _raise_error
+    raise ReproductionError(f"failed to reproduce{segment} {names}") from exc
+dvc.exceptions.ReproductionError: failed to reproduce 'this-fails'

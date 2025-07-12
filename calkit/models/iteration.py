@@ -24,8 +24,31 @@ class RangeIteration(BaseModel):
         return vals
 
 
+class ValueInFile(BaseModel):
+    """A value in a file.
+
+    If ``key`` is None, we assume the value is all that's written in the file.
+    """
+
+    path: str
+    key: str | None = None
+
+
+class Parameter(BaseModel):
+    value: int | float | str
+    write_to: ValueInFile | None = None
+    description: str | None = None
+
+
+class Metric(BaseModel):
+    value: int | float | str
+    read_from: ValueInFile | None = None
+    description: str | None = None
+
+
 ParametersType = dict[
-    str, int | float | str | list[int | float | str | RangeIteration]
+    str,
+    int | float | str | list[int | float | str | RangeIteration],
 ]
 
 

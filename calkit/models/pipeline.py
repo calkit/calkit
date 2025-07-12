@@ -56,6 +56,7 @@ class Stage(BaseModel):
     outputs: list[str | PathOutput] = []  # TODO: Support database outputs
     always_run: bool = False
     iterate_over: list[StageIteration] | None = None
+    description: str | None = None
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
 

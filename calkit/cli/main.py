@@ -923,6 +923,13 @@ def run(
         except Exception as e:
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Pipeline compilation failed: {e}")
+    # Get status of Git repo before running
+    repo = git.Repo()
+    git_rev = repo.head.commit.hexsha
+    git_branch = repo.active_branch.name
+    git_changed_files_before = calkit.git.get_changed_files(repo=repo)
+    git_staged_files_before = calkit.git.get_staged_files(repo=repo)
+    git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
     if targets is None:
         targets = []
     args = targets
@@ -981,6 +988,10 @@ def run(
     res = dvc_cli_main(["repro"] + args)
     failed = res != 0
     if not no_log:
+        # Get Git status after running
+        git_changed_files_after = calkit.git.get_changed_files(repo=repo)
+        git_staged_files_after = calkit.git.get_staged_files(repo=repo)
+        git_untracked_files_after = calkit.git.get_untracked_files(repo=repo)
         # Parse log to get timing
         with open(log_fpath, "r") as f:
             log_content = f.read()
@@ -994,8 +1005,18 @@ def run(
             "start_time": start_time.isoformat(),
             "end_time": calkit.utcnow(remove_tz=False).isoformat(),
             "targets": targets,
+            "force": force,
+            "dvc_args": args,
             "status": "failure" if failed else "success",
             "stages": stage_run_info,
+            "git_rev": git_rev,
+            "git_branch": git_branch,
+            "git_changed_files_before": git_changed_files_before,
+            "git_staged_files_before": git_staged_files_before,
+            "git_untracked_files_before": git_untracked_files_before,
+            "git_changed_files_after": git_changed_files_after,
+            "git_staged_files_after": git_staged_files_after,
+            "git_untracked_files_after": git_untracked_files_after,
         }
         run_info_fpath = os.path.join(
             ".calkit",

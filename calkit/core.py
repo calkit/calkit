@@ -16,6 +16,7 @@ import socket
 import subprocess
 import uuid
 
+import psutil
 import requests
 
 import calkit
@@ -492,6 +493,8 @@ def get_system_info() -> dict:
         "machine": platform.machine(),
         "python_implementation": platform.python_implementation(),
         "python_compiler": platform.python_compiler(),
+        "memory_gb": psutil.virtual_memory().total / (1024**3),
+        "cpu_count": os.cpu_count(),
     }
     node_id = uuid.getnode()
     # The multicast bit is the 40th bit from the right (0-indexed)

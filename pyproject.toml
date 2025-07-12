@@ -31,6 +31,7 @@ dependencies = [
   "typer",
   "uvicorn",
   "tqdm>=4.67.1",
+  "psutil>=7.0.0",
 ]
 description = "Reproducibility simplified."
 dynamic = ["version"]

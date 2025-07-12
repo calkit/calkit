@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import uuid
+from datetime import datetime
 from pathlib import PurePosixPath
 
 import dotenv
@@ -688,8 +689,84 @@ def run_local_server():
 
 
 def _stage_run_info_from_log_content(log_content: str) -> dict:
-    res = {}
+    def add_stage_info(stage_name: str, key: str, value: str | datetime):
+        if isinstance(value, datetime):
+            # Convert datetime to ISO format for consistency
+            value = value.isoformat()
+        if stage_name not in res:
+            res[stage_name] = {}
+        res[stage_name][key] = value
 
+    res = {}
+    errored_timestamp = None
+    lines = log_content.splitlines()
+    current_stage_name = None
+    current_stage_status = None
+    for line in lines:
+        # This was a failed stage
+        # Log lines should be able to be split into timestamp, type, message
+        ls = line.split(" -", maxsplit=2)
+        if len(ls) < 2:
+            continue
+        timestamp, log_type, message = (
+            ls[0].strip(),
+            ls[1].strip(),
+            ls[2].strip() if len(ls) > 2 else "",
+        )
+        try:
+            timestamp = datetime.fromisoformat(timestamp)
+        except ValueError:
+            # If the timestamp is not in ISO format, skip this line
+            continue
+        # If we hit an error, the logs should print a traceback and end
+        if log_type == "ERROR":
+            errored_timestamp = timestamp
+            break
+        if message.startswith("Running stage "):
+            if (
+                current_stage_name is not None
+                and current_stage_status == "running"
+            ):
+                # If we were already running a stage, add its end time
+                add_stage_info(current_stage_name, "end_time", timestamp)
+                add_stage_info(current_stage_name, "status", "completed")
+            # This is a stage run
+            current_stage_name = (
+                message.removeprefix("Running stage ")
+                .replace("'", "")
+                .replace(":", "")
+            )
+            current_stage_status = "running"
+            add_stage_info(current_stage_name, "start_time", timestamp)
+        elif message.startswith("Stage ") and "skipping" in message:
+            if (
+                current_stage_name is not None
+                and current_stage_status == "running"
+            ):
+                # If we were already running a stage, add its end time
+                add_stage_info(current_stage_name, "end_time", timestamp)
+                add_stage_info(current_stage_name, "status", "completed")
+            current_stage_name = message.removeprefix("Stage '").split("'")[0]
+            current_stage_status = "skipped"
+            add_stage_info(current_stage_name, "start_time", timestamp)
+            add_stage_info(current_stage_name, "end_time", timestamp)
+            add_stage_info(current_stage_name, "status", current_stage_status)
+    if errored_timestamp is not None:
+        # Figure out which stage failed
+        for line in lines[-1::-1]:
+            if line.startswith(
+                "dvc.exceptions.ReproductionError: failed to reproduce "
+            ):
+                stage_name = (
+                    line.strip()
+                    .removeprefix(
+                        "dvc.exceptions.ReproductionError: failed to reproduce "
+                    )
+                    .replace("'", "")
+                )
+                add_stage_info(stage_name, "end_time", errored_timestamp)
+                add_stage_info(stage_name, "status", "failed")
+                break
     return res
 
 

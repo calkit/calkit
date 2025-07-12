@@ -3,7 +3,7 @@
 2025-07-11 18:25:44,860 - INFO - Running stage '_check-env-tex':
 2025-07-11 18:25:44,860 - INFO - > calkit check environment --name tex
 2025-07-11 18:25:45,710 - INFO - Stage 'collect-data' didn't change, skipping
-2025-07-11 18:25:45,714 - INFO - Stage 'plot-voltage' didn't change, skipping
+2025-07-11 18:25:45,714 - INFO - Stage 'plot-voltage' is cached - skipping run, checking out outputs
 2025-07-11 18:25:45,722 - ERROR -
 Traceback (most recent call last):
   File "/Users/pete/mambaforge/lib/python3.12/site-packages/dvc/repo/reproduce.py", line 187, in _reproduce

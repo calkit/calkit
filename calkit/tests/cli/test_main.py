@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 from datetime import datetime
+from pprint import pprint
 
 import dvc.repo
 import git
@@ -411,35 +412,53 @@ def test_run(tmp_dir):
 
 def test_stage_run_info_from_log_content():
     fpath = os.path.join(
-        os.path.dirname(__file__), "..", "..", "test", "test-log.log"
+        os.path.dirname(__file__), "..", "..", "..", "test", "test-log.log"
     )
     with open(fpath, "r") as f:
         content = f.read()
     info = _stage_run_info_from_log_content(content)
+    pprint(info)
     assert info == {
         "_check-env-py": {
-            "start_time": datetime.fromisoformat("2025-07-11 18:25:43,557"),
-            "end_time": datetime.fromisoformat("2025-07-11 18:25:44,860"),
-            "status": "success",
+            "start_time": datetime.fromisoformat(
+                "2025-07-11 18:25:43,557"
+            ).isoformat(),
+            "end_time": datetime.fromisoformat(
+                "2025-07-11 18:25:44,860"
+            ).isoformat(),
+            "status": "completed",
         },
         "_check-env-tex": {
-            "start_time": datetime.fromisoformat("2025-07-11 18:25:44,860"),
-            "end_time": datetime.fromisoformat("2025-07-11 18:25:45,710"),
-            "status": "success",
+            "start_time": datetime.fromisoformat(
+                "2025-07-11 18:25:44,860"
+            ).isoformat(),
+            "end_time": datetime.fromisoformat(
+                "2025-07-11 18:25:45,710"
+            ).isoformat(),
+            "status": "completed",
         },
-        "get-data": {
-            "start_time": datetime.fromisoformat("2025-07-11 18:25:45,710"),
-            "end_time": datetime.fromisoformat("2025-07-11 18:25:45,710"),
+        "collect-data": {
+            "start_time": datetime.fromisoformat(
+                "2025-07-11 18:25:45,710"
+            ).isoformat(),
+            "end_time": datetime.fromisoformat(
+                "2025-07-11 18:25:45,710"
+            ).isoformat(),
             "status": "skipped",
         },
         "plot-voltage": {
-            "start_time": datetime.fromisoformat("2025-07-11 18:25:45,714"),
-            "end_time": datetime.fromisoformat("2025-07-11 18:25:45,714"),
+            "start_time": datetime.fromisoformat(
+                "2025-07-11 18:25:45,714"
+            ).isoformat(),
+            "end_time": datetime.fromisoformat(
+                "2025-07-11 18:25:45,714"
+            ).isoformat(),
             "status": "skipped",
         },
         "this-fails": {
-            "start_time": datetime.fromisoformat("2025-07-11 18:25:45,722"),
-            "end_time": None,
-            "status": "failure",
+            "end_time": datetime.fromisoformat(
+                "2025-07-11 18:25:45,722"
+            ).isoformat(),
+            "status": "failed",
         },
     }

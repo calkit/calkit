@@ -76,7 +76,6 @@ def check_env(
         log_func = calkit.logger.info
     log_func(f"Checking conda env defined in {env_fpath}")
     res = EnvCheckResult()
-
     info = json.loads(subprocess.check_output(["conda", "info", "--json"]))
     root_prefix = info["root_prefix"]
     envs_dir = os.path.join(root_prefix, "envs")

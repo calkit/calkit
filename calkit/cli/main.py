@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import uuid
+from copy import deepcopy
 from datetime import datetime
 from pathlib import PurePosixPath
 
@@ -930,9 +931,14 @@ def run(
     git_changed_files_before = calkit.git.get_changed_files(repo=repo)
     git_staged_files_before = calkit.git.get_staged_files(repo=repo)
     git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
+    # Get status of DVC repo before running
+    dvc_repo = dvc.repo.Repo()
+    dvc_status_before = dvc_repo.status()
+    dvc_data_status_before = dvc_repo.data_status()
+    dvc_data_status_before.pop("git", None)  # Remove git status
     if targets is None:
         targets = []
-    args = targets
+    args = deepcopy(targets)
     # Extract any boolean args
     for name in [
         "quiet",
@@ -992,6 +998,10 @@ def run(
         git_changed_files_after = calkit.git.get_changed_files(repo=repo)
         git_staged_files_after = calkit.git.get_staged_files(repo=repo)
         git_untracked_files_after = calkit.git.get_untracked_files(repo=repo)
+        # Get DVC status after running
+        dvc_status_after = dvc_repo.status()
+        dvc_data_status_after = dvc_repo.data_status()
+        dvc_data_status_after.pop("git", None)  # Remove git status
         # Parse log to get timing
         with open(log_fpath, "r") as f:
             log_content = f.read()
@@ -1017,6 +1027,10 @@ def run(
             "git_changed_files_after": git_changed_files_after,
             "git_staged_files_after": git_staged_files_after,
             "git_untracked_files_after": git_untracked_files_after,
+            "dvc_status_before": dvc_status_before,
+            "dvc_data_status_before": dvc_data_status_before,
+            "dvc_status_after": dvc_status_after,
+            "dvc_data_status_after": dvc_data_status_after,
         }
         run_info_fpath = os.path.join(
             ".calkit",

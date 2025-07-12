@@ -5,7 +5,7 @@ from __future__ import annotations
 import git
 
 
-def get_staged_files(path: str = None) -> list[str]:
+def get_staged_files(path: str | None = None) -> list[str]:
     repo = git.Repo(path)
     cmd = ["--staged", "--name-only"]
     if path is not None:
@@ -15,7 +15,7 @@ def get_staged_files(path: str = None) -> list[str]:
     return paths
 
 
-def get_staged_files_with_status(path: str = None) -> list[dict]:
+def get_staged_files_with_status(path: str | None = None) -> list[dict]:
     repo = git.Repo(path)
     cmd = ["--staged", "--name-status"]
     if path is not None:
@@ -23,7 +23,7 @@ def get_staged_files_with_status(path: str = None) -> list[dict]:
     diff = repo.git.diff(cmd)
     paths = diff.split("\n")
     res = []
-    for path in paths:
-        status, p = path.split("\t")
+    for pathi in paths:
+        status, p = pathi.split("\t")
         res.append({"status": status, "path": p})
     return res

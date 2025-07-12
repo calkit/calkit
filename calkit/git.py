@@ -10,11 +10,12 @@ def get_staged_files(
 ) -> list[str]:
     if repo is None:
         repo = git.Repo(path)
-    return [
-        item.a_path
-        for item in repo.index.diff("HEAD")
-        if item.a_path is not None
-    ]
+    cmd = ["--staged", "--name-only"]
+    if path is not None:
+        cmd.append(path)
+    diff = repo.git.diff(cmd)
+    paths = diff.split("\n")
+    return [p for p in paths if p]
 
 
 def get_changed_files(

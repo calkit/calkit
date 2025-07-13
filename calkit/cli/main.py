@@ -1033,7 +1033,7 @@ def run(
         run_info_fpath = os.path.join(
             ".calkit",
             "runs",
-            start_time_no_tz.isoformat(timespec="seconds").replace(":", "")
+            start_time_no_tz.isoformat(timespec="seconds").replace(":", "-")
             + "-"
             + run_id
             + ".json",

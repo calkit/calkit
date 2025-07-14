@@ -221,9 +221,9 @@ def new_project(
                 if not no_commit:
                     repo.git.commit(["-m", "Create calkit.yaml"])
         try:
-            calkit.dvc.set_remote_auth(wdir=abs_path)
+            calkit.dvc.configure_remote(wdir=abs_path)
         except Exception:
-            warn("Failed to setup Calkit DVC remote auth")
+            warn("Failed to setup Calkit DVC remote")
         prj = calkit.detect_project_name(wdir=abs_path)
         add_msg = f"\n\nYou can view your project at https://calkit.io/{prj}"
         typer.echo(success_message + add_msg)

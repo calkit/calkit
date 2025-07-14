@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from pathlib import PurePosixPath
 
 import typer
 from typing_extensions import Annotated
@@ -78,7 +79,8 @@ def execute_notebook(
     )
     folder = os.path.dirname(fpath_out_exec)
     os.makedirs(folder, exist_ok=True)
-    fpath_out_exec = os.path.abspath(fpath_out_exec)
+    fname = os.path.basename(fpath_out_exec)
+    fpath_out_exec = PurePosixPath(fpath_out_exec).as_posix()
     cmd = [
         "jupyter",
         "nbconvert",
@@ -86,8 +88,10 @@ def execute_notebook(
         "--execute",
         "--to",
         "notebook",
+        "--output-dir",
+        PurePosixPath(folder).as_posix(),
         "--output",
-        fpath_out_exec,
+        fname,
     ]
     run_in_env(cmd=cmd, env_name=env_name, no_check=no_check)
     for to_fmt in to:
@@ -101,7 +105,7 @@ def execute_notebook(
                 raise_error(f"Invalid output format: '{to}'")
             folder = os.path.dirname(fpath_out)
             os.makedirs(folder, exist_ok=True)
-            fpath_out = os.path.abspath(fpath_out)
+            fname_out = os.path.basename(fpath_out)
             # Now convert without executing or checking the environment
             cmd = [
                 "jupyter",
@@ -109,8 +113,10 @@ def execute_notebook(
                 fpath_out_exec,
                 "--to",
                 to_fmt,
+                "--output-dir",
+                PurePosixPath(folder).as_posix(),
                 "--output",
-                fpath_out,
+                fname_out,
             ]
             typer.echo(f"Exporting {to_fmt}")
             run_in_env(cmd=cmd, env_name=env_name, no_check=True)

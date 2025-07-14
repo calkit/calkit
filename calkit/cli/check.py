@@ -79,6 +79,9 @@ def check_environment(
             ),
             platform=env.get("platform"),
             deps=env.get("deps", []),
+            env_vars=env.get("env_vars", []),
+            ports=env.get("ports", []),
+            gpus=env.get("gpus"),
             quiet=not verbose,
         )
     elif env["kind"] == "conda":
@@ -172,6 +175,30 @@ def check_docker_env(
             help="Declare an explicit dependency for this Docker image.",
         ),
     ] = [],
+    env_vars: Annotated[
+        list[str],
+        typer.Option(
+            "--env-var",
+            "-e",
+            help="Declare an explicit environment variable for the container.",
+        ),
+    ] = [],
+    ports: Annotated[
+        list[str],
+        typer.Option(
+            "--port",
+            "-p",
+            help="Declare an explicit port for the container.",
+        ),
+    ] = [],
+    gpus: Annotated[
+        str | None,
+        typer.Option(
+            "--gpus",
+            "-g",
+            help="Declare an explicit GPU requirement for the container.",
+        ),
+    ] = None,
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Be quiet.")
     ] = False,
@@ -277,6 +304,12 @@ def check_docker_env(
     inspect = get_docker_inspect()
     inspect["DockerfileMD5"] = dockerfile_md5
     inspect["DepsMD5s"] = deps_md5s
+    if env_vars:
+        inspect["EnvVars"] = env_vars
+    if ports:
+        inspect["Ports"] = ports
+    if gpus:
+        inspect["GPUs"] = gpus
     lock_dir = os.path.dirname(lock_fpath)
     if lock_dir:
         os.makedirs(lock_dir, exist_ok=True)

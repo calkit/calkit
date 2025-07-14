@@ -82,6 +82,8 @@ def check_environment(
             env_vars=env.get("env_vars", []),
             ports=env.get("ports", []),
             gpus=env.get("gpus"),
+            user=env.get("user"),
+            wdir=env.get("wdir"),
             quiet=not verbose,
         )
     elif env["kind"] == "conda":
@@ -166,6 +168,14 @@ def check_docker_env(
     platform: Annotated[
         str | None,
         typer.Option("--platform", help="Which platform(s) to build for."),
+    ] = None,
+    user: Annotated[
+        str | None,
+        typer.Option("--user", help="Which user to run the container as."),
+    ] = None,
+    wdir: Annotated[
+        str | None,
+        typer.Option("--wdir", help="Working directory inside the container."),
     ] = None,
     deps: Annotated[
         list[str],
@@ -304,6 +314,12 @@ def check_docker_env(
     inspect = get_docker_inspect()
     inspect["DockerfileMD5"] = dockerfile_md5
     inspect["DepsMD5s"] = deps_md5s
+    if platform is not None:
+        inspect["Platform"] = platform
+    if wdir is not None:
+        inspect["WorkDir"] = wdir
+    if user is not None:
+        inspect["User"] = user
     if env_vars:
         inspect["EnvVars"] = env_vars
     if ports:

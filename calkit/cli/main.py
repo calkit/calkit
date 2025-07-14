@@ -1015,7 +1015,7 @@ def run(
             "targets": targets,
             "force": force,
             "dvc_args": args,
-            "status": "failure" if failed else "success",
+            "status": "failed" if failed else "completed",
             "stages": stage_run_info,
             "git_rev": git_rev,
             "git_branch": git_branch,

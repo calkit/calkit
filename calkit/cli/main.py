@@ -1198,6 +1198,17 @@ def run_in_env(
         ]
         if platform:
             docker_cmd += ["--platform", platform]
+        env_vars = env.get("env-vars", {})
+        if env_vars:
+            for key, value in env_vars.items():
+                if isinstance(value, str):
+                    value = os.path.expandvars(value)
+                docker_cmd += ["-e", f"{key}={value}"]
+        if (gpus := env.get("gpus")) is not None:
+            docker_cmd += ["--gpus", gpus]
+        if ports := env.get("ports"):
+            for port in ports:
+                docker_cmd += ["-p", port]
         docker_user = env.get("user")
         if docker_user is None:
             try:

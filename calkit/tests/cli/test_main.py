@@ -28,6 +28,7 @@ def test_run_in_env(tmp_dir):
     # First create a new Docker environment for this bare project
     subprocess.check_call(
         "calkit new docker-env "
+        "--image my-image "
         "--name my-image "
         "--from ubuntu "
         "--add-layer uv "

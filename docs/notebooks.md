@@ -80,8 +80,10 @@ of environments a project can use, and they can be of any type.
 
 ## Adding a notebook to the pipeline
 
-A notebook can be added to the pipeline by editing the project's `calkit.yaml`
-file directly, using a `jupyter-notebook` stage.
+A notebook can be added to the pipeline either with
+`calkit new jupyter-notebook-stage` or
+by editing the project's `calkit.yaml`
+file directly.
 For example:
 
 ```yaml

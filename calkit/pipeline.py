@@ -65,6 +65,9 @@ def to_dvc(
         outs = []
         if env_fpath is not None:
             deps.append(env_fpath)
+        # Docker envs sometimes have deps, so add those too
+        if env.get("deps", []):
+            deps += env["deps"]
         outs.append({lock_fpath: dict(cache=False, persist=True)})
         stage = dict(cmd=cmd, deps=deps, outs=outs, always_changed=True)
         stage["desc"] = (

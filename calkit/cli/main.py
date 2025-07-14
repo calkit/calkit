@@ -4,18 +4,28 @@ from __future__ import annotations
 
 import csv
 import glob
+import json
+import logging
 import os
 import platform as _platform
 import posixpath
 import subprocess
 import sys
 import time
+import uuid
+from copy import deepcopy
+from datetime import datetime
 from pathlib import PurePosixPath
 
 import dotenv
+import dvc
+import dvc.log
 import dvc.repo
+import dvc.repo.reproduce
+import dvc.ui
 import git
 import typer
+from dvc.cli import main as dvc_cli_main
 from dvc.exceptions import NotDvcRepoError
 from git.exc import InvalidGitRepositoryError
 from typing_extensions import Annotated, Optional
@@ -33,6 +43,7 @@ from calkit.cli.check import (
 )
 from calkit.cli.cloud import cloud_app
 from calkit.cli.config import config_app
+from calkit.cli.describe import describe_app
 from calkit.cli.import_ import import_app
 from calkit.cli.list import list_app
 from calkit.cli.new import new_app
@@ -58,6 +69,7 @@ app.add_typer(
 )
 app.add_typer(notebooks_app, name="nb", help="Work with Jupyter notebooks.")
 app.add_typer(list_app, name="list", help="List Calkit objects.")
+app.add_typer(describe_app, name="describe", help="Describe things.")
 app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(update_app, name="update", help="Update objects.")
@@ -675,6 +687,87 @@ def run_local_server():
     )
 
 
+def _stage_run_info_from_log_content(log_content: str) -> dict:
+    def add_stage_info(stage_name: str, key: str, value: str | datetime):
+        if isinstance(value, datetime):
+            # Convert datetime to ISO format for consistency
+            value = value.isoformat()
+        if stage_name not in res:
+            res[stage_name] = {}
+        res[stage_name][key] = value
+
+    res = {}
+    errored_timestamp = None
+    lines = log_content.splitlines()
+    current_stage_name = None
+    current_stage_status = None
+    for line in lines:
+        # Log lines should be able to be split into timestamp, type, message
+        ls = line.split(" -", maxsplit=2)
+        if len(ls) < 2:
+            continue
+        timestamp, log_type, message = (
+            ls[0].strip(),
+            ls[1].strip(),
+            ls[2].strip() if len(ls) > 2 else "",
+        )
+        try:
+            timestamp = datetime.fromisoformat(timestamp)
+        except ValueError:
+            # If the timestamp is not in ISO format, skip this line
+            continue
+        # If we hit an error, the logs should print a traceback and end
+        if log_type == "ERROR":
+            errored_timestamp = timestamp
+            break
+        if message.startswith("Running stage "):
+            if (
+                current_stage_name is not None
+                and current_stage_status == "running"
+            ):
+                # If we were already running a stage, add its end time
+                add_stage_info(current_stage_name, "end_time", timestamp)
+                add_stage_info(current_stage_name, "status", "completed")
+            # This is a stage run
+            current_stage_name = (
+                message.removeprefix("Running stage ")
+                .replace("'", "")
+                .replace(":", "")
+            )
+            current_stage_status = "running"
+            add_stage_info(current_stage_name, "start_time", timestamp)
+        elif message.startswith("Stage ") and "skipping" in message:
+            if (
+                current_stage_name is not None
+                and current_stage_status == "running"
+            ):
+                # If we were already running a stage, add its end time
+                add_stage_info(current_stage_name, "end_time", timestamp)
+                add_stage_info(current_stage_name, "status", "completed")
+            current_stage_name = message.removeprefix("Stage '").split("'")[0]
+            current_stage_status = "skipped"
+            add_stage_info(current_stage_name, "start_time", timestamp)
+            add_stage_info(current_stage_name, "end_time", timestamp)
+            add_stage_info(current_stage_name, "status", current_stage_status)
+    if errored_timestamp is not None:
+        # Figure out which stage failed
+        for line in lines[-1::-1]:
+            if line.startswith(
+                "dvc.exceptions.ReproductionError: failed to reproduce "
+            ):
+                stage_name = (
+                    line.strip()
+                    .removeprefix(
+                        "dvc.exceptions.ReproductionError: failed to reproduce "
+                    )
+                    .replace("'", "")
+                )
+                add_stage_info(stage_name, "end_time", errored_timestamp)
+                add_stage_info(stage_name, "status", "failed")
+                break
+    return res
+
+
 @app.command(name="run")
 def run(
     targets: Optional[list[str]] = typer.Argument(
@@ -779,6 +872,10 @@ def run(
     no_run_cache: Annotated[
         bool, typer.Option("--no-run-cache", help="Ignore the run cache.")
     ] = False,
+    no_log: Annotated[
+        bool,
+        typer.Option("--no-log", help="Do not log the run."),
+    ] = False,
     save_after_run: Annotated[
         bool,
         typer.Option("--save", "-S", help="Save the project after running."),
@@ -793,11 +890,24 @@ def run(
     """Check dependencies and run the pipeline."""
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    if not quiet:
+        typer.echo("Getting system information")
+    system_info = calkit.get_system_info()
+    # Save the system to .calkit/systems
+    if verbose:
+        typer.echo("Saving system information:")
+        typer.echo(system_info)
+    sysinfo_fpath = os.path.join(
+        ".calkit", "systems", system_info["id"] + ".json"
+    )
+    os.makedirs(os.path.dirname(sysinfo_fpath), exist_ok=True)
+    with open(sysinfo_fpath, "w") as f:
+        json.dump(system_info, f, indent=2)
     # First check any system-level dependencies exist
     if not quiet:
         typer.echo("Checking system-level dependencies")
     try:
-        calkit.check_system_deps()
+        calkit.check_system_deps(system_info=system_info)
     except Exception as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(str(e))
@@ -811,9 +921,21 @@ def run(
         except Exception as e:
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Pipeline compilation failed: {e}")
+    # Get status of Git repo before running
+    repo = git.Repo()
+    git_rev = repo.head.commit.hexsha
+    git_branch = repo.active_branch.name
+    git_changed_files_before = calkit.git.get_changed_files(repo=repo)
+    git_staged_files_before = calkit.git.get_staged_files(repo=repo)
+    git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
+    # Get status of DVC repo before running
+    dvc_repo = dvc.repo.Repo()
+    dvc_status_before = dvc_repo.status()
+    dvc_data_status_before = dvc_repo.data_status()
+    dvc_data_status_before.pop("git", None)  # Remove git status
     if targets is None:
         targets = []
-    args = targets
+    args = deepcopy(targets)
     # Extract any boolean args
     for name in [
         "quiet",
@@ -838,12 +960,96 @@ def run(
         args += ["--pipeline", pipeline]
     if downstream is not None:
         args += downstream
-    try:
-        subprocess.check_call([sys.executable, "-m", "dvc", "repro"] + args)
-    except subprocess.CalledProcessError:
-        os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-        raise_error("DVC pipeline failed")
+    start_time_no_tz = calkit.utcnow(remove_tz=True)
+    start_time = calkit.utcnow(remove_tz=False)
+    run_id = uuid.uuid4().hex
+    if not no_log:
+        log_fpath = os.path.join(
+            ".calkit",
+            "logs",
+            start_time_no_tz.isoformat(timespec="seconds").replace(":", "-")
+            + "-"
+            + run_id
+            + ".log",
+        )
+        if verbose:
+            typer.echo(f"Starting run ID: {run_id}")
+            typer.echo(f"Saving logs to {log_fpath}")
+        os.makedirs(os.path.dirname(log_fpath), exist_ok=True)
+        # Create a file handler for dvc.stage.run logger
+        file_handler = logging.FileHandler(log_fpath, mode="w")
+        file_handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(message)s"
+        )
+        formatter.converter = time.gmtime  # Use UTC time for asctime
+        file_handler.setFormatter(formatter)
+        dvc.log.logger.addHandler(file_handler)
+    # Remove newline logging in dvc.repo.reproduce
+    dvc.repo.reproduce.logger.setLevel(logging.ERROR)
+    # Disable other misc DVC output
+    dvc.ui.ui.write = lambda *args, **kwargs: None
+    res = dvc_cli_main(["repro"] + args)
+    failed = res != 0
+    if not no_log:
+        # Get Git status after running
+        git_changed_files_after = calkit.git.get_changed_files(repo=repo)
+        git_staged_files_after = calkit.git.get_staged_files(repo=repo)
+        git_untracked_files_after = calkit.git.get_untracked_files(repo=repo)
+        # Get DVC status after running
+        dvc_status_after = dvc_repo.status()
+        dvc_data_status_after = dvc_repo.data_status()
+        dvc_data_status_after.pop("git", None)  # Remove git status
+        # Parse log to get timing
+        with open(log_fpath, "r") as f:
+            log_content = f.read()
+            stage_run_info = _stage_run_info_from_log_content(log_content)
+        # Save run information to a file
+        if verbose:
+            typer.echo("Saving run info")
+        run_info = {
+            "id": run_id,
+            "system_id": system_info["id"],
+            "start_time": start_time.isoformat(),
+            "end_time": calkit.utcnow(remove_tz=False).isoformat(),
+            "targets": targets,
+            "force": force,
+            "dvc_args": args,
+            "status": "failed" if failed else "completed",
+            "stages": stage_run_info,
+            "git_rev": git_rev,
+            "git_branch": git_branch,
+            "git_changed_files_before": git_changed_files_before,
+            "git_staged_files_before": git_staged_files_before,
+            "git_untracked_files_before": git_untracked_files_before,
+            "git_changed_files_after": git_changed_files_after,
+            "git_staged_files_after": git_staged_files_after,
+            "git_untracked_files_after": git_untracked_files_after,
+            "dvc_status_before": dvc_status_before,
+            "dvc_data_status_before": dvc_data_status_before,
+            "dvc_status_after": dvc_status_after,
+            "dvc_data_status_after": dvc_data_status_after,
+        }
+        run_info_fpath = os.path.join(
+            ".calkit",
+            "runs",
+            start_time_no_tz.isoformat(timespec="seconds").replace(":", "-")
+            + "-"
+            + run_id
+            + ".json",
+        )
+        os.makedirs(os.path.dirname(run_info_fpath), exist_ok=True)
+        with open(run_info_fpath, "w") as f:
+            json.dump(run_info, f, indent=2)
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+    if failed:
+        raise_error("Pipeline failed")
+    else:
+        typer.echo(
+            "Pipeline completed successfully ✅".encode(
+                "utf-8", errors="replace"
+            )
+        )
     if save_after_run or save_message is not None:
         if save_message is None:
             save_message = "Run pipeline"

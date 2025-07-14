@@ -49,25 +49,38 @@ and can specify `inputs` and `outputs`.
 The different kinds of stages and their unique attributes are listed below.
 For more details, see `calkit.models.pipeline`.
 
-- `python-script`
-  - `script_path`
-  - `args` (list, optional)
-- `shell-command`
-  - `command`
-  - `shell` (optional, e.g., `bash`, `sh`, `zsh`, etc., default `bash`)
-- `shell-script`
-  - `script_path`
-  - `shell` (optional, e.g., `bash`, `sh`, `zsh`, etc., default `bash`)
-  - `args` (list, optional)
-- `matlab-script`
-  - `script_path`
-- `latex`
-  - `target_path`
-- `docker-command`
-  - `command`
-- `r-script`
-  - `script_path`
-  - `args` (list, optional)
+### `python-script`
+
+- `script_path`
+- `args` (list, optional)
+
+### `shell-command`
+
+- `command`
+- `shell` (optional, e.g., `bash`, `sh`, `zsh`; default: `bash`)
+
+### `shell-script`
+
+- `script_path`
+- `shell` (optional, e.g., `bash`, `sh`, `zsh`; default: `bash`)
+- `args` (list, optional)
+
+### `matlab-script`
+
+- `script_path`
+
+### `latex`
+
+- `target_path`
+
+### `docker-command`
+
+- `command`
+
+### `r-script`
+
+- `script_path`
+- `args` (list, optional)
 
 ## Iteration
 

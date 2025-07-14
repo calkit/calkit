@@ -24,8 +24,8 @@ from starlette.middleware.cors import CORSMiddleware
 import calkit
 import calkit.jupyter
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__package__)
+logger.setLevel(logging.INFO)
 
 app = FastAPI(title="calkit-server")
 

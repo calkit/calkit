@@ -5,15 +5,21 @@ from __future__ import annotations
 import base64
 import csv
 import glob
+import hashlib
 import json
 import logging
 import os
 import pickle
+import platform
 import re
+import socket
 import subprocess
+import uuid
 
+import psutil
 import requests
 
+import calkit
 from calkit.models import ProjectStatus
 
 try:
@@ -32,8 +38,8 @@ from git.exc import InvalidGitRepositoryError
 
 from calkit.models import ProjectInfo
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__package__)
+logger.setLevel(logging.INFO)
 
 ryaml = ruamel.yaml.YAML()
 ryaml.indent(mapping=2, sequence=4, offset=2)
@@ -245,7 +251,9 @@ def make_readme_content(
 
 
 def check_dep_exists(
-    name: str, kind: Literal["app", "env-var", "calkit-config"] = "app"
+    name: str,
+    kind: Literal["app", "env-var", "calkit-config"] = "app",
+    system_info: dict | None = None,
 ) -> bool:
     """Check that a dependency exists.
 
@@ -259,6 +267,8 @@ def check_dep_exists(
         cfg = calkit.config.read()
         return getattr(cfg, name, None) is not None
     if name == "calkit":
+        return True
+    if system_info is not None and system_info.get(f"{name}_version"):
         return True
     cmd = [name]
     # Executables with non-conventional CLIs
@@ -276,7 +286,9 @@ def check_dep_exists(
         return False
 
 
-def check_system_deps(wdir: str | None = None) -> None:
+def check_system_deps(
+    wdir: str | None = None, system_info: dict | None = None
+) -> None:
     """Check that the dependencies declared in a project's ``calkit.yaml`` file
     exist.
     """
@@ -307,7 +319,7 @@ def check_system_deps(wdir: str | None = None) -> None:
         else:
             dep_name = re.split("[=<>]", dep)[0]
             dep_kind = "app"
-        if not check_dep_exists(dep_name, dep_kind):
+        if not check_dep_exists(dep_name, dep_kind, system_info=system_info):
             raise ValueError(f"{dep_kind} '{dep_name}' not found")
 
 
@@ -452,3 +464,66 @@ def detect_project_name(wdir: str | None = None) -> str:
     if owner is None:
         owner = owner_name
     return f"{owner}/{name}"
+
+
+def get_dep_version(dep_name: str) -> str | None:
+    """Get the version of a system-level dependency."""
+    try:
+        cmd = [dep_name, "--version"]
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=True
+        )
+        return result.stdout.strip()
+    except Exception:
+        return None
+
+
+def get_system_info() -> dict:
+    """Get information about the system on which we're currently running."""
+    os_name = platform.system()
+    system_info = {
+        "os": os_name,
+        "os_version": platform.release(),
+        "python_version": platform.python_version(),
+        "calkit_version": calkit.__version__,
+        "calkit_git_rev": None,
+        "hostname": socket.gethostname(),
+        "processor": platform.processor(),
+        "platform": platform.platform(),
+        "machine": platform.machine(),
+        "python_implementation": platform.python_implementation(),
+        "python_compiler": platform.python_compiler(),
+        "memory_gb": psutil.virtual_memory().total / (1024**3),
+        "cpu_count": os.cpu_count(),
+    }
+    node_id = uuid.getnode()
+    # The multicast bit is the 40th bit from the right (0-indexed)
+    # This corresponds to the least significant bit of the first octet
+    # A standard unicast MAC address has this bit as 0
+    # A randomly generated node ID by uuid.getnode() will have this bit as 1
+    is_random_fallback = bool(node_id & 0x010000000000)
+    if is_random_fallback:
+        node_id = None
+    system_info["node_id"] = node_id
+    # See if we can detect Calkit Git rev
+    try:
+        repo = Repo(
+            path=os.path.dirname(calkit.__file__),
+            search_parent_directories=True,
+        )
+        system_info["calkit_git_rev"] = repo.head.commit.hexsha
+    except Exception:
+        pass
+    # Get versions of important foundational dependencies
+    for dep in [
+        "docker",
+        "conda",
+        "mamba",
+        "uv",
+        "pixi",
+        "Rscript",
+    ]:
+        system_info[f"{dep}_version"] = get_dep_version(dep)
+    system_info_str = json.dumps(system_info, sort_keys=True).encode()
+    system_info["id"] = hashlib.sha1(system_info_str).hexdigest()
+    return system_info

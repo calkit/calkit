@@ -506,7 +506,14 @@ def new_question(
 def new_notebook(
     path: Annotated[str, typer.Argument(help="Notebook path (relative)")],
     title: Annotated[str, typer.Option("--title")],
-    description: Annotated[str, typer.Option("--description")] = None,
+    description: Annotated[str | None, typer.Option("--description")] = None,
+    stage_name: Annotated[
+        str | None,
+        typer.Option(
+            "--stage",
+            help=("Name of the pipeline stage that runs this notebook."),
+        ),
+    ] = None,
     commit: Annotated[bool, typer.Option("--commit")] = False,
 ):
     """Add a new notebook."""
@@ -516,8 +523,7 @@ def new_notebook(
         raise ValueError("Path is not a file")
     if not path.endswith(".ipynb"):
         raise ValueError("Path does not have .ipynb extension")
-    # TODO: Add option to create stages that run `calkit nb clean` and
-    # `calkit nb execute`
+    # TODO: Add option to create stage if one doesn't exist
     ck_info = calkit.load_calkit_info()
     notebooks = ck_info.get("notebooks", [])
     paths = [f.get("path") for f in notebooks]
@@ -526,6 +532,12 @@ def new_notebook(
     obj = dict(path=path, title=title)
     if description is not None:
         obj["description"] = description
+    if stage_name is not None:
+        if stage_name not in ck_info.get("pipeline", {}).get("stages", {}):
+            raise ValueError(
+                f"Stage '{stage_name}' does not exist in the pipeline"
+            )
+        obj["stage"] = stage_name
     notebooks.append(obj)
     ck_info["notebooks"] = notebooks
     with open("calkit.yaml", "w") as f:
@@ -533,7 +545,7 @@ def new_notebook(
     if commit:
         repo = git.Repo()
         repo.git.add("calkit.yaml")
-        repo.git.commit(["-m", f"Add notebook {path}"])
+        repo.git.commit(["calkit.yaml", "-m", f"Add notebook {path}"])
 
 
 @new_app.command("docker-env")

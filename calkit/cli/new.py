@@ -511,7 +511,7 @@ def new_notebook(
         str | None,
         typer.Option(
             "--stage",
-            help=("Name of the pipeline stage that runs this notebook."),
+            help="Name of the pipeline stage that runs this notebook.",
         ),
     ] = None,
     commit: Annotated[bool, typer.Option("--commit")] = False,

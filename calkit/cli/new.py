@@ -1840,6 +1840,88 @@ def new_latex_stage(
     )
 
 
+class NotebookStorage(str, Enum):
+    git = "git"
+    dvc = "dvc"
+    none = None
+
+
+@new_app.command(name="jupyter-notebook-stage")
+def new_jupyter_notebook_stage(
+    name: StageArgs.name,
+    environment: StageArgs.environment,
+    notebook_path: Annotated[
+        str, typer.Option("--notebook-path", help="Path to notebook.")
+    ],
+    inputs: StageArgs.inputs = [],
+    outputs: StageArgs.outputs = [],
+    outs_git: StageArgs.outs_git = [],
+    outs_git_no_delete: StageArgs.outs_git_no_delete = [],
+    outs_no_delete: StageArgs.outs_no_delete = [],
+    outs_no_store: StageArgs.outs_no_store = [],
+    outs_no_store_no_delete: StageArgs.outs_no_store_no_delete = [],
+    html_storage: Annotated[
+        NotebookStorage,
+        typer.Option(
+            "--html-storage",
+            help=("In what system to store the HTML output of the notebook."),
+        ),
+    ] = NotebookStorage.dvc,
+    cleaned_ipynb_storage: Annotated[
+        NotebookStorage,
+        typer.Option(
+            "--cleaned-ipynb-storage",
+            help=(
+                "In what system to store the cleaned ipynb output of "
+                "the notebook."
+            ),
+        ),
+    ] = NotebookStorage.git,
+    executed_ipynb_storage: Annotated[
+        NotebookStorage,
+        typer.Option(
+            "--executed-ipynb-storage",
+            help=(
+                "In what system to store the executed ipynb output of "
+                "the notebook."
+            ),
+        ),
+    ] = NotebookStorage.dvc,
+    overwrite: StageArgs.overwrite = False,
+    no_check: StageArgs.no_check = False,
+    no_commit: StageArgs.no_commit = False,
+):
+    """Add a stage to the pipeline that runs a Jupyter notebook."""
+    ck_outs = _to_ck_outs(
+        outputs=outputs,
+        outs_git=outs_git,
+        outs_git_no_delete=outs_git_no_delete,
+        outs_no_delete=outs_no_delete,
+        outs_no_store=outs_no_store,
+        outs_no_store_no_delete=outs_no_store_no_delete,
+    )
+    try:
+        stage = calkit.models.pipeline.JupyterNotebookStage(
+            kind="jupyter-notebook",
+            environment=environment,
+            inputs=inputs,  # type: ignore
+            outputs=ck_outs,
+            notebook_path=notebook_path,
+            html_storage=html_storage.value,
+            cleaned_ipynb_storage=cleaned_ipynb_storage.value,
+            executed_ipynb_storage=executed_ipynb_storage.value,
+        )
+    except Exception as e:
+        raise_error(f"Invalid stage specification: {e}")
+    _save_stage(
+        stage=stage,
+        name=name,
+        overwrite=overwrite,
+        no_check=no_check,
+        no_commit=no_commit,
+    )
+
+
 @new_app.command(name="release")
 def new_release(
     name: Annotated[

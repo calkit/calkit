@@ -1206,6 +1206,9 @@ def run_in_env(
                 docker_cmd += ["-e", f"{key}={value}"]
         if (gpus := env.get("gpus")) is not None:
             docker_cmd += ["--gpus", gpus]
+        if ports := env.get("ports"):
+            for port in ports:
+                docker_cmd += ["-p", port]
         docker_user = env.get("user")
         if docker_user is None:
             try:

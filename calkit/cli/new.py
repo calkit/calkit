@@ -611,6 +611,16 @@ def new_docker_env(
         str | None,
         typer.Option("--platform", help="Which platform(s) to build for."),
     ] = None,
+    ports: Annotated[
+        list[str],
+        typer.Option(
+            "--port",
+            help=(
+                "Ports to expose in the container, e.g., '8080:80'. "
+                "Can be specified multiple times."
+            ),
+        ),
+    ] = [],
     description: Annotated[
         str | None, typer.Option("--description", help="Description.")
     ] = None,
@@ -698,6 +708,8 @@ def new_docker_env(
         env["args"] = args
     if deps:
         env["deps"] = deps
+    if ports:
+        env["ports"] = ports
     envs[name] = env
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:

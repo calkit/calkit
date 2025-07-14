@@ -574,6 +574,30 @@ def new_docker_env(
             "--add-layer", help="Add a layer (options: miniforge, foampy)."
         ),
     ] = [],
+    env_vars: Annotated[
+        list[str],
+        typer.Option(
+            "--env-var", help="Environment variables to set in the container."
+        ),
+    ] = [],
+    gpus: Annotated[str | None, typer.Option("--gpus")] = None,
+    args: Annotated[
+        list[str],
+        typer.Option(
+            "--arg",
+            help="Arguments to use when running container.",
+        ),
+    ] = [],
+    deps: Annotated[
+        list[str],
+        typer.Option(
+            "--dep",
+            help=(
+                "Path to add as a dependency, i.e., "
+                "a file that gets added to the container."
+            ),
+        ),
+    ] = [],
     wdir: Annotated[
         str, typer.Option("--wdir", help="Working directory.")
     ] = "/work",
@@ -615,8 +639,11 @@ def new_docker_env(
     if path is not None and base and os.path.isfile(path) and not overwrite:
         raise_error("Output path already exists (use -f to overwrite)")
     if image_name is None:
-        typer.echo("No image name specified; using environment name")
-        image_name = name
+        typer.echo(
+            "No image name specified; using project and environment name"
+        )
+        _, project_name = calkit.detect_project_name().split("/")
+        image_name = f"{project_name}-{name}"
     repo = git.Repo()
     if base and path is not None:
         txt = "FROM " + base + "\n\n"
@@ -658,6 +685,19 @@ def new_docker_env(
         env["platform"] = platform
     if user:
         env["user"] = user
+    if gpus:
+        env["gpus"] = gpus
+    if env_vars:
+        env["env_vars"] = {}
+        for var in env_vars:
+            if "=" not in var:
+                raise_error(f"Invalid environment variable format: {var}")
+            key, value = var.split("=", 1)
+            env["env_vars"][key] = value
+    if args:
+        env["args"] = args
+    if deps:
+        env["deps"] = deps
     envs[name] = env
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:

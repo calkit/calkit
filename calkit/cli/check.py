@@ -84,6 +84,7 @@ def check_environment(
             gpus=env.get("gpus"),
             user=env.get("user"),
             wdir=env.get("wdir"),
+            args=env.get("args", []),
             quiet=not verbose,
         )
     elif env["kind"] == "conda":
@@ -209,6 +210,14 @@ def check_docker_env(
             help="Declare an explicit GPU requirement for the container.",
         ),
     ] = None,
+    args: Annotated[
+        list[str],
+        typer.Option(
+            "--arg",
+            "-a",
+            help="Declare an explicit run argument for the container.",
+        ),
+    ] = [],
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Be quiet.")
     ] = False,
@@ -326,6 +335,8 @@ def check_docker_env(
         inspect["Ports"] = ports
     if gpus:
         inspect["GPUs"] = gpus
+    if args:
+        inspect["Args"] = args
     lock_dir = os.path.dirname(lock_fpath)
     if lock_dir:
         os.makedirs(lock_dir, exist_ok=True)

@@ -467,10 +467,12 @@ def check_venv(
     if lock_dir:
         os.makedirs(lock_dir, exist_ok=True)
     # If the lock file exists, try to install with that
-    dep_file_path = lock_fpath or path
+    dep_file_txt = f"-r {path}"
+    if os.path.isfile(lock_fpath):
+        dep_file_txt += f" -r {lock_fpath}"
     check_cmd = (
         f"{activate_cmd} "
-        f"&& {pip_cmd} install {pip_install_args} -r {dep_file_path} "
+        f"&& {pip_cmd} install {pip_install_args} {dep_file_txt} "
         f"&& {pip_freeze_cmd} > {lock_fpath} "
         "&& deactivate"
     )

@@ -874,7 +874,7 @@ def run(
     ] = False,
     no_log: Annotated[
         bool,
-        typer.Option("--no-log", help="Do not log the run."),
+        typer.Option("--no-log", "-l", help="Do not log the run."),
     ] = False,
     save_after_run: Annotated[
         bool,
@@ -893,16 +893,17 @@ def run(
     if not quiet:
         typer.echo("Getting system information")
     system_info = calkit.get_system_info()
-    # Save the system to .calkit/systems
-    if verbose:
-        typer.echo("Saving system information:")
-        typer.echo(system_info)
-    sysinfo_fpath = os.path.join(
-        ".calkit", "systems", system_info["id"] + ".json"
-    )
-    os.makedirs(os.path.dirname(sysinfo_fpath), exist_ok=True)
-    with open(sysinfo_fpath, "w") as f:
-        json.dump(system_info, f, indent=2)
+    if not no_log:
+        # Save the system to .calkit/systems
+        if verbose:
+            typer.echo("Saving system information:")
+            typer.echo(system_info)
+        sysinfo_fpath = os.path.join(
+            ".calkit", "systems", system_info["id"] + ".json"
+        )
+        os.makedirs(os.path.dirname(sysinfo_fpath), exist_ok=True)
+        with open(sysinfo_fpath, "w") as f:
+            json.dump(system_info, f, indent=2)
     # First check any system-level dependencies exist
     if not quiet:
         typer.echo("Checking system-level dependencies")
@@ -1189,6 +1190,12 @@ def run_in_env(
                 ),
                 platform=env.get("platform"),
                 deps=env.get("deps", []),
+                env_vars=env.get("env_vars", []),
+                ports=env.get("ports", []),
+                gpus=env.get("gpus"),
+                user=env.get("user"),
+                wdir=env.get("wdir"),
+                args=env.get("args", []),
                 quiet=not verbose,
             )
         shell_cmd = _to_shell_cmd(cmd)

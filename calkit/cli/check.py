@@ -26,7 +26,7 @@ import calkit
 import calkit.matlab
 import calkit.pipeline
 from calkit.check import check_reproducibility
-from calkit.cli import raise_error
+from calkit.cli import raise_error, warn
 
 check_app = typer.Typer(no_args_is_help=True)
 
@@ -466,9 +466,11 @@ def check_venv(
     lock_dir = os.path.dirname(lock_fpath)
     if lock_dir:
         os.makedirs(lock_dir, exist_ok=True)
+    # If the lock file exists, try to install with that
+    dep_file_path = lock_fpath or path
     check_cmd = (
         f"{activate_cmd} "
-        f"&& {pip_cmd} install {pip_install_args} -r {path} "
+        f"&& {pip_cmd} install {pip_install_args} -r {dep_file_path} "
         f"&& {pip_freeze_cmd} > {lock_fpath} "
         "&& deactivate"
     )
@@ -482,7 +484,18 @@ def check_venv(
             stderr=subprocess.STDOUT if not verbose else None,
         )
     except subprocess.CalledProcessError:
-        raise_error(f"Failed to check {kind}")
+        warn("Failed to create environment from lock file; attempting rebuild")
+        check_cmd = (
+            f"{activate_cmd} "
+            f"&& {pip_cmd} install {pip_install_args} -r {path} "
+            f"&& {pip_freeze_cmd} > {lock_fpath} "
+            "&& deactivate"
+        )
+        # Try again and don't capture output
+        try:
+            subprocess.run(check_cmd, shell=True, cwd=wdir, check=True)
+        except subprocess.CalledProcessError:
+            raise_error(f"Failed to check {kind}")
 
 
 @check_app.command(name="matlab-env")

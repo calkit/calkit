@@ -17,9 +17,21 @@ from calkit import ryaml
 
 
 def _check_single(req: str, actual: str, conda: bool = False) -> bool:
-    """Helper function for checking actual versions against requirements."""
-    req_name = re.split("[=<>]", req)[0]
-    req_spec = req.removeprefix(req_name)
+    """Helper function for checking actual versions against requirements.
+
+    Note that this also doesn't check optional dependencies.
+    """
+    # If this is a Git version, we can't check it
+    # TODO: Clone Git repos to check?
+    if "@git" in req:
+        warnings.warn(f"Cannot check Git version for {req}")
+        req = req.split("@git")[0]
+    req_name = re.split("[=<>]", req)[0].strip()
+    req_spec = req.removeprefix(req_name).strip().replace(" ", "")
+    if "[" in req_name:
+        warnings.warn(f"Cannot check optional dependencies for {req_name}")
+        # Remove optional dependencies
+        req_name = req_name.split("[")[0].strip()
     if conda and req_spec.startswith("="):
         req_spec = "=" + req_spec
         if not req_spec.endswith(".*"):

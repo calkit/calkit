@@ -1190,6 +1190,12 @@ def run_in_env(
                 ),
                 platform=env.get("platform"),
                 deps=env.get("deps", []),
+                env_vars=env.get("env_vars", []),
+                ports=env.get("ports", []),
+                gpus=env.get("gpus"),
+                user=env.get("user"),
+                wdir=env.get("wdir"),
+                args=env.get("args", []),
                 quiet=not verbose,
             )
         shell_cmd = _to_shell_cmd(cmd)

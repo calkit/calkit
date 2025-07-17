@@ -133,6 +133,11 @@ def new_project(
             raise_error(
                 f"Could not detect Git repo URL from existing repo: {e}"
             )
+        # We don't have a project name but do have a Git repo URL, the
+        # project name will be the Git repo name lowercased, since that's
+        # how the Calkit Cloud will create the project name by default
+        if name is None and git_repo_url is not None:
+            name = git_repo_url.split("/")[-1].lower()
         # If this isn't a DVC repo, run `dvc init`
         if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
             typer.echo("Initializing DVC repository")

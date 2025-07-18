@@ -1187,13 +1187,13 @@ def new_conda_env(
 
 @new_app.command("uv-venv")
 def new_uv_venv(
-    packages: Annotated[
-        list[str],
-        typer.Argument(help="Packages to include in the environment."),
-    ],
     name: Annotated[
         str, typer.Option("--name", "-n", help="Environment name.")
     ],
+    packages: Annotated[
+        list[str] | None,
+        typer.Argument(help="Packages to include in the environment."),
+    ] = None,
     path: Annotated[
         str, typer.Option("--path", help="Path for requirements file.")
     ] = "requirements.txt",
@@ -1201,10 +1201,10 @@ def new_uv_venv(
         str, typer.Option("--prefix", help="Prefix for environment location.")
     ] = ".venv",
     python_version: Annotated[
-        str, typer.Option("--python", "-p", help="Python version.")
-    ] = None,
+        str | None, typer.Option("--python", "-p", help="Python version.")
+    ] = "3.13",
     description: Annotated[
-        str, typer.Option("--description", help="Description.")
+        str | None, typer.Option("--description", help="Description.")
     ] = None,
     overwrite: Annotated[
         bool,
@@ -1226,8 +1226,10 @@ def new_uv_venv(
     ] = False,
 ):
     """Create a new uv virtual environment."""
-    if os.path.isfile(path) and not overwrite:
+    if os.path.isfile(path) and packages and not overwrite:
         raise_error("Output path already exists (use -f to overwrite)")
+    elif packages is None and not os.path.isfile(path):
+        raise_error("If path doesn't exist, packages must be specified")
     repo = git.Repo()
     # Add environment to Calkit info
     ck_info = calkit.load_calkit_info()
@@ -1249,11 +1251,12 @@ def new_uv_venv(
                     f"Environment '{env_name}' already exists with "
                     f"prefix '{prefix}'"
                 )
-    packages_txt = "\n".join(packages)
-    # Write environment to path
-    _check_path_dir(path)
-    with open(path, "w") as f:
-        f.write(packages_txt)
+    if packages is not None:
+        packages_txt = "\n".join(packages)
+        # Write environment to path
+        _check_path_dir(path)
+        with open(path, "w") as f:
+            f.write(packages_txt)
     repo.git.add(path)
     typer.echo("Adding environment to calkit.yaml")
     env = dict(path=path, kind="uv-venv", prefix=prefix)

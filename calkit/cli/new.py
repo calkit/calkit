@@ -1079,15 +1079,15 @@ def new_publication(
 
 @new_app.command("conda-env")
 def new_conda_env(
-    packages: Annotated[
-        list[str],
-        typer.Argument(help="Packages to include in the environment."),
-    ],
     name: Annotated[
         str, typer.Option("--name", "-n", help="Environment name.")
     ],
+    packages: Annotated[
+        list[str] | None,
+        typer.Argument(help="Packages to include in the environment."),
+    ] = None,
     conda_name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--conda-name",
             help=(
@@ -1105,10 +1105,11 @@ def new_conda_env(
         list[str], typer.Option("--pip", help="Packages to install with pip.")
     ] = [],
     prefix: Annotated[
-        str, typer.Option("--prefix", help="Prefix for environment location.")
+        str | None,
+        typer.Option("--prefix", help="Prefix for environment location."),
     ] = None,
     description: Annotated[
-        str, typer.Option("--description", help="Description.")
+        str | None, typer.Option("--description", help="Description.")
     ] = None,
     overwrite: Annotated[
         bool,
@@ -1130,8 +1131,10 @@ def new_conda_env(
     ] = False,
 ):
     """Create a new Conda environment."""
-    if os.path.isfile(path) and not overwrite:
+    if packages is not None and os.path.isfile(path) and not overwrite:
         raise_error("Output path already exists (use -f to overwrite)")
+    elif packages is None and not os.path.isfile(path):
+        raise_error("Packages must be provided if path doesn't exist")
     repo = git.Repo()
     # Add environment to Calkit info
     ck_info = calkit.load_calkit_info()
@@ -1150,21 +1153,34 @@ def new_conda_env(
         if project_name is None:
             project_name = os.path.basename(os.getcwd())
         conda_name = calkit.to_kebab_case(project_name) + "-" + name
-    # Write environment to path
-    _check_path_dir(path)
-    conda_env = dict(
-        name=conda_name, channels=["conda-forge"], dependencies=packages
-    )
-    if prefix is not None:
-        from calkit.cli.main import ignore
+    if packages is not None:
+        assert isinstance(packages, list)
+        # Write environment to path
+        _check_path_dir(path)
+        conda_env = dict(
+            name=conda_name, channels=["conda-forge"], dependencies=packages
+        )
+        if prefix is not None:
+            from calkit.cli.main import ignore
 
-        conda_env["prefix"] = prefix
-        ignore(prefix, no_commit=True)
-        repo.git.add(".gitignore")
-    if pip_packages:
-        conda_env["dependencies"].append(dict(pip=pip_packages))
-    with open(path, "w") as f:
-        ryaml.dump(conda_env, f)
+            conda_env["prefix"] = prefix
+            ignore(prefix, no_commit=True)
+            repo.git.add(".gitignore")
+        if pip_packages:
+            conda_env["dependencies"].append(dict(pip=pip_packages))
+        with open(path, "w") as f:
+            ryaml.dump(conda_env, f)
+    elif packages is None and os.path.isfile(path):
+        with open(path) as f:
+            conda_env: dict = ryaml.load(f)
+        # Remove prefix
+        conda_env.pop("prefix", None)
+        if prefix is not None:
+            conda_env["prefix"] = prefix
+        # Rename so we can track it more uniquely
+        conda_env["name"] = conda_name
+        with open(path, "w") as f:
+            ryaml.dump(conda_env, f)
     repo.git.add(path)
     typer.echo("Adding environment to calkit.yaml")
     env = dict(path=path, kind="conda")

@@ -212,6 +212,37 @@ def test_new_uv_venv(tmp_dir):
     assert env.kind == "uv-venv"
 
 
+def test_new_conda_env(tmp_dir):
+    with open("environment.yml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "dependencies": ["python", "requests"],
+                "name": "whatever",
+                "channels": ["conda-forge"],
+            },
+            f,
+        )
+    subprocess.check_call(
+        ["calkit", "new", "project", ".", "--name", "test", "--title", "Test"]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "conda-env",
+            "--path",
+            "environment.yml",
+            "--name",
+            "e1",
+            "--no-check",
+        ]
+    )
+    with open("environment.yml") as f:
+        env = calkit.ryaml.load(f)
+    assert env["name"] == "test-e1"
+    assert env["dependencies"] == ["python", "requests"]
+
+
 def test_new_project(tmp_dir):
     subprocess.check_call(
         ["calkit", "new", "project", ".", "--title", "My new project"]

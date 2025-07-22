@@ -22,11 +22,8 @@ from pydantic_settings import (
 
 
 def supports_keyring() -> bool:
-    """Checks if the system supports the Python keyring library with a usable
+    """Check if the system supports the Python keyring library with a usable
     backend.
-
-    Returns:
-        bool: True if keyring is supported, False otherwise.
     """
     try:
         # Attempt to get a password (this will trigger backend initialization)
@@ -35,19 +32,21 @@ def supports_keyring() -> bool:
     except keyring.errors.NoKeyringError:
         return False
     except keyring.errors.PasswordDeleteError:
-        # This can happen if the backend is functional but empty.
-        # We consider this as supported.
+        # This can happen if the backend is functional but empty
+        # We consider this as supported
         return True
-    except keyring.errors.ExceptionRaised as e:
+    except keyring.errors.InitError:
+        # Backend failed to initialize (e.g., user dismissed prompt)
+        return False
+    except keyring.errors.KeyringError as e:
         # Check if the underlying exception indicates no backend
         if "No backend found" in str(e):
             return False
         else:
-            # Some other error occurred, might still be considered supported
-            # depending on your needs. For strict checking, return False.
-            return True  # Or False if you want to be strict
+            # Some other error occurred, which we consider as supported
+            return True
     except ImportError:
-        # keyring library itself is not installed
+        # The keyring library itself is not installed, which should not happen
         return False
     except Exception:
         # Catch any other unexpected errors during initialization

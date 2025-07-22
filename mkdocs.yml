@@ -35,8 +35,8 @@ theme:
         name: Switch to system preference
 nav:
   - Home: index.md
-  - Help and support: help.md
   - Installation: installation.md
+  - Quickstart: quickstart.md
   - Cloud integration: cloud-integration.md
   - Version control: version-control.md
   - The calkit.yaml file: calkit-yaml.md
@@ -68,6 +68,7 @@ nav:
       - tutorials/office.md
       - tutorials/matlab.md
   - CLI reference: cli-reference.md
+  - Help and support: help.md
 markdown_extensions:
   - admonition
   - attr_list

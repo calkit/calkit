@@ -6,8 +6,19 @@ which is typically a good idea,
 that should also be installed.
 For Python, we recommend
 [uv](https://docs.astral.sh/uv/).
+On Linux, macOS, or Windows Git Bash, you can install Calkit and uv with:
 
-With uv installed, install Calkit with:
+```sh
+curl -LsSf https://github.com/calkit/calkit/raw/refs/heads/main/scripts/install.sh | sh
+```
+
+Or with Windows Command Prompt or PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/calkit/calkit/raw/refs/heads/main/scripts/install.ps1 | iex"
+```
+
+If you already have uv installed, install Calkit with:
 
 ```sh
 uv tool install calkit-python

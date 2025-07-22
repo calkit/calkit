@@ -7,9 +7,8 @@ To get in touch with the community,
 check out the
 [discussion forum](https://github.com/orgs/calkit/discussions)
 or the
-[Discord server](https://discord.gg/QHEDz7G6).
+[Discord server](https://discord.gg/ryDkGarc).
 
 If you want to get in touch directly,
 feel free to
-[send an email](mailto:help@calkit.io) or
-[schedule a video chat](https://calendar.app.google/fGDwYrqJm3diKegr8).
+[send an email](mailto:help@calkit.io).

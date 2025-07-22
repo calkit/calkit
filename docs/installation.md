@@ -19,6 +19,12 @@ Alternatively, but less ideally, you can install with your system Python:
 pip install calkit-python
 ```
 
+Next,
+[connect to a Calkit Hub](cloud-integration.md)
+for collaboration and backup.
+
+## Calkit Assistant
+
 For Windows users, the
 [Calkit Assistant](https://github.com/calkit/calkit-assistant)
 app is the easiest way to get everything set up and ready to work in

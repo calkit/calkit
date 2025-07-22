@@ -1,26 +1,28 @@
 # Home
 
-Calkit's mission is to make every scientific study reproducible.
-That is,
-it should be possible to go from raw data to research article
-by "pressing a single button"
-([Claerbout and Karrenbach (1992)](https://doi.org/10.1190/1.1822162)).
+Calkit makes it easy to create
+["single button"](https://doi.org/10.1190/1.1822162)
+reproducible research projects.
+
+Instead of a loosely related collection of files
+and manual instructions,
+turn your project into a version-controlled,
+self-contained "calculation kit,"
+tying together all phases or stages of the project:
+data collection, analysis, visualization, and writing,
+each of which can make use of the latest and greatest computational
+tools and languages.
+In other words, you, your collaborators, and readers will be able to go
+from raw data to research article with a single command,
+improving efficiency via faster iteration cycle time,
+reducing the likelihood of mistakes,
+and allowing others to more effectively build upon your work.
 
 Calkit makes this level of automation possible without extensive software
 engineering expertise by providing a project framework and toolset that unifies
-and simplifies the use of enabling technologies like Git,
+and simplifies the use of powerful enabling technologies like Git,
 DVC, Conda, Docker, and more,
 while guiding users away from common reproducibility pitfalls.
-
-When your project is reproducible,
-you'll be able to iterate more quickly and more often,
-easily onboard collaborators,
-make fewer mistakes,
-and feel confident sharing all of your project materials
-with your research articles,
-because you'll know the code will actually run!
-This will allow others to reuse parts of your project in their own research,
-accelerating the pace of discovery.
 
 ## Features
 

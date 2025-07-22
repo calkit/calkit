@@ -17,21 +17,33 @@
   </a>
 </p>
 
-Calkit's mission is to make every scientific study reproducible.
-That is,
-it should be possible to go from raw data to research article
-by "pressing a single button"
-([Claerbout and Karrenbach (1992)](https://doi.org/10.1190/1.1822162)).
+Calkit makes it easy to create
+["single button"](https://doi.org/10.1190/1.1822162)
+reproducible research projects.
+
+Instead of a loosely related collection of files
+and manual instructions,
+turn your project into a version-controlled,
+self-contained "calculation kit,"
+tying together all phases or stages of the project:
+data collection, analysis, visualization, and writing,
+each of which can make use of the latest and greatest computational
+tools and languages.
+In other words, you, your collaborators, and readers will be able to go
+from raw data to research article with a single command,
+improving efficiency via faster iteration cycle time,
+reducing the likelihood of mistakes,
+and allowing others to more effectively build upon your work.
 
 Calkit makes this level of automation possible without extensive software
 engineering expertise by providing a project framework and toolset that unifies
-and simplifies the use of enabling technologies like Git,
+and simplifies the use of powerful enabling technologies like Git,
 DVC, Conda, Docker, and more,
 while guiding users away from common reproducibility pitfalls.
 
 ## Features
 
-- A declarative pipeline that forces users to define an environment
+- A declarative pipeline that guides users to define an environment
   for every stage, so long lists of instructions in a README and
   "but it works on my machine" are things of the past.
 - A CLI to run the project's pipeline to verify it's reproducible,
@@ -98,6 +110,64 @@ calkit config set token ${YOUR_TOKEN_HERE}
 
 ## Quickstart
 
+### From an existing project
+
+If you want to use Calkit with an existing project,
+navigate into its working directory and run:
+
+```sh
+calkit new project --public --cloud .
+```
+
+Note that the `--public` and `--cloud` options can be omitted,
+but you'll need to configure your own DVC remote or use Git to store
+pipeline outputs.
+
+Next, create your [environment(s)](https://docs.calkit.org/environments).
+In this example, imagine we have a `requirements.txt` file we want to use to
+define a uv virtual environment, or venv:
+
+```sh
+calkit new uv-venv --name main --path requirements.txt --python 3.13
+```
+
+If you're using Conda for environment management,
+e.g., with an `environment.yml` file,
+you can use the `calkit new conda-env` command.
+
+Next, we can start building our [pipeline](https://docs.calkit.org/pipeline).
+Let's say we have a Jupyter notebook called `collect-data.ipynb`
+that produces raw data at `data/raw.h5`.
+We can add a pipeline stage to run this notebook in the `main` environment
+we just created with:
+
+```sh
+calkit new jupyter-notebook-stage \
+    --name collect-data \
+    --environment main \
+    --notebook-path collect-data.ipynb \
+    --output data/raw.h5
+```
+
+We can then run the pipeline with:
+
+```sh
+calkit run
+```
+
+and save and back up our results with:
+
+```sh
+calkit save -am "Run pipeline"
+```
+
+After that,
+you can add more environments, pipeline stages,
+[start a publication with LaTeX](https://docs.calkit.org/tutorials/adding-latex-pub-docker/),
+or [link a publication with Overleaf](https://docs.calkit.org/overleaf/).
+
+### Fresh from a Calkit project template
+
 After installing Calkit and setting your token as described above, run:
 
 ```sh
@@ -119,7 +189,7 @@ cd calkit-project-1
 calkit run
 ```
 
-This will reproduce the project's pipeline.
+This will run the project's pipeline.
 Next, you can start adding stages to the pipeline,
 modifying the Python environments and scripts,
 and editing the paper.

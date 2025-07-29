@@ -291,6 +291,7 @@ def check_docker_env(
         typer.echo(f"Lock file ({lock_fpath}) does not exist", file=outfile)
         lock = None
     if inspect and lock:
+        # TODO: Only pull if platform matches in lockfile
         typer.echo(
             "Checking image and Dockerfile against lock file", file=outfile
         )

@@ -1140,6 +1140,14 @@ def run_in_env(
             help="Check the environment in a relaxed way, if applicable.",
         ),
     ] = False,
+    machine_name: Annotated[
+        str | None,
+        typer.Option(
+            "--machine",
+            "-m",
+            help="Machine name on which to run. Defaults to local machine.",
+        ),
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -1487,6 +1495,18 @@ def run_in_env(
             raise_error("Failed to run in MATLAB environment")
     else:
         raise_error("Environment kind not supported")
+
+
+@app.command(name="xm")
+def run_on_machine(
+    machine_name: Annotated[str, typer.Argument(help="Machine name")],
+    env_name: Annotated[
+        str | None,
+        typer.Option("--environment", "-e", help="Environment name."),
+    ] = None,
+):
+    """Run a command on a machine."""
+    pass
 
 
 @app.command(name="runproc", help="Execute a procedure (alias for 'xproc').")

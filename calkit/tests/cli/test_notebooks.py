@@ -6,7 +6,7 @@ import subprocess
 
 
 def test_clean_notebook_outputs(tmp_dir):
-    # Copy in a test notebook and run it
+    # Copy in a test notebook and clean it
     nb_fpath = os.path.join(
         os.path.dirname(__file__), "..", "..", "..", "test", "pipeline.ipynb"
     )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import PurePosixPath
 
 import typer
@@ -30,6 +31,8 @@ def clean_notebook_outputs(path: str):
     fpath_out = os.path.abspath(fpath_out)
     subprocess.call(
         [
+            sys.executable,
+            "-m",
             "jupyter",
             "nbconvert",
             path,

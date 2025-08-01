@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: If you use these files, please cite is using these metadata.
+title: Calkit
+abstract: A project framework and toolkit for 'single button' reproducible
+  research.
+version: v0.26.9
+date-released: "2025-07-31"
+repository-code: https://github.com/calkit/calkit
+authors:
+  - family-names: Bachant
+    given-names: Pete
+  - family-names: McCabe
+    given-names: Rebecca
+identifiers: []

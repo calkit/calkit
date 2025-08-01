@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: If you use these files, please cite is using these metadata.
 title: Calkit
-abstract: A project framework and toolkit for 'single button' reproducible
+abstract: A project framework and toolkit for single button reproducible
   research.
 version: v0.26.9
 date-released: "2025-07-31"
@@ -9,6 +9,32 @@ repository-code: https://github.com/calkit/calkit
 authors:
   - family-names: Bachant
     given-names: Pete
+    orcid:
   - family-names: McCabe
     given-names: Rebecca
-identifiers: []
+    orcid:
+identifiers:
+  - description: "This is the collection of archived snapshots of all versions of My Research Software"
+    type: doi
+    value: 10.5281/zenodo.123456
+  - description: "This is the archived snapshot of version 0.11.2 of My Research Software"
+    type: doi
+    value: 10.5281/zenodo.123457
+license: MIT
+keywords:
+  - reproducible research
+  - reproducibility
+  - open science
+  - project framework
+  - data science
+  - Python
+  - containerization
+references:
+  - authors:
+      - name: "DVC developers"
+    date-released: "2021-07-26"
+    doi: 10.5281/zenodo.x1234567
+    repository-code: "https://github.com/dependency-project/dependency"
+    title: Dependency
+    type: software
+    version: 0.13.4

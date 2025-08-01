@@ -1,6 +1,7 @@
 """Tests for ``calkit.models.pipeline``."""
 
 from calkit.models.pipeline import (
+    JupyterNotebookStage,
     LatexStage,
     PythonScriptStage,
     WordToPdfStage,
@@ -51,3 +52,36 @@ def test_latexstage():
     assert " -silent " not in s.dvc_cmd
     assert "my-paper.tex" in s.dvc_deps
     assert "my-paper.pdf" in s.dvc_outs
+
+
+def test_jupyternotebookstage():
+    def dvc_outs_to_str_list(dvc_stage) -> list[str]:
+        outs = []
+        for out in dvc_stage["outs"]:
+            if isinstance(out, dict):
+                outs.append(list(out.keys())[0])
+            else:
+                outs.append(out)
+        return outs
+
+    s = JupyterNotebookStage(
+        environment="main",
+        notebook_path="something.ipynb",
+        inputs=["file.txt"],
+        html_storage="git",
+    )
+    dvc_stage = s.to_dvc()
+    outs = dvc_outs_to_str_list(dvc_stage)
+    assert s.html_path in outs
+    assert "html" in dvc_stage["cmd"]
+    assert "file.txt" in dvc_stage["deps"]
+    s = JupyterNotebookStage(
+        environment="main",
+        notebook_path="something.ipynb",
+        inputs=["file.txt"],
+        html_storage=None,
+    )
+    dvc_stage = s.to_dvc()
+    outs = dvc_outs_to_str_list(dvc_stage)
+    assert s.html_path not in outs
+    assert "html" not in dvc_stage["cmd"]

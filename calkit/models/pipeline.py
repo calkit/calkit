@@ -306,11 +306,14 @@ class JupyterNotebookStage(Stage):
     def dvc_outs(self) -> list[str | dict]:
         outs = super().dvc_outs
         exec_nb_path = self.executed_notebook_path
-        html_path = self.html_path
-        outs = outs + [
-            {exec_nb_path: {"cache": self.executed_ipynb_storage == "dvc"}},
-            {html_path: {"cache": self.html_storage == "dvc"}},
-        ]
+        outs.append(
+            {exec_nb_path: {"cache": self.executed_ipynb_storage == "dvc"}}
+        )
+        if self.html_storage:
+            html_path = self.html_path
+            outs.append(
+                {html_path: {"cache": self.html_storage == "dvc"}},
+            )
         return outs
 
     @property

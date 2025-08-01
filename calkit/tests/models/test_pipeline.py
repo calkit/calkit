@@ -73,6 +73,7 @@ def test_jupyternotebookstage():
     dvc_stage = s.to_dvc()
     outs = dvc_outs_to_str_list(dvc_stage)
     assert s.html_path in outs
+    assert s.executed_notebook_path in outs
     assert "html" in dvc_stage["cmd"]
     assert "file.txt" in dvc_stage["deps"]
     s = JupyterNotebookStage(
@@ -84,4 +85,5 @@ def test_jupyternotebookstage():
     dvc_stage = s.to_dvc()
     outs = dvc_outs_to_str_list(dvc_stage)
     assert s.html_path not in outs
+    assert s.executed_notebook_path in outs
     assert "html" not in dvc_stage["cmd"]

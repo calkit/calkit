@@ -925,7 +925,11 @@ def run(
     # Get status of Git repo before running
     repo = git.Repo()
     git_rev = repo.head.commit.hexsha
-    git_branch = repo.active_branch.name
+    try:
+        git_branch = repo.active_branch.name
+    except TypeError:
+        # If no branch is checked out, we are in a detached HEAD state
+        git_branch = None
     git_changed_files_before = calkit.git.get_changed_files(repo=repo)
     git_staged_files_before = calkit.git.get_staged_files(repo=repo)
     git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)

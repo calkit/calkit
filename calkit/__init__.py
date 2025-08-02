@@ -1,4 +1,4 @@
-__version__ = "0.26.9"
+__version__ = "0.26.10"
 
 from .core import *  # noqa: F403, I001
 from . import git  # noqa: F401

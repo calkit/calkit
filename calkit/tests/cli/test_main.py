@@ -407,8 +407,18 @@ def test_run(tmp_dir):
             "main",
         ]
     )
+    subprocess.check_call(
+        ["calkit", "save", "-am", "Create pipeline", "--no-push"]
+    )
     out = subprocess.check_output(["calkit", "run"], text=True)
     print(out)
+    subprocess.check_call(
+        ["calkit", "save", "-am", "Run pipeline", "--no-push"]
+    )
+    # Make sure we can run on a detached head
+    repo = git.Repo()
+    repo.git.checkout("HEAD^")
+    out = subprocess.check_output(["calkit", "run"], text=True)
 
 
 def test_stage_run_info_from_log_content():

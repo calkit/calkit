@@ -3,23 +3,28 @@ message: If you use these files, please cite is using these metadata.
 title: Calkit
 abstract: A project framework and toolkit for single button reproducible
   research.
-version: v0.26.9
-date-released: "2025-07-31"
+version: v0.26.10
+date-released: "2025-08-02"
 repository-code: https://github.com/calkit/calkit
 authors:
   - family-names: Bachant
     given-names: Pete
-    orcid:
+    orcid: "0000-0003-4039-6954"
   - family-names: McCabe
     given-names: Rebecca
     orcid:
+  - family-names: Bisht
+    given-names: Mukul
+    orcid:
 identifiers:
-  - description: "This is the collection of archived snapshots of all versions of My Research Software"
+  - description: "All Calkit releases"
     type: doi
-    value: 10.5281/zenodo.123456
-  - description: "This is the archived snapshot of version 0.11.2 of My Research Software"
+    value: 10.5281/zenodo.16710624
+  - description: "Calkit v0.26.10"
     type: doi
-    value: 10.5281/zenodo.123457
+    value: 10.5281/zenodo.16710625
+  - type: swh
+    value: swh:1:dir:50caaf3793cccc64fd9ece2fed488a0110756aff;origin=https://doi.org/10.5281/zenodo.16710624;visit=swh:1:snp:1103646b0c17db58d2485bf2134578b71aec02db;anchor=swh:1:rel:0822fe71a56c06e4097ec9eb128808aeb773e7c2;path=calkit-calkit-c418e8e
 license: MIT
 keywords:
   - reproducible research
@@ -31,10 +36,9 @@ keywords:
   - containerization
 references:
   - authors:
-      - name: "DVC developers"
-    date-released: "2021-07-26"
-    doi: 10.5281/zenodo.x1234567
-    repository-code: "https://github.com/dependency-project/dependency"
-    title: Dependency
+      - name: The DVC team and contributors
+        website: https://github.com/iterative
+    doi: 10.5281/zenodo.15828598
+    repository-code: https://github.com/iterative/dvc
+    title: "DVC: Data Version Control - Git for Data & Models"
     type: software
-    version: 0.13.4

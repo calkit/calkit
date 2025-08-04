@@ -3,8 +3,6 @@ message: If you use these files, please cite is using these metadata.
 title: Calkit
 abstract: A project framework and toolkit for single button reproducible
   research.
-version: v0.26.10
-date-released: "2025-08-02"
 repository-code: https://github.com/calkit/calkit
 authors:
   - family-names: Bachant

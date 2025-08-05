@@ -3,7 +3,7 @@
 The `calkit.yaml` file serves as a small "database"
 for the project's important metadata, which includes its:
 
-- Global or system-level dependencies
+- Global or system-level [dependencies](dependencies.md)
   (applications, libraries, environmental variables)
 - Questions the project seeks to answer
 - [Environments](environments.md)

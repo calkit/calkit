@@ -559,13 +559,14 @@ def check_env_vars(
     for name in env_var_dep_names:
         if verbose:
             typer.echo(f"Checking for environmental variable '{name}'")
-        if name in deps:
-            attrs = deps[name]
-        else:
-            for dep in deps:
-                if isinstance(dep, dict) and "name" in dep:
-                    attrs = dep
-                    break
+        attrs = {}
+        for dep in deps:
+            if isinstance(dep, dict) and "name" in dep:
+                attrs = dep
+                break
+            elif isinstance(dep, dict) and list(dep.keys()) == [name]:
+                attrs = dep[name]
+                break
         if name not in os.environ:
             typer.echo(f"Missing env var '{name}'")
             if "default" in attrs:

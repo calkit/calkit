@@ -1,7 +1,12 @@
 """Tests for ``calkit.cli.check``."""
 
+import os
 import shutil
 import subprocess
+
+import pytest
+
+import calkit
 
 
 def test_check_venv(tmp_dir):
@@ -43,3 +48,27 @@ def test_check_venv(tmp_dir):
     with open("lock.txt") as f:
         lock_txt_3 = f.read()
     assert "polars==1.0.0" in lock_txt_3
+
+
+def test_check_env_vars(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "dependencies": [
+            {"name": "MY_ENV_VAR", "kind": "env-var"},
+            {"name": "MY_APP", "kind": "app"},
+            "something-else",
+            {"MY_OTHER_ENV_VAR": {"kind": "env-var"}},
+        ]
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(
+        ["calkit", "check", "env-vars"],
+        env=os.environ.copy()
+        | {"MY_ENV_VAR": "value1", "MY_OTHER_ENV_VAR": "value2"},
+    )
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(
+            ["calkit", "check", "env-vars"],
+            env=os.environ.copy() | {"MY_ENV_VAR": "value1"},
+        )

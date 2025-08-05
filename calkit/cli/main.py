@@ -526,6 +526,20 @@ def save(
             "--no-push", help="Do not push to Git and DVC after committing."
         ),
     ] = False,
+    git_push_args: Annotated[
+        list[str],
+        typer.Option(
+            "--git-push",
+            help="Additional Git args to pass when pushing.",
+        ),
+    ] = [],
+    dvc_push_args: Annotated[
+        list[str],
+        typer.Option(
+            "--dvc-push",
+            help="Additional DVC args to pass when pushing.",
+        ),
+    ] = [],
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -579,17 +593,27 @@ def save(
     if not no_push:
         if verbose and not any_dvc:
             typer.echo("Not pushing to DVC since no DVC files were staged")
-        push(no_dvc=not any_dvc)
+        push(
+            no_dvc=not any_dvc, git_args=git_push_args, dvc_args=dvc_push_args
+        )
 
 
 @app.command(name="pull")
 def pull(
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
+    git_args: Annotated[
+        list[str],
+        typer.Option("--git-arg", help="Additional Git args."),
+    ] = [],
+    dvc_args: Annotated[
+        list[str],
+        typer.Option("--dvc-arg", help="Additional DVC args."),
+    ] = [],
 ):
     """Pull with both Git and DVC."""
     typer.echo("Git pulling")
     try:
-        subprocess.check_call(["git", "pull"])
+        subprocess.check_call(["git", "pull"] + git_args)
     except subprocess.CalledProcessError:
         raise_error("Git pull failed")
     typer.echo("DVC pulling")
@@ -601,7 +625,7 @@ def pull(
                 typer.echo(f"Checking authentication for DVC remote: {name}")
                 calkit.dvc.set_remote_auth(remote_name=name)
     try:
-        subprocess.check_call([sys.executable, "-m", "dvc", "pull"])
+        subprocess.check_call([sys.executable, "-m", "dvc", "pull"] + dvc_args)
     except subprocess.CalledProcessError:
         raise_error("DVC pull failed")
 
@@ -610,11 +634,19 @@ def pull(
 def push(
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
     no_dvc: Annotated[bool, typer.Option("--no-dvc")] = False,
+    git_args: Annotated[
+        list[str],
+        typer.Option("--git-arg", help="Additional Git args."),
+    ] = [],
+    dvc_args: Annotated[
+        list[str],
+        typer.Option("--dvc-arg", help="Additional DVC args."),
+    ] = [],
 ):
     """Push with both Git and DVC."""
     typer.echo("Pushing to Git remote")
     try:
-        subprocess.check_call(["git", "push"])
+        subprocess.check_call(["git", "push"] + git_args)
     except subprocess.CalledProcessError:
         raise_error("Git push failed")
     if not no_dvc:
@@ -629,7 +661,9 @@ def push(
                     )
                     calkit.dvc.set_remote_auth(remote_name=name)
         try:
-            subprocess.check_call([sys.executable, "-m", "dvc", "push"])
+            subprocess.check_call(
+                [sys.executable, "-m", "dvc", "push"] + dvc_args
+            )
         except subprocess.CalledProcessError:
             raise_error("DVC push failed")
 
@@ -1209,7 +1243,14 @@ def run_in_env(
         ]
         if platform:
             docker_cmd += ["--platform", platform]
-        env_vars = env.get("env-vars", {})
+        env_vars = env.get("env_vars", {})
+        if "env-vars" in env:
+            warn("The 'env-vars' key is deprecated; use 'env_vars' instead.")
+            env_vars.update(env["env-vars"])
+        # Also add any project-level environmental variable dependencies
+        project_env_vars = calkit.get_env_var_dep_names()
+        if project_env_vars:
+            env_vars.update({k: f"${k}" for k in project_env_vars})
         if env_vars:
             for key, value in env_vars.items():
                 if isinstance(value, str):

@@ -312,15 +312,46 @@ def check_system_deps(
     for dep in deps:
         if isinstance(dep, dict):
             keys = list(dep.keys())
-            if len(keys) != 1:
+            # For backwards compatibility, we allow the name to be a single key
+            # or we allow a `name` key to be present
+            if len(keys) != 1 and "name" not in keys:
                 raise ValueError(f"Malformed dependency: {dep}")
-            dep_name = keys[0]
+            if len(keys) == 1:
+                dep_name = keys[0]
+            elif "name" in keys:
+                dep_name = dep["name"]
+            else:
+                raise ValueError(f"Malformed dependency: {dep}")
             dep_kind = dep[dep_name].get("kind", "app")
         else:
             dep_name = re.split("[=<>]", dep)[0]
             dep_kind = "app"
         if not check_dep_exists(dep_name, dep_kind, system_info=system_info):
             raise ValueError(f"{dep_kind} '{dep_name}' not found")
+
+
+def get_env_var_dep_names(ck_info: dict | None = None) -> list[str]:
+    """Get a list of all environment variable names used in the project."""
+    if ck_info is None:
+        ck_info = load_calkit_info()
+    env_vars = []
+    for dep in ck_info.get("dependencies", []):
+        if isinstance(dep, dict):
+            keys = list(dep.keys())
+            # For backwards compatibility, we allow the name to be a single key
+            # or we allow a `name` key to be present
+            if len(keys) != 1 and "name" not in keys:
+                raise ValueError(f"Malformed dependency: {dep}")
+            if len(keys) == 1:
+                dep_kind = dep[keys[0]].get("kind", "app")
+                if dep_kind == "env-var":
+                    env_vars.append(keys[0])
+            elif dep.get("kind") == "env-var":
+                if "name" in keys:
+                    env_vars.append(dep["name"])
+                else:
+                    raise ValueError(f"Malformed dependency: {dep}")
+    return env_vars
 
 
 def project_and_path_from_path(path: str) -> tuple:

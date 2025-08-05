@@ -66,6 +66,9 @@ def execute_notebook(
             "--no-check", help="Do not check environment before executing."
         ),
     ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
+    ] = False,
 ):
     """Execute notebook and place a copy in the relevant directory.
 
@@ -96,7 +99,7 @@ def execute_notebook(
         "--output",
         fname,
     ]
-    run_in_env(cmd=cmd, env_name=env_name, no_check=no_check)
+    run_in_env(cmd=cmd, env_name=env_name, no_check=no_check, verbose=verbose)
     for to_fmt in to:
         if to_fmt != "notebook":
             try:
@@ -122,4 +125,6 @@ def execute_notebook(
                 fname_out,
             ]
             typer.echo(f"Exporting {to_fmt}")
-            run_in_env(cmd=cmd, env_name=env_name, no_check=True)
+            run_in_env(
+                cmd=cmd, env_name=env_name, no_check=True, verbose=verbose
+            )

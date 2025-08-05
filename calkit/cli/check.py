@@ -555,23 +555,17 @@ def check_env_vars(
     dotenv.load_dotenv(dotenv_path=".env")
     ck_info = calkit.load_calkit_info()
     deps = ck_info.get("dependencies", [])
-    env_var_deps = {}
-    for d in deps:
-        if isinstance(d, dict):
-            keys = list(d.keys())
-            if len(keys) > 1:
-                raise_error(
-                    f"Malformed dependency: {d}\n"
-                    "Dependencies with attributes should have a single key "
-                    "(their name)"
-                )
-            name = keys[0]
-            attrs = list(d.values())[0]
-            if attrs.get("kind") == "env-var":
-                env_var_deps[name] = attrs
-    for name, attrs in env_var_deps.items():
+    env_var_dep_names = calkit.get_env_var_dep_names(ck_info)
+    for name in env_var_dep_names:
         if verbose:
             typer.echo(f"Checking for environmental variable '{name}'")
+        if name in deps:
+            attrs = deps[name]
+        else:
+            for dep in deps:
+                if isinstance(dep, dict) and "name" in dep:
+                    attrs = dep
+                    break
         if name not in os.environ:
             typer.echo(f"Missing env var '{name}'")
             if "default" in attrs:

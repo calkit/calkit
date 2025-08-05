@@ -1209,7 +1209,14 @@ def run_in_env(
         ]
         if platform:
             docker_cmd += ["--platform", platform]
-        env_vars = env.get("env-vars", {})
+        env_vars = env.get("env_vars", {})
+        if "env-vars" in env:
+            warn("The 'env-vars' key is deprecated; use 'env_vars' instead.")
+            env_vars.update(env["env-vars"])
+        # Also add any project-level environmental variable dependencies
+        project_env_vars = calkit.get_env_var_dep_names()
+        if project_env_vars:
+            env_vars.update({k: f"${k}" for k in project_env_vars})
         if env_vars:
             for key, value in env_vars.items():
                 if isinstance(value, str):

@@ -63,3 +63,18 @@ def test_load_calkit_info(tmp_dir):
     ck_info = calkit.load_calkit_info(process_includes=True)
     assert ck_info["environments"]["env1"]["image"] == "ubuntu"
     assert ck_info["environments"]["env2"]["image"] == "openfoam"
+
+
+def test_get_env_var_dep_names():
+    ck_info = {
+        "dependencies": [
+            {"name": "MY_ENV_VAR", "kind": "env-var"},
+            {"name": "MY_APP", "kind": "app"},
+            "something-else",
+            {"MY_OTHER_ENV_VAR": {"kind": "env-var"}},
+        ]
+    }
+    assert calkit.get_env_var_dep_names(ck_info) == [
+        "MY_ENV_VAR",
+        "MY_OTHER_ENV_VAR",
+    ]

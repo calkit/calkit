@@ -393,8 +393,14 @@ def add(
             for dvc_uncommitted in dvc_status["uncommitted"].get(
                 "modified", []
             ):
-                typer.echo(f"Adding {dvc_uncommitted} to DVC")
-                dvc_repo.commit(dvc_uncommitted, force=True)
+                if os.path.exists(dvc_uncommitted):
+                    typer.echo(f"Adding {dvc_uncommitted} to DVC")
+                    dvc_repo.commit(dvc_uncommitted, force=True)
+                else:
+                    warn(
+                        f"DVC uncommitted '{dvc_uncommitted}' does not exist; "
+                        "skipping"
+                    )
             if not disable_auto_ignore:
                 for untracked_file in untracked_git_files:
                     if (

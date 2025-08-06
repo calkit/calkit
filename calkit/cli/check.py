@@ -555,11 +555,12 @@ def check_dependencies(
     correctly.
     """
     typer.echo("Checking project dependencies")
+    dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     try:
         calkit.check_system_deps()
     except Exception as e:
         raise_error(str(e))
-    message = "✅ All system-level dependencies are set up correctly!"
+    message = "✅ All set!"
     typer.echo(message.encode("utf-8", errors="replace"))
 
 

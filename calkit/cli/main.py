@@ -380,7 +380,12 @@ def add(
         else:
             commit_message = f"Add {paths[0]}"
     if to is not None:
-        subprocess.call([to, "add"] + paths)
+        if to == "git":
+            subprocess.call(["git", "add"] + paths)
+        elif to == "dvc":
+            subprocess.call([sys.executable, "-m", "dvc", "add"] + paths)
+        else:
+            raise_error(f"Invalid option for 'to': {to}")
     else:
         if "." in paths:
             paths.remove(".")

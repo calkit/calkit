@@ -322,6 +322,7 @@ def test_add(tmp_dir):
         f.write(os.urandom(2_000_000))
     subprocess.check_call(["calkit", "add", "data2", "-M"])
     assert repo.head.commit.message.strip() == "Add data2"
+    subprocess.check_call(["calkit", "add", "--to", "dvc", "large.bin"])
 
 
 def test_status(tmp_dir):

@@ -380,7 +380,12 @@ def add(
         else:
             commit_message = f"Add {paths[0]}"
     if to is not None:
-        subprocess.call([to, "add"] + paths)
+        if to == "git":
+            subprocess.call(["git", "add"] + paths)
+        elif to == "dvc":
+            subprocess.call([sys.executable, "-m", "dvc", "add"] + paths)
+        else:
+            raise_error(f"Invalid option for 'to': {to}")
     else:
         if "." in paths:
             paths.remove(".")
@@ -388,8 +393,14 @@ def add(
             for dvc_uncommitted in dvc_status["uncommitted"].get(
                 "modified", []
             ):
-                typer.echo(f"Adding {dvc_uncommitted} to DVC")
-                dvc_repo.commit(dvc_uncommitted, force=True)
+                if os.path.exists(dvc_uncommitted):
+                    typer.echo(f"Adding {dvc_uncommitted} to DVC")
+                    dvc_repo.commit(dvc_uncommitted, force=True)
+                else:
+                    warn(
+                        f"DVC uncommitted '{dvc_uncommitted}' does not exist; "
+                        "skipping"
+                    )
             if not disable_auto_ignore:
                 for untracked_file in untracked_git_files:
                     if (

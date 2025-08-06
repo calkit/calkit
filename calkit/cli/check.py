@@ -544,6 +544,26 @@ def check_matlab_env(
     )
 
 
+@check_app.command(name="dependencies")
+@check_app.command(name="deps")
+def check_dependencies(
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output")
+    ] = False,
+):
+    """Check that a project's system-level dependencies are set up
+    correctly.
+    """
+    typer.echo("Checking project dependencies")
+    dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    try:
+        calkit.check_system_deps()
+    except Exception as e:
+        raise_error(str(e))
+    message = "✅ All set!"
+    typer.echo(message.encode("utf-8", errors="replace"))
+
+
 @check_app.command(name="env-vars")
 def check_env_vars(
     verbose: Annotated[

@@ -318,11 +318,12 @@ def check_system_deps(
                 raise ValueError(f"Malformed dependency: {dep}")
             if len(keys) == 1:
                 dep_name = keys[0]
+                dep_kind = dep[dep_name].get("kind", "app")
             elif "name" in keys:
                 dep_name = dep["name"]
+                dep_kind = dep.get("kind", "app")
             else:
                 raise ValueError(f"Malformed dependency: {dep}")
-            dep_kind = dep[dep_name].get("kind", "app")
         else:
             dep_name = re.split("[=<>]", dep)[0]
             dep_kind = "app"

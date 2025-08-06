@@ -4,6 +4,7 @@ import os
 import subprocess
 
 import git
+import pytest
 
 import calkit
 
@@ -78,3 +79,21 @@ def test_get_env_var_dep_names():
         "MY_ENV_VAR",
         "MY_OTHER_ENV_VAR",
     ]
+
+
+def test_check_system_deps(tmp_dir):
+    ck_info = {
+        "dependencies": [
+            "uv",
+            {"kind": "env-var", "name": "MY_ENV_VAR"},
+            {"MY_ENV_VAR2": {"kind": "env-var"}},
+        ]
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(
+        ["calkit", "check", "dependencies"],
+        env=os.environ.copy() | {"MY_ENV_VAR": "5", "MY_ENV_VAR2": "55"},
+    )
+    with pytest.raises(ValueError):
+        calkit.check_system_deps()

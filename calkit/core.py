@@ -488,7 +488,7 @@ def detect_project_name(
     if name is not None and not prepend_owner:
         return name
     owner = ck_info.get("owner")
-    if name is None and owner is None:
+    if name is None or owner is None:
         try:
             url = Repo(path=wdir).remote().url
         except ValueError:

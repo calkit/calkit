@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import PurePosixPath
 
+import papermill
 import typer
 from typing_extensions import Annotated
 
@@ -79,27 +80,34 @@ def execute_notebook(
 
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
-    # First, always execute the notebook and save as ipynb
+    # First, ensure the specified environment has a kernel we can use
+    project_name = calkit.detect_project_name()
+    kernel_name = calkit.to_kebab_case(f"{project_name}-{env_name}")
+    cmd = [
+        "python",
+        "-m",
+        "ipykernel",
+        "install",
+        "--user",
+        "--name",
+        kernel_name,
+        "--display-name",
+        f"{project_name}: {env_name}",
+    ]
+    run_in_env(cmd=cmd, env_name=env_name, no_check=no_check, verbose=verbose)
+    # Next, always execute the notebook and save as ipynb
     fpath_out_exec = calkit.notebooks.get_executed_notebook_path(
         notebook_path=path, to="notebook", as_posix=True
     )
     folder = os.path.dirname(fpath_out_exec)
     os.makedirs(folder, exist_ok=True)
-    fname = os.path.basename(fpath_out_exec)
     fpath_out_exec = PurePosixPath(fpath_out_exec).as_posix()
-    cmd = [
-        "jupyter",
-        "nbconvert",
-        path,
-        "--execute",
-        "--to",
-        "notebook",
-        "--output-dir",
-        PurePosixPath(folder).as_posix(),
-        "--output",
-        fname,
-    ]
-    run_in_env(cmd=cmd, env_name=env_name, no_check=no_check, verbose=verbose)
+    papermill.execute_notebook(
+        input_path=path,
+        output_path=fpath_out_exec,
+        kernel_name=kernel_name,
+        log_output=True,
+    )
     for to_fmt in to:
         if to_fmt != "notebook":
             try:
@@ -114,6 +122,8 @@ def execute_notebook(
             fname_out = os.path.basename(fpath_out)
             # Now convert without executing or checking the environment
             cmd = [
+                sys.executable,
+                "-m",
                 "jupyter",
                 "nbconvert",
                 fpath_out_exec,

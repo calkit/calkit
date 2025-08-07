@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Discriminator
 from typing_extensions import Annotated
@@ -273,6 +273,7 @@ class JupyterNotebookStage(Stage):
     cleaned_ipynb_storage: Literal["git", "dvc"] | None = "git"
     executed_ipynb_storage: Literal["git", "dvc"] | None = "dvc"
     html_storage: Literal["git", "dvc"] | None = "dvc"
+    parameters: dict[str, Any] = {}
 
     @property
     def cleaned_notebook_path(self) -> str:
@@ -299,6 +300,8 @@ class JupyterNotebookStage(Stage):
         cmd = f"calkit nb execute --environment {self.environment} --no-check"
         if self.html_storage:
             cmd += " --to html"
+        for k, v in self.parameters.items():
+            cmd += f" -p {k}={v}"
         cmd += f' "{self.notebook_path}"'
         return cmd
 

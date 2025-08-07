@@ -219,6 +219,62 @@ def test_to_dvc_notebook_stage():
             found_html = True
             assert out[p]["cache"]
     assert found_html
+    # Test we can use parameters and iterations in notebook stages
+    ck_info = {
+        "parameters": {
+            "param1": [{"range": {"start": 5, "stop": 23, "step": 2}}],
+            "param2": ["s", "m", "l"],
+            "param3": [
+                {"range": {"start": 0.1, "stop": 1.1, "step": 0.11}},
+                55,
+                "something",
+            ],
+        },
+        "pipeline": {
+            "stages": {
+                "notebook-1": {
+                    "kind": "jupyter-notebook",
+                    "environment": "something",
+                    "notebook_path": nb_path,
+                    "outputs": [
+                        "figures/fig1.png",
+                    ],
+                    "html_storage": "dvc",
+                    "cleaned_ipynb_storage": "git",
+                    "executed_ipynb_storage": None,
+                    "parameters": {
+                        "param1": "{param1}",
+                        "param2": "{param2}",
+                        "param3": "{param3}",
+                    },
+                    "iterate_over": [
+                        {
+                            "arg_name": "param1",
+                            "values": [{"parameter": "param1"}],
+                        },
+                        {
+                            "arg_name": "param2",
+                            "values": [{"parameter": "param2"}],
+                        },
+                        {
+                            "arg_name": "param3",
+                            "values": [{"parameter": "param3"}],
+                        },
+                    ],
+                },
+            }
+        },
+    }
+    dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    print(dvc_stages)
+    stage = dvc_stages["notebook-1"]
+    assert stage["cmd"].startswith("calkit nb execute")
+    assert " -p param1=${item.param1} " in stage["cmd"]
+    assert " -p param2=${item.param2} " in stage["cmd"]
+    assert " -p param3=${item.param3} " in stage["cmd"]
+    assert stage["matrix"]["param1"][0] == 5.0
+    assert "m" in stage["matrix"]["param2"]
+    assert "something" in stage["matrix"]["param3"]
 
 
 def test_remove_stage(tmp_dir):

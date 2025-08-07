@@ -87,3 +87,18 @@ def test_jupyternotebookstage():
     assert s.html_path not in outs
     assert s.executed_notebook_path in outs
     assert "html" not in dvc_stage["cmd"]
+    # Test with parameters
+    s = JupyterNotebookStage(
+        environment="main",
+        notebook_path="something.ipynb",
+        inputs=["file.txt"],
+        html_storage=None,
+        parameters={"param1": "value1", "param2": "value2"},
+    )
+    dvc_stage = s.to_dvc()
+    outs = dvc_outs_to_str_list(dvc_stage)
+    assert s.html_path not in outs
+    assert s.executed_notebook_path in outs
+    assert "html" not in dvc_stage["cmd"]
+    assert " -p param1=value1 " in dvc_stage["cmd"]
+    assert " -p param2=value2 " in dvc_stage["cmd"]

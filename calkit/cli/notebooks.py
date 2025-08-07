@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 from pathlib import PurePosixPath
+from typing import Any
 
 import papermill
 import typer
@@ -46,6 +47,30 @@ def clean_notebook_outputs(path: str):
     )
 
 
+def _parse_params(params: list[str]) -> dict[str, Any]:
+    """Parse parameters from command line arguments."""
+    parameters = {}
+    for param in params:
+        if "=" not in param:
+            raise ValueError(f"Parameter must be in key=value format: {param}")
+        key, value = param.split("=", 1)
+        # Try to convert to appropriate types
+        try:
+            if "." in value:
+                parameters[key] = float(value)
+            elif value.isdigit() or (
+                value.startswith("-") and value[1:].isdigit()
+            ):
+                parameters[key] = int(value)
+            elif value.lower() in ("true", "false"):
+                parameters[key] = value.lower() == "true"
+            else:
+                parameters[key] = value
+        except ValueError:
+            parameters[key] = value
+    return parameters
+
+
 @notebooks_app.command("execute")
 def execute_notebook(
     path: str,
@@ -67,6 +92,14 @@ def execute_notebook(
             "--no-check", help="Do not check environment before executing."
         ),
     ] = False,
+    params: Annotated[
+        list[str],
+        typer.Option(
+            "--param",
+            "-p",
+            help="Parameter to pass to the notebook in key=value format.",
+        ),
+    ] = [],
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -102,11 +135,19 @@ def execute_notebook(
     folder = os.path.dirname(fpath_out_exec)
     os.makedirs(folder, exist_ok=True)
     fpath_out_exec = PurePosixPath(fpath_out_exec).as_posix()
+    if params:
+        try:
+            parsed_params = _parse_params(params)
+        except ValueError as e:
+            raise_error(str(e))
+    else:
+        parsed_params = {}
     papermill.execute_notebook(
         input_path=path,
         output_path=fpath_out_exec,
         kernel_name=kernel_name,
         log_output=True,
+        parameters=parsed_params,
     )
     for to_fmt in to:
         if to_fmt != "notebook":

@@ -48,6 +48,8 @@ class Stage(BaseModel):
         "shell-script",
         "jupyter-notebook",
         "r-script",
+        "julia-script",
+        "word-to-pdf",
     ]
     environment: str
     wdir: str | None = None
@@ -246,6 +248,20 @@ class RScriptStage(Stage):
         for arg in self.args:
             cmd += f" {arg}"
         return cmd
+
+
+class JuliaScriptStage(Stage):
+    kind: Literal["julia-script"] = "julia-script"
+    script_path: str
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f'{self.xenv_cmd} -- include("{self.script_path}")'
+        return cmd
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.script_path] + super().dvc_deps
 
 
 class JupyterNotebookStage(Stage):

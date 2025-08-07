@@ -114,7 +114,7 @@ def execute_notebook(
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
     # First, ensure the specified environment has a kernel we can use
-    project_name = calkit.detect_project_name()
+    project_name = calkit.detect_project_name(prepend_owner=False)
     kernel_name = calkit.to_kebab_case(f"{project_name}-{env_name}")
     cmd = [
         "python",

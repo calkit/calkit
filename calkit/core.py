@@ -479,12 +479,16 @@ def get_latest_project_status(wdir: str | None = None) -> ProjectStatus | None:
         return statuses[-1]  # type: ignore
 
 
-def detect_project_name(wdir: str | None = None) -> str:
+def detect_project_name(
+    wdir: str | None = None, prepend_owner: bool = True
+) -> str:
     """Detect a Calkit project owner and name."""
     ck_info = load_calkit_info(wdir=wdir)
     name = ck_info.get("name")
+    if name is not None and not prepend_owner:
+        return name
     owner = ck_info.get("owner")
-    if name is None or owner is None:
+    if name is None and owner is None:
         try:
             url = Repo(path=wdir).remote().url
         except ValueError:
@@ -495,7 +499,9 @@ def detect_project_name(wdir: str | None = None) -> str:
         name = project_name
     if owner is None:
         owner = owner_name
-    return f"{owner}/{name}"
+    if prepend_owner:
+        return f"{owner}/{name}"
+    return name
 
 
 def get_dep_version(dep_name: str) -> str | None:

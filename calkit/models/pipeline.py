@@ -256,7 +256,7 @@ class JuliaScriptStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f'{self.xenv_cmd} -- include("{self.script_path}")'
+        cmd = f'{self.xenv_cmd} -- "include(\\"{self.script_path}\\")"'
         return cmd
 
     @property
@@ -421,6 +421,7 @@ class Pipeline(BaseModel):
                 | RScriptStage
                 | WordToPdfStage
                 | JupyterNotebookStage
+                | JuliaScriptStage
             ),
             Discriminator("kind"),
         ],

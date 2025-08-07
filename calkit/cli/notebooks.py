@@ -174,12 +174,14 @@ def execute_notebook(
     )
     folder = os.path.dirname(fpath_out_exec)
     os.makedirs(folder, exist_ok=True)
+    notebook_dir = os.path.dirname(path) or None
     papermill.execute_notebook(
         input_path=path,
         output_path=fpath_out_exec,
         kernel_name=kernel_name,
         log_output=True,
         parameters=parsed_params,
+        cwd=notebook_dir,
     )
     for to_fmt in to:
         if to_fmt != "notebook":

@@ -71,6 +71,46 @@ def _parse_params(params: list[str]) -> dict[str, Any]:
     return parameters
 
 
+@notebooks_app.command("check-env-kernel")
+def check_env_kernel(
+    env_name: Annotated[
+        str,
+        typer.Option(
+            "--environment",
+            "-e",
+            help="Environment name in which to run the notebook.",
+        ),
+    ],
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check", help="Do not check environment before executing."
+        ),
+    ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
+    ] = False,
+):
+    """Check that an environment has a registered kernel."""
+    from calkit.cli.main import run_in_env
+
+    project_name = calkit.detect_project_name(prepend_owner=False)
+    kernel_name = calkit.to_kebab_case(f"{project_name}-{env_name}")
+    cmd = [
+        "python",
+        "-m",
+        "ipykernel",
+        "install",
+        "--user",
+        "--name",
+        kernel_name,
+        "--display-name",
+        f"{project_name}: {env_name}",
+    ]
+    run_in_env(cmd=cmd, env_name=env_name, no_check=no_check, verbose=verbose)
+    return kernel_name
+
+
 @notebooks_app.command("execute")
 def execute_notebook(
     path: str,
@@ -114,20 +154,9 @@ def execute_notebook(
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
     # First, ensure the specified environment has a kernel we can use
-    project_name = calkit.detect_project_name(prepend_owner=False)
-    kernel_name = calkit.to_kebab_case(f"{project_name}-{env_name}")
-    cmd = [
-        "python",
-        "-m",
-        "ipykernel",
-        "install",
-        "--user",
-        "--name",
-        kernel_name,
-        "--display-name",
-        f"{project_name}: {env_name}",
-    ]
-    run_in_env(cmd=cmd, env_name=env_name, no_check=no_check, verbose=verbose)
+    kernel_name = check_env_kernel(
+        env_name=env_name, no_check=no_check, verbose=verbose
+    )
     # Next, always execute the notebook and save as ipynb
     fpath_out_exec = calkit.notebooks.get_executed_notebook_path(
         notebook_path=path, to="notebook", as_posix=True

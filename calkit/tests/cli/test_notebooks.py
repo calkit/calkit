@@ -12,3 +12,29 @@ def test_clean_notebook_outputs(tmp_dir):
     )
     shutil.copy(nb_fpath, "notebook.ipynb")
     subprocess.check_call(["calkit", "nb", "clean", "notebook.ipynb"])
+
+
+def test_execute_notebook(tmp_dir):
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "project",
+            ".",
+            "-n",
+            "cool-project",
+            "--title",
+            "Cool project",
+        ]
+    )
+    subprocess.check_call(
+        ["calkit", "new", "uv-venv", "-n", "main", "ipykernel"]
+    )
+    nb_fpath = os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "test", "nb-subdir.ipynb"
+    )
+    os.makedirs("notebooks/results")
+    shutil.copy(nb_fpath, "notebooks/main.ipynb")
+    subprocess.check_call(
+        ["calkit", "nb", "execute", "notebooks/main.ipynb", "-e", "main"]
+    )

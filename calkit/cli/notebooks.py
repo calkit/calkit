@@ -157,13 +157,7 @@ def execute_notebook(
     kernel_name = check_env_kernel(
         env_name=env_name, no_check=no_check, verbose=verbose
     )
-    # Next, always execute the notebook and save as ipynb
-    fpath_out_exec = calkit.notebooks.get_executed_notebook_path(
-        notebook_path=path, to="notebook", as_posix=True
-    )
-    folder = os.path.dirname(fpath_out_exec)
-    os.makedirs(folder, exist_ok=True)
-    fpath_out_exec = PurePosixPath(fpath_out_exec).as_posix()
+    # Parse parameters
     if params:
         try:
             parsed_params = _parse_params(params)
@@ -171,6 +165,15 @@ def execute_notebook(
             raise_error(str(e))
     else:
         parsed_params = {}
+    # Next, always execute the notebook and save as ipynb
+    fpath_out_exec = calkit.notebooks.get_executed_notebook_path(
+        notebook_path=path,
+        to="notebook",
+        as_posix=True,
+        parameters=parsed_params,
+    )
+    folder = os.path.dirname(fpath_out_exec)
+    os.makedirs(folder, exist_ok=True)
     papermill.execute_notebook(
         input_path=path,
         output_path=fpath_out_exec,
@@ -184,6 +187,7 @@ def execute_notebook(
                 fpath_out = calkit.notebooks.get_executed_notebook_path(
                     notebook_path=path,
                     to=to_fmt,  # type: ignore
+                    parameters=parsed_params,
                 )
             except ValueError:
                 raise_error(f"Invalid output format: '{to}'")

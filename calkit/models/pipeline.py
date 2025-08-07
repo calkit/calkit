@@ -282,13 +282,19 @@ class JupyterNotebookStage(Stage):
     @property
     def executed_notebook_path(self) -> str:
         return get_executed_notebook_path(
-            self.notebook_path, to="notebook", as_posix=True
+            self.notebook_path,
+            to="notebook",
+            as_posix=True,
+            parameters=self.parameters,
         )
 
     @property
     def html_path(self) -> str:
         return get_executed_notebook_path(
-            self.notebook_path, to="html", as_posix=True
+            self.notebook_path,
+            to="html",
+            as_posix=True,
+            parameters=self.parameters,
         )
 
     @property

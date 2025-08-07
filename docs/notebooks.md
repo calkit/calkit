@@ -236,3 +236,90 @@ about that cell's code or environment has changed.
 
 For a more in-depth look at using the `%%stage` cell magic,
 see [this tutorial](tutorials/notebook-pipeline.md).
+
+## Parameterizing notebooks
+
+Thanks to [Papermill](https://github.com/nteract/papermill),
+Calkit can run notebooks that have been parameterized,
+and executed versions will be saved with parameters in their names.
+To parameterize a notebook,
+first add a cell with the "parameters" tag and add your parameters there
+as variable declarations, e.g.,
+
+```python
+param1 = 5
+param2 = "something"
+```
+
+In JupyterLab, you can use the property inspector to edit cell tags:
+
+![JupyterLab property inspector](img/jupyterlab-params.png)
+
+In VS Code, the cell context menu can be used to mark the cell as parameters:
+
+![VS Code context menu for marking parameters cell](img/vscode-nb-params.png)
+
+Then, in the Calkit pipeline, add `parameters` to the notebook stage:
+
+```yaml
+# In calkit.yaml
+environments:
+  main:
+    kind: uv-venv
+    path: requirements.txt
+    prefix: .venv
+    python: "3.13"
+pipeline:
+  stages:
+    notebook-56-a:
+      kind: jupyter-notebook
+      notebook_path: notebook.ipynb
+      environment: main
+      parameters:
+        param1: 56
+        param2: a
+    notebook-58-b:
+      kind: jupyter-notebook
+      notebook_path: notebook.ipynb
+      environment: main
+      parameters:
+        param1: 58
+        param2: b
+```
+
+### Iterating over parameterized notebooks
+
+The example below shows project-level parameters used to iterate over a
+notebook stage:
+
+```yaml
+parameters:
+  param1:
+    - range:
+        start: 0
+        stop: 10
+        step: 2
+  param2:
+    - random-forest
+    - lightgbm
+pipeline:
+  stages:
+    my-notebook-with-params:
+      kind: jupyter-notebook
+      environment: my-env
+      notebook_path: notebook.ipynb
+      iterate_over:
+        - arg_name: param1
+          values:
+            - parameter: param1 # Args and params can be named differently
+        - arg_name: param2
+          values:
+            - parameter: param2
+      parameters:
+        param1: "{param1}" # Notebook params can also be named differently
+        param2: "{param2}"
+      outputs:
+        - results/param1={param1}/param2={param2}/results.csv
+```
+
+For more information, see [pipeline iteration](/pipeline#iteration).

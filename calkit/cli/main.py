@@ -1790,3 +1790,20 @@ def call_dvc(
     """
     process = subprocess.run([sys.executable, "-m", "dvc"] + sys.argv[2:])
     sys.exit(process.returncode)
+
+
+@app.command(
+    name="jupyter",
+    add_help_option=False,
+    context_settings={
+        "ignore_unknown_options": True,
+        "allow_extra_args": True,
+    },
+)
+def run_jupyter(
+    ctx: typer.Context,
+    help: Annotated[bool, typer.Option("-h", "--help")] = False,
+):
+    """Run a command with the Jupyter CLI."""
+    process = subprocess.run([sys.executable, "-m", "jupyter"] + sys.argv[2:])
+    sys.exit(process.returncode)

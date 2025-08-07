@@ -570,7 +570,6 @@ def check_matlab_env(
     )
 
 
-@check_app.command(name="julia-env")
 @check_app.command(name="dependencies")
 @check_app.command(name="deps")
 def check_dependencies(

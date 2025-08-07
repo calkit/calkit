@@ -470,6 +470,7 @@ dependencies = [
     { name = "dvc" },
     { name = "fastapi" },
     { name = "gitpython" },
+    { name = "jupyterlab" },
     { name = "keyring" },
     { name = "nbconvert" },
     { name = "papermill" },
@@ -523,6 +524,7 @@ requires-dist = [
     { name = "dvc", specifier = "==3.61.0" },
     { name = "fastapi" },
     { name = "gitpython" },
+    { name = "jupyterlab", specifier = ">=4.4.5" },
     { name = "keyring" },
     { name = "nbconvert" },
     { name = "pandas", marker = "extra == 'data'", specifier = ">=2.2.3" },
@@ -1634,7 +1636,7 @@ name = "importlib-metadata"
 version = "8.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "zipp" },
+    { name = "zipp", marker = "python_full_version < '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/76/66/650a33bd90f786193e4de4b3ad86ea60b53c89b669a5c7be931fac31cdb0/importlib_metadata-8.7.0.tar.gz", hash = "sha256:d13b81ad223b890aa16c5471f2ac3056cf76c5f10f82d6f9292f0b415f389000", size = 56641, upload-time = "2025-04-27T15:29:01.736Z" }
 wheels = [

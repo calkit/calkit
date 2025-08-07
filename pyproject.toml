@@ -33,6 +33,7 @@ dependencies = [
   "tqdm>=4.67.1",
   "psutil>=7.0.0",
   "papermill>=2.6.0",
+  "jupyterlab>=4.4.5",
 ]
 description = "Reproducibility simplified."
 dynamic = ["version"]

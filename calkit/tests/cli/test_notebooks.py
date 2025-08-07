@@ -38,3 +38,10 @@ def test_execute_notebook(tmp_dir):
     subprocess.check_call(
         ["calkit", "nb", "execute", "notebooks/main.ipynb", "-e", "main"]
     )
+    assert os.path.isfile("notebooks/results/something.txt")
+    os.makedirs("results")
+    shutil.copy("notebooks/main.ipynb", "main.ipynb")
+    subprocess.check_call(
+        ["calkit", "nb", "execute", "main.ipynb", "-e", "main"]
+    )
+    assert os.path.isfile("results/something.txt")

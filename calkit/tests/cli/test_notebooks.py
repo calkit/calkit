@@ -1,8 +1,11 @@
 """Tests for ``calkit.cli.notebooks``."""
 
+import json
 import os
 import shutil
 import subprocess
+
+import calkit
 
 
 def test_clean_notebook_outputs(tmp_dir):
@@ -45,3 +48,80 @@ def test_execute_notebook(tmp_dir):
         ["calkit", "nb", "execute", "main.ipynb", "-e", "main"]
     )
     assert os.path.isfile("results/something.txt")
+    # Test we can execute with parameters
+    nb_fpath = os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "test", "nb-params.ipynb"
+    )
+    shutil.copy(nb_fpath, "nb-params.ipynb")
+    params = {
+        "my_value": 5,
+        "my_list": [1, 2, 3],
+        "my_dict": {"something": 55.5, "else": "b"},
+    }
+    subprocess.check_call(
+        [
+            "calkit",
+            "nb",
+            "execute",
+            "main.ipynb",
+            "-e",
+            "main",
+            "--params-json",
+            json.dumps(params),
+            "--verbose",
+        ]
+    )
+    with open("params-out.json") as f:
+        params_out = json.load(f)
+    assert params_out["my_value"] == params["my_value"]
+    assert params_out["my_list"] == params["my_list"]
+    assert params_out["my_dict"] == params["my_dict"]
+    # Test we can execute in the pipeline with params
+    pipeline = {
+        "stages": {
+            "nb-params": {
+                "kind": "jupyter-notebook",
+                "notebook_path": "nb-params.ipynb",
+                "environment": "main",
+                "parameters": params,
+                "html_storage": None,
+            }
+        }
+    }
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = pipeline
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
+    with open("params-out.json") as f:
+        params_out = json.load(f)
+    assert params_out["my_value"] == params["my_value"]
+    assert params_out["my_list"] == params["my_list"]
+    assert params_out["my_dict"] == params["my_dict"]
+    # Test we can patch in a range iteration from project parameters
+    project_params = {
+        "my_range": {"range": {"start": 1, "stop": 6, "step": 1}}
+    }
+    pipeline = {
+        "stages": {
+            "nb-params": {
+                "kind": "jupyter-notebook",
+                "notebook_path": "nb-params.ipynb",
+                "environment": "main",
+                "parameters": params | {"my_list": "{my_range}"},
+                "html_storage": None,
+            }
+        }
+    }
+    ck_info = calkit.load_calkit_info()
+    ck_info["parameters"] = project_params
+    ck_info["pipeline"] = pipeline
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    os.remove("params-out.json")
+    subprocess.check_call(["calkit", "run"])
+    with open("params-out.json") as f:
+        params_out = json.load(f)
+    assert params_out["my_value"] == params["my_value"]
+    assert params_out["my_list"] == list(range(1, 6))
+    assert params_out["my_dict"] == params["my_dict"]

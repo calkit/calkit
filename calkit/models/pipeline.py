@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
@@ -275,6 +276,27 @@ class JupyterNotebookStage(Stage):
     html_storage: Literal["git", "dvc"] | None = "dvc"
     parameters: dict[str, Any] = {}
 
+    def update_parameters(self, params: dict) -> None:
+        """If we have any templated parameters, update those, e.g., from
+        project-level parameters.
+
+        This needs to happen before writing a DVC stage, so we can properly
+        create JSON for the notebook.
+        """
+        updated_params = {}
+        for k, v in self.parameters.items():
+            # If we have something like {var_name} in v, replace it with the
+            # value from params
+            if isinstance(v, str) and v.startswith("{") and v.endswith("}"):
+                var_name = v[1:-1]
+                if var_name in params:
+                    updated_params[k] = params[var_name]
+                else:
+                    updated_params[k] = v
+            else:
+                updated_params[k] = v
+        self.parameters = updated_params
+
     @property
     def cleaned_notebook_path(self) -> str:
         return get_cleaned_notebook_path(self.notebook_path, as_posix=True)
@@ -306,8 +328,15 @@ class JupyterNotebookStage(Stage):
         cmd = f"calkit nb execute --environment {self.environment} --no-check"
         if self.html_storage:
             cmd += " --to html"
-        for k, v in self.parameters.items():
-            cmd += f" -p {k}={v}"
+        if self.parameters:
+            # If we have parameters, we need to pass them as JSON, escaping
+            # double quotes
+            params_json = json.dumps(self.parameters)
+            params_json = params_json.replace('"', '\\"')
+            # We also need to double up braces, since string formatting will
+            # be applied to patch iteration parameters into the command
+            params_json = params_json.replace("{", "{{").replace("}", "}}")
+            cmd += f' --params-json="{params_json}"'
         cmd += f' "{self.notebook_path}"'
         return cmd
 

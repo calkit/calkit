@@ -625,7 +625,7 @@ def pull(
         typer.Option(
             "--force",
             "-f",
-            help="Force pull even if there are uncommitted changes.",
+            help="Force pull, potentially overwriting local changes.",
         ),
     ] = False,
 ):

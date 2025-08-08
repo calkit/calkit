@@ -16,10 +16,19 @@ class RangeIteration(BaseModel):
 
     @property
     def values(self) -> list[int | float]:
+        # Determine precision from inputs
+        def get_decimal_places(num):
+            return len(str(num).split(".")[-1]) if "." in str(num) else 0
+
+        max_precision = max(
+            get_decimal_places(self.range.start),
+            get_decimal_places(self.range.stop),
+            get_decimal_places(self.range.step),
+        )
         vals = []
         current = self.range.start
         while current < self.range.stop:
-            vals.append(current)
+            vals.append(round(current, max_precision))
             current += self.range.step
         return vals
 

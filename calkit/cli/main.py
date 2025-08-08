@@ -621,9 +621,22 @@ def pull(
         list[str],
         typer.Option("--dvc-arg", help="Additional DVC args."),
     ] = [],
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Force pull, potentially overwriting local changes.",
+        ),
+    ] = False,
 ):
     """Pull with both Git and DVC."""
     typer.echo("Git pulling")
+    if force:
+        if "-f" not in git_args and "--force" not in git_args:
+            git_args.append("-f")
+        if "-f" not in dvc_args and "--force" not in dvc_args:
+            dvc_args.append("-f")
     try:
         subprocess.check_call(["git", "pull"] + git_args)
     except subprocess.CalledProcessError:

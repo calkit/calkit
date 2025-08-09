@@ -32,7 +32,10 @@ while guiding users away from common reproducibility pitfalls.
 - A CLI to run the project's pipeline to verify it's reproducible,
   regenerating outputs as needed and
   ensuring all
-  computational environments (e.g., [Conda](https://docs.conda.io/en/latest/), [Docker](https://docker.com)) match their specification.
+  computational environments
+  (e.g., [Conda](https://docs.conda.io/en/latest/),
+  [Docker](https://docker.com), uv, Julia)
+  match their specification.
 - A schema to store structured metadata describing the
   project's important outputs (in its `calkit.yaml` file)
   and how they are created

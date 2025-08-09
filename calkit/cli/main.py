@@ -38,6 +38,7 @@ from calkit.cli.check import (
     check_app,
     check_conda_env,
     check_docker_env,
+    check_environment,
     check_matlab_env,
     check_venv,
 )
@@ -1389,6 +1390,38 @@ def run_in_env(
             subprocess.check_call(cmd, shell=True, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error(f"Failed to run in {kind}")
+    elif env["kind"] == "julia":
+        if not no_check:
+            check_environment(env_name=env_name, verbose=verbose)
+        env_path = env.get("path")
+        if env_path is None:
+            raise_error(
+                "Julia environments require a path pointing to Project.toml"
+            )
+        env_fname = os.path.basename(env_path)
+        if not env_fname == "Project.toml":
+            raise_error(
+                "Julia environments require a path pointing to Project.toml"
+            )
+        env_dir = os.path.dirname(env_path)
+        if not env_dir:
+            env_dir = "."
+        julia_cmd = [
+            "julia",
+            "--project=" + env_dir,
+            "-e",
+            " ".join(cmd),
+        ]
+        if verbose:
+            typer.echo(f"Running command: {julia_cmd}")
+        try:
+            subprocess.check_call(
+                julia_cmd,
+                cwd=wdir,
+                env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"},
+            )
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in julia environment")
     elif env["kind"] == "ssh":
         try:
             host = os.path.expandvars(env["host"])

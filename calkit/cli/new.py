@@ -588,7 +588,8 @@ def new_docker_env(
     layers: Annotated[
         list[str],
         typer.Option(
-            "--add-layer", help="Add a layer (options: miniforge, foampy)."
+            "--add-layer",
+            help="Add a layer (options: miniforge, foampy, uv, julia).",
         ),
     ] = [],
     env_vars: Annotated[

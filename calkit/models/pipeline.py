@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator
+from pydantic import BaseModel, ConfigDict, Discriminator, field_validator
 from typing_extensions import Annotated
 
 from calkit.models.io import InputsFromStageOutputs, PathOutput
@@ -21,8 +21,51 @@ from calkit.notebooks import (
 
 
 class StageIteration(BaseModel):
-    arg_name: str
-    values: list[int | float | str | RangeIteration | ParameterIteration]
+    """A model for the ``iterate_over`` key in a stage definition.
+
+    If ``arg_name`` is a list, ``values`` also must be a list of lists with
+    each sublist the length of ``arg_name``.
+    """
+
+    arg_name: str | list[str]
+    values: list[
+        int
+        | float
+        | str
+        | RangeIteration
+        | ParameterIteration
+        | list[int | float | str]
+    ]
+
+    @field_validator("values")
+    @classmethod
+    def validate_values_structure(cls, v, info):
+        """Validate that values are structured correctly based on arg_name."""
+        arg_name = info.data.get("arg_name")
+        # If arg_name is a list, check that values contains lists of the correct length
+        if isinstance(arg_name, list):
+            expected_length = len(arg_name)
+            for i, value in enumerate(v):
+                # Skip validation for RangeIteration and ParameterIteration as they have their own logic
+                if isinstance(value, (RangeIteration, ParameterIteration)):
+                    raise ValueError(
+                        "RangeIteration and ParameterIteration are not "
+                        "allowed when arg_name is a list"
+                    )
+                # Check if the value is a list and has the correct length
+                if not isinstance(value, list):
+                    raise ValueError(
+                        f"When arg_name is a list, all values must be lists; "
+                        f"Value at index {i} is {type(value).__name__}"
+                    )
+                if len(value) != expected_length:
+                    raise ValueError(
+                        f"When arg_name has {expected_length} elements, "
+                        f"each value list must have {expected_length} "
+                        f"elements;  Value at index {i} has {len(value)} "
+                        "elements"
+                    )
+        return v
 
     def expand_values(self, params: ParametersType) -> list[int | float | str]:
         vals = []

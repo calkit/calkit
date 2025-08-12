@@ -117,3 +117,5 @@ def test_stageiteration():
         StageIteration(arg_name=["param1", "param2"], values=[1, 2, 3])
     i = StageIteration(arg_name=["param1", "param2"], values=[[1, 2], [3, 4]])
     i.values
+    exp_vals = i.expand_values(params={})
+    assert exp_vals == [{"param1": 1, "param2": 2}, {"param1": 3, "param2": 4}]

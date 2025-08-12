@@ -67,15 +67,28 @@ class StageIteration(BaseModel):
                     )
         return v
 
-    def expand_values(self, params: ParametersType) -> list[int | float | str]:
+    def expand_values(
+        self, params: ParametersType
+    ) -> list[int | float | str | dict[str, int | float | str]]:
         vals = []
-        for vals_i in self.values:
-            if isinstance(vals_i, ParameterIteration):
-                vals += vals_i.values_from_params(params)
-            elif isinstance(vals_i, RangeIteration):
-                vals += vals_i.values
-            else:
-                vals.append(vals_i)
+        if isinstance(self.arg_name, list):
+            # Expand into a list of dictionaries, in which case the DVC arg
+            # name must be auto-generated
+            for vals_list in self.values:
+                assert isinstance(vals_list, list)
+                v = {}
+                for n, name in enumerate(self.arg_name):
+                    v[name] = vals_list[n]
+                vals.append(v)
+        else:
+            # arg_name is a string
+            for vals_i in self.values:
+                if isinstance(vals_i, ParameterIteration):
+                    vals += vals_i.values_from_params(params)
+                elif isinstance(vals_i, RangeIteration):
+                    vals += vals_i.values
+                else:
+                    vals.append(vals_i)
         return vals
 
 

@@ -75,7 +75,8 @@ class StageIteration(BaseModel):
             # Expand into a list of dictionaries, in which case the DVC arg
             # name must be auto-generated
             for vals_list in self.values:
-                assert isinstance(vals_list, list)
+                if not isinstance(vals_list, list):
+                    raise ValueError(f"Expected a list for vals_list, got {type(vals_list).__name__}")
                 v = {}
                 for n, name in enumerate(self.arg_name):
                     v[name] = vals_list[n]

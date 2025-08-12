@@ -28,10 +28,10 @@ def _expand_matrix(input_dict: dict[str, list]) -> list[dict]:
     list_of_dicts = []
     for combination in combinations:
         list_of_dicts.append(dict(zip(keys, combination)))
-    # After expanding the matrix, flatten any nested dictionaries in the result.
-    # This handles cases where list-of-lists iterations produce dictionaries as values,
-    # by concatenating parent and child keys (e.g., "parent.child") so all permutations
-    # are represented as flat dictionaries.
+    # After expanding the matrix, flatten any nested dictionaries in the result
+    # This handles cases where list-of-lists iterations produce dictionaries as
+    # values, by concatenating parent and child keys (e.g., "parent.child")
+    # so all permutations are represented as flat dictionaries
     final_list = []
     for item in list_of_dicts:
         keys = list(item.keys())

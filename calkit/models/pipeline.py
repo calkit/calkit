@@ -42,11 +42,12 @@ class StageIteration(BaseModel):
     def validate_values_structure(cls, v, info):
         """Validate that values are structured correctly based on arg_name."""
         arg_name = info.data.get("arg_name")
-        # If arg_name is a list, check that values contains lists of the correct length
+        # If arg_name is a list, check that values contains lists of the
+        # correct length
         if isinstance(arg_name, list):
             expected_length = len(arg_name)
             for i, value in enumerate(v):
-                # Skip validation for RangeIteration and ParameterIteration as they have their own logic
+                # TODO: Support RangeIteration and ParameterIteration
                 if isinstance(value, (RangeIteration, ParameterIteration)):
                     raise ValueError(
                         "RangeIteration and ParameterIteration are not "
@@ -76,7 +77,10 @@ class StageIteration(BaseModel):
             # name must be auto-generated
             for vals_list in self.values:
                 if not isinstance(vals_list, list):
-                    raise ValueError(f"Expected a list for vals_list, got {type(vals_list).__name__}")
+                    raise ValueError(
+                        "Expected a list for vals_list, got "
+                        f"{type(vals_list).__name__}"
+                    )
                 v = {}
                 for n, name in enumerate(self.arg_name):
                     v[name] = vals_list[n]

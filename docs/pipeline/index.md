@@ -82,6 +82,10 @@ For more details, see `calkit.models.pipeline`.
 - `script_path`
 - `args` (list, optional)
 
+### `julia-script`
+
+- `script_path`
+
 ## Iteration
 
 ### Over a list of values

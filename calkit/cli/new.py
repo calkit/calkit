@@ -1867,6 +1867,66 @@ def new_python_script_stage(
     )
 
 
+@new_app.command(name="julia-script-stage")
+def new_julia_script_stage(
+    name: StageArgs.name,
+    environment: StageArgs.environment,
+    script_path: StageArgs.script_path,
+    inputs: StageArgs.inputs = [],
+    outputs: StageArgs.outputs = [],
+    outs_git: StageArgs.outs_git = [],
+    outs_git_no_delete: StageArgs.outs_git_no_delete = [],
+    outs_no_delete: StageArgs.outs_no_delete = [],
+    outs_no_store: StageArgs.outs_no_store = [],
+    outs_no_store_no_delete: StageArgs.outs_no_store_no_delete = [],
+    iter_arg: Annotated[
+        tuple[str, str] | None,
+        typer.Option(
+            "--iter",
+            help=(
+                "Iterate over an argument with a comma-separated list, e.g., "
+                "--iter-arg var_name val1,val2,val3."
+            ),
+        ),
+    ] = None,
+    overwrite: StageArgs.overwrite = False,
+    no_check: StageArgs.no_check = False,
+    no_commit: StageArgs.no_commit = False,
+) -> None:
+    """Add a stage to the pipeline that runs a Julia script."""
+    ck_outs = _to_ck_outs(
+        outputs=outputs,
+        outs_git=outs_git,
+        outs_git_no_delete=outs_git_no_delete,
+        outs_no_delete=outs_no_delete,
+        outs_no_store=outs_no_store,
+        outs_no_store_no_delete=outs_no_store_no_delete,
+    )
+    try:
+        if iter_arg is not None:
+            arg_name, vals = iter_arg
+            i = [StageIteration(arg_name=arg_name, values=vals.split(","))]  # type: ignore
+        else:
+            i = None
+        stage = calkit.models.pipeline.JuliaScriptStage(
+            kind="julia-script",
+            environment=environment,
+            inputs=inputs,  # type: ignore
+            outputs=ck_outs,
+            script_path=script_path,
+            iterate_over=i,
+        )
+    except Exception as e:
+        raise_error(f"Invalid stage specification: {e}")
+    _save_stage(
+        stage=stage,
+        name=name,
+        overwrite=overwrite,
+        no_check=no_check,
+        no_commit=no_commit,
+    )
+
+
 @new_app.command(name="matlab-script-stage")
 def new_matlab_script_stage(
     name: StageArgs.name,

@@ -1067,7 +1067,7 @@ def new_publication(
         calkit.ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
     # Copy in template files if applicable
-    if template_type == "latex":
+    if template is not None and template_type == "latex":
         if overwrite and os.path.exists(path):
             shutil.rmtree(path)
         calkit.templates.use_template(

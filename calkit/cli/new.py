@@ -704,11 +704,11 @@ def new_docker_env(
         wdir=wdir,
     )
     if base is not None or path is not None:
-        env["path"] = path
+        env["path"] = path  # type: ignore
     if description is not None:
         env["description"] = description
     if layers:
-        env["layers"] = layers
+        env["layers"] = layers  # type: ignore
     if platform:
         env["platform"] = platform
     if user:
@@ -716,18 +716,18 @@ def new_docker_env(
     if gpus:
         env["gpus"] = gpus
     if env_vars:
-        env["env_vars"] = {}
+        env["env_vars"] = {}  # type: ignore
         for var in env_vars:
             if "=" not in var:
                 raise_error(f"Invalid environment variable format: {var}")
             key, value = var.split("=", 1)
             env["env_vars"][key] = value
     if args:
-        env["args"] = args
+        env["args"] = args  # type: ignore
     if deps:
-        env["deps"] = deps
+        env["deps"] = deps  # type: ignore
     if ports:
-        env["ports"] = ports
+        env["ports"] = ports  # type: ignore
     envs[name] = env
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:

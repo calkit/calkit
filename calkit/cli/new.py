@@ -1391,7 +1391,7 @@ def new_pixi_env(
         list[str], typer.Option("--pip", help="Packages to install with pip.")
     ] = [],
     description: Annotated[
-        str, typer.Option("--description", help="Description.")
+        str | None, typer.Option("--description", help="Description.")
     ] = None,
     platforms: Annotated[
         list[str], typer.Option("--platform", "-p", help="Platform.")

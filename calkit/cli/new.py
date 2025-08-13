@@ -1480,6 +1480,86 @@ def new_pixi_env(
         repo.git.commit(["-m", f"Add pixi env {name}"])
 
 
+@new_app.command("julia-env")
+def new_julia_env(
+    packages: Annotated[
+        list[str],
+        typer.Argument(help="Packages to include in the environment."),
+    ],
+    name: Annotated[
+        str, typer.Option("--name", "-n", help="Environment name.")
+    ],
+    path: Annotated[
+        str, typer.Option("--path", help="Path for Project.toml file.")
+    ] = "Project.toml",
+    description: Annotated[
+        str | None, typer.Option("--description", help="Description.")
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite any existing environment with this name.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
+):
+    """Create a new Julia environment."""
+    if not os.path.basename(path) == "Project.toml":
+        raise_error(
+            "Julia environment paths must point to a Project.toml file"
+        )
+    try:
+        repo = git.Repo()
+    except git.InvalidGitRepositoryError:
+        raise_error(
+            "Current directory is not a Git repository; run calkit init"
+        )
+    # Add environment to Calkit info
+    ck_info = calkit.load_calkit_info()
+    # If environments is a list instead of a dict, reformulate it
+    envs = ck_info.get("environments", {})
+    if isinstance(envs, list):
+        typer.echo("Converting environments from list to dict")
+        envs = {env.pop("name"): env for env in envs}
+    if name in envs and not overwrite:
+        raise_error(
+            f"Environment with name {name} already exists "
+            "(use -f to overwrite)"
+        )
+    # Create the environment now
+    env_dir = os.path.dirname(path)
+    if env_dir:
+        os.makedirs(env_dir, exist_ok=True)
+    else:
+        env_dir = "."
+    cmd = ["julia", f"--project={env_dir}", "-e"]
+    install_cmd = "using Pkg;"
+    for package in packages:
+        install_cmd += f' Pkg.add("{package}");'
+    cmd.append(install_cmd)
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError:
+        raise_error("Failed to create new Julia environment")
+    typer.echo("Adding environment to calkit.yaml")
+    env = dict(kind="julia", path=path, name=name)
+    if description is not None:
+        env["description"] = description
+    envs[name] = env
+    ck_info["environments"] = envs
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    repo.git.add(path)
+    repo.git.add(os.path.join(env_dir, "Manifest.toml"))
+    repo.git.add("calkit.yaml")
+    if not no_commit and repo.git.diff("--staged"):
+        repo.git.commit(["-m", f"Add Julia env {name}"])
+
+
 class Status(str, Enum):
     in_progress = "in-progress"
     on_hold = "on-hold"

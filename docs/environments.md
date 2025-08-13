@@ -269,6 +269,28 @@ Again this highlights Calkit's declarative design philosophy.
 Declare the environment and what command should be executed inside,
 and Calkit will handle the rest.
 
+### Julia
+
+[Julia](https://julialang.org/) environments have paths that point to a
+`Project.toml` file.
+Creating a new Julia environment is similar to creating a Python environment:
+
+```sh
+calkit new julia-env \
+    --name my-julia-env \
+    --path ./envs/my-julia-env/Project.toml \
+    WaterLily \
+    Makie
+```
+
+Unlike Python environments, for which `xenv` runs a shell command,
+`xenv` runs Julia commands in a Julia environment.
+For example:
+
+```sh
+calkit xenv -n my-julia-env -- "println(\"hello world\");"
+```
+
 ### SSH
 
 It's possible to define a remote environment that uses `ssh` to connect

@@ -1310,7 +1310,7 @@ def new_venv(
         str, typer.Option("--prefix", help="Prefix for environment location.")
     ] = ".venv",
     description: Annotated[
-        str, typer.Option("--description", help="Description.")
+        str | None, typer.Option("--description", help="Description.")
     ] = None,
     overwrite: Annotated[
         bool,

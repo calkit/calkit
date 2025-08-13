@@ -800,14 +800,14 @@ def new_dataset(
     title: Annotated[str, typer.Option("--title")],
     description: Annotated[str, typer.Option("--description")],
     stage_name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--stage",
             help="Name of the pipeline stage that generates this dataset.",
         ),
     ] = None,
     cmd: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--cmd", help="Command to add to the stage, if specified."
         ),
@@ -826,7 +826,7 @@ def new_dataset(
         ),
     ] = [],
     outs_from_stage: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--deps-from-stage-outs",
             help="Stage name from which to add outputs as dependencies.",

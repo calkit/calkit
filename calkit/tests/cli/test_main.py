@@ -234,6 +234,41 @@ def test_run_in_venv(tmp_dir):
     assert out == "2.0.0"
 
 
+def test_run_in_julia_env(tmp_dir):
+    subprocess.check_call("calkit init", shell=True)
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "julia-env",
+            "-n",
+            "my-julia",
+            "--no-commit",
+            "Revise",
+            "PkgVersion",
+        ]
+    )
+    out = (
+        subprocess.check_output(
+            [
+                "calkit",
+                "xenv",
+                "-n",
+                "my-julia",
+                "--",
+                (
+                    "using Revise; using PkgVersion; "
+                    "println(PkgVersion.Version(Revise))"
+                ),
+            ]
+        )
+        .decode()
+        .strip()
+    )
+    # TODO: Allow specifying version
+    assert out
+
+
 def test_to_shell_cmd():
     cmd = ["python", "-c", "import math; print('hello world')"]
     subprocess.check_call(cmd)
@@ -420,6 +455,35 @@ def test_run(tmp_dir):
     repo = git.Repo()
     repo.git.checkout("HEAD^")
     out = subprocess.check_output(["calkit", "run"], text=True)
+    # Test that we can run a Julia script
+    with open("julia_script.jl", "w") as f:
+        f.write('println("Hello from julia_script.jl")')
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "julia-env",
+            "--name",
+            "j1",
+            "--path",
+            "something/Project.toml",
+            "PkgVersion",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "julia-script-stage",
+            "--name",
+            "stage-2",
+            "--script-path",
+            "julia_script.jl",
+            "-e",
+            "j1",
+        ]
+    )
+    subprocess.check_call(["calkit", "run"])
 
 
 def test_stage_run_info_from_log_content():

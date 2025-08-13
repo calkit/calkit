@@ -309,6 +309,8 @@ def check_system_deps(
             if "docker" not in deps:
                 deps.append("docker")
             deps.append({"MATLAB_LICENSE_SERVER": {"kind": "env-var"}})
+        elif kind == "julia" and "julia" not in deps:
+            deps.append("julia")
     for dep in deps:
         if isinstance(dep, dict):
             keys = list(dep.keys())
@@ -488,7 +490,7 @@ def detect_project_name(
     if name is not None and not prepend_owner:
         return name
     owner = ck_info.get("owner")
-    if name is None and owner is None:
+    if name is None or owner is None:
         try:
             url = Repo(path=wdir).remote().url
         except ValueError:
@@ -560,6 +562,7 @@ def get_system_info() -> dict:
         "uv",
         "pixi",
         "Rscript",
+        "julia",
     ]:
         system_info[f"{dep}_version"] = get_dep_version(dep)
     system_info_str = json.dumps(system_info, sort_keys=True).encode()

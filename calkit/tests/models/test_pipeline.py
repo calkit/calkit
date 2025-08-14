@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from calkit.models.pipeline import (
+    JuliaCommandStage,
     JupyterNotebookStage,
     LatexStage,
     PythonScriptStage,
@@ -119,3 +120,12 @@ def test_stageiteration():
     i.values
     exp_vals = i.expand_values(params={})
     assert exp_vals == [{"param1": 1, "param2": 2}, {"param1": 3, "param2": 4}]
+
+
+def test_juliacommandstage():
+    s = JuliaCommandStage(environment="j1", command='println("sup")')
+    sd = s.to_dvc()
+    print(sd)
+    assert sd["cmd"] == (
+        'calkit xenv -n j1 --no-check -- "println(\\"sup\\")"'
+    )

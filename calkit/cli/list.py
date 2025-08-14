@@ -71,7 +71,9 @@ def list_references():
 
 
 @list_app.command(name="environments")
+@list_app.command(name="envs")
 def list_environments():
+    """List environments in the project."""
     envs = calkit.load_calkit_info().get("environments", {})
     for name, env in envs.items():
         typer.echo(name + ":")

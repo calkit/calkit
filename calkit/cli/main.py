@@ -1398,6 +1398,7 @@ def run_in_env(
             raise_error(
                 "Julia environments require a path pointing to Project.toml"
             )
+        julia_version = env.get("julia")
         env_fname = os.path.basename(env_path)
         if not env_fname == "Project.toml":
             raise_error(
@@ -1408,6 +1409,7 @@ def run_in_env(
             env_dir = "."
         julia_cmd = [
             "julia",
+            f"+{julia_version}",
             "--project=" + env_dir,
             "-e",
             " ".join(cmd),

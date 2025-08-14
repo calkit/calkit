@@ -309,8 +309,11 @@ def check_system_deps(
             if "docker" not in deps:
                 deps.append("docker")
             deps.append({"MATLAB_LICENSE_SERVER": {"kind": "env-var"}})
-        elif kind == "julia" and "julia" not in deps:
-            deps.append("julia")
+        elif kind == "julia":
+            if "julia" not in deps:
+                deps.append("julia")
+            if "juliaup" not in deps:
+                deps.append("juliaup")
     for dep in deps:
         if isinstance(dep, dict):
             keys = list(dep.keys())
@@ -562,6 +565,7 @@ def get_system_info() -> dict:
         "uv",
         "pixi",
         "Rscript",
+        "juliaup",
         "julia",
     ]:
         system_info[f"{dep}_version"] = get_dep_version(dep)

@@ -167,6 +167,7 @@ def check_environment(
             env_dir = "."
         cmd = [
             "julia",
+            f"+{julia_version}",
             f"--project={env_dir}",
             "-e",
             "using Pkg; Pkg.instantiate();",

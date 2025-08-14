@@ -649,6 +649,8 @@ def test_new_julia_env(tmp_dir):
             "julia-env",
             "--name",
             "j2",
+            "--julia",
+            "1.10",
             "Revise",
             "--path",
             "envs/my-env/Project.toml",

@@ -1496,7 +1496,7 @@ def new_julia_env(
         str | None, typer.Option("--description", help="Description.")
     ] = None,
     julia_version: Annotated[
-        str, typer.Option("--julia-version", "-j", help="Julia version.")
+        str, typer.Option("--julia", "-j", help="Julia version.")
     ] = "1.11",
     overwrite: Annotated[
         bool,
@@ -1545,7 +1545,7 @@ def new_julia_env(
         subprocess.run(cmd, check=True)
     except subprocess.CalledProcessError:
         raise_error(f"Failed to install Julia version {julia_version}")
-    cmd = ["julia", f"+{julia_version}, --project={env_dir}", "-e"]
+    cmd = ["julia", f"+{julia_version}", f"--project={env_dir}", "-e"]
     install_cmd = "using Pkg;"
     for package in packages:
         install_cmd += f' Pkg.add("{package}");'

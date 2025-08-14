@@ -1495,6 +1495,9 @@ def new_julia_env(
     description: Annotated[
         str | None, typer.Option("--description", help="Description.")
     ] = None,
+    julia_version: Annotated[
+        str, typer.Option("--julia-version", "-j", help="Julia version.")
+    ] = "1.11",
     overwrite: Annotated[
         bool,
         typer.Option(
@@ -1536,7 +1539,13 @@ def new_julia_env(
         os.makedirs(env_dir, exist_ok=True)
     else:
         env_dir = "."
-    cmd = ["julia", f"--project={env_dir}", "-e"]
+    # First make sure the Julia version is installed
+    cmd = ["juliaup", "add", julia_version]
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError:
+        raise_error(f"Failed to install Julia version {julia_version}")
+    cmd = ["julia", f"+{julia_version}, --project={env_dir}", "-e"]
     install_cmd = "using Pkg;"
     for package in packages:
         install_cmd += f' Pkg.add("{package}");'
@@ -1546,7 +1555,7 @@ def new_julia_env(
     except subprocess.CalledProcessError:
         raise_error("Failed to create new Julia environment")
     typer.echo("Adding environment to calkit.yaml")
-    env = dict(kind="julia", path=path, name=name)
+    env = dict(kind="julia", path=path, julia=julia_version)
     if description is not None:
         env["description"] = description
     envs[name] = env

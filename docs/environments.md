@@ -279,12 +279,13 @@ Creating a new Julia environment is similar to creating a Python environment:
 calkit new julia-env \
     --name my-julia-env \
     --path ./envs/my-julia-env/Project.toml \
+    --julia 1.11 \
     WaterLily \
     Makie
 ```
 
 Unlike Python environments, for which `xenv` runs a shell command,
-`xenv` runs Julia commands in a Julia environment.
+`xenv` runs Julia commands.
 For example:
 
 ```sh

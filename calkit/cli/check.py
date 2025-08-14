@@ -156,6 +156,8 @@ def check_environment(
             )
         # First ensure the Julia version exists
         cmd = ["juliaup", "add", julia_version]
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
         try:
             subprocess.run(cmd, check=True)
         except subprocess.CalledProcessError:

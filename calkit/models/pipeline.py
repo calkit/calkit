@@ -110,6 +110,7 @@ class Stage(BaseModel):
         "jupyter-notebook",
         "r-script",
         "julia-script",
+        "julia-command",
         "word-to-pdf",
     ]
     environment: str
@@ -325,6 +326,18 @@ class JuliaScriptStage(Stage):
         return [self.script_path] + super().dvc_deps
 
 
+class JuliaCommandStage(Stage):
+    kind: Literal["julia-command"] = "julia-command"
+    command: str
+
+    @property
+    def dvc_cmd(self) -> str:
+        # We need to escape quotes in the command
+        julia_cmd = self.command.replace('"', '\\"')
+        cmd = f'{self.xenv_cmd} -- "{julia_cmd}"'
+        return cmd
+
+
 class JupyterNotebookStage(Stage):
     """A stage that runs a Jupyter notebook.
 
@@ -483,6 +496,7 @@ class Pipeline(BaseModel):
                 | WordToPdfStage
                 | JupyterNotebookStage
                 | JuliaScriptStage
+                | JuliaCommandStage
             ),
             Discriminator("kind"),
         ],

@@ -931,9 +931,9 @@ def run(
     no_run_cache: Annotated[
         bool, typer.Option("--no-run-cache", help="Ignore the run cache.")
     ] = False,
-    no_log: Annotated[
+    save_log: Annotated[
         bool,
-        typer.Option("--no-log", "-l", help="Do not log the run."),
+        typer.Option("--log", "-l", help="Log the run."),
     ] = False,
     save_after_run: Annotated[
         bool,
@@ -952,7 +952,7 @@ def run(
     if not quiet:
         typer.echo("Getting system information")
     system_info = calkit.get_system_info()
-    if not no_log:
+    if save_log:
         # Save the system to .calkit/systems
         if verbose:
             typer.echo("Saving system information:")
@@ -1027,7 +1027,7 @@ def run(
     start_time_no_tz = calkit.utcnow(remove_tz=True)
     start_time = calkit.utcnow(remove_tz=False)
     run_id = uuid.uuid4().hex
-    if not no_log:
+    if save_log:
         log_fpath = os.path.join(
             ".calkit",
             "logs",
@@ -1055,7 +1055,7 @@ def run(
     dvc.ui.ui.write = lambda *args, **kwargs: None
     res = dvc_cli_main(["repro"] + args)
     failed = res != 0
-    if not no_log:
+    if save_log:
         # Get Git status after running
         git_changed_files_after = calkit.git.get_changed_files(repo=repo)
         git_staged_files_after = calkit.git.get_staged_files(repo=repo)

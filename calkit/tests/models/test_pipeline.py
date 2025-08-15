@@ -105,8 +105,10 @@ def test_jupyternotebookstage():
     assert s.html_path not in outs
     assert s.executed_notebook_path in outs
     assert "html" not in dvc_stage["cmd"]
-    assert " -p param1=value1 " in dvc_stage["cmd"]
-    assert " -p param2=value2 " in dvc_stage["cmd"]
+    assert (
+        " --params-base64 "
+        '"eyJwYXJhbTEiOiAidmFsdWUxIiwgInBhcmFtMiI6ICJ2YWx1ZTIifQ==" '
+    ) in dvc_stage["cmd"]
 
 
 def test_stageiteration():

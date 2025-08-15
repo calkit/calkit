@@ -7,7 +7,13 @@ import json
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    ValidationError,
+    field_validator,
+)
 from typing_extensions import Annotated
 
 from calkit.models.io import InputsFromStageOutputs, PathOutput
@@ -386,6 +392,13 @@ class JupyterNotebookStage(Stage):
                     updated_params[k] = v
             else:
                 updated_params[k] = v
+            # Try parsing as a RangeIteration and expanding
+            try:
+                updated_params[k] = RangeIteration.model_validate(
+                    updated_params[k]
+                ).values
+            except ValidationError:
+                pass
         self.parameters = updated_params
 
     @property

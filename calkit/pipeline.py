@@ -96,7 +96,6 @@ def to_dvc(
     for stage_name, stage in pipeline.stages.items():
         # If this stage is a Jupyter notebook stage, we need to update its
         # parameters if any reference project-level parameters
-        # TODO: These need to expand ranges!
         if stage.kind == "jupyter-notebook":
             stage.update_parameters(params=ck_info.get("parameters", {}))
         dvc_stage = stage.to_dvc()

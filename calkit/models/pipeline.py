@@ -423,12 +423,11 @@ class JupyterNotebookStage(Stage):
             # If we have parameters, we need to pass them as JSON, escaping
             # double quotes
             params_json = json.dumps(self.parameters)
-            params_json = params_json.replace('"', '\\"')
             # Now base64 encode
             params_base64 = base64.b64encode(
                 params_json.encode("utf-8")
             ).decode("utf-8")
-            cmd += f' --params-base64="{params_base64}"'
+            cmd += f' --params-base64 "{params_base64}"'
         cmd += f' "{self.notebook_path}"'
         return cmd
 

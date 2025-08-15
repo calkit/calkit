@@ -94,11 +94,11 @@ def to_dvc(
         env_lock_fpaths[env_name] = lock_fpath
     # Now convert Calkit stages into DVC stages
     for stage_name, stage in pipeline.stages.items():
-        # If this stage is a Jupyter notebooks stage, we need to update its
+        # If this stage is a Jupyter notebook stage, we need to update its
         # parameters if any reference project-level parameters
         # TODO: These need to expand ranges!
-        # if stage.kind == "jupyter-notebook":
-        #     stage.update_parameters(params=ck_info.get("parameters", {}))
+        if stage.kind == "jupyter-notebook":
+            stage.update_parameters(params=ck_info.get("parameters", {}))
         dvc_stage = stage.to_dvc()
         # Add environment lock file to deps
         env_lock_fpath = env_lock_fpaths.get(stage.environment)

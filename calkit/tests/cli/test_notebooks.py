@@ -1,5 +1,6 @@
 """Tests for ``calkit.cli.notebooks``."""
 
+import base64
 import json
 import os
 import shutil
@@ -53,9 +54,11 @@ def test_execute_notebook(tmp_dir):
         os.path.dirname(__file__), "..", "..", "..", "test", "nb-params.ipynb"
     )
     shutil.copy(nb_fpath, "nb-params.ipynb")
-    params = {
+    params1 = {
         "my_value": 5,
         "my_list": [1, 2, 3],
+    }
+    params2 = {
         "my_dict": {"something": 55.5, "else": "b"},
     }
     subprocess.check_call(
@@ -63,14 +66,19 @@ def test_execute_notebook(tmp_dir):
             "calkit",
             "nb",
             "execute",
-            "main.ipynb",
+            "nb-params.ipynb",
             "-e",
             "main",
             "--params-json",
-            json.dumps(params),
+            json.dumps(params1),
+            "--params-base64",
+            base64.b64encode(json.dumps(params2).encode("utf-8")).decode(
+                "utf-8"
+            ),
             "--verbose",
         ]
     )
+    params = params1 | params2
     with open("params-out.json") as f:
         params_out = json.load(f)
     assert params_out["my_value"] == params["my_value"]

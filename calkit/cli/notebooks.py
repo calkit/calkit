@@ -209,6 +209,11 @@ def execute_notebook(
     folder = os.path.dirname(fpath_out_exec)
     os.makedirs(folder, exist_ok=True)
     notebook_dir = os.path.dirname(path) or None
+    if verbose:
+        typer.echo(f"Executing notebook {path} with params: {parsed_params}")
+        typer.echo(f"Using kernel: {kernel_name}")
+        typer.echo(f"Running with cwd: {notebook_dir}")
+        typer.echo(f"Output will be saved to: {fpath_out_exec}")
     papermill.execute_notebook(
         input_path=path,
         output_path=fpath_out_exec,

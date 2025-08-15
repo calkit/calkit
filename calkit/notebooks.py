@@ -1,5 +1,7 @@
 """Functionality for working with notebooks."""
 
+import hashlib
+import json
 import os
 from pathlib import PurePosixPath
 from typing import Any, Literal
@@ -21,7 +23,25 @@ def get_executed_notebook_path(
     nb_fname = os.path.basename(notebook_path)
     # If we have any parameters, add these to the notebook name
     if parameters:
-        params_txt = "-".join(f"{k}-{v}" for k, v in parameters.items())
+        parameters_cleaned = {}
+        for k, v in parameters.items():
+            if isinstance(v, list):
+                if len(v) == 0:
+                    v = "empty"
+                elif len(v) < 5:
+                    v = ",".join(map(str, v))
+                else:
+                    v = hashlib.md5(
+                        json.dumps(v, sort_keys=True).encode()
+                    ).hexdigest()[:7]
+            elif isinstance(v, dict):
+                v = hashlib.md5(
+                    json.dumps(v, sort_keys=True).encode()
+                ).hexdigest()[:7]
+            parameters_cleaned[k] = v
+        params_txt = "-".join(
+            f"{k}-{v}" for k, v in parameters_cleaned.items()
+        )
         nb_fname = f"{nb_fname.removesuffix('.ipynb')}-{params_txt}.ipynb"
     if to == "html":
         fname_out = nb_fname.removesuffix(".ipynb") + ".html"

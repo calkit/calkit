@@ -60,11 +60,15 @@ ParametersType = dict[
     int | float | str | list[int | float | str | RangeIteration],
 ]
 
+ExpandedParametersType = dict[str, int | float | str | list[int | float | str]]
+
 
 class ParameterIteration(BaseModel):
     parameter: str
 
-    def values_from_params(self, params: ParametersType) -> list:
+    def values_from_params(
+        self, params: ParametersType | ExpandedParametersType
+    ) -> list:
         """Convert parameters from calkit.yaml into a list of values."""
         if self.parameter not in params:
             raise ValueError(f"'{self.parameter}' not found in parameters")
@@ -79,3 +83,23 @@ class ParameterIteration(BaseModel):
             else:
                 vals.append(val)
         return vals
+
+
+def expand_project_parameters(
+    params: ParametersType,
+) -> ExpandedParametersType:
+    """Expand any range iterations in project parameters."""
+    expanded = {}
+    for key, value in params.items():
+        if isinstance(value, list):
+            expanded_list = []
+            for item in value:
+                try:
+                    range_iter = RangeIteration.model_validate(item)
+                    expanded_list.extend(range_iter.values)
+                except Exception:
+                    expanded_list.append(item)
+            expanded[key] = expanded_list
+        else:
+            expanded[key] = value
+    return expanded

@@ -18,6 +18,7 @@ from typing_extensions import Annotated
 
 from calkit.models.io import InputsFromStageOutputs, PathOutput
 from calkit.models.iteration import (
+    ExpandedParametersType,
     ParameterIteration,
     ParametersType,
     RangeIteration,
@@ -77,7 +78,7 @@ class StageIteration(BaseModel):
         return v
 
     def expand_values(
-        self, params: ParametersType
+        self, params: ParametersType | ExpandedParametersType
     ) -> list[int | float | str | dict[str, int | float | str]]:
         vals = []
         if isinstance(self.arg_name, list):

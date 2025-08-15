@@ -8,6 +8,7 @@ import typer
 
 import calkit
 from calkit.environments import get_env_lock_fpath
+from calkit.models.iteration import expand_project_parameters
 from calkit.models.pipeline import (
     InputsFromStageOutputs,
     PathOutput,
@@ -92,12 +93,13 @@ def to_dvc(
         )
         dvc_stages[f"_check-env-{env_name}"] = stage
         env_lock_fpaths[env_name] = lock_fpath
+    project_params = expand_project_parameters(ck_info.get("parameters", {}))
     # Now convert Calkit stages into DVC stages
     for stage_name, stage in pipeline.stages.items():
         # If this stage is a Jupyter notebook stage, we need to update its
         # parameters if any reference project-level parameters
         if stage.kind == "jupyter-notebook":
-            stage.update_parameters(params=ck_info.get("parameters", {}))
+            stage.update_parameters(params=project_params)
         dvc_stage = stage.to_dvc()
         # Add environment lock file to deps
         env_lock_fpath = env_lock_fpaths.get(stage.environment)
@@ -116,9 +118,7 @@ def to_dvc(
             format_dict = {}
             for n, iteration in enumerate(stage.iterate_over):
                 arg_name = iteration.arg_name
-                exp_vals = iteration.expand_values(
-                    params=ck_info.get("parameters", {})
-                )
+                exp_vals = iteration.expand_values(params=project_params)
                 if isinstance(arg_name, list):
                     dvc_arg_name = f"_arg{n}"
                     for arg_name_i in arg_name:
@@ -147,21 +147,31 @@ def to_dvc(
                 except Exception as e:
                     raise ValueError(
                         (
-                            f"Failed to format dep '{dep}': "
+                            f"Failed to format dep '{dep}' with "
+                            f"'{format_dict}': "
                             f"{e.__class__.__name__}: {e}"
                         )
                     )
             for out in dvc_stage.get("outs", []):
-                if isinstance(out, dict):
-                    formatted_outs.append(
-                        {
-                            str(list(out.keys())[0]).format(
-                                **format_dict
-                            ): dict(list(out.values())[0])
-                        }
+                try:
+                    if isinstance(out, dict):
+                        formatted_outs.append(
+                            {
+                                str(list(out.keys())[0]).format(
+                                    **format_dict
+                                ): dict(list(out.values())[0])
+                            }
+                        )
+                    else:
+                        formatted_outs.append(out.format(**format_dict))
+                except Exception as e:
+                    raise ValueError(
+                        (
+                            f"Failed to format out '{out}' with "
+                            f"'{format_dict}': "
+                            f"{e.__class__.__name__}: {e}"
+                        )
                     )
-                else:
-                    formatted_outs.append(out.format(**format_dict))
             dvc_stage["deps"] = formatted_deps
             dvc_stage["outs"] = formatted_outs
             dvc_stage["matrix"] = dvc_matrix

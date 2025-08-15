@@ -6,7 +6,7 @@ import json
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator
+from pydantic import BaseModel, ConfigDict, Discriminator, field_validator
 from typing_extensions import Annotated
 
 from calkit.models.io import InputsFromStageOutputs, PathOutput
@@ -22,18 +22,79 @@ from calkit.notebooks import (
 
 
 class StageIteration(BaseModel):
-    arg_name: str
-    values: list[int | float | str | RangeIteration | ParameterIteration]
+    """A model for the ``iterate_over`` key in a stage definition.
 
-    def expand_values(self, params: ParametersType) -> list[int | float | str]:
+    If ``arg_name`` is a list, ``values`` also must be a list of lists with
+    each sublist the length of ``arg_name``.
+    """
+
+    arg_name: str | list[str]
+    values: list[
+        int
+        | float
+        | str
+        | RangeIteration
+        | ParameterIteration
+        | list[int | float | str]
+    ]
+
+    @field_validator("values")
+    @classmethod
+    def validate_values_structure(cls, v, info):
+        """Validate that values are structured correctly based on arg_name."""
+        arg_name = info.data.get("arg_name")
+        # If arg_name is a list, check that values contains lists of the
+        # correct length
+        if isinstance(arg_name, list):
+            expected_length = len(arg_name)
+            for i, value in enumerate(v):
+                # TODO: Support RangeIteration and ParameterIteration
+                if isinstance(value, (RangeIteration, ParameterIteration)):
+                    raise ValueError(
+                        "RangeIteration and ParameterIteration are not "
+                        "allowed when arg_name is a list"
+                    )
+                # Check if the value is a list and has the correct length
+                if not isinstance(value, list):
+                    raise ValueError(
+                        f"When arg_name is a list, all values must be lists; "
+                        f"Value at index {i} is {type(value).__name__}"
+                    )
+                if len(value) != expected_length:
+                    raise ValueError(
+                        f"When arg_name has {expected_length} elements, "
+                        f"each value list must have {expected_length} "
+                        f"elements;  Value at index {i} has {len(value)} "
+                        "elements"
+                    )
+        return v
+
+    def expand_values(
+        self, params: ParametersType
+    ) -> list[int | float | str | dict[str, int | float | str]]:
         vals = []
-        for vals_i in self.values:
-            if isinstance(vals_i, ParameterIteration):
-                vals += vals_i.values_from_params(params)
-            elif isinstance(vals_i, RangeIteration):
-                vals += vals_i.values
-            else:
-                vals.append(vals_i)
+        if isinstance(self.arg_name, list):
+            # Expand into a list of dictionaries, in which case the DVC arg
+            # name must be auto-generated
+            for vals_list in self.values:
+                if not isinstance(vals_list, list):
+                    raise ValueError(
+                        "Expected a list for vals_list, got "
+                        f"{type(vals_list).__name__}"
+                    )
+                v = {}
+                for n, name in enumerate(self.arg_name):
+                    v[name] = vals_list[n]
+                vals.append(v)
+        else:
+            # arg_name is a string
+            for vals_i in self.values:
+                if isinstance(vals_i, ParameterIteration):
+                    vals += vals_i.values_from_params(params)
+                elif isinstance(vals_i, RangeIteration):
+                    vals += vals_i.values
+                else:
+                    vals.append(vals_i)
         return vals
 
 
@@ -49,6 +110,9 @@ class Stage(BaseModel):
         "shell-script",
         "jupyter-notebook",
         "r-script",
+        "julia-script",
+        "julia-command",
+        "word-to-pdf",
     ]
     environment: str
     wdir: str | None = None
@@ -249,6 +313,32 @@ class RScriptStage(Stage):
         return cmd
 
 
+class JuliaScriptStage(Stage):
+    kind: Literal["julia-script"] = "julia-script"
+    script_path: str
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f'{self.xenv_cmd} -- "include(\\"{self.script_path}\\")"'
+        return cmd
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.script_path] + super().dvc_deps
+
+
+class JuliaCommandStage(Stage):
+    kind: Literal["julia-command"] = "julia-command"
+    command: str
+
+    @property
+    def dvc_cmd(self) -> str:
+        # We need to escape quotes in the command
+        julia_cmd = self.command.replace('"', '\\"')
+        cmd = f'{self.xenv_cmd} -- "{julia_cmd}"'
+        return cmd
+
+
 class JupyterNotebookStage(Stage):
     """A stage that runs a Jupyter notebook.
 
@@ -434,6 +524,8 @@ class Pipeline(BaseModel):
                 | RScriptStage
                 | WordToPdfStage
                 | JupyterNotebookStage
+                | JuliaScriptStage
+                | JuliaCommandStage
             ),
             Discriminator("kind"),
         ],

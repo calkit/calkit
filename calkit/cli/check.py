@@ -140,6 +140,44 @@ def check_environment(
                 env=env, env_name=env_name, as_posix=False
             ),  # type: ignore
         )
+    elif env["kind"] == "julia":
+        env_path = env.get("path")
+        if env_path is None:
+            raise_error(
+                "Julia environments require a path pointing to Project.toml"
+            )
+        julia_version = env.get("julia")
+        if julia_version is None:
+            raise_error("Julia environments require a Julia version")
+        env_fname = os.path.basename(env_path)
+        if not env_fname == "Project.toml":
+            raise_error(
+                "Julia environments require a path pointing to Project.toml"
+            )
+        # First ensure the Julia version exists
+        cmd = ["juliaup", "add", julia_version]
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError:
+            raise_error(f"Failed to install Julia version {julia_version}")
+        env_dir = os.path.dirname(env_path)
+        if not env_dir:
+            env_dir = "."
+        cmd = [
+            "julia",
+            f"+{julia_version}",
+            f"--project={env_dir}",
+            "-e",
+            "using Pkg; Pkg.instantiate();",
+        ]
+        try:
+            subprocess.check_call(
+                cmd, env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"}
+            )
+        except subprocess.CalledProcessError:
+            raise_error("Failed to check julia environment")
     else:
         raise_error(f"Environment kind '{env['kind']}' not supported")
     return get_env_lock_fpath(env=env, env_name=env_name, as_posix=False)

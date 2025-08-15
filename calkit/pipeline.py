@@ -28,7 +28,23 @@ def _expand_matrix(input_dict: dict[str, list]) -> list[dict]:
     list_of_dicts = []
     for combination in combinations:
         list_of_dicts.append(dict(zip(keys, combination)))
-    return list_of_dicts
+    # After expanding the matrix, flatten any nested dictionaries in the result
+    # This handles cases where list-of-lists iterations produce dictionaries as
+    # values, by concatenating parent and child keys (e.g., "parent.child")
+    # so all permutations are represented as flat dictionaries
+    final_list = []
+    for item in list_of_dicts:
+        keys = list(item.keys())
+        vals = list(item.values())
+        vd = {}
+        for key, val in zip(keys, vals):
+            if isinstance(val, dict):
+                for k, v in val.items():
+                    vd[f"{key}.{k}"] = v
+            else:
+                vd[key] = val
+        final_list.append(vd)
+    return final_list
 
 
 def to_dvc(
@@ -95,16 +111,24 @@ def to_dvc(
         # stage
         if stage.iterate_over is not None:
             # Process a list of iterations into a DVC matrix stage
+            # Initialize a DVC matrix
             dvc_matrix = {}
+            # Initialize a dict for doing string formatting on the DVC stage
             format_dict = {}
-            for iteration in stage.iterate_over:
+            for n, iteration in enumerate(stage.iterate_over):
                 arg_name = iteration.arg_name
-                dvc_matrix[arg_name] = iteration.expand_values(
+                exp_vals = iteration.expand_values(
                     params=ck_info.get("parameters", {})
                 )
-                # Now replace arg name in cmd, deps, and outs with
-                # ${item.{arg_name}}
-                format_dict[arg_name] = f"${{item.{arg_name}}}"
+                if isinstance(arg_name, list):
+                    dvc_arg_name = f"_arg{n}"
+                    for arg_name_i in arg_name:
+                        item_string = f"${{item.{dvc_arg_name}.{arg_name_i}}}"
+                        format_dict[arg_name_i] = item_string
+                else:
+                    dvc_arg_name = arg_name
+                    format_dict[arg_name] = f"${{item.{arg_name}}}"
+                dvc_matrix[dvc_arg_name] = exp_vals
             try:
                 cmd = dvc_stage["cmd"]
                 cmd = cmd.format(**format_dict)

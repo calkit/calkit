@@ -38,6 +38,7 @@ from calkit.cli.check import (
     check_app,
     check_conda_env,
     check_docker_env,
+    check_environment,
     check_matlab_env,
     check_venv,
 )
@@ -930,9 +931,9 @@ def run(
     no_run_cache: Annotated[
         bool, typer.Option("--no-run-cache", help="Ignore the run cache.")
     ] = False,
-    no_log: Annotated[
+    save_log: Annotated[
         bool,
-        typer.Option("--no-log", "-l", help="Do not log the run."),
+        typer.Option("--log", "-l", help="Log the run."),
     ] = False,
     save_after_run: Annotated[
         bool,
@@ -951,7 +952,7 @@ def run(
     if not quiet:
         typer.echo("Getting system information")
     system_info = calkit.get_system_info()
-    if not no_log:
+    if save_log:
         # Save the system to .calkit/systems
         if verbose:
             typer.echo("Saving system information:")
@@ -1026,7 +1027,7 @@ def run(
     start_time_no_tz = calkit.utcnow(remove_tz=True)
     start_time = calkit.utcnow(remove_tz=False)
     run_id = uuid.uuid4().hex
-    if not no_log:
+    if save_log:
         log_fpath = os.path.join(
             ".calkit",
             "logs",
@@ -1054,7 +1055,7 @@ def run(
     dvc.ui.ui.write = lambda *args, **kwargs: None
     res = dvc_cli_main(["repro"] + args)
     failed = res != 0
-    if not no_log:
+    if save_log:
         # Get Git status after running
         git_changed_files_after = calkit.git.get_changed_files(repo=repo)
         git_staged_files_after = calkit.git.get_staged_files(repo=repo)
@@ -1389,6 +1390,40 @@ def run_in_env(
             subprocess.check_call(cmd, shell=True, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error(f"Failed to run in {kind}")
+    elif env["kind"] == "julia":
+        if not no_check:
+            check_environment(env_name=env_name, verbose=verbose)
+        env_path = env.get("path")
+        if env_path is None:
+            raise_error(
+                "Julia environments require a path pointing to Project.toml"
+            )
+        julia_version = env.get("julia")
+        env_fname = os.path.basename(env_path)
+        if not env_fname == "Project.toml":
+            raise_error(
+                "Julia environments require a path pointing to Project.toml"
+            )
+        env_dir = os.path.dirname(env_path)
+        if not env_dir:
+            env_dir = "."
+        julia_cmd = [
+            "julia",
+            f"+{julia_version}",
+            "--project=" + env_dir,
+            "-e",
+            " ".join(cmd),
+        ]
+        if verbose:
+            typer.echo(f"Running command: {julia_cmd}")
+        try:
+            subprocess.check_call(
+                julia_cmd,
+                cwd=wdir,
+                env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"},
+            )
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in julia environment")
     elif env["kind"] == "ssh":
         try:
             host = os.path.expandvars(env["host"])

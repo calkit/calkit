@@ -269,9 +269,7 @@ def test_to_dvc_notebook_stage():
     print(dvc_stages)
     stage = dvc_stages["notebook-1"]
     assert stage["cmd"].startswith("calkit nb execute")
-    assert " -p param1=${item.param1} " in stage["cmd"]
-    assert " -p param2=${item.param2} " in stage["cmd"]
-    assert " -p param3=${item.param3} " in stage["cmd"]
+    assert "--params-base64" in stage["cmd"]
     assert stage["matrix"]["param1"][0] == 5.0
     assert "m" in stage["matrix"]["param2"]
     assert "something" in stage["matrix"]["param3"]

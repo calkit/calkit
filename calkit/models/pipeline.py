@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import base64
+import json
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    ValidationError,
+    field_validator,
+)
 from typing_extensions import Annotated
 
 from calkit.models.io import InputsFromStageOutputs, PathOutput
 from calkit.models.iteration import (
+    ExpandedParametersType,
     ParameterIteration,
     ParametersType,
     RangeIteration,
@@ -69,7 +78,7 @@ class StageIteration(BaseModel):
         return v
 
     def expand_values(
-        self, params: ParametersType
+        self, params: ParametersType | ExpandedParametersType
     ) -> list[int | float | str | dict[str, int | float | str]]:
         vals = []
         if isinstance(self.arg_name, list):
@@ -365,6 +374,34 @@ class JupyterNotebookStage(Stage):
     html_storage: Literal["git", "dvc"] | None = "dvc"
     parameters: dict[str, Any] = {}
 
+    def update_parameters(self, params: dict) -> None:
+        """If we have any templated parameters, update those, e.g., from
+        project-level parameters.
+
+        This needs to happen before writing a DVC stage, so we can properly
+        create JSON for the notebook.
+        """
+        updated_params = {}
+        for k, v in self.parameters.items():
+            # If we have something like {var_name} in v, replace it with the
+            # value from params
+            if isinstance(v, str) and v.startswith("{") and v.endswith("}"):
+                var_name = v[1:-1]
+                if var_name in params:
+                    updated_params[k] = params[var_name]
+                else:
+                    updated_params[k] = v
+            else:
+                updated_params[k] = v
+            # Try parsing as a RangeIteration and expanding
+            try:
+                updated_params[k] = RangeIteration.model_validate(
+                    updated_params[k]
+                ).values
+            except ValidationError:
+                pass
+        self.parameters = updated_params
+
     @property
     def cleaned_notebook_path(self) -> str:
         return get_cleaned_notebook_path(self.notebook_path, as_posix=True)
@@ -396,8 +433,15 @@ class JupyterNotebookStage(Stage):
         cmd = f"calkit nb execute --environment {self.environment} --no-check"
         if self.html_storage:
             cmd += " --to html"
-        for k, v in self.parameters.items():
-            cmd += f" -p {k}={v}"
+        if self.parameters:
+            # If we have parameters, we need to pass them as JSON, escaping
+            # double quotes
+            params_json = json.dumps(self.parameters)
+            # Now base64 encode
+            params_base64 = base64.b64encode(
+                params_json.encode("utf-8")
+            ).decode("utf-8")
+            cmd += f' --params-base64 "{params_base64}"'
         cmd += f' "{self.notebook_path}"'
         return cmd
 

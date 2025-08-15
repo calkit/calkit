@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 import subprocess
 import sys
@@ -140,6 +142,27 @@ def execute_notebook(
             help="Parameter to pass to the notebook in key=value format.",
         ),
     ] = [],
+    params_json: Annotated[
+        str | None,
+        typer.Option(
+            "--params-json",
+            "-j",
+            help=(
+                "JSON string to parse as parameters to pass to the notebook."
+            ),
+        ),
+    ] = None,
+    params_base64: Annotated[
+        str | None,
+        typer.Option(
+            "--params-base64",
+            "-b",
+            help=(
+                "Base64-encoded JSON string to parse as parameters to pass to "
+                "the notebook."
+            ),
+        ),
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -165,6 +188,17 @@ def execute_notebook(
             raise_error(str(e))
     else:
         parsed_params = {}
+    # Parse JSON parameters
+    if params_json is not None:
+        parsed_params_json = json.loads(params_json)
+        parsed_params |= parsed_params_json
+    # Parse base64 parameters
+    if params_base64 is not None:
+        try:
+            decoded_json = base64.b64decode(params_base64).decode("utf-8")
+            parsed_params |= json.loads(decoded_json)
+        except Exception as e:
+            raise_error(f"Failed to parse base64 parameters: {e}")
     # Next, always execute the notebook and save as ipynb
     fpath_out_exec = calkit.notebooks.get_executed_notebook_path(
         notebook_path=path,
@@ -175,6 +209,11 @@ def execute_notebook(
     folder = os.path.dirname(fpath_out_exec)
     os.makedirs(folder, exist_ok=True)
     notebook_dir = os.path.dirname(path) or None
+    if verbose:
+        typer.echo(f"Executing notebook {path} with params: {parsed_params}")
+        typer.echo(f"Using kernel: {kernel_name}")
+        typer.echo(f"Running with cwd: {notebook_dir}")
+        typer.echo(f"Output will be saved to: {fpath_out_exec}")
     papermill.execute_notebook(
         input_path=path,
         output_path=fpath_out_exec,

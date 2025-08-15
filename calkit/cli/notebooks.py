@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import subprocess
@@ -151,6 +152,17 @@ def execute_notebook(
             ),
         ),
     ] = None,
+    params_base64: Annotated[
+        str | None,
+        typer.Option(
+            "--params-base64",
+            "-b",
+            help=(
+                "Base64-encoded JSON string to parse as parameters to pass to "
+                "the notebook."
+            ),
+        ),
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -180,6 +192,13 @@ def execute_notebook(
     if params_json is not None:
         parsed_params_json = json.loads(params_json)
         parsed_params |= parsed_params_json
+    # Parse base64 parameters
+    if params_base64 is not None:
+        try:
+            decoded_json = base64.b64decode(params_base64).decode("utf-8")
+            parsed_params |= json.loads(decoded_json)
+        except Exception as e:
+            raise_error(f"Failed to parse base64 parameters: {e}")
     # Next, always execute the notebook and save as ipynb
     fpath_out_exec = calkit.notebooks.get_executed_notebook_path(
         notebook_path=path,

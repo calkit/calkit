@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import PurePosixPath
 from typing import Any, Literal
@@ -423,10 +424,11 @@ class JupyterNotebookStage(Stage):
             # double quotes
             params_json = json.dumps(self.parameters)
             params_json = params_json.replace('"', '\\"')
-            # We also need to double up braces, since string formatting will
-            # be applied to patch iteration parameters into the command
-            params_json = params_json.replace("{", "{{").replace("}", "}}")
-            cmd += f' --params-json="{params_json}"'
+            # Now base64 encode
+            params_base64 = base64.b64encode(
+                params_json.encode("utf-8")
+            ).decode("utf-8")
+            cmd += f' --params-base64="{params_base64}"'
         cmd += f' "{self.notebook_path}"'
         return cmd
 

@@ -25,7 +25,7 @@ If you're using Conda for environment management,
 e.g., with an `environment.yml` file,
 you can use the `calkit new conda-env` command.
 
-Next, we can start building our [pipeline](pipeline.md).
+Next, we can start building our [pipeline](pipeline/index.md).
 Let's say we have a Jupyter notebook called `collect-data.ipynb`
 that produces raw data at `data/raw.h5`.
 We can add a pipeline stage to run this notebook in the `main` environment

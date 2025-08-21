@@ -322,4 +322,4 @@ pipeline:
         - results/param1={param1}/param2={param2}/results.csv
 ```
 
-For more information, see [pipeline iteration](/pipeline#iteration).
+For more information, see [pipeline iteration](pipeline/index.md#iteration).

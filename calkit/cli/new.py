@@ -157,10 +157,16 @@ def new_project(
                 repo.git.commit(["-m", "Initialize DVC"])
     ck_info_fpath = os.path.join(abs_path, "calkit.yaml")
     if os.path.isfile(ck_info_fpath) and not overwrite:
-        raise_error(
+        ck_info = calkit.load_calkit_info(wdir=abs_path)
+        name = ck_info.get("name", name)
+        title = ck_info.get("title", title)
+        description = ck_info.get("description", description)
+        typer.echo(
             "Destination is already a Calkit project; "
-            "use --overwrite to continue"
+            "will use existing project info where possible"
         )
+    else:
+        ck_info = {}
     if os.path.isdir(abs_path) and os.listdir(abs_path) and repo is None:
         warn(f"{abs_path} is not empty")
     if name is None:
@@ -224,7 +230,29 @@ def new_project(
                     )
                 repo.git.add("calkit.yaml")
                 if not no_commit:
-                    repo.git.commit(["-m", "Create calkit.yaml"])
+                    repo.git.commit(
+                        ["calkit.yaml", "-m", "Create calkit.yaml"]
+                    )
+            else:
+                # Merge with existing project info in calkit.yaml
+                typer.echo("Updating existing calkit.yaml file")
+                ck_info = (
+                    dict(
+                        owner=resp["owner_account_name"],
+                        name=resp["name"],
+                        title=resp["title"],
+                        description=resp["description"],
+                        git_repo_url=resp["git_repo_url"],
+                    )
+                    | ck_info
+                )
+                with open(calkit_fpath, "w") as f:
+                    ryaml.dump(ck_info, f)
+                repo.git.add("calkit.yaml")
+                if not no_commit and repo.git.diff("--staged"):
+                    repo.git.commit(
+                        ["calkit.yaml", "-m", "Update calkit.yaml"]
+                    )
         try:
             calkit.dvc.configure_remote(wdir=abs_path)
         except Exception:

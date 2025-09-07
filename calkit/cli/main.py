@@ -1855,3 +1855,51 @@ def run_jupyter(
     """Run a command with the Jupyter CLI."""
     process = subprocess.run([sys.executable, "-m", "jupyter"] + sys.argv[2:])
     sys.exit(process.returncode)
+
+
+@app.command(name="latexmk")
+def run_latexmk(
+    tex_file: Annotated[str, typer.Argument(help="The .tex file to compile.")],
+    environment: Annotated[
+        str | None,
+        typer.Option(
+            "--env",
+            "-e",
+            help=("Environment in which to run latexmk, if applicable."),
+        ),
+    ] = None,
+):
+    """Compile a LaTeX document with latexmk.
+
+    If a Calkit environment is not specified, latexmk will be run in the
+    system environment if available. If not available, a TeX Live Docker
+    container will be used.
+    """
+    latexmk_cmd = [
+        "latexmk",
+        "-pdf",
+        "-cd",
+        "-silent",
+        "-synctex=1",
+        "-interaction=nonstopmode",
+        tex_file,
+    ]
+    if environment is not None:
+        cmd = ["calkit", "xenv", "--name", environment] + latexmk_cmd
+    elif calkit.check_dep_exists("latexmk"):
+        cmd = latexmk_cmd
+    else:
+        cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{os.getcwd()}:/work",
+            "-w",
+            "/work",
+            "texlive/texlive:latest-full",
+        ] + latexmk_cmd
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError:
+        raise_error("latexmk failed")

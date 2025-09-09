@@ -981,22 +981,23 @@ def run(
         except Exception as e:
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Pipeline compilation failed: {e}")
-    # Get status of Git repo before running
-    repo = git.Repo()
-    git_rev = repo.head.commit.hexsha
-    try:
-        git_branch = repo.active_branch.name
-    except TypeError:
-        # If no branch is checked out, we are in a detached HEAD state
-        git_branch = None
-    git_changed_files_before = calkit.git.get_changed_files(repo=repo)
-    git_staged_files_before = calkit.git.get_staged_files(repo=repo)
-    git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
-    # Get status of DVC repo before running
-    dvc_repo = dvc.repo.Repo()
-    dvc_status_before = dvc_repo.status()
-    dvc_data_status_before = dvc_repo.data_status()
-    dvc_data_status_before.pop("git", None)  # Remove git status
+    if save_log:
+        # Get status of Git repo before running
+        repo = git.Repo()
+        git_rev = repo.head.commit.hexsha
+        try:
+            git_branch = repo.active_branch.name
+        except TypeError:
+            # If no branch is checked out, we are in a detached HEAD state
+            git_branch = None
+        git_changed_files_before = calkit.git.get_changed_files(repo=repo)
+        git_staged_files_before = calkit.git.get_staged_files(repo=repo)
+        git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
+        # Get status of DVC repo before running
+        dvc_repo = dvc.repo.Repo()
+        dvc_status_before = dvc_repo.status()
+        dvc_data_status_before = dvc_repo.data_status()
+        dvc_data_status_before.pop("git", None)  # Remove git status
     if targets is None:
         targets = []
     args = deepcopy(targets)

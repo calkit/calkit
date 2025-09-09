@@ -113,6 +113,7 @@ class Stage(BaseModel):
         "python-script",
         "latex",
         "matlab-script",
+        "matlab-command",
         "docker-command",
         "shell-command",
         "shell-script",
@@ -164,7 +165,9 @@ class Stage(BaseModel):
 
     @property
     def xenv_cmd(self) -> str:
-        return f"calkit xenv -n {self.environment} --no-check"
+        if self.environment == "_system":
+            return ""
+        return f"calkit xenv -n {self.environment} --no-check --"
 
     def to_dvc(self) -> dict:
         """Convert to a DVC stage.
@@ -193,7 +196,7 @@ class PythonScriptStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"{self.xenv_cmd} -- python {self.script_path}"
+        cmd = f"{self.xenv_cmd} python {self.script_path}"
         for arg in self.args:
             cmd += f" {arg}"
         return cmd
@@ -212,7 +215,7 @@ class LatexStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"{self.xenv_cmd} -- latexmk -cd -interaction=nonstopmode"
+        cmd = f"{self.xenv_cmd} latexmk -cd -interaction=nonstopmode"
         if not self.verbose:
             cmd += " -silent"
         if self.force:
@@ -247,7 +250,26 @@ class MatlabScriptStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        return f"{self.xenv_cmd} -- \"run('{self.script_path}');\""
+        cmd = self.xenv_cmd
+        if self.environment == "_system":
+            cmd += "matlab -batch"
+        cmd += f" \"run('{self.script_path}');\""
+        return cmd
+
+
+class MatlabCommandStage(Stage):
+    kind: Literal["matlab-command"] = "matlab-command"
+    command: str
+
+    @property
+    def dvc_cmd(self) -> str:
+        # We need to escape quotes in the command
+        matlab_cmd = self.command.replace('"', '\\"')
+        cmd = self.xenv_cmd
+        if self.environment == "_system":
+            cmd += "matlab -batch"
+        cmd += f' "{matlab_cmd}"'
+        return cmd
 
 
 class ShellCommandStage(Stage):
@@ -257,14 +279,12 @@ class ShellCommandStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = ""
-        if self.environment != "_system":
-            cmd = f"{self.xenv_cmd} -- "
+        cmd = self.xenv_cmd
         if self.shell == "zsh":
             norc_args = "-f"
         else:
             norc_args = "--noprofile --norc"
-        cmd += f'{self.shell} {norc_args} -c "{self.command}"'
+        cmd += f' {self.shell} {norc_args} -c "{self.command}"'
         return cmd
 
 
@@ -280,14 +300,12 @@ class ShellScriptStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = ""
-        if self.environment != "_system":
-            cmd = f"{self.xenv_cmd} -- "
+        cmd = self.xenv_cmd
         if self.shell == "zsh":
             norc_args = "-f"
         else:
             norc_args = "--noprofile --norc"
-        cmd += f"{self.shell} {norc_args} {self.script_path}"
+        cmd += f" {self.shell} {norc_args} {self.script_path}"
         for arg in self.args:
             cmd += f" {arg}"
         return cmd
@@ -327,7 +345,7 @@ class JuliaScriptStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f'{self.xenv_cmd} -- "include(\\"{self.script_path}\\")"'
+        cmd = f'{self.xenv_cmd} "include(\\"{self.script_path}\\")"'
         return cmd
 
     @property
@@ -343,7 +361,7 @@ class JuliaCommandStage(Stage):
     def dvc_cmd(self) -> str:
         # We need to escape quotes in the command
         julia_cmd = self.command.replace('"', '\\"')
-        cmd = f'{self.xenv_cmd} -- "{julia_cmd}"'
+        cmd = f'{self.xenv_cmd} "{julia_cmd}"'
         return cmd
 
 
@@ -533,6 +551,7 @@ class Pipeline(BaseModel):
                 PythonScriptStage
                 | LatexStage
                 | MatlabScriptStage
+                | MatlabCommandStage
                 | ShellCommandStage
                 | ShellScriptStage
                 | DockerCommandStage

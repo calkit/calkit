@@ -169,8 +169,8 @@ def execute_notebook(
             "--language",
             "-l",
             help=(
-                "Notebook language; if 'matlab', will ensure MATLAB kernel is "
-                "available."
+                "Notebook language; if 'matlab', MATLAB kernel must be "
+                "available in environment."
             ),
         ),
     ] = "python",

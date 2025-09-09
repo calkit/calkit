@@ -124,17 +124,6 @@ def execute_notebook(
             help="Environment name in which to run the notebook.",
         ),
     ],
-    kernel_name: Annotated[
-        str | None,
-        typer.Option(
-            "--kernel",
-            "-k",
-            help=(
-                "Kernel name to use; if not provided, will be inferred from "
-                "environment and language."
-            ),
-        ),
-    ] = None,
     to: Annotated[
         list[str],
         typer.Option("--to", help="Output format ('html' or 'notebook')."),
@@ -204,12 +193,14 @@ def execute_notebook(
         )
     # First, ensure the specified environment has a kernel we can use
     # We need to check the environment type and create the kernel if needed
-    if kernel_name is None and language.lower() == "python":
+    if language.lower() == "python":
         kernel_name = check_env_kernel(
             env_name=env_name, no_check=no_check, verbose=verbose
         )
-    if language.lower() == "matlab" and kernel_name is None:
+    elif language.lower() == "matlab":
         kernel_name = "jupyter_matlab_kernel"
+    else:
+        raise_error(f"Language '{language}' not yet supported")
     # We can't handle parameters unless language is Python
     if language.lower() != "python":
         if params or params_json is not None or params_base64 is not None:

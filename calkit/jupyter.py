@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 
 from pydantic import BaseModel
@@ -47,25 +46,3 @@ def stop_server(url: str):
     # Extract the port from the URL
     port = url.split(":")[2][:4]
     subprocess.call(["jupyter", "server", "stop", port])
-
-
-def check_path():
-    """Ensure that the Jupyter environment can access Calkit resources when
-    installed in a uv tool environment.
-    """
-    tool_share = os.path.join(
-        os.path.expanduser("~"),
-        ".local",
-        "share",
-        "uv",
-        "tools",
-        "calkit-python",
-        "share",
-        "jupyter",
-    )
-    if os.path.isdir(tool_share):
-        # Prepend to JUPYTER_PATH so that Jupyter can find
-        # Calkit resources (kernelspecs, nbextensions, labextensions, etc)
-        jupyter_path = os.environ.get("JUPYTER_PATH", "")
-        if tool_share not in jupyter_path.split(":"):
-            os.environ["JUPYTER_PATH"] = f"{tool_share}:{jupyter_path}"

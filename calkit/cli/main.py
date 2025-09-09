@@ -981,22 +981,23 @@ def run(
         except Exception as e:
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Pipeline compilation failed: {e}")
-    # Get status of Git repo before running
-    repo = git.Repo()
-    git_rev = repo.head.commit.hexsha
-    try:
-        git_branch = repo.active_branch.name
-    except TypeError:
-        # If no branch is checked out, we are in a detached HEAD state
-        git_branch = None
-    git_changed_files_before = calkit.git.get_changed_files(repo=repo)
-    git_staged_files_before = calkit.git.get_staged_files(repo=repo)
-    git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
-    # Get status of DVC repo before running
-    dvc_repo = dvc.repo.Repo()
-    dvc_status_before = dvc_repo.status()
-    dvc_data_status_before = dvc_repo.data_status()
-    dvc_data_status_before.pop("git", None)  # Remove git status
+    if save_log:
+        # Get status of Git repo before running
+        repo = git.Repo()
+        git_rev = repo.head.commit.hexsha
+        try:
+            git_branch = repo.active_branch.name
+        except TypeError:
+            # If no branch is checked out, we are in a detached HEAD state
+            git_branch = None
+        git_changed_files_before = calkit.git.get_changed_files(repo=repo)
+        git_staged_files_before = calkit.git.get_staged_files(repo=repo)
+        git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
+        # Get status of DVC repo before running
+        dvc_repo = dvc.repo.Repo()
+        dvc_status_before = dvc_repo.status()
+        dvc_data_status_before = dvc_repo.data_status()
+        dvc_data_status_before.pop("git", None)  # Remove git status
     if targets is None:
         targets = []
     args = deepcopy(targets)
@@ -1855,3 +1856,51 @@ def run_jupyter(
     """Run a command with the Jupyter CLI."""
     process = subprocess.run([sys.executable, "-m", "jupyter"] + sys.argv[2:])
     sys.exit(process.returncode)
+
+
+@app.command(name="latexmk")
+def run_latexmk(
+    tex_file: Annotated[str, typer.Argument(help="The .tex file to compile.")],
+    environment: Annotated[
+        str | None,
+        typer.Option(
+            "--env",
+            "-e",
+            help=("Environment in which to run latexmk, if applicable."),
+        ),
+    ] = None,
+):
+    """Compile a LaTeX document with latexmk.
+
+    If a Calkit environment is not specified, latexmk will be run in the
+    system environment if available. If not available, a TeX Live Docker
+    container will be used.
+    """
+    latexmk_cmd = [
+        "latexmk",
+        "-pdf",
+        "-cd",
+        "-silent",
+        "-synctex=1",
+        "-interaction=nonstopmode",
+        tex_file,
+    ]
+    if environment is not None:
+        cmd = ["calkit", "xenv", "--name", environment] + latexmk_cmd
+    elif calkit.check_dep_exists("latexmk"):
+        cmd = latexmk_cmd
+    else:
+        cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{os.getcwd()}:/work",
+            "-w",
+            "/work",
+            "texlive/texlive:latest-full",
+        ] + latexmk_cmd
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError:
+        raise_error("latexmk failed")

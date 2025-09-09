@@ -163,6 +163,17 @@ def execute_notebook(
             ),
         ),
     ] = None,
+    language: Annotated[
+        str,
+        typer.Option(
+            "--language",
+            "-l",
+            help=(
+                "Notebook language; if 'matlab', MATLAB kernel must be "
+                "available in environment."
+            ),
+        ),
+    ] = "python",
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -176,10 +187,24 @@ def execute_notebook(
 
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
+    if language.lower() not in ["python", "matlab", "julia"]:
+        raise ValueError(
+            "Language must be one of 'python', 'matlab', or 'julia'"
+        )
     # First, ensure the specified environment has a kernel we can use
-    kernel_name = check_env_kernel(
-        env_name=env_name, no_check=no_check, verbose=verbose
-    )
+    # We need to check the environment type and create the kernel if needed
+    if language.lower() == "python":
+        kernel_name = check_env_kernel(
+            env_name=env_name, no_check=no_check, verbose=verbose
+        )
+    elif language.lower() == "matlab":
+        kernel_name = "jupyter_matlab_kernel"
+    else:
+        raise_error(f"Language '{language}' not yet supported")
+    # We can't handle parameters unless language is Python
+    if language.lower() != "python":
+        if params or params_json is not None or params_base64 is not None:
+            raise_error("Parameters can only be passed to Python notebooks")
     # Parse parameters
     if params:
         try:
@@ -214,14 +239,34 @@ def execute_notebook(
         typer.echo(f"Using kernel: {kernel_name}")
         typer.echo(f"Running with cwd: {notebook_dir}")
         typer.echo(f"Output will be saved to: {fpath_out_exec}")
-    papermill.execute_notebook(
-        input_path=path,
-        output_path=fpath_out_exec,
-        kernel_name=kernel_name,
-        log_output=True,
-        parameters=parsed_params,
-        cwd=notebook_dir,
-    )
+    # If this is a Python or Julia notebook, we can use Papermill
+    # If it's a MATLAB notebook, we need to use the MATLAB kernel inside the
+    # specified environment
+    if language.lower() in ["python", "julia"]:
+        papermill.execute_notebook(
+            input_path=path,
+            output_path=fpath_out_exec,
+            kernel_name=kernel_name,
+            log_output=True,
+            parameters=parsed_params,
+            cwd=notebook_dir,
+        )
+    elif language.lower() == "matlab":
+        # Use nbconvert to execute the notebook with the MATLAB kernel
+        cmd = [
+            "python",
+            "-m",
+            "jupyter",
+            "nbconvert",
+            "--to",
+            "notebook",
+            "--execute",
+            f"--ExecutePreprocessor.kernel_name={kernel_name}",
+            "--output",
+            fpath_out_exec,
+            path,
+        ]
+        run_in_env(cmd, env_name=env_name, no_check=no_check, verbose=verbose)
     for to_fmt in to:
         if to_fmt != "notebook":
             try:
@@ -250,6 +295,6 @@ def execute_notebook(
                 fname_out,
             ]
             typer.echo(f"Exporting {to_fmt}")
-            run_in_env(
-                cmd=cmd, env_name=env_name, no_check=True, verbose=verbose
-            )
+            p = subprocess.run(cmd)
+            if p.returncode != 0:
+                raise_error(f"nbconvert failed for format '{to_fmt}'")

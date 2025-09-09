@@ -7,6 +7,7 @@ from calkit.models.pipeline import (
     JuliaCommandStage,
     JupyterNotebookStage,
     LatexStage,
+    MatlabCommandStage,
     PythonScriptStage,
     StageIteration,
     WordToPdfStage,
@@ -131,3 +132,18 @@ def test_juliacommandstage():
     assert sd["cmd"] == (
         'calkit xenv -n j1 --no-check -- "println(\\"sup\\")"'
     )
+
+
+def test_matlabcommandstage():
+    s = MatlabCommandStage(environment="m1", command='disp("Hello, MATLAB!");')
+    sd = s.to_dvc()
+    print(sd)
+    assert sd["cmd"] == (
+        'calkit xenv -n m1 --no-check -- "disp(\\"Hello, MATLAB!\\");"'
+    )
+    s = MatlabCommandStage(
+        environment="_system", command='disp("Hello, MATLAB!");'
+    )
+    sd = s.to_dvc()
+    print(sd)
+    assert sd["cmd"] == 'matlab -batch "disp(\\"Hello, MATLAB!\\");"'

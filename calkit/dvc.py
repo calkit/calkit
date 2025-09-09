@@ -18,7 +18,7 @@ logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
 
 
-def configure_remote(wdir: str = None):
+def configure_remote(wdir: str | None = None):
     try:
         project_name = calkit.detect_project_name(wdir=wdir)
     except ValueError as e:
@@ -70,7 +70,9 @@ def configure_remote(wdir: str = None):
 
 
 def set_remote_auth(
-    remote_name: str = None, always_auth: bool = False, wdir: str = None
+    remote_name: str | None = None,
+    always_auth: bool = False,
+    wdir: str | None = None,
 ):
     """Get a token and set it in the local DVC config so we can interact with
     the cloud as an HTTP remote.
@@ -85,7 +87,7 @@ def set_remote_auth(
         )["access_token"]
         settings.dvc_token = token
         settings.write()
-    subprocess.check_call(
+    p1 = subprocess.run(
         [
             sys.executable,
             "-m",
@@ -99,7 +101,7 @@ def set_remote_auth(
         ],
         cwd=wdir,
     )
-    subprocess.check_call(
+    p2 = subprocess.run(
         [
             sys.executable,
             "-m",
@@ -113,6 +115,10 @@ def set_remote_auth(
         ],
         cwd=wdir,
     )
+    if p1.returncode != 0 or p2.returncode != 0:
+        raise RuntimeError(
+            f"Failed to set DVC remote authentication for {remote_name}"
+        )
 
 
 def add_external_remote(owner_name: str, project_name: str) -> dict:
@@ -159,13 +165,15 @@ def get_remotes(wdir: str | None = None) -> dict[str, str]:
     """Get a dictionary of DVC remotes, keyed by name, with URL as the
     value.
     """
-    out = (
-        subprocess.check_output(
-            [sys.executable, "-m", "dvc", "remote", "list"], cwd=wdir
-        )
-        .decode()
-        .strip()
+    p = subprocess.run(
+        [sys.executable, "-m", "dvc", "remote", "list"],
+        cwd=wdir,
+        capture_output=True,
+        text=True,
     )
+    if p.returncode != 0:
+        raise RuntimeError(f"Error getting DVC remotes: {p.stderr.strip()}")
+    out = p.stdout.strip()
     if not out:
         return {}
     resp = {}
@@ -182,12 +190,14 @@ def get_remotes(wdir: str | None = None) -> dict[str, str]:
     return resp
 
 
-def list_paths(wdir: str = None, recursive=False) -> list[str]:
+def list_paths(wdir: str | None = None, recursive=False) -> list[str]:
     """List paths tracked with DVC."""
-    return [p.get("path") for p in list_files(wdir=wdir, recursive=recursive)]
+    return [
+        p.get("path", "") for p in list_files(wdir=wdir, recursive=recursive)
+    ]
 
 
-def list_files(wdir: str = None, recursive=True) -> list[dict]:
+def list_files(wdir: str | None = None, recursive=True) -> list[dict]:
     """Return a list with all files in DVC, including their path and md5
     checksum.
     """

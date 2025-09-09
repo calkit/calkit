@@ -391,6 +391,7 @@ class JupyterNotebookStage(Stage):
     executed_ipynb_storage: Literal["git", "dvc"] | None = "dvc"
     html_storage: Literal["git", "dvc"] | None = "dvc"
     parameters: dict[str, Any] = {}
+    language: Literal["python", "matlab", "julia"] = "python"
 
     def update_parameters(self, params: dict) -> None:
         """If we have any templated parameters, update those, e.g., from
@@ -448,7 +449,10 @@ class JupyterNotebookStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"calkit nb execute --environment {self.environment} --no-check"
+        cmd = (
+            f"calkit nb execute --environment {self.environment} "
+            f"--no-check --language {self.language}"
+        )
         if self.html_storage:
             cmd += " --to html"
         if self.parameters:

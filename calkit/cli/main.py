@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import glob
 import json
 import logging
 import os
@@ -33,6 +32,7 @@ from typing_extensions import Annotated, Optional
 import calkit
 import calkit.matlab
 import calkit.pipeline
+import calkit.ssh
 from calkit.cli import print_sep, raise_error, run_cmd, warn
 from calkit.cli.check import (
     check_app,
@@ -52,6 +52,7 @@ from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
 from calkit.cli.overleaf import overleaf_app
 from calkit.cli.update import update_app
+from calkit.core import to_shell_cmd
 from calkit.environments import get_env_lock_fpath
 from calkit.models import Procedure
 
@@ -104,22 +105,6 @@ DVC_EXTENSIONS = [
     ".zarr",
 ]
 DVC_SIZE_THRESH_BYTES = 1_000_000
-
-
-def _to_shell_cmd(cmd: list[str]) -> str:
-    """Join a command to be compatible with running at the shell.
-
-    This is similar to ``shlex.join`` but works with Git Bash on Windows.
-    """
-    quoted_cmd = []
-    for part in cmd:
-        # Find quotes within quotes and escape them
-        if " " in part or '"' in part[1:-1] or "'" in part[1:-1]:
-            part = part.replace('"', r"\"")
-            quoted_cmd.append(f'"{part}"')
-        else:
-            quoted_cmd.append(part)
-    return " ".join(quoted_cmd)
 
 
 @app.callback()
@@ -1204,6 +1189,14 @@ def run_in_env(
             help="Check the environment in a relaxed way, if applicable.",
         ),
     ] = False,
+    machine_name: Annotated[
+        str | None,
+        typer.Option(
+            "--machine",
+            "-m",
+            help="Machine name on which to run. Defaults to local machine.",
+        ),
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -1262,7 +1255,7 @@ def run_in_env(
                 args=env.get("args", []),
                 quiet=not verbose,
             )
-        shell_cmd = _to_shell_cmd(cmd)
+        shell_cmd = to_shell_cmd(cmd)
         docker_cmd = [
             "docker",
             "run",
@@ -1361,7 +1354,7 @@ def run_in_env(
             raise_error("venv environments require a path")
         prefix = env["prefix"]
         path = env["path"]
-        shell_cmd = _to_shell_cmd(cmd)
+        shell_cmd = to_shell_cmd(cmd)
         if _platform.system() == "Windows":
             activate_cmd = f"{prefix}\\Scripts\\activate"
         else:
@@ -1426,116 +1419,9 @@ def run_in_env(
         except subprocess.CalledProcessError:
             raise_error("Failed to run in julia environment")
     elif env["kind"] == "ssh":
-        try:
-            host = os.path.expandvars(env["host"])
-            user = os.path.expandvars(env["user"])
-            remote_wdir: str = env["wdir"]
-        except KeyError:
-            raise_error(
-                "Host, user, and wdir must be defined for ssh environments"
-            )
-        send_paths = env.get("send_paths")
-        get_paths = env.get("get_paths")
-        key = env.get("key")
-        if key is not None:
-            key = os.path.expanduser(os.path.expandvars(key))
-        remote_shell_cmd = _to_shell_cmd(cmd)
-        # Run with nohup so we can disconnect
-        # TODO: Should we collect output instead of send to /dev/null?
-        remote_cmd = (
-            f"cd '{remote_wdir}' ; nohup {remote_shell_cmd} "
-            "> /dev/null 2>&1 & echo $! "
+        calkit.ssh.run_command(
+            env=env, env_name=env_name, cmd=cmd, verbose=verbose
         )
-        key_cmd = ["-i", key] if key is not None else []
-        # Check to see if we've already submitted a job with this command
-        jobs_fpath = ".calkit/jobs.yaml"
-        job_key = f"{env_name}::{remote_shell_cmd}"
-        remote_pid = None
-        if os.path.isfile(jobs_fpath):
-            with open(jobs_fpath) as f:
-                jobs = calkit.ryaml.load(f)
-            if jobs is None:
-                jobs = {}
-        else:
-            jobs = {}
-        job = jobs.get(job_key, {})
-        remote_pid = job.get("remote_pid")
-        if remote_pid is None:
-            # First make sure the remote working dir exists
-            typer.echo("Ensuring remote working directory exists")
-            subprocess.check_call(
-                ["ssh"]
-                + key_cmd
-                + [f"{user}@{host}", f"mkdir -p {remote_wdir}"]
-            )
-            # Now send any necessary files
-            if send_paths:
-                typer.echo("Sending to remote directory")
-                # Accept glob patterns
-                paths = []
-                for p in send_paths:
-                    paths += glob.glob(p)
-                scp_cmd = (
-                    ["scp", "-r"]
-                    + key_cmd
-                    + paths
-                    + [f"{user}@{host}:{remote_wdir}/"]
-                )
-                if verbose:
-                    typer.echo(f"scp cmd: {scp_cmd}")
-                subprocess.check_call(scp_cmd)
-            # Now run the command
-            typer.echo(f"Running remote command: {remote_shell_cmd}")
-            if verbose:
-                typer.echo(f"Full command: {remote_cmd}")
-            remote_pid = (
-                subprocess.check_output(
-                    ["ssh"] + key_cmd + [f"{user}@{host}", remote_cmd]
-                )
-                .decode()
-                .strip()
-            )
-            typer.echo(f"Running with remote PID: {remote_pid}")
-            # Save PID to jobs database so we can resume waiting
-            typer.echo("Updating jobs database")
-            os.makedirs(".calkit", exist_ok=True)
-            job["remote_pid"] = remote_pid
-            job["submitted"] = time.time()
-            job["finished"] = None
-            jobs[job_key] = job
-            with open(jobs_fpath, "w") as f:
-                calkit.ryaml.dump(jobs, f)
-        # Now wait for the job to complete
-        typer.echo(f"Waiting for remote PID {remote_pid} to finish")
-        ps_cmd = ["ssh"] + key_cmd + [f"{user}@{host}", "ps", "-p", remote_pid]
-        finished = False
-        while not finished:
-            try:
-                subprocess.check_output(ps_cmd)
-                finished = False
-                time.sleep(2)
-            except subprocess.CalledProcessError:
-                finished = True
-                typer.echo("Remote process finished")
-        # Now sync the files back
-        # TODO: Figure out how to do this in one command
-        # Getting the syntax right is troublesome since it appears to work
-        # differently on different platforms
-        if get_paths:
-            typer.echo("Copying files back from remote directory")
-            for src_path in get_paths:
-                src_path = remote_wdir + "/" + src_path  # type: ignore
-                src = f"{user}@{host}:{src_path}"
-                scp_cmd = ["scp", "-r"] + key_cmd + [src, "."]
-                subprocess.check_call(scp_cmd)
-        # Now delete the remote PID from the jobs file
-        typer.echo("Updating jobs database")
-        os.makedirs(".calkit", exist_ok=True)
-        job["remote_pid"] = None
-        job["finished"] = time.time()
-        jobs[job_key] = job
-        with open(jobs_fpath, "w") as f:
-            calkit.ryaml.dump(jobs, f)
     elif env["kind"] == "renv":
         try:
             subprocess.check_call(
@@ -1592,6 +1478,18 @@ def run_in_env(
             raise_error("Failed to run in MATLAB environment")
     else:
         raise_error("Environment kind not supported")
+
+
+@app.command(name="xm")
+def run_on_machine(
+    machine_name: Annotated[str, typer.Argument(help="Machine name")],
+    env_name: Annotated[
+        str | None,
+        typer.Option("--environment", "-e", help="Environment name."),
+    ] = None,
+):
+    """Run a command on a machine."""
+    pass
 
 
 @app.command(name="runproc", help="Execute a procedure (alias for 'xproc').")

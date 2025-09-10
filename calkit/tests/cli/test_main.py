@@ -13,7 +13,7 @@ from dvc.exceptions import NotDvcRepoError
 from git.exc import InvalidGitRepositoryError
 
 import calkit
-from calkit.cli.main import _stage_run_info_from_log_content, _to_shell_cmd
+from calkit.cli.main import _stage_run_info_from_log_content
 
 
 def test_run_in_env(tmp_dir):
@@ -267,33 +267,6 @@ def test_run_in_julia_env(tmp_dir):
     )
     # TODO: Allow specifying version
     assert out
-
-
-def test_to_shell_cmd():
-    cmd = ["python", "-c", "import math; print('hello world')"]
-    subprocess.check_call(cmd)
-    shell_cmd = _to_shell_cmd(cmd)
-    assert shell_cmd == "python -c \"import math; print('hello world')\""
-    subprocess.check_call(shell_cmd, shell=True)
-    cmd = ["echo", "hello world"]
-    subprocess.check_call(cmd)
-    shell_cmd = _to_shell_cmd(cmd)
-    assert shell_cmd == 'echo "hello world"'
-    subprocess.check_call(shell_cmd, shell=True)
-    cmd = ["python", "-c", "print('sup')"]
-    shell_cmd = _to_shell_cmd(cmd)
-    assert shell_cmd == "python -c \"print('sup')\""
-    cmd = ["python", "-c", 'print("hello world")']
-    shell_cmd = _to_shell_cmd(cmd)
-    assert shell_cmd == 'python -c "print(\\"hello world\\")"'
-    subprocess.check_call(shell_cmd, shell=True)
-    cmd = [
-        "sh",
-        "-c",
-        "cd dir1 && ls",
-    ]
-    good_shell_cmd = 'sh -c "cd dir1 && ls"'
-    assert _to_shell_cmd(cmd) == good_shell_cmd
 
 
 def test_add(tmp_dir):

@@ -157,7 +157,7 @@ def config_github_ssh():
             if 1 <= key_choice <= len(existing_pub_keys):
                 key_path = existing_pub_keys[key_choice - 1][:-4]
             else:
-                raise_error("Invalid choice")
+                typer.echo("Invalid choice")
                 # Keep asking until they give a valid choice
                 while True:
                     key_choice = typer.prompt(

@@ -143,9 +143,6 @@ def config_github_ssh():
     # First check if the user has any SSH keys
     ssh_dir = os.path.expanduser("~/.ssh")
     existing_pub_keys = glob.glob(os.path.join(ssh_dir, "*.pub"))
-    # Get the user's email from their Git config, and ask them if they want to
-    # use that or a different one
-    user_git_email = git
     # If not run ssh-keygen
     if existing_pub_keys:
         # Ask the user if they want to use an existing key or create a new one
@@ -182,6 +179,21 @@ def config_github_ssh():
             "Enter the path to save the new SSH key",
             default=os.path.join(ssh_dir, "id_ed25519"),
         )
+    # Get the user's email from their Git config, and ask them if they want to
+    # use that or a different one
+    user_git_email = git.Git().config("--get", "user.email").strip()
+    if not user_git_email:
+        user_git_email = typer.prompt(
+            "No email found in Git config; enter email for SSH key"
+        )
+        git.Git().config("--global", "user.email", user_git_email)
+    # Do the same for user name even though we don't need it
+    user_git_name = git.Git().config("--get", "user.name").strip()
+    if not user_git_name:
+        user_git_name = typer.prompt(
+            "No name found in Git config; enter name for SSH key"
+        )
+        git.Git().config("--global", "user.name", user_git_name)
     keygen_cmd = [
         "ssh-keygen",
         "-t",
@@ -203,7 +215,9 @@ def config_github_ssh():
     # Add the SSH key to the ssh-agent
     typer.echo(f"Adding SSH key to ssh-agent: {key_path}")
     cmd = ["ssh-add", key_path]
-    subprocess.run(cmd)
+    p = subprocess.run(cmd)
+    if p.returncode != 0:
+        raise_error("Failed to add SSH key to ssh-agent")
     # Now add to GitHub
     gh_ssh_url = "https://github.com/settings/ssh/new"
     typer.echo(

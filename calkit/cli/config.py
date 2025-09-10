@@ -219,17 +219,22 @@ def config_github_ssh():
     cmd = ["ssh-add", key_path]
     p = subprocess.run(cmd)
     if p.returncode != 0:
-        raise_error("Failed to add SSH key to ssh-agent")
+        raise_error("Failed to add SSH key to ssh-agent; please try again")
     # Now add to GitHub
     gh_ssh_url = "https://github.com/settings/ssh/new"
     typer.echo(
-        "Please add the new SSH key to your GitHub account by visiting:\n"
+        "Add the new SSH key to your GitHub account by visiting:\n"
         f"{gh_ssh_url}"
     )
     with open(key_path + ".pub", "r") as f:
         pub_key = f.read()
     typer.echo(f"Paste this into the public key field:\n\n{pub_key}\n")
-    # Tell the user to visit this and confirm when it's entered
-    # Now test that we can connect to GitHub
-    # We expect output like "successfully authenticated", but will return a
-    # non-zero exit code
+    typer.confirm("Press Enter when done", default=True)
+    typer.echo("Testing SSH connection to GitHub")
+    p = subprocess.run(ssh_test_cmd, capture_output=True, text=True)
+    if "successfully authenticated" in p.stderr:
+        typer.echo("Successfully connected to GitHub via SSH!")
+    else:
+        raise_error(
+            "Failed to connect to GitHub via SSH; please check your setup"
+        )

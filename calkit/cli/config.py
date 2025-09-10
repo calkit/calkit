@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import glob
 import os
 import subprocess
 
@@ -124,3 +125,95 @@ def list_config_keys():
     cfg = config.read()
     for key in cfg.model_dump():
         typer.echo(key)
+
+
+@config_app.command(name="github-ssh")
+def config_github_ssh():
+    """Walk through the process of adding an SSH key to GitHub."""
+    typer.echo("Checking if you can already connect to GitHub via SSH")
+    # First check if we can already connect to GitHub
+    ssh_test_cmd = ["ssh", "-T", "git@github.com"]
+    p = subprocess.run(ssh_test_cmd, capture_output=True, text=True)
+    if "successfully authenticated" in p.stderr:
+        typer.echo("You can already connect to GitHub via SSH")
+        go_on = typer.confirm("Do you want to add a new SSH key anyway?")
+        if not go_on:
+            raise typer.Exit()
+    # If we can, ask the user if they still want to add a new key
+    # First check if the user has any SSH keys
+    ssh_dir = os.path.expanduser("~/.ssh")
+    existing_pub_keys = glob.glob(os.path.join(ssh_dir, "*.pub"))
+    # Get the user's email from their Git config, and ask them if they want to
+    # use that or a different one
+    user_git_email = git
+    # If not run ssh-keygen
+    if existing_pub_keys:
+        # Ask the user if they want to use an existing key or create a new one
+        typer.echo("Existing SSH public keys found:")
+        for i, key in enumerate(existing_pub_keys):
+            typer.echo(f"{i + 1}: {key}")
+        use_existing = typer.confirm("Do you want to use one of these keys?")
+        if use_existing:
+            key_choice = typer.prompt(
+                "Enter the number of the key to use", type=int
+            )
+            if 1 <= key_choice <= len(existing_pub_keys):
+                key_path = existing_pub_keys[key_choice - 1][:-4]
+            else:
+                raise_error("Invalid choice")
+                # Keep asking until they give a valid choice
+                while True:
+                    key_choice = typer.prompt(
+                        "Enter the number of the key to use", type=int
+                    )
+                    if 1 <= key_choice <= len(existing_pub_keys):
+                        key_path = existing_pub_keys[key_choice - 1][:-4]
+                        break
+                    else:
+                        typer.echo("Invalid choice, please try again.")
+        else:
+            key_path = typer.prompt(
+                "Enter the path to save the new SSH key",
+                default=os.path.join(ssh_dir, "id_ed25519"),
+            )
+    else:
+        typer.echo("No existing SSH keys found")
+        key_path = typer.prompt(
+            "Enter the path to save the new SSH key",
+            default=os.path.join(ssh_dir, "id_ed25519"),
+        )
+    keygen_cmd = [
+        "ssh-keygen",
+        "-t",
+        "ed25519",
+        "-C",
+        user_git_email,
+        "-f",
+        key_path,
+    ]
+    subprocess.run(keygen_cmd)
+    # Start the SSH agent in the background
+    typer.echo("Checking that the SSH agent is running")
+    ssh_agent_cmd = subprocess.run(
+        ["ssh-agent", "-s"], capture_output=True, text=True
+    ).stdout
+    p = subprocess.run(ssh_agent_cmd, shell=True)
+    if p.returncode != 0:
+        raise_error("Failed to start ssh-agent")
+    # Add the SSH key to the ssh-agent
+    typer.echo(f"Adding SSH key to ssh-agent: {key_path}")
+    cmd = ["ssh-add", key_path]
+    subprocess.run(cmd)
+    # Now add to GitHub
+    gh_ssh_url = "https://github.com/settings/ssh/new"
+    typer.echo(
+        "Please add the new SSH key to your GitHub account by visiting:\n"
+        f"{gh_ssh_url}"
+    )
+    with open(key_path + ".pub", "r") as f:
+        pub_key = f.read()
+    typer.echo(f"Paste this into the public key field:\n\n{pub_key}\n")
+    # Tell the user to visit this and confirm when it's entered
+    # Now test that we can connect to GitHub
+    # We expect output like "successfully authenticated", but will return a
+    # non-zero exit code

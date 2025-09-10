@@ -181,15 +181,17 @@ def config_github_ssh():
         )
     # Get the user's email from their Git config, and ask them if they want to
     # use that or a different one
-    user_git_email = git.Git().config("--get", "user.email").strip()
-    if not user_git_email:
+    try:
+        user_git_email = git.Git().config("--get", "user.email").strip()
+    except Exception:
         user_git_email = typer.prompt(
             "No email found in Git config; enter email for SSH key"
         )
         git.Git().config("--global", "user.email", user_git_email)
     # Do the same for user name even though we don't need it
-    user_git_name = git.Git().config("--get", "user.name").strip()
-    if not user_git_name:
+    try:
+        user_git_name = git.Git().config("--get", "user.name").strip()
+    except Exception:
         user_git_name = typer.prompt(
             "No name found in Git config; enter name for SSH key"
         )

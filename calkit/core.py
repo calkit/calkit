@@ -572,3 +572,19 @@ def get_system_info() -> dict:
     system_info_str = json.dumps(system_info, sort_keys=True).encode()
     system_info["id"] = hashlib.sha1(system_info_str).hexdigest()
     return system_info
+
+
+def to_shell_cmd(cmd: list[str]) -> str:
+    """Join a command to be compatible with running at the shell.
+
+    This is similar to ``shlex.join`` but works with Git Bash on Windows.
+    """
+    quoted_cmd = []
+    for part in cmd:
+        # Find quotes within quotes and escape them
+        if " " in part or '"' in part[1:-1] or "'" in part[1:-1]:
+            part = part.replace('"', r"\"")
+            quoted_cmd.append(f'"{part}"')
+        else:
+            quoted_cmd.append(part)
+    return " ".join(quoted_cmd)

@@ -7,6 +7,7 @@ import git
 import pytest
 
 import calkit
+from calkit.core import to_shell_cmd
 
 
 def test_find_project_dirs():
@@ -97,3 +98,30 @@ def test_check_system_deps(tmp_dir):
     )
     with pytest.raises(ValueError):
         calkit.check_system_deps()
+
+
+def test_to_shell_cmd():
+    cmd = ["python", "-c", "import math; print('hello world')"]
+    subprocess.check_call(cmd)
+    shell_cmd = to_shell_cmd(cmd)
+    assert shell_cmd == "python -c \"import math; print('hello world')\""
+    subprocess.check_call(shell_cmd, shell=True)
+    cmd = ["echo", "hello world"]
+    subprocess.check_call(cmd)
+    shell_cmd = to_shell_cmd(cmd)
+    assert shell_cmd == 'echo "hello world"'
+    subprocess.check_call(shell_cmd, shell=True)
+    cmd = ["python", "-c", "print('sup')"]
+    shell_cmd = to_shell_cmd(cmd)
+    assert shell_cmd == "python -c \"print('sup')\""
+    cmd = ["python", "-c", 'print("hello world")']
+    shell_cmd = to_shell_cmd(cmd)
+    assert shell_cmd == 'python -c "print(\\"hello world\\")"'
+    subprocess.check_call(shell_cmd, shell=True)
+    cmd = [
+        "sh",
+        "-c",
+        "cd dir1 && ls",
+    ]
+    good_shell_cmd = 'sh -c "cd dir1 && ls"'
+    assert to_shell_cmd(cmd) == good_shell_cmd

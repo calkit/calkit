@@ -9,7 +9,7 @@ import typer
 
 import calkit
 from calkit.cli import raise_error
-from calkit.cli.main import _to_shell_cmd
+from calkit.core import to_shell_cmd
 
 
 def run_command(
@@ -39,7 +39,7 @@ def run_command(
     key = env.get("key")
     if key is not None:
         key = os.path.expanduser(os.path.expandvars(key))
-    remote_shell_cmd = _to_shell_cmd(cmd)
+    remote_shell_cmd = to_shell_cmd(cmd)
     # Run with nohup so we can disconnect
     # TODO: Should we collect output instead of send to /dev/null?
     remote_cmd = (

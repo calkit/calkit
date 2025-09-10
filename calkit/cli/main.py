@@ -52,6 +52,7 @@ from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
 from calkit.cli.overleaf import overleaf_app
 from calkit.cli.update import update_app
+from calkit.core import to_shell_cmd
 from calkit.environments import get_env_lock_fpath
 from calkit.models import Procedure
 
@@ -104,22 +105,6 @@ DVC_EXTENSIONS = [
     ".zarr",
 ]
 DVC_SIZE_THRESH_BYTES = 1_000_000
-
-
-def _to_shell_cmd(cmd: list[str]) -> str:
-    """Join a command to be compatible with running at the shell.
-
-    This is similar to ``shlex.join`` but works with Git Bash on Windows.
-    """
-    quoted_cmd = []
-    for part in cmd:
-        # Find quotes within quotes and escape them
-        if " " in part or '"' in part[1:-1] or "'" in part[1:-1]:
-            part = part.replace('"', r"\"")
-            quoted_cmd.append(f'"{part}"')
-        else:
-            quoted_cmd.append(part)
-    return " ".join(quoted_cmd)
 
 
 @app.callback()
@@ -1270,7 +1255,7 @@ def run_in_env(
                 args=env.get("args", []),
                 quiet=not verbose,
             )
-        shell_cmd = _to_shell_cmd(cmd)
+        shell_cmd = to_shell_cmd(cmd)
         docker_cmd = [
             "docker",
             "run",
@@ -1369,7 +1354,7 @@ def run_in_env(
             raise_error("venv environments require a path")
         prefix = env["prefix"]
         path = env["path"]
-        shell_cmd = _to_shell_cmd(cmd)
+        shell_cmd = to_shell_cmd(cmd)
         if _platform.system() == "Windows":
             activate_cmd = f"{prefix}\\Scripts\\activate"
         else:

@@ -15,6 +15,17 @@ from calkit.cli.main import _to_shell_cmd
 def run_command(
     env: dict, env_name: str, cmd: list[str], verbose: bool = False
 ):
+    """Run a command on a remote machine via SSH.
+
+    TODO:
+    - Ensure Calkit is installed and install if specified in the env def.
+    - Ensure we have credentials set up.
+    - Ensure Git is configured like the client w.r.t. the user.
+    - Ensure there's a Calkit DVC token.
+    - Ensure the repo is cloned there by default.
+    - Check out and pull the correct branch.
+    - Run the command and sync via the repo remotes, not scp.
+    """
     try:
         host = os.path.expandvars(env["host"])
         user = os.path.expandvars(env["user"])

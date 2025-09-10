@@ -28,6 +28,20 @@ def get_env_lock_fpath(
         lock_fpath += ".yml"
     elif env_kind == "matlab":
         lock_fpath += ".json"
+    elif env_kind == "julia":
+        env_path = env.get("path")
+        if env_path is None:
+            raise ValueError(
+                "Julia environments require a path pointing to Project.toml"
+            )
+        env_fname = os.path.basename(env_path)
+        if not env_fname == "Project.toml":
+            raise ValueError(
+                "Julia environments require a path pointing to Project.toml"
+            )
+        # Simply replace Project.toml with Manifest.toml
+        env_dir = os.path.dirname(env_path)
+        lock_fpath = os.path.join(env_dir, "Manifest.toml")
     else:
         return
     if as_posix:

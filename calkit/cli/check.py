@@ -140,6 +140,44 @@ def check_environment(
                 env=env, env_name=env_name, as_posix=False
             ),  # type: ignore
         )
+    elif env["kind"] == "julia":
+        env_path = env.get("path")
+        if env_path is None:
+            raise_error(
+                "Julia environments require a path pointing to Project.toml"
+            )
+        julia_version = env.get("julia")
+        if julia_version is None:
+            raise_error("Julia environments require a Julia version")
+        env_fname = os.path.basename(env_path)
+        if not env_fname == "Project.toml":
+            raise_error(
+                "Julia environments require a path pointing to Project.toml"
+            )
+        # First ensure the Julia version exists
+        cmd = ["juliaup", "add", julia_version]
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError:
+            raise_error(f"Failed to install Julia version {julia_version}")
+        env_dir = os.path.dirname(env_path)
+        if not env_dir:
+            env_dir = "."
+        cmd = [
+            "julia",
+            f"+{julia_version}",
+            f"--project={env_dir}",
+            "-e",
+            "using Pkg; Pkg.instantiate();",
+        ]
+        try:
+            subprocess.check_call(
+                cmd, env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"}
+            )
+        except subprocess.CalledProcessError:
+            raise_error("Failed to check julia environment")
     else:
         raise_error(f"Environment kind '{env['kind']}' not supported")
     return get_env_lock_fpath(env=env, env_name=env_name, as_posix=False)
@@ -545,6 +583,26 @@ def check_matlab_env(
     )
 
 
+@check_app.command(name="dependencies")
+@check_app.command(name="deps")
+def check_dependencies(
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output")
+    ] = False,
+):
+    """Check that a project's system-level dependencies are set up
+    correctly.
+    """
+    typer.echo("Checking project dependencies")
+    dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    try:
+        calkit.check_system_deps()
+    except Exception as e:
+        raise_error(str(e))
+    message = "✅ All set!"
+    typer.echo(message.encode("utf-8", errors="replace"))
+
+
 @check_app.command(name="env-vars")
 def check_env_vars(
     verbose: Annotated[
@@ -556,23 +614,18 @@ def check_env_vars(
     dotenv.load_dotenv(dotenv_path=".env")
     ck_info = calkit.load_calkit_info()
     deps = ck_info.get("dependencies", [])
-    env_var_deps = {}
-    for d in deps:
-        if isinstance(d, dict):
-            keys = list(d.keys())
-            if len(keys) > 1:
-                raise_error(
-                    f"Malformed dependency: {d}\n"
-                    "Dependencies with attributes should have a single key "
-                    "(their name)"
-                )
-            name = keys[0]
-            attrs = list(d.values())[0]
-            if attrs.get("kind") == "env-var":
-                env_var_deps[name] = attrs
-    for name, attrs in env_var_deps.items():
+    env_var_dep_names = calkit.get_env_var_dep_names(ck_info)
+    for name in env_var_dep_names:
         if verbose:
             typer.echo(f"Checking for environmental variable '{name}'")
+        attrs = {}
+        for dep in deps:
+            if isinstance(dep, dict) and "name" in dep:
+                attrs = dep
+                break
+            elif isinstance(dep, dict) and list(dep.keys()) == [name]:
+                attrs = dep[name]
+                break
         if name not in os.environ:
             typer.echo(f"Missing env var '{name}'")
             if "default" in attrs:

@@ -157,10 +157,16 @@ def new_project(
                 repo.git.commit(["-m", "Initialize DVC"])
     ck_info_fpath = os.path.join(abs_path, "calkit.yaml")
     if os.path.isfile(ck_info_fpath) and not overwrite:
-        raise_error(
+        ck_info = calkit.load_calkit_info(wdir=abs_path)
+        name = ck_info.get("name", name)
+        title = ck_info.get("title", title)
+        description = ck_info.get("description", description)
+        typer.echo(
             "Destination is already a Calkit project; "
-            "use --overwrite to continue"
+            "will use existing project info where possible"
         )
+    else:
+        ck_info = {}
     if os.path.isdir(abs_path) and os.listdir(abs_path) and repo is None:
         warn(f"{abs_path} is not empty")
     if name is None:
@@ -224,7 +230,29 @@ def new_project(
                     )
                 repo.git.add("calkit.yaml")
                 if not no_commit:
-                    repo.git.commit(["-m", "Create calkit.yaml"])
+                    repo.git.commit(
+                        ["calkit.yaml", "-m", "Create calkit.yaml"]
+                    )
+            else:
+                # Merge with existing project info in calkit.yaml
+                typer.echo("Updating existing calkit.yaml file")
+                ck_info = (
+                    dict(
+                        owner=resp["owner_account_name"],
+                        name=resp["name"],
+                        title=resp["title"],
+                        description=resp["description"],
+                        git_repo_url=resp["git_repo_url"],
+                    )
+                    | ck_info
+                )
+                with open(calkit_fpath, "w") as f:
+                    ryaml.dump(ck_info, f)
+                repo.git.add("calkit.yaml")
+                if not no_commit and repo.git.diff("--staged"):
+                    repo.git.commit(
+                        ["calkit.yaml", "-m", "Update calkit.yaml"]
+                    )
         try:
             calkit.dvc.configure_remote(wdir=abs_path)
         except Exception:
@@ -588,7 +616,8 @@ def new_docker_env(
     layers: Annotated[
         list[str],
         typer.Option(
-            "--add-layer", help="Add a layer (options: miniforge, foampy)."
+            "--add-layer",
+            help="Add a layer (options: miniforge, foampy, uv, julia).",
         ),
     ] = [],
     env_vars: Annotated[
@@ -703,11 +732,11 @@ def new_docker_env(
         wdir=wdir,
     )
     if base is not None or path is not None:
-        env["path"] = path
+        env["path"] = path  # type: ignore
     if description is not None:
         env["description"] = description
     if layers:
-        env["layers"] = layers
+        env["layers"] = layers  # type: ignore
     if platform:
         env["platform"] = platform
     if user:
@@ -715,18 +744,18 @@ def new_docker_env(
     if gpus:
         env["gpus"] = gpus
     if env_vars:
-        env["env_vars"] = {}
+        env["env_vars"] = {}  # type: ignore
         for var in env_vars:
             if "=" not in var:
                 raise_error(f"Invalid environment variable format: {var}")
             key, value = var.split("=", 1)
             env["env_vars"][key] = value
     if args:
-        env["args"] = args
+        env["args"] = args  # type: ignore
     if deps:
-        env["deps"] = deps
+        env["deps"] = deps  # type: ignore
     if ports:
-        env["ports"] = ports
+        env["ports"] = ports  # type: ignore
     envs[name] = env
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
@@ -799,14 +828,14 @@ def new_dataset(
     title: Annotated[str, typer.Option("--title")],
     description: Annotated[str, typer.Option("--description")],
     stage_name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--stage",
             help="Name of the pipeline stage that generates this dataset.",
         ),
     ] = None,
     cmd: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--cmd", help="Command to add to the stage, if specified."
         ),
@@ -825,7 +854,7 @@ def new_dataset(
         ),
     ] = [],
     outs_from_stage: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--deps-from-stage-outs",
             help="Stage name from which to add outputs as dependencies.",
@@ -1066,7 +1095,7 @@ def new_publication(
         calkit.ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
     # Copy in template files if applicable
-    if template_type == "latex":
+    if template is not None and template_type == "latex":
         if overwrite and os.path.exists(path):
             shutil.rmtree(path)
         calkit.templates.use_template(
@@ -1309,7 +1338,7 @@ def new_venv(
         str, typer.Option("--prefix", help="Prefix for environment location.")
     ] = ".venv",
     description: Annotated[
-        str, typer.Option("--description", help="Description.")
+        str | None, typer.Option("--description", help="Description.")
     ] = None,
     overwrite: Annotated[
         bool,
@@ -1390,7 +1419,7 @@ def new_pixi_env(
         list[str], typer.Option("--pip", help="Packages to install with pip.")
     ] = [],
     description: Annotated[
-        str, typer.Option("--description", help="Description.")
+        str | None, typer.Option("--description", help="Description.")
     ] = None,
     platforms: Annotated[
         list[str], typer.Option("--platform", "-p", help="Platform.")
@@ -1477,6 +1506,95 @@ def new_pixi_env(
             repo.git.add(env_lock_fpath)
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add pixi env {name}"])
+
+
+@new_app.command("julia-env")
+def new_julia_env(
+    packages: Annotated[
+        list[str],
+        typer.Argument(help="Packages to include in the environment."),
+    ],
+    name: Annotated[
+        str, typer.Option("--name", "-n", help="Environment name.")
+    ],
+    path: Annotated[
+        str, typer.Option("--path", help="Path for Project.toml file.")
+    ] = "Project.toml",
+    description: Annotated[
+        str | None, typer.Option("--description", help="Description.")
+    ] = None,
+    julia_version: Annotated[
+        str, typer.Option("--julia", "-j", help="Julia version.")
+    ] = "1.11",
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite any existing environment with this name.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
+):
+    """Create a new Julia environment."""
+    if not os.path.basename(path) == "Project.toml":
+        raise_error(
+            "Julia environment paths must point to a Project.toml file"
+        )
+    try:
+        repo = git.Repo()
+    except git.InvalidGitRepositoryError:
+        raise_error(
+            "Current directory is not a Git repository; run calkit init"
+        )
+    # Add environment to Calkit info
+    ck_info = calkit.load_calkit_info()
+    # If environments is a list instead of a dict, reformulate it
+    envs = ck_info.get("environments", {})
+    if isinstance(envs, list):
+        typer.echo("Converting environments from list to dict")
+        envs = {env.pop("name"): env for env in envs}
+    if name in envs and not overwrite:
+        raise_error(
+            f"Environment with name {name} already exists "
+            "(use -f to overwrite)"
+        )
+    # Create the environment now
+    env_dir = os.path.dirname(path)
+    if env_dir:
+        os.makedirs(env_dir, exist_ok=True)
+    else:
+        env_dir = "."
+    # First make sure the Julia version is installed
+    cmd = ["juliaup", "add", julia_version]
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError:
+        raise_error(f"Failed to install Julia version {julia_version}")
+    cmd = ["julia", f"+{julia_version}", f"--project={env_dir}", "-e"]
+    install_cmd = "using Pkg;"
+    for package in packages:
+        install_cmd += f' Pkg.add("{package}");'
+    cmd.append(install_cmd)
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError:
+        raise_error("Failed to create new Julia environment")
+    typer.echo("Adding environment to calkit.yaml")
+    env = dict(kind="julia", path=path, julia=julia_version)
+    if description is not None:
+        env["description"] = description
+    envs[name] = env
+    ck_info["environments"] = envs
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    repo.git.add(path)
+    repo.git.add(os.path.join(env_dir, "Manifest.toml"))
+    repo.git.add("calkit.yaml")
+    if not no_commit and repo.git.diff("--staged"):
+        repo.git.commit(["-m", f"Add Julia env {name}"])
 
 
 class Status(str, Enum):
@@ -1770,6 +1888,66 @@ def new_python_script_stage(
             kind="python-script",
             environment=environment,
             args=args,
+            inputs=inputs,  # type: ignore
+            outputs=ck_outs,
+            script_path=script_path,
+            iterate_over=i,
+        )
+    except Exception as e:
+        raise_error(f"Invalid stage specification: {e}")
+    _save_stage(
+        stage=stage,
+        name=name,
+        overwrite=overwrite,
+        no_check=no_check,
+        no_commit=no_commit,
+    )
+
+
+@new_app.command(name="julia-script-stage")
+def new_julia_script_stage(
+    name: StageArgs.name,
+    environment: StageArgs.environment,
+    script_path: StageArgs.script_path,
+    inputs: StageArgs.inputs = [],
+    outputs: StageArgs.outputs = [],
+    outs_git: StageArgs.outs_git = [],
+    outs_git_no_delete: StageArgs.outs_git_no_delete = [],
+    outs_no_delete: StageArgs.outs_no_delete = [],
+    outs_no_store: StageArgs.outs_no_store = [],
+    outs_no_store_no_delete: StageArgs.outs_no_store_no_delete = [],
+    iter_arg: Annotated[
+        tuple[str, str] | None,
+        typer.Option(
+            "--iter",
+            help=(
+                "Iterate over an argument with a comma-separated list, e.g., "
+                "--iter-arg var_name val1,val2,val3."
+            ),
+        ),
+    ] = None,
+    overwrite: StageArgs.overwrite = False,
+    no_check: StageArgs.no_check = False,
+    no_commit: StageArgs.no_commit = False,
+) -> None:
+    """Add a stage to the pipeline that runs a Julia script."""
+    ck_outs = _to_ck_outs(
+        outputs=outputs,
+        outs_git=outs_git,
+        outs_git_no_delete=outs_git_no_delete,
+        outs_no_delete=outs_no_delete,
+        outs_no_store=outs_no_store,
+        outs_no_store_no_delete=outs_no_store_no_delete,
+    )
+    try:
+        if iter_arg is not None:
+            arg_name, vals = iter_arg
+            i = [StageIteration(arg_name=arg_name, values=vals.split(","))]  # type: ignore
+        else:
+            i = None
+        stage = calkit.models.pipeline.JuliaScriptStage(
+            kind="julia-script",
+            environment=environment,
             inputs=inputs,  # type: ignore
             outputs=ck_outs,
             script_path=script_path,

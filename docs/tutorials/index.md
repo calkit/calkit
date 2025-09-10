@@ -10,3 +10,4 @@
 - [Adding a new LaTeX-based publication with its own Docker build environment](adding-latex-pub-docker.md)
 - [A reproducible workflow using Microsoft Office (Word and Excel)](office.md)
 - [Using Calkit with MATLAB](matlab.md)
+- [Automation with GitHub Actions](github-actions.md)

@@ -1,8 +1,10 @@
 """Functionality for working with notebooks."""
 
+import hashlib
+import json
 import os
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import Any, Literal
 
 import git
 
@@ -11,16 +13,40 @@ from calkit.models.io import InputsFromStageOutputs, PathOutput
 
 
 def get_executed_notebook_path(
-    notebook_path: str, to: Literal["html", "notebook"], as_posix: bool = True
+    notebook_path: str,
+    to: Literal["html", "notebook"],
+    as_posix: bool = True,
+    parameters: dict[str, Any] | None = None,
 ) -> str:
     """Return the path of an executed notebook."""
     nb_dir = os.path.dirname(notebook_path)
     nb_fname = os.path.basename(notebook_path)
+    # If we have any parameters, add these to the notebook name
+    if parameters:
+        parameters_cleaned = {}
+        for k, v in parameters.items():
+            if isinstance(v, list):
+                if len(v) == 0:
+                    v = "empty"
+                elif len(v) < 5:
+                    v = ",".join(map(str, v))
+                else:
+                    v = hashlib.md5(
+                        json.dumps(v, sort_keys=True).encode()
+                    ).hexdigest()[:7]
+            elif isinstance(v, dict):
+                v = hashlib.md5(
+                    json.dumps(v, sort_keys=True).encode()
+                ).hexdigest()[:7]
+            parameters_cleaned[k] = v
+        params_txt = "-".join(
+            f"{k}-{v}" for k, v in parameters_cleaned.items()
+        )
+        nb_fname = f"{nb_fname.removesuffix('.ipynb')}-{params_txt}.ipynb"
     if to == "html":
         fname_out = nb_fname.removesuffix(".ipynb") + ".html"
     else:
         fname_out = nb_fname
-    # Different output types go to different subdirectories
     subdirs = {"html": "html", "notebook": "executed"}
     p = os.path.join(".calkit", "notebooks", subdirs[to], nb_dir, fname_out)
     if as_posix:

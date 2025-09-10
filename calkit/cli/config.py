@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 
 import git
@@ -82,11 +83,17 @@ def setup_remote(
         configure_remote()
         set_remote_auth()
     except subprocess.CalledProcessError:
-        raise_error("DVC remote config failed; have you run `dvc init`?")
+        if not os.path.isfile(".dvc/config"):
+            raise_error(
+                "DVC remote config failed; have you run `calkit init`?"
+            )
+        raise_error(
+            "Failed to configure DVC remote; check DVC config for errors"
+        )
     except InvalidGitRepositoryError:
         raise_error("Current directory is not a Git repository")
-    except ValueError as e:
-        raise_error(e)
+    except (ValueError, RuntimeError) as e:
+        raise_error(f"Failed to set up DVC remote: {e}")
     if not no_commit:
         repo = git.Repo()
         repo.git.add(".dvc/config")
@@ -101,7 +108,10 @@ def setup_remote_auth():
     """Store a Calkit cloud token in the local DVC config for all Calkit
     remotes.
     """
-    remotes = get_remotes()
+    try:
+        remotes = get_remotes()
+    except Exception:
+        raise_error("Cannot list DVC remotes; check DVC config for errors")
     for name, url in remotes.items():
         if name == "calkit" or name.startswith("calkit:"):
             typer.echo(f"Setting up authentication for DVC remote: {name}")

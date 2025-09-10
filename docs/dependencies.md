@@ -40,14 +40,14 @@ changing anything.
 ```yaml
 dependencies:
   - docker
-  - STRAVA_CLIENT_ID:
-      kind: env-var
-      notes: >
-        The STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET environmental
-        variables can be set in the .env file after creating a Strava
-        application at https://www.strava.com/settings/api
-  - STRAVA_CLIENT_SECRET:
-      kind: env-var
+  - name: STRAVA_CLIENT_ID
+    kind: env-var
+    notes: >
+      The STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET environmental
+      variables can be set in the .env file after creating a Strava
+      application at https://www.strava.com/settings/api
+  - name: STRAVA_CLIENT_SECRET
+    kind: env-var
 ```
 
 As we can see in the notes for `STRAVA_CLIENT_ID`,

@@ -219,6 +219,114 @@ def test_to_dvc_notebook_stage():
             found_html = True
             assert out[p]["cache"]
     assert found_html
+    # Test we can use parameters and iterations in notebook stages
+    ck_info = {
+        "parameters": {
+            "param1": [{"range": {"start": 5, "stop": 23, "step": 2}}],
+            "param2": ["s", "m", "l"],
+            "param3": [
+                {"range": {"start": 0.1, "stop": 1.1, "step": 0.11}},
+                55,
+                "something",
+            ],
+        },
+        "pipeline": {
+            "stages": {
+                "notebook-1": {
+                    "kind": "jupyter-notebook",
+                    "environment": "something",
+                    "notebook_path": nb_path,
+                    "outputs": [
+                        "figures/fig1.png",
+                    ],
+                    "html_storage": "dvc",
+                    "cleaned_ipynb_storage": "git",
+                    "executed_ipynb_storage": None,
+                    "parameters": {
+                        "param1": "{param1}",
+                        "param2": "{param2}",
+                        "param3": "{param3}",
+                    },
+                    "iterate_over": [
+                        {
+                            "arg_name": "param1",
+                            "values": [{"parameter": "param1"}],
+                        },
+                        {
+                            "arg_name": "param2",
+                            "values": [{"parameter": "param2"}],
+                        },
+                        {
+                            "arg_name": "param3",
+                            "values": [{"parameter": "param3"}],
+                        },
+                    ],
+                },
+            }
+        },
+    }
+    dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    print(dvc_stages)
+    stage = dvc_stages["notebook-1"]
+    assert stage["cmd"].startswith("calkit nb execute")
+    assert "--params-base64" in stage["cmd"]
+    assert stage["matrix"]["param1"][0] == 5.0
+    assert "m" in stage["matrix"]["param2"]
+    assert "something" in stage["matrix"]["param3"]
+
+
+def test_to_dvc_list_of_list_iteration():
+    # Test that we can define iteration over a list of lists
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "get-data": {
+                    "kind": "python-script",
+                    "environment": "something",
+                    "script_path": "something/my-cool-script.py",
+                    "args": ["--a1={var1}", "--a2={var2}"],
+                    "iterate_over": [
+                        {
+                            "arg_name": ["var1", "var2"],
+                            "values": [[1, "a"], [2, "b"], [3, "c"]],
+                        },
+                    ],
+                    "outputs": [
+                        "out-{var1}-{var2}.out",
+                        "out2-{var1}-{var2}.out",
+                    ],
+                },
+                "process-data": {
+                    "kind": "python-script",
+                    "script_path": "something.py",
+                    "environment": "py",
+                    "inputs": [
+                        {"from_stage_outputs": "get-data"},
+                        "something.else.txt",
+                    ],
+                },
+            }
+        }
+    }
+    dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    stage = dvc_stages["get-data"]
+    assert "--a1=${item._arg0.var1} --a2=${item._arg0.var2}" in stage["cmd"]
+    matrix = stage["matrix"]
+    assert matrix == {
+        "_arg0": [
+            {"var1": 1, "var2": "a"},
+            {"var1": 2, "var2": "b"},
+            {"var1": 3, "var2": "c"},
+        ]
+    }
+    assert stage["outs"] == [
+        "out-${item._arg0.var1}-${item._arg0.var2}.out",
+        "out2-${item._arg0.var1}-${item._arg0.var2}.out",
+    ]
+    print(dvc_stages)
+    stage2 = dvc_stages["process-data"]
+    assert "out-1-a.out" in stage2["deps"]
+    assert "out2-2-b.out" in stage2["deps"]
 
 
 def test_remove_stage(tmp_dir):

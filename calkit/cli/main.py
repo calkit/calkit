@@ -38,6 +38,7 @@ from calkit.cli.check import (
     check_app,
     check_conda_env,
     check_docker_env,
+    check_environment,
     check_matlab_env,
     check_venv,
 )
@@ -380,7 +381,12 @@ def add(
         else:
             commit_message = f"Add {paths[0]}"
     if to is not None:
-        subprocess.call([to, "add"] + paths)
+        if to == "git":
+            subprocess.call(["git", "add"] + paths)
+        elif to == "dvc":
+            subprocess.call([sys.executable, "-m", "dvc", "add"] + paths)
+        else:
+            raise_error(f"Invalid option for 'to': {to}")
     else:
         if "." in paths:
             paths.remove(".")
@@ -388,8 +394,14 @@ def add(
             for dvc_uncommitted in dvc_status["uncommitted"].get(
                 "modified", []
             ):
-                typer.echo(f"Adding {dvc_uncommitted} to DVC")
-                dvc_repo.commit(dvc_uncommitted, force=True)
+                if os.path.exists(dvc_uncommitted):
+                    typer.echo(f"Adding {dvc_uncommitted} to DVC")
+                    dvc_repo.commit(dvc_uncommitted, force=True)
+                else:
+                    warn(
+                        f"DVC uncommitted '{dvc_uncommitted}' does not exist; "
+                        "skipping"
+                    )
             if not disable_auto_ignore:
                 for untracked_file in untracked_git_files:
                     if (
@@ -526,6 +538,20 @@ def save(
             "--no-push", help="Do not push to Git and DVC after committing."
         ),
     ] = False,
+    git_push_args: Annotated[
+        list[str],
+        typer.Option(
+            "--git-push",
+            help="Additional Git args to pass when pushing.",
+        ),
+    ] = [],
+    dvc_push_args: Annotated[
+        list[str],
+        typer.Option(
+            "--dvc-push",
+            help="Additional DVC args to pass when pushing.",
+        ),
+    ] = [],
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -579,17 +605,40 @@ def save(
     if not no_push:
         if verbose and not any_dvc:
             typer.echo("Not pushing to DVC since no DVC files were staged")
-        push(no_dvc=not any_dvc)
+        push(
+            no_dvc=not any_dvc, git_args=git_push_args, dvc_args=dvc_push_args
+        )
 
 
 @app.command(name="pull")
 def pull(
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
+    git_args: Annotated[
+        list[str],
+        typer.Option("--git-arg", help="Additional Git args."),
+    ] = [],
+    dvc_args: Annotated[
+        list[str],
+        typer.Option("--dvc-arg", help="Additional DVC args."),
+    ] = [],
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Force pull, potentially overwriting local changes.",
+        ),
+    ] = False,
 ):
     """Pull with both Git and DVC."""
     typer.echo("Git pulling")
+    if force:
+        if "-f" not in git_args and "--force" not in git_args:
+            git_args.append("-f")
+        if "-f" not in dvc_args and "--force" not in dvc_args:
+            dvc_args.append("-f")
     try:
-        subprocess.check_call(["git", "pull"])
+        subprocess.check_call(["git", "pull"] + git_args)
     except subprocess.CalledProcessError:
         raise_error("Git pull failed")
     typer.echo("DVC pulling")
@@ -601,7 +650,7 @@ def pull(
                 typer.echo(f"Checking authentication for DVC remote: {name}")
                 calkit.dvc.set_remote_auth(remote_name=name)
     try:
-        subprocess.check_call([sys.executable, "-m", "dvc", "pull"])
+        subprocess.check_call([sys.executable, "-m", "dvc", "pull"] + dvc_args)
     except subprocess.CalledProcessError:
         raise_error("DVC pull failed")
 
@@ -610,11 +659,19 @@ def pull(
 def push(
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
     no_dvc: Annotated[bool, typer.Option("--no-dvc")] = False,
+    git_args: Annotated[
+        list[str],
+        typer.Option("--git-arg", help="Additional Git args."),
+    ] = [],
+    dvc_args: Annotated[
+        list[str],
+        typer.Option("--dvc-arg", help="Additional DVC args."),
+    ] = [],
 ):
     """Push with both Git and DVC."""
     typer.echo("Pushing to Git remote")
     try:
-        subprocess.check_call(["git", "push"])
+        subprocess.check_call(["git", "push"] + git_args)
     except subprocess.CalledProcessError:
         raise_error("Git push failed")
     if not no_dvc:
@@ -629,7 +686,9 @@ def push(
                     )
                     calkit.dvc.set_remote_auth(remote_name=name)
         try:
-            subprocess.check_call([sys.executable, "-m", "dvc", "push"])
+            subprocess.check_call(
+                [sys.executable, "-m", "dvc", "push"] + dvc_args
+            )
         except subprocess.CalledProcessError:
             raise_error("DVC push failed")
 
@@ -872,9 +931,9 @@ def run(
     no_run_cache: Annotated[
         bool, typer.Option("--no-run-cache", help="Ignore the run cache.")
     ] = False,
-    no_log: Annotated[
+    save_log: Annotated[
         bool,
-        typer.Option("--no-log", "-l", help="Do not log the run."),
+        typer.Option("--log", "-l", help="Log the run."),
     ] = False,
     save_after_run: Annotated[
         bool,
@@ -893,7 +952,7 @@ def run(
     if not quiet:
         typer.echo("Getting system information")
     system_info = calkit.get_system_info()
-    if not no_log:
+    if save_log:
         # Save the system to .calkit/systems
         if verbose:
             typer.echo("Saving system information:")
@@ -922,18 +981,23 @@ def run(
         except Exception as e:
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Pipeline compilation failed: {e}")
-    # Get status of Git repo before running
-    repo = git.Repo()
-    git_rev = repo.head.commit.hexsha
-    git_branch = repo.active_branch.name
-    git_changed_files_before = calkit.git.get_changed_files(repo=repo)
-    git_staged_files_before = calkit.git.get_staged_files(repo=repo)
-    git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
-    # Get status of DVC repo before running
-    dvc_repo = dvc.repo.Repo()
-    dvc_status_before = dvc_repo.status()
-    dvc_data_status_before = dvc_repo.data_status()
-    dvc_data_status_before.pop("git", None)  # Remove git status
+    if save_log:
+        # Get status of Git repo before running
+        repo = git.Repo()
+        git_rev = repo.head.commit.hexsha
+        try:
+            git_branch = repo.active_branch.name
+        except TypeError:
+            # If no branch is checked out, we are in a detached HEAD state
+            git_branch = None
+        git_changed_files_before = calkit.git.get_changed_files(repo=repo)
+        git_staged_files_before = calkit.git.get_staged_files(repo=repo)
+        git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
+        # Get status of DVC repo before running
+        dvc_repo = dvc.repo.Repo()
+        dvc_status_before = dvc_repo.status()
+        dvc_data_status_before = dvc_repo.data_status()
+        dvc_data_status_before.pop("git", None)  # Remove git status
     if targets is None:
         targets = []
     args = deepcopy(targets)
@@ -964,7 +1028,7 @@ def run(
     start_time_no_tz = calkit.utcnow(remove_tz=True)
     start_time = calkit.utcnow(remove_tz=False)
     run_id = uuid.uuid4().hex
-    if not no_log:
+    if save_log:
         log_fpath = os.path.join(
             ".calkit",
             "logs",
@@ -992,7 +1056,7 @@ def run(
     dvc.ui.ui.write = lambda *args, **kwargs: None
     res = dvc_cli_main(["repro"] + args)
     failed = res != 0
-    if not no_log:
+    if save_log:
         # Get Git status after running
         git_changed_files_after = calkit.git.get_changed_files(repo=repo)
         git_staged_files_after = calkit.git.get_staged_files(repo=repo)
@@ -1213,7 +1277,14 @@ def run_in_env(
         ]
         if platform:
             docker_cmd += ["--platform", platform]
-        env_vars = env.get("env-vars", {})
+        env_vars = env.get("env_vars", {})
+        if "env-vars" in env:
+            warn("The 'env-vars' key is deprecated; use 'env_vars' instead.")
+            env_vars.update(env["env-vars"])
+        # Also add any project-level environmental variable dependencies
+        project_env_vars = calkit.get_env_var_dep_names()
+        if project_env_vars:
+            env_vars.update({k: f"${k}" for k in project_env_vars})
         if env_vars:
             for key, value in env_vars.items():
                 if isinstance(value, str):
@@ -1328,6 +1399,40 @@ def run_in_env(
             subprocess.check_call(cmd, shell=True, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error(f"Failed to run in {kind}")
+    elif env["kind"] == "julia":
+        if not no_check:
+            check_environment(env_name=env_name, verbose=verbose)
+        env_path = env.get("path")
+        if env_path is None:
+            raise_error(
+                "Julia environments require a path pointing to Project.toml"
+            )
+        julia_version = env.get("julia")
+        env_fname = os.path.basename(env_path)
+        if not env_fname == "Project.toml":
+            raise_error(
+                "Julia environments require a path pointing to Project.toml"
+            )
+        env_dir = os.path.dirname(env_path)
+        if not env_dir:
+            env_dir = "."
+        julia_cmd = [
+            "julia",
+            f"+{julia_version}",
+            "--project=" + env_dir,
+            "-e",
+            " ".join(cmd),
+        ]
+        if verbose:
+            typer.echo(f"Running command: {julia_cmd}")
+        try:
+            subprocess.check_call(
+                julia_cmd,
+                cwd=wdir,
+                env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"},
+            )
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in julia environment")
     elif env["kind"] == "ssh":
         try:
             host = os.path.expandvars(env["host"])
@@ -1754,3 +1859,68 @@ def call_dvc(
     """
     process = subprocess.run([sys.executable, "-m", "dvc"] + sys.argv[2:])
     sys.exit(process.returncode)
+
+
+@app.command(
+    name="jupyter",
+    add_help_option=False,
+    context_settings={
+        "ignore_unknown_options": True,
+        "allow_extra_args": True,
+    },
+)
+def run_jupyter(
+    ctx: typer.Context,
+    help: Annotated[bool, typer.Option("-h", "--help")] = False,
+):
+    """Run a command with the Jupyter CLI."""
+    process = subprocess.run([sys.executable, "-m", "jupyter"] + sys.argv[2:])
+    sys.exit(process.returncode)
+
+
+@app.command(name="latexmk")
+def run_latexmk(
+    tex_file: Annotated[str, typer.Argument(help="The .tex file to compile.")],
+    environment: Annotated[
+        str | None,
+        typer.Option(
+            "--env",
+            "-e",
+            help=("Environment in which to run latexmk, if applicable."),
+        ),
+    ] = None,
+):
+    """Compile a LaTeX document with latexmk.
+
+    If a Calkit environment is not specified, latexmk will be run in the
+    system environment if available. If not available, a TeX Live Docker
+    container will be used.
+    """
+    latexmk_cmd = [
+        "latexmk",
+        "-pdf",
+        "-cd",
+        "-silent",
+        "-synctex=1",
+        "-interaction=nonstopmode",
+        tex_file,
+    ]
+    if environment is not None:
+        cmd = ["calkit", "xenv", "--name", environment] + latexmk_cmd
+    elif calkit.check_dep_exists("latexmk"):
+        cmd = latexmk_cmd
+    else:
+        cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{os.getcwd()}:/work",
+            "-w",
+            "/work",
+            "texlive/texlive:latest-full",
+        ] + latexmk_cmd
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError:
+        raise_error("latexmk failed")

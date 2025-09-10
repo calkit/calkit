@@ -240,6 +240,13 @@ class ProjectStatus(BaseModel):
     message: str | None = None
 
 
+class Dependency(BaseModel):
+    """A system-level dependency, e.g., and app or environmental variable."""
+
+    kind: Literal["app", "env-var"]
+    name: str
+
+
 class ProjectInfo(BaseModel):
     """All of the project's information or metadata, written to the
     ``calkit.yaml`` file.
@@ -267,7 +274,7 @@ class ProjectInfo(BaseModel):
     git_repo_url: str | None = None
     derived_from: DerivedFromProject | None = None
     questions: list[str] = []
-    dependencies: list = []
+    dependencies: list[str | dict[str, str] | Dependency] = []
     parameters: ParametersType | None = None
     metrics: dict[str, Metric] | None = None
     pipeline: Pipeline | None = None

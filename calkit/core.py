@@ -309,18 +309,55 @@ def check_system_deps(
             if "docker" not in deps:
                 deps.append("docker")
             deps.append({"MATLAB_LICENSE_SERVER": {"kind": "env-var"}})
+        elif kind == "julia":
+            if "julia" not in deps:
+                deps.append("julia")
+            if "juliaup" not in deps:
+                deps.append("juliaup")
     for dep in deps:
         if isinstance(dep, dict):
             keys = list(dep.keys())
-            if len(keys) != 1:
+            # For backwards compatibility, we allow the name to be a single key
+            # or we allow a `name` key to be present
+            if len(keys) != 1 and "name" not in keys:
                 raise ValueError(f"Malformed dependency: {dep}")
-            dep_name = keys[0]
-            dep_kind = dep[dep_name].get("kind", "app")
+            if len(keys) == 1:
+                dep_name = keys[0]
+                dep_kind = dep[dep_name].get("kind", "app")
+            elif "name" in keys:
+                dep_name = dep["name"]
+                dep_kind = dep.get("kind", "app")
+            else:
+                raise ValueError(f"Malformed dependency: {dep}")
         else:
             dep_name = re.split("[=<>]", dep)[0]
             dep_kind = "app"
         if not check_dep_exists(dep_name, dep_kind, system_info=system_info):
             raise ValueError(f"{dep_kind} '{dep_name}' not found")
+
+
+def get_env_var_dep_names(ck_info: dict | None = None) -> list[str]:
+    """Get a list of all environment variable names used in the project."""
+    if ck_info is None:
+        ck_info = load_calkit_info()
+    env_vars = []
+    for dep in ck_info.get("dependencies", []):
+        if isinstance(dep, dict):
+            keys = list(dep.keys())
+            # For backwards compatibility, we allow the name to be a single key
+            # or we allow a `name` key to be present
+            if len(keys) != 1 and "name" not in keys:
+                raise ValueError(f"Malformed dependency: {dep}")
+            if len(keys) == 1:
+                dep_kind = dep[keys[0]].get("kind", "app")
+                if dep_kind == "env-var":
+                    env_vars.append(keys[0])
+            elif dep.get("kind") == "env-var":
+                if "name" in keys:
+                    env_vars.append(dep["name"])
+                else:
+                    raise ValueError(f"Malformed dependency: {dep}")
+    return env_vars
 
 
 def project_and_path_from_path(path: str) -> tuple:
@@ -447,10 +484,14 @@ def get_latest_project_status(wdir: str | None = None) -> ProjectStatus | None:
         return statuses[-1]  # type: ignore
 
 
-def detect_project_name(wdir: str | None = None) -> str:
+def detect_project_name(
+    wdir: str | None = None, prepend_owner: bool = True
+) -> str:
     """Detect a Calkit project owner and name."""
     ck_info = load_calkit_info(wdir=wdir)
     name = ck_info.get("name")
+    if name is not None and not prepend_owner:
+        return name
     owner = ck_info.get("owner")
     if name is None or owner is None:
         try:
@@ -463,7 +504,9 @@ def detect_project_name(wdir: str | None = None) -> str:
         name = project_name
     if owner is None:
         owner = owner_name
-    return f"{owner}/{name}"
+    if prepend_owner:
+        return f"{owner}/{name}"
+    return name
 
 
 def get_dep_version(dep_name: str) -> str | None:
@@ -522,6 +565,8 @@ def get_system_info() -> dict:
         "uv",
         "pixi",
         "Rscript",
+        "juliaup",
+        "julia",
     ]:
         system_info[f"{dep}_version"] = get_dep_version(dep)
     system_info_str = json.dumps(system_info, sort_keys=True).encode()

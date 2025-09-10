@@ -82,6 +82,14 @@ For more details, see `calkit.models.pipeline`.
 - `script_path`
 - `args` (list, optional)
 
+### `julia-script`
+
+- `script_path`
+
+### `julia-command`
+
+- `command`
+
 ## Iteration
 
 ### Over a list of values
@@ -103,6 +111,28 @@ pipeline:
         - data/raw
       outputs:
         - models/{var}.h5
+```
+
+### Over a table (or list of lists)
+
+```yaml
+pipeline:
+  stages:
+    my-iter-stage:
+      kind: python-script
+      script_path: scripts/my-script.py
+      args:
+        - "--model={var1}"
+        - "--n_estimators={var2}"
+      iterate_over:
+        - arg_name: [var1, var2]
+          values:
+            - [some-model, 5]
+            - [some-other-model, 7]
+      inputs:
+        - data/raw
+      outputs:
+        - models/{var1}-{var2}.h5
 ```
 
 ### Over ranges of numbers

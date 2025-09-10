@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import base64
+import json
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    ValidationError,
+    field_validator,
+)
 from typing_extensions import Annotated
 
 from calkit.models.io import InputsFromStageOutputs, PathOutput
 from calkit.models.iteration import (
+    ExpandedParametersType,
     ParameterIteration,
     ParametersType,
     RangeIteration,
@@ -21,18 +30,79 @@ from calkit.notebooks import (
 
 
 class StageIteration(BaseModel):
-    arg_name: str
-    values: list[int | float | str | RangeIteration | ParameterIteration]
+    """A model for the ``iterate_over`` key in a stage definition.
 
-    def expand_values(self, params: ParametersType) -> list[int | float | str]:
+    If ``arg_name`` is a list, ``values`` also must be a list of lists with
+    each sublist the length of ``arg_name``.
+    """
+
+    arg_name: str | list[str]
+    values: list[
+        int
+        | float
+        | str
+        | RangeIteration
+        | ParameterIteration
+        | list[int | float | str]
+    ]
+
+    @field_validator("values")
+    @classmethod
+    def validate_values_structure(cls, v, info):
+        """Validate that values are structured correctly based on arg_name."""
+        arg_name = info.data.get("arg_name")
+        # If arg_name is a list, check that values contains lists of the
+        # correct length
+        if isinstance(arg_name, list):
+            expected_length = len(arg_name)
+            for i, value in enumerate(v):
+                # TODO: Support RangeIteration and ParameterIteration
+                if isinstance(value, (RangeIteration, ParameterIteration)):
+                    raise ValueError(
+                        "RangeIteration and ParameterIteration are not "
+                        "allowed when arg_name is a list"
+                    )
+                # Check if the value is a list and has the correct length
+                if not isinstance(value, list):
+                    raise ValueError(
+                        f"When arg_name is a list, all values must be lists; "
+                        f"Value at index {i} is {type(value).__name__}"
+                    )
+                if len(value) != expected_length:
+                    raise ValueError(
+                        f"When arg_name has {expected_length} elements, "
+                        f"each value list must have {expected_length} "
+                        f"elements;  Value at index {i} has {len(value)} "
+                        "elements"
+                    )
+        return v
+
+    def expand_values(
+        self, params: ParametersType | ExpandedParametersType
+    ) -> list[int | float | str | dict[str, int | float | str]]:
         vals = []
-        for vals_i in self.values:
-            if isinstance(vals_i, ParameterIteration):
-                vals += vals_i.values_from_params(params)
-            elif isinstance(vals_i, RangeIteration):
-                vals += vals_i.values
-            else:
-                vals.append(vals_i)
+        if isinstance(self.arg_name, list):
+            # Expand into a list of dictionaries, in which case the DVC arg
+            # name must be auto-generated
+            for vals_list in self.values:
+                if not isinstance(vals_list, list):
+                    raise ValueError(
+                        "Expected a list for vals_list, got "
+                        f"{type(vals_list).__name__}"
+                    )
+                v = {}
+                for n, name in enumerate(self.arg_name):
+                    v[name] = vals_list[n]
+                vals.append(v)
+        else:
+            # arg_name is a string
+            for vals_i in self.values:
+                if isinstance(vals_i, ParameterIteration):
+                    vals += vals_i.values_from_params(params)
+                elif isinstance(vals_i, RangeIteration):
+                    vals += vals_i.values
+                else:
+                    vals.append(vals_i)
         return vals
 
 
@@ -43,11 +113,15 @@ class Stage(BaseModel):
         "python-script",
         "latex",
         "matlab-script",
+        "matlab-command",
         "docker-command",
         "shell-command",
         "shell-script",
         "jupyter-notebook",
         "r-script",
+        "julia-script",
+        "julia-command",
+        "word-to-pdf",
     ]
     environment: str
     wdir: str | None = None
@@ -91,7 +165,9 @@ class Stage(BaseModel):
 
     @property
     def xenv_cmd(self) -> str:
-        return f"calkit xenv -n {self.environment} --no-check"
+        if self.environment == "_system":
+            return ""
+        return f"calkit xenv -n {self.environment} --no-check --"
 
     def to_dvc(self) -> dict:
         """Convert to a DVC stage.
@@ -120,7 +196,7 @@ class PythonScriptStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"{self.xenv_cmd} -- python {self.script_path}"
+        cmd = f"{self.xenv_cmd} python {self.script_path}"
         for arg in self.args:
             cmd += f" {arg}"
         return cmd
@@ -139,7 +215,7 @@ class LatexStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"{self.xenv_cmd} -- latexmk -cd -interaction=nonstopmode"
+        cmd = f"{self.xenv_cmd} latexmk -cd -interaction=nonstopmode"
         if not self.verbose:
             cmd += " -silent"
         if self.force:
@@ -174,7 +250,26 @@ class MatlabScriptStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        return f"{self.xenv_cmd} -- \"run('{self.script_path}');\""
+        cmd = self.xenv_cmd
+        if self.environment == "_system":
+            cmd += "matlab -batch"
+        cmd += f" \"run('{self.script_path}');\""
+        return cmd
+
+
+class MatlabCommandStage(Stage):
+    kind: Literal["matlab-command"] = "matlab-command"
+    command: str
+
+    @property
+    def dvc_cmd(self) -> str:
+        # We need to escape quotes in the command
+        matlab_cmd = self.command.replace('"', '\\"')
+        cmd = self.xenv_cmd
+        if self.environment == "_system":
+            cmd += "matlab -batch"
+        cmd += f' "{matlab_cmd}"'
+        return cmd
 
 
 class ShellCommandStage(Stage):
@@ -184,14 +279,12 @@ class ShellCommandStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = ""
-        if self.environment != "_system":
-            cmd = f"{self.xenv_cmd} -- "
+        cmd = self.xenv_cmd
         if self.shell == "zsh":
             norc_args = "-f"
         else:
             norc_args = "--noprofile --norc"
-        cmd += f'{self.shell} {norc_args} -c "{self.command}"'
+        cmd += f' {self.shell} {norc_args} -c "{self.command}"'
         return cmd
 
 
@@ -207,14 +300,12 @@ class ShellScriptStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = ""
-        if self.environment != "_system":
-            cmd = f"{self.xenv_cmd} -- "
+        cmd = self.xenv_cmd
         if self.shell == "zsh":
             norc_args = "-f"
         else:
             norc_args = "--noprofile --norc"
-        cmd += f"{self.shell} {norc_args} {self.script_path}"
+        cmd += f" {self.shell} {norc_args} {self.script_path}"
         for arg in self.args:
             cmd += f" {arg}"
         return cmd
@@ -248,6 +339,32 @@ class RScriptStage(Stage):
         return cmd
 
 
+class JuliaScriptStage(Stage):
+    kind: Literal["julia-script"] = "julia-script"
+    script_path: str
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f'{self.xenv_cmd} "include(\\"{self.script_path}\\")"'
+        return cmd
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.script_path] + super().dvc_deps
+
+
+class JuliaCommandStage(Stage):
+    kind: Literal["julia-command"] = "julia-command"
+    command: str
+
+    @property
+    def dvc_cmd(self) -> str:
+        # We need to escape quotes in the command
+        julia_cmd = self.command.replace('"', '\\"')
+        cmd = f'{self.xenv_cmd} "{julia_cmd}"'
+        return cmd
+
+
 class JupyterNotebookStage(Stage):
     """A stage that runs a Jupyter notebook.
 
@@ -273,6 +390,36 @@ class JupyterNotebookStage(Stage):
     cleaned_ipynb_storage: Literal["git", "dvc"] | None = "git"
     executed_ipynb_storage: Literal["git", "dvc"] | None = "dvc"
     html_storage: Literal["git", "dvc"] | None = "dvc"
+    parameters: dict[str, Any] = {}
+    language: Literal["python", "matlab", "julia"] = "python"
+
+    def update_parameters(self, params: dict) -> None:
+        """If we have any templated parameters, update those, e.g., from
+        project-level parameters.
+
+        This needs to happen before writing a DVC stage, so we can properly
+        create JSON for the notebook.
+        """
+        updated_params = {}
+        for k, v in self.parameters.items():
+            # If we have something like {var_name} in v, replace it with the
+            # value from params
+            if isinstance(v, str) and v.startswith("{") and v.endswith("}"):
+                var_name = v[1:-1]
+                if var_name in params:
+                    updated_params[k] = params[var_name]
+                else:
+                    updated_params[k] = v
+            else:
+                updated_params[k] = v
+            # Try parsing as a RangeIteration and expanding
+            try:
+                updated_params[k] = RangeIteration.model_validate(
+                    updated_params[k]
+                ).values
+            except ValidationError:
+                pass
+        self.parameters = updated_params
 
     @property
     def cleaned_notebook_path(self) -> str:
@@ -281,13 +428,19 @@ class JupyterNotebookStage(Stage):
     @property
     def executed_notebook_path(self) -> str:
         return get_executed_notebook_path(
-            self.notebook_path, to="notebook", as_posix=True
+            self.notebook_path,
+            to="notebook",
+            as_posix=True,
+            parameters=self.parameters,
         )
 
     @property
     def html_path(self) -> str:
         return get_executed_notebook_path(
-            self.notebook_path, to="html", as_posix=True
+            self.notebook_path,
+            to="html",
+            as_posix=True,
+            parameters=self.parameters,
         )
 
     @property
@@ -296,9 +449,21 @@ class JupyterNotebookStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"calkit nb execute --environment {self.environment} --no-check"
+        cmd = (
+            f"calkit nb execute --environment {self.environment} "
+            f"--no-check --language {self.language}"
+        )
         if self.html_storage:
             cmd += " --to html"
+        if self.parameters:
+            # If we have parameters, we need to pass them as JSON, escaping
+            # double quotes
+            params_json = json.dumps(self.parameters)
+            # Now base64 encode
+            params_base64 = base64.b64encode(
+                params_json.encode("utf-8")
+            ).decode("utf-8")
+            cmd += f' --params-base64 "{params_base64}"'
         cmd += f' "{self.notebook_path}"'
         return cmd
 
@@ -306,11 +471,14 @@ class JupyterNotebookStage(Stage):
     def dvc_outs(self) -> list[str | dict]:
         outs = super().dvc_outs
         exec_nb_path = self.executed_notebook_path
-        html_path = self.html_path
-        outs = outs + [
-            {exec_nb_path: {"cache": self.executed_ipynb_storage == "dvc"}},
-            {html_path: {"cache": self.html_storage == "dvc"}},
-        ]
+        outs.append(
+            {exec_nb_path: {"cache": self.executed_ipynb_storage == "dvc"}}
+        )
+        if self.html_storage:
+            html_path = self.html_path
+            outs.append(
+                {html_path: {"cache": self.html_storage == "dvc"}},
+            )
         return outs
 
     @property
@@ -387,12 +555,15 @@ class Pipeline(BaseModel):
                 PythonScriptStage
                 | LatexStage
                 | MatlabScriptStage
+                | MatlabCommandStage
                 | ShellCommandStage
                 | ShellScriptStage
                 | DockerCommandStage
                 | RScriptStage
                 | WordToPdfStage
                 | JupyterNotebookStage
+                | JuliaScriptStage
+                | JuliaCommandStage
             ),
             Discriminator("kind"),
         ],

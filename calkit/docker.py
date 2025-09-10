@@ -47,7 +47,17 @@ RUN pip install --no-cache-dir numpy pandas matplotlib h5py \
 """.strip()
 
 UV_LAYER_TEXT = """
-COPY --from=ghcr.io/astral-sh/uv:0.6.14 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.8.5 /uv /uvx /bin/
+"""
+
+JULIA_LAYER_TEXT = """
+# Install Julia
+# Ensure base image is a bullseye distribution
+COPY --from=julia:1.11.6-bullseye /usr/local/julia /usr/local/julia
+ENV JULIA_PATH=/usr/local/julia \
+    PATH=$PATH:/usr/local/julia/bin \
+    JULIA_GPG=3673DF529D9049477F76B37566E3C7DC03D6E495 \
+    JULIA_VERSION=1.11.6
 """
 
 LAYERS = {
@@ -55,4 +65,5 @@ LAYERS = {
     "miniforge": MINIFORGE_LAYER_TXT,
     "foampy": FOAMPY_LAYER_TEXT,
     "uv": UV_LAYER_TEXT,
+    "julia": JULIA_LAYER_TEXT,
 }

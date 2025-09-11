@@ -279,12 +279,13 @@ class ShellCommandStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
+        shell_cmd = self.command.replace('"', '\\"')
         cmd = self.xenv_cmd
         if self.shell == "zsh":
             norc_args = "-f"
         else:
             norc_args = "--noprofile --norc"
-        cmd += f' {self.shell} {norc_args} -c "{self.command}"'
+        cmd += f' {self.shell} {norc_args} -c "{shell_cmd}"'
         return cmd
 
 

@@ -372,6 +372,7 @@ class SBatchStage(Stage):
     kind: Literal["sbatch"] = "sbatch"
     script_path: str
     args: list[str] = []
+    sbatch_options: list[str] = []
 
     @property
     def dvc_deps(self) -> list[str]:
@@ -382,7 +383,9 @@ class SBatchStage(Stage):
         cmd = f"calkit slurm batch --name {self.name}"
         for dep in self.dvc_deps:
             cmd += f" --dep {dep}"
-        cmd += f" {self.script_path} --"
+        for opt in self.sbatch_options:
+            cmd += f" --sbatch-option {opt}"
+        cmd += f" {self.script_path}"
         for arg in self.args:
             cmd += f" {arg}"
         return cmd

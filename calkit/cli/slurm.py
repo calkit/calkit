@@ -20,7 +20,7 @@ slurm_app = typer.Typer(no_args_is_help=True)
 def run_sbatch(
     name: Annotated[
         str,
-        typer.Option("--name", "-n", help="Name for the SLURM job."),
+        typer.Option("--name", "-n", help="Job name."),
     ],
     script: Annotated[
         str,

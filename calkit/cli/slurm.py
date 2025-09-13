@@ -50,7 +50,7 @@ def run_sbatch(
     dependencies have changed, in which case any queued or running jobs will
     be cancelled and a new one submitted.
     """
-    cmd = ["sbatch", "--parsable", "--name", name] + args
+    cmd = ["sbatch", "--parsable", "--job-name", f"calkit:{name}"] + args
     script_path = args[0]
     if not os.path.isfile(script_path):
         raise_error(f"SLURM script path '{script_path}' does not exist")

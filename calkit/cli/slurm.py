@@ -71,6 +71,16 @@ def run_sbatch(
             return False
         return len(p.stdout.strip().split("\n")) > 1
 
+    def cancel_job(job_id: str, reason: str) -> None:
+        typer.echo(f"{reason}; canceling existing job ID {job_id}")
+        p = subprocess.run(
+            ["scancel", job_id], capture_output=True, text=True, check=False
+        )
+        if p.returncode != 0:
+            raise_error(
+                f"Failed to cancel existing job ID {job_id}: {p.stderr}"
+            )
+
     if args is None:
         args = []
     cmd = (
@@ -109,6 +119,7 @@ def run_sbatch(
         job_info = jobs[name]
         job_id = job_info["job_id"]
         job_deps = job_info["deps"]
+        job_args = job_info.get("args", [])
         running_or_queued = check_job_running_or_queued(job_id)
         should_wait = True
         if running_or_queued:
@@ -116,41 +127,33 @@ def run_sbatch(
                 f"Job '{name}' with is already running or queued with ID "
                 f"{job_id}"
             )
+            # Check if args have changed
+            if job_args != args:
+                should_wait = False
+                cancel_job(
+                    job_id=job_id,
+                    reason=f"Arguments for job '{name}' have changed",
+                )
             # Check if dependency paths have changed
             if set(job_deps) != set(deps):
                 should_wait = False
-                typer.echo(
-                    f"Dependencies for job '{name}' have changed; canceling"
-                    " existing job"
+                cancel_job(
+                    job_id=job_id,
+                    reason=f"Dependencies for job '{name}' have changed",
                 )
-                try:
-                    subprocess.run(
-                        ["scancel", job_id], check=True, capture_output=True
-                    )
-                except subprocess.CalledProcessError as e:
-                    raise_error(
-                        f"Failed to cancel existing job ID {job_id}: {e}"
-                    )
             # Check dependency hashes
             job_dep_md5s = job_info.get("dep_md5s", {})
             for dep_path, md5 in current_dep_md5s.items():
                 job_md5 = job_dep_md5s.get(dep_path)
                 if md5 != job_md5:
-                    typer.echo(
-                        f"Dependency '{dep_path}' for job '{name}' has "
-                        "changed; canceling existing job"
-                    )
                     should_wait = False
-                    try:
-                        subprocess.run(
-                            ["scancel", job_id],
-                            check=True,
-                            capture_output=True,
-                        )
-                    except subprocess.CalledProcessError as e:
-                        raise_error(
-                            f"Failed to cancel existing job ID {job_id}: {e}"
-                        )
+                    cancel_job(
+                        job_id=job_id,
+                        reason=(
+                            f"Dependency '{dep_path}' for job '{name}' has "
+                            "changed"
+                        ),
+                    )
                     break
             # Wait for the job to finish if it's running or queued and valid
             if should_wait:
@@ -166,7 +169,12 @@ def run_sbatch(
         raise_error(f"Failed to submit new job: {p.stderr}")
     job_id = p.stdout.strip()
     typer.echo(f"Submitted job with ID: {job_id}")
-    new_job = {"job_id": job_id, "deps": deps, "dep_md5s": current_dep_md5s}
+    new_job = {
+        "job_id": job_id,
+        "deps": deps,
+        "args": args,
+        "dep_md5s": current_dep_md5s,
+    }
     jobs[name] = new_job
     with open(jobs_path, "w") as f:
         json.dump(jobs, f, indent=4)

@@ -51,6 +51,7 @@ from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
 from calkit.cli.overleaf import overleaf_app
+from calkit.cli.slurm import slurm_app
 from calkit.cli.update import update_app
 from calkit.environments import get_env_lock_fpath
 from calkit.models import Procedure
@@ -77,6 +78,7 @@ app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(overleaf_app, name="overleaf", help="Interact with Overleaf.")
 app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
+app.add_typer(slurm_app, name="slurm", help="Work with SLURM.")
 
 # Constants for version control auto-ignore
 AUTO_IGNORE_SUFFIXES = [".DS_Store", ".env", ".pyc", ".synctex.gz"]

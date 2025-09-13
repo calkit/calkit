@@ -15,7 +15,12 @@ import re
 import socket
 import subprocess
 import uuid
+import warnings
 
+# See https://github.com/calkit/calkit/issues/346
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=UserWarning)
+    import checksumdir
 import psutil
 import requests
 
@@ -572,3 +577,12 @@ def get_system_info() -> dict:
     system_info_str = json.dumps(system_info, sort_keys=True).encode()
     system_info["id"] = hashlib.sha1(system_info_str).hexdigest()
     return system_info
+
+
+def get_md5(path: str, exclude_files: list[str] | None = None) -> str:
+    if os.path.isdir(path):
+        return checksumdir.dirhash(path, excluded_files=exclude_files)
+    else:
+        with open(path) as f:
+            content = f.read()
+        return hashlib.md5(content.encode()).hexdigest()

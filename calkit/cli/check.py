@@ -3,20 +3,11 @@
 from __future__ import annotations
 
 import functools
-import hashlib
 import json
 import os
 import platform as _platform
 import subprocess
-import warnings
 from typing import Annotated
-
-from calkit.environments import get_env_lock_fpath
-
-# See https://github.com/calkit/calkit/issues/346
-with warnings.catch_warnings():
-    warnings.filterwarnings("ignore", category=UserWarning)
-    import checksumdir
 
 import dotenv
 import git
@@ -27,6 +18,8 @@ import calkit.matlab
 import calkit.pipeline
 from calkit.check import check_reproducibility
 from calkit.cli import raise_error, warn
+from calkit.core import get_md5
+from calkit.environments import get_env_lock_fpath
 
 check_app = typer.Typer(no_args_is_help=True)
 
@@ -287,14 +280,6 @@ def check_docker_env(
         for key in keys:
             resp[key] = out[0].get(key)
         return resp
-
-    def get_md5(path: str, exclude_files: list[str] | None = None) -> str:
-        if os.path.isdir(path):
-            return checksumdir.dirhash(dep, excluded_files=exclude_files)
-        else:
-            with open(path) as f:
-                content = f.read()
-            return hashlib.md5(content.encode()).hexdigest()
 
     outfile = open(os.devnull, "w") if quiet else None
     typer.echo(f"Checking for existing image with tag {tag}", file=outfile)

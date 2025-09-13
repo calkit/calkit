@@ -13,6 +13,7 @@ from pydantic import (
     Discriminator,
     ValidationError,
     field_validator,
+    model_validator,
 )
 from typing_extensions import Annotated
 
@@ -109,6 +110,7 @@ class StageIteration(BaseModel):
 class Stage(BaseModel):
     """A stage in the pipeline."""
 
+    name: str | None = None
     kind: Literal[
         "python-script",
         "latex",
@@ -366,6 +368,26 @@ class JuliaCommandStage(Stage):
         return cmd
 
 
+class SBatchStage(Stage):
+    kind: Literal["sbatch"] = "sbatch"
+    script_path: str
+    args: list[str] = []
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.script_path] + super().dvc_deps
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f"calkit slurm batch --name {self.name}"
+        for dep in self.dvc_deps:
+            cmd += f" --dep {dep}"
+        cmd += f" {self.script_path} --"
+        for arg in self.args:
+            cmd += f" {arg}"
+        return cmd
+
+
 class JupyterNotebookStage(Stage):
     """A stage that runs a Jupyter notebook.
 
@@ -549,6 +571,7 @@ class WordToPdfStage(Stage):
 
 
 class Pipeline(BaseModel):
+    sequence: list[str | list[str | list[str]]] | None = None
     stages: dict[
         str,
         Annotated[
@@ -565,9 +588,22 @@ class Pipeline(BaseModel):
                 | JupyterNotebookStage
                 | JuliaScriptStage
                 | JuliaCommandStage
+                | SBatchStage
             ),
             Discriminator("kind"),
         ],
     ]
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def set_stage_names(self):
+        """Set the name field of each stage to match its key in the dict."""
+        for stage_name, stage in self.stages.items():
+            if stage.name is not None and stage.name != stage_name:
+                raise ValueError(
+                    f"Stage name '{stage.name}' does not match key "
+                    f"'{stage_name}'"
+                )
+            stage.name = stage_name
+        return self

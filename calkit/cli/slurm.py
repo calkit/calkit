@@ -154,6 +154,6 @@ def run_sbatch(
     # Now wait for job to finish
     typer.echo("Waiting for job to finish")
     running_or_queued = True
-    while running_or_queued and should_wait:
+    while running_or_queued:
         running_or_queued = check_job_running_or_queued(job_id)
         time.sleep(1)

@@ -46,46 +46,6 @@ def run_sbatch(
             ),
         ),
     ] = [],
-    time_limit: Annotated[
-        str | None,
-        typer.Option(
-            "--time",
-            "-t",
-            help="Time limit for the job, e.g. '1:00:00' for one hour.",
-        ),
-    ] = None,
-    gpus: Annotated[
-        int | None,
-        typer.Option(
-            "--gpus",
-            "-g",
-            help="Number of GPUs to request for the job.",
-        ),
-    ] = None,
-    nodes: Annotated[
-        int | None,
-        typer.Option(
-            "--nodes",
-            "-N",
-            help="Number of nodes to request for the job.",
-        ),
-    ] = None,
-    tasks_per_node: Annotated[
-        int | None,
-        typer.Option(
-            "--tasks-per-node",
-            "-p",
-            help="Number of tasks per node to request for the job.",
-        ),
-    ] = None,
-    tasks: Annotated[
-        int | None,
-        typer.Option(
-            "--ntasks",
-            "-n",
-            help="Total number of tasks to request for the job.",
-        ),
-    ] = None,
     sbatch_opts: Annotated[
         list[str],
         typer.Option(
@@ -113,25 +73,19 @@ def run_sbatch(
 
     if args is None:
         args = []
-    cmd = [
-        "sbatch",
-        "--parsable",
-        "--job-name",
-        name,
-        "-o",
-        ".calkit/slurm/logs/%j.out",
-    ] + sbatch_opts
-    if time_limit is not None:
-        cmd += ["--time", time_limit]
-    if gpus is not None:
-        cmd += ["--gpus", str(gpus)]
-    if nodes is not None:
-        cmd += ["--nodes", str(nodes)]
-    if tasks_per_node is not None:
-        cmd += ["--ntasks-per-node", str(tasks_per_node)]
-    if tasks is not None:
-        cmd += ["--ntasks", str(tasks)]
-    cmd += [script] + args
+    cmd = (
+        [
+            "sbatch",
+            "--parsable",
+            "--job-name",
+            name,
+            "-o",
+            ".calkit/slurm/logs/%j.out",
+        ]
+        + sbatch_opts
+        + [script]
+        + args
+    )
     if not os.path.isfile(script):
         raise_error(f"SLURM script '{script}' does not exist")
     deps = [script] + deps

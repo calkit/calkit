@@ -50,6 +50,15 @@ def run_sbatch(
     dependencies have changed, in which case any queued or running jobs will
     be cancelled and a new one submitted.
     """
+
+    def check_job_running_or_queued(job_id: str) -> bool:
+        p = subprocess.run(
+            ["squeue", "--job", job_id], capture_output=True, text=True
+        )
+        if p.returncode != 0:
+            return False
+        return len(p.stdout.strip().split("\n")) > 1
+
     cmd = [
         "sbatch",
         "--parsable",
@@ -82,12 +91,7 @@ def run_sbatch(
         job_info = jobs[name]
         job_id = job_info["job_id"]
         job_deps = job_info["deps"]
-        running_or_queued = (
-            subprocess.run(
-                ["squeue", "--job", job_id], capture_output=True
-            ).returncode
-            == 0
-        )
+        running_or_queued = check_job_running_or_queued(job_id)
         should_wait = True
         if running_or_queued:
             typer.echo(
@@ -133,12 +137,7 @@ def run_sbatch(
             # Now just wait for the job to finish
             typer.echo("Waiting for job to finish")
             while running_or_queued and should_wait:
-                running_or_queued = (
-                    subprocess.run(
-                        ["squeue", "--job", job_id], capture_output=True
-                    ).returncode
-                    == 0
-                )
+                running_or_queued = check_job_running_or_queued(job_id)
                 time.sleep(1)
             if should_wait:
                 raise typer.Exit(0)
@@ -156,10 +155,5 @@ def run_sbatch(
     typer.echo("Waiting for job to finish")
     running_or_queued = True
     while running_or_queued and should_wait:
-        running_or_queued = (
-            subprocess.run(
-                ["squeue", "--job", job_id], capture_output=True
-            ).returncode
-            == 0
-        )
+        running_or_queued = check_job_running_or_queued(job_id)
         time.sleep(1)

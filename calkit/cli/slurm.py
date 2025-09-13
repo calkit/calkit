@@ -134,8 +134,9 @@ def run_sbatch(
                             f"Failed to cancel existing job ID {job_id}: {e}"
                         )
                     break
-            # Now just wait for the job to finish
-            typer.echo("Waiting for job to finish")
+            # Wait for the job to finish if it's running or queued and valid
+            if should_wait:
+                typer.echo("Waiting for job to finish")
             while running_or_queued and should_wait:
                 running_or_queued = check_job_running_or_queued(job_id)
                 time.sleep(1)

@@ -51,7 +51,7 @@ def run_sbatch(
         typer.Option(
             "--sbatch-option",
             "-s",
-            help="Additional options to pass to sbatch.",
+            help="Additional options to pass to sbatch (no spaces allowed).",
         ),
     ] = [],
 ) -> None:

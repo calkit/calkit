@@ -384,7 +384,7 @@ class SBatchStage(Stage):
         for dep in self.dvc_deps:
             cmd += f" --dep {dep}"
         for opt in self.sbatch_options:
-            cmd += f" --sbatch-option {opt}"
+            cmd += f" -s {opt}"
         cmd += f" {self.script_path}"
         for arg in self.args:
             cmd += f" {arg}"

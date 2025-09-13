@@ -22,15 +22,19 @@ def run_sbatch(
         str,
         typer.Option("--name", "-n", help="Name for the SLURM job."),
     ],
+    script: Annotated[
+        str,
+        typer.Argument(help="Path to the SLURM script to run."),
+    ],
     args: Annotated[
-        list[str],
+        list[str] | None,
         typer.Argument(
             help=(
                 "Arguments for sbatch, the first of which should be the "
                 "script."
             )
         ),
-    ],
+    ] = None,
     deps: Annotated[
         list[str],
         typer.Option(
@@ -40,6 +44,54 @@ def run_sbatch(
                 "Additional dependencies to track, which if changed signify"
                 " a job is invalid."
             ),
+        ),
+    ] = [],
+    time_limit: Annotated[
+        str | None,
+        typer.Option(
+            "--time",
+            "-t",
+            help="Time limit for the job, e.g. '1:00:00' for one hour.",
+        ),
+    ] = None,
+    gpus: Annotated[
+        int | None,
+        typer.Option(
+            "--gpus",
+            "-g",
+            help="Number of GPUs to request for the job.",
+        ),
+    ] = None,
+    nodes: Annotated[
+        int | None,
+        typer.Option(
+            "--nodes",
+            "-N",
+            help="Number of nodes to request for the job.",
+        ),
+    ] = None,
+    tasks_per_node: Annotated[
+        int | None,
+        typer.Option(
+            "--tasks-per-node",
+            "-p",
+            help="Number of tasks per node to request for the job.",
+        ),
+    ] = None,
+    tasks: Annotated[
+        int | None,
+        typer.Option(
+            "--ntasks",
+            "-n",
+            help="Total number of tasks to request for the job.",
+        ),
+    ] = None,
+    sbatch_opts: Annotated[
+        list[str],
+        typer.Option(
+            "--sbatch-option",
+            "-s",
+            help="Additional options to pass to sbatch.",
         ),
     ] = [],
 ) -> None:
@@ -59,18 +111,30 @@ def run_sbatch(
             return False
         return len(p.stdout.strip().split("\n")) > 1
 
+    if args is None:
+        args = []
     cmd = [
         "sbatch",
         "--parsable",
         "--job-name",
-        f"calkit:{name}",
+        name,
         "-o",
         ".calkit/slurm/logs/%j.out",
-    ] + args
-    script_path = args[0]
-    if not os.path.isfile(script_path):
-        raise_error(f"SLURM script path '{script_path}' does not exist")
-    deps = [script_path] + deps
+    ] + sbatch_opts
+    if time_limit is not None:
+        cmd += ["--time", time_limit]
+    if gpus is not None:
+        cmd += ["--gpus", str(gpus)]
+    if nodes is not None:
+        cmd += ["--nodes", str(nodes)]
+    if tasks_per_node is not None:
+        cmd += ["--ntasks-per-node", str(tasks_per_node)]
+    if tasks is not None:
+        cmd += ["--ntasks", str(tasks)]
+    cmd += [script] + args
+    if not os.path.isfile(script):
+        raise_error(f"SLURM script '{script}' does not exist")
+    deps = [script] + deps
     slurm_dir = os.path.join(".calkit", "slurm")
     logs_dir = os.path.join(slurm_dir, "logs")
     os.makedirs(logs_dir, exist_ok=True)

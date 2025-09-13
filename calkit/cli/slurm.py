@@ -22,10 +22,14 @@ def run_sbatch(
         str,
         typer.Option("--name", "-n", help="Name for the SLURM job."),
     ],
-    script: Annotated[str, typer.Argument(help="Path to the sbatch script.")],
     args: Annotated[
         list[str],
-        typer.Argument(help="Additional arguments for the sbatch script."),
+        typer.Argument(
+            help=(
+                "Arguments for sbatch, the first of which should be the "
+                "script."
+            )
+        ),
     ],
     deps: Annotated[
         list[str],
@@ -46,7 +50,11 @@ def run_sbatch(
     dependencies have changed, in which case any queued or running jobs will
     be cancelled and a new one submitted.
     """
-    cmd = ["sbatch", "--parsable", "--name", name, script] + args
+    cmd = ["sbatch", "--parsable", "--name", name] + args
+    script_path = args[0]
+    if not os.path.isfile(script_path):
+        raise_error(f"SLURM script path '{script_path}' does not exist")
+    deps = [script_path] + deps
     slurm_dir = os.path.join(".calkit", "slurm")
     os.makedirs(slurm_dir, exist_ok=True)
     jobs_path = os.path.join(slurm_dir, "jobs.json")
@@ -129,7 +137,7 @@ def run_sbatch(
     # Job is not running or queued, so we can submit
     p = subprocess.run(cmd, capture_output=True, check=False, text=True)
     if p.returncode != 0:
-        raise_error("Failed to submit new job")
+        raise_error(f"Failed to submit new job: {p.stderr}")
     job_id = p.stdout.strip()
     typer.echo(f"Submitted job with ID: {job_id}")
     new_job = {"job_id": job_id, "deps": deps, "dep_md5s": current_dep_md5s}

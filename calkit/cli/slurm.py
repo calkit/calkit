@@ -176,3 +176,24 @@ def run_sbatch(
     while running_or_queued:
         running_or_queued = check_job_running_or_queued(job_id)
         time.sleep(1)
+
+
+@slurm_app.command(name="queue")
+def get_queue() -> None:
+    """List SLURM jobs submitted via Calkit."""
+    slurm_dir = os.path.join(".calkit", "slurm")
+    jobs_path = os.path.join(slurm_dir, "jobs.json")
+    if os.path.isfile(jobs_path):
+        with open(jobs_path, "r") as f:
+            jobs = json.load(f)
+    else:
+        jobs = {}
+    if len(jobs) == 0:
+        typer.echo("No jobs found for this project")
+        raise typer.Exit(0)
+    job_ids = [j["job_id"] for j in jobs.values()]
+    subprocess.run(
+        ["squeue", "-j", ",".join(job_ids)],
+        capture_output=False,
+        text=True,
+    )

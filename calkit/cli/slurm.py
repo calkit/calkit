@@ -50,13 +50,21 @@ def run_sbatch(
     dependencies have changed, in which case any queued or running jobs will
     be cancelled and a new one submitted.
     """
-    cmd = ["sbatch", "--parsable", "--job-name", f"calkit:{name}"] + args
+    cmd = [
+        "sbatch",
+        "--parsable",
+        "--job-name",
+        f"calkit:{name}",
+        "-o",
+        ".calkit/slurm/logs/%j.out",
+    ] + args
     script_path = args[0]
     if not os.path.isfile(script_path):
         raise_error(f"SLURM script path '{script_path}' does not exist")
     deps = [script_path] + deps
     slurm_dir = os.path.join(".calkit", "slurm")
-    os.makedirs(slurm_dir, exist_ok=True)
+    logs_dir = os.path.join(slurm_dir, "logs")
+    os.makedirs(logs_dir, exist_ok=True)
     jobs_path = os.path.join(slurm_dir, "jobs.json")
     if os.path.isfile(jobs_path):
         with open(jobs_path, "r") as f:
@@ -146,6 +154,7 @@ def run_sbatch(
         json.dump(jobs, f, indent=4)
     # Now wait for job to finish
     typer.echo("Waiting for job to finish")
+    running_or_queued = True
     while running_or_queued and should_wait:
         running_or_queued = (
             subprocess.run(

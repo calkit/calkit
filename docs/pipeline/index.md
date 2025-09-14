@@ -98,7 +98,8 @@ For more details, see `calkit.models.pipeline`.
 - `sbatch_options`
 
 This stage type runs a script with `sbatch`, which is a common way to run
-jobs on a high performance computing (HPC) cluster.
+jobs on a high performance computing (HPC) cluster that uses the SLURM
+job scheduler.
 
 ## Iteration
 

@@ -28,6 +28,7 @@ environments:
     kind: uv-venv
     path: requirements.txt
     python: "3.13"
+
 # Define the pipeline
 pipeline:
   stages:
@@ -89,6 +90,15 @@ For more details, see `calkit.models.pipeline`.
 ### `julia-command`
 
 - `command`
+
+### `sbatch`
+
+- `script_path`
+- `args`
+- `sbatch_options`
+
+This stage type runs a script with `sbatch`, which is a common way to run
+jobs on a high performance computing (HPC) cluster.
 
 ## Iteration
 

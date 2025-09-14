@@ -378,9 +378,26 @@ class SBatchStage(Stage):
     def dvc_deps(self) -> list[str]:
         return [self.script_path] + super().dvc_deps
 
+    def dvc_outs(self) -> list[str | dict]:
+        # All outputs must be persistent, since ``calkit slurm batch``
+        # handles deletion
+        outs = super().dvc_outs
+        final_outs = []
+        for out in outs:
+            if isinstance(out, str):
+                final_outs.append({out: {"persist": True}})
+            elif isinstance(out, dict):
+                k = list(out.keys())[0]
+                v = out[k]
+                v["persist"] = True
+                final_outs.append({k: v})
+        return final_outs
+
     @property
     def dvc_cmd(self) -> str:
         cmd = f"calkit slurm batch --name {self.name}"
+        if self.environment != "_system":
+            cmd += f" --environment {self.environment}"
         for dep in self.dvc_deps:
             cmd += f" --dep {dep}"
         for opt in self.sbatch_options:

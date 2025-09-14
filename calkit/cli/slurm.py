@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import socket
 import subprocess
 import time
 
@@ -26,6 +28,14 @@ def run_sbatch(
         str,
         typer.Argument(help="Path to the SLURM script to run."),
     ],
+    environment: Annotated[
+        str,
+        typer.Option(
+            "--environment",
+            "-e",
+            help="Calkit (slurm) environment to use for the job.",
+        ),
+    ],
     args: Annotated[
         list[str] | None,
         typer.Argument(
@@ -43,6 +53,17 @@ def run_sbatch(
             help=(
                 "Additional dependencies to track, which if changed signify"
                 " a job is invalid."
+            ),
+        ),
+    ] = [],
+    outs: Annotated[
+        list[str],
+        typer.Option(
+            "--out",
+            "-o",
+            help=(
+                "Non-persistent output files or directories produced by the "
+                "job, which will be deleted before submitting a new job."
             ),
         ),
     ] = [],
@@ -98,6 +119,21 @@ def run_sbatch(
     )
     if not os.path.isfile(script):
         raise_error(f"SLURM script '{script}' does not exist")
+    if environment != "_system":
+        ck_info = calkit.load_calkit_info()
+        env = ck_info.get("environments", {}).get(environment, {})
+        env_kind = env.get("kind")
+        if env_kind != "slurm":
+            raise_error(
+                f"Environment '{environment}' is not a slurm environment"
+            )
+        # Check host matches
+        env_host = env.get("host", "localhost")
+        if env_host != "localhost" and env_host != socket.gethostname():
+            raise_error(
+                f"Environment '{environment}' is for host '{env_host}', but "
+                f"this is '{socket.gethostname()}'"
+            )
     deps = [script] + deps
     slurm_dir = os.path.join(".calkit", "slurm")
     logs_dir = os.path.join(slurm_dir, "logs")
@@ -164,6 +200,17 @@ def run_sbatch(
             if should_wait:
                 raise typer.Exit(0)
     # Job is not running or queued, so we can submit
+    # But first, delete any non-persistent outputs
+    for out in outs:
+        if os.path.exists(out):
+            typer.echo(f"Deleting output path '{out}'")
+            try:
+                if os.path.isfile(out):
+                    os.remove(out)
+                else:
+                    shutil.rmtree(out)
+            except Exception as e:
+                raise_error(f"Error deleting '{out}': {e}")
     p = subprocess.run(cmd, capture_output=True, check=False, text=True)
     if p.returncode != 0:
         raise_error(f"Failed to submit new job: {p.stderr}")

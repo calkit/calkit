@@ -288,6 +288,10 @@ def cancel_jobs(
         job_info = jobs[name]
         job_id = job_info["job_id"]
         if job_id not in running_or_queued_ids:
+            typer.echo(
+                f"Job '{name}' (last submitted ID: {job_id}) is not "
+                "running or queued"
+            )
             continue
         p = subprocess.run(
             ["scancel", job_id], capture_output=True, text=True, check=False

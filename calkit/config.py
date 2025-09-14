@@ -56,9 +56,9 @@ def supports_keyring() -> bool:
 KEYRING_SUPPORTED = supports_keyring()
 
 
-def get_env() -> Literal["local", "staging", "production"]:
+def get_env() -> Literal["test", "local", "staging", "production"]:
     env = os.getenv("CALKIT_ENV", "production")
-    if env not in ["local", "staging", "production"]:
+    if env not in ["test", "local", "staging", "production"]:
         raise ValueError(f"{env} is not a valid environment name")
     return env  # type: ignore
 

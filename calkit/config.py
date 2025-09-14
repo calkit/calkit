@@ -57,7 +57,10 @@ KEYRING_SUPPORTED = supports_keyring()
 
 
 def get_env() -> Literal["local", "staging", "production"]:
-    return os.getenv("CALKIT_ENV", "production")
+    env = os.getenv("CALKIT_ENV", "production")
+    if env not in ["local", "staging", "production"]:
+        raise ValueError(f"{env} is not a valid environment name")
+    return env  # type: ignore
 
 
 def set_env(name: Literal["local", "staging", "production"]) -> None:
@@ -184,10 +187,10 @@ class Settings(BaseSettings):
             dotenv_settings,
             YamlConfigSettingsSource(settings_cls),
             KeyringSecretsSource(settings_cls),
-        )
+        )  # type: ignore
 
     def write(self) -> None:
-        base_dir = os.path.dirname(self.model_config["yaml_file"])
+        base_dir = os.path.dirname(self.model_config["yaml_file"])  # type: ignore
         os.makedirs(base_dir, exist_ok=True)
         cfg = self.model_dump()
         # Remove anything that should be in the keyring
@@ -205,8 +208,10 @@ class Settings(BaseSettings):
                         except keyring.errors.KeyringError:
                             # Ignore errors when deleting secrets
                             pass
-        with open(self.model_config["yaml_file"], "w") as f:
+        with open(self.model_config["yaml_file"], "w") as f:  # type: ignore
             yaml.safe_dump(cfg, f)
+        # Ensure permissions are user read/write only
+        os.chmod(self.model_config["yaml_file"], 0o600)  # type: ignore
 
 
 def read() -> Settings:

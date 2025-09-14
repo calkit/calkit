@@ -252,3 +252,38 @@ def get_queue() -> None:
         capture_output=False,
         text=True,
     )
+
+
+@slurm_app.command(name="cancel")
+def cancel_jobs(
+    names: Annotated[
+        list[str],
+        typer.Argument(help="Names of jobs to cancel."),
+    ],
+) -> None:
+    """Cancel SLURM jobs by their name in the project."""
+    slurm_dir = os.path.join(".calkit", "slurm")
+    jobs_path = os.path.join(slurm_dir, "jobs.json")
+    if os.path.isfile(jobs_path):
+        with open(jobs_path, "r") as f:
+            jobs = json.load(f)
+    else:
+        jobs = {}
+    if len(jobs) == 0:
+        typer.echo("No jobs found for this project")
+        raise typer.Exit(0)
+    for name in names:
+        if name not in jobs:
+            typer.echo(f"No job named '{name}' found for this project")
+            continue
+        job_info = jobs[name]
+        job_id = job_info["job_id"]
+        p = subprocess.run(
+            ["scancel", job_id], capture_output=True, text=True, check=False
+        )
+        if p.returncode != 0:
+            raise_error(f"Failed to cancel job ID {job_id}: {p.stderr}")
+        typer.echo(f"Cancelled job '{name}' with ID {job_id}")
+        jobs.pop(name)
+    with open(jobs_path, "w") as f:
+        json.dump(jobs, f, indent=4)

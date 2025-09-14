@@ -375,3 +375,40 @@ def test_remove_stage(tmp_dir):
         dvc_yaml = calkit.ryaml.load(f)
     assert "get-data" not in dvc_yaml["stages"]
     assert "process-data" in dvc_yaml["stages"]
+
+
+def test_sbatch_stage_to_dvc():
+    pipeline = {
+        "stages": {
+            "job1": {
+                "kind": "sbatch",
+                "script_path": "scripts/run_job.sh",
+                "environment": "slurm-env",
+                "args": ["something", "else"],
+                "sbatch_options": ["--time=01:00:00", "--mem=4G"],
+                "inputs": ["data/input.txt"],
+                "outputs": [
+                    {
+                        "path": "data/output.txt",
+                        "storage": "git",
+                        "delete_before_run": False,
+                    },
+                    "data/output2.txt",
+                ],
+            }
+        }
+    }
+    stages = calkit.pipeline.to_dvc(
+        ck_info={"pipeline": pipeline}, write=False
+    )
+    stage = stages["job1"]
+    print(stage)
+    assert stage["cmd"] == (
+        "calkit slurm batch --name job1 --environment slurm-env "
+        "--dep data/input.txt --out data/output2.txt "
+        "-s --time=01:00:00 -s --mem=4G scripts/run_job.sh something else"
+    )
+    assert "scripts/run_job.sh" in stage["deps"]
+    assert "data/input.txt" in stage["deps"]
+    out = {"data/output.txt": {"cache": False, "persist": True}}
+    assert out in stage["outs"]

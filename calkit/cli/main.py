@@ -189,8 +189,11 @@ def clone(
     no_dvc_pull: Annotated[
         bool, typer.Option("--no-dvc-pull", help="Do not pull DVC objects.")
     ] = False,
-    recursive: Annotated[
-        bool, typer.Option("--recursive", help="Recursively clone submodules.")
+    non_recursive: Annotated[
+        bool,
+        typer.Option(
+            "--no-recursive", help="Do not recursively clone submodules."
+        ),
     ] = False,
 ):
     """Clone a Git repo and by default configure and pull from the DVC
@@ -221,7 +224,7 @@ def clone(
             url = url.replace("https://github.com/", "git@github.com:")
     # Git clone
     cmd = ["git", "clone", url]
-    if recursive:
+    if not non_recursive:
         cmd.append("--recursive")
     if location is not None:
         cmd.append(location)

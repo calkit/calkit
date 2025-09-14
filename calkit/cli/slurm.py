@@ -285,5 +285,3 @@ def cancel_jobs(
             raise_error(f"Failed to cancel job ID {job_id}: {p.stderr}")
         typer.echo(f"Cancelled job '{name}' with ID {job_id}")
         jobs.pop(name)
-    with open(jobs_path, "w") as f:
-        json.dump(jobs, f, indent=4)

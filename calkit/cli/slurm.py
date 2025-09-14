@@ -272,16 +272,26 @@ def cancel_jobs(
     if len(jobs) == 0:
         typer.echo("No jobs found for this project")
         raise typer.Exit(0)
+    # Get any job IDs that are actually running or queued
+    job_ids = [j["job_id"] for j in jobs.values()]
+    p = subprocess.run(
+        ["squeue", "-h", "-o", "%A", "-j", ",".join(job_ids)],
+        capture_output=True,
+        text=True,
+    )
+    running_or_queued_ids = p.stdout.strip().split("\n")
+    running_or_queued_ids = [j for j in running_or_queued_ids if j]
     for name in names:
         if name not in jobs:
             typer.echo(f"No job named '{name}' found for this project")
             continue
         job_info = jobs[name]
         job_id = job_info["job_id"]
+        if job_id not in running_or_queued_ids:
+            continue
         p = subprocess.run(
             ["scancel", job_id], capture_output=True, text=True, check=False
         )
         if p.returncode != 0:
             raise_error(f"Failed to cancel job ID {job_id}: {p.stderr}")
         typer.echo(f"Cancelled job '{name}' with ID {job_id}")
-        jobs.pop(name)

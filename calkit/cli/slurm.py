@@ -299,3 +299,46 @@ def cancel_jobs(
         if p.returncode != 0:
             raise_error(f"Failed to cancel job ID {job_id}: {p.stderr}")
         typer.echo(f"Cancelled job '{name}' with ID {job_id}")
+
+
+@slurm_app.command(name="logs")
+def get_logs(
+    name: Annotated[
+        str,
+        typer.Option("--name", "-n", help="Name of the job to get logs for."),
+    ],
+    follow: Annotated[
+        bool,
+        typer.Option(
+            "--follow", "-f", help="Follow the log output like tail -f."
+        ),
+    ] = False,
+) -> None:
+    """Get the logs for a SLURM job by its name in the project."""
+    slurm_dir = os.path.join(".calkit", "slurm")
+    jobs_path = os.path.join(slurm_dir, "jobs.json")
+    if os.path.isfile(jobs_path):
+        with open(jobs_path, "r") as f:
+            jobs = json.load(f)
+    else:
+        jobs = {}
+    if len(jobs) == 0:
+        typer.echo("No jobs found for this project")
+        raise typer.Exit(0)
+    if name not in jobs:
+        raise_error(f"No job named '{name}' found for this project")
+    job_info = jobs[name]
+    job_id = job_info["job_id"]
+    log_path = os.path.join(slurm_dir, "logs", f"{job_id}.out")
+    if not os.path.isfile(log_path):
+        raise_error(f"No log file found for job '{name}' with ID {job_id}")
+    if follow:
+        p = subprocess.Popen(["tail", "-f", log_path])
+        try:
+            p.wait()
+        except KeyboardInterrupt:
+            p.terminate()
+            raise typer.Exit(0)
+    else:
+        with open(log_path, "r") as f:
+            typer.echo(f.read())

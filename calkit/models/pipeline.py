@@ -599,7 +599,6 @@ class WordToPdfStage(Stage):
 
 
 class Pipeline(BaseModel):
-    sequence: list[str | list[str | list[str]]] | None = None
     stages: dict[
         str,
         Annotated[

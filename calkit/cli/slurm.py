@@ -305,7 +305,7 @@ def cancel_jobs(
 def get_logs(
     name: Annotated[
         str,
-        typer.Option("--name", "-n", help="Name of the job to get logs for."),
+        typer.Argument(help="Name of the job to get logs for."),
     ],
     follow: Annotated[
         bool,

@@ -410,7 +410,7 @@ class SBatchStage(Stage):
                 cmd += f" --out {out.path}"
         for opt in self.sbatch_options:
             cmd += f" -s {opt}"
-        cmd += f" {self.script_path}"
+        cmd += f" -- {self.script_path}"
         for arg in self.args:
             cmd += f" {arg}"
         return cmd

@@ -9,6 +9,7 @@ from calkit.models.pipeline import (
     LatexStage,
     MatlabCommandStage,
     PythonScriptStage,
+    SBatchStage,
     StageIteration,
     WordToPdfStage,
 )
@@ -156,3 +157,26 @@ def test_matlabcommandstage():
     sd = s.to_dvc()
     print(sd)
     assert sd["cmd"] == 'matlab -batch "disp(\\"Hello, MATLAB!\\");"'
+
+
+def test_sbatchstage():
+    s = SBatchStage(
+        name="job1",
+        script_path="scripts/run_job.sh",
+        environment="slurm-env",
+        args=["something", "else"],
+        sbatch_options=["--time=01:00:00", "--mem=4G"],
+        inputs=["data/input.txt"],
+        outputs=["data/output.txt"],
+    )
+    sd = s.to_dvc()
+    print(sd)
+    assert sd["cmd"] == (
+        "calkit slurm batch --name job1 --environment slurm-env "
+        "--dep data/input.txt --out data/output.txt "
+        "-s --time=01:00:00 -s --mem=4G scripts/run_job.sh something else"
+    )
+    assert "scripts/run_job.sh" in sd["deps"]
+    assert "data/input.txt" in sd["deps"]
+    out = {"data/output.txt": {"persist": True}}
+    assert out in sd["outs"]

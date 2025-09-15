@@ -557,6 +557,9 @@ def save(
             help="Additional DVC args to pass when pushing.",
         ),
     ] = [],
+    no_recursive: Annotated[
+        bool, typer.Option("--no-recursive", help="Do not push to submodules.")
+    ] = False,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -611,7 +614,10 @@ def save(
         if verbose and not any_dvc:
             typer.echo("Not pushing to DVC since no DVC files were staged")
         push(
-            no_dvc=not any_dvc, git_args=git_push_args, dvc_args=dvc_push_args
+            no_dvc=not any_dvc,
+            git_args=git_push_args,
+            dvc_args=dvc_push_args,
+            no_recursive=no_recursive,
         )
 
 
@@ -634,6 +640,12 @@ def pull(
             help="Force pull, potentially overwriting local changes.",
         ),
     ] = False,
+    no_recursive: Annotated[
+        bool,
+        typer.Option(
+            "--no-recursive", help="Do not recursively pull from submodules."
+        ),
+    ] = False,
 ):
     """Pull with both Git and DVC."""
     typer.echo("Git pulling")
@@ -643,7 +655,10 @@ def pull(
         if "-f" not in dvc_args and "--force" not in dvc_args:
             dvc_args.append("-f")
     try:
-        subprocess.check_call(["git", "pull"] + git_args)
+        git_cmd = ["git", "pull"]
+        if not no_recursive and "--recurse-submodules" not in git_args:
+            git_cmd.append("--recurse-submodules")
+        subprocess.check_call(git_cmd + git_args)
     except subprocess.CalledProcessError:
         raise_error("Git pull failed")
     typer.echo("DVC pulling")
@@ -672,11 +687,17 @@ def push(
         list[str],
         typer.Option("--dvc-arg", help="Additional DVC args."),
     ] = [],
+    no_recursive: Annotated[
+        bool, typer.Option("--no-recursive", help="Do not push to submodules.")
+    ] = False,
 ):
     """Push with both Git and DVC."""
     typer.echo("Pushing to Git remote")
     try:
-        subprocess.check_call(["git", "push"] + git_args)
+        git_cmd = ["git", "push"]
+        if not no_recursive and "--recurse-submodules" not in git_args:
+            git_cmd.append("--recurse-submodules=on-demand")
+        subprocess.check_call(git_cmd + git_args)
     except subprocess.CalledProcessError:
         raise_error("Git push failed")
     if not no_dvc:

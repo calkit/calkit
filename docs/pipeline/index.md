@@ -1,7 +1,7 @@
 # The pipeline
 
 The pipeline
-defines the processes that produce
+defines and ties together the processes that produce
 the project's important assets or artifacts, such as datasets,
 figures, tables, and publications.
 It is saved in the `pipeline` section of the `calkit.yaml` file,
@@ -18,6 +18,9 @@ and the affected stages need to be rerun.
 Stages can also define `inputs` and `outputs`,
 and you can decide how you'd like outputs to be stored, i.e., with Git or DVC.
 
+Any stages that have not changed since they were last run will be skipped,
+since their results will have been cached.
+
 In the `calkit.yaml` file, you can define a `pipeline`
 (and `environments`) like:
 
@@ -28,6 +31,10 @@ environments:
     kind: uv-venv
     path: requirements.txt
     python: "3.13"
+  texlive:
+    kind: docker
+    image: texlive/texlive:latest-full
+
 # Define the pipeline
 pipeline:
   stages:
@@ -40,6 +47,22 @@ pipeline:
         - path: data/meta.json
           storage: git
           delete_before_run: false
+    process-data:
+      kind: jupyter-notebook
+      notebook_path: notebooks/process.ipynb
+      environment: main
+      inputs:
+        - data/raw.csv
+      outputs:
+        - data/processed.csv
+        - figures/fig1.png
+    build-paper:
+      kind: latex
+      target_path: paper/paper.tex
+      environment: texlive
+      inputs:
+        - figures/fig1.png
+        - references.bib
 ```
 
 ## Stage types and unique attributes
@@ -89,6 +112,16 @@ For more details, see `calkit.models.pipeline`.
 ### `julia-command`
 
 - `command`
+
+### `sbatch`
+
+- `script_path`
+- `args`
+- `sbatch_options`
+
+This stage type runs a script with `sbatch`, which is a common way to run
+jobs on a high performance computing (HPC) cluster that uses the SLURM
+job scheduler.
 
 ## Iteration
 

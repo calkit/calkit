@@ -4,6 +4,7 @@ When the pipeline is run with the `calkit run` command,
 Calkit will first compile the pipeline into a DVC pipeline with
 some additional stages to handle environment checking.
 
+If the `--log` option is specified,
 Calkit also collects important system information such as
 foundational dependency versions to log for the sake of
 traceability and saves to JSON files in `.calkit/systems`.

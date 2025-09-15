@@ -46,6 +46,7 @@ nav:
       - pipeline/index.md
       - pipeline/running-and-logging.md
       - pipeline/manual-steps.md
+      - pipeline/slurm.md
   - Notebooks: notebooks.md
   - Datasets: datasets.md
   - References: references.md

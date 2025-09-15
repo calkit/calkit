@@ -13,6 +13,7 @@ from pydantic import (
     Discriminator,
     ValidationError,
     field_validator,
+    model_validator,
 )
 from typing_extensions import Annotated
 
@@ -109,6 +110,7 @@ class StageIteration(BaseModel):
 class Stage(BaseModel):
     """A stage in the pipeline."""
 
+    name: str | None = None
     kind: Literal[
         "python-script",
         "latex",
@@ -366,6 +368,54 @@ class JuliaCommandStage(Stage):
         return cmd
 
 
+class SBatchStage(Stage):
+    kind: Literal["sbatch"] = "sbatch"
+    script_path: str
+    args: list[str] = []
+    sbatch_options: list[str] = []
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.script_path] + super().dvc_deps
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        # All outputs must be persistent, since ``calkit slurm batch``
+        # handles deletion
+        outs = super().dvc_outs
+        final_outs = []
+        for out in outs:
+            if isinstance(out, str):
+                final_outs.append({out: {"persist": True}})
+            elif isinstance(out, dict):
+                k = list(out.keys())[0]
+                v = out[k]
+                v["persist"] = True
+                final_outs.append({k: v})
+        return final_outs
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f"calkit slurm batch --name {self.name}"
+        if self.environment != "_system":
+            cmd += f" --environment {self.environment}"
+        for dep in self.dvc_deps:
+            if dep != self.script_path:
+                cmd += f" --dep {dep}"
+        for out in self.outputs:
+            # Determine if this is a non-persistent output
+            if isinstance(out, str):
+                cmd += f" --out {out}"
+            elif isinstance(out, PathOutput) and out.delete_before_run:
+                cmd += f" --out {out.path}"
+        for opt in self.sbatch_options:
+            cmd += f" -s {opt}"
+        cmd += f" -- {self.script_path}"
+        for arg in self.args:
+            cmd += f" {arg}"
+        return cmd
+
+
 class JupyterNotebookStage(Stage):
     """A stage that runs a Jupyter notebook.
 
@@ -565,9 +615,22 @@ class Pipeline(BaseModel):
                 | JupyterNotebookStage
                 | JuliaScriptStage
                 | JuliaCommandStage
+                | SBatchStage
             ),
             Discriminator("kind"),
         ],
     ]
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def set_stage_names(self):
+        """Set the name field of each stage to match its key in the dict."""
+        for stage_name, stage in self.stages.items():
+            if stage.name is not None and stage.name != stage_name:
+                raise ValueError(
+                    f"Stage name '{stage.name}' does not match key "
+                    f"'{stage_name}'"
+                )
+            stage.name = stage_name
+        return self

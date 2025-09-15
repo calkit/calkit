@@ -9,6 +9,7 @@ from calkit.models.pipeline import (
     LatexStage,
     MatlabCommandStage,
     PythonScriptStage,
+    SBatchStage,
     StageIteration,
     WordToPdfStage,
 )
@@ -17,6 +18,7 @@ from calkit.models.pipeline import (
 def test_pythonscriptstage():
     s = PythonScriptStage.model_validate(
         dict(
+            name="something",
             kind="python-script",
             script_path="scripts/my-script.py",
             environment="py1",
@@ -43,6 +45,7 @@ def test_pythonscriptstage():
 
 def test_wordtopdfstage():
     s = WordToPdfStage(
+        name="none",
         word_doc_path="my word doc.docx",
     )
     sd = s.to_dvc()
@@ -52,7 +55,9 @@ def test_wordtopdfstage():
 
 
 def test_latexstage():
-    s = LatexStage(environment="tex", target_path="my-paper.tex")
+    s = LatexStage(
+        name="something", environment="tex", target_path="my-paper.tex"
+    )
     assert " -silent " in s.dvc_cmd
     s.verbose = True
     assert " -silent " not in s.dvc_cmd
@@ -71,6 +76,7 @@ def test_jupyternotebookstage():
         return outs
 
     s = JupyterNotebookStage(
+        name="whatever",
         environment="main",
         notebook_path="something.ipynb",
         inputs=["file.txt"],
@@ -83,6 +89,7 @@ def test_jupyternotebookstage():
     assert "html" in dvc_stage["cmd"]
     assert "file.txt" in dvc_stage["deps"]
     s = JupyterNotebookStage(
+        name="notebook1",
         environment="main",
         notebook_path="something.ipynb",
         inputs=["file.txt"],
@@ -95,6 +102,7 @@ def test_jupyternotebookstage():
     assert "html" not in dvc_stage["cmd"]
     # Test with parameters
     s = JupyterNotebookStage(
+        name="notebook2",
         environment="main",
         notebook_path="something.ipynb",
         inputs=["file.txt"],
@@ -126,7 +134,7 @@ def test_stageiteration():
 
 
 def test_juliacommandstage():
-    s = JuliaCommandStage(environment="j1", command='println("sup")')
+    s = JuliaCommandStage(name="a", environment="j1", command='println("sup")')
     sd = s.to_dvc()
     print(sd)
     assert sd["cmd"] == (
@@ -135,15 +143,40 @@ def test_juliacommandstage():
 
 
 def test_matlabcommandstage():
-    s = MatlabCommandStage(environment="m1", command='disp("Hello, MATLAB!");')
+    s = MatlabCommandStage(
+        name="b", environment="m1", command='disp("Hello, MATLAB!");'
+    )
     sd = s.to_dvc()
     print(sd)
     assert sd["cmd"] == (
         'calkit xenv -n m1 --no-check -- "disp(\\"Hello, MATLAB!\\");"'
     )
     s = MatlabCommandStage(
-        environment="_system", command='disp("Hello, MATLAB!");'
+        name="c", environment="_system", command='disp("Hello, MATLAB!");'
     )
     sd = s.to_dvc()
     print(sd)
     assert sd["cmd"] == 'matlab -batch "disp(\\"Hello, MATLAB!\\");"'
+
+
+def test_sbatchstage():
+    s = SBatchStage(
+        name="job1",
+        script_path="scripts/run_job.sh",
+        environment="slurm-env",
+        args=["something", "else"],
+        sbatch_options=["--time=01:00:00", "--mem=4G"],
+        inputs=["data/input.txt"],
+        outputs=["data/output.txt"],
+    )
+    sd = s.to_dvc()
+    print(sd)
+    assert sd["cmd"] == (
+        "calkit slurm batch --name job1 --environment slurm-env "
+        "--dep data/input.txt --out data/output.txt "
+        "-s --time=01:00:00 -s --mem=4G -- scripts/run_job.sh something else"
+    )
+    assert "scripts/run_job.sh" in sd["deps"]
+    assert "data/input.txt" in sd["deps"]
+    out = {"data/output.txt": {"persist": True}}
+    assert out in sd["outs"]

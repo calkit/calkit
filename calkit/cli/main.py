@@ -51,6 +51,7 @@ from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
 from calkit.cli.overleaf import overleaf_app
+from calkit.cli.slurm import slurm_app
 from calkit.cli.update import update_app
 from calkit.environments import get_env_lock_fpath
 from calkit.models import Procedure
@@ -77,6 +78,7 @@ app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(overleaf_app, name="overleaf", help="Interact with Overleaf.")
 app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
+app.add_typer(slurm_app, name="slurm", help="Work with SLURM.")
 
 # Constants for version control auto-ignore
 AUTO_IGNORE_SUFFIXES = [".DS_Store", ".env", ".pyc", ".synctex.gz"]
@@ -187,8 +189,11 @@ def clone(
     no_dvc_pull: Annotated[
         bool, typer.Option("--no-dvc-pull", help="Do not pull DVC objects.")
     ] = False,
-    recursive: Annotated[
-        bool, typer.Option("--recursive", help="Recursively clone submodules.")
+    non_recursive: Annotated[
+        bool,
+        typer.Option(
+            "--no-recursive", help="Do not recursively clone submodules."
+        ),
     ] = False,
 ):
     """Clone a Git repo and by default configure and pull from the DVC
@@ -219,7 +224,7 @@ def clone(
             url = url.replace("https://github.com/", "git@github.com:")
     # Git clone
     cmd = ["git", "clone", url]
-    if recursive:
+    if not non_recursive:
         cmd.append("--recursive")
     if location is not None:
         cmd.append(location)
@@ -552,6 +557,9 @@ def save(
             help="Additional DVC args to pass when pushing.",
         ),
     ] = [],
+    no_recursive: Annotated[
+        bool, typer.Option("--no-recursive", help="Do not push to submodules.")
+    ] = False,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -606,7 +614,10 @@ def save(
         if verbose and not any_dvc:
             typer.echo("Not pushing to DVC since no DVC files were staged")
         push(
-            no_dvc=not any_dvc, git_args=git_push_args, dvc_args=dvc_push_args
+            no_dvc=not any_dvc,
+            git_args=git_push_args,
+            dvc_args=dvc_push_args,
+            no_recursive=no_recursive,
         )
 
 
@@ -629,6 +640,12 @@ def pull(
             help="Force pull, potentially overwriting local changes.",
         ),
     ] = False,
+    no_recursive: Annotated[
+        bool,
+        typer.Option(
+            "--no-recursive", help="Do not recursively pull from submodules."
+        ),
+    ] = False,
 ):
     """Pull with both Git and DVC."""
     typer.echo("Git pulling")
@@ -638,7 +655,10 @@ def pull(
         if "-f" not in dvc_args and "--force" not in dvc_args:
             dvc_args.append("-f")
     try:
-        subprocess.check_call(["git", "pull"] + git_args)
+        git_cmd = ["git", "pull"]
+        if not no_recursive and "--recurse-submodules" not in git_args:
+            git_cmd.append("--recurse-submodules")
+        subprocess.check_call(git_cmd + git_args)
     except subprocess.CalledProcessError:
         raise_error("Git pull failed")
     typer.echo("DVC pulling")
@@ -667,11 +687,17 @@ def push(
         list[str],
         typer.Option("--dvc-arg", help="Additional DVC args."),
     ] = [],
+    no_recursive: Annotated[
+        bool, typer.Option("--no-recursive", help="Do not push to submodules.")
+    ] = False,
 ):
     """Push with both Git and DVC."""
     typer.echo("Pushing to Git remote")
     try:
-        subprocess.check_call(["git", "push"] + git_args)
+        git_cmd = ["git", "push"]
+        if not no_recursive and "--recurse-submodules" not in git_args:
+            git_cmd.append("--recurse-submodules=on-demand")
+        subprocess.check_call(git_cmd + git_args)
     except subprocess.CalledProcessError:
         raise_error("Git push failed")
     if not no_dvc:

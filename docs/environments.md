@@ -292,14 +292,29 @@ For example:
 calkit xenv -n my-julia-env -- "println(\"hello world\");"
 ```
 
+### SLURM
+
+[SLURM](https://slurm.schedmd.com/documentation.html)
+is a job scheduler commonly used for high performance computing (HPC).
+A SLURM environment can be defined in `calkit.yaml` as follows:
+
+```yaml
+environments:
+  my-hpc-cluster:
+    kind: slurm
+    host: hpc.myinstitute.org
+```
+
+To run a script in a `slurm` environment, use the
+[`sbatch` pipeline stage type](pipeline/index.md#sbatch).
+
 ### SSH
 
 It's possible to define a remote environment that uses `ssh` to connect
 and run commands,
 and `scp` to copy files back and forth.
 This could be useful, e.g.,
-for running one or more pipeline stages on a high performance computing (HPC)
-cluster,
+for running one or more pipeline stages on an HPC cluster,
 or simply offloading some work to a virtual machine in the cloud
 with specialized hardware like a more powerful GPU.
 

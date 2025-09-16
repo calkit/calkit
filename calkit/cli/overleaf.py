@@ -360,7 +360,16 @@ def sync(
             overleaf_repo = git.Repo(overleaf_project_dir)
         # Pull the latest version in the Overleaf project
         typer.echo("Pulling the latest version from Overleaf")
-        overleaf_repo.git.pull()
+        try:
+            overleaf_repo.git.pull()
+        except Exception:
+            raise_error(
+                "Failed to pull from Overleaf; "
+                "check that your Overleaf token is valid\n"
+                "Run 'calkit config get overleaf_token' and ensure that "
+                "it matches one in your Overleaf account settings "
+                "(https://overleaf.com/user/settings)"
+            )
         last_sync_commit = pub["overleaf"].get("last_sync_commit")
         # Determine which paths to sync and push
         # TODO: Support glob patterns

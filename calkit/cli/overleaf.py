@@ -314,6 +314,14 @@ def sync(
         for path in paths:
             if not any(pub.get("path") == path for pub in pubs):
                 raise_error(f"Publication with path '{path}' not found")
+    # First check our config for an Overleaf token
+    calkit_config = calkit.config.read()
+    overleaf_token = calkit_config.overleaf_token
+    if not overleaf_token:
+        raise_error(
+            "Overleaf token not set; "
+            "Please set it using 'calkit config set overleaf_token'"
+        )
     repo = git.Repo()
     for pub in pubs:
         overleaf_config = pub.get("overleaf", {})
@@ -341,26 +349,30 @@ def sync(
         overleaf_project_dir = os.path.join(
             ".calkit", "overleaf", overleaf_project_id
         )
+        overleaf_remote_url = (
+            f"https://git:{overleaf_token}@git.overleaf.com/"
+            f"{overleaf_project_id}"
+        )
         if not os.path.isdir(overleaf_project_dir):
-            calkit_config = calkit.config.read()
-            overleaf_token = calkit_config.overleaf_token
-            if not overleaf_token:
-                raise_error(
-                    "Overleaf token not set; "
-                    "Please set it using 'calkit config set overleaf_token'"
-                )
-            overleaf_clone_url = (
-                f"https://git:{overleaf_token}@git.overleaf.com/"
-                f"{overleaf_project_id}"
-            )
             overleaf_repo = git.Repo.clone_from(
-                overleaf_clone_url, to_path=overleaf_project_dir
+                overleaf_remote_url, to_path=overleaf_project_dir
             )
         else:
             overleaf_repo = git.Repo(overleaf_project_dir)
         # Pull the latest version in the Overleaf project
         typer.echo("Pulling the latest version from Overleaf")
-        overleaf_repo.git.pull()
+        # Ensure that our current Overleaf remote URL is correct
+        overleaf_repo.git.remote("set-url", "origin", overleaf_remote_url)
+        try:
+            overleaf_repo.git.pull()
+        except Exception:
+            raise_error(
+                "Failed to pull from Overleaf; "
+                "check that your Overleaf token is valid\n"
+                "Run 'calkit config get overleaf_token' and ensure that "
+                "it matches one in your Overleaf account settings "
+                "(https://overleaf.com/user/settings)"
+            )
         last_sync_commit = pub["overleaf"].get("last_sync_commit")
         # Determine which paths to sync and push
         # TODO: Support glob patterns

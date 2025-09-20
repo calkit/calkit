@@ -1818,19 +1818,25 @@ def set_env_var(
 @app.command(name="upgrade")
 def upgrade():
     """Upgrade Calkit."""
-    if calkit.check_dep_exists("pipx"):
-        cmd = ["pipx", "upgrade", "calkit-python"]
-    elif calkit.check_dep_exists("uv"):
+    if calkit.check_dep_exists("uv"):
         cmd = [
             "uv",
-            "pip",
+            "tool",
             "install",
-            "--system",
             "--upgrade",
             "calkit-python",
         ]
+    elif calkit.check_dep_exists("pipx"):
+        cmd = ["pipx", "upgrade", "calkit-python"]
     else:
-        cmd = ["pip", "install", "--upgrade", "calkit-python"]
+        cmd = [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "calkit-python",
+        ]
     subprocess.run(cmd)
 
 

@@ -14,7 +14,6 @@ from enum import Enum
 import bibtexparser
 import dotenv
 import git
-import requests
 import typer
 from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 from typing_extensions import Annotated
@@ -2433,17 +2432,15 @@ def new_release(
             )
             # Then upload the file content
             with open(fpath, "rb") as f:
-                # Use requests.put directly for file upload since _request doesn't handle binary data well
-                token = calkit.invenio.get_token(service=to)  # type: ignore
-                base_url = calkit.invenio.get_base_url(service=to)  # type: ignore
-                resp = requests.put(
-                    f"{base_url}/records/{record_id}/draft/files/{filename}/content",
-                    data=f,
+                file_data = f.read()
+                resp = calkit.invenio.put(
+                    f"/records/{record_id}/draft/files/{filename}/content",
                     headers={"Content-Type": "application/octet-stream"},
-                    params={"access_token": token},
+                    as_json=False,
+                    service=to,  # type: ignore
+                    data=file_data,
                 )
                 typer.echo(f"Status code: {resp.status_code}")
-                resp.raise_for_status()
             # Commit the file
             calkit.invenio.post(
                 f"/records/{record_id}/draft/files/{filename}/commit",

@@ -47,7 +47,7 @@ def _request(
     path: str,
     params: dict | None = None,
     json: dict | None = None,
-    data: dict | None = None,
+    data: dict | bytes | None = None,
     headers: dict | None = None,
     as_json: bool = True,
     service: Literal["zenodo", "caltechdata"] = "zenodo",

@@ -2468,10 +2468,7 @@ def new_release(
             )
             doi = draft_record["pids"]["doi"]["identifier"]
             url = f"https://doi.org/{doi}"
-            typer.echo(
-                f"Created {to} draft with reserved DOI: {doi} "
-                "(not yet published)"
-            )
+            typer.echo(f"Created {to} draft with reserved DOI: {doi}")
         else:
             # Publish the record
             typer.echo(f"Publishing {to} record ID {record_id}")

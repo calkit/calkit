@@ -93,14 +93,14 @@ def create_citation_cff(
         "message": (
             "If you use these files, please cite is using these metadata."
         ),
-        "title": ck_info["title"],
-        "abstract": ck_info["description"],
+        "title": ck_info.get("title"),
+        "abstract": ck_info.get("description"),
         "version": release_name,
         "date-released": str(release_date),
-        "repository-code": ck_info["git_repo_url"],
+        "repository-code": ck_info.get("git_repo_url"),
     }
     # Get authors from ck_info
-    authors = ck_info["authors"]
+    authors = ck_info.get("authors", [])
     cff_authors = []
     for author in authors:
         cff_author = {

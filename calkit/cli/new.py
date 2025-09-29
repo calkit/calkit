@@ -2308,8 +2308,8 @@ def new_release(
     size = calkit.get_size(release_files_dir)
     typer.echo(f"Release size: {(size / 1e6):.1f} MB")
     if size >= 50e9:
-        raise_error("Release is too large (>50 GB) to upload to Zenodo")
-    # Upload to Zenodo
+        raise_error(f"Release is too large (>50 GB) to upload to {to}")
+    # Upload to InvenioRDM instance
     # Is there already a deposition for this release, which indicates we should
     # create a new version?
     invenio_dep_id = None

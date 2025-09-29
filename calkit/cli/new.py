@@ -2391,16 +2391,10 @@ def new_release(
             resource_type = "poster"
         else:
             resource_type = "publication-other"
-    elif release_type == "dataset":
-        resource_type = "dataset"
-    elif release_type == "software":
-        resource_type = "software"
     elif release_type == "figure":
         resource_type = "image-figure"
-    elif release_type == "poster":
-        resource_type = "poster"
-    elif release_type == "presentation":
-        resource_type = "presentation"
+    elif release_type in ["dataset", "software", "poster", "presentation"]:
+        resource_type = release_type
     else:
         # Default for "project" and other unknown types
         resource_type = "other"

@@ -10,8 +10,11 @@ from requests.exceptions import HTTPError
 
 import calkit
 
+ServiceName = Literal["zenodo", "caltechdata"]
+DEFAULT_SERVICE = "zenodo"
 
-def get_token(service: Literal["zenodo", "caltechdata"] = "zenodo") -> str:
+
+def get_token(service: ServiceName = DEFAULT_SERVICE) -> str:
     dotenv.load_dotenv()
     config = calkit.config.read()
     if service == "zenodo":
@@ -30,13 +33,14 @@ def get_token(service: Literal["zenodo", "caltechdata"] = "zenodo") -> str:
     return token
 
 
-def get_base_url(service: Literal["zenodo", "caltechdata"] = "zenodo") -> str:
+def get_base_url(service: ServiceName = DEFAULT_SERVICE) -> str:
+    current_env = calkit.config.get_env()
     if service == "zenodo":
-        if calkit.config.get_env() == "local":
+        if current_env in ["local", "test"]:
             return "https://sandbox.zenodo.org/api"
         return "https://zenodo.org/api"
     elif service == "caltechdata":
-        if calkit.config.get_env() == "local":
+        if current_env in ["local", "test"]:
             return "https://data.caltechlibrary.dev/api"
         else:
             return "https://data.caltech.edu/api"
@@ -50,7 +54,7 @@ def _request(
     data: dict | bytes | None = None,
     headers: dict | None = None,
     as_json: bool = True,
-    service: Literal["zenodo", "caltechdata"] = "zenodo",
+    service: ServiceName = DEFAULT_SERVICE,
     **kwargs,
 ):
     if params is None:
@@ -88,8 +92,10 @@ put = partial(_request, "put")
 delete = partial(_request, "delete")
 
 
-def get_download_urls(record_id: int) -> dict[str, str]:
-    resp = get(f"/records/{record_id}")
+def get_download_urls(
+    record_id: int | str, service: ServiceName = DEFAULT_SERVICE
+) -> dict[str, str]:
+    resp = get(f"/records/{record_id}", service=service)
     download_urls = [f["links"]["self"] for f in resp["files"]]
     filenames = [f["key"] for f in resp["files"]]
     urls = {}

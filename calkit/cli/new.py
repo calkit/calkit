@@ -2198,6 +2198,13 @@ def new_release(
             "--to", help="Archival service to use (zenodo or caltechdata)."
         ),
     ] = "zenodo",
+    draft_only: Annotated[
+        bool,
+        typer.Option(
+            "--draft",
+            help="Create draft record with reserved DOI but do not publish.",
+        ),
+    ] = False,
 ):
     """Create a new release."""
     to = to.lower()
@@ -2446,20 +2453,39 @@ def new_release(
                 f"/records/{record_id}/draft/files/{filename}/commit",
                 service=to,  # type: ignore
             )
-        # Now publish the new record
-        typer.echo(f"Publishing {to} record ID {record_id}")
-        invenio_dep = calkit.invenio.post(
-            f"/records/{record_id}/draft/actions/publish",
-            service=to,  # type: ignore
-        )
-        record_id = invenio_dep["id"]
-        doi = invenio_dep["pids"]["doi"]["identifier"]
-        url = f"https://doi.org/{doi}"
-        typer.echo(f"Published to {to} with DOI: {doi}")
+        # Conditionally publish or reserve DOI based on --draft flag
+        if draft_only:
+            # Reserve a DOI for the draft record
+            typer.echo(f"Reserving DOI for {to} draft record ID {record_id}")
+            calkit.invenio.post(
+                f"/records/{record_id}/draft/pids/doi",
+                service=to,  # type: ignore
+            )
+            # Get the updated draft record with DOI information
+            draft_record = calkit.invenio.get(
+                f"/records/{record_id}/draft",
+                service=to,  # type: ignore
+            )
+            doi = draft_record["pids"]["doi"]["identifier"]
+            url = f"https://doi.org/{doi}"
+            typer.echo(
+                f"Created {to} draft with reserved DOI: {doi} "
+                "(not yet published)"
+            )
+        else:
+            # Publish the record
+            typer.echo(f"Publishing {to} record ID {record_id}")
+            invenio_dep = calkit.invenio.post(
+                f"/records/{record_id}/draft/actions/publish",
+                service=to,  # type: ignore
+            )
+            record_id = invenio_dep["id"]
+            doi = invenio_dep["pids"]["doi"]["identifier"]
+            url = f"https://doi.org/{doi}"
+            typer.echo(f"Published to {to} with DOI: {doi}")
     else:
         typer.echo(f"Would have posted {to} record: {invenio_metadata}")
-    # If this is a project release, add Zenodo badge to project README if
-    # it doesn't exist
+    # If this is a project release, add badge to project README
     doi_md = None
     if release_type == "project" and doi is not None:
         typer.echo("Adding DOI badge to README.md")

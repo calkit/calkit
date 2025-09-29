@@ -2259,12 +2259,17 @@ def new_release(
             for fpath in all_paths:
                 zipf.write(fpath)
         if description is None:
+            description = ck_info.get("description")
+        if description is None:
             description = "An archive of all project files."
         title = ck_info.get("title")
         if title is None:
             warn("Project has no title")
             title = typer.prompt("Enter a title for the project")
             ck_info["title"] = title
+            if not dry_run:
+                with open("calkit.yaml", "w") as f:
+                    calkit.ryaml.dump(ck_info, f)
     else:
         # TODO: Handle directories, e.g., datasets
         if not os.path.isfile(path):
@@ -2356,14 +2361,23 @@ def new_release(
                 "Are there more authors to enter?", default=True
             )
         ck_info["authors"] = authors
+        # Write authors out to calkit.yaml
+        if not dry_run:
+            typer.echo("Adding authors to calkit.yaml")
+            with open("calkit.yaml", "w") as f:
+                calkit.ryaml.dump(ck_info, f)
     invenio_creators = []
     for author in authors:
-        creator = dict(
-            name=f"{author['last_name']}, {author['first_name']}",
-            affiliation=author["affiliation"],
-        )
-        if "orcid" in author:
-            creator["orcid"] = author["orcid"]
+        orcid = author.get("orcid")
+        creator = {
+            "person_or_org": {
+                "type": "personal",
+                "given_name": author["first_name"],
+                "family_name": author["last_name"],
+                "identifiers": [{"identifier": orcid}] if orcid else [],
+            },
+            "affiliations": [author["affiliation"]],
+        }
         invenio_creators.append(creator)
     invenio_metadata["creators"] = invenio_creators
     if release_type == "project":
@@ -2434,7 +2448,7 @@ def new_release(
             # First, initiate the file upload
             calkit.invenio.post(
                 f"/records/{record_id}/draft/files",
-                json={"key": filename},
+                json=[{"key": filename}],
                 service=to,  # type: ignore
             )
             # Then upload the file content

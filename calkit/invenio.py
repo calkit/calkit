@@ -46,7 +46,7 @@ def _request(
     kind: Literal["get", "post", "put", "patch", "delete"],
     path: str,
     params: dict | None = None,
-    json: dict | None = None,
+    json: dict | list | None = None,
     data: dict | bytes | None = None,
     headers: dict | None = None,
     as_json: bool = True,

@@ -84,3 +84,20 @@ calkit new release \
     --kind publication \
     path/to/the/publication.pdf
 ```
+
+## Releasing to CaltechDATA
+
+[CaltechDATA](https://data.caltech.edu/)
+is an instance of the
+[InvenioRDM](https://inveniosoftware.org/products/rdm/)
+software that powers Zenodo,
+so archiving there is a similar process.
+
+First, set your CaltechDATA PAT with:
+
+```sh
+calkit config set caltechdata_token {paste CaltechDATA token here}
+```
+
+Then, in the `new release` command, simply add the `--to caltechdata`
+option.

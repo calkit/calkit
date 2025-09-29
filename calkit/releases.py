@@ -5,10 +5,16 @@ https://github.com/citation-file-format/citation-file-format
 """
 
 import os
+from typing import Literal
 
 import git
 
 import calkit
+
+SERVICES = {
+    "caltechdata": {"name": "CaltechDATA", "url": "https://data.caltech.edu"},
+    "zenodo": {"name": "Zenodo", "url": "https://zenodo.org"},
+}
 
 BIBTEX_TEMPLATE = """
 @misc{{{first_author_last_name}{year}_{dep_id},
@@ -16,7 +22,7 @@ BIBTEX_TEMPLATE = """
   title        = {{{title}}},
   month        = {month},
   year         = {{{year}}},
-  publisher    = {{Zenodo}},
+  publisher    = {{{service}}},
   doi          = {{{doi}}},
   url          = {{https://doi.org/{doi}}},
 }}
@@ -24,7 +30,12 @@ BIBTEX_TEMPLATE = """
 
 
 def create_bibtex(
-    authors: list[dict], release_date: str, title: str, doi: str, dep_id: int
+    authors: list[dict],
+    release_date: str,
+    title: str,
+    doi: str,
+    dep_id: int,
+    service: Literal["zenodo", "caltechdata"] = "zenodo",
 ) -> str:
     """Create a BibTeX entry for a Zenodo release."""
     first_author_last_name = authors[0]["last_name"]
@@ -45,6 +56,7 @@ def create_bibtex(
         month=month,
         year=year,
         dep_id=dep_id,
+        service=SERVICES[service]["name"],
     )
 
 

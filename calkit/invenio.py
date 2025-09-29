@@ -1,4 +1,4 @@
-"""Functionality for working with Zenodo."""
+"""Functionality for working with InvenioRDM instances like Zenodo."""
 
 import os
 from functools import partial
@@ -11,20 +11,35 @@ from requests.exceptions import HTTPError
 import calkit
 
 
-def get_token() -> str:
+def get_token(service: Literal["zenodo", "caltechdata"] = "zenodo") -> str:
     dotenv.load_dotenv()
-    token = calkit.config.read().zenodo_token
-    if token is None:
-        token = os.getenv("ZENODO_TOKEN")
-    if token is None:
-        token = calkit.cloud.get("/user/zenodo-token")["access_token"]
+    config = calkit.config.read()
+    if service == "zenodo":
+        token = config.zenodo_token
+        if token is None:
+            token = os.getenv("ZENODO_TOKEN")
+        if token is None:
+            token = calkit.cloud.get("/user/zenodo-token")["access_token"]
+        return token
+    elif service == "caltechdata":
+        token = config.caltechdata_token
+        if token is None:
+            raise ValueError(f"No token for {service} found")
+    else:
+        raise ValueError(f"Unknown archival service '{service}'")
     return token
 
 
-def get_base_url() -> str:
-    if calkit.config.get_env() == "local":
-        return "https://sandbox.zenodo.org/api"
-    return "https://zenodo.org/api"
+def get_base_url(service: Literal["zenodo", "caltechdata"] = "zenodo") -> str:
+    if service == "zenodo":
+        if calkit.config.get_env() == "local":
+            return "https://sandbox.zenodo.org/api"
+        return "https://zenodo.org/api"
+    elif service == "caltechdata":
+        if calkit.config.get_env() == "local":
+            return "https://data.caltechlibrary.dev/api"
+        else:
+            return "https://data.caltech.edu/api"
 
 
 def _request(
@@ -34,16 +49,17 @@ def _request(
     json: dict | None = None,
     data: dict | None = None,
     headers: dict | None = None,
-    as_json=True,
+    as_json: bool = True,
+    service: Literal["zenodo", "caltechdata"] = "zenodo",
     **kwargs,
 ):
     if params is None:
         params = {}
     if "access_token" not in params:
-        params = params | {"access_token": get_token()}
+        params = params | {"access_token": get_token(service=service)}
     func = getattr(requests, kind)
     resp = func(
-        get_base_url() + path,
+        get_base_url(service=service) + path,
         params=params,
         json=json,
         data=data,

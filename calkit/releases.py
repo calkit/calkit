@@ -17,7 +17,7 @@ SERVICES = {
 }
 
 BIBTEX_TEMPLATE = """
-@misc{{{first_author_last_name}{year}_{dep_id},
+@misc{{{first_author_last_name}{year}_{record_id},
   author       = {{{authors}}},
   title        = {{{title}}},
   month        = {month},
@@ -34,10 +34,10 @@ def create_bibtex(
     release_date: str,
     title: str,
     doi: str,
-    dep_id: int,
+    record_id: int | str,
     service: Literal["zenodo", "caltechdata"] = "zenodo",
 ) -> str:
-    """Create a BibTeX entry for a Zenodo release."""
+    """Create a BibTeX entry for a release."""
     first_author_last_name = authors[0]["last_name"]
     authors_string = f"{authors[0]['last_name']}, {authors[0]['first_name']}"
     if len(authors) > 1:
@@ -55,7 +55,7 @@ def create_bibtex(
         doi=doi,
         month=month,
         year=year,
-        dep_id=dep_id,
+        record_id=record_id,
         service=SERVICES[service]["name"],
     )
 

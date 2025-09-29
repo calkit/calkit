@@ -2376,30 +2376,35 @@ def new_release(
                 "family_name": author["last_name"],
                 "identifiers": [{"identifier": orcid}] if orcid else [],
             },
-            "affiliations": [author["affiliation"]],
+            "affiliations": [{"name": author["affiliation"]}],
         }
         invenio_creators.append(creator)
-    invenio_metadata["creators"] = invenio_creators
-    if release_type == "project":
-        invenio_metadata["upload_type"] = "other"
-    elif release_type == "publication":
+    invenio_metadata["creators"] = invenio_creators  # type: ignore
+    # Set InvenioRDM resource_type based on release_type and artifact kind
+    if release_type == "publication":
         pubtype = artifact.get("kind")  # type: ignore
         if pubtype == "journal-article":
-            invenio_metadata["upload_type"] = "publication"
-            invenio_metadata["publication_type"] = "article"
+            resource_type = "publication-article"
         elif pubtype == "presentation":
-            invenio_metadata["upload_type"] = "presentation"
+            resource_type = "presentation"
         elif pubtype == "poster":
-            invenio_metadata["upload_type"] = "poster"
+            resource_type = "poster"
         else:
-            invenio_metadata["upload_type"] = "other"
-    elif release_type in ["dataset", "software"]:
-        invenio_metadata["upload_type"] = release_type
+            resource_type = "publication-other"
+    elif release_type == "dataset":
+        resource_type = "dataset"
+    elif release_type == "software":
+        resource_type = "software"
     elif release_type == "figure":
-        invenio_metadata["upload_type"] = "image"
-        invenio_metadata["image_type"] = "figure"
+        resource_type = "image-figure"
+    elif release_type == "poster":
+        resource_type = "poster"
+    elif release_type == "presentation":
+        resource_type = "presentation"
     else:
-        invenio_metadata["upload_type"] = "other"
+        # Default for "project" and other unknown types
+        resource_type = "other"
+    invenio_metadata["resource_type"] = {"id": resource_type}  # type: ignore
     doi = None
     url = None
     for existing_name, existing_release in releases.items():

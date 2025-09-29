@@ -2217,8 +2217,8 @@ def new_release(
         raise_error(f"Unknown release type '{release_type}'")
     # TODO: Check path is consistent with release type
     dotenv.load_dotenv()
-    # First see if we have a Zenodo token
-    typer.echo("Checking for Zenodo token")
+    # First see if we have a token for the given service
+    typer.echo(f"Checking for {to} token")
     try:
         token = calkit.invenio.get_token(service=to)  # type: ignore
     except Exception as e:

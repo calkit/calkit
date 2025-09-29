@@ -79,7 +79,9 @@ def update_release(
             raise_error(f"Failed to publish release: {e}")
     if delete:
         try:
-            calkit.invenio.delete(f"/records/{record_id}/draft")
+            calkit.invenio.delete(
+                f"/records/{record_id}/draft", publisher=publisher
+            )
         except Exception as e:
             raise_error(f"Failed to delete release: {e}")
     # TODO: Finish reupload, add ability to update metadata

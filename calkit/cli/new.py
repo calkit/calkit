@@ -2217,10 +2217,10 @@ def new_release(
         raise_error(f"Unknown release type '{release_type}'")
     # TODO: Check path is consistent with release type
     dotenv.load_dotenv()
-    # First see if we have a token for the given service
+    # Check that we have access to the service
     typer.echo(f"Checking for {to} token")
     try:
-        token = calkit.invenio.get_token(service=to)  # type: ignore
+        calkit.invenio.get_token(service=to)  # type: ignore
     except Exception as e:
         raise_error(str(e))
     ck_info = calkit.load_calkit_info()
@@ -2310,9 +2310,9 @@ def new_release(
     if size >= 50e9:
         raise_error(f"Release is too large (>50 GB) to upload to {to}")
     # Upload to InvenioRDM instance
-    # Is there already a deposition for this release, which indicates we should
+    # Is there already a record for this release, which indicates we should
     # create a new version?
-    invenio_dep_id = None
+    record_id = None
     project_name = calkit.detect_project_name()
     invenio_metadata = dict(
         title=title,
@@ -2388,72 +2388,79 @@ def new_release(
             and existing_release.get("path") == path
             and existing_release.get("publisher") == to
         ):
-            invenio_dep_id = existing_release.get("dep_id")
+            record_id = existing_release.get("record_id")
             typer.echo(
-                f"Found existing {to} deposition ID {invenio_dep_id} "
+                f"Found existing {to} record ID {record_id} "
                 f"in release {existing_name} to create new version for"
             )
             break
     if not dry_run:
         typer.echo(f"Uploading to {to}")
-        if invenio_dep_id is not None:
-            # Create a new version of the existing deposit
+        if record_id is not None:
+            # Create a new version of the existing record
             # TODO: This might fail if a new version is in progress, in which
             # case we should discard that
             invenio_dep = calkit.invenio.post(
-                f"/deposit/depositions/{invenio_dep_id}/actions/newversion",
-                json=dict(metadata=invenio_metadata),
+                f"/records/{record_id}/versions",
                 service=to,  # type: ignore
             )
-            typer.echo("Created new version deposition")
-            typer.echo("Fetching latest draft")
-            invenio_dep = requests.get(
-                invenio_dep["links"]["latest_draft"],
-                params=dict(access_token=token),
-            ).json()
-            invenio_dep_id = invenio_dep["id"]
-            typer.echo(
-                f"Fetched latest draft with deposition ID: {invenio_dep_id} "
-            )
+            typer.echo("Created new version record")
+            record_id = invenio_dep["id"]
+            typer.echo(f"Created new version with record ID: {record_id}")
             # Now update that draft with the metadata
-            typer.echo("Updating latest draft metadata")
+            typer.echo("Updating draft metadata")
             calkit.invenio.put(
-                f"/deposit/depositions/{invenio_dep_id}",
+                f"/records/{record_id}/draft",
                 json=dict(metadata=invenio_metadata),
                 service=to,  # type: ignore
             )
         else:
             invenio_dep = calkit.invenio.post(
-                "/deposit/depositions",
+                "/records",
                 json=dict(metadata=invenio_metadata),
                 service=to,  # type: ignore
             )
-            invenio_dep_id = invenio_dep["id"]
-        bucket_url = invenio_dep["links"]["bucket"]
+            record_id = invenio_dep["id"]
         files = os.listdir(release_files_dir)
         for filename in files:
             typer.echo(f"Uploading {filename}")
             fpath = os.path.join(release_files_dir, filename)
+            # First, initiate the file upload
+            calkit.invenio.post(
+                f"/records/{record_id}/draft/files",
+                json={"key": filename},
+                service=to,  # type: ignore
+            )
+            # Then upload the file content
             with open(fpath, "rb") as f:
+                # Use requests.put directly for file upload since _request doesn't handle binary data well
+                token = calkit.invenio.get_token(service=to)  # type: ignore
+                base_url = calkit.invenio.get_base_url(service=to)  # type: ignore
                 resp = requests.put(
-                    f"{bucket_url}/{filename}",
+                    f"{base_url}/records/{record_id}/draft/files/{filename}/content",
                     data=f,
+                    headers={"Content-Type": "application/octet-stream"},
                     params={"access_token": token},
                 )
                 typer.echo(f"Status code: {resp.status_code}")
                 resp.raise_for_status()
-        # Now publish the new deposition
-        typer.echo(f"Publishing Zenodo deposition ID {invenio_dep_id}")
+            # Commit the file
+            calkit.invenio.post(
+                f"/records/{record_id}/draft/files/{filename}/commit",
+                service=to,  # type: ignore
+            )
+        # Now publish the new record
+        typer.echo(f"Publishing {to} record ID {record_id}")
         invenio_dep = calkit.invenio.post(
-            f"/deposit/depositions/{invenio_dep_id}/actions/publish",
+            f"/records/{record_id}/draft/actions/publish",
             service=to,  # type: ignore
         )
-        invenio_dep_id = invenio_dep["id"]
-        doi = invenio_dep["doi"]
-        url = invenio_dep["doi_url"]
+        record_id = invenio_dep["id"]
+        doi = invenio_dep["pids"]["doi"]["identifier"]
+        url = f"https://doi.org/{doi}"
         typer.echo(f"Published to {to} with DOI: {doi}")
     else:
-        typer.echo(f"Would have posted {to} deposition: {invenio_metadata}")
+        typer.echo(f"Would have posted {to} record: {invenio_metadata}")
     # If this is a project release, add Zenodo badge to project README if
     # it doesn't exist
     doi_md = None
@@ -2508,7 +2515,7 @@ def new_release(
         git_rev=git_rev,
         date=release_date,
         publisher=to,
-        dep_id=invenio_dep_id,
+        record_id=record_id,
         doi=doi,
         url=url,
         description=description,
@@ -2547,7 +2554,7 @@ def new_release(
             release_date=release_date,
             title=title,  # type: ignore
             doi=doi,  # type: ignore
-            dep_id=invenio_dep_id,  # type: ignore
+            record_id=record_id,  # type: ignore
             service=to,  # type: ignore
         )
         new_entry = bibtexparser.loads(invenio_bibtex).entries[0]

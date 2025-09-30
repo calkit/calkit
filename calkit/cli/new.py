@@ -310,7 +310,7 @@ def new_project(
         typer.echo("Generating README.md")
         readme_txt = calkit.make_readme_content(
             project_name=name,
-            project_title=title,
+            project_title=title,  # type: ignore
             project_description=description,
         )
         with open(readme_fpath, "w") as f:
@@ -380,7 +380,7 @@ def new_project(
         typer.echo("Generating README.md")
         readme_txt = calkit.make_readme_content(
             project_name=name,
-            project_title=title,
+            project_title=title,  # type: ignore
             project_description=description,
         )
         with open(readme_fpath, "w") as f:
@@ -410,14 +410,14 @@ def new_figure(
     title: Annotated[str, typer.Option("--title")],
     description: Annotated[str, typer.Option("--description")],
     stage_name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--stage",
             help="Name of the pipeline stage that generates this figure.",
         ),
     ] = None,
     cmd: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--cmd", help="Command to add to the stage, if specified."
         ),
@@ -436,7 +436,7 @@ def new_figure(
         ),
     ] = [],
     outs_from_stage: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--deps-from-stage-outs",
             help="Stage name from which to add outputs as dependencies.",
@@ -1027,7 +1027,7 @@ def new_publication(
         )
     if template_type is not None:
         try:
-            template_obj = calkit.templates.get_template(template)
+            template_obj = calkit.templates.get_template(template)  # type: ignore
         except ValueError:
             raise_error(f"Template '{template}' does not exist")
     # Parse outs from stage if specified
@@ -1083,7 +1083,7 @@ def new_publication(
         stage = LatexStage(
             kind="latex",
             environment=env_name,
-            target_path=os.path.join(path, template_obj.target),
+            target_path=os.path.join(path, template_obj.target),  # type: ignore
             outputs=[pub_fpath],
         ).model_dump()
         if "pipeline" not in ck_info:

@@ -96,7 +96,7 @@ def set_secret(key: str, value: str) -> None:
     service_name = get_app_name()
     if platform.system() == "Linux":
         value_bytes = value.encode("utf-8")
-        keyring.set_password(service_name, key, value_bytes)
+        keyring.set_password(service_name, key, value_bytes)  # type: ignore
     else:
         keyring.set_password(service_name, key, value)
 
@@ -170,6 +170,7 @@ class Settings(BaseSettings):
     dataframe_engine: Literal["pandas", "polars"] = "pandas"
     github_token: KeyringOptionalSecret | None = None
     zenodo_token: KeyringOptionalSecret | None = None
+    caltechdata_token: KeyringOptionalSecret | None = None
     overleaf_token: KeyringOptionalSecret | None = None
 
     @classmethod

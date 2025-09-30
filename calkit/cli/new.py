@@ -14,7 +14,6 @@ from enum import Enum
 import bibtexparser
 import dotenv
 import git
-import requests
 import typer
 from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 from typing_extensions import Annotated
@@ -311,7 +310,7 @@ def new_project(
         typer.echo("Generating README.md")
         readme_txt = calkit.make_readme_content(
             project_name=name,
-            project_title=title,
+            project_title=title,  # type: ignore
             project_description=description,
         )
         with open(readme_fpath, "w") as f:
@@ -381,7 +380,7 @@ def new_project(
         typer.echo("Generating README.md")
         readme_txt = calkit.make_readme_content(
             project_name=name,
-            project_title=title,
+            project_title=title,  # type: ignore
             project_description=description,
         )
         with open(readme_fpath, "w") as f:
@@ -411,14 +410,14 @@ def new_figure(
     title: Annotated[str, typer.Option("--title")],
     description: Annotated[str, typer.Option("--description")],
     stage_name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--stage",
             help="Name of the pipeline stage that generates this figure.",
         ),
     ] = None,
     cmd: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--cmd", help="Command to add to the stage, if specified."
         ),
@@ -437,7 +436,7 @@ def new_figure(
         ),
     ] = [],
     outs_from_stage: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--deps-from-stage-outs",
             help="Stage name from which to add outputs as dependencies.",
@@ -1028,7 +1027,7 @@ def new_publication(
         )
     if template_type is not None:
         try:
-            template_obj = calkit.templates.get_template(template)
+            template_obj = calkit.templates.get_template(template)  # type: ignore
         except ValueError:
             raise_error(f"Template '{template}' does not exist")
     # Parse outs from stage if specified
@@ -1047,7 +1046,8 @@ def new_publication(
     # Create publication object
     if template_type == "latex":
         pub_fpath = os.path.join(
-            path, template_obj.target.removesuffix(".tex") + ".pdf"
+            path,
+            template_obj.target.removesuffix(".tex") + ".pdf",  # type: ignore
         )
     else:
         pub_fpath = path
@@ -1083,7 +1083,7 @@ def new_publication(
         stage = LatexStage(
             kind="latex",
             environment=env_name,
-            target_path=os.path.join(path, template_obj.target),
+            target_path=os.path.join(path, template_obj.target),  # type: ignore
             outputs=[pub_fpath],
         ).model_dump()
         if "pipeline" not in ck_info:
@@ -1993,7 +1993,7 @@ def new_matlab_script_stage(
         stage = calkit.models.pipeline.MatlabScriptStage(
             kind="matlab-script",
             environment=environment,
-            inputs=inputs,
+            inputs=inputs,  # type: ignore
             outputs=ck_outs,
             script_path=script_path,
         )
@@ -2040,7 +2040,7 @@ def new_latex_stage(
             kind="latex",
             environment=environment,
             target_path=target_path,
-            inputs=inputs,
+            inputs=inputs,  # type: ignore
             outputs=ck_outs,
         )
     except Exception as e:
@@ -2157,7 +2157,7 @@ def new_release(
         typer.Argument(help="The path to release; '.' for a project release."),
     ] = ".",
     description: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--description",
             "--desc",
@@ -2168,7 +2168,7 @@ def new_release(
         ),
     ] = None,
     release_date: Annotated[
-        str,
+        str | None,
         typer.Option("--date", help="Release date. Will default to today."),
     ] = None,
     dry_run: Annotated[
@@ -2192,8 +2192,27 @@ def new_release(
             help="Do not push to Git remote.",
         ),
     ] = False,
+    to: Annotated[
+        str,
+        typer.Option(
+            "--to", help="Archival service to use (zenodo or caltechdata)."
+        ),
+    ] = "zenodo",
+    draft_only: Annotated[
+        bool,
+        typer.Option(
+            "--draft",
+            help="Create draft record with reserved DOI but do not publish.",
+        ),
+    ] = False,
 ):
     """Create a new release."""
+    to = to.lower()
+    if to not in calkit.releases.SERVICES:
+        raise_error(
+            f"Unknown archival service '{to}'; "
+            f"choose from: {list(calkit.releases.SERVICES.keys())}"
+        )
     if release_type not in [
         "project",
         "publication",
@@ -2204,12 +2223,12 @@ def new_release(
         raise_error(f"Unknown release type '{release_type}'")
     # TODO: Check path is consistent with release type
     dotenv.load_dotenv()
-    # First see if we have a Zenodo token
-    typer.echo("Checking for Zenodo token")
+    # Check that we have access to the service
+    typer.echo(f"Checking for {to} token")
     try:
-        token = calkit.zenodo.get_token()
+        calkit.invenio.get_token(service=to)  # type: ignore
     except Exception as e:
-        raise_error(e)
+        raise_error(str(e))
     ck_info = calkit.load_calkit_info()
     releases = ck_info.get("releases", {})
     # TODO: Enable resuming a release if upload failed part-way?
@@ -2240,12 +2259,17 @@ def new_release(
             for fpath in all_paths:
                 zipf.write(fpath)
         if description is None:
+            description = ck_info.get("description")
+        if description is None:
             description = "An archive of all project files."
         title = ck_info.get("title")
         if title is None:
             warn("Project has no title")
             title = typer.prompt("Enter a title for the project")
             ck_info["title"] = title
+            if not dry_run:
+                with open("calkit.yaml", "w") as f:
+                    calkit.ryaml.dump(ck_info, f)
     else:
         # TODO: Handle directories, e.g., datasets
         if not os.path.isfile(path):
@@ -2295,13 +2319,13 @@ def new_release(
     size = calkit.get_size(release_files_dir)
     typer.echo(f"Release size: {(size / 1e6):.1f} MB")
     if size >= 50e9:
-        raise_error("Release is too large (>50 GB) to upload to Zenodo")
-    # Upload to Zenodo
-    # Is there already a deposition for this release, which indicates we should
+        raise_error(f"Release is too large (>50 GB) to upload to {to}")
+    # Upload to InvenioRDM instance
+    # Is there already a record for this release, which indicates we should
     # create a new version?
-    zenodo_dep_id = None
+    record_id = None
     project_name = calkit.detect_project_name()
-    zenodo_metadata = dict(
+    invenio_metadata = dict(
         title=title,
         description=description,
         notes=f"Created from Calkit project {project_name} release {name}.",
@@ -2325,10 +2349,10 @@ def new_release(
             author["affiliation"] = typer.prompt(
                 f"Enter the affiliation of author {n}"
             )
-            has_orchid = typer.confirm(
+            has_orcid = typer.confirm(
                 f"Does author {n} have an ORCID?", default=False
             )
-            if has_orchid:
+            if has_orcid:
                 author["orcid"] = typer.prompt(
                     f"Enter the ORCID of author {n}"
                 )
@@ -2337,112 +2361,147 @@ def new_release(
                 "Are there more authors to enter?", default=True
             )
         ck_info["authors"] = authors
-    zenodo_creators = []
+        # Write authors out to calkit.yaml
+        if not dry_run:
+            typer.echo("Adding authors to calkit.yaml")
+            with open("calkit.yaml", "w") as f:
+                calkit.ryaml.dump(ck_info, f)
+    invenio_creators = []
     for author in authors:
-        creator = dict(
-            name=f"{author['last_name']}, {author['first_name']}",
-            affiliation=author["affiliation"],
-        )
-        if "orcid" in author:
-            creator["orcid"] = author["orcid"]
-        zenodo_creators.append(creator)
-    zenodo_metadata["creators"] = zenodo_creators
-    if release_type == "project":
-        zenodo_metadata["upload_type"] = "other"
-    elif release_type == "publication":
-        pubtype = artifact.get("kind")
+        orcid = author.get("orcid")
+        creator = {
+            "person_or_org": {
+                "type": "personal",
+                "given_name": author["first_name"],
+                "family_name": author["last_name"],
+                "identifiers": [{"identifier": orcid}] if orcid else [],
+            },
+            "affiliations": [{"name": author["affiliation"]}],
+        }
+        invenio_creators.append(creator)
+    invenio_metadata["creators"] = invenio_creators  # type: ignore
+    # Set InvenioRDM resource_type based on release_type and artifact kind
+    if release_type == "publication":
+        pubtype = artifact.get("kind")  # type: ignore
         if pubtype == "journal-article":
-            zenodo_metadata["upload_type"] = "publication"
-            zenodo_metadata["publication_type"] = "article"
+            resource_type = "publication-article"
         elif pubtype == "presentation":
-            zenodo_metadata["upload_type"] = "presentation"
+            resource_type = "presentation"
         elif pubtype == "poster":
-            zenodo_metadata["upload_type"] = "poster"
+            resource_type = "poster"
         else:
-            zenodo_metadata["upload_type"] = "other"
-    elif release_type in ["dataset", "software"]:
-        zenodo_metadata["upload_type"] = release_type
+            resource_type = "publication-other"
     elif release_type == "figure":
-        zenodo_metadata["upload_type"] = "image"
-        zenodo_metadata["image_type"] = "figure"
+        resource_type = "image-figure"
+    elif release_type in ["dataset", "software", "poster", "presentation"]:
+        resource_type = release_type
     else:
-        zenodo_metadata["upload_type"] = "other"
+        # Default for "project" and other unknown types
+        resource_type = "other"
+    invenio_metadata["resource_type"] = {"id": resource_type}  # type: ignore
     doi = None
     url = None
     for existing_name, existing_release in releases.items():
         if (
             existing_release.get("kind") == release_type
             and existing_release.get("path") == path
-            and existing_release.get("publisher") == "zenodo.org"
+            and existing_release.get("publisher") == to
         ):
-            zenodo_dep_id = existing_release.get("zenodo_dep_id")
+            record_id = existing_release.get("record_id")
             typer.echo(
-                f"Found existing Zenodo deposition ID {zenodo_dep_id} "
+                f"Found existing {to} record ID {record_id} "
                 f"in release {existing_name} to create new version for"
             )
             break
     if not dry_run:
-        typer.echo("Uploading to Zenodo")
-        if zenodo_dep_id is not None:
-            # Create a new version of the existing deposit
+        typer.echo(f"Uploading to {to}")
+        if record_id is not None:
+            # Create a new version of the existing record
             # TODO: This might fail if a new version is in progress, in which
             # case we should discard that
-            zenodo_dep = calkit.zenodo.post(
-                f"/deposit/depositions/{zenodo_dep_id}/actions/newversion",
-                json=dict(metadata=zenodo_metadata),
+            invenio_dep = calkit.invenio.post(
+                f"/records/{record_id}/versions",
+                service=to,  # type: ignore
             )
-            typer.echo("Created new version deposition")
-            typer.echo("Fetching latest draft")
-            zenodo_dep = requests.get(
-                zenodo_dep["links"]["latest_draft"],
-                params=dict(access_token=token),
-            ).json()
-            zenodo_dep_id = zenodo_dep["id"]
-            typer.echo(
-                f"Fetched latest draft with deposition ID: {zenodo_dep_id} "
-            )
+            typer.echo("Created new version record")
+            record_id = invenio_dep["id"]
+            typer.echo(f"Created new version with record ID: {record_id}")
             # Now update that draft with the metadata
-            typer.echo("Updating latest draft metadata")
-            calkit.zenodo.put(
-                f"/deposit/depositions/{zenodo_dep_id}",
-                json=dict(metadata=zenodo_metadata),
+            typer.echo("Updating draft metadata")
+            calkit.invenio.put(
+                f"/records/{record_id}/draft",
+                json=dict(metadata=invenio_metadata),
+                service=to,  # type: ignore
             )
         else:
-            zenodo_dep = calkit.zenodo.post(
-                "/deposit/depositions", json=dict(metadata=zenodo_metadata)
+            invenio_dep = calkit.invenio.post(
+                "/records",
+                json=dict(metadata=invenio_metadata),
+                service=to,  # type: ignore
             )
-            zenodo_dep_id = zenodo_dep["id"]
-        bucket_url = zenodo_dep["links"]["bucket"]
+            record_id = invenio_dep["id"]
         files = os.listdir(release_files_dir)
         for filename in files:
             typer.echo(f"Uploading {filename}")
             fpath = os.path.join(release_files_dir, filename)
+            # First, initiate the file upload
+            calkit.invenio.post(
+                f"/records/{record_id}/draft/files",
+                json=[{"key": filename}],
+                service=to,  # type: ignore
+            )
+            # Then upload the file content
             with open(fpath, "rb") as f:
-                resp = requests.put(
-                    f"{bucket_url}/{filename}",
-                    data=f,
-                    params={"access_token": token},
+                file_data = f.read()
+                resp = calkit.invenio.put(
+                    f"/records/{record_id}/draft/files/{filename}/content",
+                    headers={"Content-Type": "application/octet-stream"},
+                    as_json=False,
+                    service=to,  # type: ignore
+                    data=file_data,
                 )
                 typer.echo(f"Status code: {resp.status_code}")
-                resp.raise_for_status()
-        # Now publish the new deposition
-        typer.echo(f"Publishing Zenodo deposition ID {zenodo_dep_id}")
-        zenodo_dep = calkit.zenodo.post(
-            f"/deposit/depositions/{zenodo_dep_id}/actions/publish"
-        )
-        zenodo_dep_id = zenodo_dep["id"]
-        doi = zenodo_dep["doi"]
-        url = zenodo_dep["doi_url"]
-        typer.echo(f"Published to Zenodo with DOI: {doi}")
+            # Commit the file
+            calkit.invenio.post(
+                f"/records/{record_id}/draft/files/{filename}/commit",
+                service=to,  # type: ignore
+            )
+        # Conditionally publish or reserve DOI based on --draft flag
+        if draft_only:
+            # Reserve a DOI for the draft record
+            typer.echo(f"Reserving DOI for {to} draft record ID {record_id}")
+            calkit.invenio.post(
+                f"/records/{record_id}/draft/pids/doi",
+                service=to,  # type: ignore
+            )
+            # Get the updated draft record with DOI information
+            draft_record = calkit.invenio.get(
+                f"/records/{record_id}/draft",
+                service=to,  # type: ignore
+            )
+            doi = draft_record["pids"]["doi"]["identifier"]
+            url = f"https://doi.org/{doi}"
+            typer.echo(f"Created {to} draft with reserved DOI: {doi}")
+        else:
+            # Publish the record
+            typer.echo(f"Publishing {to} record ID {record_id}")
+            invenio_dep = calkit.invenio.post(
+                f"/records/{record_id}/draft/actions/publish",
+                service=to,  # type: ignore
+            )
+            record_id = invenio_dep["id"]
+            doi = invenio_dep["pids"]["doi"]["identifier"]
+            url = f"https://doi.org/{doi}"
+            typer.echo(f"Published to {to} with DOI: {doi}")
     else:
-        typer.echo(f"Would have posted Zenodo deposition: {zenodo_metadata}")
-    # If this is a project release, add Zenodo badge to project README if
-    # it doesn't exist
+        typer.echo(f"Would have posted {to} record: {invenio_metadata}")
+    # If this is a project release, add badge to project README
     doi_md = None
     if release_type == "project" and doi is not None:
         typer.echo("Adding DOI badge to README.md")
+        doi_base_url = calkit.releases.SERVICES[to]["url"]
         doi_md = (
-            f"[![DOI](https://zenodo.org/badge/DOI/{doi}.svg)]"
+            f"[![DOI]({doi_base_url}/badge/DOI/{doi}.svg)]"
             f"(https://handle.stage.datacite.org/{doi})"
         )
         if os.path.isfile("README.md"):
@@ -2488,8 +2547,8 @@ def new_release(
         path=path,
         git_rev=git_rev,
         date=release_date,
-        publisher="zenodo.org",
-        zenodo_dep_id=zenodo_dep_id,
+        publisher=to,
+        record_id=record_id,
         doi=doi,
         url=url,
         description=description,
@@ -2523,14 +2582,15 @@ def new_release(
                 reflib = bibtexparser.load(f)
         else:
             reflib = bibtexparser.bibdatabase.BibDatabase()
-        zenodo_bibtex = calkit.releases.create_bibtex(
+        invenio_bibtex = calkit.releases.create_bibtex(
             authors=authors,
             release_date=release_date,
-            title=title,
-            doi=doi,
-            dep_id=zenodo_dep_id,
+            title=title,  # type: ignore
+            doi=doi,  # type: ignore
+            record_id=record_id,  # type: ignore
+            service=to,  # type: ignore
         )
-        new_entry = bibtexparser.loads(zenodo_bibtex).entries[0]
+        new_entry = bibtexparser.loads(invenio_bibtex).entries[0]
         # Search through entries for one with the same DOI, and replace if
         # there is a match
         existing_index = None

@@ -580,6 +580,9 @@ def save(
             typer.echo(
                 f"Generating commit message for staged files: {staged_files}"
             )
+        if not staged_files:
+            typer.echo("No changes to commit; exiting")
+            raise typer.Exit(0)
         if len(staged_files) != 1:
             raise_error(
                 "Automatic commit messages can only be generated when "
@@ -603,11 +606,12 @@ def save(
         message = typer.prompt("Message")
     # Figure out if we have any DVC files in this commit, and if not, we can
     # skip pushing to DVC
+    staged_files = calkit.git.get_staged_files()
+    if not staged_files:
+        typer.echo("No changes to commit; exiting")
+        raise typer.Exit(0)
     any_dvc = any(
-        [
-            path == "dvc.lock" or path.endswith(".dvc")
-            for path in calkit.git.get_staged_files()
-        ]
+        [path == "dvc.lock" or path.endswith(".dvc") for path in staged_files]
     )
     commit(all=True if paths is None else False, message=message)
     if not no_push:

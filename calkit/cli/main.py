@@ -1905,7 +1905,6 @@ def run_latexmk(
     latexmk_cmd = [
         "latexmk",
         "-pdf",
-        "-cd",
         "-silent",
         "-synctex=1",
         "-interaction=nonstopmode",

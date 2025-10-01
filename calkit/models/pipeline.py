@@ -217,7 +217,7 @@ class LatexStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"{self.xenv_cmd} latexmk -cd -interaction=nonstopmode"
+        cmd = f"{self.xenv_cmd} latexmk -interaction=nonstopmode"
         if not self.verbose:
             cmd += " -silent"
         if self.force:

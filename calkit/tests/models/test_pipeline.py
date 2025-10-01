@@ -63,6 +63,8 @@ def test_latexstage():
     assert " -silent " not in s.dvc_cmd
     assert "my-paper.tex" in s.dvc_deps
     assert "my-paper.pdf" in s.dvc_outs
+    # Verify that -cd is not in the command to allow .latexmkrc detection
+    assert "-cd" not in s.dvc_cmd
 
 
 def test_jupyternotebookstage():

@@ -2670,7 +2670,7 @@ def new_stage(
     if kind.value == "python-script":
         cmd += f"python {target}"
     elif kind.value == "latex":
-        cmd += f"latexmk -cd -interaction=nonstopmode -pdf {target}"
+        cmd += f"latexmk -interaction=nonstopmode -pdf {target}"
         out_target = target.removesuffix(".tex") + ".pdf"
         if out_target not in (
             outs + outs_no_cache + outs_persist + outs_persist_no_cache

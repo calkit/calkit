@@ -989,16 +989,19 @@ def run(
         os.makedirs(os.path.dirname(sysinfo_fpath), exist_ok=True)
         with open(sysinfo_fpath, "w") as f:
             json.dump(system_info, f, indent=2)
+    # Load Calkit project info
+    ck_info = calkit.load_calkit_info()
     # First check any system-level dependencies exist
     if not quiet:
         typer.echo("Checking system-level dependencies")
     try:
-        calkit.check_system_deps(system_info=system_info)
+        calkit.check_system_deps(
+            system_info=system_info, ck_info=ck_info, stages=targets
+        )
     except Exception as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(str(e))
     # Compile the pipeline
-    ck_info = calkit.load_calkit_info()
     if ck_info.get("pipeline", {}):
         if not quiet:
             typer.echo("Compiling DVC pipeline")

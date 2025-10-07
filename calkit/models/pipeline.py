@@ -211,13 +211,16 @@ class PythonScriptStage(Stage):
 class LatexStage(Stage):
     kind: Literal["latex"] = "latex"
     target_path: str
+    latexmkrc_path: str | None = None
     verbose: bool = False
     force: bool = False
     synctex: bool = True
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"{self.xenv_cmd} latexmk -cd -interaction=nonstopmode"
+        cmd = f"{self.xenv_cmd} latexmk -cd -norc -interaction=nonstopmode"
+        if self.latexmkrc_path is not None:
+            cmd += f" -r {self.latexmkrc_path}"
         if not self.verbose:
             cmd += " -silent"
         if self.force:
@@ -229,7 +232,11 @@ class LatexStage(Stage):
 
     @property
     def dvc_deps(self) -> list[str]:
-        return [self.target_path] + super().dvc_deps
+        deps = [self.target_path]
+        if self.latexmkrc_path is not None:
+            deps.append(self.latexmkrc_path)
+        deps += super().dvc_deps
+        return deps
 
     @property
     def dvc_outs(self) -> list[str | dict]:

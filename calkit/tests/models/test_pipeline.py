@@ -63,6 +63,14 @@ def test_latexstage():
     assert " -silent " not in s.dvc_cmd
     assert "my-paper.tex" in s.dvc_deps
     assert "my-paper.pdf" in s.dvc_outs
+    s = LatexStage(
+        name="something",
+        environment="tex",
+        target_path="my-paper.tex",
+        latexmkrc_path="test/latexmkrc",
+    )
+    assert "test/latexmkrc" in s.dvc_deps
+    assert "-r test/latexmkrc" in s.dvc_cmd
 
 
 def test_jupyternotebookstage():

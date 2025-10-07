@@ -479,6 +479,11 @@ def sync(
                 # Copy the file
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy2(src, dst)
+            elif os.path.isfile(dst) and not os.path.isfile(src):
+                # Handle newly created files on Overleaf, i.e., they exist
+                # in dst but not in src
+                os.makedirs(os.path.dirname(src), exist_ok=True)
+                shutil.copy2(dst, src)
             else:
                 raise_error(
                     f"Source path {src} does not exist; "

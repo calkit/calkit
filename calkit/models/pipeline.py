@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from pathlib import PurePosixPath
 from typing import Any, Literal
+import subprocess
 
 from pydantic import (
     BaseModel,
@@ -248,14 +250,75 @@ class LatexStage(Stage):
             outs.append(out_path)
         return outs
 
+class MatlabStage(Stage):
+    def dvc_deps(self, filepath) -> list[str]:
+        """Automatically get dependencies from MATLAB.
 
-class MatlabScriptStage(Stage):
+        If MATLAB cannot be invoked or returns an error, return the
+        declared stage inputs plus the provided filepath. When MATLAB
+        succeeds, return the discovered deps (converted to POSIX
+        relative paths) and ensure the provided filepath is included.
+        """
+        get_deps_cmd = self.xenv_cmd
+        if self.environment == "_system":
+            get_deps_cmd += "matlab -batch"
+
+        # Quote the filepath for MATLAB and escape single quotes
+        quoted = filepath.replace("'", "''")
+
+        # MATLAB code that adds the current folder to path and
+        # prints required files for the given file. Use disp to ensure
+        # newline-separated output.
+        matlab_code = (
+            "addpath(genpath(pwd)); "
+            f"f = matlab.codetools.requiredFilesAndProducts('{quoted}'); "
+            "for i=1:numel(f); disp(f{i}); end"
+        )
+
+        # Wrap in quotes for shell invocation
+        full_cmd = f'{get_deps_cmd} "{matlab_code}"'
+        try:
+            result = subprocess.run(
+                full_cmd, capture_output=True, text=True, shell=True
+            )
+        except Exception:
+            # If subprocess fails to start, return the filepath plus
+            # any declared inputs on the stage
+            return [PurePosixPath(filepath).as_posix()] + super().dvc_deps
+
+        if result.returncode != 0:
+            # MATLAB call failed; return filepath plus declared inputs
+            return [PurePosixPath(filepath).as_posix()] + super().dvc_deps
+
+        abs_paths = [p.strip() for p in result.stdout.strip().splitlines() if p.strip()]
+
+        rel_paths: list[str] = super().dvc_deps
+        for p in abs_paths:
+            try:
+                # Convert to a path relative to the current working dir
+                rel = os.path.relpath(p)
+            except Exception:
+                # If any issue, skip this path
+                continue
+            # Convert to POSIX-style path for DVC compatibility
+            rel_posix = PurePosixPath(rel).as_posix()
+            if rel_posix not in rel_paths:
+                rel_paths.append(rel_posix)
+
+        # Ensure the requested filepath is included and prefer it first
+        fp_posix = PurePosixPath(filepath).as_posix()
+        if fp_posix not in rel_paths:
+            rel_paths.insert(0, fp_posix)
+
+        return rel_paths
+
+class MatlabScriptStage(MatlabStage):
     kind: Literal["matlab-script"]
     script_path: str
 
     @property
     def dvc_deps(self) -> list[str]:
-        return [self.script_path] + super().dvc_deps
+        return super().dvc_deps(self.script_path)
 
     @property
     def dvc_cmd(self) -> str:
@@ -266,9 +329,18 @@ class MatlabScriptStage(Stage):
         return cmd
 
 
-class MatlabCommandStage(Stage):
+class MatlabCommandStage(MatlabStage):
     kind: Literal["matlab-command"] = "matlab-command"
     command: str
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        # Write the command to a temporary .m file to get dependencies
+        with open("tmp.m", "w") as f:
+            f.write(self.command)
+        deps = super().dvc_deps("tmp.m")
+        os.remove("tmp.m")
+        return deps
 
     @property
     def dvc_cmd(self) -> str:

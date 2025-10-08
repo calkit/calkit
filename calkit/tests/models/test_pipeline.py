@@ -8,6 +8,7 @@ from calkit.models.pipeline import (
     JupyterNotebookStage,
     LatexStage,
     MatlabCommandStage,
+    MatlabScriptStage,
     PythonScriptStage,
     SBatchStage,
     StageIteration,
@@ -165,7 +166,14 @@ def test_matlabcommandstage():
     sd = s.to_dvc()
     print(sd)
     assert sd["cmd"] == 'matlab -batch "disp(\\"Hello, MATLAB!\\");"'
+    s = MatlabCommandStage(
+        name="d", environment="_system", command="matlab_parent"
+    )
+    assert s.dvc_deps == ["test/matlab_parent.m", "test/matlab_child.m"]
 
+def test_matlabscriptstage():
+    s = MatlabScriptStage(name="a", environment="_system", script_path="test/matlab_parent.m")
+    assert s.dvc_deps == ["test/matlab_parent.m", "test/matlab_child.m"]
 
 def test_sbatchstage():
     s = SBatchStage(

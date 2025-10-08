@@ -339,6 +339,7 @@ class MatlabCommandStage(MatlabStage):
         with open("tmp.m", "w") as f:
             f.write(self.command)
         deps = super().dvc_deps("tmp.m")
+        deps.remove("tmp.m")
         os.remove("tmp.m")
         return deps
 

@@ -5,9 +5,9 @@ from __future__ import annotations
 import base64
 import json
 import os
+import subprocess
 from pathlib import PurePosixPath
 from typing import Any, Literal
-import subprocess
 
 from pydantic import (
     BaseModel,
@@ -250,6 +250,7 @@ class LatexStage(Stage):
             outs.append(out_path)
         return outs
 
+
 class MatlabStage(Stage):
     def dvc_deps(self, filepath) -> list[str]:
         """Automatically get dependencies from MATLAB.
@@ -290,7 +291,9 @@ class MatlabStage(Stage):
             # MATLAB call failed; return filepath plus declared inputs
             return [PurePosixPath(filepath).as_posix()] + super().dvc_deps
 
-        abs_paths = [p.strip() for p in result.stdout.strip().splitlines() if p.strip()]
+        abs_paths = [
+            p.strip() for p in result.stdout.strip().splitlines() if p.strip()
+        ]
 
         rel_paths: list[str] = super().dvc_deps
         for p in abs_paths:
@@ -311,6 +314,7 @@ class MatlabStage(Stage):
             rel_paths.insert(0, fp_posix)
 
         return rel_paths
+
 
 class MatlabScriptStage(MatlabStage):
     kind: Literal["matlab-script"]

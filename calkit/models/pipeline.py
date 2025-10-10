@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import subprocess
+import tempfile
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
@@ -340,11 +341,10 @@ class MatlabCommandStage(MatlabStage):
     @property
     def dvc_deps(self) -> list[str]:
         # Write the command to a temporary .m file to get dependencies
-        with open("tmp.m", "w") as f:
+        with tempfile.NamedTemporaryFile() as f:
             f.write(self.command)
-        deps = super().get_deps_from_matlab("tmp.m")
-        deps.remove("tmp.m")
-        os.remove("tmp.m")
+        deps = super().get_deps_from_matlab(f.name)
+        deps.remove(f.name)
         return deps
 
     @property

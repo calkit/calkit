@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import filecmp
 import os
 import shutil
 import subprocess
@@ -557,3 +558,145 @@ def sync(
         if dvc_sync_paths:
             subprocess.run([sys.executable, "-m", "dvc", "push"])
     # TODO: Add option to run the pipeline after?
+
+
+def compare_folders_recursively(
+    dir1: str, dir2: str, paths: list[str], dirname: str = ""
+) -> dict[str, list[str]]:
+    """Compare two directories recursively."""
+    res = {
+        "left_only": [],
+        "right_only": [],
+        "diff_files": [],
+        "same_files": [],
+    }
+    dcmp = filecmp.dircmp(dir1, dir2)
+    for category in ["left_only", "right_only", "diff_files", "same_files"]:
+        items = getattr(dcmp, category)
+        for item in items:
+            relpath = os.path.join(dirname, item)
+            if relpath in paths:
+                res[category].append(relpath)
+    # Recursively compare subdirectories
+    for subdir_name, sub_dcmp in dcmp.subdirs.items():
+        subdir_res = compare_folders_recursively(
+            sub_dcmp.left, sub_dcmp.right, paths=paths, dirname=subdir_name
+        )
+        for k in res.keys():
+            res[k] += subdir_res[k]
+    return res
+
+
+@overleaf_app.command(name="status")
+def get_status(
+    paths: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help=(
+                "Paths to sync with Overleaf, e.g., 'paper/paper.pdf'. "
+                "If not provided, all Overleaf publications will be synced."
+            ),
+        ),
+    ] = None,
+):
+    """Check the status of Overleaf publications in a project."""
+    # Find all publications with Overleaf projects linked
+    ck_info = calkit.load_calkit_info()
+    pubs = ck_info.get("publications", [])
+    if paths is not None:
+        for path in paths:
+            if not any(pub.get("path") == path for pub in pubs):
+                raise_error(f"Publication with path '{path}' not found")
+    # First check our config for an Overleaf token
+    calkit_config = calkit.config.read()
+    overleaf_token = calkit_config.overleaf_token
+    if not overleaf_token:
+        raise_error(
+            "Overleaf token not set; "
+            "Please set it using 'calkit config set overleaf_token'"
+        )
+    for pub in pubs:
+        pub_path = pub.get("path")
+        overleaf_config = pub.get("overleaf", {})
+        if not overleaf_config:
+            continue
+        if paths is not None and pub_path not in paths:
+            continue
+        overleaf_project_id = overleaf_config.get("project_id")
+        if not overleaf_project_id:
+            raise_error(
+                "No Overleaf project ID defined for this publication; "
+                "please set it in the publication's Overleaf config"
+            )
+        typer.echo(
+            f"Getting status of {pub['path']} with "
+            f"Overleaf project ID {overleaf_project_id}"
+        )
+        wdir = pub["overleaf"].get("wdir")
+        if wdir is None:
+            raise_error(
+                "No working directory defined for this publication; "
+                "please set it in the publication's Overleaf config"
+            )
+        # Ensure we've cloned the Overleaf project
+        overleaf_project_dir = os.path.join(
+            ".calkit", "overleaf", overleaf_project_id
+        )
+        overleaf_remote_url = (
+            f"https://git:{overleaf_token}@git.overleaf.com/"
+            f"{overleaf_project_id}"
+        )
+        if not os.path.isdir(overleaf_project_dir):
+            overleaf_repo = git.Repo.clone_from(
+                overleaf_remote_url, to_path=overleaf_project_dir
+            )
+        else:
+            overleaf_repo = git.Repo(overleaf_project_dir)
+        # Pull the latest version in the Overleaf project
+        typer.echo("Pulling the latest version from Overleaf")
+        # Ensure that our current Overleaf remote URL is correct
+        overleaf_repo.git.remote("set-url", "origin", overleaf_remote_url)
+        try:
+            overleaf_repo.git.pull()
+        except Exception:
+            raise_error(
+                "Failed to pull from Overleaf; "
+                "check that your Overleaf token is valid\n"
+                "Run 'calkit config get overleaf_token' and ensure that "
+                "it matches one in your Overleaf account settings "
+                "(https://overleaf.com/user/settings)"
+            )
+        last_sync_commit = pub["overleaf"].get("last_sync_commit")
+        if last_sync_commit:
+            commits_since = list(
+                overleaf_repo.iter_commits(rev=f"{last_sync_commit}..HEAD")
+            )
+            typer.echo(
+                f"There have been {len(commits_since)} changes on "
+                "Overleaf since last sync"
+            )
+        # Determine which paths to use for computing diff
+        git_sync_paths = pub["overleaf"].get("sync_paths", [])
+        git_sync_paths += pub["overleaf"].get("git_sync_paths", [])
+        dvc_sync_paths = pub["overleaf"].get("dvc_sync_paths", [])
+        sync_paths = git_sync_paths + dvc_sync_paths
+        if not sync_paths:
+            warn(
+                "No sync paths or DVC sync paths defined in the publication's "
+                "Overleaf config"
+            )
+        status = compare_folders_recursively(
+            wdir, overleaf_project_dir, paths=sync_paths
+        )
+        if status["left_only"]:
+            typer.echo("Files only in Calkit project:")
+            for p in status["left_only"]:
+                typer.echo(f"    - {os.path.join(wdir, p)}")
+        if status["right_only"]:
+            typer.echo("Files only in Overleaf project:")
+            for p in status["right_only"]:
+                typer.echo(f"    - {os.path.join(wdir, p)}")
+        if status["diff_files"]:
+            typer.echo("Changed files:")
+            for p in status["diff_files"]:
+                typer.echo(f"    - {os.path.join(wdir, p)}")

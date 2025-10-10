@@ -560,6 +560,12 @@ def save(
     no_recursive: Annotated[
         bool, typer.Option("--no-recursive", help="Do not push to submodules.")
     ] = False,
+    sync_overleaf: Annotated[
+        bool,
+        typer.Option(
+            "--overleaf", "-O", help="Sync with Overleaf after saving."
+        ),
+    ] = False,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -619,6 +625,10 @@ def save(
             dvc_args=dvc_push_args,
             no_recursive=no_recursive,
         )
+    if sync_overleaf:
+        from calkit.cli.overleaf import sync as overleaf_sync
+
+        overleaf_sync(verbose=verbose, no_push=no_push)
 
 
 @app.command(name="pull")

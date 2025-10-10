@@ -252,7 +252,7 @@ class LatexStage(Stage):
 
 
 class MatlabStage(Stage):
-    def dvc_deps(self, filepath) -> list[str]:
+    def get_deps_from_matlab(self, filepath) -> list[str]:
         """Automatically get dependencies from MATLAB.
 
         If MATLAB cannot be invoked or returns an error, return the
@@ -322,7 +322,7 @@ class MatlabScriptStage(MatlabStage):
 
     @property
     def dvc_deps(self) -> list[str]:
-        return super().dvc_deps(self.script_path)
+        return super().get_deps_from_matlab(self.script_path)
 
     @property
     def dvc_cmd(self) -> str:
@@ -342,7 +342,7 @@ class MatlabCommandStage(MatlabStage):
         # Write the command to a temporary .m file to get dependencies
         with open("tmp.m", "w") as f:
             f.write(self.command)
-        deps = super().dvc_deps("tmp.m")
+        deps = super().get_deps_from_matlab("tmp.m")
         deps.remove("tmp.m")
         os.remove("tmp.m")
         return deps

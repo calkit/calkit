@@ -345,6 +345,13 @@ def sync(
                 "No working directory defined for this publication; "
                 "please set it in the publication's Overleaf config"
             )
+        # If there are any uncommitted changes in the publication working
+        # directory, raise an error
+        if repo.git.diff(wdir) or repo.index.diff("HEAD", wdir):
+            raise_error(
+                f"Uncommitted changes found in {wdir}; "
+                "please commit or stash them before syncing with Overleaf"
+            )
         # Ensure we've cloned the Overleaf project
         overleaf_project_dir = os.path.join(
             ".calkit", "overleaf", overleaf_project_id

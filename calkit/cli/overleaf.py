@@ -382,6 +382,14 @@ def sync(
                 "(https://overleaf.com/user/settings)"
             )
         last_sync_commit = pub["overleaf"].get("last_sync_commit")
+        if last_sync_commit:
+            commits_since = list(
+                overleaf_repo.iter_commits(rev=f"{last_sync_commit}..HEAD")
+            )
+            typer.echo(
+                f"There have been {len(commits_since)} changes on "
+                "Overleaf since last sync"
+            )
         # Determine which paths to sync and push
         # TODO: Support glob patterns
         git_sync_paths = pub["overleaf"].get("sync_paths", [])

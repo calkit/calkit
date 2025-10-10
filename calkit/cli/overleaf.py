@@ -688,15 +688,20 @@ def get_status(
         status = compare_folders_recursively(
             wdir, overleaf_project_dir, paths=sync_paths
         )
+
+        def print_path(p, fg_color=None):
+            txt = f"    {os.path.join(wdir, p)}"
+            typer.echo(typer.style(txt, fg=fg_color))
+
         if status["left_only"]:
             typer.echo("Files only in Calkit project:")
             for p in status["left_only"]:
-                typer.echo(f"    - {os.path.join(wdir, p)}")
+                print_path(p, "green")
         if status["right_only"]:
             typer.echo("Files only in Overleaf project:")
             for p in status["right_only"]:
-                typer.echo(f"    - {os.path.join(wdir, p)}")
+                print_path(p, "yellow")
         if status["diff_files"]:
             typer.echo("Changed files:")
             for p in status["diff_files"]:
-                typer.echo(f"    - {os.path.join(wdir, p)}")
+                print_path(p, "red")

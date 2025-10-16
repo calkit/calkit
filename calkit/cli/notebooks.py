@@ -96,19 +96,44 @@ def check_env_kernel(
     """Check that an environment has a registered kernel."""
     from calkit.cli.main import run_in_env
 
+    # TODO: Pass in language or detect from env type
+    language = "python"
     project_name = calkit.detect_project_name(prepend_owner=False)
     kernel_name = calkit.to_kebab_case(f"{project_name}-{env_name}")
-    cmd = [
-        "python",
-        "-m",
-        "ipykernel",
-        "install",
-        "--user",
-        "--name",
-        kernel_name,
-        "--display-name",
-        f"{project_name}: {env_name}",
-    ]
+    display_name = f"{project_name}: {env_name}"
+    if language == "python":
+        cmd = [
+            "python",
+            "-m",
+            "ipykernel",
+            "install",
+            "--user",
+            "--name",
+            kernel_name,
+            "--display-name",
+            display_name,
+        ]
+    elif language == "julia":
+        # TODO: Get project dir correct
+        cmd = [
+            (
+                "import IJulia;"
+                "IJulia.installkernel("
+                f'"{display_name}",'
+                '"--project=@.",'
+                'env=Dict("JULIA_LOAD_PATH" => "@:@stdlib")'
+                ")"
+            )
+        ]
+        # Note we'll get output like:
+        # [ Info: Installing 'ion_trap_simulations: main 1.11.7' kernelspec in
+        # /Users/pete/Library/Jupyter/kernels/ion_trap_simulations_-main-1.11
+        # "/Users/pete/Library/Jupyter/kernels/ion_trap_simulations_-main-1.11"
+        # This means we need to get the kernel name with the Julia version
+        # suffix
+        # The string is the output of the function call
+    else:
+        raise_error(f"{language} not supported")
     run_in_env(cmd=cmd, env_name=env_name, no_check=no_check, verbose=verbose)
     return kernel_name
 
@@ -193,16 +218,14 @@ def execute_notebook(
         )
     # First, ensure the specified environment has a kernel we can use
     # We need to check the environment type and create the kernel if needed
-    if language.lower() == "python":
+    if language.lower() in ["python", "julia"]:
         kernel_name = check_env_kernel(
             env_name=env_name, no_check=no_check, verbose=verbose
         )
     elif language.lower() == "matlab":
         kernel_name = "jupyter_matlab_kernel"
-    else:
-        raise_error(f"Language '{language}' not yet supported")
-    # We can't handle parameters unless language is Python
-    if language.lower() != "python":
+    # We can't handle parameters unless language is Python or Julia
+    if language.lower() not in ["python", "julia"]:
         if params or params_json is not None or params_base64 is not None:
             raise_error("Parameters can only be passed to Python notebooks")
     # Parse parameters

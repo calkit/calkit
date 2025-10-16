@@ -264,10 +264,8 @@ class MatlabStage(Stage):
         get_deps_cmd = self.xenv_cmd
         if self.environment == "_system":
             get_deps_cmd += "matlab -batch"
-
         # Quote the filepath for MATLAB and escape single quotes
         quoted = filepath.replace("'", "''")
-
         # MATLAB code that adds the current folder to path and
         # prints required files for the given file. Use disp to ensure
         # newline-separated output.

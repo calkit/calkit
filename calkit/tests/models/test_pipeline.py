@@ -1,5 +1,7 @@
 """Tests for ``calkit.models.pipeline``."""
 
+import shutil
+
 import pytest
 from pydantic import ValidationError
 

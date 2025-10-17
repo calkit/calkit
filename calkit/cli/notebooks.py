@@ -89,15 +89,42 @@ def check_env_kernel(
             "--no-check", help="Do not check environment before executing."
         ),
     ] = False,
+    language: Annotated[
+        str | None,
+        typer.Option(
+            "--language",
+            "-l",
+            help=(
+                "Notebook language; if 'matlab', MATLAB kernel must be "
+                "available in environment."
+            ),
+        ),
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
 ):
     """Check that an environment has a registered kernel."""
+    from calkit.cli.check import check_environment
     from calkit.cli.main import run_in_env
 
-    # TODO: Pass in language or detect from env type
-    language = "python"
+    def get_env():
+        ck_info = calkit.load_calkit_info()
+        envs = ck_info.get("environments", {})
+        if env_name not in envs:
+            raise_error(
+                f"No environment '{env_name}' defined for this project"
+            )
+        return envs[env_name]
+
+    env = None
+    # Detect language from environment
+    if language is None:
+        env = get_env()
+        if env.get("kind") == "julia":
+            language = "julia"
+        else:
+            language = "python"
     project_name = calkit.detect_project_name(prepend_owner=False)
     kernel_name = calkit.to_kebab_case(f"{project_name}-{env_name}")
     display_name = f"{project_name}: {env_name}"
@@ -113,29 +140,53 @@ def check_env_kernel(
             "--display-name",
             display_name,
         ]
+        res = run_in_env(
+            cmd=cmd,
+            env_name=env_name,
+            no_check=no_check,
+            verbose=verbose,
+        )
+        return kernel_name
     elif language == "julia":
-        # TODO: Get project dir correct
-        cmd = [
-            (
-                "import IJulia;"
-                "IJulia.installkernel("
-                f'"{display_name}",'
-                '"--project=@.",'
-                'env=Dict("JULIA_LOAD_PATH" => "@:@stdlib")'
-                ")"
+        if not no_check:
+            check_environment(env_name=env_name, verbose=verbose)
+        if env is None:
+            env = get_env()
+        env_path = env.get("path")
+        julia_version = env.get("julia")
+        env_fname = os.path.basename(env_path)
+        if not env_fname == "Project.toml":
+            raise_error(
+                "Julia environments require a path pointing to Project.toml"
             )
+        env_dir = os.path.dirname(env_path)
+        if not env_dir:
+            env_dir = "."
+        julia_cmd = (
+            "import IJulia;"
+            "kp=IJulia.installkernel("
+            f'"{display_name}",'
+            '"--project=@.",'
+            'env=Dict("JULIA_LOAD_PATH" => "@:@stdlib")'
+            ");"
+            "println(kp);"
+        )
+        cmd = [
+            "julia",
+            f"+{julia_version}",
+            "--project=" + env_dir,
+            "-e",
+            julia_cmd,
         ]
-        # Note we'll get output like:
-        # [ Info: Installing 'ion_trap_simulations: main 1.11.7' kernelspec in
-        # /Users/pete/Library/Jupyter/kernels/ion_trap_simulations_-main-1.11
-        # "/Users/pete/Library/Jupyter/kernels/ion_trap_simulations_-main-1.11"
-        # This means we need to get the kernel name with the Julia version
-        # suffix
-        # The string is the output of the function call
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            raise_error(f"Failed to create kernel:\n{res.stdout}")
+        kernel_path = res.stdout.strip()
+        typer.echo(f"Registered IJulia kernel at: {kernel_path}")
+        kernel_name = os.path.basename(kernel_path)
+        return kernel_name
     else:
         raise_error(f"{language} not supported")
-    run_in_env(cmd=cmd, env_name=env_name, no_check=no_check, verbose=verbose)
-    return kernel_name
 
 
 @notebooks_app.command("execute")
@@ -189,7 +240,7 @@ def execute_notebook(
         ),
     ] = None,
     language: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--language",
             "-l",
@@ -198,7 +249,7 @@ def execute_notebook(
                 "available in environment."
             ),
         ),
-    ] = "python",
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -212,6 +263,20 @@ def execute_notebook(
 
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
+    # Detect language from environment
+    if language is None:
+        ck_info = calkit.load_calkit_info()
+        envs = ck_info.get("environments", {})
+        if env_name not in envs:
+            raise_error(
+                f"No environment '{env_name}' defined for this project"
+            )
+        env = envs[env_name]
+        if env.get("kind") == "julia":
+            language = "julia"
+        else:
+            language = "python"
+        typer.echo(f"Using {language} as notebook language")
     if language.lower() not in ["python", "matlab", "julia"]:
         raise ValueError(
             "Language must be one of 'python', 'matlab', or 'julia'"

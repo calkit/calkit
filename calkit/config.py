@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import platform
+import warnings
 from typing import Any, Literal
 from typing import get_args as get_type_args
 
@@ -37,6 +38,9 @@ def supports_keyring() -> bool:
         return True
     except keyring.errors.InitError:
         # Backend failed to initialize (e.g., user dismissed prompt)
+        return False
+    except keyring.errors.KeyringLocked:
+        warnings.warn("Keyring is locked; will use YAML config file")
         return False
     except keyring.errors.KeyringError as e:
         # Check if the underlying exception indicates no backend

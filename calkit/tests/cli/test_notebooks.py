@@ -135,3 +135,38 @@ def test_execute_notebook(tmp_dir):
     assert params_out["my_value"] == project_params["my_project_value"]
     assert params_out["my_list"] == list(range(1, 6))
     assert params_out["my_dict"] == params["my_dict"]
+
+
+def test_execute_notebook_julia(tmp_dir):
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "project",
+            ".",
+            "-n",
+            "cool-project",
+            "--title",
+            "Cool project",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "julia-env",
+            "--name",
+            "main",
+            "--julia",
+            "1.11",
+            "IJulia",
+        ]
+    )
+    nb_fpath = os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "test", "nb-julia.ipynb"
+    )
+    os.makedirs("notebooks")
+    shutil.copy(nb_fpath, "notebooks/main.ipynb")
+    subprocess.check_call(
+        ["calkit", "nb", "execute", "-e", "main", "notebooks/main.ipynb"]
+    )

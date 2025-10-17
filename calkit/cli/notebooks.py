@@ -89,28 +89,104 @@ def check_env_kernel(
             "--no-check", help="Do not check environment before executing."
         ),
     ] = False,
+    language: Annotated[
+        str | None,
+        typer.Option(
+            "--language",
+            "-l",
+            help=(
+                "Notebook language; if 'matlab', MATLAB kernel must be "
+                "available in environment."
+            ),
+        ),
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
 ):
     """Check that an environment has a registered kernel."""
+    from calkit.cli.check import check_environment
     from calkit.cli.main import run_in_env
 
+    def get_env():
+        ck_info = calkit.load_calkit_info()
+        envs = ck_info.get("environments", {})
+        if env_name not in envs:
+            raise_error(
+                f"No environment '{env_name}' defined for this project"
+            )
+        return envs[env_name]
+
+    env = None
+    # Detect language from environment
+    if language is None:
+        env = get_env()
+        if env.get("kind") == "julia":
+            language = "julia"
+        else:
+            language = "python"
     project_name = calkit.detect_project_name(prepend_owner=False)
     kernel_name = calkit.to_kebab_case(f"{project_name}-{env_name}")
-    cmd = [
-        "python",
-        "-m",
-        "ipykernel",
-        "install",
-        "--user",
-        "--name",
-        kernel_name,
-        "--display-name",
-        f"{project_name}: {env_name}",
-    ]
-    run_in_env(cmd=cmd, env_name=env_name, no_check=no_check, verbose=verbose)
-    return kernel_name
+    display_name = f"{project_name}: {env_name}"
+    if language == "python":
+        cmd = [
+            "python",
+            "-m",
+            "ipykernel",
+            "install",
+            "--user",
+            "--name",
+            kernel_name,
+            "--display-name",
+            display_name,
+        ]
+        res = run_in_env(
+            cmd=cmd,
+            env_name=env_name,
+            no_check=no_check,
+            verbose=verbose,
+        )
+        return kernel_name
+    elif language == "julia":
+        if not no_check:
+            check_environment(env_name=env_name, verbose=verbose)
+        if env is None:
+            env = get_env()
+        env_path = env.get("path")
+        julia_version = env.get("julia")
+        env_fname = os.path.basename(env_path)
+        if not env_fname == "Project.toml":
+            raise_error(
+                "Julia environments require a path pointing to Project.toml"
+            )
+        env_dir = os.path.dirname(env_path)
+        if not env_dir:
+            env_dir = "."
+        julia_cmd = (
+            "import IJulia;"
+            "kp=IJulia.installkernel("
+            f'"{display_name}",'
+            '"--project=@.",'
+            'env=Dict("JULIA_LOAD_PATH" => "@:@stdlib")'
+            ");"
+            "println(kp);"
+        )
+        cmd = [
+            "julia",
+            f"+{julia_version}",
+            "--project=" + env_dir,
+            "-e",
+            julia_cmd,
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            raise_error(f"Failed to create kernel:\n{res.stdout}")
+        kernel_path = res.stdout.strip()
+        typer.echo(f"Registered IJulia kernel at: {kernel_path}")
+        kernel_name = os.path.basename(kernel_path)
+        return kernel_name
+    else:
+        raise_error(f"{language} not supported")
 
 
 @notebooks_app.command("execute")
@@ -164,7 +240,7 @@ def execute_notebook(
         ),
     ] = None,
     language: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--language",
             "-l",
@@ -173,7 +249,7 @@ def execute_notebook(
                 "available in environment."
             ),
         ),
-    ] = "python",
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -187,22 +263,34 @@ def execute_notebook(
 
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
+    # Detect language from environment
+    if language is None:
+        ck_info = calkit.load_calkit_info()
+        envs = ck_info.get("environments", {})
+        if env_name not in envs:
+            raise_error(
+                f"No environment '{env_name}' defined for this project"
+            )
+        env = envs[env_name]
+        if env.get("kind") == "julia":
+            language = "julia"
+        else:
+            language = "python"
+        typer.echo(f"Using {language} as notebook language")
     if language.lower() not in ["python", "matlab", "julia"]:
         raise ValueError(
             "Language must be one of 'python', 'matlab', or 'julia'"
         )
     # First, ensure the specified environment has a kernel we can use
     # We need to check the environment type and create the kernel if needed
-    if language.lower() == "python":
+    if language.lower() in ["python", "julia"]:
         kernel_name = check_env_kernel(
             env_name=env_name, no_check=no_check, verbose=verbose
         )
     elif language.lower() == "matlab":
         kernel_name = "jupyter_matlab_kernel"
-    else:
-        raise_error(f"Language '{language}' not yet supported")
-    # We can't handle parameters unless language is Python
-    if language.lower() != "python":
+    # We can't handle parameters unless language is Python or Julia
+    if language.lower() not in ["python", "julia"]:
         if params or params_json is not None or params_base64 is not None:
             raise_error("Parameters can only be passed to Python notebooks")
     # Parse parameters

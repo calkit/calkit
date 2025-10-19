@@ -9,6 +9,7 @@ import logging
 import os
 import platform as _platform
 import posixpath
+import shutil
 import subprocess
 import sys
 import time
@@ -1828,7 +1829,19 @@ def set_env_var(
 @app.command(name="upgrade")
 def upgrade():
     """Upgrade Calkit."""
-    if calkit.check_dep_exists("uv"):
+    # First detect how Calkit is installed
+    # If installed with uv tool, calkit will like in something like
+    # ~/.local/bin/calkit
+    which_calkit = shutil.which("calkit")
+    if which_calkit is None:
+        raise_error("Calkit is not installed")
+    split_path = os.path.normpath(str(which_calkit)).split(os.sep)
+    if (
+        ".local" in split_path
+        and "bin" in split_path
+        and calkit.check_dep_exists("uv")
+    ):
+        # This is a uv tool install
         cmd = [
             "uv",
             "tool",
@@ -1836,7 +1849,7 @@ def upgrade():
             "--upgrade",
             "calkit-python",
         ]
-    elif calkit.check_dep_exists("pipx"):
+    elif "pipx" in split_path and calkit.check_dep_exists("pipx"):
         cmd = ["pipx", "upgrade", "calkit-python"]
     else:
         cmd = [
@@ -1847,7 +1860,10 @@ def upgrade():
             "--upgrade",
             "calkit-python",
         ]
-    subprocess.run(cmd)
+    res = subprocess.run(cmd)
+    if res.returncode != 0:
+        raise_error("Upgrade failed")
+    typer.echo("Success!")
 
 
 @app.command(name="switch-branch")

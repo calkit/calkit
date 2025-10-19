@@ -1830,7 +1830,7 @@ def set_env_var(
 def upgrade():
     """Upgrade Calkit."""
     # First detect how Calkit is installed
-    # If installed with uv tool, calkit will like in something like
+    # If installed with uv tool, calkit will be located at something like
     # ~/.local/bin/calkit
     which_calkit = shutil.which("calkit")
     if which_calkit is None:

@@ -292,17 +292,32 @@ def check_dep_exists(
 
 
 def check_system_deps(
-    wdir: str | None = None, system_info: dict | None = None
+    wdir: str | None = None,
+    system_info: dict | None = None,
+    ck_info: dict | None = None,
+    stages: list[str] | None = None,
 ) -> None:
     """Check that the dependencies declared in a project's ``calkit.yaml`` file
     exist.
     """
-    ck_info = load_calkit_info(wdir=wdir)
+    if ck_info is None:
+        ck_info = load_calkit_info(wdir=wdir)
     deps = ck_info.get("dependencies", [])
     if "git" not in deps:
         deps.append("git")
+    # List relevant environments
+    envs_in_pipeline = set()
+    pipeline = ck_info.get("pipeline", {})
+    pipeline_stages = pipeline.get("stages", {})
+    for stage_name, stage in pipeline_stages.items():
+        if stages is not None and stage_name not in stages:
+            continue
+        if (env := stage.get("environment")) is not None:
+            envs_in_pipeline.add(env)
     # Infer dependencies from environment types
-    for _, env in ck_info.get("environments", {}).items():
+    for env_name, env in ck_info.get("environments", {}).items():
+        if env_name not in envs_in_pipeline:
+            continue
         kind = env.get("kind")
         if kind in ["docker", "uv", "conda", "pixi"] and kind not in deps:
             deps.append(kind)

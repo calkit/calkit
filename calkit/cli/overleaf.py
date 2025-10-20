@@ -134,6 +134,10 @@ def import_publication(
     overleaf_project_id = src_url.split("/")[-1]
     if not overleaf_project_id:
         raise_error("Invalid Overleaf project ID")
+    # Make sure destination directory exists, and isn't a file
+    if os.path.isfile(dest_dir):
+        raise_error("Destination must be a directory, not a file")
+    os.makedirs(dest_dir, exist_ok=True)
     ck_info = calkit.load_calkit_info(process_includes="environments")
     pubs = ck_info.get("publications", [])
     # TODO: Don't allow the same Overleaf project ID in multiple publications
@@ -249,11 +253,15 @@ def import_publication(
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
-    if not no_commit:
+    if not no_commit and repo.git.diff(["--staged", "--", "calkit.yaml"]):
         # Commit any necessary changes
         typer.echo("Committing changes")
         repo.git.commit(
-            ["-m", f"Import Overleaf project ID {overleaf_project_id}"]
+            [
+                "calkit.yaml",
+                "-m",
+                f"Import Overleaf project ID {overleaf_project_id}",
+            ]
         )
     # Sync the project
     sync(paths=[pub_path], no_commit=no_commit)
@@ -560,6 +568,8 @@ def sync(
                 commit_message,
             )
     if not no_push and not no_commit:
+        if not repo.remotes:
+            raise_error("Project has no Git remotes defined")
         # Push to the project remote
         typer.echo("Pushing changes to project Git remote")
         repo.git.push()

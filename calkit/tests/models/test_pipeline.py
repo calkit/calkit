@@ -176,7 +176,9 @@ def test_matlabcommandstage():
     assert s.dvc_deps == ["test/matlab_child.m", "test/matlab_parent.m"]
 
 
-@pytest.mark.skipif(shutil.which("matlab") is None, reason="Test requires matlab installed.")
+@pytest.mark.skipif(
+    shutil.which("matlab") is None, reason="Test requires matlab installed."
+)
 def test_matlabscriptstage():
     s = MatlabScriptStage(
         name="a",

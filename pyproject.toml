@@ -66,6 +66,7 @@ dev = [
   "mkdocs-material",
   "mkdocs-mermaid2-plugin",
   "pytest-env>=1.1.5",
+  "pytest-xdist>=3.8.0",
 ]
 
 [project.urls]
@@ -100,3 +101,4 @@ lint.extend-select = ["I"]
 
 [tool.pytest.ini_options]
 env = ["CALKIT_ENV = test"]
+addopts = "-n auto"

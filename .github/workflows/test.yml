@@ -3,7 +3,7 @@ name: Run tests
 on: pull_request
 
 env:
-  CALKIT_ZENODO_TOKEN: ${{ secrets.CALKIT_ZENODO_TOKEN }}
+  CALKIT_TEST_ZENODO_TOKEN: ${{ secrets.CALKIT_ZENODO_TOKEN }}
 
 jobs:
   linux:

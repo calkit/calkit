@@ -7,13 +7,18 @@ from typing import Literal
 import typer
 
 import calkit
+from calkit.cli import warn
 
 list_app = typer.Typer(no_args_is_help=True)
 
 
 def _list_objects(
     kind: Literal[
-        "notebooks", "datasets", "figures", "references", "publications"
+        "notebooks",
+        "datasets",
+        "figures",
+        "references",
+        "publications",
     ],
 ):
     """List objects.
@@ -93,3 +98,30 @@ def list_procedures():
     ck_info = calkit.load_calkit_info()
     for p in ck_info.get("procedures", {}):
         typer.echo(p)
+
+
+@list_app.command(name="releases")
+def list_releases():
+    """List releases."""
+    objs = calkit.load_calkit_info().get("releases", {})
+    for name, obj in objs.items():
+        typer.echo(name + ":")
+        # First figure out if the release is published
+        published = None
+        try:
+            published = calkit.invenio.get(
+                f"/records/{obj.get('record_id')}",
+                service=obj.get("publisher"),
+            )["is_published"]
+        except Exception:
+            try:
+                published = calkit.invenio.get(
+                    f"/records/{obj.get('record_id')}/draft",
+                    service=obj.get("publisher"),
+                )["is_published"]
+            except Exception as e:
+                warn(f"Cannot tell if release {name} is published: {e}")
+        if published is not None:
+            typer.echo(f"    published: {published}")
+        for k, v in obj.items():
+            typer.echo(f"    {k}: {v}")

@@ -5,18 +5,24 @@ https://github.com/citation-file-format/citation-file-format
 """
 
 import os
+from typing import Literal
 
 import git
 
 import calkit
 
+SERVICES = {
+    "caltechdata": {"name": "CaltechDATA", "url": "https://data.caltech.edu"},
+    "zenodo": {"name": "Zenodo", "url": "https://zenodo.org"},
+}
+
 BIBTEX_TEMPLATE = """
-@misc{{{first_author_last_name}{year}_{dep_id},
+@misc{{{first_author_last_name}{year}_{record_id},
   author       = {{{authors}}},
   title        = {{{title}}},
   month        = {month},
   year         = {{{year}}},
-  publisher    = {{Zenodo}},
+  publisher    = {{{service}}},
   doi          = {{{doi}}},
   url          = {{https://doi.org/{doi}}},
 }}
@@ -24,9 +30,14 @@ BIBTEX_TEMPLATE = """
 
 
 def create_bibtex(
-    authors: list[dict], release_date: str, title: str, doi: str, dep_id: int
+    authors: list[dict],
+    release_date: str,
+    title: str,
+    doi: str,
+    record_id: int | str,
+    service: Literal["zenodo", "caltechdata"] = "zenodo",
 ) -> str:
-    """Create a BibTeX entry for a Zenodo release."""
+    """Create a BibTeX entry for a release."""
     first_author_last_name = authors[0]["last_name"]
     authors_string = f"{authors[0]['last_name']}, {authors[0]['first_name']}"
     if len(authors) > 1:
@@ -44,7 +55,8 @@ def create_bibtex(
         doi=doi,
         month=month,
         year=year,
-        dep_id=dep_id,
+        record_id=record_id,
+        service=SERVICES[service]["name"],
     )
 
 
@@ -81,14 +93,14 @@ def create_citation_cff(
         "message": (
             "If you use these files, please cite is using these metadata."
         ),
-        "title": ck_info["title"],
-        "abstract": ck_info["description"],
+        "title": ck_info.get("title"),
+        "abstract": ck_info.get("description"),
         "version": release_name,
         "date-released": str(release_date),
-        "repository-code": ck_info["git_repo_url"],
+        "repository-code": ck_info.get("git_repo_url"),
     }
     # Get authors from ck_info
-    authors = ck_info["authors"]
+    authors = ck_info.get("authors", [])
     cff_authors = []
     for author in authors:
         cff_author = {

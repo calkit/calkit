@@ -721,6 +721,7 @@ def test_new_release(tmp_dir):
     assert "v0.1.0" in ck_info["releases"]
     release = ck_info["releases"]["v0.1.0"]
     assert release["doi"] is not None
+    # TODO: Test that the GitHub link is in the related works
     # Test that we can update this release
     # Side note: This is revealing some design weirdness where we're grouping
     # functionality under verbs and not the type of resource they act on

@@ -2193,6 +2193,13 @@ def new_release(
             help="Do not push to Git remote.",
         ),
     ] = False,
+    no_github_release: Annotated[
+        bool,
+        typer.Option(
+            "--no-github",
+            help="Do not create a GitHub release.",
+        ),
+    ] = False,
     to: Annotated[
         str,
         typer.Option(
@@ -2623,21 +2630,23 @@ def new_release(
     if not dry_run and not no_push and not no_commit and not draft_only:
         repo.git.push(["origin", repo.active_branch.name, "--tags"])
         # Now create GitHub release
-        typer.echo("Creating GitHub release")
-        release_body = ""
-        if doi_md is not None:
-            release_body += doi_md + "\n\n"
-        release_body += description
-        resp = calkit.cloud.post(
-            f"/projects/{project_name}/github-releases",
-            json=dict(
-                tag_name=name,
-                body=release_body,
-            ),
-        )
-        typer.echo(f"Created GitHub release at: {resp['url']}")
-        # TODO: Upload assets for GitHub release if they're not too big?
+        if not no_github_release:
+            typer.echo("Creating GitHub release")
+            release_body = ""
+            if doi_md is not None:
+                release_body += doi_md + "\n\n"
+            release_body += description
+            resp = calkit.cloud.post(
+                f"/projects/{project_name}/github-releases",
+                json=dict(
+                    tag_name=name,
+                    body=release_body,
+                ),
+            )
+            typer.echo(f"Created GitHub release at: {resp['url']}")
+            # TODO: Upload assets for GitHub release if they're not too big?
     typer.echo(f"New {release_type} release {name} successfully created")
+    return release
 
 
 @new_app.command(name="stage")

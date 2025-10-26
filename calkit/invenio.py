@@ -28,9 +28,9 @@ def get_token(service: ServiceName = DEFAULT_SERVICE) -> str:
         token = config.caltechdata_token
         if token is None:
             raise ValueError(f"No token for {service} found")
+        return token
     else:
         raise ValueError(f"Unknown archival service '{service}'")
-    return token
 
 
 def get_base_url(service: ServiceName = DEFAULT_SERVICE) -> str:
@@ -44,6 +44,8 @@ def get_base_url(service: ServiceName = DEFAULT_SERVICE) -> str:
             return "https://data.caltechlibrary.dev/api"
         else:
             return "https://data.caltech.edu/api"
+    else:
+        raise ValueError(f"Unknown archival service '{service}'")
 
 
 def _request(

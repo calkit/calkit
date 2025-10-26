@@ -2349,6 +2349,10 @@ def new_release(
         f"'{project_name}'."
     )
     record_id = None
+    # Detect project licenses
+    licenses = calkit.licenses.get_project_licenses()
+    if not licenses:
+        raise_error("Project has no license(s) defined")
     invenio_metadata = dict(
         title=title,
         description=invenio_description,
@@ -2356,6 +2360,7 @@ def new_release(
         publication_date=release_date,
         version=name,
         publisher=publisher_name,
+        rights=calkit.invenio.rights_from_project_licenses(licenses),
     )
     # Add related identifiers
     github_url = calkit.detect_project_github_url()

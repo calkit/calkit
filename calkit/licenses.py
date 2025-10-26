@@ -20,6 +20,8 @@ licenses:
 """
 
 # IDs here come from https://spdx.org/licenses/
+# Note this format is currently the one used by InvenioRDM,
+# but we may want to use the spdx-license-list Python package
 LICENSES = {
     "cc-by-4.0": {
         "id": "cc-by-4.0",
@@ -38,7 +40,7 @@ LICENSES = {
 }
 
 
-def get_licenses() -> dict:
+def get_project_licenses() -> dict:
     """Read project licenses.
 
     Returns a dictionary keyed by path, where `.` represents the default for

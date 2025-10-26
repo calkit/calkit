@@ -2157,7 +2157,7 @@ def new_release(
         str,
         typer.Argument(help="The path to release; '.' for a project release."),
     ] = ".",
-    description: Annotated[
+    release_description: Annotated[
         str | None,
         typer.Option(
             "--description",
@@ -2258,6 +2258,7 @@ def new_release(
     if release_date is None:
         release_date = str(calkit.utcnow().date())
     typer.echo(f"Using release date: {release_date}")
+    project_description = ck_info.get("description")
     # Gather up the list of files to upload
     if path == ".":
         zip_path = release_files_dir + "/archive.zip"
@@ -2266,10 +2267,6 @@ def new_release(
         with zipfile.ZipFile(zip_path, "w") as zipf:
             for fpath in all_paths:
                 zipf.write(fpath)
-        if description is None:
-            description = ck_info.get("description")
-        if description is None:
-            description = "An archive of all project files."
         title = ck_info.get("title")
         if title is None:
             warn("Project has no title")
@@ -2284,8 +2281,6 @@ def new_release(
             raise_error("Single artifact releases must be a single file")
         typer.echo(f"Copying {path} into {release_files_dir}")
         shutil.copy2(path, release_files_dir)
-        if description is None:
-            description = f"Release {release_type} at {path}."
         # Check that this artifact actually exists
         artifact_key = (
             release_type + "s" if release_type != "software" else release_type
@@ -2331,14 +2326,40 @@ def new_release(
     # Upload to InvenioRDM instance
     # Is there already a record for this release, which indicates we should
     # create a new version?
+    try:
+        project_name = calkit.detect_project_name(prepend_owner=True)
+    except Exception:
+        raise_error("Could not detect project name")
+    invenio_description = ""
+    if project_description is not None:
+        invenio_description += project_description + "\n\n"
+    if release_description is not None:
+        invenio_description += release_description + "\n\n"
+    invenio_description += (
+        f"This is an archive of release '{name}' from the Calkit project "
+        f"'{project_name}'."
+    )
     record_id = None
-    project_name = calkit.detect_project_name()
     invenio_metadata = dict(
         title=title,
-        description=description,
+        description=invenio_description,
         notes=f"Created from Calkit project {project_name} release {name}.",
         publication_date=release_date,
+        version=name,
     )
+    # Add related identifiers
+    github_url = calkit.detect_project_github_url()
+    related_identifiers = []
+    if github_url is not None:
+        related_identifiers.append(
+            {
+                "identifier": github_url,
+                "scheme": "url",
+                "relation_type": {"id": "isSupplementTo"},
+                "resource_type": {"id": "software"},
+            }
+        )
+    # TODO: Add calkit.io URL if applicable?
     # Determine creators from authors, adding to project if not present
     authors = ck_info.get("authors", [])
     if not authors:
@@ -2543,11 +2564,15 @@ def new_release(
         if not dry_run:
             repo.git.add("README.md")
     # Create Git tag
+    git_tag_message = release_description
+    if git_tag_message is None:
+        git_tag_message = f"Release {name}"
     if not dry_run and not draft_only:
-        repo.git.tag(["-a", name, "-m", description])
+        repo.git.tag(["-a", name, "-m", git_tag_message])
     else:
         typer.echo(
-            f"Would have created Git tag {name} with message: {description}"
+            f"Would have created Git tag {name} with message: "
+            f"{git_tag_message}"
         )
     # Save release in Calkit info
     release = dict(
@@ -2559,7 +2584,7 @@ def new_release(
         record_id=record_id,
         doi=doi,
         url=url,
-        description=description,
+        description=release_description,
     )
     releases[name] = release
     ck_info["releases"] = releases
@@ -2635,7 +2660,8 @@ def new_release(
             release_body = ""
             if doi_md is not None:
                 release_body += doi_md + "\n\n"
-            release_body += description
+            if release_description is not None:
+                release_body += release_description
             resp = calkit.cloud.post(
                 f"/projects/{project_name}/github-releases",
                 json=dict(

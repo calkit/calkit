@@ -514,6 +514,22 @@ def detect_project_name(
     return name
 
 
+def detect_project_github_url(wdir: str | None = None) -> str | None:
+    """Detect the GitHub URL for the current project."""
+    try:
+        url = Repo(path=wdir).remote().url
+    except ValueError:
+        warnings.warn("No Git remote set with name 'origin'")
+        return
+    if "github.com" not in url:
+        warnings.warn("Git remote is not a GitHub URL")
+        return
+    url = url.removesuffix(".git")
+    if url.startswith("git@github.com:"):
+        url = url.replace("git@github.com:", "https://github.com/")
+    return url
+
+
 def get_dep_version(dep_name: str) -> str | None:
     """Get the version of a system-level dependency."""
     try:

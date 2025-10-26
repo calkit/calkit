@@ -666,7 +666,25 @@ def test_new_release(tmp_dir):
         ["calkit", "new", "project", ".", "--title", "Test project"]
     )
     # TODO: Add project description?
-    # TODO: Add authors
+    # Add authors
+    authors = [
+        {
+            "first_name": "Alice",
+            "last_name": "Smith",
+            "affiliation": "SomeU",
+            "orcid": "0000-0001-2345-6789",
+        },
+        {
+            "first_name": "Bob",
+            "last_name": "Jones",
+            "affiliation": None,
+            "orcid": None,
+        },
+    ]
+    ck_info = calkit.load_calkit_info()
+    ck_info["authors"] = authors
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
     subprocess.check_call(
         [
             "calkit",

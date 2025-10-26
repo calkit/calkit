@@ -659,3 +659,28 @@ def test_new_julia_env(tmp_dir):
     )
     assert os.path.isfile("envs/my-env/Project.toml")
     assert os.path.isfile("envs/my-env/Manifest.toml")
+
+
+def test_new_release(tmp_dir):
+    subprocess.check_call(
+        ["calkit", "new", "project", ".", "--title", "Test project"]
+    )
+    # TODO: Add project description?
+    # TODO: Add authors
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "--name",
+            "v0.1.0",
+            "--description",
+            "First release.",
+            "--no-github",
+        ]
+    )
+    repo = git.Repo()
+    tags = repo.tags
+    assert "v0.1.0" in [tag.name for tag in tags]
+    ck_info = calkit.load_calkit_info()
+    assert "v0.1.0" in ck_info["releases"]

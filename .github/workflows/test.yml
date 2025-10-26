@@ -34,7 +34,7 @@ jobs:
         run: |
           source ~/.bashrc
           pixi --version
-          uv run pytest -n 6
+          uv run pytest -n 4
   windows:
     runs-on: windows-latest
     timeout-minutes: 20

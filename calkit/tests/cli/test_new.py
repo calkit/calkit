@@ -663,7 +663,16 @@ def test_new_julia_env(tmp_dir):
 
 def test_new_release(tmp_dir):
     subprocess.check_call(
-        ["calkit", "new", "project", ".", "--title", "Test project"]
+        [
+            "calkit",
+            "new",
+            "project",
+            ".",
+            "--title",
+            "Test project",
+            "--name",
+            "test-project",
+        ]
     )
     subprocess.check_call(
         [
@@ -671,7 +680,7 @@ def test_new_release(tmp_dir):
             "remote",
             "add",
             "origin",
-            "https://github.com/calkit/test.git",
+            "https://github.com/calkit/test-project.git",
         ]
     )
     # TODO: Add project description?
@@ -721,3 +730,4 @@ def test_new_release(tmp_dir):
         ["calkit", "update", "release", "--latest", "--publish"]
     )
     # TODO: Check Git tags for the release name
+    # TODO: Delete the release

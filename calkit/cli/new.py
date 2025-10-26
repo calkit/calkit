@@ -2144,7 +2144,8 @@ def new_release(
             "--name",
             "-n",
             help=(
-                "A name for the release, typically kebab-case. "
+                "A name for the release, typically kebab-case or a semantic "
+                "version. "
                 "Will be used for the Git tag and GitHub release title."
             ),
         ),

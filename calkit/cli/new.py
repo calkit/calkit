@@ -2535,7 +2535,7 @@ def new_release(
         if not dry_run:
             repo.git.add("README.md")
     # Create Git tag
-    if not dry_run:
+    if not dry_run and not draft_only:
         repo.git.tag(["-a", name, "-m", description])
     else:
         typer.echo(

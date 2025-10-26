@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 
 import requests
 import typer
@@ -44,7 +45,12 @@ def update_devcontainer(
 
 @update_app.command(name="release")
 def update_release(
-    name: Annotated[str, typer.Option("--name", "-n", help="Release name.")],
+    name: Annotated[
+        str | None, typer.Option("--name", "-n", help="Release name.")
+    ] = None,
+    use_latest: Annotated[
+        bool, typer.Option("--latest", help="Update latest release.")
+    ] = False,
     delete: Annotated[
         bool, typer.Option("--delete", help="Delete release.")
     ] = False,
@@ -56,12 +62,32 @@ def update_release(
     ] = False,
 ):
     """Update a release."""
+    if name is None and not use_latest:
+        raise_error("Release name or --latest must be specified")
     if delete and (publish or reupload):
         raise_error("Cannot delete release if reuploading or publishing")
     ck_info = calkit.load_calkit_info()
     releases = ck_info.get("releases", {})
-    if name not in releases:
+    if name is not None and name not in releases:
         raise_error(f"Release '{name}' does not exist")
+    if use_latest:
+        latest_name = None
+        latest_date = None
+        for release_name, release in releases.items():
+            release_date = release.get("date")
+            try:
+                release_date = datetime.fromisoformat(release_date)
+            except Exception:
+                raise_error(
+                    f"Release '{release_name}' has invalid date "
+                    f"'{release_date}'"
+                )
+            if latest_date is None or release_date > latest_date:
+                latest_name = release_name
+                latest_date = release_date
+        if latest_name is None:
+            raise_error("No releases found")
+        name = latest_name
     release = releases[name]
     publisher = release.get("publisher")
     if publisher is None:
@@ -73,14 +99,14 @@ def update_release(
         try:
             calkit.invenio.post(
                 f"/records/{record_id}/draft/actions/publish",
-                publisher=publisher,
+                service=publisher,
             )
         except Exception as e:
             raise_error(f"Failed to publish release: {e}")
     if delete:
         try:
             calkit.invenio.delete(
-                f"/records/{record_id}/draft", publisher=publisher
+                f"/records/{record_id}/draft", service=publisher
             )
         except Exception as e:
             raise_error(f"Failed to delete release: {e}")

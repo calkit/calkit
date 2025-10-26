@@ -2229,6 +2229,7 @@ def new_release(
             f"Unknown archival service '{to}'; "
             f"choose from: {list(calkit.releases.SERVICES.keys())}"
         )
+    publisher_name = calkit.releases.SERVICES[to]["name"]
     if release_type not in [
         "project",
         "publication",
@@ -2354,6 +2355,7 @@ def new_release(
         notes=f"Created from Calkit project {project_name} release {name}.",
         publication_date=release_date,
         version=name,
+        publisher=publisher_name,
     )
     # Add related identifiers
     github_url = calkit.detect_project_github_url()

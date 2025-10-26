@@ -6,6 +6,7 @@ import os
 import zipfile
 from datetime import datetime
 
+import git
 import requests
 import typer
 from typing_extensions import Annotated
@@ -61,6 +62,16 @@ def update_release(
     reupload: Annotated[
         bool, typer.Option("--reupload", help="Reupload files.")
     ] = False,
+    no_github: Annotated[
+        bool,
+        typer.Option("--no-github", help="Do not create a release on GitHub."),
+    ] = False,
+    no_push_tags: Annotated[
+        bool,
+        typer.Option(
+            "--no-push-tags", help="Do not push Git tags to remote repository."
+        ),
+    ] = False,
 ):
     """Update a release."""
     if name is None and not use_latest:
@@ -91,6 +102,9 @@ def update_release(
         name = latest_name
     release = releases[name]
     publisher = release.get("publisher")
+    release_description = release.get("description")
+    project_name = calkit.detect_project_name()
+    repo = git.Repo()
     if publisher is None:
         raise_error("Release does not have a publisher")
     record_id = release.get("record_id")
@@ -104,13 +118,50 @@ def update_release(
             )
         except Exception as e:
             raise_error(f"Failed to publish release: {e}")
+        # Create a Git tag
+        git_tag_message = release_description
+        if git_tag_message is None:
+            git_tag_message = f"Release {name}"
+        repo.git.tag(["-a", name, "-m", git_tag_message])
+        if not no_push_tags:
+            typer.echo("Pushing Git tags to remote repository")
+            repo.git.push("--tags")
+        if not no_github:
+            typer.echo("Creating GitHub release")
+            release_body = ""
+            doi = release.get("doi")
+            if doi is not None:
+                doi_base_url = calkit.releases.SERVICES[publisher]["url"]
+                doi_md = (
+                    f"[![DOI]({doi_base_url}/badge/DOI/{doi}.svg)]"
+                    f"(https://handle.stage.datacite.org/{doi})"
+                )
+                release_body += doi_md + "\n\n"
+            if release_description is not None:
+                release_body += release_description
+            resp = calkit.cloud.post(
+                f"/projects/{project_name}/github-releases",
+                json=dict(
+                    tag_name=name,
+                    body=release_body,
+                ),
+            )
+            typer.echo(f"Created GitHub release at: {resp['url']}")
     if delete:
         try:
             calkit.invenio.delete(
                 f"/records/{record_id}/draft", service=publisher
             )
         except Exception as e:
-            raise_error(f"Failed to delete release: {e}")
+            raise_error(f"Failed to delete release draft: {e}")
+        ck_info["releases"].pop(name)
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        repo.git.add("calkit.yaml")
+        if "calkit.yaml" in calkit.git.get_staged_files():
+            repo.git.commit(["calkit.yaml", "-m", f"Delete release {name}"])
+        # TODO: Delete release files, GitHub release, DVC MD5s, etc.
+        typer.echo(f"Deleted release '{name}'")
     if reupload:
         # Regenerate archive data and reupload
         path = release["path"]
@@ -126,7 +177,28 @@ def update_release(
             for fpath in all_paths:
                 zipf.write(fpath)
         files = os.listdir(release_files_dir)
+        try:
+            files_in_record = [
+                entry["key"]
+                for entry in calkit.invenio.get(
+                    f"/records/{record_id}/draft/files",
+                    service=publisher.lower(),
+                )["entries"]
+            ]
+            typer.echo(f"Existing files in record: {files_in_record}")
+        except Exception as e:
+            raise_error(
+                "Failed to get existing files in record: "
+                f"{e.__class__.__name__}: {e}"
+            )
         for filename in files:
+            if filename in files_in_record:
+                typer.echo(f"Deleting existing file {filename} from draft")
+                calkit.invenio.delete(
+                    f"/records/{record_id}/draft/files/{filename}",
+                    service=publisher.lower(),  # type: ignore
+                    as_json=False,  # We only get a 204 back
+                )
             typer.echo(f"Uploading {filename}")
             fpath = os.path.join(release_files_dir, filename)
             # First, initiate the file upload

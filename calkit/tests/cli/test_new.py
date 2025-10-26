@@ -731,9 +731,24 @@ def test_new_release(tmp_dir):
     )
     # TODO: Check that the files were actually updated, not just that there
     # were not errors
+    # TODO: Check that the git rev of the release was updated
     # Test publishing the release
     subprocess.check_call(
-        ["calkit", "update", "release", "--latest", "--publish"]
+        [
+            "calkit",
+            "update",
+            "release",
+            "--latest",
+            "--publish",
+            "--no-github",
+            "--no-push-tags",
+        ]
     )
-    # TODO: Check Git tags for the release name
-    # TODO: Delete the release
+    # Check Git tags for the release name
+    git_tags = git.Repo().tags
+    assert "v0.1.0" in [tag.name for tag in git_tags]
+    # TODO: Test that we can delete the release
+    # This will fail if it's not a draft
+    # subprocess.check_call(
+    #     ["calkit", "update", "release", "--name", "v0.1.0", "--delete"]
+    # )

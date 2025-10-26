@@ -2213,6 +2213,14 @@ def new_release(
             help="Create draft record with reserved DOI but do not publish.",
         ),
     ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Print verbose output.",
+        ),
+    ] = False,
 ):
     """Create a new release."""
     to = to.lower()
@@ -2468,6 +2476,8 @@ def new_release(
                 json=dict(metadata=invenio_metadata),
                 service=to,  # type: ignore
             )
+            if verbose:
+                typer.echo(f"Invenio records post response:\n{invenio_dep}")
             record_id = invenio_dep["id"]
         files = os.listdir(release_files_dir)
         for filename in files:
@@ -2499,16 +2509,18 @@ def new_release(
         if draft_only:
             # Reserve a DOI for the draft record
             typer.echo(f"Reserving DOI for {to} draft record ID {record_id}")
-            calkit.invenio.post(
+            doi_resp = calkit.invenio.post(
                 f"/records/{record_id}/draft/pids/doi",
                 service=to,  # type: ignore
             )
-            # Get the updated draft record with DOI information
-            draft_record = calkit.invenio.get(
-                f"/records/{record_id}/draft",
-                service=to,  # type: ignore
-            )
-            doi = draft_record["pids"]["doi"]["identifier"]
+            if verbose:
+                typer.echo(f"DOI response for draft:\n{doi_resp}")
+            try:
+                doi = doi_resp["pids"]["doi"]["identifier"]
+            except KeyError:
+                doi = doi_resp["doi"]
+            except Exception as e:
+                raise_error(f"Failed to reserve DOI for draft: {e}")
             url = f"https://doi.org/{doi}"
             typer.echo(f"Created {to} draft with reserved DOI: {doi}")
         else:

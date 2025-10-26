@@ -665,6 +665,15 @@ def test_new_release(tmp_dir):
     subprocess.check_call(
         ["calkit", "new", "project", ".", "--title", "Test project"]
     )
+    subprocess.check_call(
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/calkit/test.git",
+        ]
+    )
     # TODO: Add project description?
     # Add authors
     authors = [
@@ -694,11 +703,12 @@ def test_new_release(tmp_dir):
             "v0.1.0",
             "--description",
             "First release.",
+            "--draft",
             "--no-github",
+            "--verbose",
         ]
     )
-    repo = git.Repo()
-    tags = repo.tags
-    assert "v0.1.0" in [tag.name for tag in tags]
     ck_info = calkit.load_calkit_info()
     assert "v0.1.0" in ck_info["releases"]
+    release = ck_info["releases"]["v0.1.0"]
+    assert release["doi"] is not None

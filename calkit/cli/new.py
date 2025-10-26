@@ -2619,7 +2619,7 @@ def new_release(
     if not dry_run and calkit.git.get_staged_files() and not no_commit:
         repo.git.commit(["-m", f"Create new {release_type} release {name}"])
     # Push with Git
-    if not dry_run and not no_push and not no_commit:
+    if not dry_run and not no_push and not no_commit and not draft_only:
         repo.git.push(["origin", repo.active_branch.name, "--tags"])
         # Now create GitHub release
         typer.echo("Creating GitHub release")

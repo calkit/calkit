@@ -727,6 +727,12 @@ def test_new_release(tmp_dir):
     # This leads to a more English-like CLI, but we may want to organize the
     # logic by resource type
     subprocess.check_call(
+        ["calkit", "update", "release", "--name", "v0.1.0", "--reupload"]
+    )
+    # TODO: Check that the files were actually updated, not just that there
+    # were not errors
+    # Test publishing the release
+    subprocess.check_call(
         ["calkit", "update", "release", "--latest", "--publish"]
     )
     # TODO: Check Git tags for the release name

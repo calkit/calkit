@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import zipfile
 from datetime import datetime
 
 import requests
@@ -110,4 +111,44 @@ def update_release(
             )
         except Exception as e:
             raise_error(f"Failed to delete release: {e}")
-    # TODO: Finish reupload, add ability to update metadata
+    if reupload:
+        # Regenerate archive data and reupload
+        path = release["path"]
+        release_type = release["kind"]
+        # TODO: Enable reuploading artifact releases
+        if path != "." or release_type != "project":
+            raise_error("Can only handle updating project releases")
+        release_files_dir = f".calkit/releases/{name}/files"
+        zip_path = release_files_dir + "/archive.zip"
+        all_paths = calkit.releases.ls_files()
+        typer.echo(f"Adding files to {zip_path}")
+        with zipfile.ZipFile(zip_path, "w") as zipf:
+            for fpath in all_paths:
+                zipf.write(fpath)
+        files = os.listdir(release_files_dir)
+        for filename in files:
+            typer.echo(f"Uploading {filename}")
+            fpath = os.path.join(release_files_dir, filename)
+            # First, initiate the file upload
+            calkit.invenio.post(
+                f"/records/{record_id}/draft/files",
+                json=[{"key": filename}],
+                service=publisher.lower(),  # type: ignore
+            )
+            # Then upload the file content
+            with open(fpath, "rb") as f:
+                file_data = f.read()
+                resp = calkit.invenio.put(
+                    f"/records/{record_id}/draft/files/{filename}/content",
+                    headers={"Content-Type": "application/octet-stream"},
+                    as_json=False,
+                    service=publisher.lower(),  # type: ignore
+                    data=file_data,
+                )
+                typer.echo(f"Status code: {resp.status_code}")
+            # Commit the file
+            calkit.invenio.post(
+                f"/records/{record_id}/draft/files/{filename}/commit",
+                service=publisher.lower(),  # type: ignore
+            )
+    # TODO: Add ability to update metadata

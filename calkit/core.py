@@ -520,10 +520,10 @@ def detect_project_github_url(wdir: str | None = None) -> str | None:
         url = Repo(path=wdir).remote().url
     except ValueError:
         warnings.warn("No Git remote set with name 'origin'")
-        return
+        return None
     if "github.com" not in url:
         warnings.warn("Git remote is not a GitHub URL")
-        return
+        return None
     url = url.removesuffix(".git")
     if url.startswith("git@github.com:"):
         url = url.replace("git@github.com:", "https://github.com/")

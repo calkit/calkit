@@ -55,6 +55,7 @@ def get_staged_files_with_status(
     paths = diff.split("\n")
     res = []
     for pathi in paths:
+        # Make sure line is not empty, e.g., a trailing newline
         if pathi:
             status, p = pathi.split("\t")
             res.append({"status": status, "path": p})

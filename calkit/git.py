@@ -8,6 +8,9 @@ import git
 def get_staged_files(
     path: str | None = None, repo: git.Repo | None = None
 ) -> list[str]:
+    """Get a list of staged files for the repo at ``path`` or the provided
+    repo.
+    """
     if repo is None:
         repo = git.Repo(path)
     cmd = ["--staged", "--name-only"]
@@ -52,6 +55,8 @@ def get_staged_files_with_status(
     paths = diff.split("\n")
     res = []
     for pathi in paths:
-        status, p = pathi.split("\t")
-        res.append({"status": status, "path": p})
+        # Make sure line is not empty, e.g., a trailing newline
+        if pathi:
+            status, p = pathi.split("\t")
+            res.append({"status": status, "path": p})
     return res

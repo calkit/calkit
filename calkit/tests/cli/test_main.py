@@ -197,6 +197,7 @@ def test_run_in_venv(tmp_dir):
         )
         .decode()
         .strip()
+        .split("\n")[-1]
     )
     assert out == "1.17.0"
     # Test pixi envs

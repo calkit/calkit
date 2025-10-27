@@ -28,7 +28,7 @@ dependencies = [
   "python-dotenv>=1",
   "pywin32; platform_system == 'Windows'",
   "requests",
-  "typer==0.16.0",
+  "typer==0.20.0",
   "uvicorn",
   "tqdm>=4.67.1",
   "psutil>=7.0.0",
@@ -66,6 +66,7 @@ dev = [
   "mkdocs-material",
   "mkdocs-mermaid2-plugin",
   "pytest-env>=1.1.5",
+  "pytest-xdist>=3.8.0",
 ]
 
 [project.urls]
@@ -100,3 +101,4 @@ lint.extend-select = ["I"]
 
 [tool.pytest.ini_options]
 env = ["CALKIT_ENV = test"]
+addopts = "-n auto"

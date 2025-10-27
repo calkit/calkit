@@ -762,8 +762,11 @@ def test_new_release(tmp_dir):
     # TODO: It seems like we can't use multiple license IDs with the API
     record_id = release["record_id"]
     record = calkit.invenio.get(f"/records/{record_id}")
-    print(record["metadata"])
-    assert record["metadata"]["license"] == {"id": "cc-by-4.0"}
+    metadata = record["metadata"]
+    print(metadata)
+    assert metadata["license"] == {"id": "cc-by-4.0"}
+    related = metadata["related_identifiers"]
+    assert related[0]["identifier"] == "https://github.com/calkit/test-project"
     # TODO: Test that we can delete the release
     # This will fail if it's not a draft
     # subprocess.check_call(

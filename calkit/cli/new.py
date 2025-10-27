@@ -2421,10 +2421,11 @@ def new_release(
             {
                 "identifier": github_url,
                 "scheme": "url",
-                "relation_type": {"id": "isSupplementTo"},
-                "resource_type": {"id": "software"},
+                "relation_type": {"id": "issupplementto"},
+                "resource_type": {"id": "other"},
             }
         )
+    invenio_metadata["related_identifiers"] = related_identifiers
     # TODO: Add calkit.io URL if applicable?
     # Determine creators from authors, adding to project if not present
     authors = ck_info.get("authors", [])

@@ -45,6 +45,39 @@ def update_devcontainer(
         f.write(resp.text)
 
 
+@update_app.command(name="license")
+def update_license(
+    copyright_holder: Annotated[
+        str,
+        typer.Option(
+            "--copyright-holder",
+            "-c",
+            help="Copyright holder, e.g., your full name.",
+        ),
+    ],
+    no_commit: Annotated[
+        bool,
+        typer.Option(
+            "--no-commit",
+            help="Do not create a Git commit for the updated license.",
+        ),
+    ] = False,
+):
+    """Update license with a reasonable default
+    (MIT for code, CC-BY-4.0 for other files)
+    """
+    with open("LICENSE", "w") as f:
+        f.write(
+            calkit.licenses.LICENSE_TEMPLATE_DUAL.format(
+                year=calkit.utcnow().year, copyright_holder=copyright_holder
+            )
+        )
+    repo = git.Repo()
+    repo.git.add("LICENSE")
+    if not no_commit and repo.git.diff(["--staged", "--", "LICENSE"]):
+        repo.git.commit(["LICENSE", "-m", "Update license"])
+
+
 @update_app.command(name="release")
 def update_release(
     name: Annotated[

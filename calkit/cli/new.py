@@ -2213,6 +2213,17 @@ def new_release(
             help="Create draft record with reserved DOI but do not publish.",
         ),
     ] = False,
+    license_ids: Annotated[
+        list[str],
+        typer.Option(
+            "--license",
+            help=(
+                "License ID (from https://spdx.org/licenses). "
+                "Multiple can be specified. "
+                "Will try to infer from LICENSE file, if present."
+            ),
+        ),
+    ] = [],
     verbose: Annotated[
         bool,
         typer.Option(
@@ -2349,9 +2360,49 @@ def new_release(
         f"'{project_name}'."
     )
     record_id = None
-    # Detect project licenses
-    licenses = calkit.licenses.get_project_licenses()
-    if not licenses:
+    # Detect project license IDs if necessary
+    if not license_ids:
+        license_file = None
+        license_txt = None
+        license_candidates = [
+            "LICENSE",
+            "LICENSE.rst",
+            "LICENSE.txt",
+            "LICENSE.md",
+        ]
+        for lc in license_candidates:
+            if os.path.isfile(lc):
+                license_file = lc
+                break
+        if license_file is None:
+            typer.echo("No project license found.")
+            use_default_license = typer.confirm(
+                "Would you like to use the default (MIT/CC-BY-4.0)?",
+                default=True,
+            )
+            if not use_default_license:
+                raise_error("Please generate a license file and try again")
+            copyright_holder = typer.prompt(
+                "Please enter the copyright holder for the license "
+                "(e.g., your full name)"
+            )
+            license_txt = calkit.licenses.LICENSE_TEMPLATE_DUAL.format(
+                year=calkit.utcnow().year, copyright_holder=copyright_holder
+            )
+            with open("LICENSE", "w") as f:
+                f.write(license_txt)
+                repo.git.add("LICENSE")
+            license_ids = ["mit", "cc-by-4.0"]
+        if license_txt is None and license_file is not None:
+            with open(license_file) as f:
+                license_txt = f.read()
+            # Try to detect licenses
+            if "the mit license" in license_txt.lower():
+                license_ids.append("mit")
+            if "cc by 4.0" in license_txt.lower():
+                license_ids.append("cc-by-4.0")
+            # TODO: Detect others
+    if not license_ids:
         raise_error("Project has no license(s) defined")
     invenio_metadata = dict(
         title=title,
@@ -2360,7 +2411,7 @@ def new_release(
         publication_date=release_date,
         version=name,
         publisher=publisher_name,
-        rights=calkit.invenio.rights_from_project_licenses(licenses),
+        rights=[{"id": lid for lid in license_ids}],
     )
     # Add related identifiers
     github_url = calkit.detect_project_github_url()

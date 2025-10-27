@@ -703,6 +703,16 @@ def test_new_release(tmp_dir):
     ck_info["authors"] = authors
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
+    # Add a default license
+    subprocess.check_call(
+        [
+            "calkit",
+            "update",
+            "license",
+            "--copyright-holder",
+            "Some Person",
+        ]
+    )
     subprocess.check_call(
         [
             "calkit",
@@ -748,6 +758,12 @@ def test_new_release(tmp_dir):
     # Check Git tags for the release name
     git_tags = git.Repo().tags
     assert "v0.1.0" in [tag.name for tag in git_tags]
+    # Check the license is correct
+    # TODO: It seems like we can't use multiple license IDs with the API
+    record_id = release["record_id"]
+    record = calkit.invenio.get(f"/records/{record_id}")
+    print(record["metadata"])
+    assert record["metadata"]["license"] == {"id": "cc-by-4.0"}
     # TODO: Test that we can delete the release
     # This will fail if it's not a draft
     # subprocess.check_call(

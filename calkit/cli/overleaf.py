@@ -327,10 +327,18 @@ def sync(
     calkit_config = calkit.config.read()
     overleaf_token = calkit_config.overleaf_token
     if not overleaf_token:
-        raise_error(
-            "Overleaf token not set; "
-            "Please set it using 'calkit config set overleaf_token'"
-        )
+        # See if we can get it from the cloud
+        if calkit_config.token is not None:
+            try:
+                resp = calkit.cloud.get("/user/overleaf-token")
+                overleaf_token = resp["access_token"]
+                calkit_config.overleaf_token = overleaf_token
+                calkit_config.write()
+            except Exception:
+                raise_error(
+                    "Overleaf token not set; "
+                    "Please set it using 'calkit config set overleaf_token'"
+                )
     repo = git.Repo()
     for pub in pubs:
         overleaf_config = pub.get("overleaf", {})

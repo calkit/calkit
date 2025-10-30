@@ -455,7 +455,6 @@ def sync(
                         "git",
                         "am",
                         "--3way",
-                        "--reject",
                         "--directory",
                         wdir,
                         "-",
@@ -479,8 +478,8 @@ def sync(
                     else:
                         raise_error(
                             "Failed to apply Overleaf patch to project repo. "
-                            "Check the .rej files and manually apply changes, "
-                            "delete them, then rerun with --force."
+                            "Resolve merge conflicts in the relevant files, "
+                            "then call calkit overleaf sync --force"
                         )
             else:
                 typer.echo("No changes to apply")

@@ -413,6 +413,14 @@ def sync(
         dvc_sync_paths = pub["overleaf"].get("dvc_sync_paths", [])
         sync_paths = git_sync_paths + dvc_sync_paths
         push_paths = pub["overleaf"].get("push_paths", [])
+        implicit_sync_paths = os.listdir(overleaf_repo.working_dir)
+        for p in implicit_sync_paths:
+            if p.startswith("."):
+                continue
+            if p not in sync_paths:
+                sync_paths.append(p)
+                if p not in git_sync_paths and p not in dvc_sync_paths:
+                    git_sync_paths.append(p)
         git_sync_paths_in_project = [
             os.path.join(wdir, p) for p in git_sync_paths
         ]

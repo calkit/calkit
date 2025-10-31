@@ -202,14 +202,38 @@ def update_release(
         # TODO: Enable reuploading artifact releases
         if path != "." or release_type != "project":
             raise_error("Can only handle updating project releases")
-        release_files_dir = f".calkit/releases/{name}/files"
+        release_dir = f".calkit/releases/{name}"
+        release_files_dir = release_dir + "/files"
+        os.makedirs(release_files_dir, exist_ok=True)
+        # Save a metadata file with each DVC file's MD5 checksum
+        dvc_md5s = calkit.releases.make_dvc_md5s(
+            zipfile="archive.zip" if path == "." else None,
+            paths=None if path == "." else [path],
+        )
+        dvc_md5s_path = release_dir + "/dvc-md5s.yaml"
+        typer.echo(f"Saving DVC MD5 info to {dvc_md5s_path}")
+        with open(dvc_md5s_path, "w") as f:
+            calkit.ryaml.dump(dvc_md5s, f)
+        # Create a README for the Invenio release
+        typer.echo("Creating README.md for release")
+        title = ck_info.get("title")
+        if title is None:
+            raise_error("Project has no title")
+        readme_txt = f"# {title}\n"
+        git_rev = repo.git.rev_parse(["--short", "HEAD"])
+        readme_txt += (
+            f"\nThis is a {release_type} release ({name}) generated with "
+            f"Calkit from Git rev {git_rev}.\n"
+        )
+        readme_path = release_files_dir + "/README.md"
+        with open(readme_path, "w") as f:
+            f.write(readme_txt)
         zip_path = release_files_dir + "/archive.zip"
         all_paths = calkit.releases.ls_files()
         typer.echo(f"Adding files to {zip_path}")
         with zipfile.ZipFile(zip_path, "w") as zipf:
             for fpath in all_paths:
                 zipf.write(fpath)
-        files = os.listdir(release_files_dir)
         try:
             files_in_record = [
                 entry["key"]
@@ -224,6 +248,10 @@ def update_release(
                 "Failed to get existing files in record: "
                 f"{e.__class__.__name__}: {e}"
             )
+        # Check size of files dir
+        size = calkit.get_size(release_files_dir)
+        typer.echo(f"Release size: {(size / 1e6):.1f} MB")
+        files = os.listdir(release_files_dir)
         for filename in files:
             if filename in files_in_record:
                 typer.echo(f"Deleting existing file {filename} from draft")

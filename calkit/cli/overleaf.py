@@ -327,10 +327,18 @@ def sync(
     calkit_config = calkit.config.read()
     overleaf_token = calkit_config.overleaf_token
     if not overleaf_token:
-        raise_error(
-            "Overleaf token not set; "
-            "Please set it using 'calkit config set overleaf_token'"
-        )
+        # See if we can get it from the cloud
+        if calkit_config.token is not None:
+            try:
+                resp = calkit.cloud.get("/user/overleaf-token")
+                overleaf_token = resp["access_token"]
+                calkit_config.overleaf_token = overleaf_token
+                calkit_config.write()
+            except Exception:
+                raise_error(
+                    "Overleaf token not set; "
+                    "Please set it using 'calkit config set overleaf_token'"
+                )
     repo = git.Repo()
     for pub in pubs:
         overleaf_config = pub.get("overleaf", {})
@@ -405,6 +413,14 @@ def sync(
         dvc_sync_paths = pub["overleaf"].get("dvc_sync_paths", [])
         sync_paths = git_sync_paths + dvc_sync_paths
         push_paths = pub["overleaf"].get("push_paths", [])
+        implicit_sync_paths = os.listdir(overleaf_repo.working_dir)
+        for p in implicit_sync_paths:
+            if p.startswith("."):
+                continue
+            if p not in sync_paths:
+                sync_paths.append(p)
+                if p not in git_sync_paths and p not in dvc_sync_paths:
+                    git_sync_paths.append(p)
         git_sync_paths_in_project = [
             os.path.join(wdir, p) for p in git_sync_paths
         ]
@@ -439,7 +455,6 @@ def sync(
                         "git",
                         "am",
                         "--3way",
-                        "--reject",
                         "--directory",
                         wdir,
                         "-",
@@ -463,8 +478,8 @@ def sync(
                     else:
                         raise_error(
                             "Failed to apply Overleaf patch to project repo. "
-                            "Check the .rej files and manually apply changes, "
-                            "delete them, then rerun with --force."
+                            "Resolve merge conflicts in the relevant files, "
+                            "then call calkit overleaf sync --force"
                         )
             else:
                 typer.echo("No changes to apply")

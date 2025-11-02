@@ -29,7 +29,8 @@ def _make_temp_overleaf_project(project_id: str) -> git.Repo:
 def test_overleaf(tmp_dir):
     # First, create a temporary repo to represent the Overleaf project
     pid = str(uuid.uuid4())
-    _ = _make_temp_overleaf_project(pid)
+    ol_repo = _make_temp_overleaf_project(pid)
+    ol_repo.git.config(["receive.denyCurrentBranch", "ignore"])
     subprocess.run(
         ["calkit", "init"],
         check=True,
@@ -37,7 +38,8 @@ def test_overleaf(tmp_dir):
     repo = git.Repo()
     tmp_remote = f"/tmp/overleaf-sync-remotes/{pid}"
     os.makedirs(tmp_remote, exist_ok=True)
-    git.Repo.init(path=tmp_remote, bare=True)
+    remote_repo = git.Repo.init(path=tmp_remote, bare=True)
+    remote_repo.git.config(["receive.denyCurrentBranch", "ignore"])
     repo.git.remote(["add", "origin", tmp_remote])
     ol_url = calkit.overleaf.get_git_remote_url(pid, "no token")
     assert os.environ["CALKIT_ENV"] == "test"
@@ -56,6 +58,28 @@ def test_overleaf(tmp_dir):
         ],
         check=True,
     )
+    with open("ol-project/main.tex") as f:
+        txt = f.read()
+        assert "This is the initial text" in txt
+    # TODO: Check the TeX environment and pipeline was created properly
     # Test that we can sync
     subprocess.run(["calkit", "overleaf", "sync"], check=True)
     # TODO: Test that we can properly resolve a merge conflict
+    with open(os.path.join(ol_repo.working_dir, "main.tex"), "a") as f:
+        f.write("\nHere's another line from Overleaf")
+    ol_repo.git.commit(["main.tex", "-m", "Update on Overleaf"])
+    with open("ol-project/main.tex", "a") as f:
+        f.write("\nHere's another line from main project")
+    repo.git.commit(["ol-project/main.tex", "-m", "Local edit"])
+    res = subprocess.run(["calkit", "overleaf", "sync"], capture_output=True)
+    assert res.returncode != 0
+    with open("ol-project/main.tex") as f:
+        txt = f.read()
+    assert ">>>>>>>" in txt
+    # Now let's resolve the commit without actually editing the file
+    subprocess.run(["calkit", "overleaf", "sync", "--resolve"], check=True)
+    # Now make another change on Overleaf but allow the sync to succeed
+    with open(os.path.join(ol_repo.working_dir, "main.tex"), "a") as f:
+        f.write("\nHere's another line from Overleaf")
+    ol_repo.git.commit(["main.tex", "-m", "Update on Overleaf"])
+    subprocess.run(["calkit", "overleaf", "sync"], check=True)

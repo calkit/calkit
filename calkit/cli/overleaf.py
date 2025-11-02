@@ -389,7 +389,9 @@ def sync(
             )
         # If there are any uncommitted changes in the publication working
         # directory, raise an error
-        if repo.git.diff(wdir) or repo.index.diff("HEAD", wdir):
+        if not resolve and (
+            repo.git.diff(wdir) or repo.index.diff("HEAD", wdir)
+        ):
             raise_error(
                 f"Uncommitted changes found in {wdir}; "
                 "please commit or stash them before syncing with Overleaf"

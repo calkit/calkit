@@ -61,7 +61,15 @@ def test_overleaf(tmp_dir):
     with open("ol-project/main.tex") as f:
         txt = f.read()
         assert "This is the initial text" in txt
-    # TODO: Check the TeX environment and pipeline was created properly
+    # Check the TeX environment and pipeline was created properly
+    ck_info = calkit.load_calkit_info()
+    env = ck_info["environments"]["tex"]
+    assert env["kind"] == "docker"
+    assert env["image"] == "texlive/texlive:latest-full"
+    stage = ck_info["pipeline"]["stages"]["build-ol-project"]
+    assert stage["kind"] == "latex"
+    assert stage["environment"] == "tex"
+    assert stage["target_path"] == "ol-project/main.tex"
     # Test that we can sync
     subprocess.run(["calkit", "overleaf", "sync"], check=True)
     # TODO: Test that we can properly resolve a merge conflict

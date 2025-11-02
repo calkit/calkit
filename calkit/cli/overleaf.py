@@ -214,6 +214,8 @@ def import_publication(
             description="TeXlive via Docker.",
         )
         ck_info["environments"] = envs
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
     # Check that we have a build stage
     # TODO: Use Calkit pipeline for this
     typer.echo("Checking for a build stage in the pipeline")
@@ -241,7 +243,6 @@ def import_publication(
             name=stage_name,
             environment=tex_env_name,
             target_path=PurePosixPath(dest_dir, tex_path).as_posix(),
-            outputs=[pub_path],
             inputs=[
                 os.path.join(dest_dir, p) for p in sync_paths + push_paths
             ],
@@ -251,6 +252,7 @@ def import_publication(
         repo.git.add("calkit.yaml")
     # Add to publications in calkit.yaml
     typer.echo("Adding publication to calkit.yaml")
+    ck_info = calkit.load_calkit_info()
     new_pub = dict(
         path=pub_path,
         title=title,

@@ -85,6 +85,9 @@ def test_overleaf(tmp_dir):
         txt = f.read()
     assert ">>>>>>>" in txt
     # Now let's resolve the commit without actually editing the file
+    subprocess.run(
+        ["calkit", "save", "-am", "Resolve merge conflict from Overleaf sync"]
+    )
     subprocess.run(["calkit", "overleaf", "sync", "--resolve"], check=True)
     # Now make another change on Overleaf but allow the sync to succeed
     with open(os.path.join(ol_repo.working_dir, "main.tex"), "a") as f:

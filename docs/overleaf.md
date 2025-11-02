@@ -54,11 +54,17 @@ calkit overleaf import \
     paper \
     --title "My paper title" \
     --kind journal-article \
-    --sync-path paper.tex \
     --push-path figures
 ```
 
-If necessary, this will create a TeXlive Docker [environment](environments.md)
+This command will link a local project folder, in this case `paper`,
+to the Overleaf project,
+and always push the `paper/figures` folder, i.e.,
+the figures will be one-way synced,
+whereas any other files will be synced bidirectionally.
+
+If necessary, this command will also
+create a TeXlive Docker [environment](environments.md)
 and a build stage in the [pipeline](pipeline/index.md),
 which will build and cache the PDF upon calling `calkit run`.
 

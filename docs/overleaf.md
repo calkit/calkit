@@ -88,3 +88,30 @@ You can view an example project that uses Overleaf integration on
 and the [Calkit Cloud](https://calkit.io/calkit/example-overleaf).
 This project syncs the document text bidirectionally,
 and pushes figures up to Overleaf.
+
+## Merge conflicts
+
+If the same lines are changed in a file in both the main project and the
+Overleaf project a "merge conflict" will occur.
+In this case,
+the text will need to be merged together manually.
+[VS Code](https://code.visualstudio.com/) has a built-in merge conflict
+resolution tool, but there are many to choose from.
+
+In the file, e.g., `paper.tex`, you'll see something like:
+
+```tex
+<<<<<<< HEAD
+I made this edit locally. It's pretty great.
+=======
+I made this edit on Overleaf. It's great.
+>>>>>>> <commit-id-of-patch>
+```
+
+After merging the two chunks together and deleting the lines that start with
+`<<<<<<<`, `>>>>>>>`, or `=======`,
+mark the conflict as resolved and sync again with:
+
+```sh
+calkit overleaf sync --resolve
+```

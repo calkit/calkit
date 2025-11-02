@@ -305,6 +305,14 @@ def sync(
             help="Enable verbose output.",
         ),
     ] = False,
+    resolve: Annotated[
+        bool,
+        typer.Option(
+            "--resolve",
+            "-r",
+            help="Mark merge conflicts as resolved before committing.",
+        ),
+    ] = False,
     force: Annotated[
         bool,
         typer.Option(
@@ -463,23 +471,21 @@ def sync(
                     text=True,
                     encoding="utf-8",
                 )
+                # TODO: Better detect that we encountered a merge conflict
+                # here
+                # It's possible this command failed for a different reason
                 if process.returncode != 0:
-                    if force:
+                    if force or resolve:
                         # Skip any patches we might be in the middle of
                         try:
                             repo.git.am("--skip")
                         except Exception:
                             pass
-                        typer.echo(
-                            "Failed to apply Overleaf patch to project repo. "
-                            "Proceeding to push project changes to Overleaf "
-                            "anyway."
-                        )
                     else:
                         raise_error(
                             "Failed to apply Overleaf patch to project repo. "
                             "Resolve merge conflicts in the relevant files, "
-                            "then call calkit overleaf sync --force"
+                            "then call:\n\n    calkit overleaf sync --resolve"
                         )
             else:
                 typer.echo("No changes to apply")

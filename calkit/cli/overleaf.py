@@ -381,9 +381,8 @@ def sync(
         overleaf_project_dir = os.path.join(
             ".calkit", "overleaf", overleaf_project_id
         )
-        overleaf_remote_url = (
-            f"https://git:{overleaf_token}@git.overleaf.com/"
-            f"{overleaf_project_id}"
+        overleaf_remote_url = calkit.overleaf.get_git_remote_url(
+            project_id=overleaf_project_id, token=str(overleaf_token)
         )
         if not os.path.isdir(overleaf_project_dir):
             overleaf_repo = git.Repo.clone_from(
@@ -681,9 +680,8 @@ def get_status(
         overleaf_project_dir = os.path.join(
             ".calkit", "overleaf", overleaf_project_id
         )
-        overleaf_remote_url = (
-            f"https://git:{overleaf_token}@git.overleaf.com/"
-            f"{overleaf_project_id}"
+        overleaf_remote_url = calkit.overleaf.get_git_remote_url(
+            project_id=overleaf_project_id, token=str(overleaf_token)
         )
         if not os.path.isdir(overleaf_project_dir):
             overleaf_repo = git.Repo.clone_from(

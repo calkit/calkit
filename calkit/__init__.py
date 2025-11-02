@@ -16,4 +16,5 @@ from . import github  # noqa: F401
 from . import invenio  # noqa: F401
 from . import releases  # noqa: F401
 from . import licenses  # noqa: F401
+from . import overleaf  # noqa: F401
 from .notebooks import declare_notebook  # noqa: F401

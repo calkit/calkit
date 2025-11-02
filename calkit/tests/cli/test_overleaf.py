@@ -26,7 +26,7 @@ def _make_temp_overleaf_project(project_id: str) -> git.Repo:
     return repo
 
 
-def test_overleaf_import(tmp_dir):
+def test_overleaf(tmp_dir):
     # First, create a temporary repo to represent the Overleaf project
     pid = str(uuid.uuid4())
     _ = _make_temp_overleaf_project(pid)
@@ -56,3 +56,6 @@ def test_overleaf_import(tmp_dir):
         ],
         check=True,
     )
+    # Test that we can sync
+    subprocess.run(["calkit", "overleaf", "sync"], check=True)
+    # TODO: Test that we can properly resolve a merge conflict

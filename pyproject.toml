@@ -100,5 +100,5 @@ fix = true
 lint.extend-select = ["I"]
 
 [tool.pytest.ini_options]
-env = ["CALKIT_ENV = test", "CALKIT_TEST_OVERLEAF_TOKEN = none"]
+env = ["CALKIT_ENV=test", "CALKIT_TEST_OVERLEAF_TOKEN=none"]
 addopts = "-n auto"

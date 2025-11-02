@@ -36,17 +36,6 @@ def import_publication(
             help="Directory at which to save in the project, e.g., 'paper'."
         ),
     ],
-    sync_paths: Annotated[
-        list[str],
-        typer.Option(
-            "--sync-path",
-            "-s",
-            help=(
-                "Paths to sync from the Overleaf project, e.g., 'main.tex'. "
-                "Note that multiple can be specified."
-            ),
-        ),
-    ],
     title: Annotated[
         str,
         typer.Option(
@@ -55,6 +44,14 @@ def import_publication(
             help="Title of the publication.",
         ),
     ],
+    target_path: Annotated[
+        str | None,
+        typer.Option(
+            "--target",
+            "-T",
+            help="Target TeX file path inside Overleaf project.",
+        ),
+    ] = None,
     description: Annotated[
         str | None,
         typer.Option(
@@ -70,6 +67,17 @@ def import_publication(
             help="What of the publication this is, e.g., 'journal-article'.",
         ),
     ] = None,
+    sync_paths: Annotated[
+        list[str],
+        typer.Option(
+            "--sync-path",
+            "-s",
+            help=(
+                "Paths to sync from the Overleaf project, e.g., 'main.tex'. "
+                "Note that multiple can be specified."
+            ),
+        ),
+    ] = [],
     push_paths: Annotated[
         list[str],
         typer.Option(
@@ -82,18 +90,6 @@ def import_publication(
             ),
         ),
     ] = [],
-    pdf_path: Annotated[
-        str | None,
-        typer.Option(
-            "--pdf-path",
-            "-o",
-            help=(
-                "PDF output file in the Overleaf project, e.g., 'main.pdf'. "
-                "If not provided, it will be determined from the first sync "
-                "path."
-            ),
-        ),
-    ] = None,
     no_commit: Annotated[
         bool,
         typer.Option("--no-commit", help="Do not commit changes to repo."),
@@ -127,13 +123,19 @@ def import_publication(
         typer.echo("Storing Overleaf token in Calkit config")
         config.overleaf_token = overleaf_token
         config.write()
-    if not src_url.startswith("https://www.overleaf.com/project/"):
+    if (
+        not src_url.startswith("https://www.overleaf.com/project/")
+        and calkit.config.get_env() != "test"
+    ):
         raise_error(
             "Invalid URL; must start with 'https://www.overleaf.com/project/'"
         )
     overleaf_project_id = src_url.split("/")[-1]
     if not overleaf_project_id:
         raise_error("Invalid Overleaf project ID")
+    # Check target path
+    if target_path is not None and not target_path.endswith(".tex"):
+        raise_error("Target path should have a .tex extension")
     # Make sure destination directory exists, and isn't a file
     if os.path.isfile(dest_dir):
         raise_error("Destination must be a directory, not a file")
@@ -141,21 +143,6 @@ def import_publication(
     ck_info = calkit.load_calkit_info(process_includes="environments")
     pubs = ck_info.get("publications", [])
     # TODO: Don't allow the same Overleaf project ID in multiple publications
-    # Determine the PDF output path
-    if pdf_path is None:
-        # Use the first sync path as the PDF path
-        pdf_path = sync_paths[0].removesuffix(".tex") + ".pdf"
-        typer.echo(f"Using PDF path: {pdf_path}")
-    tex_path = pdf_path.removesuffix(".pdf") + ".tex"
-    pub_path = PurePosixPath(dest_dir, pdf_path).as_posix()
-    pub_paths = [pub.get("path") for pub in pubs]
-    if not overwrite and pub_path in pub_paths:
-        raise_error(
-            f"A publication already exists in this project at {pub_path}"
-        )
-    elif overwrite and pub_path in pub_paths:
-        # Note: This publication will go to the end of the list
-        pubs = [p for p in pubs if p.get("path") != pub_path]
     repo = git.Repo()
     # Clone the Overleaf project into .calkit/overleaf if it doesn't exist
     # otherwise pull
@@ -163,8 +150,8 @@ def import_publication(
     os.makedirs(overleaf_dir, exist_ok=True)
     git_ignore(overleaf_dir, no_commit=no_commit)
     overleaf_project_dir = os.path.join(overleaf_dir, overleaf_project_id)
-    git_clone_url = (
-        f"https://git:{overleaf_token}@git.overleaf.com/{overleaf_project_id}"
+    git_clone_url = calkit.overleaf.get_git_remote_url(
+        project_id=overleaf_project_id, token=overleaf_token
     )
     if os.path.isdir(overleaf_project_dir):
         warn("This Overleaf project has already been cloned; removing")
@@ -176,6 +163,36 @@ def import_publication(
         overleaf_project_dir,
         depth=1,
     )
+    # Detect target path if not specified
+    if target_path is None:
+        ol_contents = os.listdir(overleaf_project_dir)
+        for cand in ["main.tex", "report.tex", "paper.tex"]:
+            if cand in ol_contents:
+                target_path = cand
+                break
+    if target_path is None:
+        # Fall back to lone .tex file if there is one
+        tex_files = [p for p in ol_contents if p.endswith(".tex")]
+        if len(tex_files) == 1:
+            target_path = tex_files[0]
+    if target_path is None:
+        raise_error(
+            "Target TeX file path cannot be detected; "
+            "please specify with --target"
+        )
+    # Determine the PDF output path
+    pdf_path = target_path.removesuffix(".tex") + ".pdf"  # type: ignore
+    typer.echo(f"Using PDF path: {pdf_path}")
+    tex_path = pdf_path.removesuffix(".pdf") + ".tex"
+    pub_path = PurePosixPath(dest_dir, pdf_path).as_posix()
+    pub_paths = [pub.get("path") for pub in pubs]
+    if not overwrite and pub_path in pub_paths:
+        raise_error(
+            f"A publication already exists in this project at {pub_path}"
+        )
+    elif overwrite and pub_path in pub_paths:
+        # Note: This publication will go to the end of the list
+        pubs = [p for p in pubs if p.get("path") != pub_path]
     # Check that we have a LaTeX environment
     typer.echo("Checking that this project has a LaTeX environment")
     envs = ck_info.get("environments", {})

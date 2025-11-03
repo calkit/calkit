@@ -64,7 +64,7 @@ def update_license(
     ] = False,
 ):
     """Update license with a reasonable default
-    (MIT for code, CC-BY-4.0 for other files)
+    (MIT for code, CC-BY-4.0 for other files).
     """
     with open("LICENSE", "w") as f:
         f.write(

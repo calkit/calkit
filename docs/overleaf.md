@@ -54,11 +54,17 @@ calkit overleaf import \
     paper \
     --title "My paper title" \
     --kind journal-article \
-    --sync-path paper.tex \
     --push-path figures
 ```
 
-If necessary, this will create a TeXlive Docker [environment](environments.md)
+This command will link a local project folder, in this case `paper`,
+to the Overleaf project,
+and always push the `paper/figures` folder, i.e.,
+the figures will be one-way synced,
+whereas any other files will be synced bidirectionally.
+
+If necessary, this command will also
+create a TeXlive Docker [environment](environments.md)
 and a build stage in the [pipeline](pipeline/index.md),
 which will build and cache the PDF upon calling `calkit run`.
 
@@ -82,3 +88,30 @@ You can view an example project that uses Overleaf integration on
 and the [Calkit Cloud](https://calkit.io/calkit/example-overleaf).
 This project syncs the document text bidirectionally,
 and pushes figures up to Overleaf.
+
+## Merge conflicts
+
+If the same lines are changed in a file in both the main project and the
+Overleaf project a "merge conflict" will occur.
+In this case,
+the text will need to be merged together manually.
+[VS Code](https://code.visualstudio.com/) has a built-in merge conflict
+resolution tool, but there are many to choose from.
+
+In the file, e.g., `paper.tex`, you'll see something like:
+
+```tex
+<<<<<<< HEAD
+I made this edit locally. It's pretty great.
+=======
+I made this edit on Overleaf. It's great.
+>>>>>>> <commit-id-of-patch>
+```
+
+After merging the two chunks together and deleting the lines that start with
+`<<<<<<<`, `>>>>>>>`, or `=======`,
+mark the conflict as resolved and sync again with:
+
+```sh
+calkit overleaf sync --resolve
+```

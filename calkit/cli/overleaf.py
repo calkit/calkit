@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import filecmp
+import json
 import os
 import shutil
 import subprocess
@@ -332,14 +333,6 @@ def sync(
             help="Mark merge conflicts as resolved before committing.",
         ),
     ] = False,
-    force: Annotated[
-        bool,
-        typer.Option(
-            "--force",
-            "-f",
-            help="Force push to Overleaf even if there are conflicts.",
-        ),
-    ] = False,
 ):
     """Sync publications with Overleaf."""
     # TODO: We should probably ensure the pipeline isn't stale
@@ -367,6 +360,20 @@ def sync(
                     "Please set it using 'calkit config set overleaf_token'"
                 )
     repo = git.Repo()
+    conflict_fpath = os.path.join(".calkit", "overleaf", "CONFLICT.json")
+    in_am_session = "in the middle of an am session" in repo.git.status()
+    # Check if we're in the middle of resolving a merge conflict
+    if in_am_session and not resolve:
+        raise_error(
+            "You are in the middle of resolving a merge conflict; "
+            "use `calkit overleaf sync --resolve` after editing file(s)"
+        )
+    elif resolve:
+        if not os.path.isfile(conflict_fpath):
+            raise_error("No merge conflict to resolve")
+        # Figure out which wdir has the conflict in it
+        with open(conflict_fpath) as f:
+            resolving_info = json.load(f)
     for pub in pubs:
         overleaf_config = pub.get("overleaf", {})
         if not overleaf_config:
@@ -389,6 +396,16 @@ def sync(
                 "No working directory defined for this publication; "
                 "please set it in the publication's Overleaf config"
             )
+        if resolve and wdir == resolving_info["wdir"]:
+            repo.git.add(wdir)
+            if repo.git.diff(["--staged", wdir]):
+                repo.git.commit(
+                    [wdir, "-m", f"Resolve Overleaf merge conflict in {wdir}"]
+                )
+            if in_am_session:
+                repo.git.am("--skip")
+        elif resolve:
+            continue
         # If there are any uncommitted changes in the publication working
         # directory, raise an error
         if repo.git.diff(wdir) or repo.index.diff("HEAD", wdir):
@@ -423,7 +440,10 @@ def sync(
                 "it matches one in your Overleaf account settings "
                 "(https://overleaf.com/user/settings)"
             )
-        last_sync_commit = pub["overleaf"].get("last_sync_commit")
+        if resolve:
+            last_sync_commit = resolving_info["last_overleaf_commit"]
+        else:
+            last_sync_commit = pub["overleaf"].get("last_sync_commit")
         if last_sync_commit:
             commits_since = list(
                 overleaf_repo.iter_commits(rev=f"{last_sync_commit}..HEAD")
@@ -432,6 +452,8 @@ def sync(
                 f"There have been {len(commits_since)} changes on "
                 "Overleaf since last sync"
             )
+        else:
+            commits_since = []
         # Determine which paths to sync and push
         # TODO: Support glob patterns
         git_sync_paths = pub["overleaf"].get("sync_paths", [])
@@ -488,23 +510,38 @@ def sync(
                     input=patch,
                     text=True,
                     encoding="utf-8",
+                    capture_output=True,
                 )
-                # TODO: Better detect that we encountered a merge conflict
-                # here
-                # It's possible this command failed for a different reason
-                if process.returncode != 0:
-                    if force or resolve:
-                        # Skip any patches we might be in the middle of
-                        try:
-                            repo.git.am("--skip")
-                        except Exception:
-                            pass
-                    else:
-                        raise_error(
-                            "Failed to apply Overleaf patch to project repo. "
-                            "Resolve merge conflicts in the relevant files, "
-                            "then call:\n\n    calkit overleaf sync --resolve"
+                # Handle merge conflicts
+                if (
+                    process.returncode != 0
+                    and "merge conflict" in process.stdout.lower()
+                ):
+                    msg = ""
+                    for line in process.stdout.split("\n"):
+                        if "merge conflict" in line.lower():
+                            msg += line + "\n"
+                    # Save a file to track this merge conflict
+                    c = overleaf_repo.head.commit.hexsha
+                    with open(conflict_fpath, "w") as f:
+                        json.dump(
+                            {
+                                "wdir": wdir,
+                                "last_overleaf_commit": c,
+                                "pub_path": pub["path"],
+                            },
+                            f,
                         )
+                    raise_error(
+                        f"{msg}Edit the file(s) and then call:\n\n"
+                        "    calkit overleaf sync --resolve"
+                    )
+                elif process.returncode != 0:
+                    raise_error(f"Could not apply:\n{process.stdout}")
+            elif resolve:
+                # We have no patch since the last sync, but we need to update
+                # our latest sync commit
+                typer.echo("Merge conflict resolved")
             else:
                 typer.echo("No changes to apply")
         else:
@@ -574,6 +611,8 @@ def sync(
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)
         repo.git.add("calkit.yaml")
+        if resolve and os.path.isfile(conflict_fpath):
+            os.remove(conflict_fpath)
         # Stage the changes in the project repo
         # Add any DVC sync paths to DVC
         for dvc_sync_path in dvc_sync_paths_in_project:

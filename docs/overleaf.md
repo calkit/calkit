@@ -113,6 +113,5 @@ After merging the two chunks together and deleting the lines that start with
 mark the conflict as resolved and sync again with:
 
 ```sh
-calkit save -am "Resolve merge conflict from Overleaf sync"
 calkit overleaf sync --resolve
 ```

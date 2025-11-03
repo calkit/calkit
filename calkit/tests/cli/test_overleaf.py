@@ -31,10 +31,7 @@ def test_overleaf(tmp_dir):
     pid = str(uuid.uuid4())
     ol_repo = _make_temp_overleaf_project(pid)
     ol_repo.git.config(["receive.denyCurrentBranch", "ignore"])
-    subprocess.run(
-        ["calkit", "init"],
-        check=True,
-    )
+    subprocess.run(["calkit", "init"], check=True)
     repo = git.Repo()
     tmp_remote = f"/tmp/overleaf-sync-remotes/{pid}"
     os.makedirs(tmp_remote, exist_ok=True)
@@ -85,9 +82,6 @@ def test_overleaf(tmp_dir):
         txt = f.read()
     assert ">>>>>>>" in txt
     # Now let's resolve the commit without actually editing the file
-    subprocess.run(
-        ["calkit", "save", "-am", "Resolve merge conflict from Overleaf sync"]
-    )
     subprocess.run(["calkit", "overleaf", "sync", "--resolve"], check=True)
     # Now make another change on Overleaf but allow the sync to succeed
     with open(os.path.join(ol_repo.working_dir, "main.tex"), "a") as f:

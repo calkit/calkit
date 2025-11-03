@@ -366,7 +366,7 @@ def sync(
     if in_am_session and not resolve:
         raise_error(
             "You are in the middle of resolving a merge conflict; "
-            "use `calkit overleaf sync --resolve` after editing file(s)"
+            "use 'calkit overleaf sync --resolve' after editing file(s)"
         )
     elif resolve:
         if not os.path.isfile(conflict_fpath):

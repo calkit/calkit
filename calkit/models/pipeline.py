@@ -339,9 +339,11 @@ class MatlabCommandStage(MatlabStage):
     @property
     def dvc_deps(self) -> list[str]:
         # Write the command to a temporary .m file to get dependencies
-        with tempfile.NamedTemporaryFile() as f:
+        with tempfile.NamedTemporaryFile(mode='w+t', suffix='.m', dir='.') as f:
             f.write(self.command)
         deps = super().get_deps_from_matlab(f.name)
+        print('deps before removing temp file:', deps)
+        print('temp file name:', f.name)
         deps.remove(f.name)
         return deps
 

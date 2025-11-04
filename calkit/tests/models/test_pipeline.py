@@ -173,6 +173,8 @@ def test_matlabcommandstage():
         environment="_system",
         command='disp("Hello, MATLAB!"); matlab_parent',
     )
+    print(s.dvc_deps)
+    print(str(s.dvc_deps))
     assert s.dvc_deps == ["test/matlab_child.m", "test/matlab_parent.m"]
 
 

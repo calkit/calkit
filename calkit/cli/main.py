@@ -1317,6 +1317,8 @@ def run_in_env(
         if "env-vars" in env:
             warn("The 'env-vars' key is deprecated; use 'env_vars' instead.")
             env_vars.update(env["env-vars"])
+        # Add project-level env vars (non-secret)
+        env_vars.update(ck_info.get("env_vars", {}))
         # Also add any project-level environmental variable dependencies
         project_env_vars = calkit.get_env_var_dep_names()
         if project_env_vars:

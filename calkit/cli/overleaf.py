@@ -159,11 +159,7 @@ def import_publication(
         shutil.rmtree(overleaf_project_dir)
     # Clone the Overleaf project
     typer.echo("Cloning Overleaf project")
-    git.Repo.clone_from(
-        git_clone_url,
-        overleaf_project_dir,
-        depth=1,
-    )
+    git.Repo.clone_from(git_clone_url, overleaf_project_dir)
     # Detect target path if not specified
     if target_path is None:
         ol_contents = os.listdir(overleaf_project_dir)

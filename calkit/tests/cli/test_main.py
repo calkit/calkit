@@ -452,6 +452,19 @@ def test_run(tmp_dir):
     subprocess.check_call(
         ["calkit", "save", "-am", "Run pipeline", "--no-push"]
     )
+    # Test that we can set env vars at the project level
+    ck_info = calkit.load_calkit_info()
+    ck_info["env_vars"] = {"MY_ENV_VAR": "some-value"}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("script.py", "w") as f:
+        f.write("import os\nprint(os.environ['MY_ENV_VAR'])")
+    out = subprocess.check_output(["calkit", "run"], text=True)
+    print(out)
+    assert "some-value" in out
+    subprocess.check_call(
+        ["calkit", "save", "-am", "Run pipeline", "--no-push"]
+    )
     # Make sure we can run on a detached head
     repo = git.Repo()
     repo.git.checkout("HEAD^")

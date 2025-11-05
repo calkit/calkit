@@ -987,7 +987,7 @@ def run(
         typer.Option(
             "--save",
             "-S",
-            help="Save the project after running, including outputs of successful and unsuccessful stages.",
+            help="Save the project after running, only if the full pipeline succeeds.",
         ),
     ] = False,
     save_successes_after_run: Annotated[
@@ -1110,7 +1110,7 @@ def run(
         file_handler.setFormatter(formatter)
         dvc.log.logger.addHandler(file_handler)
     # Remove newline logging in dvc.repo.reproduce
-    dvc.repo.reproduce.logger.setLevel(logging.ERROR)
+    dvc.repo.reproduce.logger.setLevel(logging.WARNING)
     # Disable other misc DVC output
     dvc.ui.ui.write = lambda *args, **kwargs: None
     res = dvc_cli_main(["repro"] + args)
@@ -1167,20 +1167,6 @@ def run(
         with open(run_info_fpath, "w") as f:
             json.dump(run_info, f, indent=2)
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
-    if failed:
-        raise_error("Pipeline failed")
-    else:
-        typer.echo(
-            "Pipeline completed successfully ✅".encode(
-                "utf-8", errors="replace"
-            )
-        )
-    if save_after_run or save_message is not None:
-        if save_message is None:
-            save_message = "Run pipeline"
-        if not quiet:
-            typer.echo("Saving the whole project after successful run")
-        save(save_all=True, message=save_message)
     if save_successes_after_run:
         if save_message is None:
             save_message = "Run pipeline"
@@ -1190,6 +1176,20 @@ def run(
             stage_run_info
         )
         save(paths=successful_stage_outs, message=save_message)
+    if failed:
+        raise_error("Pipeline failed")
+    else:
+        typer.echo(
+            "Pipeline completed successfully ✅".encode(
+                "utf-8", errors="replace"
+            )
+        )
+        if save_after_run or save_message is not None:
+            if save_message is None:
+                save_message = "Run pipeline"
+            if not quiet:
+                typer.echo("Saving the whole project after a successful run")
+            save(save_all=True, message=save_message)
 
 
 @app.command(name="manual-step", help="Execute a manual step.")

@@ -181,7 +181,6 @@ def get_stage_outputs(stage_name: str, wdir: str = ".") -> list[str]:
         raise KeyError(f"Stage '{stage_name}' not found in dvc.yaml")
     stage = stages[stage_name] or {}
     raw_outs = stage.get("outs") or []
-
     outs: list[str] = []
     for entry in raw_outs:
         out_path = None

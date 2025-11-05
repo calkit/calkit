@@ -552,7 +552,6 @@ def test_get_outs_from_successful_stages():
     with open(fpath, "r") as f:
         content = f.read()
     stage_run_info = _stage_run_info_from_log_content(content)
-
     # Only the two _check-env-* stages completed per the fixture
     completed = [
         s
@@ -560,7 +559,6 @@ def test_get_outs_from_successful_stages():
         if info.get("status") == "completed"
     ]
     assert sorted(completed) == sorted(["_check-env-py", "_check-env-tex"])
-
     outs = _get_outs_from_successful_stages(
         stage_run_info, wdir=os.path.dirname(fpath)
     )

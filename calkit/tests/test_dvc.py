@@ -1,6 +1,7 @@
 """Tests for the ``dvc`` module."""
 
 import subprocess
+from pathlib import Path
 
 import calkit
 
@@ -35,3 +36,23 @@ def test_get_remotes(tmp_dir):
             "https://sup.com/this/is/a/long/remote/url/so/test/this"
         ),
     }
+
+
+def test_get_stage_outputs_string_and_dict():
+    # Create a dvc.yaml
+    dvc_yaml = Path("dvc.yaml")
+    content = """
+stages:
+  build_model:
+    cmd: python train.py
+    outs:
+      - data/model.pkl
+      - results/output.csv
+      - logs/run.log:
+        - cache: false
+"""
+    dvc_yaml.write_text(content)
+    outs = calkit.dvc.get_stage_outputs("build_model")
+    expected = ["data/model.pkl", "results/output.csv", "logs/run.log"]
+
+    assert sorted(outs) == sorted(expected)

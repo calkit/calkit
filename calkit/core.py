@@ -602,3 +602,23 @@ def get_md5(path: str, exclude_files: list[str] | None = None) -> str:
         with open(path) as f:
             content = f.read()
         return hashlib.md5(content.encode()).hexdigest()
+
+
+def set_env_vars(ck_info: dict, cli: bool = True) -> None:
+    """Set environmental variables according to the values read from
+    ``calkit.yaml``.
+    """
+    env_vars = ck_info.get("env_vars", {})
+    if not isinstance(env_vars, dict):
+        msg = (
+            "Environmental variables in Calkit project info must be a "
+            "map/dictionary"
+        )
+        if cli:
+            from calkit.cli import raise_error
+
+            raise_error(msg)
+        else:
+            raise ValueError(msg)
+    for k, v in env_vars.items():
+        os.environ[str(k)] = str(v)

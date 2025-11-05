@@ -990,6 +990,9 @@ def run(
     """Check dependencies and run the pipeline."""
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    ck_info = calkit.load_calkit_info()
+    # Set env vars
+    calkit.set_env_vars(ck_info=ck_info)
     if not quiet:
         typer.echo("Getting system information")
     system_info = calkit.get_system_info()
@@ -1013,7 +1016,6 @@ def run(
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(str(e))
     # Compile the pipeline
-    ck_info = calkit.load_calkit_info()
     if ck_info.get("pipeline", {}):
         if not quiet:
             typer.echo("Compiling DVC pipeline")
@@ -1251,6 +1253,7 @@ def run_in_env(
 ):
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info(process_includes="environments")
+    calkit.set_env_vars(ck_info=ck_info)
     envs = ck_info.get("environments", {})
     if not envs:
         raise_error("No environments defined in calkit.yaml")
@@ -1314,6 +1317,8 @@ def run_in_env(
         if "env-vars" in env:
             warn("The 'env-vars' key is deprecated; use 'env_vars' instead.")
             env_vars.update(env["env-vars"])
+        # Add project-level env vars (non-secret)
+        env_vars.update(ck_info.get("env_vars", {}))
         # Also add any project-level environmental variable dependencies
         project_env_vars = calkit.get_env_var_dep_names()
         if project_env_vars:
@@ -1668,6 +1673,7 @@ def run_procedure(
         return value
 
     ck_info = calkit.load_calkit_info(process_includes="procedures")
+    calkit.set_env_vars(ck_info=ck_info)
     procs = ck_info.get("procedures", {})
     if name not in procs:
         raise_error(f"'{name}' is not defined as a procedure")

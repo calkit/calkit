@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import platform
+import warnings
 from typing import Any, Literal
 from typing import get_args as get_type_args
 
@@ -37,6 +38,9 @@ def supports_keyring() -> bool:
         return True
     except keyring.errors.InitError:
         # Backend failed to initialize (e.g., user dismissed prompt)
+        return False
+    except keyring.errors.KeyringLocked:
+        warnings.warn("Keyring is locked; will use YAML config file")
         return False
     except keyring.errors.KeyringError as e:
         # Check if the underlying exception indicates no backend
@@ -96,7 +100,7 @@ def set_secret(key: str, value: str) -> None:
     service_name = get_app_name()
     if platform.system() == "Linux":
         value_bytes = value.encode("utf-8")
-        keyring.set_password(service_name, key, value_bytes)
+        keyring.set_password(service_name, key, value_bytes)  # type: ignore
     else:
         keyring.set_password(service_name, key, value)
 
@@ -170,6 +174,7 @@ class Settings(BaseSettings):
     dataframe_engine: Literal["pandas", "polars"] = "pandas"
     github_token: KeyringOptionalSecret | None = None
     zenodo_token: KeyringOptionalSecret | None = None
+    caltechdata_token: KeyringOptionalSecret | None = None
     overleaf_token: KeyringOptionalSecret | None = None
 
     @classmethod

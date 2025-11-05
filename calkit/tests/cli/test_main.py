@@ -54,6 +54,18 @@ def test_run_in_env(tmp_dir):
         stdin=stdin,
         check=True,
     )
+    # Check that we can pass project env vars into the container
+    ck_info = calkit.load_calkit_info()
+    ck_info["env_vars"] = {"MY_COOL_ENV_VAR": "my cool value"}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    p = subprocess.run(
+        ["calkit", "xenv", "echo", "$MY_COOL_ENV_VAR"],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert "my cool value" in p.stdout
     # Now let's create a 2nd Docker env and make sure we need to call it by
     # name when trying to run
     subprocess.check_call(
@@ -201,6 +213,7 @@ def test_run_in_venv(tmp_dir):
         )
         .decode()
         .strip()
+        .split("\n")[-1]
     )
     assert out == "1.17.0"
     # Test pixi envs
@@ -452,6 +465,19 @@ def test_run(tmp_dir):
     )
     out = subprocess.check_output(["calkit", "run"], text=True)
     print(out)
+    subprocess.check_call(
+        ["calkit", "save", "-am", "Run pipeline", "--no-push"]
+    )
+    # Test that we can set env vars at the project level
+    ck_info = calkit.load_calkit_info()
+    ck_info["env_vars"] = {"MY_ENV_VAR": "some-value"}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("script.py", "w") as f:
+        f.write("import os\nprint(os.environ['MY_ENV_VAR'])")
+    out = subprocess.check_output(["calkit", "run"], text=True)
+    print(out)
+    assert "some-value" in out
     subprocess.check_call(
         ["calkit", "save", "-am", "Run pipeline", "--no-push"]
     )

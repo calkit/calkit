@@ -53,6 +53,7 @@ def test_check_env(tmp_dir, conda_env_name):
             "--no-check",
             "python",
             "pip",
+            "h5py",
             "--pip",
             "pxl",
         ]

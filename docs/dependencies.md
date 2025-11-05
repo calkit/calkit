@@ -57,3 +57,14 @@ can be used to define these variables.
 in lieu of directly editing `.env`.
 `calkit check env-vars` can also be run to check for missing variables,
 prompting the user for their values and setting them in `.env`.
+
+Additional (non-secret) environmental variables can be set at the project
+level in `calkit.yaml` in the `env_vars` map:
+
+```yaml
+env_vars:
+  MY_ENV_VAR_NAME: the-value-here
+  ANOTHER_VAR: another value
+```
+
+These will then be set for calls to the `run` and `xenv` commands.

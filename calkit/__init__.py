@@ -1,4 +1,4 @@
-__version__ = "0.30.3"
+__version__ = "0.30.10"
 
 from .core import *  # noqa: F403, I001
 from . import git  # noqa: F401
@@ -13,6 +13,8 @@ from . import conda  # noqa: F401
 from . import calc  # noqa: F401
 from . import check  # noqa: F401
 from . import github  # noqa: F401
-from . import zenodo  # noqa: F401
+from . import invenio  # noqa: F401
 from . import releases  # noqa: F401
+from . import licenses  # noqa: F401
+from . import overleaf  # noqa: F401
 from .notebooks import declare_notebook  # noqa: F401

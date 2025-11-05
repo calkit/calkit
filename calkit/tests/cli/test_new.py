@@ -659,3 +659,116 @@ def test_new_julia_env(tmp_dir):
     )
     assert os.path.isfile("envs/my-env/Project.toml")
     assert os.path.isfile("envs/my-env/Manifest.toml")
+
+
+def test_new_release(tmp_dir):
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "project",
+            ".",
+            "--title",
+            "Test project",
+            "--name",
+            "test-project",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/calkit/test-project.git",
+        ]
+    )
+    # TODO: Add project description?
+    # Add authors
+    authors = [
+        {
+            "first_name": "Alice",
+            "last_name": "Smith",
+            "affiliation": "SomeU",
+            "orcid": "0000-0001-2345-6789",
+        },
+        {
+            "first_name": "Bob",
+            "last_name": "Jones",
+            "affiliation": None,
+            "orcid": None,
+        },
+    ]
+    ck_info = calkit.load_calkit_info()
+    ck_info["authors"] = authors
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # Add a default license
+    subprocess.check_call(
+        [
+            "calkit",
+            "update",
+            "license",
+            "--copyright-holder",
+            "Some Person",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "--name",
+            "v0.1.0",
+            "--description",
+            "First release.",
+            "--draft",
+            "--no-github",
+            "--verbose",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert "v0.1.0" in ck_info["releases"]
+    release = ck_info["releases"]["v0.1.0"]
+    assert release["doi"] is not None
+    # TODO: Test that the GitHub link is in the related works
+    # Test that we can update this release
+    # Side note: This is revealing some design weirdness where we're grouping
+    # functionality under verbs and not the type of resource they act on
+    # This leads to a more English-like CLI, but we may want to organize the
+    # logic by resource type
+    subprocess.check_call(
+        ["calkit", "update", "release", "--name", "v0.1.0", "--reupload"]
+    )
+    # TODO: Check that the files were actually updated, not just that there
+    # were not errors
+    # TODO: Check that the git rev of the release was updated
+    # Test publishing the release
+    subprocess.check_call(
+        [
+            "calkit",
+            "update",
+            "release",
+            "--latest",
+            "--publish",
+            "--no-github",
+            "--no-push-tags",
+        ]
+    )
+    # Check Git tags for the release name
+    git_tags = git.Repo().tags
+    assert "v0.1.0" in [tag.name for tag in git_tags]
+    # Check the license is correct
+    # TODO: It seems like we can't use multiple license IDs with the API
+    record_id = release["record_id"]
+    record = calkit.invenio.get(f"/records/{record_id}")
+    metadata = record["metadata"]
+    print(metadata)
+    assert metadata["license"] == {"id": "cc-by-4.0"}
+    related = metadata["related_identifiers"]
+    assert related[0]["identifier"] == "https://github.com/calkit/test-project"
+    # TODO: Test that we can delete the release
+    # This will fail if it's not a draft
+    # subprocess.check_call(
+    #     ["calkit", "update", "release", "--name", "v0.1.0", "--delete"]
+    # )

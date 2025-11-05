@@ -9,6 +9,7 @@ import logging
 import os
 import platform as _platform
 import posixpath
+import shutil
 import subprocess
 import sys
 import time
@@ -560,6 +561,12 @@ def save(
     no_recursive: Annotated[
         bool, typer.Option("--no-recursive", help="Do not push to submodules.")
     ] = False,
+    sync_overleaf: Annotated[
+        bool,
+        typer.Option(
+            "--overleaf", "-O", help="Sync with Overleaf after saving."
+        ),
+    ] = False,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -580,6 +587,9 @@ def save(
             typer.echo(
                 f"Generating commit message for staged files: {staged_files}"
             )
+        if not staged_files:
+            typer.echo("No changes to commit; exiting")
+            raise typer.Exit(0)
         if len(staged_files) != 1:
             raise_error(
                 "Automatic commit messages can only be generated when "
@@ -603,11 +613,12 @@ def save(
         message = typer.prompt("Message")
     # Figure out if we have any DVC files in this commit, and if not, we can
     # skip pushing to DVC
+    staged_files = calkit.git.get_staged_files()
+    if not staged_files:
+        typer.echo("No changes to commit; exiting")
+        raise typer.Exit(0)
     any_dvc = any(
-        [
-            path == "dvc.lock" or path.endswith(".dvc")
-            for path in calkit.git.get_staged_files()
-        ]
+        [path == "dvc.lock" or path.endswith(".dvc") for path in staged_files]
     )
     commit(all=True if paths is None else False, message=message)
     if not no_push:
@@ -619,6 +630,10 @@ def save(
             dvc_args=dvc_push_args,
             no_recursive=no_recursive,
         )
+    if sync_overleaf:
+        from calkit.cli.overleaf import sync as overleaf_sync
+
+        overleaf_sync(verbose=verbose, no_push=no_push)
 
 
 @app.command(name="pull")
@@ -1008,6 +1023,9 @@ def run(
     """Check dependencies and run the pipeline."""
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    ck_info = calkit.load_calkit_info()
+    # Set env vars
+    calkit.set_env_vars(ck_info=ck_info)
     if not quiet:
         typer.echo("Getting system information")
     system_info = calkit.get_system_info()
@@ -1031,7 +1049,6 @@ def run(
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(str(e))
     # Compile the pipeline
-    ck_info = calkit.load_calkit_info()
     if ck_info.get("pipeline", {}):
         if not quiet:
             typer.echo("Compiling DVC pipeline")
@@ -1279,6 +1296,7 @@ def run_in_env(
 ):
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info(process_includes="environments")
+    calkit.set_env_vars(ck_info=ck_info)
     envs = ck_info.get("environments", {})
     if not envs:
         raise_error("No environments defined in calkit.yaml")
@@ -1342,6 +1360,8 @@ def run_in_env(
         if "env-vars" in env:
             warn("The 'env-vars' key is deprecated; use 'env_vars' instead.")
             env_vars.update(env["env-vars"])
+        # Add project-level env vars (non-secret)
+        env_vars.update(ck_info.get("env_vars", {}))
         # Also add any project-level environmental variable dependencies
         project_env_vars = calkit.get_env_var_dep_names()
         if project_env_vars:
@@ -1696,6 +1716,7 @@ def run_procedure(
         return value
 
     ck_info = calkit.load_calkit_info(process_includes="procedures")
+    calkit.set_env_vars(ck_info=ck_info)
     procs = ck_info.get("procedures", {})
     if name not in procs:
         raise_error(f"'{name}' is not defined as a procedure")
@@ -1861,20 +1882,41 @@ def set_env_var(
 @app.command(name="upgrade")
 def upgrade():
     """Upgrade Calkit."""
-    if calkit.check_dep_exists("pipx"):
-        cmd = ["pipx", "upgrade", "calkit-python"]
-    elif calkit.check_dep_exists("uv"):
+    # First detect how Calkit is installed
+    # If installed with uv tool, calkit will be located at something like
+    # ~/.local/bin/calkit
+    which_calkit = shutil.which("calkit")
+    if which_calkit is None:
+        raise_error("Calkit is not installed")
+    split_path = os.path.normpath(str(which_calkit)).split(os.sep)
+    if (
+        ".local" in split_path
+        and "bin" in split_path
+        and calkit.check_dep_exists("uv")
+    ):
+        # This is a uv tool install
         cmd = [
             "uv",
-            "pip",
+            "tool",
             "install",
-            "--system",
             "--upgrade",
             "calkit-python",
         ]
+    elif "pipx" in split_path and calkit.check_dep_exists("pipx"):
+        cmd = ["pipx", "upgrade", "calkit-python"]
     else:
-        cmd = ["pip", "install", "--upgrade", "calkit-python"]
-    subprocess.run(cmd)
+        cmd = [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "calkit-python",
+        ]
+    res = subprocess.run(cmd)
+    if res.returncode != 0:
+        raise_error("Upgrade failed")
+    typer.echo("Success!")
 
 
 @app.command(name="switch-branch")

@@ -54,5 +54,4 @@ stages:
     dvc_yaml.write_text(content)
     outs = calkit.dvc.get_stage_outputs("build_model")
     expected = ["data/model.pkl", "results/output.csv", "logs/run.log"]
-
     assert sorted(outs) == sorted(expected)

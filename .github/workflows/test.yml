@@ -2,6 +2,9 @@ name: Run tests
 
 on: pull_request
 
+env:
+  CALKIT_TEST_ZENODO_TOKEN: ${{ secrets.CALKIT_ZENODO_TOKEN }}
+
 jobs:
   linux:
     runs-on: ubuntu-latest
@@ -12,6 +15,8 @@ jobs:
           git config --global user.name github-actions[bot]
           git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
           git config --global init.defaultBranch main
+      - name: Configure Git push behavior
+        run: git config --global push.autoSetupRemote true
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
       - name: Setup Miniforge
@@ -31,7 +36,7 @@ jobs:
         run: |
           source ~/.bashrc
           pixi --version
-          make test
+          uv run pytest -n 4
   windows:
     runs-on: windows-latest
     timeout-minutes: 20

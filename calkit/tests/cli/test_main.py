@@ -54,6 +54,18 @@ def test_run_in_env(tmp_dir):
         stdin=stdin,
         check=True,
     )
+    # Check that we can pass project env vars into the container
+    ck_info = calkit.load_calkit_info()
+    ck_info["env_vars"] = {"MY_COOL_ENV_VAR": "my cool value"}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    p = subprocess.run(
+        ["calkit", "xenv", "echo", "$MY_COOL_ENV_VAR"],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert "my cool value" in p.stdout
     # Now let's create a 2nd Docker env and make sure we need to call it by
     # name when trying to run
     subprocess.check_call(
@@ -201,6 +213,7 @@ def test_run_in_venv(tmp_dir):
         )
         .decode()
         .strip()
+        .split("\n")[-1]
     )
     assert out == "1.17.0"
     # Test pixi envs
@@ -455,6 +468,19 @@ def test_run(tmp_dir):
     subprocess.check_call(
         ["calkit", "save", "-am", "Run pipeline", "--no-push"]
     )
+    # Test that we can set env vars at the project level
+    ck_info = calkit.load_calkit_info()
+    ck_info["env_vars"] = {"MY_ENV_VAR": "some-value"}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("script.py", "w") as f:
+        f.write("import os\nprint(os.environ['MY_ENV_VAR'])")
+    out = subprocess.check_output(["calkit", "run"], text=True)
+    print(out)
+    assert "some-value" in out
+    subprocess.check_call(
+        ["calkit", "save", "-am", "Run pipeline", "--no-push"]
+    )
     # Make sure we can run on a detached head
     repo = git.Repo()
     repo.git.checkout("HEAD^")
@@ -552,7 +578,6 @@ def test_get_outs_from_successful_stages():
     with open(fpath, "r") as f:
         content = f.read()
     stage_run_info = _stage_run_info_from_log_content(content)
-
     # Only the two _check-env-* stages completed per the fixture
     completed = [
         s
@@ -560,7 +585,6 @@ def test_get_outs_from_successful_stages():
         if info.get("status") == "completed"
     ]
     assert sorted(completed) == sorted(["_check-env-py", "_check-env-tex"])
-
     outs = _get_outs_from_successful_stages(
         stage_run_info, wdir=os.path.dirname(fpath)
     )

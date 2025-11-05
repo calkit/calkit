@@ -514,6 +514,22 @@ def detect_project_name(
     return name
 
 
+def detect_project_github_url(wdir: str | None = None) -> str | None:
+    """Detect the GitHub URL for the current project."""
+    try:
+        url = Repo(path=wdir).remote().url
+    except ValueError:
+        warnings.warn("No Git remote set with name 'origin'")
+        return None
+    if "github.com" not in url:
+        warnings.warn("Git remote is not a GitHub URL")
+        return None
+    url = url.removesuffix(".git")
+    if url.startswith("git@github.com:"):
+        url = url.replace("git@github.com:", "https://github.com/")
+    return url
+
+
 def get_dep_version(dep_name: str) -> str | None:
     """Get the version of a system-level dependency."""
     try:
@@ -586,3 +602,23 @@ def get_md5(path: str, exclude_files: list[str] | None = None) -> str:
         with open(path) as f:
             content = f.read()
         return hashlib.md5(content.encode()).hexdigest()
+
+
+def set_env_vars(ck_info: dict, cli: bool = True) -> None:
+    """Set environmental variables according to the values read from
+    ``calkit.yaml``.
+    """
+    env_vars = ck_info.get("env_vars", {})
+    if not isinstance(env_vars, dict):
+        msg = (
+            "Environmental variables in Calkit project info must be a "
+            "map/dictionary"
+        )
+        if cli:
+            from calkit.cli import raise_error
+
+            raise_error(msg)
+        else:
+            raise ValueError(msg)
+    for k, v in env_vars.items():
+        os.environ[str(k)] = str(v)

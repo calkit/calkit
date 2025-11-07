@@ -640,9 +640,15 @@ def save(
         typer.echo("No changes to commit; exiting")
         raise typer.Exit(0)
     commit(all=True if paths is None else False, message=message)
-    any_dvc = any(
-        [path == "dvc.lock" or path.endswith(".dvc") for path in staged_files]
-    ) or stages is not None
+    any_dvc = (
+        any(
+            [
+                path == "dvc.lock" or path.endswith(".dvc")
+                for path in staged_files
+            ]
+        )
+        or stages is not None
+    )
     if not no_push:
         if verbose and not any_dvc:
             typer.echo("Not pushing to DVC since no DVC files were staged")
@@ -889,6 +895,7 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
                 break
     return res
 
+
 def _get_successful_stages(
     stage_run_info: dict,
 ) -> list[str]:
@@ -898,6 +905,7 @@ def _get_successful_stages(
         if info.get("status") == "completed"
     ]
     return successful_stages
+
 
 def _get_outs_from_successful_stages(
     stage_run_info: dict, wdir: str = "."
@@ -1043,9 +1051,11 @@ def run(
     save_message: Annotated[
         str | None,
         typer.Option(
-            "--save-message", "-m", help="Commit message for saving. " \
-            "Uses --save-any-successes if neither --save-any-successes " \
-            "nor --save-if-all-succeed are set."
+            "--save-message",
+            "-m",
+            help="Commit message for saving. "
+            "Uses --save-any-successes if neither --save-any-successes "
+            "nor --save-if-all-succeed are set.",
         ),
     ] = None,
 ):
@@ -1103,7 +1113,11 @@ def run(
         dvc_status_before = dvc_repo.status()
         dvc_data_status_before = dvc_repo.data_status()
         dvc_data_status_before.pop("git", None)  # Remove git status
-    will_save = save_only_if_all_succeed or save_any_successful_stages or save_message is not None
+    will_save = (
+        save_only_if_all_succeed
+        or save_any_successful_stages
+        or save_message is not None
+    )
     if will_save:
         no_commit = True  # Don't allow dvc repro to auto-commit, since calkit will handle saving
     if targets is None:
@@ -1221,9 +1235,7 @@ def run(
     if will_save:
         if save_message is None:
             save_message = "Run pipeline"
-        successful_stages = _get_successful_stages(
-            stage_run_info
-        )
+        successful_stages = _get_successful_stages(stage_run_info)
         if not save_any_successful_stages and not save_only_if_all_succeed:
             save_any_successful_stages = True  # Default to saving any successful stages if message is provided without flags
         if not quiet:

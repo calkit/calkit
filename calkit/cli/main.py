@@ -471,12 +471,13 @@ def add(
             else:
                 typer.echo(f"Adding {path} to Git")
                 subprocess.call(["git", "add", path])
-        for stage in stages:
-            try:
-                dvc_cmd = ["dvc", "commit", stage]
-                subprocess.check_call(dvc_cmd)
-            except subprocess.CalledProcessError:
-                raise_error("DVC commit failed")
+        if stages is not None:
+            for stage in stages:
+                try:
+                    dvc_cmd = ["dvc", "commit", stage]
+                    subprocess.check_call(dvc_cmd)
+                except subprocess.CalledProcessError:
+                    raise_error("DVC commit failed")
     if commit_message is not None:
         subprocess.call(["git", "commit", "-m", commit_message])
     if push_commit:

@@ -238,3 +238,35 @@ def config_github_ssh():
         raise_error(
             "Failed to connect to GitHub via SSH; please check your setup"
         )
+
+
+@config_app.command(name="github-codespace")
+def config_github_codespace():
+    """Configure a GitHub Codespace.
+
+    Typically this will simply mean we exchange a GitHub token for a Calkit
+    token to use for pushing with DVC.
+
+    If this is run outside a Codespace, typically nothing will happen.
+    """
+    is_codespace = os.getenv("GITHUB_CODESPACE_TOKEN")
+    if not is_codespace:
+        typer.echo("Not running in compatible Codespace; exiting")
+        raise typer.Exit()
+    github_token = os.getenv("GITHUB_TOKEN")
+    if not github_token:
+        typer.echo("No GitHub token found; exiting")
+        raise typer.Exit()
+    try:
+        resp = calkit.cloud.post(
+            "/login/github-token",
+            headers={"Authorization": f"Bearer {github_token}"},
+        )
+        calkit_token = resp["access_token"]
+        typer.echo("Successfully authenticated with the Calkit API")
+        set_config_value("token", calkit_token)
+        # TODO: We should just fetch short-lived DVC tokens with the main
+        # Calkit API token if necessary, instead of creating long-lived ones
+        set_config_value("dvc_token", calkit_token)
+    except Exception as e:
+        raise_error(f"Failed to authenticate with GitHub token: {e}")

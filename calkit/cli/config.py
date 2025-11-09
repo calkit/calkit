@@ -261,6 +261,7 @@ def config_github_codespace():
         resp = calkit.cloud.post(
             "/login/github-token",
             headers={"Authorization": f"Bearer {github_token}"},
+            auth=False,
         )
         calkit_token = resp["access_token"]
         typer.echo("Successfully authenticated with the Calkit API")

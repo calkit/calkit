@@ -997,8 +997,26 @@ def run(
             "--save-message", "-m", help="Commit message for saving."
         ),
     ] = None,
+    target_inputs: Annotated[
+        list[str],
+        typer.Option(
+            "--input",
+            "--dep",
+            help="Run stages that depend on given input dependency path.",
+        ),
+    ] = [],
+    target_outputs: Annotated[
+        list[str],
+        typer.Option(
+            "--output",
+            "--out",
+            help="Run stages that produce the given output path.",
+        ),
+    ] = [],
 ):
     """Check dependencies and run the pipeline."""
+    if (target_inputs or target_outputs) and targets:
+        raise_error("Cannot specify both targets and inputs")
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info()
@@ -1027,14 +1045,56 @@ def run(
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(str(e))
     # Compile the pipeline
+    dvc_stages = None
     if ck_info.get("pipeline", {}):
         if not quiet:
             typer.echo("Compiling DVC pipeline")
         try:
-            calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+            dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
         except Exception as e:
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Pipeline compilation failed: {e}")
+    # Convert deps into target stage names
+    # TODO: This could probably be merged back upstream into DVC
+    if dvc_stages is None:
+        if os.path.exists("dvc.yaml"):
+            with open("dvc.yaml") as f:
+                dvc_stages = calkit.ryaml.load(f).get("stages", {})
+        else:
+            dvc_stages = {}
+    if target_inputs or target_outputs:
+        targets = []
+        input_abs_paths = [os.path.abspath(dep) for dep in target_inputs]
+        output_abs_paths = [os.path.abspath(out) for out in target_outputs]
+        for dvc_stage_name, dvc_stage in dvc_stages.items():
+            stage_deps = dvc_stage.get("deps", [])
+            for stage_dep in stage_deps:
+                # Check absolute path equality
+                abs_stage_dep = os.path.abspath(stage_dep)
+                if abs_stage_dep in input_abs_paths:
+                    if dvc_stage_name not in targets:
+                        typer.echo(
+                            f"Detected stage target {dvc_stage_name} "
+                            f"from input {stage_dep}"
+                        )
+                        targets.append(dvc_stage_name)
+            stage_outs = dvc_stage.get("outs", [])
+            for stage_out in stage_outs:
+                if isinstance(stage_out, str):
+                    abs_stage_out = os.path.abspath(stage_out)
+                elif isinstance(stage_out, dict):
+                    abs_stage_out = os.path.abspath(list(stage_out.keys())[0])
+                else:
+                    raise_error(f"Malformed output in stage: {dvc_stage_name}")
+                if abs_stage_out in output_abs_paths:
+                    if dvc_stage_name not in targets:
+                        typer.echo(
+                            f"Detected stage target {dvc_stage_name} "
+                            f"from output {stage_out}"
+                        )
+                        targets.append(dvc_stage_name)
+        if not targets:
+            raise_error("No stages found to run")
     if save_log:
         # Get status of Git repo before running
         repo = git.Repo()

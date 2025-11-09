@@ -41,8 +41,11 @@ def get_token() -> str:
     return token
 
 
-def get_headers(headers: dict | None = None) -> dict:
-    base_headers = {"Authorization": f"Bearer {get_token()}"}
+def get_headers(headers: dict | None = None, auth: bool = True) -> dict:
+    if auth:
+        base_headers = {"Authorization": f"Bearer {get_token()}"}
+    else:
+        base_headers = {}
     if headers is not None:
         return base_headers | headers
     else:
@@ -72,6 +75,7 @@ def _request(
     data: dict | None = None,
     headers: dict | None = None,
     as_json=True,
+    auth: bool = True,
     **kwargs,
 ):
     func = getattr(requests, kind)
@@ -80,7 +84,7 @@ def _request(
         params=params,
         json=json,
         data=data,
-        headers=get_headers(headers),
+        headers=get_headers(headers, auth=auth),
         **kwargs,
     )
     try:

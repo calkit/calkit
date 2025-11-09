@@ -1,6 +1,7 @@
 """Tests for ``cli.main``."""
 
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -441,8 +442,11 @@ def test_run(tmp_dir):
         ["calkit", "new", "uv-venv", "-n", "main", "requests"]
     )
     # Test that we can run a Python script
-    with open("script.py", "w") as f:
-        f.write("print('Hello from script.py')")
+    # Copy script.py from the repo's test directory
+    script_path = os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "test", "script.py"
+    )
+    shutil.copy2(script_path, "script.py")
     subprocess.check_call(
         [
             "calkit",
@@ -454,6 +458,8 @@ def test_run(tmp_dir):
             "script.py",
             "-e",
             "main",
+            "--output",
+            "test.txt",
         ]
     )
     subprocess.check_call(
@@ -469,14 +475,17 @@ def test_run(tmp_dir):
     ck_info["env_vars"] = {"MY_ENV_VAR": "some-value"}
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    with open("script.py", "w") as f:
-        f.write("import os\nprint(os.environ['MY_ENV_VAR'])")
+    with open("script.py", "a") as f:
+        f.write("\nimport os\nprint(os.environ['MY_ENV_VAR'])")
     out = subprocess.check_output(["calkit", "run"], text=True)
     print(out)
     assert "some-value" in out
     subprocess.check_call(
         ["calkit", "save", "-am", "Run pipeline", "--no-push"]
     )
+    # Check we can run for inputs and outputs
+    subprocess.check_call(["calkit", "run", "--input", "script.py"])
+    subprocess.check_call(["calkit", "run", "--output", "test.txt"])
     # Make sure we can run on a detached head
     repo = git.Repo()
     repo.git.checkout("HEAD^")

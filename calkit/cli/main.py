@@ -1045,6 +1045,7 @@ def run(
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(str(e))
     # Compile the pipeline
+    dvc_stages = None
     if ck_info.get("pipeline", {}):
         if not quiet:
             typer.echo("Compiling DVC pipeline")
@@ -1055,6 +1056,12 @@ def run(
             raise_error(f"Pipeline compilation failed: {e}")
     # Convert deps into target stage names
     # TODO: This could probably be merged back upstream into DVC
+    if dvc_stages is None:
+        if os.path.exists("dvc.yaml"):
+            with open("dvc.yaml") as f:
+                dvc_stages = calkit.ryaml.load(f).get("stages", {})
+        else:
+            dvc_stages = {}
     if target_inputs or target_outputs:
         targets = []
         input_abs_paths = [os.path.abspath(dep) for dep in target_inputs]

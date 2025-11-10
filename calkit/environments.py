@@ -12,7 +12,7 @@ def get_env_lock_dir(wdir: str | None = None) -> str:
     return env_lock_dir
 
 
-def _conda_subdir() -> str:
+def _conda_venv_subdir() -> str:
     sys = platform.system().lower()
     mach = platform.machine().lower()
     if sys == "darwin":
@@ -81,8 +81,7 @@ def get_env_lock_fpath(
             lock_fpath = os.path.join(
                 env_lock_dir,
                 "venv",
-                platform.system().lower(),
-                platform.machine().lower(),
+                _conda_venv_subdir(),
                 env_name + ".txt",
             )
     elif env_kind == "conda":
@@ -92,7 +91,7 @@ def get_env_lock_fpath(
             lock_fpath = os.path.join(
                 env_lock_dir,
                 "conda",
-                _conda_subdir(),
+                _conda_venv_subdir(),
                 env_name + ".yml",
             )
     elif env_kind == "matlab":

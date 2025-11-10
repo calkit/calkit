@@ -73,7 +73,11 @@ def get_env_lock_fpath(
                 env_lock_dir, "docker", _docker_platform(), env_name + ".json"
             )
     elif env_kind == "uv":
-        lock_fpath = "uv.lock"
+        env_dir = os.path.dirname(env.get("path", ""))
+        if env_dir:
+            lock_fpath = os.path.join(env_dir, "uv.lock")
+        else:
+            lock_fpath = "uv.lock"
     elif env_kind in ["venv", "uv-venv"]:
         if legacy:
             lock_fpath += ".txt"

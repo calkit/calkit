@@ -1462,17 +1462,27 @@ def run_in_env(
             subprocess.check_call(cmd, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error("Failed to run in Conda environment")
-    elif env["kind"] in ["pixi", "uv"]:
+    elif env["kind"] == "pixi":
         env_cmd = []
         if "name" in env:
             env_cmd = ["--environment", env["name"]]
-        cmd = [env["kind"], "run"] + env_cmd + cmd
+        cmd = ["pixi", "run"] + env_cmd + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
             subprocess.check_call(cmd, cwd=wdir)
         except subprocess.CalledProcessError:
-            raise_error(f"Failed to run in {env['kind']} environment")
+            raise_error("Failed to run in Pixi environment")
+    elif env["kind"] == "uv":
+        cmd = ["uv", "run"]
+        env_dir = os.path.dirname(os.path.abspath(env["path"]))
+        cmd += ["--project", env_dir] + cmd
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
+        try:
+            subprocess.check_call(cmd, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in uv environment")
     elif (kind := env["kind"]) in ["uv-venv", "venv"]:
         if "prefix" not in env:
             raise_error("venv environments require a prefix")

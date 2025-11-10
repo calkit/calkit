@@ -5,6 +5,7 @@ import subprocess
 import pytest
 
 import calkit.pipeline
+from calkit.environments import get_env_lock_fpath
 
 
 def test_to_dvc():
@@ -44,7 +45,8 @@ def test_to_dvc():
     assert stage["desc"].startswith("Automatically generated")
     out = stage["outs"][0]
     out_path = list(out.keys())[0]
-    assert out_path == ".calkit/env-locks/py.txt"
+    env_lock_fpath = get_env_lock_fpath(ck_info["environments"]["py"], "py")
+    assert out_path == env_lock_fpath
     assert not out[out_path]["cache"]
     # TODO: Test other stage types
     # Test when user forgets to add an environment

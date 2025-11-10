@@ -30,6 +30,30 @@ def _conda_subdir() -> str:
     return f"{sys}-{mach}"
 
 
+def _docker_platform() -> str:
+    """Get Docker platform string (arch part only)."""
+    mach = platform.machine().lower()
+    # Map common platform.machine() outputs to Docker arch names
+    if mach in ("x86_64", "amd64"):
+        return "amd64"
+    elif mach in ("aarch64", "arm64"):
+        return "arm64"
+    elif mach in ("armv7l", "armv7"):
+        return "arm-v7"
+    elif mach in ("armv6l", "armv6"):
+        return "arm-v6"
+    elif mach == "ppc64le":
+        return "ppc64le"
+    elif mach == "s390x":
+        return "s390x"
+    elif mach in ("i386", "i686"):
+        return "386"
+    elif mach == "riscv64":
+        return "riscv64"
+    # Fallback
+    return mach
+
+
 def get_env_lock_fpath(
     env: dict,
     env_name: str,
@@ -46,7 +70,7 @@ def get_env_lock_fpath(
             lock_fpath += ".json"
         else:
             lock_fpath = os.path.join(
-                env_lock_dir, "docker", platform.machine(), env_name + ".json"
+                env_lock_dir, "docker", _docker_platform(), env_name + ".json"
             )
     elif env_kind == "uv":
         lock_fpath = "uv.lock"

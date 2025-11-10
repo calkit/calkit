@@ -80,7 +80,7 @@ def get_env_lock_fpath(
         else:
             lock_fpath = os.path.join(
                 env_lock_dir,
-                "venv",
+                "venvs",
                 _conda_venv_subdir(),
                 env_name + ".txt",
             )

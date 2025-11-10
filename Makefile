@@ -39,3 +39,7 @@ docs-test: ## Test if documentation can be built without warnings or errors.
 .PHONY: docs
 docs: ## Build and serve the documentation.
 	@uv run mkdocs serve
+
+.PHONY: import-profile
+import-profile: ## Profile the import time of the CLI.
+	uv run python -X importtime -m calkit --help 2> import.log && uvx tuna import.log

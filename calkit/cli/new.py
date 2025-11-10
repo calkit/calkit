@@ -11,7 +11,6 @@ import sys
 import zipfile
 from enum import Enum
 
-import bibtexparser
 import dotenv
 import git
 import typer
@@ -2234,6 +2233,8 @@ def new_release(
     ] = False,
 ):
     """Create a new release."""
+    import bibtexparser
+
     to = to.lower()
     if to not in calkit.releases.SERVICES:
         raise_error(

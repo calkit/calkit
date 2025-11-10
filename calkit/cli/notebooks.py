@@ -10,7 +10,6 @@ import sys
 from pathlib import PurePosixPath
 from typing import Any
 
-import papermill
 import typer
 from typing_extensions import Annotated
 
@@ -259,6 +258,8 @@ def execute_notebook(
     This can be useful to use as a preprocessing DVC stage to use a clean
     notebook as a dependency for a stage that caches and executed notebook.
     """
+    import papermill
+
     from calkit.cli.main import run_in_env
 
     if os.path.isabs(path):

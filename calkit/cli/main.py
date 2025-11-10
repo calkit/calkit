@@ -19,15 +19,8 @@ from datetime import datetime
 from pathlib import PurePosixPath
 
 import dotenv
-import dvc
-import dvc.log
-import dvc.repo
-import dvc.repo.reproduce
-import dvc.ui
 import git
 import typer
-from dvc.cli import main as dvc_cli_main
-from dvc.exceptions import NotDvcRepoError
 from git.exc import InvalidGitRepositoryError
 from typing_extensions import Annotated, Optional
 
@@ -351,6 +344,9 @@ def add(
     Note: This will enable the 'autostage' feature of DVC, automatically
     adding any .dvc files to Git when adding to DVC.
     """
+    import dvc.repo
+    from dvc.exceptions import NotDvcRepoError
+
     if auto_commit_message:
         if commit_message is not None:
             raise_error(
@@ -1015,6 +1011,12 @@ def run(
     ] = [],
 ):
     """Check dependencies and run the pipeline."""
+    import dvc.log
+    import dvc.repo
+    import dvc.repo.reproduce
+    import dvc.ui
+    from dvc.cli import main as dvc_cli_main
+
     if (target_inputs or target_outputs) and targets:
         raise_error("Cannot specify both targets and inputs")
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"

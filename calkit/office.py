@@ -2,8 +2,6 @@
 
 import os
 
-from PIL import ImageGrab
-
 
 def excel_chart_to_image(
     input_fpath: str,
@@ -13,6 +11,7 @@ def excel_chart_to_image(
 ):
     """Export a chart from an Excel sheet to image."""
     import win32com.client
+    from PIL import ImageGrab
 
     # Open the excel application using win32com
     excel = win32com.client.Dispatch("Excel.Application")

@@ -7,3 +7,4 @@ site
 .venv
 .coverage*
 coverage.xml
+import.log

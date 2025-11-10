@@ -20,6 +20,48 @@ from calkit.cli import raise_error, warn
 overleaf_app = typer.Typer(no_args_is_help=True)
 
 
+def _get_overleaf_token() -> str:
+    """Get the user's Overleaf token from config.
+
+    If not set, we'll try to get from the cloud. If that fails, we'll prompt
+    the user to enter it.
+
+    TODO: Handle expiration?
+    """
+    calkit_config = calkit.config.read()
+    overleaf_token = calkit_config.overleaf_token
+    if not overleaf_token:
+        # See if we can get it from the cloud
+        if calkit_config.token is not None:
+            try:
+                typer.echo("Getting Overleaf token from cloud")
+                resp = calkit.cloud.get("/user/overleaf-token")
+                overleaf_token = resp["access_token"]
+                calkit_config.overleaf_token = overleaf_token
+                calkit_config.write()
+            except Exception:
+                typer.echo("Failed to get Overleaf token from cloud")
+    if not overleaf_token:
+        warn("Overleaf token not set in config", prefix="")
+        typer.echo(
+            "One can be generated at:\n\n"
+            "    https://www.overleaf.com/user/settings\n\n"
+            "under the 'Git Integration' section.\n"
+        )
+        overleaf_token = typer.prompt(
+            "Enter Overleaf Git authentication token", hide_input=True
+        )
+        typer.echo("Storing Overleaf token in Calkit config")
+        calkit_config.overleaf_token = overleaf_token
+        calkit_config.write()
+    if not overleaf_token:
+        raise_error(
+            "Overleaf token not set in config; "
+            "Please set it using 'calkit config set overleaf_token'"
+        )
+    return overleaf_token
+
+
 @overleaf_app.command(name="import")
 def import_publication(
     src_url: Annotated[
@@ -109,21 +151,7 @@ def import_publication(
     from calkit.cli.new import new_latex_stage
 
     # First check that the user has an Overleaf token set
-    config = calkit.config.read()
-    overleaf_token = config.overleaf_token
-    if not overleaf_token:
-        warn("Overleaf token not set in config", prefix="")
-        typer.echo(
-            "One can be generated at:\n\n"
-            "    https://www.overleaf.com/user/settings\n\n"
-            "under the 'Git Integration' section.\n"
-        )
-        overleaf_token = typer.prompt(
-            "Enter Overleaf Git authentication token", hide_input=True
-        )
-        typer.echo("Storing Overleaf token in Calkit config")
-        config.overleaf_token = overleaf_token
-        config.write()
+    overleaf_token = _get_overleaf_token()
     if (
         not src_url.startswith("https://www.overleaf.com/project/")
         and calkit.config.get_env() != "test"
@@ -340,21 +368,7 @@ def sync(
             if not any(pub.get("path") == path for pub in pubs):
                 raise_error(f"Publication with path '{path}' not found")
     # First check our config for an Overleaf token
-    calkit_config = calkit.config.read()
-    overleaf_token = calkit_config.overleaf_token
-    if not overleaf_token:
-        # See if we can get it from the cloud
-        if calkit_config.token is not None:
-            try:
-                resp = calkit.cloud.get("/user/overleaf-token")
-                overleaf_token = resp["access_token"]
-                calkit_config.overleaf_token = overleaf_token
-                calkit_config.write()
-            except Exception:
-                raise_error(
-                    "Overleaf token not set; "
-                    "Please set it using 'calkit config set overleaf_token'"
-                )
+    overleaf_token = _get_overleaf_token()
     repo = git.Repo()
     conflict_fpath = os.path.join(".calkit", "overleaf", "CONFLICT.json")
     in_am_session = "in the middle of an am session" in repo.git.status()
@@ -700,13 +714,7 @@ def get_status(
             if not any(pub.get("path") == path for pub in pubs):
                 raise_error(f"Publication with path '{path}' not found")
     # First check our config for an Overleaf token
-    calkit_config = calkit.config.read()
-    overleaf_token = calkit_config.overleaf_token
-    if not overleaf_token:
-        raise_error(
-            "Overleaf token not set; "
-            "Please set it using 'calkit config set overleaf_token'"
-        )
+    overleaf_token = _get_overleaf_token()
     for pub in pubs:
         pub_path = pub.get("path")
         overleaf_config = pub.get("overleaf", {})

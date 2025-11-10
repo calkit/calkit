@@ -10,7 +10,6 @@ from typing import get_args as get_type_args
 
 import keyring
 import keyring.errors
-import yaml
 from pydantic import GetCoreSchemaHandler
 from pydantic.fields import FieldInfo
 from pydantic_core import core_schema
@@ -195,6 +194,8 @@ class Settings(BaseSettings):
         )  # type: ignore
 
     def write(self) -> None:
+        import yaml
+
         base_dir = os.path.dirname(self.model_config["yaml_file"])  # type: ignore
         os.makedirs(base_dir, exist_ok=True)
         cfg = self.model_dump()

@@ -1,6 +1,7 @@
 """Functionality related to environments."""
 
 import os
+import platform
 from pathlib import PurePosixPath
 
 
@@ -11,21 +12,65 @@ def get_env_lock_dir(wdir: str | None = None) -> str:
     return env_lock_dir
 
 
+def _conda_subdir() -> str:
+    sys = platform.system().lower()
+    mach = platform.machine().lower()
+    if sys == "darwin":
+        return "osx-arm64" if mach in ("arm64", "aarch64") else "osx-64"
+    if sys == "linux":
+        if mach in ("arm64", "aarch64"):
+            return "linux-aarch64"
+        elif mach in ("ppc64le",):
+            return "linux-ppc64le"
+        else:
+            return "linux-64"
+    if sys == "windows":
+        return "win-64"
+    # Fallback for unusual platforms
+    return f"{sys}-{mach}"
+
+
 def get_env_lock_fpath(
-    env: dict, env_name: str, wdir: str | None = None, as_posix: bool = True
+    env: dict,
+    env_name: str,
+    wdir: str | None = None,
+    as_posix: bool = True,
+    legacy: bool = False,
 ) -> str | None:
     """Create the environment lock file path."""
     env_lock_dir = get_env_lock_dir(wdir=wdir)
     env_kind = env.get("kind")
     lock_fpath = os.path.join(env_lock_dir, env_name)
     if env_kind == "docker":
-        lock_fpath += ".json"
+        if legacy:
+            lock_fpath += ".json"
+        else:
+            lock_fpath = os.path.join(
+                env_lock_dir, "docker", platform.machine(), env_name + ".json"
+            )
     elif env_kind == "uv":
         lock_fpath = "uv.lock"
     elif env_kind in ["venv", "uv-venv"]:
-        lock_fpath += ".txt"
+        if legacy:
+            lock_fpath += ".txt"
+        else:
+            lock_fpath = os.path.join(
+                env_lock_dir,
+                "venv",
+                platform.system().lower(),
+                platform.machine().lower(),
+                env_name + ".txt",
+            )
     elif env_kind == "conda":
-        lock_fpath += ".yml"
+        if legacy:
+            lock_fpath += ".yml"
+        else:
+            lock_fpath = os.path.join(
+                env_lock_dir,
+                "conda",
+                _conda_subdir(),
+                env_name + ".yml",
+            )
     elif env_kind == "matlab":
         lock_fpath += ".json"
     elif env_kind == "julia":

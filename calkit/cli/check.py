@@ -19,7 +19,11 @@ import calkit.pipeline
 from calkit.check import check_reproducibility
 from calkit.cli import raise_error, warn
 from calkit.core import get_md5
-from calkit.environments import get_docker_lock_fpaths, get_env_lock_fpath
+from calkit.environments import (
+    get_docker_lock_fpaths,
+    get_env_lock_fpath,
+    get_venv_lock_fpaths,
+)
 
 check_app = typer.Typer(no_args_is_help=True)
 
@@ -114,15 +118,23 @@ def check_environment(
             raise_error("venv environments require a path")
         prefix = env["prefix"]
         path = env["path"]
-        # Check environment
+        lock_fpath = get_env_lock_fpath(
+            env=env, env_name=env_name, as_posix=False
+        )
+        legacy_lock_fpath = get_env_lock_fpath(
+            env=env, env_name=env_name, as_posix=False, legacy=True
+        )
+        alt_lock_fpaths = get_venv_lock_fpaths(
+            env_name=env_name, as_posix=False
+        )
         check_venv(
             path=path,
             prefix=prefix,
             use_uv=kind == "uv-venv",
             python=env.get("python"),
-            lock_fpath=get_env_lock_fpath(
-                env=env, env_name=env_name, as_posix=False
-            ),
+            lock_fpath=lock_fpath,
+            alt_lock_fpaths_delete=[str(legacy_lock_fpath)],
+            alt_lock_fpaths=alt_lock_fpaths,
             verbose=verbose,
         )
     elif env["kind"] == "ssh":
@@ -496,6 +508,17 @@ def check_venv(
             ),
         ),
     ] = None,
+    alt_lock_fpaths: Annotated[
+        list[str],
+        typer.Option("--input", help="Alternative lock file input paths."),
+    ] = [],
+    alt_lock_fpaths_delete: Annotated[
+        list[str],
+        typer.Option(
+            "--input-delete",
+            help="Alternative lock file input paths to delete after use.",
+        ),
+    ] = [],
     wdir: Annotated[
         str | None,
         typer.Option(
@@ -548,6 +571,26 @@ def check_venv(
     if lock_fpath is None:
         fname, ext = os.path.splitext(path)
         lock_fpath = fname + "-lock" + ext
+    lock_dir = os.path.dirname(lock_fpath)
+    if lock_dir:
+        os.makedirs(lock_dir, exist_ok=True)
+    # Use main lock file if exists, else try alternatives (including legacy)
+    reqs_to_use = lock_fpath
+    used_legacy_lock = None
+    if not os.path.isfile(lock_fpath):
+        for alt_fpath in alt_lock_fpaths:
+            if os.path.isfile(alt_fpath):
+                reqs_to_use = alt_fpath
+                if verbose:
+                    typer.echo(f"Using alternative lock file: {alt_fpath}")
+                break
+        for legacy_fpath in alt_lock_fpaths_delete:
+            if os.path.isfile(legacy_fpath):
+                reqs_to_use = legacy_fpath
+                used_legacy_lock = legacy_fpath
+                if verbose:
+                    typer.echo(f"Using legacy lock file: {legacy_fpath}")
+                break
     if _platform.system() == "Windows":
         activate_cmd = f"{prefix}\\Scripts\\activate"
     else:
@@ -557,8 +600,8 @@ def check_venv(
         os.makedirs(lock_dir, exist_ok=True)
     # If the lock file exists, try to install with that
     dep_file_txt = f"-r {path}"
-    if os.path.isfile(lock_fpath):
-        dep_file_txt += f" -r {lock_fpath}"
+    if os.path.isfile(reqs_to_use):
+        dep_file_txt += f" -r {reqs_to_use}"
     check_cmd = (
         f"{activate_cmd} "
         f"&& {pip_cmd} install {pip_install_args} {dep_file_txt} "
@@ -574,8 +617,26 @@ def check_venv(
             cwd=wdir,
             stderr=subprocess.STDOUT if not verbose else None,
         )
+        # Delete legacy lock file after use
+        if used_legacy_lock:
+            try:
+                os.remove(used_legacy_lock)
+                if verbose:
+                    typer.echo(
+                        "Deleted legacy lock file after use: "
+                        f"{used_legacy_lock}"
+                    )
+            except Exception as e:
+                if verbose:
+                    typer.echo(
+                        "Failed to delete legacy lock file "
+                        f"{used_legacy_lock}: {e}"
+                    )
     except subprocess.CalledProcessError:
-        warn("Failed to create environment from lock file; attempting rebuild")
+        warn(
+            f"Failed to create environment from lock file ({reqs_to_use}); "
+            f"attempting rebuild from input file {path}"
+        )
         check_cmd = (
             f"{activate_cmd} "
             f"&& {pip_cmd} install {pip_install_args} -r {path} "
@@ -586,7 +647,7 @@ def check_venv(
         try:
             subprocess.run(check_cmd, shell=True, cwd=wdir, check=True)
         except subprocess.CalledProcessError:
-            raise_error(f"Failed to check {kind}")
+            raise_error(f"Failed to check {kind} from input file {path}")
 
 
 @check_app.command(name="matlab-env")

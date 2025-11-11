@@ -20,6 +20,7 @@ from calkit.check import check_reproducibility
 from calkit.cli import raise_error, warn
 from calkit.core import get_md5
 from calkit.environments import (
+    get_conda_lock_fpaths,
     get_docker_lock_fpaths,
     get_env_lock_fpath,
     get_venv_lock_fpaths,
@@ -95,11 +96,20 @@ def check_environment(
             quiet=not verbose,
         )
     elif env["kind"] == "conda":
+        lock_fpath = get_env_lock_fpath(
+            env=env, env_name=env_name, as_posix=False
+        )
+        legacy_lock_fpath = get_env_lock_fpath(
+            env=env, env_name=env_name, as_posix=False, legacy=True
+        )
+        alt_lock_fpaths = get_conda_lock_fpaths(
+            env_name=env_name, as_posix=False
+        )
         check_conda_env(
             env_fpath=env["path"],
-            output_fpath=get_env_lock_fpath(
-                env=env, env_name=env_name, as_posix=False
-            ),
+            output_fpath=lock_fpath,
+            alt_lock_fpaths_delete=[str(legacy_lock_fpath)],
+            alt_lock_fpaths=alt_lock_fpaths,
             relaxed=True,  # TODO: Add option?
             quiet=not verbose,
         )
@@ -468,6 +478,17 @@ def check_conda_env(
             ),
         ),
     ] = None,
+    alt_lock_fpaths: Annotated[
+        list[str],
+        typer.Option("--input", help="Alternative lock file input paths."),
+    ] = [],
+    alt_lock_fpaths_delete: Annotated[
+        list[str],
+        typer.Option(
+            "--input-delete",
+            help="Alternative lock file input paths to delete after use.",
+        ),
+    ] = [],
     relaxed: Annotated[
         bool,
         typer.Option(
@@ -482,12 +503,17 @@ def check_conda_env(
         log_func = functools.partial(typer.echo, file=open(os.devnull, "w"))
     else:
         log_func = typer.echo
-    calkit.conda.check_env(
-        env_fpath=env_fpath,
-        output_fpath=output_fpath,
-        log_func=log_func,
-        relaxed=relaxed,
-    )
+    try:
+        calkit.conda.check_env(
+            env_fpath=env_fpath,
+            output_fpath=output_fpath,
+            alt_lock_fpaths=alt_lock_fpaths,
+            alt_lock_fpaths_delete=alt_lock_fpaths_delete,
+            log_func=log_func,
+            relaxed=relaxed,
+        )
+    except Exception as e:
+        raise_error(f"Failed to check conda environment: {e}")
 
 
 @check_app.command(name="venv")

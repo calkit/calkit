@@ -19,7 +19,7 @@ import calkit.pipeline
 from calkit.check import check_reproducibility
 from calkit.cli import raise_error, warn
 from calkit.core import get_md5
-from calkit.environments import get_env_lock_fpath
+from calkit.environments import get_docker_lock_fpaths, get_env_lock_fpath
 
 check_app = typer.Typer(no_args_is_help=True)
 
@@ -64,12 +64,22 @@ def check_environment(
     if env["kind"] == "docker":
         if "image" not in env:
             raise_error("Image must be defined for Docker environments")
+        lock_fpath = get_env_lock_fpath(
+            env=env, env_name=env_name, as_posix=False
+        )
+        legacy_lock_fpath = get_env_lock_fpath(
+            env=env, env_name=env_name, as_posix=False, legacy=True
+        )
+        # Alt lock paths include other architectures
+        alt_lock_fpaths = get_docker_lock_fpaths(
+            env_name=env_name, as_posix=False
+        )
         check_docker_env(
             tag=env["image"],
             fpath=env.get("path"),
-            lock_fpath=get_env_lock_fpath(
-                env=env, env_name=env_name, as_posix=False
-            ),
+            lock_fpath=lock_fpath,
+            alt_lock_fpaths_delete=[str(legacy_lock_fpath)],
+            alt_lock_fpaths=alt_lock_fpaths,
             platform=env.get("platform"),
             deps=env.get("deps", []),
             env_vars=env.get("env_vars", []),
@@ -197,6 +207,22 @@ def check_docker_env(
             ),
         ),
     ] = None,
+    alt_lock_fpaths: Annotated[
+        list[str],
+        typer.Option(
+            "--input", help="Alternative lock file input paths to read."
+        ),
+    ] = [],
+    alt_lock_fpaths_delete: Annotated[
+        list[str],
+        typer.Option(
+            "--input-delete",
+            help=(
+                "Alternative lock input file paths to read and "
+                "remove (i.e., legacy paths)."
+            ),
+        ),
+    ] = [],
     platform: Annotated[
         str | None,
         typer.Option("--platform", help="Which platform(s) to build for."),
@@ -303,6 +329,7 @@ def check_docker_env(
     for dep in deps:
         deps_md5s[dep] = get_md5(dep, exclude_files=[lock_fpath])
     rebuild_or_pull = True
+    lock = None
     if os.path.isfile(lock_fpath):
         typer.echo(f"Reading lock file: {lock_fpath}", file=outfile)
         with open(lock_fpath) as f:
@@ -312,7 +339,28 @@ def check_docker_env(
             lock = lock[0]
     else:
         typer.echo(f"Lock file ({lock_fpath}) does not exist", file=outfile)
-        lock = None
+        for alt_lock_fpath in alt_lock_fpaths_delete:
+            if os.path.isfile(alt_lock_fpath):
+                typer.echo(f"Reading alternative lock file: {alt_lock_fpath}")
+                with open(alt_lock_fpath) as f:
+                    lock = json.load(f)
+                # Handle legacy lock files that are lists
+                if isinstance(lock, list):
+                    lock = lock[0]
+                os.remove(alt_lock_fpath)
+                break
+        if lock is None:
+            for alt_lock_fpath in alt_lock_fpaths:
+                if os.path.isfile(alt_lock_fpath):
+                    typer.echo(
+                        f"Reading alternative lock file: {alt_lock_fpath}"
+                    )
+                    with open(alt_lock_fpath) as f:
+                        lock = json.load(f)
+                    # Handle legacy lock files that are lists
+                    if isinstance(lock, list):
+                        lock = lock[0]
+                    break
     if inspect and lock:
         typer.echo(
             "Checking image and Dockerfile against lock file", file=outfile
@@ -336,12 +384,30 @@ def check_docker_env(
         cmd.append(".")
         subprocess.check_output(cmd, cwd=wdir)
     elif fpath is None and rebuild_or_pull:
-        typer.echo(f"Pulling image: {tag}")
-        cmd = ["docker", "pull", tag]
-        try:
-            subprocess.check_output(cmd)
-        except subprocess.CalledProcessError:
-            raise_error(f"Failed to pull image: {tag}")
+        # First try to pull by repo digest
+        pulled = False
+        if lock and "RepoDigests" in lock:
+            repo_digests = lock["RepoDigests"]
+            if repo_digests:
+                tag_with_digest = repo_digests[0]
+                typer.echo(f"Pulling image by digest: {tag_with_digest}")
+                cmd = ["docker", "pull", tag_with_digest]
+                try:
+                    subprocess.check_output(cmd)
+                    pulled = True
+                except subprocess.CalledProcessError:
+                    warn(
+                        f"Failed to pull image by digest: {tag_with_digest}; "
+                        "falling back to pulling by tag"
+                    )
+                    pulled = False
+        if not pulled:
+            typer.echo(f"Pulling image: {tag}")
+            cmd = ["docker", "pull", tag]
+            try:
+                subprocess.check_output(cmd)
+            except subprocess.CalledProcessError:
+                raise_error(f"Failed to pull image: {tag}")
     # Write the lock file
     inspect = get_docker_inspect()
     inspect["DockerfileMD5"] = dockerfile_md5

@@ -54,6 +54,41 @@ def _docker_platform() -> str:
     return mach
 
 
+# Central list of docker architecture directory names we support
+_DOCKER_ARCHS: tuple[str, ...] = (
+    "amd64",
+    "arm64",
+    "arm-v7",
+    "arm-v6",
+    "ppc64le",
+    "s390x",
+    "386",
+    "riscv64",
+)
+
+
+def get_docker_lock_fpaths(
+    env_name: str,
+    wdir: str | None = None,
+    as_posix: bool = True,
+) -> list[str]:
+    """Return docker environment lock file paths for every supported
+    architecture.
+
+    This intentionally excludes legacy (pre-arch) lock file locations;
+    legacy handling is performed separately.
+    """
+    env_lock_dir = get_env_lock_dir(wdir=wdir)
+    docker_dir = os.path.join(env_lock_dir, "docker")
+    fpaths = [
+        os.path.join(docker_dir, arch, env_name + ".json")
+        for arch in _DOCKER_ARCHS
+    ]
+    if as_posix:
+        fpaths = [PurePosixPath(p).as_posix() for p in fpaths]
+    return fpaths
+
+
 def get_env_lock_fpath(
     env: dict,
     env_name: str,

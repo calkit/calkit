@@ -306,6 +306,19 @@ def check_env(
     else:
         log_func(f"Environment {env_name} matches spec")
         res.env_needs_rebuild = False
+        # Delete legacy lock file since environment is up-to-date
+        if used_legacy_lock:
+            try:
+                os.remove(used_legacy_lock)
+                log_func(
+                    "Deleted legacy lock file (env matches spec): "
+                    f"{used_legacy_lock}"
+                )
+            except Exception as e:
+                log_func(
+                    "Failed to delete legacy lock file "
+                    f"{used_legacy_lock}: {e}"
+                )
     # If the env was rebuilt, export the env check
     res.env_needs_export = env_needs_export
     if env_needs_export:

@@ -1,6 +1,7 @@
 """Tests for ``cli.main``."""
 
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -50,6 +51,18 @@ def test_run_in_env(tmp_dir):
         stdin=stdin,
         check=True,
     )
+    # Check that we can pass project env vars into the container
+    ck_info = calkit.load_calkit_info()
+    ck_info["env_vars"] = {"MY_COOL_ENV_VAR": "my cool value"}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    p = subprocess.run(
+        ["calkit", "xenv", "echo", "$MY_COOL_ENV_VAR"],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert "my cool value" in p.stdout
     # Now let's create a 2nd Docker env and make sure we need to call it by
     # name when trying to run
     subprocess.check_call(
@@ -429,8 +442,11 @@ def test_run(tmp_dir):
         ["calkit", "new", "uv-venv", "-n", "main", "requests"]
     )
     # Test that we can run a Python script
-    with open("script.py", "w") as f:
-        f.write("print('Hello from script.py')")
+    # Copy script.py from the repo's test directory
+    script_path = os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "test", "script.py"
+    )
+    shutil.copy2(script_path, "script.py")
     subprocess.check_call(
         [
             "calkit",
@@ -442,6 +458,8 @@ def test_run(tmp_dir):
             "script.py",
             "-e",
             "main",
+            "--output",
+            "test.txt",
         ]
     )
     subprocess.check_call(
@@ -452,6 +470,22 @@ def test_run(tmp_dir):
     subprocess.check_call(
         ["calkit", "save", "-am", "Run pipeline", "--no-push"]
     )
+    # Test that we can set env vars at the project level
+    ck_info = calkit.load_calkit_info()
+    ck_info["env_vars"] = {"MY_ENV_VAR": "some-value"}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("script.py", "a") as f:
+        f.write("\nimport os\nprint(os.environ['MY_ENV_VAR'])")
+    out = subprocess.check_output(["calkit", "run"], text=True)
+    print(out)
+    assert "some-value" in out
+    subprocess.check_call(
+        ["calkit", "save", "-am", "Run pipeline", "--no-push"]
+    )
+    # Check we can run for inputs and outputs
+    subprocess.check_call(["calkit", "run", "--input", "script.py"])
+    subprocess.check_call(["calkit", "run", "--output", "test.txt"])
     # Make sure we can run on a detached head
     repo = git.Repo()
     repo.git.checkout("HEAD^")

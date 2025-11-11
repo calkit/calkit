@@ -7,7 +7,6 @@ import os
 import subprocess
 import sys
 
-import dvc.repo
 import git
 
 import calkit
@@ -201,6 +200,8 @@ def list_files(wdir: str | None = None, recursive=True) -> list[dict]:
     """Return a list with all files in DVC, including their path and md5
     checksum.
     """
+    import dvc.repo
+
     dvc_repo = dvc.repo.Repo(wdir)
     return dvc_repo.ls(".", dvc_only=True, recursive=recursive)
 

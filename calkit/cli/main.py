@@ -19,15 +19,8 @@ from datetime import datetime
 from pathlib import PurePosixPath
 
 import dotenv
-import dvc
-import dvc.log
-import dvc.repo
-import dvc.repo.reproduce
-import dvc.ui
 import git
 import typer
-from dvc.cli import main as dvc_cli_main
-from dvc.exceptions import NotDvcRepoError
 from git.exc import InvalidGitRepositoryError
 from typing_extensions import Annotated, Optional
 
@@ -82,9 +75,20 @@ app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
 app.add_typer(slurm_app, name="slurm", help="Work with SLURM.")
 
 # Constants for version control auto-ignore
-AUTO_IGNORE_SUFFIXES = [".DS_Store", ".env", ".pyc", ".synctex.gz"]
+AUTO_IGNORE_SUFFIXES = [
+    ".DS_Store",
+    ".env",
+    ".pyc",
+    ".synctex.gz",
+    ".ipynb_checkpoints",
+]
 AUTO_IGNORE_PATHS = [os.path.join(".dvc", "config.local")]
-AUTO_IGNORE_PREFIXES = [".venv", "__pycache__"]
+AUTO_IGNORE_PREFIXES = [
+    ".venv",
+    "__pycache__",
+    ".ipynb_checkpoints",
+    ".calkit/overleaf/",
+]
 # Constants for version control auto-add to DVC
 DVC_EXTENSIONS = [
     ".png",
@@ -340,6 +344,9 @@ def add(
     Note: This will enable the 'autostage' feature of DVC, automatically
     adding any .dvc files to Git when adding to DVC.
     """
+    import dvc.repo
+    from dvc.exceptions import NotDvcRepoError
+
     if auto_commit_message:
         if commit_message is not None:
             raise_error(
@@ -986,10 +993,37 @@ def run(
             "--save-message", "-m", help="Commit message for saving."
         ),
     ] = None,
+    target_inputs: Annotated[
+        list[str],
+        typer.Option(
+            "--input",
+            "--dep",
+            help="Run stages that depend on given input dependency path.",
+        ),
+    ] = [],
+    target_outputs: Annotated[
+        list[str],
+        typer.Option(
+            "--output",
+            "--out",
+            help="Run stages that produce the given output path.",
+        ),
+    ] = [],
 ):
     """Check dependencies and run the pipeline."""
+    import dvc.log
+    import dvc.repo
+    import dvc.repo.reproduce
+    import dvc.ui
+    from dvc.cli import main as dvc_cli_main
+
+    if (target_inputs or target_outputs) and targets:
+        raise_error("Cannot specify both targets and inputs")
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    ck_info = calkit.load_calkit_info()
+    # Set env vars
+    calkit.set_env_vars(ck_info=ck_info)
     if not quiet:
         typer.echo("Getting system information")
     system_info = calkit.get_system_info()
@@ -1017,14 +1051,56 @@ def run(
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(str(e))
     # Compile the pipeline
+    dvc_stages = None
     if ck_info.get("pipeline", {}):
         if not quiet:
             typer.echo("Compiling DVC pipeline")
         try:
-            calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+            dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
         except Exception as e:
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Pipeline compilation failed: {e}")
+    # Convert deps into target stage names
+    # TODO: This could probably be merged back upstream into DVC
+    if dvc_stages is None:
+        if os.path.exists("dvc.yaml"):
+            with open("dvc.yaml") as f:
+                dvc_stages = calkit.ryaml.load(f).get("stages", {})
+        else:
+            dvc_stages = {}
+    if target_inputs or target_outputs:
+        targets = []
+        input_abs_paths = [os.path.abspath(dep) for dep in target_inputs]
+        output_abs_paths = [os.path.abspath(out) for out in target_outputs]
+        for dvc_stage_name, dvc_stage in dvc_stages.items():
+            stage_deps = dvc_stage.get("deps", [])
+            for stage_dep in stage_deps:
+                # Check absolute path equality
+                abs_stage_dep = os.path.abspath(stage_dep)
+                if abs_stage_dep in input_abs_paths:
+                    if dvc_stage_name not in targets:
+                        typer.echo(
+                            f"Detected stage target {dvc_stage_name} "
+                            f"from input {stage_dep}"
+                        )
+                        targets.append(dvc_stage_name)
+            stage_outs = dvc_stage.get("outs", [])
+            for stage_out in stage_outs:
+                if isinstance(stage_out, str):
+                    abs_stage_out = os.path.abspath(stage_out)
+                elif isinstance(stage_out, dict):
+                    abs_stage_out = os.path.abspath(list(stage_out.keys())[0])
+                else:
+                    raise_error(f"Malformed output in stage: {dvc_stage_name}")
+                if abs_stage_out in output_abs_paths:
+                    if dvc_stage_name not in targets:
+                        typer.echo(
+                            f"Detected stage target {dvc_stage_name} "
+                            f"from output {stage_out}"
+                        )
+                        targets.append(dvc_stage_name)
+        if not targets:
+            raise_error("No stages found to run")
     if save_log:
         # Get status of Git repo before running
         repo = git.Repo()
@@ -1254,6 +1330,7 @@ def run_in_env(
 ):
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info(process_includes="environments")
+    calkit.set_env_vars(ck_info=ck_info)
     envs = ck_info.get("environments", {})
     if not envs:
         raise_error("No environments defined in calkit.yaml")
@@ -1317,6 +1394,8 @@ def run_in_env(
         if "env-vars" in env:
             warn("The 'env-vars' key is deprecated; use 'env_vars' instead.")
             env_vars.update(env["env-vars"])
+        # Add project-level env vars (non-secret)
+        env_vars.update(ck_info.get("env_vars", {}))
         # Also add any project-level environmental variable dependencies
         project_env_vars = calkit.get_env_var_dep_names()
         if project_env_vars:
@@ -1671,6 +1750,7 @@ def run_procedure(
         return value
 
     ck_info = calkit.load_calkit_info(process_includes="procedures")
+    calkit.set_env_vars(ck_info=ck_info)
     procs = ck_info.get("procedures", {})
     if name not in procs:
         raise_error(f"'{name}' is not defined as a procedure")

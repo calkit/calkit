@@ -4,6 +4,27 @@ import os
 import platform
 from pathlib import PurePosixPath
 
+# Central list of docker architecture directory names we support
+_DOCKER_ARCHS: tuple[str, ...] = (
+    "amd64",
+    "arm64",
+    "arm-v7",
+    "arm-v6",
+    "ppc64le",
+    "s390x",
+    "386",
+    "riscv64",
+)
+
+_CONDA_VENV_ARCHS = [
+    "osx-arm64",
+    "osx-64",
+    "linux-aarch64",
+    "linux-ppc64le",
+    "linux-64",
+    "win-64",
+]
+
 
 def get_env_lock_dir(wdir: str | None = None) -> str:
     env_lock_dir = os.path.join(".calkit", "env-locks")
@@ -54,19 +75,6 @@ def _docker_platform() -> str:
     return mach
 
 
-# Central list of docker architecture directory names we support
-_DOCKER_ARCHS: tuple[str, ...] = (
-    "amd64",
-    "arm64",
-    "arm-v7",
-    "arm-v6",
-    "ppc64le",
-    "s390x",
-    "386",
-    "riscv64",
-)
-
-
 def get_docker_lock_fpaths(
     env_name: str,
     wdir: str | None = None,
@@ -83,6 +91,44 @@ def get_docker_lock_fpaths(
     fpaths = [
         os.path.join(docker_dir, arch, env_name + ".json")
         for arch in _DOCKER_ARCHS
+    ]
+    if as_posix:
+        fpaths = [PurePosixPath(p).as_posix() for p in fpaths]
+    return fpaths
+
+
+def get_conda_lock_fpaths(
+    env_name: str,
+    wdir: str | None = None,
+    as_posix: bool = True,
+) -> list[str]:
+    """Return conda environment lock file paths for every supported
+    architecture.
+    """
+    env_lock_dir = get_env_lock_dir(wdir=wdir)
+    conda_dir = os.path.join(env_lock_dir, "conda")
+    archs = _CONDA_VENV_ARCHS
+    fpaths = [
+        os.path.join(conda_dir, arch, env_name + ".yml") for arch in archs
+    ]
+    if as_posix:
+        fpaths = [PurePosixPath(p).as_posix() for p in fpaths]
+    return fpaths
+
+
+def get_venv_lock_fpaths(
+    env_name: str,
+    wdir: str | None = None,
+    as_posix: bool = True,
+) -> list[str]:
+    """Return venv environment lock file paths for every supported
+    architecture.
+    """
+    env_lock_dir = get_env_lock_dir(wdir=wdir)
+    venv_dir = os.path.join(env_lock_dir, "venvs")
+    archs = _CONDA_VENV_ARCHS
+    fpaths = [
+        os.path.join(venv_dir, arch, env_name + ".txt") for arch in archs
     ]
     if as_posix:
         fpaths = [PurePosixPath(p).as_posix() for p in fpaths]

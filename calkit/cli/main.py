@@ -875,6 +875,27 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
     return res
 
 
+def _get_outs_from_successful_stages(
+    stage_run_info: dict, wdir: str = "."
+) -> list[str]:
+    successful_stages = [
+        stage
+        for stage, info in stage_run_info.items()
+        if info.get("status") == "completed"
+    ]
+    pipeline = calkit.dvc.read_pipeline(wdir=wdir)
+    successful_stage_outs: list[str] = []
+    stages = (pipeline.get("stages") if pipeline else {}) or {}
+    for stage_name in stages.keys():
+        if stage_name in successful_stages:
+            successful_stage_outs.extend(
+                calkit.dvc.get_stage_outputs(stage_name, wdir=wdir)
+            )
+    # Deduplicate
+    unique_outs = list(set(successful_stage_outs))
+    return unique_outs
+
+
 @app.command(name="run")
 def run(
     targets: Optional[list[str]] = typer.Argument(
@@ -985,7 +1006,19 @@ def run(
     ] = False,
     save_after_run: Annotated[
         bool,
-        typer.Option("--save", "-S", help="Save the project after running."),
+        typer.Option(
+            "--save",
+            "-S",
+            help="Save the project after running, only if the full pipeline succeeds.",
+        ),
+    ] = False,
+    save_successes_after_run: Annotated[
+        bool,
+        typer.Option(
+            "--save-successes",
+            "-SS",
+            help="Save only outputs of successful stages after running.",
+        ),
     ] = False,
     save_message: Annotated[
         str | None,
@@ -1167,11 +1200,16 @@ def run(
         file_handler.setFormatter(formatter)
         dvc.log.logger.addHandler(file_handler)
     # Remove newline logging in dvc.repo.reproduce
-    dvc.repo.reproduce.logger.setLevel(logging.ERROR)
+    dvc.repo.reproduce.logger.setLevel(logging.WARNING)
     # Disable other misc DVC output
     dvc.ui.ui.write = lambda *args, **kwargs: None
     res = dvc_cli_main(["repro"] + args)
     failed = res != 0
+    if save_log or save_successes_after_run:
+        # Parse log to get timing
+        with open(log_fpath, "r") as f:
+            log_content = f.read()
+            stage_run_info = _stage_run_info_from_log_content(log_content)
     if save_log:
         # Get Git status after running
         git_changed_files_after = calkit.git.get_changed_files(repo=repo)
@@ -1181,10 +1219,6 @@ def run(
         dvc_status_after = dvc_repo.status()
         dvc_data_status_after = dvc_repo.data_status()
         dvc_data_status_after.pop("git", None)  # Remove git status
-        # Parse log to get timing
-        with open(log_fpath, "r") as f:
-            log_content = f.read()
-            stage_run_info = _stage_run_info_from_log_content(log_content)
         # Save run information to a file
         if verbose:
             typer.echo("Saving run info")
@@ -1223,6 +1257,15 @@ def run(
         with open(run_info_fpath, "w") as f:
             json.dump(run_info, f, indent=2)
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+    if save_successes_after_run:
+        if save_message is None:
+            save_message = "Run pipeline"
+        if not quiet:
+            typer.echo("Saving successful stages of the project after run")
+        successful_stage_outs = _get_outs_from_successful_stages(
+            stage_run_info
+        )
+        save(paths=successful_stage_outs, message=save_message)
     if failed:
         raise_error("Pipeline failed")
     else:
@@ -1231,12 +1274,12 @@ def run(
                 "utf-8", errors="replace"
             )
         )
-    if save_after_run or save_message is not None:
-        if save_message is None:
-            save_message = "Run pipeline"
-        if not quiet:
-            typer.echo("Saving the project after successful run")
-        save(save_all=True, message=save_message)
+        if save_after_run or save_message is not None:
+            if save_message is None:
+                save_message = "Run pipeline"
+            if not quiet:
+                typer.echo("Saving the whole project after a successful run")
+            save(save_all=True, message=save_message)
 
 
 @app.command(name="manual-step", help="Execute a manual step.")

@@ -160,6 +160,39 @@ def read_pipeline(wdir: str = ".") -> dict:
         return calkit.ryaml.load(f)
 
 
+def get_stage_outputs(stage_name: str, wdir: str = ".") -> list[str]:
+    """Return a list of output paths declared for a stage in `dvc.yaml`.
+
+    The function reads the `dvc.yaml` in ``wdir`` (using
+    :func:`read_pipeline`) and extracts outputs from the named stage.
+    It handles both string-style entries and dict-style entries (with a
+    ``path`` key). Returned paths are normalized and resolved relative to
+    ``wdir``.
+
+    Raises KeyError if the stage is not found. Returns an empty list if
+    the pipeline file is missing or the stage has no declared outputs.
+    """
+    pipeline = read_pipeline(wdir=wdir)
+    if not pipeline:
+        return []
+    stages = pipeline.get("stages", {}) or {}
+    if stage_name not in stages:
+        raise KeyError(f"Stage '{stage_name}' not found in dvc.yaml")
+    stage = stages[stage_name] or {}
+    raw_outs = stage.get("outs") or []
+    outs: list[str] = []
+    for entry in raw_outs:
+        out_path = None
+        if isinstance(entry, str):
+            out_path = entry
+        elif isinstance(entry, dict):
+            out_path = [*entry][
+                0
+            ]  # Get the first key, which should be the only key
+        outs.append(out_path)
+    return outs
+
+
 def get_remotes(wdir: str | None = None) -> dict[str, str]:
     """Get a dictionary of DVC remotes, keyed by name, with URL as the
     value.

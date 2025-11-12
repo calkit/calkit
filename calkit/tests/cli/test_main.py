@@ -14,7 +14,11 @@ from dvc.exceptions import NotDvcRepoError
 from git.exc import InvalidGitRepositoryError
 
 import calkit
-from calkit.cli.main import _stage_run_info_from_log_content, _to_shell_cmd
+from calkit.cli.main import (
+    _get_outs_from_successful_stages,
+    _stage_run_info_from_log_content,
+    _to_shell_cmd,
+)
 
 
 def test_run_in_env(tmp_dir):
@@ -573,3 +577,26 @@ def test_stage_run_info_from_log_content():
             "status": "failed",
         },
     }
+
+
+def test_get_outs_from_successful_stages():
+    # Read the same log used in the other test
+    fpath = os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "test", "test-log.log"
+    )
+    with open(fpath, "r") as f:
+        content = f.read()
+    stage_run_info = _stage_run_info_from_log_content(content)
+    # Only the two _check-env-* stages completed per the fixture
+    completed = [
+        s
+        for s, info in stage_run_info.items()
+        if info.get("status") == "completed"
+    ]
+    assert sorted(completed) == sorted(["_check-env-py", "_check-env-tex"])
+    outs = _get_outs_from_successful_stages(
+        stage_run_info, wdir=os.path.dirname(fpath)
+    )
+    assert sorted(outs) == sorted(
+        [".calkit/env-locks/py.txt", ".calkit/env-locks/tex.json"]
+    )

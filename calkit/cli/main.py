@@ -1474,9 +1474,8 @@ def run_in_env(
         except subprocess.CalledProcessError:
             raise_error("Failed to run in Pixi environment")
     elif env["kind"] == "uv":
-        cmd = ["uv", "run"]
         env_dir = os.path.dirname(os.path.abspath(env["path"]))
-        cmd += ["--project", env_dir] + cmd
+        cmd = ["uv", "run", "--project", env_dir] + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:

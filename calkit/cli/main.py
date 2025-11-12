@@ -308,6 +308,14 @@ def diff(
 @app.command(name="add")
 def add(
     paths: list[str],
+    stages: Annotated[
+        Optional[list[str]],
+        typer.Option(
+            "--stages",
+            "-s",
+            help="List of stages to save.",
+        ),
+    ] = None,
     commit_message: Annotated[
         str | None,
         typer.Option(
@@ -470,6 +478,13 @@ def add(
             else:
                 typer.echo(f"Adding {path} to Git")
                 subprocess.call(["git", "add", path])
+        if stages is not None:
+            for stage in stages:
+                try:
+                    dvc_cmd = ["dvc", "commit", stage]
+                    subprocess.check_call(dvc_cmd)
+                except subprocess.CalledProcessError:
+                    raise_error("DVC commit failed")
     if commit_message is not None:
         subprocess.call(["git", "commit", "-m", commit_message])
     if push_commit:
@@ -518,6 +533,14 @@ def save(
                 "Paths to add and commit. If not provided, will default to "
                 "any changed files that have been added previously."
             ),
+        ),
+    ] = None,
+    stages: Annotated[
+        Optional[list[str]],
+        typer.Option(
+            "--stages",
+            "-s",
+            help="List of stages to save.",
         ),
     ] = None,
     save_all: Annotated[
@@ -582,10 +605,10 @@ def save(
 
     This is essentially git/dvc add, commit, and push in one step.
     """
-    if not paths and not save_all:
-        raise_error("Paths must be provided if not using --all")
-    if paths is not None:
-        add(paths, to=to)
+    if not paths and not stages and not save_all:
+        raise_error("Paths and/or stages must be provided if not using --all")
+    if paths is not None or stages is not None:
+        add(paths, stages, to=to)
     elif save_all:
         add(paths=["."])
     if auto_commit_message and message is None:
@@ -624,10 +647,16 @@ def save(
     if not staged_files:
         typer.echo("No changes to commit; exiting")
         raise typer.Exit(0)
-    any_dvc = any(
-        [path == "dvc.lock" or path.endswith(".dvc") for path in staged_files]
-    )
     commit(all=True if paths is None else False, message=message)
+    any_dvc = (
+        any(
+            [
+                path == "dvc.lock" or path.endswith(".dvc")
+                for path in staged_files
+            ]
+        )
+        or stages is not None
+    )
     if not no_push:
         if verbose and not any_dvc:
             typer.echo("Not pushing to DVC since no DVC files were staged")
@@ -875,6 +904,34 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
     return res
 
 
+def _get_successful_stages(
+    stage_run_info: dict,
+) -> list[str]:
+    successful_stages = [
+        stage
+        for stage, info in stage_run_info.items()
+        if info.get("status") == "completed"
+    ]
+    return successful_stages
+
+
+def _get_outs_from_successful_stages(
+    stage_run_info: dict, wdir: str = "."
+) -> list[str]:
+    successful_stages = _get_successful_stages(stage_run_info)
+    pipeline = calkit.dvc.read_pipeline(wdir=wdir)
+    successful_stage_outs: list[str] = []
+    stages = (pipeline.get("stages") if pipeline else {}) or {}
+    for stage_name in stages.keys():
+        if stage_name in successful_stages:
+            successful_stage_outs.extend(
+                calkit.dvc.get_stage_outputs(stage_name, wdir=wdir)
+            )
+    # Deduplicate
+    unique_outs = list(set(successful_stage_outs))
+    return unique_outs
+
+
 @app.command(name="run")
 def run(
     targets: Optional[list[str]] = typer.Argument(
@@ -983,14 +1040,30 @@ def run(
         bool,
         typer.Option("--log", "-l", help="Log the run."),
     ] = False,
-    save_after_run: Annotated[
+    save_only_if_all_succeed: Annotated[
         bool,
-        typer.Option("--save", "-S", help="Save the project after running."),
+        typer.Option(
+            "--save-if-all-succeed",
+            "-S",
+            help="Save the project after running, only if the pipeline succeeds.",
+        ),
+    ] = False,
+    save_any_successful_stages: Annotated[
+        bool,
+        typer.Option(
+            "--save-any-successes",
+            "-SS",
+            help="Save any outputs of successful stages after running.",
+        ),
     ] = False,
     save_message: Annotated[
         str | None,
         typer.Option(
-            "--save-message", "-m", help="Commit message for saving."
+            "--save-message",
+            "-m",
+            help="Commit message for saving. "
+            "Uses --save-any-successes if neither --save-any-successes "
+            "nor --save-if-all-succeed are set.",
         ),
     ] = None,
     target_inputs: Annotated[
@@ -1114,6 +1187,13 @@ def run(
         dvc_status_before = dvc_repo.status()
         dvc_data_status_before = dvc_repo.data_status()
         dvc_data_status_before.pop("git", None)  # Remove git status
+    will_save = (
+        save_only_if_all_succeed
+        or save_any_successful_stages
+        or save_message is not None
+    )
+    if will_save:
+        no_commit = True  # Don't allow dvc repro to auto-commit, since calkit will handle saving
     if targets is None:
         targets = []
     args = deepcopy(targets)
@@ -1167,11 +1247,18 @@ def run(
         file_handler.setFormatter(formatter)
         dvc.log.logger.addHandler(file_handler)
     # Remove newline logging in dvc.repo.reproduce
-    dvc.repo.reproduce.logger.setLevel(logging.ERROR)
+    dvc.repo.reproduce.logger.setLevel(logging.WARNING)
     # Disable other misc DVC output
     dvc.ui.ui.write = lambda *args, **kwargs: None
     res = dvc_cli_main(["repro"] + args)
     failed = res != 0
+    if failed and save_only_if_all_succeed:
+        will_save = False
+    if save_log or will_save:
+        # Parse log to get timing
+        with open(log_fpath, "r") as f:
+            log_content = f.read()
+            stage_run_info = _stage_run_info_from_log_content(log_content)
     if save_log:
         # Get Git status after running
         git_changed_files_after = calkit.git.get_changed_files(repo=repo)
@@ -1181,10 +1268,6 @@ def run(
         dvc_status_after = dvc_repo.status()
         dvc_data_status_after = dvc_repo.data_status()
         dvc_data_status_after.pop("git", None)  # Remove git status
-        # Parse log to get timing
-        with open(log_fpath, "r") as f:
-            log_content = f.read()
-            stage_run_info = _stage_run_info_from_log_content(log_content)
         # Save run information to a file
         if verbose:
             typer.echo("Saving run info")
@@ -1223,6 +1306,15 @@ def run(
         with open(run_info_fpath, "w") as f:
             json.dump(run_info, f, indent=2)
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+    if will_save:
+        if save_message is None:
+            save_message = "Run pipeline"
+        successful_stages = _get_successful_stages(stage_run_info)
+        if not save_any_successful_stages and not save_only_if_all_succeed:
+            save_any_successful_stages = True  # Default to saving any successful stages if message is provided without flags
+        if not quiet:
+            typer.echo("Saving the project after run")
+        save(save_all=False, paths=successful_stages, message=save_message)
     if failed:
         raise_error("Pipeline failed")
     else:
@@ -1231,12 +1323,6 @@ def run(
                 "utf-8", errors="replace"
             )
         )
-    if save_after_run or save_message is not None:
-        if save_message is None:
-            save_message = "Run pipeline"
-        if not quiet:
-            typer.echo("Saving the project after successful run")
-        save(save_all=True, message=save_message)
 
 
 @app.command(name="manual-step", help="Execute a manual step.")

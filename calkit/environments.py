@@ -31,7 +31,7 @@ def get_env_lock_dir(wdir: str | None = None) -> str:
     return env_lock_dir
 
 
-def _conda_venv_subdir() -> str:
+def _conda_venv_platform() -> str:
     sys = platform.system().lower()
     mach = platform.machine().lower()
     if sys == "darwin":
@@ -85,10 +85,9 @@ def get_all_docker_lock_fpaths(
     legacy handling is performed separately.
     """
     env_lock_dir = get_env_lock_dir(wdir=wdir)
-    docker_dir = os.path.join(env_lock_dir, "docker")
+    docker_dir = os.path.join(env_lock_dir, env_name)
     fpaths = [
-        os.path.join(docker_dir, arch, env_name + ".json")
-        for arch in DOCKER_ARCHS
+        os.path.join(docker_dir, arch + ".json") for arch in DOCKER_ARCHS
     ]
     if as_posix:
         fpaths = [PurePosixPath(p).as_posix() for p in fpaths]
@@ -104,10 +103,9 @@ def get_all_conda_lock_fpaths(
     architecture.
     """
     env_lock_dir = get_env_lock_dir(wdir=wdir)
-    conda_dir = os.path.join(env_lock_dir, "conda")
+    env_lock_dir = os.path.join(env_lock_dir, env_name)
     fpaths = [
-        os.path.join(conda_dir, arch, env_name + ".yml")
-        for arch in CONDA_VENV_ARCHS
+        os.path.join(env_lock_dir, arch + ".yml") for arch in CONDA_VENV_ARCHS
     ]
     if as_posix:
         fpaths = [PurePosixPath(p).as_posix() for p in fpaths]
@@ -123,10 +121,9 @@ def get_all_venv_lock_fpaths(
     architecture.
     """
     env_lock_dir = get_env_lock_dir(wdir=wdir)
-    venv_dir = os.path.join(env_lock_dir, "venvs")
+    venv_dir = os.path.join(env_lock_dir, env_name)
     fpaths = [
-        os.path.join(venv_dir, arch, env_name + ".txt")
-        for arch in CONDA_VENV_ARCHS
+        os.path.join(venv_dir, arch + ".txt") for arch in CONDA_VENV_ARCHS
     ]
     if as_posix:
         fpaths = [PurePosixPath(p).as_posix() for p in fpaths]
@@ -139,8 +136,14 @@ def get_env_lock_fpath(
     wdir: str | None = None,
     as_posix: bool = True,
     legacy: bool = False,
+    for_dvc: bool = False,
 ) -> str | None:
-    """Create the environment lock file path."""
+    """Create the environment lock file path.
+
+    If `for_dvc` is True, return the directory containing the lock file
+    instead of the lock file itself for Docker, venv, and conda environments,
+    which store a separate lock file for each platform/architecture.
+    """
     env_lock_dir = get_env_lock_dir(wdir=wdir)
     env_kind = env.get("kind")
     lock_fpath = os.path.join(env_lock_dir, env_name)
@@ -149,8 +152,10 @@ def get_env_lock_fpath(
             lock_fpath += ".json"
         else:
             lock_fpath = os.path.join(
-                env_lock_dir, "docker", _docker_platform(), env_name + ".json"
+                env_lock_dir, env_name, _docker_platform() + ".json"
             )
+            if for_dvc:
+                lock_fpath = os.path.dirname(lock_fpath)
     elif env_kind == "uv":
         env_dir = os.path.dirname(env.get("path", ""))
         if env_dir:
@@ -163,20 +168,22 @@ def get_env_lock_fpath(
         else:
             lock_fpath = os.path.join(
                 env_lock_dir,
-                "venvs",
-                _conda_venv_subdir(),
-                env_name + ".txt",
+                env_name,
+                _conda_venv_platform() + ".txt",
             )
+            if for_dvc:
+                lock_fpath = os.path.dirname(lock_fpath)
     elif env_kind == "conda":
         if legacy:
             lock_fpath += ".yml"
         else:
             lock_fpath = os.path.join(
                 env_lock_dir,
-                "conda",
-                _conda_venv_subdir(),
-                env_name + ".yml",
+                env_name,
+                _conda_venv_platform() + ".yml",
             )
+            if for_dvc:
+                lock_fpath = os.path.dirname(lock_fpath)
     elif env_kind == "matlab":
         lock_fpath += ".json"
     elif env_kind == "julia":

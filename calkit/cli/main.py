@@ -259,6 +259,11 @@ def clone(
 @app.command(name="status")
 def get_status():
     """Get a unified Git and DVC status."""
+    ck_info = calkit.load_calkit_info()
+    try:
+        calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    except Exception as e:
+        warn(f"Failed to compile pipeline: {e.__class__.__name__}: {e}")
     print_sep("Project")
     # Print latest status
     status = calkit.get_latest_project_status()

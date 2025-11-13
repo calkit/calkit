@@ -507,7 +507,7 @@ def test_new_python_script_stage(tmp_dir):
         "calkit xenv -n py --no-check -- python script.py"
     )
     env_lock_fpath = get_env_lock_fpath(
-        calkit.load_calkit_info()["environments"]["py"], "py"
+        calkit.load_calkit_info()["environments"]["py"], "py", for_dvc=True
     )
     assert set(pipeline["stages"]["run-script"]["deps"]) == set(
         ["script.py", env_lock_fpath]
@@ -588,7 +588,7 @@ def test_new_latex_stage(tmp_dir):
     )
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["tex"]
-    env_lock_fpath = get_env_lock_fpath(env, "tex")
+    env_lock_fpath = get_env_lock_fpath(env, "tex", for_dvc=True)
     assert set(pipeline["stages"]["build-paper"]["deps"]) == set(
         ["paper.tex", env_lock_fpath]
     )
@@ -635,7 +635,9 @@ def test_new_matlab_script_stage(tmp_dir):
         "calkit xenv -n matlab1 --no-check -- \"run('scripts/script.m');\""
     )
     env_lock_fpath = get_env_lock_fpath(
-        calkit.load_calkit_info()["environments"]["matlab1"], "matlab1"
+        calkit.load_calkit_info()["environments"]["matlab1"],
+        "matlab1",
+        for_dvc=True,
     )
     assert set(pipeline["stages"]["run-script1"]["deps"]) == set(
         ["scripts/script.m", env_lock_fpath]

@@ -45,7 +45,9 @@ def test_to_dvc():
     assert stage["desc"].startswith("Automatically generated")
     out = stage["outs"][0]
     out_path = list(out.keys())[0]
-    env_lock_fpath = get_env_lock_fpath(ck_info["environments"]["py"], "py")
+    env_lock_fpath = get_env_lock_fpath(
+        ck_info["environments"]["py"], "py", for_dvc=True
+    )
     assert out_path == env_lock_fpath
     assert not out[out_path]["cache"]
     # TODO: Test other stage types

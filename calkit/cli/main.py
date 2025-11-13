@@ -263,7 +263,7 @@ def get_status():
     try:
         calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     except Exception as e:
-        raise_error(f"Failed to compile pipeline: {e.__class__.__name__}: {e}")
+        warn(f"Failed to compile pipeline: {e.__class__.__name__}: {e}")
     print_sep("Project")
     # Print latest status
     status = calkit.get_latest_project_status()

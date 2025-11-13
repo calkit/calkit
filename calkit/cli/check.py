@@ -20,10 +20,10 @@ from calkit.check import check_reproducibility
 from calkit.cli import raise_error, warn
 from calkit.core import get_md5
 from calkit.environments import (
-    get_conda_lock_fpaths,
-    get_docker_lock_fpaths,
+    get_all_conda_lock_fpaths,
+    get_all_docker_lock_fpaths,
+    get_all_venv_lock_fpaths,
     get_env_lock_fpath,
-    get_venv_lock_fpaths,
 )
 
 check_app = typer.Typer(no_args_is_help=True)
@@ -76,7 +76,7 @@ def check_environment(
             env=env, env_name=env_name, as_posix=False, legacy=True
         )
         # Alt lock paths include other architectures
-        alt_lock_fpaths = get_docker_lock_fpaths(
+        alt_lock_fpaths = get_all_docker_lock_fpaths(
             env_name=env_name, as_posix=False
         )
         check_docker_env(
@@ -102,7 +102,7 @@ def check_environment(
         legacy_lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=False, legacy=True
         )
-        alt_lock_fpaths = get_conda_lock_fpaths(
+        alt_lock_fpaths = get_all_conda_lock_fpaths(
             env_name=env_name, as_posix=False
         )
         check_conda_env(
@@ -134,7 +134,7 @@ def check_environment(
         legacy_lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=False, legacy=True
         )
-        alt_lock_fpaths = get_venv_lock_fpaths(
+        alt_lock_fpaths = get_all_venv_lock_fpaths(
             env_name=env_name, as_posix=False
         )
         check_venv(

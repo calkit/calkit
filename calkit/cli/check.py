@@ -307,10 +307,10 @@ def check_docker_env(
             "Lock file output path must be provided if input Dockerfile is not"
         )
 
-    def get_docker_inspect() -> dict:
+    def get_docker_inspect(obj_id: str = tag) -> dict:
         # This command returns a list, of which we want the first object
         out = json.loads(
-            subprocess.check_output(["docker", "inspect", tag]).decode()
+            subprocess.check_output(["docker", "inspect", obj_id]).decode()
         )
         # Remove some keys that can change without the important aspects of
         # the image changing
@@ -411,15 +411,18 @@ def check_docker_env(
         if lock and "RepoDigests" in lock:
             repo_digests = lock["RepoDigests"]
             if repo_digests:
-                tag_with_digest = repo_digests[0]
-                typer.echo(f"Pulling image by digest: {tag_with_digest}")
-                cmd = ["docker", "pull", tag_with_digest]
+                image_with_digest = repo_digests[0]
+                typer.echo(f"Pulling image by digest: {image_with_digest}")
+                cmd = ["docker", "pull", image_with_digest]
+                tag_cmd = ["docker", "tag", image_with_digest, tag]
                 try:
                     subprocess.check_output(cmd)
+                    # Now tag the pulled image
+                    subprocess.check_output(tag_cmd)
                     pulled = True
                 except subprocess.CalledProcessError:
                     warn(
-                        f"Failed to pull image by digest: {tag_with_digest}; "
+                        f"Failed to pull image by digest: {image_with_digest}; "
                         "falling back to pulling by tag"
                     )
                     pulled = False
@@ -432,6 +435,9 @@ def check_docker_env(
                 raise_error(f"Failed to pull image: {tag}")
     # Write the lock file
     inspect = get_docker_inspect()
+    # Ensure repo tags only have the tag we wanted, not the digest, so we
+    # don't cause stages to rerun from lock file change
+    inspect["RepoTags"] = [tag]
     inspect["DockerfileMD5"] = dockerfile_md5
     inspect["DepsMD5s"] = deps_md5s
     if platform is not None:

@@ -73,11 +73,11 @@ def to_dvc(
             continue
         env_fpath = env.get("path")
         lock_fpath = get_env_lock_fpath(
-            env=env, env_name=env_name, as_posix=True
+            env=env, env_name=env_name, as_posix=True, for_dvc=True
         )
-        cmd = f"calkit check environment --name {env_name}"
         if lock_fpath is None:
             continue
+        cmd = f"calkit check environment --name {env_name}"
         deps = []
         outs = []
         if env_fpath is not None:

@@ -7,6 +7,7 @@ import git
 import pytest
 
 import calkit
+from calkit.environments import get_env_lock_fpath
 
 
 def test_new_foreach_stage(tmp_dir):
@@ -505,8 +506,11 @@ def test_new_python_script_stage(tmp_dir):
     assert pipeline["stages"]["run-script"]["cmd"] == (
         "calkit xenv -n py --no-check -- python script.py"
     )
+    env_lock_fpath = get_env_lock_fpath(
+        calkit.load_calkit_info()["environments"]["py"], "py"
+    )
     assert set(pipeline["stages"]["run-script"]["deps"]) == set(
-        ["script.py", ".calkit/env-locks/py.txt"]
+        ["script.py", env_lock_fpath]
     )
     assert pipeline["stages"]["run-script"]["outs"] == ["output.txt"]
     subprocess.check_call(
@@ -582,8 +586,11 @@ def test_new_latex_stage(tmp_dir):
         "latexmk -cd -norc -interaction=nonstopmode -silent -synctex=1 "
         "-pdf paper.tex"
     )
+    ck_info = calkit.load_calkit_info()
+    env = ck_info["environments"]["tex"]
+    env_lock_fpath = get_env_lock_fpath(env, "tex")
     assert set(pipeline["stages"]["build-paper"]["deps"]) == set(
-        ["paper.tex", ".calkit/env-locks/tex.json"]
+        ["paper.tex", env_lock_fpath]
     )
     assert pipeline["stages"]["build-paper"]["outs"] == ["paper.pdf"]
 
@@ -627,8 +634,11 @@ def test_new_matlab_script_stage(tmp_dir):
     assert pipeline["stages"]["run-script1"]["cmd"] == (
         "calkit xenv -n matlab1 --no-check -- \"run('scripts/script.m');\""
     )
+    env_lock_fpath = get_env_lock_fpath(
+        calkit.load_calkit_info()["environments"]["matlab1"], "matlab1"
+    )
     assert set(pipeline["stages"]["run-script1"]["deps"]) == set(
-        ["scripts/script.m", ".calkit/env-locks/matlab1.json"]
+        ["scripts/script.m", env_lock_fpath]
     )
     assert pipeline["stages"]["run-script1"]["outs"] == [
         "results/output.txt",

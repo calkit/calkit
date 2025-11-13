@@ -72,6 +72,8 @@ def check_env(
     env_fpath: str = "environment.yml",
     log_func=None,
     output_fpath: str | None = None,
+    alt_lock_fpaths: list[str] = [],
+    alt_lock_fpaths_delete: list[str] = [],
     relaxed: bool = False,
 ) -> EnvCheckResult:
     """Check that a conda environment matches its spec.
@@ -87,6 +89,29 @@ def check_env(
     if log_func is None:
         log_func = calkit.logger.info
     log_func(f"Checking conda env defined in {env_fpath}")
+    # Determine which lock file to use for creating the environment
+    lock_to_use_for_creation = None
+    used_legacy_lock = None
+    if output_fpath and not os.path.isfile(output_fpath):
+        # Try alternative lock files first
+        for alt_fpath in alt_lock_fpaths:
+            if os.path.isfile(alt_fpath):
+                lock_to_use_for_creation = alt_fpath
+                log_func(
+                    f"Found alternative lock file for creation: {alt_fpath}"
+                )
+                break
+        # Try legacy lock files
+        for legacy_fpath in alt_lock_fpaths_delete:
+            if os.path.isfile(legacy_fpath):
+                lock_to_use_for_creation = legacy_fpath
+                used_legacy_lock = legacy_fpath
+                log_func(
+                    f"Using legacy lock file for creation: {legacy_fpath}"
+                )
+                break
+    elif output_fpath and os.path.isfile(output_fpath):
+        lock_to_use_for_creation = output_fpath
     res = EnvCheckResult()
     info = json.loads(subprocess.check_output(["conda", "info", "--json"]))
     root_prefix = info["root_prefix"]
@@ -132,7 +157,11 @@ def check_env(
     ]
     # Create with conda since newer mamba versions create a strange
     # "Library" subdirectory, at least on Windows
-    create_cmd = ["conda", "env", "create", "-y", "-f", env_fpath]
+    # Use lock file for creation if available, otherwise use env spec
+    create_file = (
+        lock_to_use_for_creation if lock_to_use_for_creation else env_fpath
+    )
+    create_cmd = ["conda", "env", "create", "-y", "-f", create_file]
     if prefix is not None:
         export_cmd += ["--prefix", prefix]
         create_cmd += ["--prefix", prefix]
@@ -144,7 +173,33 @@ def check_env(
         log_func(f"Environment {env_name} doesn't exist; creating")
         res.env_exists = False
         # Environment doesn't exist, so create it
-        subprocess.check_call(create_cmd)
+        try:
+            subprocess.check_call(create_cmd)
+            # Delete legacy lock file after successful creation
+            if used_legacy_lock:
+                try:
+                    os.remove(used_legacy_lock)
+                    log_func(
+                        "Deleted legacy lock file after use: "
+                        f"{used_legacy_lock}"
+                    )
+                except Exception as e:
+                    log_func(
+                        f"Failed to delete legacy lock file "
+                        f"{used_legacy_lock}: {e}"
+                    )
+        except subprocess.CalledProcessError:
+            # If creation from lock file failed, try from env spec
+            if create_file != env_fpath:
+                log_func(
+                    "Failed to create from lock file, trying from env spec"
+                )
+                create_cmd = ["conda", "env", "create", "-y", "-f", env_fpath]
+                if prefix is not None:
+                    create_cmd += ["--prefix", prefix]
+                subprocess.check_call(create_cmd)
+            else:
+                raise
         env_needs_rebuild = False
         env_needs_export = True
     else:
@@ -222,11 +277,48 @@ def check_env(
     if env_needs_rebuild:
         res.env_needs_rebuild = True
         log_func(f"Rebuilding {env_name} since it does not match spec")
-        subprocess.check_call(create_cmd)
+        # Always rebuild from env spec file, not lock file
+        rebuild_cmd = [
+            "conda",
+            "env",
+            "create",
+            "-y",
+            "-f",
+            env_fpath,
+        ]
+        if prefix is not None:
+            rebuild_cmd += ["--prefix", prefix]
+        subprocess.check_call(rebuild_cmd)
         env_needs_export = True
+        # Delete legacy lock file after successful rebuild from spec
+        if used_legacy_lock:
+            try:
+                os.remove(used_legacy_lock)
+                log_func(
+                    "Deleted legacy lock file after rebuild: "
+                    f"{used_legacy_lock}"
+                )
+            except Exception as e:
+                log_func(
+                    "Failed to delete legacy lock file "
+                    f"{used_legacy_lock}: {e}"
+                )
     else:
         log_func(f"Environment {env_name} matches spec")
         res.env_needs_rebuild = False
+        # Delete legacy lock file since environment is up-to-date
+        if used_legacy_lock:
+            try:
+                os.remove(used_legacy_lock)
+                log_func(
+                    "Deleted legacy lock file (env matches spec): "
+                    f"{used_legacy_lock}"
+                )
+            except Exception as e:
+                log_func(
+                    "Failed to delete legacy lock file "
+                    f"{used_legacy_lock}: {e}"
+                )
     # If the env was rebuilt, export the env check
     res.env_needs_export = env_needs_export
     if env_needs_export:

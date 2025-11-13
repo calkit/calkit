@@ -19,7 +19,12 @@ import calkit.pipeline
 from calkit.check import check_reproducibility
 from calkit.cli import raise_error, warn
 from calkit.core import get_md5
-from calkit.environments import get_env_lock_fpath
+from calkit.environments import (
+    get_all_conda_lock_fpaths,
+    get_all_docker_lock_fpaths,
+    get_all_venv_lock_fpaths,
+    get_env_lock_fpath,
+)
 
 check_app = typer.Typer(no_args_is_help=True)
 
@@ -64,12 +69,22 @@ def check_environment(
     if env["kind"] == "docker":
         if "image" not in env:
             raise_error("Image must be defined for Docker environments")
+        lock_fpath = get_env_lock_fpath(
+            env=env, env_name=env_name, as_posix=False
+        )
+        legacy_lock_fpath = get_env_lock_fpath(
+            env=env, env_name=env_name, as_posix=False, legacy=True
+        )
+        # Alt lock paths include other architectures
+        alt_lock_fpaths = get_all_docker_lock_fpaths(
+            env_name=env_name, as_posix=False
+        )
         check_docker_env(
             tag=env["image"],
             fpath=env.get("path"),
-            lock_fpath=get_env_lock_fpath(
-                env=env, env_name=env_name, as_posix=False
-            ),
+            lock_fpath=lock_fpath,
+            alt_lock_fpaths_delete=[str(legacy_lock_fpath)],
+            alt_lock_fpaths=alt_lock_fpaths,
             platform=env.get("platform"),
             deps=env.get("deps", []),
             env_vars=env.get("env_vars", []),
@@ -81,11 +96,20 @@ def check_environment(
             quiet=not verbose,
         )
     elif env["kind"] == "conda":
+        lock_fpath = get_env_lock_fpath(
+            env=env, env_name=env_name, as_posix=False
+        )
+        legacy_lock_fpath = get_env_lock_fpath(
+            env=env, env_name=env_name, as_posix=False, legacy=True
+        )
+        alt_lock_fpaths = get_all_conda_lock_fpaths(
+            env_name=env_name, as_posix=False
+        )
         check_conda_env(
             env_fpath=env["path"],
-            output_fpath=get_env_lock_fpath(
-                env=env, env_name=env_name, as_posix=False
-            ),
+            output_fpath=lock_fpath,
+            alt_lock_fpaths_delete=[str(legacy_lock_fpath)],
+            alt_lock_fpaths=alt_lock_fpaths,
             relaxed=True,  # TODO: Add option?
             quiet=not verbose,
         )
@@ -104,15 +128,23 @@ def check_environment(
             raise_error("venv environments require a path")
         prefix = env["prefix"]
         path = env["path"]
-        # Check environment
+        lock_fpath = get_env_lock_fpath(
+            env=env, env_name=env_name, as_posix=False
+        )
+        legacy_lock_fpath = get_env_lock_fpath(
+            env=env, env_name=env_name, as_posix=False, legacy=True
+        )
+        alt_lock_fpaths = get_all_venv_lock_fpaths(
+            env_name=env_name, as_posix=False
+        )
         check_venv(
             path=path,
             prefix=prefix,
             use_uv=kind == "uv-venv",
             python=env.get("python"),
-            lock_fpath=get_env_lock_fpath(
-                env=env, env_name=env_name, as_posix=False
-            ),
+            lock_fpath=lock_fpath,
+            alt_lock_fpaths_delete=[str(legacy_lock_fpath)],
+            alt_lock_fpaths=alt_lock_fpaths,
             verbose=verbose,
         )
     elif env["kind"] == "ssh":
@@ -197,6 +229,22 @@ def check_docker_env(
             ),
         ),
     ] = None,
+    alt_lock_fpaths: Annotated[
+        list[str],
+        typer.Option(
+            "--input", help="Alternative lock file input paths to read."
+        ),
+    ] = [],
+    alt_lock_fpaths_delete: Annotated[
+        list[str],
+        typer.Option(
+            "--input-delete",
+            help=(
+                "Alternative lock input file paths to read and "
+                "remove (i.e., legacy paths)."
+            ),
+        ),
+    ] = [],
     platform: Annotated[
         str | None,
         typer.Option("--platform", help="Which platform(s) to build for."),
@@ -303,6 +351,7 @@ def check_docker_env(
     for dep in deps:
         deps_md5s[dep] = get_md5(dep, exclude_files=[lock_fpath])
     rebuild_or_pull = True
+    lock = None
     if os.path.isfile(lock_fpath):
         typer.echo(f"Reading lock file: {lock_fpath}", file=outfile)
         with open(lock_fpath) as f:
@@ -312,7 +361,28 @@ def check_docker_env(
             lock = lock[0]
     else:
         typer.echo(f"Lock file ({lock_fpath}) does not exist", file=outfile)
-        lock = None
+        for alt_lock_fpath in alt_lock_fpaths_delete:
+            if os.path.isfile(alt_lock_fpath):
+                typer.echo(f"Reading alternative lock file: {alt_lock_fpath}")
+                with open(alt_lock_fpath) as f:
+                    lock = json.load(f)
+                # Handle legacy lock files that are lists
+                if isinstance(lock, list):
+                    lock = lock[0]
+                os.remove(alt_lock_fpath)
+                break
+        if lock is None:
+            for alt_lock_fpath in alt_lock_fpaths:
+                if os.path.isfile(alt_lock_fpath):
+                    typer.echo(
+                        f"Reading alternative lock file: {alt_lock_fpath}"
+                    )
+                    with open(alt_lock_fpath) as f:
+                        lock = json.load(f)
+                    # Handle legacy lock files that are lists
+                    if isinstance(lock, list):
+                        lock = lock[0]
+                    break
     if inspect and lock:
         typer.echo(
             "Checking image and Dockerfile against lock file", file=outfile
@@ -336,12 +406,30 @@ def check_docker_env(
         cmd.append(".")
         subprocess.check_output(cmd, cwd=wdir)
     elif fpath is None and rebuild_or_pull:
-        typer.echo(f"Pulling image: {tag}")
-        cmd = ["docker", "pull", tag]
-        try:
-            subprocess.check_output(cmd)
-        except subprocess.CalledProcessError:
-            raise_error(f"Failed to pull image: {tag}")
+        # First try to pull by repo digest
+        pulled = False
+        if lock and "RepoDigests" in lock:
+            repo_digests = lock["RepoDigests"]
+            if repo_digests:
+                tag_with_digest = repo_digests[0]
+                typer.echo(f"Pulling image by digest: {tag_with_digest}")
+                cmd = ["docker", "pull", tag_with_digest]
+                try:
+                    subprocess.check_output(cmd)
+                    pulled = True
+                except subprocess.CalledProcessError:
+                    warn(
+                        f"Failed to pull image by digest: {tag_with_digest}; "
+                        "falling back to pulling by tag"
+                    )
+                    pulled = False
+        if not pulled:
+            typer.echo(f"Pulling image: {tag}")
+            cmd = ["docker", "pull", tag]
+            try:
+                subprocess.check_output(cmd)
+            except subprocess.CalledProcessError:
+                raise_error(f"Failed to pull image: {tag}")
     # Write the lock file
     inspect = get_docker_inspect()
     inspect["DockerfileMD5"] = dockerfile_md5
@@ -390,6 +478,17 @@ def check_conda_env(
             ),
         ),
     ] = None,
+    alt_lock_fpaths: Annotated[
+        list[str],
+        typer.Option("--input", help="Alternative lock file input paths."),
+    ] = [],
+    alt_lock_fpaths_delete: Annotated[
+        list[str],
+        typer.Option(
+            "--input-delete",
+            help="Alternative lock file input paths to delete after use.",
+        ),
+    ] = [],
     relaxed: Annotated[
         bool,
         typer.Option(
@@ -404,12 +503,17 @@ def check_conda_env(
         log_func = functools.partial(typer.echo, file=open(os.devnull, "w"))
     else:
         log_func = typer.echo
-    calkit.conda.check_env(
-        env_fpath=env_fpath,
-        output_fpath=output_fpath,
-        log_func=log_func,
-        relaxed=relaxed,
-    )
+    try:
+        calkit.conda.check_env(
+            env_fpath=env_fpath,
+            output_fpath=output_fpath,
+            alt_lock_fpaths=alt_lock_fpaths,
+            alt_lock_fpaths_delete=alt_lock_fpaths_delete,
+            log_func=log_func,
+            relaxed=relaxed,
+        )
+    except Exception as e:
+        raise_error(f"Failed to check conda environment: {e}")
 
 
 @check_app.command(name="venv")
@@ -430,6 +534,17 @@ def check_venv(
             ),
         ),
     ] = None,
+    alt_lock_fpaths: Annotated[
+        list[str],
+        typer.Option("--input", help="Alternative lock file input paths."),
+    ] = [],
+    alt_lock_fpaths_delete: Annotated[
+        list[str],
+        typer.Option(
+            "--input-delete",
+            help="Alternative lock file input paths to delete after use.",
+        ),
+    ] = [],
     wdir: Annotated[
         str | None,
         typer.Option(
@@ -482,6 +597,26 @@ def check_venv(
     if lock_fpath is None:
         fname, ext = os.path.splitext(path)
         lock_fpath = fname + "-lock" + ext
+    lock_dir = os.path.dirname(lock_fpath)
+    if lock_dir:
+        os.makedirs(lock_dir, exist_ok=True)
+    # Use main lock file if exists, else try alternatives (including legacy)
+    reqs_to_use = lock_fpath
+    used_legacy_lock = None
+    if not os.path.isfile(lock_fpath):
+        for alt_fpath in alt_lock_fpaths:
+            if os.path.isfile(alt_fpath):
+                reqs_to_use = alt_fpath
+                if verbose:
+                    typer.echo(f"Using alternative lock file: {alt_fpath}")
+                break
+        for legacy_fpath in alt_lock_fpaths_delete:
+            if os.path.isfile(legacy_fpath):
+                reqs_to_use = legacy_fpath
+                used_legacy_lock = legacy_fpath
+                if verbose:
+                    typer.echo(f"Using legacy lock file: {legacy_fpath}")
+                break
     if _platform.system() == "Windows":
         activate_cmd = f"{prefix}\\Scripts\\activate"
     else:
@@ -491,8 +626,8 @@ def check_venv(
         os.makedirs(lock_dir, exist_ok=True)
     # If the lock file exists, try to install with that
     dep_file_txt = f"-r {path}"
-    if os.path.isfile(lock_fpath):
-        dep_file_txt += f" -r {lock_fpath}"
+    if os.path.isfile(reqs_to_use):
+        dep_file_txt += f" -r {reqs_to_use}"
     check_cmd = (
         f"{activate_cmd} "
         f"&& {pip_cmd} install {pip_install_args} {dep_file_txt} "
@@ -508,8 +643,26 @@ def check_venv(
             cwd=wdir,
             stderr=subprocess.STDOUT if not verbose else None,
         )
+        # Delete legacy lock file after use
+        if used_legacy_lock:
+            try:
+                os.remove(used_legacy_lock)
+                if verbose:
+                    typer.echo(
+                        "Deleted legacy lock file after use: "
+                        f"{used_legacy_lock}"
+                    )
+            except Exception as e:
+                if verbose:
+                    typer.echo(
+                        "Failed to delete legacy lock file "
+                        f"{used_legacy_lock}: {e}"
+                    )
     except subprocess.CalledProcessError:
-        warn("Failed to create environment from lock file; attempting rebuild")
+        warn(
+            f"Failed to create environment from lock file ({reqs_to_use}); "
+            f"attempting rebuild from input file {path}"
+        )
         check_cmd = (
             f"{activate_cmd} "
             f"&& {pip_cmd} install {pip_install_args} -r {path} "
@@ -520,7 +673,7 @@ def check_venv(
         try:
             subprocess.run(check_cmd, shell=True, cwd=wdir, check=True)
         except subprocess.CalledProcessError:
-            raise_error(f"Failed to check {kind}")
+            raise_error(f"Failed to check {kind} from input file {path}")
 
 
 @check_app.command(name="matlab-env")

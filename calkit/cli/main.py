@@ -2024,6 +2024,46 @@ def run_latexmk(
             help=("Environment in which to run latexmk, if applicable."),
         ),
     ] = None,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help=(
+                "Don't check the environment is valid before running latexmk."
+            ),
+        ),
+    ] = False,
+    latexmk_rc_path: Annotated[
+        str | None,
+        typer.Option(
+            "--latexmk-rc",
+            "-r",
+            help="Path to a latexmkrc file to use for compilation.",
+        ),
+    ] = None,
+    no_synctex: Annotated[
+        bool,
+        typer.Option(
+            "--no-synctex",
+            help="Don't generate synctex file for source-to-pdf mapping.",
+        ),
+    ] = False,
+    link_paths: Annotated[
+        list[str],
+        typer.Option(
+            "--link",
+            "-l",
+            help=(
+                "Relative paths to link or copy before running, "
+                "e.g., figures:paper/figures. "
+                "Can be used to link files or directories needed for "
+                "compilation."
+            ),
+        ),
+    ] = [],
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
+    ] = False,
 ):
     """Compile a LaTeX document with latexmk.
 
@@ -2031,17 +2071,46 @@ def run_latexmk(
     system environment if available. If not available, a TeX Live Docker
     container will be used.
     """
-    latexmk_cmd = [
-        "latexmk",
-        "-pdf",
-        "-cd",
-        "-silent",
-        "-synctex=1",
-        "-interaction=nonstopmode",
-        tex_file,
-    ]
+    # If we have any link paths, link them if on Linux/macOS, otherwise copy
+    # and ensure they are ignored by Git
+    for path in link_paths:
+        src_path, dest_path = path.split(":")
+        if _platform.system() in ["Linux", "Darwin"]:
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
+            os.symlink(src_path, dest_path)
+        else:
+            if os.path.exists(dest_path):
+                if os.path.isdir(dest_path):
+                    shutil.rmtree(dest_path)
+                else:
+                    os.remove(dest_path)
+            if os.path.isdir(src_path):
+                shutil.copytree(src_path, dest_path)
+            else:
+                shutil.copy2(src_path, dest_path)
+            # Ensure dest_path is ignored by Git
+            repo = git.Repo()
+            if not repo.ignored(dest_path):
+                typer.echo(f"Adding {dest_path} to .gitignore")
+                with open(".gitignore", "a") as f:
+                    f.write(f"\n{dest_path}\n")
+    latexmk_cmd = ["latexmk", "-pdf", "-cd"]
+    if latexmk_rc_path is not None:
+        latexmk_cmd += ["-r", latexmk_rc_path]
+    if not no_synctex:
+        latexmk_cmd.append("-synctex=1")
+    if not verbose:
+        latexmk_cmd.append("-silent")
+    latexmk_cmd += ["-interaction=nonstopmode", tex_file]
     if environment is not None:
-        cmd = ["calkit", "xenv", "--name", environment] + latexmk_cmd
+        if no_check:
+            check_cmd = ["--no-check"]
+        else:
+            check_cmd = []
+        cmd = (
+            ["calkit", "xenv", "--name", environment] + check_cmd + latexmk_cmd
+        )
     elif calkit.check_dep_exists("latexmk"):
         cmd = latexmk_cmd
     else:

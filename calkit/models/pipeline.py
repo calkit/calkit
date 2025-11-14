@@ -215,19 +215,22 @@ class LatexStage(Stage):
     verbose: bool = False
     force: bool = False
     synctex: bool = True
+    link_paths: dict[str, str] = {}
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"{self.xenv_cmd} latexmk -cd -norc -interaction=nonstopmode"
+        cmd = f"calkit latexmk -e {self.environment}"
         if self.latexmkrc_path is not None:
             cmd += f" -r {self.latexmkrc_path}"
-        if not self.verbose:
-            cmd += " -silent"
+        if self.verbose:
+            cmd += " --verbose"
         if self.force:
             cmd += " -f"
-        if self.synctex:
-            cmd += " -synctex=1"
-        cmd += f" -pdf {self.target_path}"
+        if not self.synctex:
+            cmd += " --no-synctex"
+        for src_path, dest_path in self.link_paths.items():
+            cmd += f" --link '{src_path}:{dest_path}'"
+        cmd += f" {self.target_path}"
         return cmd
 
     @property
@@ -236,6 +239,9 @@ class LatexStage(Stage):
         if self.latexmkrc_path is not None:
             deps.append(self.latexmkrc_path)
         deps += super().dvc_deps
+        for src_path in self.link_paths.keys():
+            if src_path not in deps:
+                deps.append(src_path)
         return deps
 
     @property

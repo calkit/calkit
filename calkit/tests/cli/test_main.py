@@ -581,73 +581,47 @@ def test_latexmk(tmp_dir):
     with open("paper/main.tex", "w") as f:
         f.write(
             r"""\documentclass{article}
-\begin{document}
-Hello, world!
-\end{document}
-"""
+            \begin{document}
+            Hello, world!
+            \end{document}
+            """
         )
     subprocess.check_call(["calkit", "latexmk", "paper/main.tex"])
     assert os.path.isfile("paper/main.pdf")
-    # Test that we can merge a directory into another
-    os.makedirs("figures", exist_ok=True)
-    with open("figures/figure1.tex", "w") as f:
-        f.write(
-            r"""\documentclass{standalone}
-\begin{document}
-This is a figure.
-\end{document}
-"""
-        )
+
+
+def test_map_paths(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("paper", exist_ok=True)
+    with open("test.txt", "w") as f:
+        f.write("This is a test file.")
     subprocess.check_call(
-        [
-            "calkit",
-            "latexmk",
-            "paper/main.tex",
-            "--merge-dir-to-dir",
-            "figures->paper/figures",
-        ]
+        ["calkit", "map-paths", "--file-to-file", "test.txt->paper/test.txt"]
     )
-    assert os.path.isfile("paper/figures/figure1.tex")
+    assert os.path.isfile("paper/test.txt")
+    with open("paper/test.txt", "r") as f:
+        content = f.read()
+    assert content == "This is a test file."
     with open(".gitignore") as f:
         gitignore = f.read()
-    assert "paper/figures/figure1.tex" in gitignore.split("\n")
-    assert "paper/figures" not in gitignore.split("\n")
-    with open("paper/figures/figure2.tex", "w") as f:
-        f.write("More content")
+    assert "paper/test.txt" in gitignore.split("\n")
+    os.makedirs("data", exist_ok=True)
+    with open("data/file1.txt", "w") as f:
+        f.write("This is file 1.")
+    with open("data/file2.txt", "w") as f:
+        f.write("This is file 2.")
     subprocess.check_call(
-        [
-            "calkit",
-            "latexmk",
-            "paper/main.tex",
-            "--merge-dir-to-dir",
-            "figures->paper/figures",
-        ]
+        ["calkit", "map-paths", "--dir-to-dir-merge", "data->paper/data"]
     )
-    assert os.path.isfile("paper/figures/figure2.tex")
-    # Test that we can copy a file into a directory
-    shutil.rmtree("paper/figures")
+    assert os.path.isfile("paper/data/file1.txt")
+    assert os.path.isfile("paper/data/file2.txt")
+    os.remove("data/file1.txt")
     subprocess.check_call(
-        [
-            "calkit",
-            "latexmk",
-            "paper/main.tex",
-            "--copy-file-to-dir",
-            "figures/figure1.tex->paper/figures",
-        ]
+        ["calkit", "map-paths", "--dir-to-dir-replace", "data->paper/data"]
     )
-    assert os.path.isfile("paper/figures/figure1.tex")
-    # Test that we can replace a directory with another
-    os.makedirs("paper/figures", exist_ok=True)
-    with open("paper/figures/bad-figure.tex", "w") as f:
-        f.write("Old content")
+    assert not os.path.isfile("paper/data/file1.txt")
+    assert os.path.isfile("paper/data/file2.txt")
     subprocess.check_call(
-        [
-            "calkit",
-            "latexmk",
-            "paper/main.tex",
-            "--replace-dir-with-dir",
-            "figures->paper/figures",
-        ]
+        ["calkit", "map-paths", "--file-to-dir", "test.txt->paper/data"]
     )
-    assert not os.path.isfile("paper/figures/bad-figure.tex")
-    assert os.path.isfile("paper/figures/figure1.tex")
+    assert os.path.isfile("paper/data/test.txt")

@@ -124,6 +124,7 @@ class Stage(BaseModel):
         "julia-script",
         "julia-command",
         "word-to-pdf",
+        "map-paths",
     ]
     environment: str
     wdir: str | None = None
@@ -208,45 +209,73 @@ class PythonScriptStage(Stage):
         return [self.script_path] + super().dvc_deps
 
 
-# LaTeX stage preprocessing models
-class CopyFileToFile(BaseModel):
-    kind: Literal["copy-file-to-file"] = "copy-file-to-file"
-    src: str
-    dest: str
+class MapPathsStage(Stage):
+    class CopyFileToFile(BaseModel):
+        kind: Literal["file-to-file"] = "file-to-file"
+        src: str
+        dest: str
+
+        @property
+        def arg(self) -> str:
+            return f"--{self.kind} '{self.src}->{self.dest}'"
+
+    class CopyFileToDir(BaseModel):
+        kind: Literal["file-to-dir"] = "file-to-dir"
+        src: str
+        dest: str
+
+        @property
+        def arg(self) -> str:
+            return f"--{self.kind} '{self.src}->{self.dest}'"
+
+    class DirToDirMerge(BaseModel):
+        kind: Literal["dir-to-dir-merge"] = "dir-to-dir-merge"
+        src: str
+        dest: str
+
+        @property
+        def arg(self) -> str:
+            return f"--{self.kind} '{self.src}->{self.dest}'"
+
+    class DirToDirReplace(BaseModel):
+        kind: Literal["dir-to-dir-replace"] = "dir-to-dir-replace"
+        src: str
+        dest: str
+
+        @property
+        def arg(self) -> str:
+            return f"--{self.kind} '{self.src}->{self.dest}'"
+
+    kind: Literal["map-paths"] = "map-paths"
+    environment: str = "_system"
+    paths: list[
+        Annotated[
+            (CopyFileToFile | CopyFileToDir | DirToDirMerge | DirToDirReplace),
+            Discriminator("kind"),
+        ]
+    ]
 
     @property
-    def arg(self) -> str:
-        return f"--{self.kind} '{self.src}->{self.dest}'"
-
-
-class CopyFileToDir(BaseModel):
-    kind: Literal["copy-file-to-dir"] = "copy-file-to-dir"
-    src: str
-    dest: str
+    def dvc_cmd(self) -> str:
+        cmd = "calkit map-paths"
+        for path in self.paths:
+            cmd += f" {path.arg}"
+        return cmd
 
     @property
-    def arg(self) -> str:
-        return f"--{self.kind} '{self.src}->{self.dest}'"
-
-
-class MergeDirToDir(BaseModel):
-    kind: Literal["merge-dir-to-dir"] = "merge-dir-to-dir"
-    src: str
-    dest: str
+    def dvc_deps(self) -> list[str]:
+        deps = []
+        for path in self.paths:
+            deps.append(path.src)
+        return deps
 
     @property
-    def arg(self) -> str:
-        return f"--{self.kind} '{self.src}->{self.dest}'"
-
-
-class ReplaceDirWithDir(BaseModel):
-    kind: Literal["replace-dir-with-dir"] = "replace-dir-with-dir"
-    src: str
-    dest: str
-
-    @property
-    def arg(self) -> str:
-        return f"--{self.kind} '{self.src}->{self.dest}'"
+    def dvc_outs(self) -> list[dict]:
+        """All DVC outs should not be cached, since they are just copies."""
+        outs = []
+        for path in self.paths:
+            outs.append({path.dest: {"cache": False, "persist": True}})
+        return outs
 
 
 class LatexStage(Stage):
@@ -256,17 +285,6 @@ class LatexStage(Stage):
     verbose: bool = False
     force: bool = False
     synctex: bool = True
-    preprocessing: list[
-        Annotated[
-            (
-                CopyFileToFile
-                | CopyFileToDir
-                | MergeDirToDir
-                | ReplaceDirWithDir
-            ),
-            Discriminator("kind"),
-        ]
-    ] = []
 
     @property
     def dvc_cmd(self) -> str:
@@ -279,8 +297,6 @@ class LatexStage(Stage):
             cmd += " -f"
         if not self.synctex:
             cmd += " --no-synctex"
-        for preproc in self.preprocessing:
-            cmd += f" {preproc.arg}"
         cmd += f" {self.target_path}"
         return cmd
 
@@ -289,9 +305,6 @@ class LatexStage(Stage):
         deps = [self.target_path] + super().dvc_deps
         if self.latexmkrc_path is not None:
             deps.append(self.latexmkrc_path)
-        for preproc in self.preprocessing:
-            if preproc.src not in deps:
-                deps.append(preproc.src)
         return deps
 
     @property
@@ -679,6 +692,7 @@ class Pipeline(BaseModel):
                 | JuliaScriptStage
                 | JuliaCommandStage
                 | SBatchStage
+                | MapPathsStage
             ),
             Discriminator("kind"),
         ],

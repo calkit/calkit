@@ -2048,48 +2048,6 @@ def run_latexmk(
             help="Don't generate synctex file for source-to-pdf mapping.",
         ),
     ] = False,
-    copy_files: Annotated[
-        list[str],
-        typer.Option(
-            "--copy-file-to-file",
-            help=(
-                "Copy files before running, e.g., "
-                "--copy-file-to-file 'results.tex->paper/results.tex'."
-            ),
-        ),
-    ] = [],
-    copy_files_to_dir: Annotated[
-        list[str],
-        typer.Option(
-            "--copy-file-to-dir",
-            help=(
-                "Copy files to a directory before running, e.g., "
-                "--copy-file-to-dir 'results.tex->paper/results'."
-            ),
-        ),
-    ] = [],
-    replace_dirs_with_dir: Annotated[
-        list[str],
-        typer.Option(
-            "--replace-dir-with-dir",
-            help=(
-                "Copy directory to another directory before running. "
-                "This is useful for replacing a target directory, "
-                "e.g., --replace-dir-with-dir 'figures->paper/figures'."
-            ),
-        ),
-    ] = [],
-    merge_dirs_to_dir: Annotated[
-        list[str],
-        typer.Option(
-            "--merge-dir-to-dir",
-            help=(
-                "Merge directory into another directory before running. "
-                "This is useful for merging contents of one directory into "
-                "another, e.g., --merge-dir-to-dir 'figures->paper/figures'."
-            ),
-        ),
-    ] = [],
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -2100,58 +2058,6 @@ def run_latexmk(
     system environment if available. If not available, a TeX Live Docker
     container will be used.
     """
-    repo = git.Repo()
-
-    def ensure_path_is_ignored(path):
-        if not repo.ignored(path):
-            typer.echo(f"Adding {path} to .gitignore")
-            with open(".gitignore", "a") as f:
-                f.write(f"\n{path}\n")
-
-    # Do any necessary preprocessing
-    for copy_file in copy_files:
-        src_path, dest_path = copy_file.split("->")
-        if os.path.isdir(dest_path):
-            raise_error(f"Destination path '{dest_path}' is a directory")
-        shutil.copy2(src_path, dest_path)
-        ensure_path_is_ignored(dest_path)
-    for copy_file in copy_files_to_dir:
-        src_path, dest_dir = copy_file.split("->")
-        if os.path.isfile(dest_dir):
-            raise_error(f"Destination path '{dest_dir}' is a file")
-        if not os.path.isdir(dest_dir):
-            os.makedirs(dest_dir, exist_ok=True)
-        dest_path = os.path.join(dest_dir, os.path.basename(src_path))
-        shutil.copy2(src_path, dest_path)
-        ensure_path_is_ignored(dest_path)
-    for replace_dir_with_dir in replace_dirs_with_dir:
-        src_dir, dest_dir = replace_dir_with_dir.split("->")
-        if os.path.isfile(dest_dir):
-            raise_error(f"Destination path '{dest_dir}' is a file")
-        if os.path.isfile(src_dir):
-            raise_error(f"Source path '{src_dir}' is a file")
-        if os.path.isdir(dest_dir):
-            shutil.rmtree(dest_dir)
-        shutil.copytree(src_dir, dest_dir)
-        ensure_path_is_ignored(dest_dir)
-    for merge_dir_to_dir in merge_dirs_to_dir:
-        src_dir, dest_dir = merge_dir_to_dir.split("->")
-        if os.path.isfile(dest_dir):
-            raise_error(f"Destination path '{dest_dir}' is a file")
-        if os.path.isfile(src_dir):
-            raise_error(f"Source path '{src_dir}' is a file")
-        if not os.path.isdir(dest_dir):
-            os.makedirs(dest_dir, exist_ok=True)
-        for item in os.listdir(src_dir):
-            if item.startswith("."):
-                continue
-            src_item = os.path.join(src_dir, item)
-            dest_item = os.path.join(dest_dir, item)
-            if os.path.isdir(src_item):
-                shutil.copytree(src_item, dest_item, dirs_exist_ok=True)
-            else:
-                shutil.copy2(src_item, dest_item)
-            ensure_path_is_ignored(dest_item)
     # Now formulate the command
     latexmk_cmd = ["latexmk", "-pdf", "-cd"]
     if latexmk_rc_path is not None:
@@ -2191,3 +2097,106 @@ def run_latexmk(
         subprocess.check_call(cmd)
     except subprocess.CalledProcessError:
         raise_error("latexmk failed")
+
+
+@app.command(name="map-paths")
+def map_paths(
+    file_to_file: Annotated[
+        list[str],
+        typer.Option(
+            "--file-to-file",
+            help=(
+                "Map a file to another file, e.g., "
+                "--file-to-file 'results.tex->paper/results.tex'."
+            ),
+        ),
+    ] = [],
+    file_to_dir: Annotated[
+        list[str],
+        typer.Option(
+            "--file-to-dir",
+            help=(
+                "Map a file into a directory, e.g., "
+                "--file-to-dir 'results.tex->paper/results'."
+            ),
+        ),
+    ] = [],
+    dir_to_dir_replace: Annotated[
+        list[str],
+        typer.Option(
+            "--dir-to-dir-replace",
+            help=(
+                "Copy directory to another directory and replace it, "
+                "e.g., --dir-to-dir-replace 'figures->paper/figures'."
+            ),
+        ),
+    ] = [],
+    dir_to_dir_merge: Annotated[
+        list[str],
+        typer.Option(
+            "--dir-to-dir-merge",
+            help=(
+                "Merge directory into another directory before. "
+                "This is useful for merging contents of one directory into "
+                "another, e.g., --dir-to-dir-merge 'figures->paper/figures'."
+            ),
+        ),
+    ] = [],
+):
+    """Map paths in a project.
+
+    Currently this is done with copying. Outputs are ensured to be ignored by
+    Git.
+    """
+    repo = git.Repo()
+
+    def ensure_path_is_ignored(path):
+        if not repo.ignored(path):
+            typer.echo(f"Adding {path} to .gitignore")
+            with open(".gitignore", "a") as f:
+                f.write(f"\n{path}\n")
+
+    # Do any necessary preprocessing
+    for copy_file in file_to_file:
+        src_path, dest_path = copy_file.split("->")
+        if os.path.isdir(dest_path):
+            raise_error(f"Destination path '{dest_path}' is a directory")
+        shutil.copy2(src_path, dest_path)
+        ensure_path_is_ignored(dest_path)
+    for copy_file in file_to_dir:
+        src_path, dest_dir = copy_file.split("->")
+        if os.path.isfile(dest_dir):
+            raise_error(f"Destination path '{dest_dir}' is a file")
+        if not os.path.isdir(dest_dir):
+            os.makedirs(dest_dir, exist_ok=True)
+        dest_path = os.path.join(dest_dir, os.path.basename(src_path))
+        shutil.copy2(src_path, dest_path)
+        ensure_path_is_ignored(dest_path)
+    for replace_dir_with_dir in dir_to_dir_replace:
+        src_dir, dest_dir = replace_dir_with_dir.split("->")
+        if os.path.isfile(dest_dir):
+            raise_error(f"Destination path '{dest_dir}' is a file")
+        if os.path.isfile(src_dir):
+            raise_error(f"Source path '{src_dir}' is a file")
+        if os.path.isdir(dest_dir):
+            shutil.rmtree(dest_dir)
+        shutil.copytree(src_dir, dest_dir)
+        ensure_path_is_ignored(dest_dir)
+    for merge_dir_to_dir in dir_to_dir_merge:
+        src_dir, dest_dir = merge_dir_to_dir.split("->")
+        if os.path.isfile(dest_dir):
+            raise_error(f"Destination path '{dest_dir}' is a file")
+        if os.path.isfile(src_dir):
+            raise_error(f"Source path '{src_dir}' is a file")
+        if not os.path.isdir(dest_dir):
+            os.makedirs(dest_dir, exist_ok=True)
+        for item in os.listdir(src_dir):
+            if item.startswith("."):
+                continue
+            src_item = os.path.join(src_dir, item)
+            dest_item = os.path.join(dest_dir, item)
+            if os.path.isdir(src_item):
+                shutil.copytree(src_item, dest_item, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src_item, dest_item)
+            ensure_path_is_ignored(dest_item)

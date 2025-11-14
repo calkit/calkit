@@ -270,7 +270,7 @@ class LatexStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"calkit latexmk -e {self.environment}"
+        cmd = f"calkit latexmk -e {self.environment} --no-check"
         if self.latexmkrc_path is not None:
             cmd += f" -r {self.latexmkrc_path}"
         if self.verbose:
@@ -286,10 +286,9 @@ class LatexStage(Stage):
 
     @property
     def dvc_deps(self) -> list[str]:
-        deps = [self.target_path]
+        deps = [self.target_path] + super().dvc_deps
         if self.latexmkrc_path is not None:
             deps.append(self.latexmkrc_path)
-        deps += super().dvc_deps
         for preproc in self.preprocessing:
             if preproc.src not in deps:
                 deps.append(preproc.src)

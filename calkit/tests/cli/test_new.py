@@ -582,9 +582,7 @@ def test_new_latex_stage(tmp_dir):
     subprocess.check_call(["calkit", "check", "pipeline", "--compile"])
     pipeline = calkit.dvc.read_pipeline()
     assert pipeline["stages"]["build-paper"]["cmd"] == (
-        "calkit xenv -n tex --no-check -- "
-        "latexmk -cd -norc -interaction=nonstopmode -silent -synctex=1 "
-        "-pdf paper.tex"
+        "calkit latexmk -e tex --no-check paper.tex"
     )
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["tex"]

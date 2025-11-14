@@ -573,3 +573,62 @@ def test_stage_run_info_from_log_content():
             "status": "failed",
         },
     }
+
+
+def test_latexmk(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("paper", exist_ok=True)
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            r"""\documentclass{article}
+\begin{document}
+Hello, world!
+\end{document}
+"""
+        )
+    subprocess.check_call(["calkit", "latexmk", "paper/main.tex"])
+    assert os.path.isfile("paper/main.pdf")
+    # Test that we can merge a directory into another
+    os.makedirs("figures", exist_ok=True)
+    with open("figures/figure1.tex", "w") as f:
+        f.write(
+            r"""\documentclass{standalone}
+\begin{document}
+This is a figure.
+\end{document}
+"""
+        )
+    subprocess.check_call(
+        [
+            "calkit",
+            "latexmk",
+            "paper/main.tex",
+            "--merge-dir-to-dir",
+            "figures->paper/figures",
+        ]
+    )
+    assert os.path.isfile("paper/figures/figure1.tex")
+    with open("paper/figures/figure2.tex", "w") as f:
+        f.write("More content")
+    subprocess.check_call(
+        [
+            "calkit",
+            "latexmk",
+            "paper/main.tex",
+            "--merge-dir-to-dir",
+            "figures->paper/figures",
+        ]
+    )
+    assert os.path.isfile("paper/figures/figure2.tex")
+    # Test that we can copy a file into a directory
+    shutil.rmtree("paper/figures")
+    subprocess.check_call(
+        [
+            "calkit",
+            "latexmk",
+            "paper/main.tex",
+            "--copy-file-to-dir",
+            "figures/figure1.tex->paper/figures",
+        ]
+    )
+    assert os.path.isfile("paper/figures/figure1.tex")

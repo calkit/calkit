@@ -219,6 +219,10 @@ class MapPathsStage(Stage):
         def arg(self) -> str:
             return f"--{self.kind} '{self.src}->{self.dest}'"
 
+        @property
+        def out_path(self) -> str:
+            return self.dest
+
     class CopyFileToDir(BaseModel):
         kind: Literal["file-to-dir"] = "file-to-dir"
         src: str
@@ -227,6 +231,10 @@ class MapPathsStage(Stage):
         @property
         def arg(self) -> str:
             return f"--{self.kind} '{self.src}->{self.dest}'"
+
+        @property
+        def out_path(self) -> str:
+            return str(PurePosixPath(self.dest) / PurePosixPath(self.src).name)
 
     class DirToDirMerge(BaseModel):
         kind: Literal["dir-to-dir-merge"] = "dir-to-dir-merge"
@@ -237,6 +245,10 @@ class MapPathsStage(Stage):
         def arg(self) -> str:
             return f"--{self.kind} '{self.src}->{self.dest}'"
 
+        @property
+        def out_path(self) -> str:
+            return self.dest
+
     class DirToDirReplace(BaseModel):
         kind: Literal["dir-to-dir-replace"] = "dir-to-dir-replace"
         src: str
@@ -245,6 +257,10 @@ class MapPathsStage(Stage):
         @property
         def arg(self) -> str:
             return f"--{self.kind} '{self.src}->{self.dest}'"
+
+        @property
+        def out_path(self) -> str:
+            return self.dest
 
     kind: Literal["map-paths"] = "map-paths"
     environment: str = "_system"
@@ -274,7 +290,7 @@ class MapPathsStage(Stage):
         """All DVC outs should not be cached, since they are just copies."""
         outs = []
         for path in self.paths:
-            outs.append({path.dest: {"cache": False, "persist": True}})
+            outs.append({path.out_path: {"cache": False, "persist": True}})
         return outs
 
 

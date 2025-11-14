@@ -7,6 +7,7 @@ from calkit.models.pipeline import (
     JuliaCommandStage,
     JupyterNotebookStage,
     LatexStage,
+    MapPathsStage,
     MatlabCommandStage,
     PythonScriptStage,
     SBatchStage,
@@ -190,3 +191,23 @@ def test_sbatchstage():
     assert "data/input.txt" in sd["deps"]
     out = {"data/output.txt": {"persist": True}}
     assert out in sd["outs"]
+
+
+def test_mappathsstage():
+    s = MapPathsStage(
+        name="map1",
+        paths=[
+            dict(
+                kind="file-to-file",
+                src="data/input.txt",
+                dest="data/output.txt",
+            ),  # type: ignore
+        ],
+    )
+    sd = s.to_dvc()
+    print(sd)
+    assert sd["cmd"] == (
+        "calkit map-paths --file-to-file 'data/input.txt->data/output.txt'"
+    )
+    assert "data/input.txt" in sd["deps"]
+    assert {"data/output.txt": {"cache": False, "persist": True}} in sd["outs"]

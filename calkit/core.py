@@ -102,6 +102,8 @@ def load_calkit_info(
     if os.path.isfile(fpath):
         with open(fpath) as f:
             info = ryaml.load(f)
+    if info is None:
+        info = {}
     # Check for any includes, i.e., entities with an _include key, for which
     # we should merge in another file
     default_includes_enabled = ["environments", "procedures"]

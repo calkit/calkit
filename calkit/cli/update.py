@@ -29,6 +29,13 @@ def update_devcontainer(
             ),
         ),
     ] = None,
+    no_commit: Annotated[
+        bool,
+        typer.Option(
+            "--no-commit",
+            help="Do not create a Git commit for the updated devcontainer.",
+        ),
+    ] = False,
 ):
     """Update a project's devcontainer to match the latest Calkit spec."""
     url = (
@@ -43,6 +50,12 @@ def update_devcontainer(
     typer.echo(f"Writing to {out_fpath}")
     with open(out_fpath, "w") as f:
         f.write(resp.text)
+    if not no_commit:
+        repo = git.Repo(wdir)
+        rel_path = os.path.join(".devcontainer", "devcontainer.json")
+        repo.git.add(rel_path)
+        if repo.git.diff(["--staged", "--", rel_path]):
+            repo.git.commit([rel_path, "-m", "Update devcontainer"])
 
 
 @update_app.command(name="license")
@@ -285,3 +298,100 @@ def update_release(
                 service=publisher.lower(),  # type: ignore
             )
     # TODO: Add ability to update metadata
+
+
+@update_app.command(name="vscode-config")
+def update_vscode_config(
+    wdir: Annotated[
+        str | None,
+        typer.Option(
+            "--wdir",
+            help=(
+                "Working directory. "
+                "By default will run current working directory."
+            ),
+        ),
+    ] = None,
+    no_commit: Annotated[
+        bool,
+        typer.Option(
+            "--no-commit",
+            help="Do not create a Git commit for the updated VS Code config.",
+        ),
+    ] = False,
+):
+    """Update a project's VS Code config to match the latest Calkit
+    recommendations.
+    """
+    out_dir = os.path.join(wdir or ".", ".vscode")
+    os.makedirs(out_dir, exist_ok=True)
+    repo = git.Repo(wdir)
+    for fname in ["settings.json", "extensions.json"]:
+        url = (
+            f"https://raw.githubusercontent.com/calkit/vscode-config/"
+            f"refs/heads/main/{fname}"
+        )
+        typer.echo(f"Downloading {url}")
+        resp = requests.get(url)
+        out_dir = os.path.join(wdir or ".", ".vscode")
+        os.makedirs(out_dir, exist_ok=True)
+        out_fpath = os.path.join(out_dir, fname)
+        typer.echo(f"Writing to {out_fpath}")
+        with open(out_fpath, "w") as f:
+            f.write(resp.text)
+        repo.git.add(os.path.join(".vscode", fname))
+    if not no_commit and repo.git.diff(["--staged", "--", ".vscode"]):
+        repo.git.commit([".vscode", "-m", "Update VS Code config"])
+
+
+@update_app.command(name="github-actions")
+def update_github_actions(
+    wdir: Annotated[
+        str | None,
+        typer.Option(
+            "--wdir",
+            help=(
+                "Working directory. "
+                "By default will run current working directory."
+            ),
+        ),
+    ] = None,
+    no_commit: Annotated[
+        bool,
+        typer.Option(
+            "--no-commit",
+            help="Do not create a Git commit for the updated GitHub Actions.",
+        ),
+    ] = False,
+):
+    """Update a project's GitHub Actions to match the latest Calkit
+    recommendations.
+    """
+    # First look for any existing workflows that run Calkit to use as the
+    # output file name
+    fname_out = "run-calkit.yml"
+    out_dir = os.path.join(wdir or ".", ".github", "workflows")
+    os.makedirs(out_dir, exist_ok=True)
+    for fname in os.listdir(out_dir):
+        if fname.endswith(".yaml") or fname.endswith(".yml"):
+            fpath = os.path.join(out_dir, fname)
+            with open(fpath) as f:
+                if "calkit" in f.read().lower():
+                    fname_out = fname
+                    break
+    url = (
+        "https://raw.githubusercontent.com/calkit/run-action/refs/heads/main"
+        "/example.yml"
+    )
+    typer.echo(f"Downloading {url}")
+    resp = requests.get(url)
+    out_fpath = os.path.join(out_dir, fname_out)
+    typer.echo(f"Writing to {out_fpath}")
+    with open(out_fpath, "w") as f:
+        f.write(resp.text)
+    if not no_commit:
+        rel_path = os.path.join(".github", "workflows", fname_out)
+        repo = git.Repo(wdir)
+        repo.git.add(rel_path)
+        if repo.git.diff(["--staged", "--", rel_path]):
+            repo.git.commit([rel_path, "-m", "Update GitHub Actions workflow"])

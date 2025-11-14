@@ -29,6 +29,13 @@ def update_devcontainer(
             ),
         ),
     ] = None,
+    no_commit: Annotated[
+        bool,
+        typer.Option(
+            "--no-commit",
+            help="Do not create a Git commit for the updated devcontainer.",
+        ),
+    ] = False,
 ):
     """Update a project's devcontainer to match the latest Calkit spec."""
     url = (
@@ -43,6 +50,12 @@ def update_devcontainer(
     typer.echo(f"Writing to {out_fpath}")
     with open(out_fpath, "w") as f:
         f.write(resp.text)
+    if not no_commit:
+        repo = git.Repo(wdir)
+        rel_path = os.path.join(".devcontainer", "devcontainer.json")
+        repo.git.add(rel_path)
+        if repo.git.diff(["--staged", "--", rel_path]):
+            repo.git.commit([rel_path, "-m", "Update devcontainer"])
 
 
 @update_app.command(name="license")

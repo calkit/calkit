@@ -208,6 +208,47 @@ class PythonScriptStage(Stage):
         return [self.script_path] + super().dvc_deps
 
 
+# LaTeX stage preprocessing models
+class CopyFileToFile(BaseModel):
+    kind: Literal["copy-file-to-file"] = "copy-file-to-file"
+    src: str
+    dest: str
+
+    @property
+    def arg(self) -> str:
+        return f"--{self.kind} '{self.src}->{self.dest}'"
+
+
+class CopyFileToDir(BaseModel):
+    kind: Literal["copy-file-to-dir"] = "copy-file-to-dir"
+    src: str
+    dest: str
+
+    @property
+    def arg(self) -> str:
+        return f"--{self.kind} '{self.src}->{self.dest}'"
+
+
+class MergeDirToDir(BaseModel):
+    kind: Literal["merge-dir-to-dir"] = "merge-dir-to-dir"
+    src: str
+    dest: str
+
+    @property
+    def arg(self) -> str:
+        return f"--{self.kind} '{self.src}->{self.dest}'"
+
+
+class ReplaceDirWithDir(BaseModel):
+    kind: Literal["replace-dir-with-dir"] = "replace-dir-with-dir"
+    src: str
+    dest: str
+
+    @property
+    def arg(self) -> str:
+        return f"--{self.kind} '{self.src}->{self.dest}'"
+
+
 class LatexStage(Stage):
     kind: Literal["latex"] = "latex"
     target_path: str
@@ -215,7 +256,17 @@ class LatexStage(Stage):
     verbose: bool = False
     force: bool = False
     synctex: bool = True
-    link_paths: dict[str, str] = {}
+    preprocessing: list[
+        Annotated[
+            (
+                CopyFileToFile
+                | CopyFileToDir
+                | MergeDirToDir
+                | ReplaceDirWithDir
+            ),
+            Discriminator("kind"),
+        ]
+    ] = []
 
     @property
     def dvc_cmd(self) -> str:
@@ -228,8 +279,8 @@ class LatexStage(Stage):
             cmd += " -f"
         if not self.synctex:
             cmd += " --no-synctex"
-        for src_path, dest_path in self.link_paths.items():
-            cmd += f" --link '{src_path}:{dest_path}'"
+        for preproc in self.preprocessing:
+            cmd += f" {preproc.arg}"
         cmd += f" {self.target_path}"
         return cmd
 
@@ -239,9 +290,9 @@ class LatexStage(Stage):
         if self.latexmkrc_path is not None:
             deps.append(self.latexmkrc_path)
         deps += super().dvc_deps
-        for src_path in self.link_paths.keys():
-            if src_path not in deps:
-                deps.append(src_path)
+        for preproc in self.preprocessing:
+            if preproc.src not in deps:
+                deps.append(preproc.src)
         return deps
 
     @property

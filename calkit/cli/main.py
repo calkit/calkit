@@ -2048,16 +2048,45 @@ def run_latexmk(
             help="Don't generate synctex file for source-to-pdf mapping.",
         ),
     ] = False,
-    link_paths: Annotated[
+    copy_files: Annotated[
         list[str],
         typer.Option(
-            "--link",
-            "-l",
+            "--copy-file-to-file",
             help=(
-                "Relative paths to link or copy before running, "
-                "e.g., figures:paper/figures. "
-                "Can be used to link files or directories needed for "
-                "compilation."
+                "Copy files before running, e.g., "
+                "--copy-file-to-file 'results.tex->paper/results.tex'."
+            ),
+        ),
+    ] = [],
+    copy_files_to_dir: Annotated[
+        list[str],
+        typer.Option(
+            "--copy-file-to-dir",
+            help=(
+                "Copy files to a directory before running, e.g., "
+                "--copy-file-to-dir 'results.tex->paper/results'."
+            ),
+        ),
+    ] = [],
+    replace_dirs_with_dir: Annotated[
+        list[str],
+        typer.Option(
+            "--replace-dir-with-dir",
+            help=(
+                "Copy directory to another directory before running. "
+                "This is useful for replacing a target directory, "
+                "e.g., --replace-dir-with-dir 'figures->paper/figures'."
+            ),
+        ),
+    ] = [],
+    merge_dirs_to_dir: Annotated[
+        list[str],
+        typer.Option(
+            "--merge-dir-to-dir",
+            help=(
+                "Merge directory into another directory before running. "
+                "This is useful for merging contents of one directory into "
+                "another, e.g., --merge-dir-to-dir 'figures->paper/figures'."
             ),
         ),
     ] = [],
@@ -2071,30 +2100,59 @@ def run_latexmk(
     system environment if available. If not available, a TeX Live Docker
     container will be used.
     """
-    # If we have any link paths, link them if on Linux/macOS, otherwise copy
-    # and ensure they are ignored by Git
-    for path in link_paths:
-        src_path, dest_path = path.split(":")
-        if _platform.system() in ["Linux", "Darwin"]:
-            if os.path.exists(dest_path):
-                os.remove(dest_path)
-            os.symlink(src_path, dest_path)
-        else:
-            if os.path.exists(dest_path):
-                if os.path.isdir(dest_path):
-                    shutil.rmtree(dest_path)
-                else:
-                    os.remove(dest_path)
-            if os.path.isdir(src_path):
-                shutil.copytree(src_path, dest_path)
+    repo = git.Repo()
+
+    def ensure_path_is_ignored(path):
+        if not repo.ignored(path):
+            typer.echo(f"Adding {path} to .gitignore")
+            with open(".gitignore", "a") as f:
+                f.write(f"\n{path}\n")
+
+    # Do any necessary preprocessing
+    for copy_file in copy_files:
+        src_path, dest_path = copy_file.split("->")
+        if os.path.isdir(dest_path):
+            raise_error(f"Destination path '{dest_path}' is a directory")
+        shutil.copy2(src_path, dest_path)
+        ensure_path_is_ignored(dest_path)
+    for copy_file in copy_files_to_dir:
+        src_path, dest_dir = copy_file.split("->")
+        if os.path.isfile(dest_dir):
+            raise_error(f"Destination path '{dest_dir}' is a file")
+        if not os.path.isdir(dest_dir):
+            os.makedirs(dest_dir, exist_ok=True)
+        dest_path = os.path.join(dest_dir, os.path.basename(src_path))
+        shutil.copy2(src_path, dest_path)
+        ensure_path_is_ignored(dest_path)
+    for replace_dir_with_dir in replace_dirs_with_dir:
+        src_dir, dest_dir = replace_dir_with_dir.split("->")
+        if os.path.isfile(dest_dir):
+            raise_error(f"Destination path '{dest_dir}' is a file")
+        if os.path.isfile(src_dir):
+            raise_error(f"Source path '{src_dir}' is a file")
+        if os.path.isdir(dest_dir):
+            shutil.rmtree(dest_dir)
+        shutil.copytree(src_dir, dest_dir)
+        ensure_path_is_ignored(dest_dir)
+    for merge_dir_to_dir in merge_dirs_to_dir:
+        src_dir, dest_dir = merge_dir_to_dir.split("->")
+        if os.path.isfile(dest_dir):
+            raise_error(f"Destination path '{dest_dir}' is a file")
+        if os.path.isfile(src_dir):
+            raise_error(f"Source path '{src_dir}' is a file")
+        if not os.path.isdir(dest_dir):
+            os.makedirs(dest_dir, exist_ok=True)
+        for item in os.listdir(src_dir):
+            if item.startswith("."):
+                continue
+            src_item = os.path.join(src_dir, item)
+            dest_item = os.path.join(dest_dir, item)
+            if os.path.isdir(src_item):
+                shutil.copytree(src_item, dest_item, dirs_exist_ok=True)
             else:
-                shutil.copy2(src_path, dest_path)
-            # Ensure dest_path is ignored by Git
-            repo = git.Repo()
-            if not repo.ignored(dest_path):
-                typer.echo(f"Adding {dest_path} to .gitignore")
-                with open(".gitignore", "a") as f:
-                    f.write(f"\n{dest_path}\n")
+                shutil.copy2(src_item, dest_item)
+            ensure_path_is_ignored(dest_item)
+    # Now formulate the command
     latexmk_cmd = ["latexmk", "-pdf", "-cd"]
     if latexmk_rc_path is not None:
         latexmk_cmd += ["-r", latexmk_rc_path]
@@ -2109,8 +2167,13 @@ def run_latexmk(
         else:
             check_cmd = []
         cmd = (
-            ["calkit", "xenv", "--name", environment] + check_cmd + latexmk_cmd
+            ["calkit", "xenv", "--name", environment]
+            + check_cmd
+            + ["--"]
+            + latexmk_cmd
         )
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
     elif calkit.check_dep_exists("latexmk"):
         cmd = latexmk_cmd
     else:

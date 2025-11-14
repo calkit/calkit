@@ -2013,6 +2013,25 @@ def run_jupyter(
     sys.exit(process.returncode)
 
 
+@app.command(
+    name="pre-commit",
+    add_help_option=False,
+    context_settings={
+        "ignore_unknown_options": True,
+        "allow_extra_args": True,
+    },
+)
+def run_pre_commit(
+    ctx: typer.Context,
+    help: Annotated[bool, typer.Option("-h", "--help")] = False,
+):
+    """Run a command with the pre-commit CLI."""
+    process = subprocess.run(
+        [sys.executable, "-m", "pre_commit"] + sys.argv[2:]
+    )
+    sys.exit(process.returncode)
+
+
 @app.command(name="latexmk")
 def run_latexmk(
     tex_file: Annotated[str, typer.Argument(help="The .tex file to compile.")],

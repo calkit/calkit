@@ -285,3 +285,47 @@ def update_release(
                 service=publisher.lower(),  # type: ignore
             )
     # TODO: Add ability to update metadata
+
+
+@update_app.command(name="vscode-config")
+def update_vscode_config(
+    wdir: Annotated[
+        str | None,
+        typer.Option(
+            "--wdir",
+            help=(
+                "Working directory. "
+                "By default will run current working directory."
+            ),
+        ),
+    ] = None,
+    no_commit: Annotated[
+        bool,
+        typer.Option(
+            "--no-commit",
+            help="Do not create a Git commit for the updated VS Code config.",
+        ),
+    ] = False,
+):
+    """Update a project's VS Code config to match the latest Calkit
+    recommendations.
+    """
+    out_dir = os.path.join(wdir or ".", ".vscode")
+    os.makedirs(out_dir, exist_ok=True)
+    repo = git.Repo(wdir)
+    for fname in ["settings.json", "extensions.json"]:
+        url = (
+            f"https://raw.githubusercontent.com/calkit/vscode-config/"
+            f"refs/heads/main/{fname}"
+        )
+        typer.echo(f"Downloading {url}")
+        resp = requests.get(url)
+        out_dir = os.path.join(wdir or ".", ".vscode")
+        os.makedirs(out_dir, exist_ok=True)
+        out_fpath = os.path.join(out_dir, fname)
+        typer.echo(f"Writing to {out_fpath}")
+        with open(out_fpath, "w") as f:
+            f.write(resp.text)
+        repo.git.add(os.path.join(".vscode", fname))
+    if not no_commit and repo.git.diff(["--staged", "--", ".vscode"]):
+        repo.git.commit([".vscode", "-m", "Update VS Code config"])

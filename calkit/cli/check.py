@@ -208,6 +208,35 @@ def check_environment(
     return get_env_lock_fpath(env=env, env_name=env_name, as_posix=False)
 
 
+@check_app.command(
+    name="envs",
+    help="Check that all environments are up-to-date.",
+)
+@check_app.command(name="environments")
+def check_environments(
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Print verbose output.")
+    ] = False,
+) -> str | None:
+    ck_info = calkit.load_calkit_info(process_includes="environments")
+    envs = ck_info.get("environments", {})
+    if not envs:
+        typer.echo("No environments defined in calkit.yaml")
+        return
+    failures = []
+    for env_name in envs.keys():
+        typer.echo(f"Checking environment: '{env_name}'")
+        try:
+            check_environment(env_name=env_name, verbose=verbose)
+        except Exception as e:
+            warn(f"Error checking environment '{env_name}': {e}")
+            failures.append(env_name)
+    if failures:
+        raise_error(
+            f"Failed to check the following environments: {', '.join(failures)}"
+        )
+
+
 @check_app.command(name="docker-env")
 def check_docker_env(
     tag: Annotated[str, typer.Argument(help="Image tag.")],

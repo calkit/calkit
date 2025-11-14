@@ -608,6 +608,10 @@ This is a figure.
         ]
     )
     assert os.path.isfile("paper/figures/figure1.tex")
+    with open(".gitignore") as f:
+        gitignore = f.read()
+    assert "paper/figures/figure1.tex" in gitignore.split("\n")
+    assert "paper/figures" not in gitignore.split("\n")
     with open("paper/figures/figure2.tex", "w") as f:
         f.write("More content")
     subprocess.check_call(
@@ -631,4 +635,19 @@ This is a figure.
             "figures/figure1.tex->paper/figures",
         ]
     )
+    assert os.path.isfile("paper/figures/figure1.tex")
+    # Test that we can replace a directory with another
+    os.makedirs("paper/figures", exist_ok=True)
+    with open("paper/figures/bad-figure.tex", "w") as f:
+        f.write("Old content")
+    subprocess.check_call(
+        [
+            "calkit",
+            "latexmk",
+            "paper/main.tex",
+            "--replace-dir-with-dir",
+            "figures->paper/figures",
+        ]
+    )
+    assert not os.path.isfile("paper/figures/bad-figure.tex")
     assert os.path.isfile("paper/figures/figure1.tex")

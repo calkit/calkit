@@ -181,11 +181,6 @@ def to_dvc(
             "in calkit.yaml. Changes made here will be overwritten."
         )
         dvc_stage["desc"] = desc
-        # If this is a Jupyter Notebook stage, we need to add a clean stage
-        if stage.kind == "jupyter-notebook":
-            clean_stage_name = f"_clean-nb-{stage_name}"
-            dvc_stages[clean_stage_name] = stage.dvc_clean_stage
-            dvc_stages[clean_stage_name]["desc"] = desc
         dvc_stages[stage_name] = dvc_stage
         # Check for any outputs that should be ignored
         if write:

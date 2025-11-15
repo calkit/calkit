@@ -283,7 +283,7 @@ class MapPathsStage(Stage):
         deps = []
         for path in self.paths:
             deps.append(path.src)
-        return deps
+        return deps + super().dvc_deps
 
     @property
     def dvc_outs(self) -> list[dict]:
@@ -291,7 +291,7 @@ class MapPathsStage(Stage):
         outs = []
         for path in self.paths:
             outs.append({path.out_path: {"cache": False, "persist": True}})
-        return outs
+        return outs + super().dvc_outs
 
 
 class LatexStage(Stage):

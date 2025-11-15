@@ -40,6 +40,7 @@ from calkit.cli.cloud import cloud_app
 from calkit.cli.config import config_app
 from calkit.cli.describe import describe_app
 from calkit.cli.import_ import import_app
+from calkit.cli.latex import latex_app
 from calkit.cli.list import list_app
 from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
@@ -70,6 +71,7 @@ app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
+app.add_typer(latex_app, name="latex", help="Work with LaTeX.")
 app.add_typer(overleaf_app, name="overleaf", help="Interact with Overleaf.")
 app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
 app.add_typer(slurm_app, name="slurm", help="Work with SLURM.")

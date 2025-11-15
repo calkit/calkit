@@ -484,6 +484,7 @@ dependencies = [
     { name = "dvc" },
     { name = "fastapi" },
     { name = "gitpython" },
+    { name = "json2latex" },
     { name = "jupyterlab" },
     { name = "keyring" },
     { name = "nbconvert" },
@@ -540,6 +541,7 @@ requires-dist = [
     { name = "dvc", specifier = "==3.64.0" },
     { name = "fastapi" },
     { name = "gitpython" },
+    { name = "json2latex", specifier = ">=0.0.2" },
     { name = "jupyterlab", specifier = ">=4.4.5" },
     { name = "keyring" },
     { name = "nbconvert" },
@@ -2015,6 +2017,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ea/98/d6cadf4d5a1c03b2136837a435682418c29fdeb66be137128544cecc5b7a/jsbeautifier-1.15.4.tar.gz", hash = "sha256:5bb18d9efb9331d825735fbc5360ee8f1aac5e52780042803943aa7f854f7592", size = 75257, upload-time = "2025-02-27T17:53:53.252Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2d/14/1c65fccf8413d5f5c6e8425f84675169654395098000d8bddc4e9d3390e1/jsbeautifier-1.15.4-py3-none-any.whl", hash = "sha256:72f65de312a3f10900d7685557f84cb61a9733c50dcc27271a39f5b0051bf528", size = 94707, upload-time = "2025-02-27T17:53:46.152Z" },
+]
+
+[[package]]
+name = "json2latex"
+version = "0.0.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "roman" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0c/6f/96dacfaf281181d67941c449f90e17f3b7fecca8a53d87fc336f0b4e6d0d/json2latex-0.0.2.tar.gz", hash = "sha256:b3e5cbc1c146fef7d3c68df8e7181d92bd377cbe413e82c5fbd38cdc2b5b168b", size = 4803, upload-time = "2020-03-01T00:32:34.208Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/66/20/d775b0a666d279d90f3e0bcc1aff5c03bc24c7f7e6e9bd4b91e850633739/json2latex-0.0.2-py3-none-any.whl", hash = "sha256:16736ec76bcbdd3ff60426259a5f462ade6a643106fe1c75baec4a27003cdfb9", size = 6058, upload-time = "2020-03-01T00:32:32.756Z" },
 ]
 
 [[package]]
@@ -4399,6 +4413,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/fb/d2/8920e102050a0de7bfabeb4c4614a49248cf8d5d7a8d01885fbb24dc767a/rich-14.2.0.tar.gz", hash = "sha256:73ff50c7c0c1c77c8243079283f4edb376f0f6442433aecb8ce7e6d0b92d1fe4", size = 219990, upload-time = "2025-10-09T14:16:53.064Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/25/7a/b0178788f8dc6cafce37a212c99565fa1fe7872c70c6c9c1e1a372d9d88f/rich-14.2.0-py3-none-any.whl", hash = "sha256:76bc51fe2e57d2b1be1f96c524b890b816e334ab4c1e45888799bfaab0021edd", size = 243393, upload-time = "2025-10-09T14:16:51.245Z" },
+]
+
+[[package]]
+name = "roman"
+version = "5.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9c/7c/3901b35ed856329bf98e84da8e5e0b4d899ea0027eee222f1be42a24ff3f/roman-5.2.tar.gz", hash = "sha256:275fe9f46290f7d0ffaea1c33251b92b8e463ace23660508ceef522e7587cb6f", size = 8185, upload-time = "2025-11-11T08:03:57.025Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/14/ea3cdd7276fcd731a9003fe4abeb6b395a38110ddff6a6a509f4ee00f741/roman-5.2-py3-none-any.whl", hash = "sha256:89d3b47400388806d06ff77ea77c79ab080bc127820dea6bf34e1f1c1b8e676e", size = 6041, upload-time = "2025-11-11T08:03:56.051Z" },
 ]
 
 [[package]]

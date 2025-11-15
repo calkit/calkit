@@ -1027,6 +1027,9 @@ def run(
     import dvc.ui
     from dvc.cli import main as dvc_cli_main
 
+    import calkit.environments
+    import calkit.pipeline
+
     if (target_inputs or target_outputs) and targets:
         raise_error("Cannot specify both targets and inputs")
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
@@ -1041,7 +1044,16 @@ def run(
         raise_error(f"Failed to clean notebooks: {e.__class__.__name__}: {e}")
     if not quiet:
         typer.echo("Getting system information")
-    # TODO: Check all environments in the pipeline
+    # Check all environments in the pipeline (with caching)
+    # If any failed, warn the user that we might have problems running
+    env_check_results = calkit.environments.check_all_in_pipeline(
+        ck_info=ck_info, targets=targets
+    )
+    for env_name, result in env_check_results.items():
+        failed = not result.get("success", False)
+        if failed:
+            warn(f"Failed to check environment '{env_name}'")
+    # Get system information
     system_info = calkit.get_system_info()
     if save_log:
         # Save the system to .calkit/systems

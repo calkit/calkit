@@ -20,7 +20,12 @@ notebooks_app = typer.Typer(no_args_is_help=True)
 
 
 @notebooks_app.command("clean")
-def clean_notebook_outputs(path: str):
+def clean_notebook_outputs(
+    path: str,
+    quiet: Annotated[
+        bool, typer.Option("--quiet", "-q", help="Do not print output.")
+    ] = False,
+):
     """Clean notebook and place a copy in the cleaned notebooks directory.
 
     This can be useful to use as a preprocessing DVC stage to use a clean
@@ -28,24 +33,30 @@ def clean_notebook_outputs(path: str):
     """
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
+    if not quiet:
+        typer.echo(f"Cleaning notebook: {path}")
     fpath_out = calkit.notebooks.get_cleaned_notebook_path(path)
     folder = os.path.dirname(fpath_out)
     os.makedirs(folder, exist_ok=True)
     fpath_out = os.path.abspath(fpath_out)
-    subprocess.call(
-        [
-            sys.executable,
-            "-m",
-            "jupyter",
-            "nbconvert",
-            path,
-            "--clear-output",
-            "--to",
-            "notebook",
-            "--output",
-            fpath_out,
-        ]
-    )
+    with open(path, "r", encoding="utf-8") as f:
+        try:
+            nb = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Error decoding JSON from notebook: {e}")
+    for cell in nb.get("cells", []):
+        if cell.get("cell_type") == "code":
+            cell["outputs"] = []
+            cell["execution_count"] = None
+        # Clean metadata but keep tags
+        if "tags" in cell.get("metadata", {}):
+            cell["metadata"] = {"tags": cell["metadata"]["tags"]}
+        else:
+            cell["metadata"] = {}
+    # Clean out notebook-level metadata
+    nb["metadata"] = {}
+    with open(fpath_out, "w", encoding="utf-8") as f:
+        json.dump(nb, f, indent=2)
 
 
 def _parse_params(params: list[str]) -> dict[str, Any]:

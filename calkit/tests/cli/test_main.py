@@ -573,3 +573,55 @@ def test_stage_run_info_from_log_content():
             "status": "failed",
         },
     }
+
+
+def test_latexmk(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("paper", exist_ok=True)
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            r"""\documentclass{article}
+            \begin{document}
+            Hello, world!
+            \end{document}
+            """
+        )
+    subprocess.check_call(["calkit", "latexmk", "paper/main.tex"])
+    assert os.path.isfile("paper/main.pdf")
+
+
+def test_map_paths(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("paper", exist_ok=True)
+    with open("test.txt", "w") as f:
+        f.write("This is a test file.")
+    subprocess.check_call(
+        ["calkit", "map-paths", "--file-to-file", "test.txt->paper/test.txt"]
+    )
+    assert os.path.isfile("paper/test.txt")
+    with open("paper/test.txt", "r") as f:
+        content = f.read()
+    assert content == "This is a test file."
+    with open(".gitignore") as f:
+        gitignore = f.read()
+    assert "paper/test.txt" in gitignore.split("\n")
+    os.makedirs("data", exist_ok=True)
+    with open("data/file1.txt", "w") as f:
+        f.write("This is file 1.")
+    with open("data/file2.txt", "w") as f:
+        f.write("This is file 2.")
+    subprocess.check_call(
+        ["calkit", "map-paths", "--dir-to-dir-merge", "data->paper/data"]
+    )
+    assert os.path.isfile("paper/data/file1.txt")
+    assert os.path.isfile("paper/data/file2.txt")
+    os.remove("data/file1.txt")
+    subprocess.check_call(
+        ["calkit", "map-paths", "--dir-to-dir-replace", "data->paper/data"]
+    )
+    assert not os.path.isfile("paper/data/file1.txt")
+    assert os.path.isfile("paper/data/file2.txt")
+    subprocess.check_call(
+        ["calkit", "map-paths", "--file-to-dir", "test.txt->paper/data"]
+    )
+    assert os.path.isfile("paper/data/test.txt")

@@ -2024,6 +2024,44 @@ def run_latexmk(
             help=("Environment in which to run latexmk, if applicable."),
         ),
     ] = None,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help=(
+                "Don't check the environment is valid before running latexmk."
+            ),
+        ),
+    ] = False,
+    latexmk_rc_path: Annotated[
+        str | None,
+        typer.Option(
+            "--latexmk-rc",
+            "-r",
+            help="Path to a latexmkrc file to use for compilation.",
+        ),
+    ] = None,
+    no_synctex: Annotated[
+        bool,
+        typer.Option(
+            "--no-synctex",
+            help="Don't generate synctex file for source-to-pdf mapping.",
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help=(
+                "Force latexmk to recompile all files, even if they are up to "
+                "date."
+            ),
+        ),
+    ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
+    ] = False,
 ):
     """Compile a LaTeX document with latexmk.
 
@@ -2031,17 +2069,30 @@ def run_latexmk(
     system environment if available. If not available, a TeX Live Docker
     container will be used.
     """
-    latexmk_cmd = [
-        "latexmk",
-        "-pdf",
-        "-cd",
-        "-silent",
-        "-synctex=1",
-        "-interaction=nonstopmode",
-        tex_file,
-    ]
+    # Now formulate the command
+    latexmk_cmd = ["latexmk", "-pdf", "-cd"]
+    if latexmk_rc_path is not None:
+        latexmk_cmd += ["-r", latexmk_rc_path]
+    if not no_synctex:
+        latexmk_cmd.append("-synctex=1")
+    if not verbose:
+        latexmk_cmd.append("-silent")
+    if force:
+        latexmk_cmd.append("-f")
+    latexmk_cmd += ["-interaction=nonstopmode", tex_file]
     if environment is not None:
-        cmd = ["calkit", "xenv", "--name", environment] + latexmk_cmd
+        if no_check:
+            check_cmd = ["--no-check"]
+        else:
+            check_cmd = []
+        cmd = (
+            ["calkit", "xenv", "--name", environment]
+            + check_cmd
+            + ["--"]
+            + latexmk_cmd
+        )
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
     elif calkit.check_dep_exists("latexmk"):
         cmd = latexmk_cmd
     else:
@@ -2059,3 +2110,125 @@ def run_latexmk(
         subprocess.check_call(cmd)
     except subprocess.CalledProcessError:
         raise_error("latexmk failed")
+
+
+@app.command(name="map-paths")
+def map_paths(
+    file_to_file: Annotated[
+        list[str],
+        typer.Option(
+            "--file-to-file",
+            help=(
+                "Map a file to another file, e.g., "
+                "--file-to-file 'results.tex->paper/results.tex'."
+            ),
+        ),
+    ] = [],
+    file_to_dir: Annotated[
+        list[str],
+        typer.Option(
+            "--file-to-dir",
+            help=(
+                "Map a file into a directory, e.g., "
+                "--file-to-dir 'results.tex->paper/results'."
+            ),
+        ),
+    ] = [],
+    dir_to_dir_replace: Annotated[
+        list[str],
+        typer.Option(
+            "--dir-to-dir-replace",
+            help=(
+                "Copy directory to another directory and replace it, "
+                "e.g., --dir-to-dir-replace 'figures->paper/figures'."
+            ),
+        ),
+    ] = [],
+    dir_to_dir_merge: Annotated[
+        list[str],
+        typer.Option(
+            "--dir-to-dir-merge",
+            help=(
+                "Merge directory into another directory. "
+                "This is useful for merging contents of one directory into "
+                "another, e.g., --dir-to-dir-merge 'figures->paper/figures'."
+            ),
+        ),
+    ] = [],
+):
+    """Map paths in a project.
+
+    Currently this is done with copying. Outputs are ensured to be ignored by
+    Git.
+    """
+    repo = git.Repo()
+
+    def ensure_path_is_ignored(path):
+        if not repo.ignored(path):
+            typer.echo(f"Adding {path} to .gitignore")
+            with open(".gitignore", "a") as f:
+                f.write(f"\n{path}\n")
+
+    def validate_and_split(mapping: str) -> tuple[str, str]:
+        if "->" not in mapping:
+            raise_error(
+                f"Invalid path mapping format: '{mapping}'; "
+                "Expected format: 'src->dest'"
+            )
+        parts = mapping.split("->")
+        if len(parts) != 2:
+            raise_error(
+                f"Invalid path mapping format: '{mapping}'; "
+                "Expected exactly one '->' separator"
+            )
+        return parts[0].strip(), parts[1].strip()
+
+    for copy_file in file_to_file:
+        src_path, dest_path = validate_and_split(copy_file)
+        if os.path.isdir(dest_path):
+            raise_error(f"Destination path '{dest_path}' is a directory")
+        parent_dir = os.path.dirname(dest_path)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
+        shutil.copy2(src_path, dest_path)
+        ensure_path_is_ignored(dest_path)
+    for copy_file in file_to_dir:
+        src_path, dest_dir = validate_and_split(copy_file)
+        if os.path.isfile(dest_dir):
+            raise_error(f"Destination path '{dest_dir}' is a file")
+        if not os.path.isdir(dest_dir):
+            os.makedirs(dest_dir, exist_ok=True)
+        dest_path = os.path.join(dest_dir, os.path.basename(src_path))
+        shutil.copy2(src_path, dest_path)
+        ensure_path_is_ignored(dest_path)
+    for replace_dir_with_dir in dir_to_dir_replace:
+        src_dir, dest_dir = validate_and_split(replace_dir_with_dir)
+        if os.path.isfile(dest_dir):
+            raise_error(f"Destination path '{dest_dir}' is a file")
+        if os.path.isfile(src_dir):
+            raise_error(f"Source path '{src_dir}' is a file")
+        if os.path.isdir(dest_dir):
+            shutil.rmtree(dest_dir)
+        parent_dir = os.path.dirname(dest_dir)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
+        shutil.copytree(src_dir, dest_dir)
+        ensure_path_is_ignored(dest_dir)
+    for merge_dir_to_dir in dir_to_dir_merge:
+        src_dir, dest_dir = validate_and_split(merge_dir_to_dir)
+        if os.path.isfile(dest_dir):
+            raise_error(f"Destination path '{dest_dir}' is a file")
+        if os.path.isfile(src_dir):
+            raise_error(f"Source path '{src_dir}' is a file")
+        if not os.path.isdir(dest_dir):
+            os.makedirs(dest_dir, exist_ok=True)
+        for item in os.listdir(src_dir):
+            if item.startswith("."):
+                continue
+            src_item = os.path.join(src_dir, item)
+            dest_item = os.path.join(dest_dir, item)
+            if os.path.isdir(src_item):
+                shutil.copytree(src_item, dest_item, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src_item, dest_item)
+            ensure_path_is_ignored(dest_item)

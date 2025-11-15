@@ -641,17 +641,22 @@ def sync(
                 raise_error(
                     f"Failed to add DVC sync path {dvc_sync_path}: {e}"
                 )
-        repo.git.add(git_sync_paths_in_project)
+        # Respect any sync paths that are ignored by Git
+        git_sync_paths_in_project_not_ignored = [
+            p for p in git_sync_paths_in_project if not repo.ignored(p)
+        ]
+        repo.git.add(git_sync_paths_in_project_not_ignored)
         if (
             repo.git.diff(
-                "--staged", git_sync_paths_in_project + ["calkit.yaml"]
+                "--staged",
+                git_sync_paths_in_project_not_ignored + ["calkit.yaml"],
             )
             and not no_commit
         ):
             typer.echo("Committing changes to project repo")
             commit_message = f"Sync {wdir} with Overleaf project"
             repo.git.commit(
-                *(git_sync_paths_in_project + ["calkit.yaml"]),
+                *(git_sync_paths_in_project_not_ignored + ["calkit.yaml"]),
                 "-m",
                 commit_message,
             )

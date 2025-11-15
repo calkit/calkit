@@ -124,6 +124,7 @@ class Stage(BaseModel):
         "julia-script",
         "julia-command",
         "word-to-pdf",
+        "map-paths",
     ]
     environment: str
     wdir: str | None = None
@@ -208,6 +209,91 @@ class PythonScriptStage(Stage):
         return [self.script_path] + super().dvc_deps
 
 
+class MapPathsStage(Stage):
+    class CopyFileToFile(BaseModel):
+        kind: Literal["file-to-file"] = "file-to-file"
+        src: str
+        dest: str
+
+        @property
+        def arg(self) -> str:
+            return f"--{self.kind} '{self.src}->{self.dest}'"
+
+        @property
+        def out_path(self) -> str:
+            return self.dest
+
+    class CopyFileToDir(BaseModel):
+        kind: Literal["file-to-dir"] = "file-to-dir"
+        src: str
+        dest: str
+
+        @property
+        def arg(self) -> str:
+            return f"--{self.kind} '{self.src}->{self.dest}'"
+
+        @property
+        def out_path(self) -> str:
+            return str(PurePosixPath(self.dest) / PurePosixPath(self.src).name)
+
+    class DirToDirMerge(BaseModel):
+        kind: Literal["dir-to-dir-merge"] = "dir-to-dir-merge"
+        src: str
+        dest: str
+
+        @property
+        def arg(self) -> str:
+            return f"--{self.kind} '{self.src}->{self.dest}'"
+
+        @property
+        def out_path(self) -> str:
+            return self.dest
+
+    class DirToDirReplace(BaseModel):
+        kind: Literal["dir-to-dir-replace"] = "dir-to-dir-replace"
+        src: str
+        dest: str
+
+        @property
+        def arg(self) -> str:
+            return f"--{self.kind} '{self.src}->{self.dest}'"
+
+        @property
+        def out_path(self) -> str:
+            return self.dest
+
+    kind: Literal["map-paths"] = "map-paths"
+    environment: str = "_system"
+    paths: list[
+        Annotated[
+            (CopyFileToFile | CopyFileToDir | DirToDirMerge | DirToDirReplace),
+            Discriminator("kind"),
+        ]
+    ]
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = "calkit map-paths"
+        for path in self.paths:
+            cmd += f" {path.arg}"
+        return cmd
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        deps = []
+        for path in self.paths:
+            deps.append(path.src)
+        return deps + super().dvc_deps
+
+    @property
+    def dvc_outs(self) -> list[dict]:
+        """All DVC outs should not be cached, since they are just copies."""
+        outs = []
+        for path in self.paths:
+            outs.append({path.out_path: {"cache": False, "persist": True}})
+        return outs + super().dvc_outs
+
+
 class LatexStage(Stage):
     kind: Literal["latex"] = "latex"
     target_path: str
@@ -218,24 +304,23 @@ class LatexStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"{self.xenv_cmd} latexmk -cd -norc -interaction=nonstopmode"
+        cmd = f"calkit latexmk -e {self.environment} --no-check"
         if self.latexmkrc_path is not None:
             cmd += f" -r {self.latexmkrc_path}"
-        if not self.verbose:
-            cmd += " -silent"
+        if self.verbose:
+            cmd += " --verbose"
         if self.force:
             cmd += " -f"
-        if self.synctex:
-            cmd += " -synctex=1"
-        cmd += f" -pdf {self.target_path}"
+        if not self.synctex:
+            cmd += " --no-synctex"
+        cmd += f" {self.target_path}"
         return cmd
 
     @property
     def dvc_deps(self) -> list[str]:
-        deps = [self.target_path]
+        deps = [self.target_path] + super().dvc_deps
         if self.latexmkrc_path is not None:
             deps.append(self.latexmkrc_path)
-        deps += super().dvc_deps
         return deps
 
     @property
@@ -623,6 +708,7 @@ class Pipeline(BaseModel):
                 | JuliaScriptStage
                 | JuliaCommandStage
                 | SBatchStage
+                | MapPathsStage
             ),
             Discriminator("kind"),
         ],

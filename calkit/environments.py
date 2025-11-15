@@ -321,6 +321,7 @@ def check_all_in_pipeline(
     ck_info: dict | None = None,
     wdir: str | None = None,
     targets: list[str] | None = None,
+    force: bool = False,
 ) -> dict:
     """Check all environments in the pipeline, caching for efficiency.
 
@@ -351,10 +352,11 @@ def check_all_in_pipeline(
     envs = ck_info.get("environments", {})
     for env_name in envs_in_pipeline:
         env = envs.get(env_name)
-        up_to_date = check_cache(env_name=env_name, env=env, wdir=wdir)
-        if up_to_date:
-            res[env_name] = {"success": True, "cached": True}
-            continue
+        if not force:
+            up_to_date = check_cache(env_name=env_name, env=env, wdir=wdir)
+            if up_to_date:
+                res[env_name] = {"success": True, "cached": True}
+                continue
         try:
             check_environment(env_name, verbose=False)
             res[env_name] = save_cache(

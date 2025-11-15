@@ -1044,15 +1044,6 @@ def run(
         raise_error(f"Failed to clean notebooks: {e.__class__.__name__}: {e}")
     if not quiet:
         typer.echo("Getting system information")
-    # Check all environments in the pipeline (with caching)
-    # If any failed, warn the user that we might have problems running
-    env_check_results = calkit.environments.check_all_in_pipeline(
-        ck_info=ck_info, targets=targets
-    )
-    for env_name, result in env_check_results.items():
-        failed = not result.get("success", False)
-        if failed:
-            warn(f"Failed to check environment '{env_name}'")
     # Get system information
     system_info = calkit.get_system_info()
     if save_log:
@@ -1074,7 +1065,19 @@ def run(
     except Exception as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(str(e))
-    # Compile the pipeline
+    # Check all environments in the pipeline (with caching)
+    # If any failed, warn the user that we might have problems running
+    typer.echo("Checking environments")
+    env_check_results = calkit.environments.check_all_in_pipeline(
+        ck_info=ck_info, targets=targets, force=force
+    )
+    for env_name, result in env_check_results.items():
+        if verbose:
+            typer.echo(f"{env_name}: {result}")
+        failed = not result.get("success", False)
+        if failed:
+            warn(f"Failed to check environment '{env_name}'")
+    # Compile the DVC pipeline
     dvc_stages = None
     if ck_info.get("pipeline", {}):
         if not quiet:

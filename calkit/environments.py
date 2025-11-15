@@ -214,12 +214,12 @@ def get_env_lock_fpath(
     return lock_fpath
 
 
-def get_cache_db() -> SqliteDict:
+def get_cache_db(name="cache") -> SqliteDict:
     env_check_cache_dir = os.path.join(
         os.path.expanduser("~"), ".calkit", "env-checks"
     )
     os.makedirs(env_check_cache_dir, exist_ok=True)
-    env_check_cache_path = os.path.join(env_check_cache_dir, "cache.sqlite")
+    env_check_cache_path = os.path.join(env_check_cache_dir, f"{name}.sqlite")
     return SqliteDict(env_check_cache_path)
 
 
@@ -247,6 +247,28 @@ def calc_data_for_env(
     3. A hash of the env prefix, if applicable.
     4. A hash of the env lock file, if applicable.
     """
+
+    def get_cached_md5(path: str) -> str | None:
+        """Get a cached MD5 hash for a path, recalculating if mtime doesn't
+        match the cached mtime.
+        """
+        key = os.path.abspath(path)
+        cached_data = {}
+        with get_cache_db(name="md5s") as db:
+            if key in db:
+                cached_data = db[key]
+                if os.path.exists(path):
+                    mtime = os.path.getmtime(path)
+                    if mtime == cached_data.get("mtime"):
+                        return cached_data.get("md5")
+        if os.path.exists(path):
+            md5 = calkit.get_md5(path)
+            mtime = os.path.getmtime(path)
+            with get_cache_db(name="md5s") as db:
+                db[key] = {"md5": md5, "mtime": mtime}
+                db.commit()
+            return md5
+
     if wdir is None:
         wdir = os.getcwd()
     else:
@@ -263,7 +285,7 @@ def calc_data_for_env(
     if env_prefix:
         env_prefix_full = os.path.join(wdir, env_prefix)
         if os.path.exists(env_prefix_full):
-            env_prefix_hash = calkit.get_md5(env_prefix_full)
+            env_prefix_hash = get_cached_md5(env_prefix_full)
         else:
             env_prefix_hash = None
     env_lock_hash = None

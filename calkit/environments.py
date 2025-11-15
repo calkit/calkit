@@ -262,7 +262,7 @@ def calc_data_for_env(
     env_prefix_hash = None
     if env_prefix:
         env_prefix_full = os.path.join(wdir, env_prefix)
-        if os.path.isfile(env_prefix_full):
+        if os.path.exists(env_prefix_full):
             env_prefix_hash = calkit.get_md5(env_prefix_full)
         else:
             env_prefix_hash = None
@@ -301,6 +301,15 @@ def check_cache(env_name: str, env: dict, wdir: str | None = None) -> bool:
     current_data = calc_data_for_env(env_name=env_name, env=env, wdir=wdir)
     time_diff = current_data["checked_at"] - cached_data.get("checked_at")
     if time_diff.total_seconds() > ENV_CHECK_CACHE_TTL_SECONDS:
+        return False
+    if env.get("path") and not current_data["hashes"]["env_path_hash"]:
+        return False
+    if env.get("prefix") and not current_data["hashes"]["env_prefix_hash"]:
+        return False
+    if (
+        get_env_lock_fpath(env=env, env_name=env_name, wdir=wdir)
+        and not current_data["hashes"]["env_lock_hash"]
+    ):
         return False
     return current_data["hashes"] == cached_data["hashes"]
 

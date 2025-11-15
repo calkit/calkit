@@ -2169,15 +2169,31 @@ def map_paths(
             with open(".gitignore", "a") as f:
                 f.write(f"\n{path}\n")
 
-    # Do any necessary preprocessing
+    def validate_and_split(mapping: str) -> tuple[str, str]:
+        if "->" not in mapping:
+            raise_error(
+                f"Invalid path mapping format: '{mapping}'; "
+                "Expected format: 'src->dest'"
+            )
+        parts = mapping.split("->")
+        if len(parts) != 2:
+            raise_error(
+                f"Invalid path mapping format: '{mapping}'; "
+                "Expected exactly one '->' separator"
+            )
+        return parts[0].strip(), parts[1].strip()
+
     for copy_file in file_to_file:
-        src_path, dest_path = copy_file.split("->")
+        src_path, dest_path = validate_and_split(copy_file)
         if os.path.isdir(dest_path):
             raise_error(f"Destination path '{dest_path}' is a directory")
+        parent_dir = os.path.dirname(dest_path)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
         shutil.copy2(src_path, dest_path)
         ensure_path_is_ignored(dest_path)
     for copy_file in file_to_dir:
-        src_path, dest_dir = copy_file.split("->")
+        src_path, dest_dir = validate_and_split(copy_file)
         if os.path.isfile(dest_dir):
             raise_error(f"Destination path '{dest_dir}' is a file")
         if not os.path.isdir(dest_dir):
@@ -2186,17 +2202,20 @@ def map_paths(
         shutil.copy2(src_path, dest_path)
         ensure_path_is_ignored(dest_path)
     for replace_dir_with_dir in dir_to_dir_replace:
-        src_dir, dest_dir = replace_dir_with_dir.split("->")
+        src_dir, dest_dir = validate_and_split(replace_dir_with_dir)
         if os.path.isfile(dest_dir):
             raise_error(f"Destination path '{dest_dir}' is a file")
         if os.path.isfile(src_dir):
             raise_error(f"Source path '{src_dir}' is a file")
         if os.path.isdir(dest_dir):
             shutil.rmtree(dest_dir)
+        parent_dir = os.path.dirname(dest_dir)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
         shutil.copytree(src_dir, dest_dir)
         ensure_path_is_ignored(dest_dir)
     for merge_dir_to_dir in dir_to_dir_merge:
-        src_dir, dest_dir = merge_dir_to_dir.split("->")
+        src_dir, dest_dir = validate_and_split(merge_dir_to_dir)
         if os.path.isfile(dest_dir):
             raise_error(f"Destination path '{dest_dir}' is a file")
         if os.path.isfile(src_dir):

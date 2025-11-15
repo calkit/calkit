@@ -530,7 +530,7 @@ class JupyterNotebookStage(Stage):
 
     kind: Literal["jupyter-notebook"] = "jupyter-notebook"
     notebook_path: str
-    cleaned_ipynb_storage: Literal["git", "dvc"] | None = "git"
+    cleaned_ipynb_storage: Literal["git", "dvc"] | None = None
     executed_ipynb_storage: Literal["git", "dvc"] | None = "dvc"
     html_storage: Literal["git", "dvc"] | None = "dvc"
     parameters: dict[str, Any] = {}
@@ -614,32 +614,16 @@ class JupyterNotebookStage(Stage):
     def dvc_outs(self) -> list[str | dict]:
         outs = super().dvc_outs
         exec_nb_path = self.executed_notebook_path
-        outs.append(
-            {exec_nb_path: {"cache": self.executed_ipynb_storage == "dvc"}}
-        )
+        if self.executed_ipynb_storage:
+            outs.append(
+                {exec_nb_path: {"cache": self.executed_ipynb_storage == "dvc"}}
+            )
         if self.html_storage:
             html_path = self.html_path
             outs.append(
                 {html_path: {"cache": self.html_storage == "dvc"}},
             )
         return outs
-
-    @property
-    def dvc_clean_stage(self) -> dict:
-        """Create a DVC stage for notebook cleaning so the cleaned notebook
-        can be used as a DVC dependency.
-
-        TODO: Should we use Jupytext for this so diffs are nice?
-        """
-        clean_nb_path = self.cleaned_notebook_path
-        stage = {
-            "cmd": f'calkit nb clean "{self.notebook_path}"',
-            "deps": [self.notebook_path],
-            "outs": [
-                {clean_nb_path: {"cache": self.cleaned_ipynb_storage == "dvc"}}
-            ],
-        }
-        return stage
 
     @property
     def notebook_outputs(self) -> list[PathOutput]:

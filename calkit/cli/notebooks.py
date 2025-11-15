@@ -13,6 +13,7 @@ from typing import Any
 import typer
 from typing_extensions import Annotated
 
+import calkit
 import calkit.notebooks
 from calkit.cli.core import raise_error
 
@@ -20,32 +21,43 @@ notebooks_app = typer.Typer(no_args_is_help=True)
 
 
 @notebooks_app.command("clean")
-def clean_notebook_outputs(path: str):
+def clean_notebook_outputs(
+    path: str,
+    quiet: Annotated[
+        bool, typer.Option("--quiet", "-q", help="Do not print output.")
+    ] = False,
+):
     """Clean notebook and place a copy in the cleaned notebooks directory.
 
     This can be useful to use as a preprocessing DVC stage to use a clean
     notebook as a dependency for a stage that caches and executed notebook.
     """
     if os.path.isabs(path):
-        raise ValueError("Path must be relative")
-    fpath_out = calkit.notebooks.get_cleaned_notebook_path(path)
-    folder = os.path.dirname(fpath_out)
-    os.makedirs(folder, exist_ok=True)
-    fpath_out = os.path.abspath(fpath_out)
-    subprocess.call(
-        [
-            sys.executable,
-            "-m",
-            "jupyter",
-            "nbconvert",
-            path,
-            "--clear-output",
-            "--to",
-            "notebook",
-            "--output",
-            fpath_out,
-        ]
-    )
+        raise_error("Path must be relative")
+    if not quiet:
+        typer.echo(f"Cleaning notebook: {path}")
+    try:
+        calkit.notebooks.clean_notebook_outputs(path)
+    except Exception as e:
+        raise_error(str(e))
+
+
+@notebooks_app.command("clean-all")
+def clean_all_in_pipeline(
+    quiet: Annotated[
+        bool, typer.Option("--quiet", "-q", help="Do not print output.")
+    ] = False,
+):
+    """Clean all notebooks in the pipeline."""
+    if not quiet:
+        typer.echo("Cleaning all notebooks in pipeline")
+    try:
+        cleaned = calkit.notebooks.clean_all_in_pipeline()
+        if not quiet:
+            for path in cleaned:
+                typer.echo(f"Cleaned: {path}")
+    except Exception as e:
+        raise_error(str(e))
 
 
 def _parse_params(params: list[str]) -> dict[str, Any]:

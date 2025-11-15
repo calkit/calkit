@@ -62,6 +62,52 @@ def get_cleaned_notebook_path(path: str, as_posix: bool = True) -> str:
     return p
 
 
+def clean_notebook_outputs(path: str):
+    """Clean the outputs of a notebook and put it in the cleaned notebooks
+    dir.
+    """
+    if os.path.isabs(path):
+        raise ValueError("Path must be relative")
+    fpath_out = get_cleaned_notebook_path(path)
+    folder = os.path.dirname(fpath_out)
+    os.makedirs(folder, exist_ok=True)
+    fpath_out = os.path.abspath(fpath_out)
+    with open(path, "r", encoding="utf-8") as f:
+        try:
+            nb = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Error decoding JSON from notebook: {e}")
+    for cell in nb.get("cells", []):
+        if cell.get("cell_type") == "code":
+            cell["outputs"] = []
+            cell["execution_count"] = None
+        # Clean metadata but keep tags
+        if "tags" in cell.get("metadata", {}):
+            cell["metadata"] = {"tags": cell["metadata"]["tags"]}
+        else:
+            cell["metadata"] = {}
+    # Clean out notebook-level metadata
+    nb["metadata"] = {}
+    with open(fpath_out, "w", encoding="utf-8") as f:
+        json.dump(nb, f, indent=2)
+
+
+def clean_all_in_pipeline(ck_info: dict | None = None) -> list[str]:
+    """Clean all notebooks in the pipeline."""
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info()
+    pipeline = ck_info.get("pipeline", {})
+    stages = pipeline.get("stages", {})
+    cleaned = []
+    for _, stage in stages.items():
+        if stage.get("kind") == "jupyter-notebook":
+            path = stage.get("notebook_path")
+            if path:
+                clean_notebook_outputs(path)
+                cleaned.append(path)
+    return cleaned
+
+
 def declare_notebook(
     path: str,
     stage_name: str,

@@ -209,9 +209,6 @@ def test_to_dvc_notebook_stage():
     }
     dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
     print(dvc_stages)
-    clean_stage = dvc_stages["_clean-nb-notebook-1"]
-    assert clean_stage["cmd"] == f'calkit nb clean "{nb_path}"'
-    assert clean_stage["desc"].startswith("Automatically generated")
     stage = dvc_stages["notebook-1"]
     assert "--to html" in stage["cmd"]
     found_html = False

@@ -264,6 +264,11 @@ def get_status():
         calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     except Exception as e:
         warn(f"Failed to compile pipeline: {e.__class__.__name__}: {e}")
+    # Clean all notebooks in the pipeline
+    try:
+        calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
+    except Exception as e:
+        warn(f"Failed to clean notebooks: {e.__class__.__name__}: {e}")
     print_sep("Project")
     # Print latest status
     status = calkit.get_latest_project_status()
@@ -1029,8 +1034,14 @@ def run(
     ck_info = calkit.load_calkit_info()
     # Set env vars
     calkit.set_env_vars(ck_info=ck_info)
+    # Clean all notebooks in the pipeline
+    try:
+        calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
+    except Exception as e:
+        raise_error(f"Failed to clean notebooks: {e.__class__.__name__}: {e}")
     if not quiet:
         typer.echo("Getting system information")
+    # TODO: Check all environments in the pipeline
     system_info = calkit.get_system_info()
     if save_log:
         # Save the system to .calkit/systems

@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 import platform
-from pathlib import PurePosixPath
+from pathlib import Path
 
 from sqlitedict import SqliteDict
 
@@ -97,7 +97,7 @@ def get_all_docker_lock_fpaths(
         os.path.join(docker_dir, arch + ".json") for arch in DOCKER_ARCHS
     ]
     if as_posix:
-        fpaths = [PurePosixPath(p).as_posix() for p in fpaths]
+        fpaths = [Path(p).as_posix() for p in fpaths]
     return fpaths
 
 
@@ -115,7 +115,7 @@ def get_all_conda_lock_fpaths(
         os.path.join(env_lock_dir, arch + ".yml") for arch in CONDA_VENV_ARCHS
     ]
     if as_posix:
-        fpaths = [PurePosixPath(p).as_posix() for p in fpaths]
+        fpaths = [Path(p).as_posix() for p in fpaths]
     return fpaths
 
 
@@ -133,7 +133,7 @@ def get_all_venv_lock_fpaths(
         os.path.join(venv_dir, arch + ".txt") for arch in CONDA_VENV_ARCHS
     ]
     if as_posix:
-        fpaths = [PurePosixPath(p).as_posix() for p in fpaths]
+        fpaths = [Path(p).as_posix() for p in fpaths]
     return fpaths
 
 
@@ -210,7 +210,7 @@ def get_env_lock_fpath(
     else:
         return
     if as_posix:
-        lock_fpath = PurePosixPath(lock_fpath).as_posix()
+        lock_fpath = Path(lock_fpath).as_posix()
     return lock_fpath
 
 

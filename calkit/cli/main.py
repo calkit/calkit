@@ -16,7 +16,7 @@ import time
 import uuid
 from copy import deepcopy
 from datetime import datetime
-from pathlib import PurePosixPath
+from pathlib import Path
 
 import dotenv
 import git
@@ -774,7 +774,7 @@ def ignore(
     """Ignore a file, i.e., keep it out of version control."""
     repo = git.Repo()
     # Ensure path makes it into .gitignore as a POSIX path
-    path = PurePosixPath(path).as_posix()
+    path = Path(path).as_posix()
     if repo.ignored(path):
         typer.echo(f"{path} is already ignored")
         return

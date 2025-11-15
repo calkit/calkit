@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
-from pathlib import PurePosixPath
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import (
@@ -234,7 +234,7 @@ class MapPathsStage(Stage):
 
         @property
         def out_path(self) -> str:
-            return str(PurePosixPath(self.dest) / PurePosixPath(self.src).name)
+            return Path(self.dest, Path(self.src).name).as_posix()
 
     class DirToDirMerge(BaseModel):
         kind: Literal["dir-to-dir-merge"] = "dir-to-dir-merge"
@@ -326,7 +326,7 @@ class LatexStage(Stage):
     @property
     def dvc_outs(self) -> list[str | dict]:
         outs = super().dvc_outs
-        out_path = PurePosixPath(
+        out_path = Path(
             self.target_path.removesuffix(".tex") + ".pdf"
         ).as_posix()
         if out_path not in outs:
@@ -654,7 +654,7 @@ class WordToPdfStage(Stage):
 
     @property
     def out_path(self) -> str:
-        return PurePosixPath(
+        return Path(
             self.word_doc_path.removesuffix(".docx") + ".pdf"
         ).as_posix()
 

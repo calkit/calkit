@@ -3,7 +3,7 @@
 import hashlib
 import json
 import os
-from pathlib import PurePosixPath
+from pathlib import Path
 from typing import Any, Literal
 
 import git
@@ -50,7 +50,7 @@ def get_executed_notebook_path(
     subdirs = {"html": "html", "notebook": "executed"}
     p = os.path.join(".calkit", "notebooks", subdirs[to], nb_dir, fname_out)
     if as_posix:
-        p = PurePosixPath(p).as_posix()
+        p = Path(p).as_posix()
     return p
 
 
@@ -58,7 +58,7 @@ def get_cleaned_notebook_path(path: str, as_posix: bool = True) -> str:
     """Return the path of a cleaned notebook."""
     p = os.path.join(".calkit", "notebooks", "cleaned", path)
     if as_posix:
-        p = PurePosixPath(p).as_posix()
+        p = Path(p).as_posix()
     return p
 
 

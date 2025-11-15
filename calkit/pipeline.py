@@ -182,24 +182,39 @@ def to_dvc(
         )
         dvc_stage["desc"] = desc
         dvc_stages[stage_name] = dvc_stage
-        # Check for any outputs that should be ignored
+        # Check for any outputs that should be ignored/unignored
         if write:
             repo = git.Repo(wdir)
             # Ensure we catch any Jupyter Notebook outputs
             outputs = stage.outputs.copy()
             if stage.kind == "jupyter-notebook":
                 outputs += stage.notebook_outputs
+            # Deal with any gitignore changes necessary
             for out in outputs:
+                gitignore_path = ".gitignore"
+                if wdir is not None:
+                    gitignore_path = os.path.join(wdir, gitignore_path)
                 if (
                     isinstance(out, PathOutput)
                     and out.storage is None
                     and not repo.ignored(out.path)
                 ):
-                    gitignore_path = ".gitignore"
-                    if wdir is not None:
-                        gitignore_path = os.path.join(wdir, gitignore_path)
                     with open(gitignore_path, "a") as f:
                         f.write("\n" + out.path + "\n")
+                # Unignore path if necessary
+                elif (
+                    isinstance(out, PathOutput)
+                    and out.storage == "git"
+                    and repo.ignored(out.path)
+                ):
+                    with open(gitignore_path, "r") as f:
+                        gitignore_lines = f.read().split("\n")
+                    if out.path in gitignore_lines:
+                        gitignore_lines.remove(out.path)
+                    if repo.ignored(out.path):
+                        gitignore_lines.append(f"!{out.path}")
+                    with open(gitignore_path, "w") as f:
+                        f.write("\n".join(gitignore_lines))
     # Now process any inputs from stage outputs
     for stage_name, stage in pipeline.stages.items():
         for i in stage.inputs:

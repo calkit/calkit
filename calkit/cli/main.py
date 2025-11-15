@@ -2149,7 +2149,7 @@ def map_paths(
         typer.Option(
             "--dir-to-dir-merge",
             help=(
-                "Merge directory into another directory before. "
+                "Merge directory into another directory. "
                 "This is useful for merging contents of one directory into "
                 "another, e.g., --dir-to-dir-merge 'figures->paper/figures'."
             ),

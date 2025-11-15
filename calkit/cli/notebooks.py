@@ -33,31 +33,13 @@ def clean_notebook_outputs(
     notebook as a dependency for a stage that caches and executed notebook.
     """
     if os.path.isabs(path):
-        raise ValueError("Path must be relative")
+        raise_error("Path must be relative")
     if not quiet:
         typer.echo(f"Cleaning notebook: {path}")
-    fpath_out = calkit.notebooks.get_cleaned_notebook_path(path)
-    folder = os.path.dirname(fpath_out)
-    os.makedirs(folder, exist_ok=True)
-    fpath_out = os.path.abspath(fpath_out)
-    with open(path, "r", encoding="utf-8") as f:
-        try:
-            nb = json.load(f)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Error decoding JSON from notebook: {e}")
-    for cell in nb.get("cells", []):
-        if cell.get("cell_type") == "code":
-            cell["outputs"] = []
-            cell["execution_count"] = None
-        # Clean metadata but keep tags
-        if "tags" in cell.get("metadata", {}):
-            cell["metadata"] = {"tags": cell["metadata"]["tags"]}
-        else:
-            cell["metadata"] = {}
-    # Clean out notebook-level metadata
-    nb["metadata"] = {}
-    with open(fpath_out, "w", encoding="utf-8") as f:
-        json.dump(nb, f, indent=2)
+    try:
+        calkit.notebooks.clean_notebook_outputs(path)
+    except Exception as e:
+        raise_error(str(e))
 
 
 @notebooks_app.command("clean-all")
@@ -67,14 +49,15 @@ def clean_all_in_pipeline(
     ] = False,
 ):
     """Clean all notebooks in the pipeline."""
-    ck_info = calkit.load_calkit_info()
-    pipeline = ck_info.get("pipeline", {})
-    stages = pipeline.get("stages", {})
-    for _, stage in stages.items():
-        if stage.get("kind") == "jupyter-notebook":
-            path = stage.get("notebook_path")
-            if path:
-                clean_notebook_outputs(path, quiet=quiet)
+    if not quiet:
+        typer.echo("Cleaning all notebooks in pipeline")
+    try:
+        cleaned = calkit.notebooks.clean_all_in_pipeline()
+        if not quiet:
+            for path in cleaned:
+                typer.echo(f"Cleaned: {path}")
+    except Exception as e:
+        raise_error(str(e))
 
 
 def _parse_params(params: list[str]) -> dict[str, Any]:

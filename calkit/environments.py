@@ -1,8 +1,14 @@
 """Functionality related to environments."""
 
+import hashlib
+import json
 import os
 import platform
-from pathlib import PurePosixPath
+from pathlib import Path
+
+from sqlitedict import SqliteDict
+
+import calkit
 
 DOCKER_ARCHS = [
     "amd64",
@@ -22,6 +28,7 @@ CONDA_VENV_ARCHS = [
     "linux-64",
     "win-64",
 ]
+ENV_CHECK_CACHE_TTL_SECONDS = 3600
 
 
 def get_env_lock_dir(wdir: str | None = None) -> str:
@@ -90,7 +97,7 @@ def get_all_docker_lock_fpaths(
         os.path.join(docker_dir, arch + ".json") for arch in DOCKER_ARCHS
     ]
     if as_posix:
-        fpaths = [PurePosixPath(p).as_posix() for p in fpaths]
+        fpaths = [Path(p).as_posix() for p in fpaths]
     return fpaths
 
 
@@ -108,7 +115,7 @@ def get_all_conda_lock_fpaths(
         os.path.join(env_lock_dir, arch + ".yml") for arch in CONDA_VENV_ARCHS
     ]
     if as_posix:
-        fpaths = [PurePosixPath(p).as_posix() for p in fpaths]
+        fpaths = [Path(p).as_posix() for p in fpaths]
     return fpaths
 
 
@@ -126,7 +133,7 @@ def get_all_venv_lock_fpaths(
         os.path.join(venv_dir, arch + ".txt") for arch in CONDA_VENV_ARCHS
     ]
     if as_posix:
-        fpaths = [PurePosixPath(p).as_posix() for p in fpaths]
+        fpaths = [Path(p).as_posix() for p in fpaths]
     return fpaths
 
 
@@ -203,5 +210,191 @@ def get_env_lock_fpath(
     else:
         return
     if as_posix:
-        lock_fpath = PurePosixPath(lock_fpath).as_posix()
+        lock_fpath = Path(lock_fpath).as_posix()
     return lock_fpath
+
+
+def get_cache_db(name="cache") -> SqliteDict:
+    env_check_cache_dir = os.path.join(
+        os.path.expanduser("~"), ".calkit", "env-checks"
+    )
+    os.makedirs(env_check_cache_dir, exist_ok=True)
+    env_check_cache_path = os.path.join(env_check_cache_dir, f"{name}.sqlite")
+    return SqliteDict(env_check_cache_path)
+
+
+def make_cache_key(env_name: str, wdir: str | None = None) -> str:
+    if wdir is None:
+        wdir = os.getcwd()
+    else:
+        wdir = os.path.abspath(wdir)
+    return f"{wdir}::{env_name}"
+
+
+def hash_dict(d: dict) -> str:
+    json_str = json.dumps(d, sort_keys=True)
+    return hashlib.sha256(json_str.encode()).hexdigest()
+
+
+def calc_data_for_env(
+    env_name: str, env: dict, wdir: str | None = None
+) -> dict:
+    """Hash important data from the environment.
+
+    This includes:
+    1. A hash of the env definition.
+    2. A hash of the env path file, if present.
+    3. A hash of the env prefix, if applicable.
+    4. A hash of the env lock file, if applicable.
+    """
+
+    def get_cached_md5(path: str) -> str | None:
+        """Get a cached MD5 hash for a path, recalculating if mtime doesn't
+        match the cached mtime.
+        """
+        key = os.path.abspath(path)
+        cached_data = {}
+        with get_cache_db(name="md5s") as db:
+            if key in db:
+                cached_data = db[key]
+                if os.path.exists(path):
+                    mtime = os.path.getmtime(path)
+                    if mtime == cached_data.get("mtime"):
+                        return cached_data.get("md5")
+        if os.path.exists(path):
+            md5 = calkit.get_md5(path)
+            mtime = os.path.getmtime(path)
+            with get_cache_db(name="md5s") as db:
+                db[key] = {"md5": md5, "mtime": mtime}
+                db.commit()
+            return md5
+
+    if wdir is None:
+        wdir = os.getcwd()
+    else:
+        wdir = os.path.abspath(wdir)
+    env_hash = hash_dict(env)
+    env_path = env.get("path", "")
+    env_path_hash = None
+    if env_path:
+        env_path_full = os.path.join(wdir, env_path)
+        if os.path.isfile(env_path_full):
+            env_path_hash = calkit.get_md5(env_path_full)
+    env_prefix = env.get("prefix", "")
+    env_prefix_hash = None
+    if env_prefix:
+        env_prefix_full = os.path.join(wdir, env_prefix)
+        if os.path.exists(env_prefix_full):
+            env_prefix_hash = get_cached_md5(env_prefix_full)
+        else:
+            env_prefix_hash = None
+    env_lock_hash = None
+    env_lock_fpath = get_env_lock_fpath(env_name=env_name, env=env, wdir=wdir)
+    if env_lock_fpath is not None:
+        env_lock_full = os.path.join(wdir, env_lock_fpath)
+        if os.path.isfile(env_lock_full):
+            env_lock_hash = calkit.get_md5(env_lock_full)
+    return {
+        "hashes": {
+            "env_hash": env_hash,
+            "env_path_hash": env_path_hash,
+            "env_prefix_hash": env_prefix_hash,
+            "env_lock_hash": env_lock_hash,
+        },
+        "checked_at": calkit.utcnow(),
+    }
+
+
+def check_cache(env_name: str, env: dict, wdir: str | None = None) -> bool:
+    """Check if the environment is up-to-date based on cached data."""
+    if wdir is None:
+        wdir = os.getcwd()
+    else:
+        wdir = os.path.abspath(wdir)
+    with get_cache_db() as db:
+        key = make_cache_key(env_name=env_name, wdir=wdir)
+        if key not in db:
+            return False
+        cached_data = db[key]
+    # If our last check failed, we're definitely not up-to-date
+    if not cached_data.get("success", False):
+        return False
+    # Check if this environment is up-to-date
+    current_data = calc_data_for_env(env_name=env_name, env=env, wdir=wdir)
+    time_diff = current_data["checked_at"] - cached_data.get("checked_at")
+    if time_diff.total_seconds() > ENV_CHECK_CACHE_TTL_SECONDS:
+        return False
+    if env.get("path") and not current_data["hashes"]["env_path_hash"]:
+        return False
+    if env.get("prefix") and not current_data["hashes"]["env_prefix_hash"]:
+        return False
+    if (
+        get_env_lock_fpath(env=env, env_name=env_name, wdir=wdir)
+        and not current_data["hashes"]["env_lock_hash"]
+    ):
+        return False
+    return current_data["hashes"] == cached_data["hashes"]
+
+
+def save_cache(
+    env_name: str, env: dict, wdir: str | None = None, success: bool = True
+) -> dict:
+    with get_cache_db() as db:
+        key = make_cache_key(env_name=env_name, wdir=wdir)
+        data = calc_data_for_env(env_name=env_name, env=env, wdir=wdir)
+        data["success"] = success
+        db[key] = data
+        db.commit()
+    return data
+
+
+def check_all_in_pipeline(
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    targets: list[str] | None = None,
+    force: bool = False,
+) -> dict:
+    """Check all environments in the pipeline, caching for efficiency.
+
+    The cache file is a simple JSON file keyed by project path.
+    Each object inside tracks the last check timestamp, pass/fail,
+    and some sort of hash(es) for the important file content involved.
+    """
+    import calkit
+    from calkit.cli.check import check_environment
+
+    # TODO: ``check_environment`` should be able to take a wdir argument
+    if wdir is not None:
+        raise ValueError(
+            "Can currently only run from current working directory"
+        )
+    res = {}
+    # First get a list of environments used in the pipeline
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    if targets:
+        stages = {k: v for k, v in stages.items() if k in targets}
+    envs_in_pipeline = [stage.get("environment") for stage in stages.values()]
+    envs_in_pipeline = [
+        e for e in envs_in_pipeline if e and not (str(e)).startswith("_")
+    ]
+    envs_in_pipeline = list(set(envs_in_pipeline))
+    envs = ck_info.get("environments", {})
+    for env_name in envs_in_pipeline:
+        env = envs.get(env_name)
+        if not force:
+            up_to_date = check_cache(env_name=env_name, env=env, wdir=wdir)
+            if up_to_date:
+                res[env_name] = {"success": True, "cached": True}
+                continue
+        try:
+            check_environment(env_name, verbose=False)
+            res[env_name] = save_cache(
+                env_name=env_name, env=env, wdir=wdir, success=True
+            )
+        except Exception:
+            res[env_name] = save_cache(
+                env_name=env_name, env=env, wdir=wdir, success=False
+            )
+    return res

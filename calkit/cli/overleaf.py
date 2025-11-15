@@ -8,7 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
-from pathlib import PurePosixPath
+from pathlib import Path
 
 import git
 import typer
@@ -209,7 +209,7 @@ def import_publication(
     pdf_path = target_path.removesuffix(".tex") + ".pdf"  # type: ignore
     typer.echo(f"Using PDF path: {pdf_path}")
     tex_path = pdf_path.removesuffix(".pdf") + ".tex"
-    pub_path = PurePosixPath(dest_dir, pdf_path).as_posix()
+    pub_path = Path(dest_dir, pdf_path).as_posix()
     pub_paths = [pub.get("path") for pub in pubs]
     if not overwrite and pub_path in pub_paths:
         raise_error(
@@ -267,7 +267,7 @@ def import_publication(
         new_latex_stage(
             name=stage_name,
             environment=tex_env_name,
-            target_path=PurePosixPath(dest_dir, tex_path).as_posix(),
+            target_path=Path(dest_dir, tex_path).as_posix(),
             inputs=[
                 os.path.join(dest_dir, p) for p in sync_paths + push_paths
             ],

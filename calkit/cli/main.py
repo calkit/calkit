@@ -16,7 +16,7 @@ import time
 import uuid
 from copy import deepcopy
 from datetime import datetime
-from pathlib import PurePosixPath
+from pathlib import Path
 
 import dotenv
 import git
@@ -292,7 +292,7 @@ def get_status():
     print_sep("Data (DVC)")
     run_cmd([sys.executable, "-m", "dvc", "data", "status"])
     typer.echo()
-    print_sep("Pipeline (DVC)")
+    print_sep("Pipeline")
     run_cmd([sys.executable, "-m", "dvc", "status"])
 
 
@@ -774,7 +774,7 @@ def ignore(
     """Ignore a file, i.e., keep it out of version control."""
     repo = git.Repo()
     # Ensure path makes it into .gitignore as a POSIX path
-    path = PurePosixPath(path).as_posix()
+    path = Path(path).as_posix()
     if repo.ignored(path):
         typer.echo(f"{path} is already ignored")
         return
@@ -1027,6 +1027,9 @@ def run(
     import dvc.ui
     from dvc.cli import main as dvc_cli_main
 
+    import calkit.environments
+    import calkit.pipeline
+
     if (target_inputs or target_outputs) and targets:
         raise_error("Cannot specify both targets and inputs")
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
@@ -1041,7 +1044,7 @@ def run(
         raise_error(f"Failed to clean notebooks: {e.__class__.__name__}: {e}")
     if not quiet:
         typer.echo("Getting system information")
-    # TODO: Check all environments in the pipeline
+    # Get system information
     system_info = calkit.get_system_info()
     if save_log:
         # Save the system to .calkit/systems
@@ -1058,11 +1061,23 @@ def run(
     if not quiet:
         typer.echo("Checking system-level dependencies")
     try:
-        calkit.check_system_deps(system_info=system_info)
+        calkit.check_system_deps(ck_info=ck_info, system_info=system_info)
     except Exception as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(str(e))
-    # Compile the pipeline
+    # Check all environments in the pipeline (with caching)
+    # If any failed, warn the user that we might have problems running
+    typer.echo("Checking environments")
+    env_check_results = calkit.environments.check_all_in_pipeline(
+        ck_info=ck_info, targets=targets, force=force
+    )
+    for env_name, result in env_check_results.items():
+        if verbose:
+            typer.echo(f"{env_name}: {result}")
+        failed = not result.get("success", False)
+        if failed:
+            warn(f"Failed to check environment '{env_name}'")
+    # Compile the DVC pipeline
     dvc_stages = None
     if ck_info.get("pipeline", {}):
         if not quiet:

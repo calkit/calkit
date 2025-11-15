@@ -39,17 +39,13 @@ def test_to_dvc():
     stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
     stage = stages["get-data"]
     assert stage["outs"][0] == "my-output.out"
-    stage = stages["_check-env-py"]
-    assert stage["deps"] == ["requirements.txt"]
-    assert stage["cmd"] == "calkit check environment --name py"
-    assert stage["desc"].startswith("Automatically generated")
-    out = stage["outs"][0]
-    out_path = list(out.keys())[0]
-    env_lock_fpath = get_env_lock_fpath(
-        ck_info["environments"]["py"], "py", for_dvc=True
+    env_lock = get_env_lock_fpath(
+        env=ck_info["environments"]["py"],
+        env_name="py",
+        as_posix=True,
+        for_dvc=True,
     )
-    assert out_path == env_lock_fpath
-    assert not out[out_path]["cache"]
+    assert env_lock in stage["deps"]
     # TODO: Test other stage types
     # Test when user forgets to add an environment
     ck_info = {

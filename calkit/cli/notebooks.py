@@ -7,7 +7,7 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import PurePosixPath
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -391,7 +391,7 @@ def execute_notebook(
                 "--to",
                 to_fmt,
                 "--output-dir",
-                PurePosixPath(folder).as_posix(),
+                Path(folder).as_posix(),
                 "--output",
                 fname_out,
             ]

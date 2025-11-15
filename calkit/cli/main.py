@@ -292,7 +292,7 @@ def get_status():
     print_sep("Data (DVC)")
     run_cmd([sys.executable, "-m", "dvc", "data", "status"])
     typer.echo()
-    print_sep("Pipeline (DVC)")
+    print_sep("Pipeline")
     run_cmd([sys.executable, "-m", "dvc", "status"])
 
 

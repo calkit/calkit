@@ -13,6 +13,7 @@ from typing import Any
 import typer
 from typing_extensions import Annotated
 
+import calkit
 import calkit.notebooks
 from calkit.cli.core import raise_error
 
@@ -57,6 +58,23 @@ def clean_notebook_outputs(
     nb["metadata"] = {}
     with open(fpath_out, "w", encoding="utf-8") as f:
         json.dump(nb, f, indent=2)
+
+
+@notebooks_app.command("clean-all")
+def clean_all_in_pipeline(
+    quiet: Annotated[
+        bool, typer.Option("--quiet", "-q", help="Do not print output.")
+    ] = False,
+):
+    """Clean all notebooks in the pipeline."""
+    ck_info = calkit.load_calkit_info()
+    pipeline = ck_info.get("pipeline", {})
+    stages = pipeline.get("stages", {})
+    for _, stage in stages.items():
+        if stage.get("kind") == "jupyter-notebook":
+            path = stage.get("notebook_path")
+            if path:
+                clean_notebook_outputs(path, quiet=quiet)
 
 
 def _parse_params(params: list[str]) -> dict[str, Any]:

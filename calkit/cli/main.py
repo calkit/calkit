@@ -2048,6 +2048,17 @@ def run_latexmk(
             help="Don't generate synctex file for source-to-pdf mapping.",
         ),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help=(
+                "Force latexmk to recompile all files, even if they are up to "
+                "date."
+            ),
+        ),
+    ] = False,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -2066,6 +2077,8 @@ def run_latexmk(
         latexmk_cmd.append("-synctex=1")
     if not verbose:
         latexmk_cmd.append("-silent")
+    if force:
+        latexmk_cmd.append("-f")
     latexmk_cmd += ["-interaction=nonstopmode", tex_file]
     if environment is not None:
         if no_check:

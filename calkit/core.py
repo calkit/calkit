@@ -294,33 +294,18 @@ def check_dep_exists(
 
 
 def check_system_deps(
-    wdir: str | None = None, system_info: dict | None = None
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    system_info: dict | None = None,
 ) -> None:
     """Check that the dependencies declared in a project's ``calkit.yaml`` file
     exist.
     """
-    ck_info = load_calkit_info(wdir=wdir)
+    if ck_info is None:
+        ck_info = load_calkit_info(wdir=wdir)
     deps = ck_info.get("dependencies", [])
     if "git" not in deps:
         deps.append("git")
-    # Infer dependencies from environment types
-    for _, env in ck_info.get("environments", {}).items():
-        kind = env.get("kind")
-        if kind in ["docker", "uv", "conda", "pixi"] and kind not in deps:
-            deps.append(kind)
-        elif kind == "uv-venv" and "uv" not in deps:
-            deps.append("uv")
-        elif kind == "renv" and "Rscript" not in deps:
-            deps.append("Rscript")
-        elif kind == "matlab":
-            if "docker" not in deps:
-                deps.append("docker")
-            deps.append({"MATLAB_LICENSE_SERVER": {"kind": "env-var"}})
-        elif kind == "julia":
-            if "julia" not in deps:
-                deps.append("julia")
-            if "juliaup" not in deps:
-                deps.append("juliaup")
     for dep in deps:
         if isinstance(dep, dict):
             keys = list(dep.keys())

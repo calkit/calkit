@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from calkit.models.pipeline import (
+    JsonToLatexStage,
     JuliaCommandStage,
     JupyterNotebookStage,
     LatexStage,
@@ -211,3 +212,20 @@ def test_mappathsstage():
     )
     assert "data/input.txt" in sd["deps"]
     assert {"data/output.txt": {"cache": False, "persist": True}} in sd["outs"]
+
+
+def test_jsontolatexstage():
+    s = JsonToLatexStage(
+        name="json2latex",
+        input_path="data/results.json",
+        output_path="paper/results.tex",
+        command_name="theresults",
+        format={"result1": "{value1:.2f}", "result2": "{value2}"},
+    )
+    sd = s.to_dvc()
+    print(sd)
+    assert sd["cmd"] == (
+        "calkit latex from-json data/results.json paper/results.tex "
+        "--command theresults --format-json "
+        '\'{"result1": "{value1:.2f}", "result2": "{value2}"}\''
+    )

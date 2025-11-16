@@ -44,7 +44,7 @@ Another is \theresults[sup].
         ],
         check=True,
     )
-    subprocess.run(["calkit", "latexmk", "paper/main.tex"], check=True)
+    subprocess.run(["calkit", "latex", "build", "paper/main.tex"], check=True)
     # Read the generated PDF and check that the values are correct
     reader = PdfReader("paper/main.pdf")
     text = ""
@@ -54,3 +54,18 @@ Another is \theresults[sup].
     assert "The result is 185188.7." in text
     assert "The other result is 3." in text
     assert "Another is 5.555." in text
+
+
+def test_build(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("paper", exist_ok=True)
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            r"""\documentclass{article}
+            \begin{document}
+            Hello, world!
+            \end{document}
+            """
+        )
+    subprocess.check_call(["calkit", "latex", "build", "paper/main.tex"])
+    assert os.path.isfile("paper/main.pdf")

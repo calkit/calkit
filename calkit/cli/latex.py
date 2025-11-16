@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
 import string
+import subprocess
 from copy import deepcopy
 
 import typer
 from typing_extensions import Annotated
+
+import calkit
+from calkit.cli import raise_error
 
 latex_app = typer.Typer(no_args_is_help=True)
 
@@ -66,3 +71,102 @@ def from_json(
         formatted[tex_var_name] = fmt_string.format(**data_for_formatting)
     with open(output_fpath, "w") as f:
         json2latex.dump(command_name, formatted, f)
+
+
+@latex_app.command(name="build")
+def build(
+    tex_file: Annotated[str, typer.Argument(help="The .tex file to compile.")],
+    environment: Annotated[
+        str | None,
+        typer.Option(
+            "--env",
+            "-e",
+            help=("Environment in which to run latexmk, if applicable."),
+        ),
+    ] = None,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help=(
+                "Don't check the environment is valid before running latexmk."
+            ),
+        ),
+    ] = False,
+    latexmk_rc_path: Annotated[
+        str | None,
+        typer.Option(
+            "--latexmk-rc",
+            "-r",
+            help="Path to a latexmkrc file to use for compilation.",
+        ),
+    ] = None,
+    no_synctex: Annotated[
+        bool,
+        typer.Option(
+            "--no-synctex",
+            help="Don't generate synctex file for source-to-pdf mapping.",
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help=(
+                "Force latexmk to recompile all files, even if they are up to "
+                "date."
+            ),
+        ),
+    ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
+    ] = False,
+):
+    """Build a PDF of a LaTeX document with latexmk.
+
+    If a Calkit environment is not specified, latexmk will be run in the
+    system environment if available. If not available, a TeX Live Docker
+    container will be used.
+    """
+    # Now formulate the command
+    latexmk_cmd = ["latexmk", "-pdf", "-cd"]
+    if latexmk_rc_path is not None:
+        latexmk_cmd += ["-r", latexmk_rc_path]
+    if not no_synctex:
+        latexmk_cmd.append("-synctex=1")
+    if not verbose:
+        latexmk_cmd.append("-silent")
+    if force:
+        latexmk_cmd.append("-f")
+    latexmk_cmd += ["-interaction=nonstopmode", tex_file]
+    if environment is not None:
+        if no_check:
+            check_cmd = ["--no-check"]
+        else:
+            check_cmd = []
+        cmd = (
+            ["calkit", "xenv", "--name", environment]
+            + check_cmd
+            + ["--"]
+            + latexmk_cmd
+        )
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
+    elif calkit.check_dep_exists("latexmk"):
+        cmd = latexmk_cmd
+    else:
+        cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{os.getcwd()}:/work",
+            "-w",
+            "/work",
+            "texlive/texlive:latest-full",
+        ] + latexmk_cmd
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError:
+        raise_error("latexmk failed")

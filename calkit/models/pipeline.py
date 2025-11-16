@@ -304,7 +304,7 @@ class LatexStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"calkit latexmk -e {self.environment} --no-check"
+        cmd = f"calkit latex build -e {self.environment} --no-check"
         if self.latexmkrc_path is not None:
             cmd += f" -r {self.latexmkrc_path}"
         if self.verbose:

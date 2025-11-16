@@ -120,6 +120,12 @@ def write_sync_info(
     return fpath
 
 
+def get_conflict_fpath(wdir: str | git.PathLike | None = None) -> str:
+    if wdir is None:
+        wdir = ""
+    return os.path.join(str(wdir), ".calkit", "overleaf", "CONFLICT.json")
+
+
 def sync(
     main_repo: git.Repo,
     overleaf_repo: git.Repo,
@@ -147,10 +153,7 @@ def sync(
     git_sync_paths += overleaf_sync_data.get("git_sync_paths", [])
     sync_paths = git_sync_paths
     push_paths = deepcopy(overleaf_sync_data.get("push_paths", []))
-    # TODO: Duplication here in conflict fpath
-    conflict_fpath = os.path.join(
-        main_repo.working_dir, ".calkit", "overleaf", "CONFLICT.json"
-    )
+    conflict_fpath = get_conflict_fpath(wdir=main_repo.working_dir)
     implicit_sync_paths = os.listdir(overleaf_repo.working_dir)
     for p in implicit_sync_paths:
         if p.startswith("."):

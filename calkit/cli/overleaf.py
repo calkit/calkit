@@ -373,7 +373,7 @@ def sync(
     # First check our config for an Overleaf token
     overleaf_token = _get_overleaf_token()
     repo = git.Repo()
-    conflict_fpath = os.path.join(".calkit", "overleaf", "CONFLICT.json")
+    conflict_fpath = calkit.overleaf.get_conflict_fpath()
     in_am_session = "in the middle of an am session" in repo.git.status()
     # Check if we're in the middle of resolving a merge conflict
     if in_am_session and not resolve:

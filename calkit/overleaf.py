@@ -58,7 +58,7 @@ def get_sync_info(
             overleaf_info[Path(pub_wdir).as_posix()] = pub_overleaf
     if wdir is None:
         wdir = ""
-    info_path = os.path.join(wdir, ".calkit", "overleaf.json")
+    info_path = get_sync_info_fpath(wdir=wdir)
     if os.path.isfile(info_path):
         with open(info_path) as f:
             ol_info_private = json.load(f)
@@ -101,6 +101,12 @@ def get_sync_info(
     return overleaf_info
 
 
+def get_sync_info_fpath(wdir: str | None = None) -> str:
+    if wdir is None:
+        wdir = ""
+    return os.path.join(wdir, ".calkit", "overleaf.json")
+
+
 def write_sync_info(
     synced_path: str, info: dict, wdir: str | None = None
 ) -> str:
@@ -108,7 +114,7 @@ def write_sync_info(
     # First read in the data
     if wdir is None:
         wdir = ""
-    fpath = os.path.join(wdir, ".calkit", "overleaf.json")
+    fpath = get_sync_info_fpath(wdir=wdir)
     if os.path.isfile(fpath):
         with open(fpath) as f:
             existing = json.load(f)

@@ -55,3 +55,22 @@ def get_sync_info(
         with open(info_path, "w") as f:
             json.dump(overleaf_info, f, indent=2)
     return overleaf_info
+
+
+def write_sync_info(
+    synced_path: str, info: dict, wdir: str | None = None
+) -> str:
+    """Write sync info for a given path, overwriting the data for that path."""
+    # First read in the data
+    if wdir is None:
+        wdir = ""
+    fpath = os.path.join(wdir, ".calkit", "overleaf.json")
+    if os.path.isfile(fpath):
+        with open(fpath) as f:
+            existing = json.load(f)
+    else:
+        existing = {}
+    existing[synced_path] = info
+    with open(fpath, "w") as f:
+        json.dump(existing, f, indent=2)
+    return fpath

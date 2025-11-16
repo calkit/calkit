@@ -358,15 +358,18 @@ def sync(
         ),
     ] = False,
 ):
-    """Sync publications with Overleaf."""
+    """Sync folders with Overleaf."""
     # TODO: We should probably ensure the pipeline isn't stale
     # Find all publications with Overleaf projects linked
-    ck_info = calkit.load_calkit_info()
-    pubs = ck_info.get("publications", [])
+    overleaf_info = calkit.overleaf.get_sync_info(fix_legacy=True)
+    if not overleaf_info:
+        raise_error("No Overleaf sync info found")
+    overleaf_sync_dirs = list(overleaf_info.keys())
     if paths is not None:
+        paths = [os.path.dirname(p) if os.path.isfile(p) else p for p in paths]
         for path in paths:
-            if not any(pub.get("path") == path for pub in pubs):
-                raise_error(f"Publication with path '{path}' not found")
+            if path not in overleaf_sync_dirs:
+                raise_error(f"Path '{path}' is not synced with Overleaf")
     # First check our config for an Overleaf token
     overleaf_token = _get_overleaf_token()
     repo = git.Repo()
@@ -384,28 +387,22 @@ def sync(
         # Figure out which wdir has the conflict in it
         with open(conflict_fpath) as f:
             resolving_info = json.load(f)
-    for pub in pubs:
-        overleaf_config = pub.get("overleaf", {})
-        if not overleaf_config:
+    for synced_folder, overleaf_sync_data in overleaf_info.items():
+        if not overleaf_sync_data:
             continue
-        if paths is not None and pub.get("path") not in paths:
+        if paths is not None and synced_folder not in paths:
             continue
-        overleaf_project_id = overleaf_config.get("project_id")
+        overleaf_project_id = overleaf_sync_data.get("project_id")
         if not overleaf_project_id:
             raise_error(
-                "No Overleaf project ID defined for this publication; "
-                "please set it in the publication's Overleaf config"
+                "No Overleaf project ID defined for this folder; "
+                "please set it in the Overleaf config"
             )
         typer.echo(
-            f"Syncing {pub['path']} with "
+            f"Syncing {synced_folder} with "
             f"Overleaf project ID {overleaf_project_id}"
         )
-        wdir = pub["overleaf"].get("wdir")
-        if wdir is None:
-            raise_error(
-                "No working directory defined for this publication; "
-                "please set it in the publication's Overleaf config"
-            )
+        wdir = synced_folder
         if resolve and wdir == resolving_info["wdir"]:
             repo.git.add(wdir)
             if repo.git.diff(["--staged", wdir]):
@@ -453,7 +450,7 @@ def sync(
         if resolve:
             last_sync_commit = resolving_info["last_overleaf_commit"]
         else:
-            last_sync_commit = pub["overleaf"].get("last_sync_commit")
+            last_sync_commit = overleaf_sync_data.get("last_sync_commit")
         if last_sync_commit:
             commits_since = list(
                 overleaf_repo.iter_commits(rev=f"{last_sync_commit}..HEAD")
@@ -466,11 +463,11 @@ def sync(
             commits_since = []
         # Determine which paths to sync and push
         # TODO: Support glob patterns
-        git_sync_paths = pub["overleaf"].get("sync_paths", [])
-        git_sync_paths += pub["overleaf"].get("git_sync_paths", [])
-        dvc_sync_paths = pub["overleaf"].get("dvc_sync_paths", [])
+        git_sync_paths = overleaf_sync_data.get("sync_paths", [])
+        git_sync_paths += overleaf_sync_data.get("git_sync_paths", [])
+        dvc_sync_paths = overleaf_sync_data.get("dvc_sync_paths", [])
         sync_paths = git_sync_paths + dvc_sync_paths
-        push_paths = pub["overleaf"].get("push_paths", [])
+        push_paths = overleaf_sync_data.get("push_paths", [])
         implicit_sync_paths = os.listdir(overleaf_repo.working_dir)
         for p in implicit_sync_paths:
             if p.startswith("."):
@@ -486,10 +483,7 @@ def sync(
             os.path.join(wdir, p) for p in dvc_sync_paths
         ]
         if not sync_paths:
-            warn(
-                "No sync paths or DVC sync paths defined in the publication's "
-                "Overleaf config"
-            )
+            warn("No sync paths or DVC sync paths defined in Overleaf config")
         elif last_sync_commit:
             # Compute a patch in the Overleaf project between HEAD and the last
             # sync
@@ -538,7 +532,6 @@ def sync(
                             {
                                 "wdir": wdir,
                                 "last_overleaf_commit": c,
-                                "pub_path": pub["path"],
                             },
                             f,
                         )
@@ -615,12 +608,13 @@ def sync(
         # Update the last sync commit
         last_overleaf_commit = overleaf_repo.head.commit.hexsha
         typer.echo(f"Updating last sync commit as {last_overleaf_commit}")
-        pub["overleaf"]["last_sync_commit"] = last_overleaf_commit
-        # Write publications back to calkit.yaml
-        ck_info["publications"] = pubs
-        with open("calkit.yaml", "w") as f:
-            calkit.ryaml.dump(ck_info, f)
+        overleaf_sync_data["last_sync_commit"] = last_overleaf_commit
+        # Write Overleaf sync data
+        overleaf_sync_data_fpath = calkit.overleaf.write_sync_info(
+            synced_path=synced_folder, info=overleaf_sync_data
+        )
         repo.git.add("calkit.yaml")
+        repo.git.add(overleaf_sync_data_fpath)
         if resolve and os.path.isfile(conflict_fpath):
             os.remove(conflict_fpath)
         # Stage the changes in the project repo
@@ -649,14 +643,18 @@ def sync(
         if (
             repo.git.diff(
                 "--staged",
-                git_sync_paths_in_project_not_ignored + ["calkit.yaml"],
+                git_sync_paths_in_project_not_ignored
+                + ["calkit.yaml", overleaf_sync_data_fpath],
             )
             and not no_commit
         ):
             typer.echo("Committing changes to project repo")
             commit_message = f"Sync {wdir} with Overleaf project"
             repo.git.commit(
-                *(git_sync_paths_in_project_not_ignored + ["calkit.yaml"]),
+                *(
+                    git_sync_paths_in_project_not_ignored
+                    + ["calkit.yaml", overleaf_sync_data_fpath]
+                ),
                 "-m",
                 commit_message,
             )

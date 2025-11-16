@@ -2,9 +2,13 @@
 
 import json
 import os
+import shutil
+import subprocess
 import warnings
 from copy import deepcopy
 from pathlib import Path
+
+import git
 
 import calkit
 
@@ -114,3 +118,218 @@ def write_sync_info(
     with open(fpath, "w") as f:
         json.dump(existing, f, indent=2)
     return fpath
+
+
+def sync(
+    main_repo: git.Repo,
+    overleaf_repo: git.Repo,
+    path_in_project: str,
+    sync_info_for_path: dict,
+    last_sync_commit: str | None = None,
+    no_commit: bool = False,
+    print_info=print,
+    warn=warnings.warn,
+    verbose: bool = False,
+    resolve: bool = False,
+) -> dict:
+    """Sync between the main project repo and Overleaf repo.
+
+    Both must be up-to-date (pulled).
+    """
+    res = {}
+    abs_synced_path_in_project = os.path.join(
+        main_repo.working_dir, path_in_project
+    )
+    overleaf_project_dir = overleaf_repo.working_dir
+    # Determine which paths to sync and push
+    overleaf_sync_data = deepcopy(sync_info_for_path)
+    git_sync_paths = deepcopy(overleaf_sync_data.get("sync_paths", []))
+    git_sync_paths += overleaf_sync_data.get("git_sync_paths", [])
+    sync_paths = git_sync_paths
+    push_paths = deepcopy(overleaf_sync_data.get("push_paths", []))
+    # TODO: Duplication here in conflict fpath
+    conflict_fpath = os.path.join(
+        main_repo.working_dir, ".calkit", "overleaf", "CONFLICT.json"
+    )
+    implicit_sync_paths = os.listdir(overleaf_repo.working_dir)
+    for p in implicit_sync_paths:
+        if p.startswith("."):
+            continue
+        if p not in sync_paths:
+            sync_paths.append(p)
+            if p not in git_sync_paths:
+                git_sync_paths.append(p)
+    # Add implicit sync paths in project
+    paths_in_project = os.listdir(abs_synced_path_in_project)
+    for p in paths_in_project:
+        if p.startswith(".") or p.endswith(".pdf"):
+            continue
+        if p not in sync_paths:
+            sync_paths.append(p)
+        if p not in git_sync_paths:
+            git_sync_paths.append(p)
+    git_sync_paths_in_project = [
+        os.path.join(path_in_project, p) for p in git_sync_paths
+    ]
+    if not sync_paths:
+        warn("No sync paths defined in Overleaf config")
+    elif last_sync_commit:
+        # Compute a patch in the Overleaf project between HEAD and the last
+        # sync
+        patch = overleaf_repo.git.format_patch(
+            [f"{last_sync_commit}..HEAD", "--stdout", "--"] + git_sync_paths
+        )
+        # Replace any Overleaf commit messages to make them more meaningful
+        patch = patch.replace(
+            "Update on Overleaf.", f"Update {path_in_project} on Overleaf"
+        )
+        # Ensure the patch ends with a new line
+        if patch and not patch.endswith("\n"):
+            patch += "\n"
+        if verbose:
+            print_info(f"Git patch:\n{patch}")
+        if patch:
+            print_info("Applying to project repo")
+            process = subprocess.run(
+                [
+                    "git",
+                    "am",
+                    "--3way",
+                    "--directory",
+                    path_in_project,
+                    "-",
+                ],
+                input=patch,
+                text=True,
+                encoding="utf-8",
+                capture_output=True,
+                cwd=main_repo.working_dir,
+            )
+            # Handle merge conflicts
+            if (
+                process.returncode != 0
+                and "merge conflict" in process.stdout.lower()
+            ):
+                msg = ""
+                for line in process.stdout.split("\n"):
+                    if "merge conflict" in line.lower():
+                        msg += line + "\n"
+                # Save a file to track this merge conflict
+                c = overleaf_repo.head.commit.hexsha
+                with open(conflict_fpath, "w") as f:
+                    json.dump(
+                        {
+                            "wdir": path_in_project,
+                            "last_overleaf_commit": c,
+                        },
+                        f,
+                    )
+                raise RuntimeError(
+                    f"{msg}Edit the file(s) and then call:\n\n"
+                    "    calkit overleaf sync --resolve"
+                )
+            elif process.returncode != 0:
+                raise RuntimeError(f"Could not apply:\n{process.stdout}")
+        elif resolve:
+            # We have no patch since the last sync, but we need to update
+            # our latest sync commit
+            print_info("Merge conflict resolved")
+        else:
+            print_info("No changes to apply")
+    else:
+        # Simply copy in all files
+        print_info(
+            "No last sync commit defined; "
+            "copying all files from Overleaf project"
+        )
+        for sync_path in sync_paths:
+            src = os.path.join(overleaf_project_dir, sync_path)
+            dst = os.path.join(abs_synced_path_in_project, sync_path)
+            if os.path.isdir(src):
+                # Copy the directory and its contents
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+            elif os.path.isfile(src):
+                # Copy the file
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(src, dst)
+            else:
+                raise RuntimeError(
+                    f"Source path {src} does not exist; "
+                    "please check your Overleaf config"
+                )
+    # Copy our versions of sync and push paths into the Overleaf project
+    for sync_push_path in sync_paths + push_paths:
+        src = os.path.join(abs_synced_path_in_project, sync_push_path)
+        dst = os.path.join(overleaf_project_dir, sync_push_path)
+        if os.path.isdir(src):
+            # Remove destination directory if it exists
+            if os.path.isdir(dst):
+                shutil.rmtree(dst)
+            # Copy the directory and its contents
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+        elif os.path.isfile(src):
+            # Copy the file
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
+        elif os.path.isfile(dst) and not os.path.isfile(src):
+            # Handle newly created files on Overleaf, i.e., they exist
+            # in dst but not in src
+            os.makedirs(os.path.dirname(src), exist_ok=True)
+            shutil.copy2(dst, src)
+        else:
+            raise RuntimeError(
+                f"Source path {src} does not exist; "
+                "please check your Overleaf config"
+            )
+            continue
+    # Stage the changes in the Overleaf project
+    overleaf_repo.git.add(sync_paths + push_paths)
+    if overleaf_repo.git.diff("--staged", sync_paths + push_paths):
+        print_info("Committing changes to Overleaf")
+        commit_message = "Sync with Calkit project"
+        overleaf_repo.git.commit(
+            *(sync_paths + push_paths),
+            "-m",
+            commit_message,
+        )
+        print_info("Pushing changes to Overleaf")
+        overleaf_repo.git.push()
+    # Update the last sync commit
+    last_overleaf_commit = overleaf_repo.head.commit.hexsha
+    print_info(f"Updating last sync commit as {last_overleaf_commit}")
+    overleaf_sync_data["last_sync_commit"] = last_overleaf_commit
+    # Write Overleaf sync data
+    overleaf_sync_data_fpath = write_sync_info(
+        synced_path=path_in_project,
+        info=overleaf_sync_data,
+        wdir=str(main_repo.working_dir),
+    )
+    main_repo.git.add("calkit.yaml")
+    main_repo.git.add(overleaf_sync_data_fpath)
+    if resolve and os.path.isfile(conflict_fpath):
+        os.remove(conflict_fpath)
+    # Stage the changes in the project repo
+    # Respect any sync paths that are ignored by Git
+    git_sync_paths_in_project_not_ignored = [
+        p for p in git_sync_paths_in_project if not main_repo.ignored(p)
+    ]
+    main_repo.git.add(git_sync_paths_in_project_not_ignored)
+    if (
+        main_repo.git.diff(
+            "--staged",
+            git_sync_paths_in_project_not_ignored
+            + ["calkit.yaml", overleaf_sync_data_fpath],
+        )
+        and not no_commit
+    ):
+        print_info("Committing changes to project repo")
+        commit_message = f"Sync {path_in_project} with Overleaf project"
+        main_repo.git.commit(
+            *(
+                git_sync_paths_in_project_not_ignored
+                + ["calkit.yaml", overleaf_sync_data_fpath]
+            ),
+            "-m",
+            commit_message,
+        )
+    return res

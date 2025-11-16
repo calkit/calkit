@@ -126,6 +126,33 @@ def get_conflict_fpath(wdir: str | git.PathLike | None = None) -> str:
     return os.path.join(str(wdir), ".calkit", "overleaf", "CONFLICT.json")
 
 
+def get_sync_push_paths(
+    main_repo: git.Repo,
+    overleaf_repo: git.Repo,
+    path_in_project: str,
+    sync_info_for_path: dict,
+) -> tuple[list[str], list[str]]:
+    overleaf_sync_data = deepcopy(sync_info_for_path)
+    sync_paths = deepcopy(overleaf_sync_data.get("sync_paths", []))
+    push_paths = deepcopy(overleaf_sync_data.get("push_paths", []))
+    # TODO: Sync and push paths can't overlap?
+    implicit_sync_paths = os.listdir(overleaf_repo.working_dir)
+    for p in implicit_sync_paths:
+        if p.startswith("."):
+            continue
+        if p not in sync_paths and p not in push_paths:
+            sync_paths.append(p)
+    # Add implicit sync paths in project
+    path_in_project_abs = os.path.join(main_repo.working_dir, path_in_project)
+    paths_in_project = os.listdir(path_in_project_abs)
+    for p in paths_in_project:
+        if p.startswith(".") or p.endswith(".pdf"):
+            continue
+        if p not in sync_paths and p not in push_paths:
+            sync_paths.append(p)
+    return sync_paths, push_paths
+
+
 def sync(
     main_repo: git.Repo,
     overleaf_repo: git.Repo,
@@ -154,22 +181,12 @@ def sync(
     conflict_fpath = get_conflict_fpath(wdir=main_repo.working_dir)
     # Determine which paths to sync and push
     overleaf_sync_data = deepcopy(sync_info_for_path)
-    sync_paths = deepcopy(overleaf_sync_data.get("sync_paths", []))
-    push_paths = deepcopy(overleaf_sync_data.get("push_paths", []))
-    # TODO: Sync and push paths can't overlap?
-    implicit_sync_paths = os.listdir(overleaf_repo.working_dir)
-    for p in implicit_sync_paths:
-        if p.startswith("."):
-            continue
-        if p not in sync_paths and p not in push_paths:
-            sync_paths.append(p)
-    # Add implicit sync paths in project
-    paths_in_project = os.listdir(path_in_project_abs)
-    for p in paths_in_project:
-        if p.startswith(".") or p.endswith(".pdf"):
-            continue
-        if p not in sync_paths and p not in push_paths:
-            sync_paths.append(p)
+    sync_paths, push_paths = get_sync_push_paths(
+        main_repo=main_repo,
+        overleaf_repo=overleaf_repo,
+        path_in_project=path_in_project,
+        sync_info_for_path=sync_info_for_path,
+    )
     sync_paths_in_project = [
         os.path.join(path_in_project, p) for p in sync_paths
     ]

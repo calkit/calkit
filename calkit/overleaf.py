@@ -141,38 +141,37 @@ def sync(
     """Sync between the main project repo and Overleaf repo.
 
     Both must be up-to-date (pulled).
+
+    All files in the Overleaf repo are committed to Git, while some in the
+    main project can be ignored, e.g., in cases where they are copied in from
+    a map-paths stage.
     """
     res = {}
     if last_sync_commit is None:
         last_sync_commit = sync_info_for_path.get("last_sync_commit")
     path_in_project_abs = os.path.join(main_repo.working_dir, path_in_project)
     overleaf_project_dir = overleaf_repo.working_dir
+    conflict_fpath = get_conflict_fpath(wdir=main_repo.working_dir)
     # Determine which paths to sync and push
     overleaf_sync_data = deepcopy(sync_info_for_path)
-    git_sync_paths = deepcopy(overleaf_sync_data.get("sync_paths", []))
-    git_sync_paths += overleaf_sync_data.get("git_sync_paths", [])
-    sync_paths = git_sync_paths
+    sync_paths = deepcopy(overleaf_sync_data.get("sync_paths", []))
     push_paths = deepcopy(overleaf_sync_data.get("push_paths", []))
-    conflict_fpath = get_conflict_fpath(wdir=main_repo.working_dir)
+    # TODO: Sync and push paths can't overlap?
     implicit_sync_paths = os.listdir(overleaf_repo.working_dir)
     for p in implicit_sync_paths:
         if p.startswith("."):
             continue
-        if p not in sync_paths:
+        if p not in sync_paths and p not in push_paths:
             sync_paths.append(p)
-            if p not in git_sync_paths:
-                git_sync_paths.append(p)
     # Add implicit sync paths in project
     paths_in_project = os.listdir(path_in_project_abs)
     for p in paths_in_project:
         if p.startswith(".") or p.endswith(".pdf"):
             continue
-        if p not in sync_paths:
+        if p not in sync_paths and p not in push_paths:
             sync_paths.append(p)
-        if p not in git_sync_paths:
-            git_sync_paths.append(p)
-    git_sync_paths_in_project = [
-        os.path.join(path_in_project, p) for p in git_sync_paths
+    sync_paths_in_project = [
+        os.path.join(path_in_project, p) for p in sync_paths
     ]
     if not sync_paths:
         print_warning("No sync paths defined in Overleaf config")
@@ -180,7 +179,7 @@ def sync(
         # Compute a patch in the Overleaf project between HEAD and the last
         # sync
         patch = overleaf_repo.git.format_patch(
-            [f"{last_sync_commit}..HEAD", "--stdout", "--"] + git_sync_paths
+            [f"{last_sync_commit}..HEAD", "--stdout", "--"] + sync_paths
         )
         # Replace any Overleaf commit messages to make them more meaningful
         patch = patch.replace(
@@ -313,14 +312,14 @@ def sync(
         os.remove(conflict_fpath)
     # Stage the changes in the project repo
     # Respect any sync paths that are ignored by Git
-    git_sync_paths_in_project_not_ignored = [
-        p for p in git_sync_paths_in_project if not main_repo.ignored(p)
+    sync_paths_in_project_not_ignored = [
+        p for p in sync_paths_in_project if not main_repo.ignored(p)
     ]
-    main_repo.git.add(git_sync_paths_in_project_not_ignored)
+    main_repo.git.add(sync_paths_in_project_not_ignored)
     if (
         main_repo.git.diff(
             "--staged",
-            git_sync_paths_in_project_not_ignored
+            sync_paths_in_project_not_ignored
             + ["calkit.yaml", overleaf_sync_data_fpath],
         )
         and not no_commit
@@ -329,7 +328,7 @@ def sync(
         commit_message = f"Sync {path_in_project} with Overleaf project"
         main_repo.git.commit(
             *(
-                git_sync_paths_in_project_not_ignored
+                sync_paths_in_project_not_ignored
                 + ["calkit.yaml", overleaf_sync_data_fpath]
             ),
             "-m",

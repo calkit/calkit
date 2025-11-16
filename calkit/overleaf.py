@@ -143,9 +143,7 @@ def sync(
     Both must be up-to-date (pulled).
     """
     res = {}
-    abs_synced_path_in_project = os.path.join(
-        main_repo.working_dir, path_in_project
-    )
+    path_in_project_abs = os.path.join(main_repo.working_dir, path_in_project)
     overleaf_project_dir = overleaf_repo.working_dir
     # Determine which paths to sync and push
     overleaf_sync_data = deepcopy(sync_info_for_path)
@@ -163,7 +161,7 @@ def sync(
             if p not in git_sync_paths:
                 git_sync_paths.append(p)
     # Add implicit sync paths in project
-    paths_in_project = os.listdir(abs_synced_path_in_project)
+    paths_in_project = os.listdir(path_in_project_abs)
     for p in paths_in_project:
         if p.startswith(".") or p.endswith(".pdf"):
             continue
@@ -247,7 +245,7 @@ def sync(
         )
         for sync_path in sync_paths:
             src = os.path.join(overleaf_project_dir, sync_path)
-            dst = os.path.join(abs_synced_path_in_project, sync_path)
+            dst = os.path.join(path_in_project_abs, sync_path)
             if os.path.isdir(src):
                 # Copy the directory and its contents
                 shutil.copytree(src, dst, dirs_exist_ok=True)
@@ -262,7 +260,7 @@ def sync(
                 )
     # Copy our versions of sync and push paths into the Overleaf project
     for sync_push_path in sync_paths + push_paths:
-        src = os.path.join(abs_synced_path_in_project, sync_push_path)
+        src = os.path.join(path_in_project_abs, sync_push_path)
         dst = os.path.join(overleaf_project_dir, sync_push_path)
         if os.path.isdir(src):
             # Remove destination directory if it exists

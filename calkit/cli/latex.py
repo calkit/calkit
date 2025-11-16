@@ -52,14 +52,25 @@ def from_json(
             if field
         ]
 
-    # TODO: Lots of validation needed here!
-
-    if fmt_json is None:
-        fmt_dict = {}
+    # Validate some stuff
+    if not os.path.isfile(input_fpath):
+        raise_error(f"Input file {input_fpath} does not exist")
+    if not input_fpath.endswith(".json"):
+        raise_error("Input file must be a JSON file")
+    if not output_fpath.endswith(".tex"):
+        raise_error("Output file must be a .tex file")
+    if fmt_json is not None:
+        try:
+            fmt_dict = json.loads(fmt_json)
+        except json.JSONDecodeError:
+            raise_error("Format JSON is not valid JSON")
     else:
-        fmt_dict = json.loads(fmt_json)
+        fmt_dict = {}
     with open(input_fpath) as f:
-        data = json.load(f)
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            raise_error("Input JSON file is not valid JSON")
     formatted = deepcopy(data)
     for tex_var_name, fmt_string in fmt_dict.items():
         fmt_string = str(fmt_string)
@@ -67,8 +78,17 @@ def from_json(
         # Do any relevant evals and add them to the data for formatting
         tokens = tokens_from_format_string(fmt_string)
         for t in tokens:
-            data_for_formatting[t] = arithmetic_eval.evaluate(t, data)
+            try:
+                data_for_formatting[t] = arithmetic_eval.evaluate(t, data)
+            except Exception:
+                raise_error(
+                    f"Error evaluating expression '{t}' for formatting"
+                )
         formatted[tex_var_name] = fmt_string.format(**data_for_formatting)
+    # Create output directory if it doesn't exist
+    outdir = os.path.dirname(output_fpath)
+    if outdir:
+        os.makedirs(outdir, exist_ok=True)
     with open(output_fpath, "w") as f:
         json2latex.dump(command_name, formatted, f)
 

@@ -54,6 +54,25 @@ Another is \theresults[sup].
     assert "The result is 185188.7." in text
     assert "The other result is 3." in text
     assert "Another is 5.555." in text
+    # Now test the unhappy path
+    with open("bad.json", "w") as f:
+        f.write("not valid json")
+    out = subprocess.run(
+        [
+            "calkit",
+            "latex",
+            "from-json",
+            "bad.json",
+            "paper/results.tex",
+            "--command",
+            "theresults",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert out.returncode != 0
+    assert "not valid JSON" in out.stderr
 
 
 def test_build(tmp_dir):

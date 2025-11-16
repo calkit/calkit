@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+from copy import deepcopy
 from pathlib import Path
 
 import git
@@ -159,7 +160,7 @@ def import_publication(
         raise_error(
             "Invalid URL; must start with 'https://www.overleaf.com/project/'"
         )
-    overleaf_project_id = src_url.split("/")[-1]
+    overleaf_project_id = calkit.overleaf.project_id_from_url(src_url)
     if not overleaf_project_id:
         raise_error("Invalid Overleaf project ID")
     # Check target path
@@ -463,11 +464,11 @@ def sync(
             commits_since = []
         # Determine which paths to sync and push
         # TODO: Support glob patterns
-        git_sync_paths = overleaf_sync_data.get("sync_paths", [])
+        git_sync_paths = deepcopy(overleaf_sync_data.get("sync_paths", []))
         git_sync_paths += overleaf_sync_data.get("git_sync_paths", [])
         dvc_sync_paths = overleaf_sync_data.get("dvc_sync_paths", [])
         sync_paths = git_sync_paths + dvc_sync_paths
-        push_paths = overleaf_sync_data.get("push_paths", [])
+        push_paths = deepcopy(overleaf_sync_data.get("push_paths", []))
         implicit_sync_paths = os.listdir(overleaf_repo.working_dir)
         for p in implicit_sync_paths:
             if p.startswith("."):
@@ -476,6 +477,15 @@ def sync(
                 sync_paths.append(p)
                 if p not in git_sync_paths and p not in dvc_sync_paths:
                     git_sync_paths.append(p)
+        # Add implicit sync paths in project
+        paths_in_project = os.listdir(synced_folder)
+        for p in paths_in_project:
+            if p.startswith(".") or p.endswith(".pdf"):
+                continue
+            if p not in sync_paths:
+                sync_paths.append(p)
+            if p not in git_sync_paths and p not in dvc_sync_paths:
+                git_sync_paths.append(p)
         git_sync_paths_in_project = [
             os.path.join(wdir, p) for p in git_sync_paths
         ]

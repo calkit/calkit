@@ -143,6 +143,7 @@ def get_sync_push_paths(
         if p not in sync_paths and p not in push_paths:
             sync_paths.append(p)
     # Add implicit sync paths in project
+    # TODO: Ignore aux LaTeX build files?
     path_in_project_abs = os.path.join(main_repo.working_dir, path_in_project)
     paths_in_project = os.listdir(path_in_project_abs)
     for p in paths_in_project:
@@ -190,13 +191,23 @@ def sync(
     sync_paths_in_project = [
         os.path.join(path_in_project, p) for p in sync_paths
     ]
+    # Respect any sync paths that are ignored by Git
+    sync_paths_in_project_not_ignored = [
+        p for p in sync_paths_in_project if not main_repo.ignored(p)
+    ]
+    paths_for_overleaf_patch = []
+    for p in sync_paths:
+        pp = os.path.join(path_in_project, p)
+        if not main_repo.ignored(pp):
+            paths_for_overleaf_patch.append(p)
     if not sync_paths:
         print_warning("No sync paths defined in Overleaf config")
     elif last_sync_commit:
         # Compute a patch in the Overleaf project between HEAD and the last
         # sync
         patch = overleaf_repo.git.format_patch(
-            [f"{last_sync_commit}..HEAD", "--stdout", "--"] + sync_paths
+            [f"{last_sync_commit}..HEAD", "--stdout", "--"]
+            + paths_for_overleaf_patch
         )
         # Replace any Overleaf commit messages to make them more meaningful
         patch = patch.replace(
@@ -328,10 +339,6 @@ def sync(
     if resolving_conflict and os.path.isfile(conflict_fpath):
         os.remove(conflict_fpath)
     # Stage the changes in the project repo
-    # Respect any sync paths that are ignored by Git
-    sync_paths_in_project_not_ignored = [
-        p for p in sync_paths_in_project if not main_repo.ignored(p)
-    ]
     main_repo.git.add(sync_paths_in_project_not_ignored)
     if (
         main_repo.git.diff(

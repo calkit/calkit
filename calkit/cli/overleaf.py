@@ -387,16 +387,16 @@ def sync(
         # Figure out which wdir has the conflict in it
         with open(conflict_fpath) as f:
             resolving_info = json.load(f)
-    for synced_folder, overleaf_sync_data in overleaf_info.items():
-        if not overleaf_sync_data:
+    for synced_folder, sync_data in overleaf_info.items():
+        if not sync_data:
             continue
         if paths is not None and synced_folder not in paths:
             continue
-        overleaf_project_id = overleaf_sync_data.get("project_id")
+        overleaf_project_id = sync_data.get("project_id")
         if not overleaf_project_id:
             raise_error(
                 "No Overleaf project ID defined for this folder; "
-                "please set it in the Overleaf config"
+                "please set 'url' in the Overleaf config"
             )
         typer.echo(
             f"Syncing {synced_folder} with "
@@ -450,7 +450,7 @@ def sync(
         if resolve:
             last_sync_commit = resolving_info["last_overleaf_commit"]
         else:
-            last_sync_commit = overleaf_sync_data.get("last_sync_commit")
+            last_sync_commit = sync_data.get("last_sync_commit")
         if last_sync_commit:
             commits_since = list(
                 overleaf_repo.iter_commits(rev=f"{last_sync_commit}..HEAD")
@@ -466,13 +466,13 @@ def sync(
                 main_repo=repo,
                 overleaf_repo=overleaf_repo,
                 path_in_project=synced_folder,
-                sync_info_for_path=overleaf_sync_data,
+                sync_info_for_path=sync_data,
                 last_sync_commit=last_sync_commit,
                 no_commit=no_commit,
                 verbose=verbose,
-                resolve=resolve,
+                resolving_conflict=resolve,
                 print_info=typer.echo,
-                warn=warn,
+                print_warning=warn,
             )
         except Exception as e:
             raise_error(str(e))

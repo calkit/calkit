@@ -134,15 +134,17 @@ def sync(
     last_sync_commit: str | None = None,
     no_commit: bool = False,
     print_info=print,
-    warn=warnings.warn,
+    print_warning=warnings.warn,
     verbose: bool = False,
-    resolve: bool = False,
+    resolving_conflict: bool = False,
 ) -> dict:
     """Sync between the main project repo and Overleaf repo.
 
     Both must be up-to-date (pulled).
     """
     res = {}
+    if last_sync_commit is None:
+        last_sync_commit = sync_info_for_path.get("last_sync_commit")
     path_in_project_abs = os.path.join(main_repo.working_dir, path_in_project)
     overleaf_project_dir = overleaf_repo.working_dir
     # Determine which paths to sync and push
@@ -173,7 +175,7 @@ def sync(
         os.path.join(path_in_project, p) for p in git_sync_paths
     ]
     if not sync_paths:
-        warn("No sync paths defined in Overleaf config")
+        print_warning("No sync paths defined in Overleaf config")
     elif last_sync_commit:
         # Compute a patch in the Overleaf project between HEAD and the last
         # sync
@@ -231,7 +233,7 @@ def sync(
                 )
             elif process.returncode != 0:
                 raise RuntimeError(f"Could not apply:\n{process.stdout}")
-        elif resolve:
+        elif resolving_conflict:
             # We have no patch since the last sync, but we need to update
             # our latest sync commit
             print_info("Merge conflict resolved")
@@ -307,7 +309,7 @@ def sync(
     )
     main_repo.git.add("calkit.yaml")
     main_repo.git.add(overleaf_sync_data_fpath)
-    if resolve and os.path.isfile(conflict_fpath):
+    if resolving_conflict and os.path.isfile(conflict_fpath):
         os.remove(conflict_fpath)
     # Stage the changes in the project repo
     # Respect any sync paths that are ignored by Git

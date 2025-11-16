@@ -40,6 +40,7 @@ from calkit.cli.cloud import cloud_app
 from calkit.cli.config import config_app
 from calkit.cli.describe import describe_app
 from calkit.cli.import_ import import_app
+from calkit.cli.latex import latex_app
 from calkit.cli.list import list_app
 from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
@@ -70,6 +71,7 @@ app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
+app.add_typer(latex_app, name="latex", help="Work with LaTeX.")
 app.add_typer(overleaf_app, name="overleaf", help="Interact with Overleaf.")
 app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
 app.add_typer(slurm_app, name="slurm", help="Work with SLURM.")
@@ -2037,105 +2039,6 @@ def run_jupyter(
     """Run a command with the Jupyter CLI."""
     process = subprocess.run([sys.executable, "-m", "jupyter"] + sys.argv[2:])
     sys.exit(process.returncode)
-
-
-@app.command(name="latexmk")
-def run_latexmk(
-    tex_file: Annotated[str, typer.Argument(help="The .tex file to compile.")],
-    environment: Annotated[
-        str | None,
-        typer.Option(
-            "--env",
-            "-e",
-            help=("Environment in which to run latexmk, if applicable."),
-        ),
-    ] = None,
-    no_check: Annotated[
-        bool,
-        typer.Option(
-            "--no-check",
-            help=(
-                "Don't check the environment is valid before running latexmk."
-            ),
-        ),
-    ] = False,
-    latexmk_rc_path: Annotated[
-        str | None,
-        typer.Option(
-            "--latexmk-rc",
-            "-r",
-            help="Path to a latexmkrc file to use for compilation.",
-        ),
-    ] = None,
-    no_synctex: Annotated[
-        bool,
-        typer.Option(
-            "--no-synctex",
-            help="Don't generate synctex file for source-to-pdf mapping.",
-        ),
-    ] = False,
-    force: Annotated[
-        bool,
-        typer.Option(
-            "--force",
-            "-f",
-            help=(
-                "Force latexmk to recompile all files, even if they are up to "
-                "date."
-            ),
-        ),
-    ] = False,
-    verbose: Annotated[
-        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
-    ] = False,
-):
-    """Compile a LaTeX document with latexmk.
-
-    If a Calkit environment is not specified, latexmk will be run in the
-    system environment if available. If not available, a TeX Live Docker
-    container will be used.
-    """
-    # Now formulate the command
-    latexmk_cmd = ["latexmk", "-pdf", "-cd"]
-    if latexmk_rc_path is not None:
-        latexmk_cmd += ["-r", latexmk_rc_path]
-    if not no_synctex:
-        latexmk_cmd.append("-synctex=1")
-    if not verbose:
-        latexmk_cmd.append("-silent")
-    if force:
-        latexmk_cmd.append("-f")
-    latexmk_cmd += ["-interaction=nonstopmode", tex_file]
-    if environment is not None:
-        if no_check:
-            check_cmd = ["--no-check"]
-        else:
-            check_cmd = []
-        cmd = (
-            ["calkit", "xenv", "--name", environment]
-            + check_cmd
-            + ["--"]
-            + latexmk_cmd
-        )
-        if verbose:
-            typer.echo(f"Running command: {cmd}")
-    elif calkit.check_dep_exists("latexmk"):
-        cmd = latexmk_cmd
-    else:
-        cmd = [
-            "docker",
-            "run",
-            "--rm",
-            "-v",
-            f"{os.getcwd()}:/work",
-            "-w",
-            "/work",
-            "texlive/texlive:latest-full",
-        ] + latexmk_cmd
-    try:
-        subprocess.check_call(cmd)
-    except subprocess.CalledProcessError:
-        raise_error("latexmk failed")
 
 
 @app.command(name="map-paths")

@@ -575,21 +575,6 @@ def test_stage_run_info_from_log_content():
     }
 
 
-def test_latexmk(tmp_dir):
-    subprocess.check_call(["calkit", "init"])
-    os.makedirs("paper", exist_ok=True)
-    with open("paper/main.tex", "w") as f:
-        f.write(
-            r"""\documentclass{article}
-            \begin{document}
-            Hello, world!
-            \end{document}
-            """
-        )
-    subprocess.check_call(["calkit", "latexmk", "paper/main.tex"])
-    assert os.path.isfile("paper/main.pdf")
-
-
 def test_map_paths(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     os.makedirs("paper", exist_ok=True)

@@ -59,7 +59,7 @@ def test_latexstage():
     s = LatexStage(
         name="something", environment="tex", target_path="my-paper.tex"
     )
-    assert s.dvc_cmd.startswith("calkit latexmk")
+    assert s.dvc_cmd.startswith("calkit latex build")
     assert " -e tex " in s.dvc_cmd
     assert " --verbose " not in s.dvc_cmd
     s.verbose = True

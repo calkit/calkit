@@ -380,8 +380,7 @@ def test_new_stage(tmp_dir):
     )
     pipeline = calkit.dvc.read_pipeline()
     assert pipeline["stages"]["build-paper"]["cmd"] == (
-        "calkit xenv -n tex -- "
-        "latexmk -cd -interaction=nonstopmode -pdf paper.tex"
+        "calkit latex build paper.tex --environment tex"
     )
     assert set(pipeline["stages"]["build-paper"]["deps"]) == set(
         [
@@ -582,7 +581,7 @@ def test_new_latex_stage(tmp_dir):
     subprocess.check_call(["calkit", "check", "pipeline", "--compile"])
     pipeline = calkit.dvc.read_pipeline()
     assert pipeline["stages"]["build-paper"]["cmd"] == (
-        "calkit latexmk -e tex --no-check paper.tex"
+        "calkit latex build -e tex --no-check paper.tex"
     )
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["tex"]

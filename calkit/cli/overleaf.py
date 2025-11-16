@@ -282,16 +282,18 @@ def import_publication(
         description=description,
         kind=kind,
         stage=stage_name,
-        overleaf=dict(
-            project_id=overleaf_project_id,
-            wdir=dest_dir,
-            sync_paths=sync_paths,
-            push_paths=push_paths,
-            last_sync_commit=None,
-        ),
     )
     pubs.append(new_pub)
     ck_info["publications"] = pubs
+    ol_sync = ck_info.get("overleaf_sync", {})
+    if dest_dir in ol_sync:
+        raise_error(f"'{dest_dir}' is already synced with Overleaf")
+    ol_sync[dest_dir] = dict(url=src_url)
+    if sync_paths:
+        ol_sync[dest_dir]["sync_paths"] = sync_paths
+    if push_paths:
+        ol_sync[dest_dir]["push_paths"] = push_paths
+    ck_info["overleaf_sync"] = ol_sync
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
@@ -306,7 +308,7 @@ def import_publication(
             ]
         )
     # Sync the project
-    sync(paths=[pub_path], no_commit=no_commit)
+    sync(paths=[dest_dir], no_commit=no_commit)
 
 
 @overleaf_app.command(name="sync")

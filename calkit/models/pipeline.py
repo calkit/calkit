@@ -346,11 +346,11 @@ class JsonToLatexStage(Stage):
     def dvc_cmd(self) -> str:
         cmd = "calkit latex from-json"
         if isinstance(self.input_path, str):
-            cmd += f" {self.input_path}"
+            cmd += f" '{self.input_path}'"
         else:
             for input_path in self.input_path:
-                cmd += f" {input_path}"
-        cmd += f" {self.output_path}"
+                cmd += f" '{input_path}'"
+        cmd += f" --output '{self.output_path}'"
         if self.command_name is not None:
             cmd += f" --command {self.command_name}"
         if self.format is not None:

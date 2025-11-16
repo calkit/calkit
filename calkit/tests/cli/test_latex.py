@@ -36,6 +36,7 @@ Another is \theresults[sup].
             "latex",
             "from-json",
             "test.json",
+            "-o",
             "paper/results.tex",
             "--command",
             "theresults",
@@ -54,7 +55,7 @@ Another is \theresults[sup].
     assert "The result is 185188.7." in text
     assert "The other result is 3." in text
     assert "Another is 5.555." in text
-    # Now test the unhappy path
+    # Now test some input validation
     with open("bad.json", "w") as f:
         f.write("not valid json")
     out = subprocess.run(
@@ -63,9 +64,8 @@ Another is \theresults[sup].
             "latex",
             "from-json",
             "bad.json",
+            "--output",
             "paper/results.tex",
-            "--command",
-            "theresults",
         ],
         text=True,
         capture_output=True,
@@ -73,6 +73,23 @@ Another is \theresults[sup].
     )
     assert out.returncode != 0
     assert "not valid JSON" in out.stderr
+    # Test that we can supply multiple input files
+    with open("test2.json", "w") as f:
+        json.dump({"result4": "hello"}, f)
+    subprocess.run(
+        [
+            "calkit",
+            "latex",
+            "from-json",
+            "test.json",
+            "test2.json",
+            "-o",
+            "paper/results.tex",
+            "--format-json",
+            json.dumps(fmt_dict),
+        ],
+        check=True,
+    )
 
 
 def test_build(tmp_dir):

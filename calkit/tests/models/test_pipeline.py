@@ -225,7 +225,8 @@ def test_jsontolatexstage():
     sd = s.to_dvc()
     print(sd)
     assert sd["cmd"] == (
-        "calkit latex from-json data/results.json paper/results.tex "
+        "calkit latex from-json 'data/results.json' "
+        "--output 'paper/results.tex' "
         "--command theresults --format-json "
         '\'{"result1": "{value1:.2f}", "result2": "{value2}"}\''
     )

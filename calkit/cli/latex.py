@@ -19,9 +19,11 @@ latex_app = typer.Typer(no_args_is_help=True)
 
 @latex_app.command(name="from-json")
 def from_json(
-    input_fpath: Annotated[str, typer.Argument(help="Input JSON file path.")],
+    input_fpaths: Annotated[
+        list[str], typer.Argument(help="Input JSON file path.")
+    ],
     output_fpath: Annotated[
-        str, typer.Argument(help="Output LaTeX file path.")
+        str, typer.Option("--output", "-o", help="Output LaTeX file path.")
     ],
     command_name: Annotated[
         str | None,
@@ -53,12 +55,6 @@ def from_json(
         ]
 
     # Validate some stuff
-    if not os.path.isfile(input_fpath):
-        raise_error(f"Input file {input_fpath} does not exist")
-    if not input_fpath.endswith(".json"):
-        raise_error("Input file must be a JSON file")
-    if not output_fpath.endswith(".tex"):
-        raise_error("Output file must be a .tex file")
     if fmt_json is not None:
         try:
             fmt_dict = json.loads(fmt_json)
@@ -66,11 +62,20 @@ def from_json(
             raise_error("Format JSON is not valid JSON")
     else:
         fmt_dict = {}
-    with open(input_fpath) as f:
-        try:
-            data = json.load(f)
-        except json.JSONDecodeError:
-            raise_error("Input JSON file is not valid JSON")
+    data = {}
+    for input_fpath in input_fpaths:
+        if not os.path.isfile(input_fpath):
+            raise_error(f"Input file {input_fpath} does not exist")
+        if not input_fpath.endswith(".json"):
+            raise_error("Input file must be a JSON file")
+        if not output_fpath.endswith(".tex"):
+            raise_error("Output file must be a .tex file")
+        with open(input_fpath) as f:
+            try:
+                data_i = json.load(f)
+                data.update(data_i)
+            except json.JSONDecodeError:
+                raise_error("Input JSON file is not valid JSON")
     # If no command is provided, use the output file name without extension
     if command_name is None:
         command_name = os.path.splitext(os.path.basename(output_fpath))[0]

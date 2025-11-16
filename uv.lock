@@ -525,7 +525,7 @@ dev = [
     { name = "polars" },
     { name = "pre-commit" },
     { name = "pyarrow" },
-    { name = "pypdf2" },
+    { name = "pypdf" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-env" },
@@ -579,7 +579,7 @@ dev = [
     { name = "polars", specifier = ">=1.18.0" },
     { name = "pre-commit" },
     { name = "pyarrow" },
-    { name = "pypdf2", specifier = ">=3.0.1" },
+    { name = "pypdf", specifier = ">=6.3.0" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-env", specifier = ">=1.1.5" },
@@ -4027,12 +4027,15 @@ wheels = [
 ]
 
 [[package]]
-name = "pypdf2"
-version = "3.0.1"
+name = "pypdf"
+version = "6.3.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/9f/bb/18dc3062d37db6c491392007dfd1a7f524bb95886eb956569ac38a23a784/PyPDF2-3.0.1.tar.gz", hash = "sha256:a74408f69ba6271f71b9352ef4ed03dc53a31aa404d29b5d31f53bfecfee1440", size = 227419, upload-time = "2022-12-31T10:36:13.13Z" }
+dependencies = [
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/42/fd/6b5ff827a5b751a85c1a3a778a0636d1ddbe153fc03954071c431271405c/pypdf-6.3.0.tar.gz", hash = "sha256:d066a2fdf8195e1811ae5a9d5a2f97f5bed0e1e7954297295eadee6357e76c5d", size = 5275038, upload-time = "2025-11-16T14:05:16.37Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8e/5e/c86a5643653825d3c913719e788e41386bee415c2b87b4f955432f2de6b2/pypdf2-3.0.1-py3-none-any.whl", hash = "sha256:d16e4205cfee272fbdc0568b68d82be796540b1537508cef59388f839c191928", size = 232572, upload-time = "2022-12-31T10:36:10.327Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/26/4ae62da67941784913606da037172d0f14b7ba120442e63a37b257110b2c/pypdf-6.3.0-py3-none-any.whl", hash = "sha256:2d5f9741e851e378908692d571374b3cbd94582fdd1c740fcf7c029ec35ac0e6", size = 328891, upload-time = "2025-11-16T14:05:14.574Z" },
 ]
 
 [[package]]

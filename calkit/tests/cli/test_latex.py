@@ -4,7 +4,7 @@ import json
 import os
 import subprocess
 
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 
 
 def test_from_json(tmp_dir):

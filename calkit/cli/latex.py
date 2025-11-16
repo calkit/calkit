@@ -24,9 +24,9 @@ def from_json(
         str, typer.Argument(help="Output LaTeX file path.")
     ],
     command_name: Annotated[
-        str,
+        str | None,
         typer.Option("--command", help="Command name to use in LaTeX output."),
-    ],
+    ] = None,
     fmt_json: Annotated[
         str | None,
         typer.Option(
@@ -71,6 +71,10 @@ def from_json(
             data = json.load(f)
         except json.JSONDecodeError:
             raise_error("Input JSON file is not valid JSON")
+    # If no command is provided, use the output file name without extension
+    if command_name is None:
+        command_name = os.path.splitext(os.path.basename(output_fpath))[0]
+    # Format the data
     formatted = deepcopy(data)
     for tex_var_name, fmt_string in fmt_dict.items():
         fmt_string = str(fmt_string)

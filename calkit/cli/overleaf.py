@@ -360,7 +360,7 @@ def sync(
 ):
     """Sync folders with Overleaf."""
     # TODO: We should probably ensure the pipeline isn't stale
-    # Find all publications with Overleaf projects linked
+    # Read all synced folders, fixing legacy schema if applicable
     overleaf_info = calkit.overleaf.get_sync_info(fix_legacy=True)
     if not overleaf_info:
         raise_error("No Overleaf sync info found")
@@ -518,45 +518,39 @@ def get_status(
         list[str] | None,
         typer.Argument(
             help=(
-                "Paths to sync with Overleaf, e.g., 'paper/paper.pdf'. "
-                "If not provided, all Overleaf publications will be synced."
+                "Paths synced with Overleaf, e.g., 'paper'. "
+                "If not provided, all Overleaf syncs will be checked."
             ),
         ),
     ] = None,
 ):
-    """Check the status of Overleaf publications in a project."""
-    # Find all publications with Overleaf projects linked
-    ck_info = calkit.load_calkit_info()
-    pubs = ck_info.get("publications", [])
+    """Check the status of folders synced with Overleaf in a project."""
+    # Read all synced folders, fixing legacy schema if applicable
+    overleaf_info = calkit.overleaf.get_sync_info(fix_legacy=False)
+    if not overleaf_info:
+        raise_error("No Overleaf sync info found")
+    overleaf_sync_dirs = list(overleaf_info.keys())
     if paths is not None:
+        paths = [os.path.dirname(p) if os.path.isfile(p) else p for p in paths]
         for path in paths:
-            if not any(pub.get("path") == path for pub in pubs):
-                raise_error(f"Publication with path '{path}' not found")
+            if path not in overleaf_sync_dirs:
+                raise_error(f"Path '{path}' is not synced with Overleaf")
     # First check our config for an Overleaf token
     overleaf_token = _get_overleaf_token()
-    for pub in pubs:
-        pub_path = pub.get("path")
-        overleaf_config = pub.get("overleaf", {})
-        if not overleaf_config:
+    for path_in_project, sync_data in overleaf_info.items():
+        if paths is not None and path_in_project not in paths:
             continue
-        if paths is not None and pub_path not in paths:
-            continue
-        overleaf_project_id = overleaf_config.get("project_id")
+        overleaf_project_id = sync_data.get("project_id")
         if not overleaf_project_id:
             raise_error(
-                "No Overleaf project ID defined for this publication; "
-                "please set it in the publication's Overleaf config"
+                "No Overleaf project ID defined for this folder; "
+                "please set it in the project's Overleaf config"
             )
         typer.echo(
-            f"Getting status of {pub['path']} with "
+            f"Getting status of {path_in_project} with "
             f"Overleaf project ID {overleaf_project_id}"
         )
-        wdir = pub["overleaf"].get("wdir")
-        if wdir is None:
-            raise_error(
-                "No working directory defined for this publication; "
-                "please set it in the publication's Overleaf config"
-            )
+        wdir = path_in_project
         # Ensure we've cloned the Overleaf project
         overleaf_project_dir = os.path.join(
             ".calkit", "overleaf", overleaf_project_id
@@ -584,7 +578,7 @@ def get_status(
                 "it matches one in your Overleaf account settings "
                 "(https://overleaf.com/user/settings)"
             )
-        last_sync_commit = pub["overleaf"].get("last_sync_commit")
+        last_sync_commit = sync_data.get("last_sync_commit")
         if last_sync_commit:
             commits_since = list(
                 overleaf_repo.iter_commits(rev=f"{last_sync_commit}..HEAD")
@@ -594,10 +588,11 @@ def get_status(
                 "Overleaf since last sync"
             )
         # Determine which paths to use for computing diff
-        git_sync_paths = pub["overleaf"].get("sync_paths", [])
-        git_sync_paths += pub["overleaf"].get("git_sync_paths", [])
-        dvc_sync_paths = pub["overleaf"].get("dvc_sync_paths", [])
+        git_sync_paths = sync_data.get("sync_paths", [])
+        git_sync_paths += sync_data.get("git_sync_paths", [])
+        dvc_sync_paths = sync_data.get("dvc_sync_paths", [])
         sync_paths = git_sync_paths + dvc_sync_paths
+        # TODO: Get implicit sync paths
         if not sync_paths:
             warn(
                 "No sync paths or DVC sync paths defined in the publication's "

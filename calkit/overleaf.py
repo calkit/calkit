@@ -262,6 +262,10 @@ class OverleafSyncPaths:
                 ):
                     continue
                 results.append(rel_posix)
+        # Always copy anything from here if it's already in Overleaf
+        for fpath in self.files_to_copy_from_overleaf:
+            if fpath not in results:
+                results.append(fpath)
         return results
 
     @property

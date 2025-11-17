@@ -273,7 +273,7 @@ class OverleafSyncPaths:
     def all_synced_files(self) -> list[str]:
         return list(
             set(
-                self.files_to_copy_from_overleaf
+                self.files_to_copy_to_overleaf
                 + self.files_to_copy_from_overleaf
             )
         )
@@ -400,7 +400,13 @@ def sync(
                     "please check your Overleaf config"
                 )
     # Copy our versions of sync and push paths into the Overleaf project
-    for sync_push_path in paths.files_to_copy_to_overleaf:
+    files_to_copy_to_overleaf = paths.files_to_copy_to_overleaf
+    if verbose:
+        print_info(
+            f"Copying the following files to Overleaf: "
+            f"{files_to_copy_to_overleaf}"
+        )
+    for sync_push_path in files_to_copy_to_overleaf:
         src = os.path.join(path_in_project_abs, sync_push_path)
         dst = os.path.join(overleaf_project_dir_abs, sync_push_path)
         if os.path.isdir(src):

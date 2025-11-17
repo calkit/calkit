@@ -104,8 +104,13 @@ def test_overleaf(tmp_dir):
         f.write("Fig1 created in main repo")
     repo.git.add("ol-project/figs")
     repo.git.commit(["-m", "Add figure"])
-    subprocess.run(["calkit", "overleaf", "sync"], check=True)
-    assert "figs/fig1.txt" in ls_files(ol_repo)
+    assert "ol-project/figs/fig1.txt" in ls_files(repo)
+    subprocess.run(["calkit", "overleaf", "sync", "--verbose"], check=True)
+    ol_repo_git_show = ol_repo.git.show()
+    print("Git show in OL repo:\n", ol_repo_git_show)
+    assert "diff --git a/figs/fig1.txt b/figs/fig1.txt" in ol_repo_git_show
+    assert "Fig1 created in main repo" in ol_repo_git_show
+    assert "new file mode 100644" in ol_repo_git_show
     # Test that a file ignored in the main repo still makes it to Overleaf
     # if it's in the synced subdirectory
     with open(os.path.join(repo.working_dir, ".gitignore"), "a") as f:
@@ -113,15 +118,26 @@ def test_overleaf(tmp_dir):
     repo.git.add(".gitignore")
     repo.git.commit(["-m", "Update gitignore"])
     with open(
-        os.path.join(repo.working_dir, "figs", "ignored-in-main.txt"), "w"
+        os.path.join(
+            repo.working_dir, "ol-project", "figs", "ignored-in-main.txt"
+        ),
+        "w",
     ) as f:
         f.write("This is ignored in main")
     assert repo.ignored("ol-project/figs/ignored-in-main.txt")
     subprocess.run(["calkit", "overleaf", "sync"], check=True)
-    assert "figs/ignored-in-main.txt" in ls_files(ol_repo)
+    ol_repo_git_show = ol_repo.git.show()
+    print("Git show in OL repo:\n", ol_repo_git_show)
+    assert "figs/ignored-in-main.txt" in ol_repo_git_show
     # Test that LaTeX aux build files and main PDFs don't make it to Overleaf
     for fname in ["main.pdf", "main.log", "main.aux"]:
         with open(
             os.path.join(repo.working_dir, "ol-project", fname), "w"
         ) as f:
             f.write("Ignored locally and shouldn't make it to Overleaf")
+    subprocess.run(["calkit", "overleaf", "sync"], check=True)
+    ol_repo_git_show = ol_repo.git.show()
+    print("Git show in OL repo:\n", ol_repo_git_show)
+    assert "main.pdf" not in ol_repo_git_show
+    assert "main.log" not in ol_repo_git_show
+    assert "main.aux" not in ol_repo_git_show

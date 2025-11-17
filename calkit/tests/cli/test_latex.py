@@ -24,6 +24,8 @@ Another is \theresults[sup].
     data = {"sup": 5.555, "lol": 3}
     with open("test.json", "w") as f:
         json.dump(data, f)
+    with open("test2.json", "w") as f:
+        json.dump({"hehe": 77}, f)
     fmt_dict = {
         "result1": "{sup / lol * 1e5 + 22:.1f}",
         "result2": "sup is {sup} and lol is {lol}",
@@ -36,8 +38,11 @@ Another is \theresults[sup].
             "latex",
             "from-json",
             "test.json",
+            "test2.json",
             "-o",
             "paper/results.tex",
+            "--output",
+            "paper/results2.tex",
             "--command",
             "theresults",
             "--format-json",
@@ -46,6 +51,10 @@ Another is \theresults[sup].
         check=True,
     )
     subprocess.run(["calkit", "latex", "build", "paper/main.tex"], check=True)
+    # Read the results of main.log
+    with open("paper/main.log") as f:
+        print(f.read())
+    assert os.path.isfile("paper/results2.tex")
     # Read the generated PDF and check that the values are correct
     reader = PdfReader("paper/main.pdf")
     text = ""

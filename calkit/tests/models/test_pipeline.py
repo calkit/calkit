@@ -217,16 +217,16 @@ def test_mappathsstage():
 def test_jsontolatexstage():
     s = JsonToLatexStage(
         name="json2latex",
-        input_path="data/results.json",
-        output_path="paper/results.tex",
+        inputs=["data/results.json", "more.json"],
+        outputs=["paper/results.tex", "paper/results2.tex"],
         command_name="theresults",
         format={"result1": "{value1:.2f}", "result2": "{value2}"},
     )
     sd = s.to_dvc()
     print(sd)
     assert sd["cmd"] == (
-        "calkit latex from-json 'data/results.json' "
-        "--output 'paper/results.tex' "
+        "calkit latex from-json 'data/results.json' 'more.json' "
+        "--output 'paper/results.tex' --output 'paper/results2.tex' "
         "--command theresults --format-json "
         '\'{"result1": "{value1:.2f}", "result2": "{value2}"}\''
     )

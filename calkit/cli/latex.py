@@ -20,10 +20,11 @@ latex_app = typer.Typer(no_args_is_help=True)
 @latex_app.command(name="from-json")
 def from_json(
     input_fpaths: Annotated[
-        list[str], typer.Argument(help="Input JSON file path.")
+        list[str], typer.Argument(help="Input JSON file path(s).")
     ],
-    output_fpath: Annotated[
-        str, typer.Option("--output", "-o", help="Output LaTeX file path.")
+    output_fpaths: Annotated[
+        list[str],
+        typer.Option("--output", "-o", help="Output LaTeX file path(s)."),
     ],
     command_name: Annotated[
         str | None,
@@ -68,17 +69,15 @@ def from_json(
             raise_error(f"Input file {input_fpath} does not exist")
         if not input_fpath.endswith(".json"):
             raise_error("Input file must be a JSON file")
-        if not output_fpath.endswith(".tex"):
-            raise_error("Output file must be a .tex file")
         with open(input_fpath) as f:
             try:
                 data_i = json.load(f)
                 data.update(data_i)
             except json.JSONDecodeError:
                 raise_error("Input JSON file is not valid JSON")
-    # If no command is provided, use the output file name without extension
-    if command_name is None:
-        command_name = os.path.splitext(os.path.basename(output_fpath))[0]
+    for output_fpath in output_fpaths:
+        if not output_fpath.endswith(".tex"):
+            raise_error("Output file must be a .tex file")
     # Format the data
     formatted = deepcopy(data)
     for tex_var_name, fmt_string in fmt_dict.items():
@@ -94,12 +93,18 @@ def from_json(
                     f"Error evaluating expression '{t}' for formatting"
                 )
         formatted[tex_var_name] = fmt_string.format(**data_for_formatting)
-    # Create output directory if it doesn't exist
-    outdir = os.path.dirname(output_fpath)
-    if outdir:
-        os.makedirs(outdir, exist_ok=True)
-    with open(output_fpath, "w") as f:
-        json2latex.dump(command_name, formatted, f)
+    for out_path in output_fpaths:
+        # If no command is provided, use the output file name without extension
+        if command_name is None:
+            cmd_name = os.path.splitext(os.path.basename(out_path))[0]
+        else:
+            cmd_name = command_name
+        # Create output directory if it doesn't exist
+        outdir = os.path.dirname(out_path)
+        if outdir:
+            os.makedirs(outdir, exist_ok=True)
+        with open(out_path, "w") as f:
+            json2latex.dump(cmd_name, formatted, f)
 
 
 @latex_app.command(name="build")

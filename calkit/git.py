@@ -60,3 +60,9 @@ def get_staged_files_with_status(
             status, p = pathi.split("\t")
             res.append({"status": status, "path": p})
     return res
+
+
+def ls_files(repo: git.Repo, *args, **kwargs) -> list[str]:
+    """Get a list of all files tracked by git."""
+    output = repo.git.ls_files(*args, **kwargs)
+    return [f for f in output.split("\n") if f]

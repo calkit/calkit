@@ -16,6 +16,7 @@ import socket
 import subprocess
 import uuid
 import warnings
+from os import PathLike
 
 # See https://github.com/calkit/calkit/issues/346
 with warnings.catch_warnings():
@@ -80,7 +81,7 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
 
 
 def load_calkit_info(
-    wdir: str | None = None,
+    wdir: str | PathLike | None = None,
     process_includes: bool | str | list[str] = False,
 ) -> dict:
     """Load Calkit project information as a dictionary.

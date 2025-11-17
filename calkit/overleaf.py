@@ -281,6 +281,17 @@ class OverleafSyncPaths:
         )
 
 
+def get_commits_since_last_sync(
+    overleaf_repo: git.Repo, last_sync_commit: str | None
+) -> list[git.Commit]:
+    if last_sync_commit:
+        return list(
+            overleaf_repo.iter_commits(rev=f"{last_sync_commit}..HEAD")
+        )
+    else:
+        return []
+
+
 def sync(
     main_repo: git.Repo,
     overleaf_repo: git.Repo,

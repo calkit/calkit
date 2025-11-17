@@ -451,16 +451,15 @@ def sync(
             last_sync_commit = resolving_info["last_overleaf_commit"]
         else:
             last_sync_commit = sync_data.get("last_sync_commit")
-        if last_sync_commit:
-            commits_since = list(
-                overleaf_repo.iter_commits(rev=f"{last_sync_commit}..HEAD")
-            )
+        commits_since = calkit.overleaf.get_commits_since_last_sync(
+            overleaf_repo=overleaf_repo,
+            last_sync_commit=last_sync_commit,
+        )
+        if commits_since:
             typer.echo(
                 f"There have been {len(commits_since)} changes on "
                 "Overleaf since last sync"
             )
-        else:
-            commits_since = []
         try:
             calkit.overleaf.sync(
                 main_repo=repo,
@@ -579,8 +578,9 @@ def get_status(
             )
         last_sync_commit = sync_data.get("last_sync_commit")
         if last_sync_commit:
-            commits_since = list(
-                overleaf_repo.iter_commits(rev=f"{last_sync_commit}..HEAD")
+            commits_since = calkit.overleaf.get_commits_since_last_sync(
+                overleaf_repo=overleaf_repo,
+                last_sync_commit=last_sync_commit,
             )
             typer.echo(
                 f"There have been {len(commits_since)} changes on "

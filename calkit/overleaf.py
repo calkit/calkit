@@ -90,6 +90,7 @@ def get_sync_info(
                 info_in_ck["sync_paths"] = info["sync_paths"]
             if "push_paths" in info:
                 info_in_ck["push_paths"] = info["push_paths"]
+            overleaf_sync_for_ck_info[synced_dir] = info_in_ck
         ck_info["overleaf_sync"] = overleaf_sync_for_ck_info
         with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
             calkit.ryaml.dump(ck_info, f)

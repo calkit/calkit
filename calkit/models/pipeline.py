@@ -358,6 +358,24 @@ class JsonToLatexStage(Stage):
             cmd += f" --format-json '{fmt_json}'"
         return cmd
 
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        """DVC outs should be stored with Git by default."""
+        outs = []
+        for out in self.outputs:
+            if isinstance(out, str):
+                outs.append({out: dict(cache=False, persist=False)})
+            elif isinstance(out, PathOutput):
+                outs.append(
+                    {
+                        out.path: dict(
+                            cache=True if out.storage == "dvc" else False,
+                            persist=not out.delete_before_run,
+                        )
+                    }
+                )
+        return outs
+
 
 class MatlabScriptStage(Stage):
     kind: Literal["matlab-script"]

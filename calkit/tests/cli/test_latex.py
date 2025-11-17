@@ -17,6 +17,7 @@ This is the document.
 The result is \theresults[result1].
 The other result is \theresults[lol].
 Another is \theresults[sup].
+Result 3 is \theresults[result3].
 \end{document}
 """
     with open("paper/main.tex", "w") as f:
@@ -29,7 +30,7 @@ Another is \theresults[sup].
     fmt_dict = {
         "result1": "{sup / lol * 1e5 + 22:.1f}",
         "result2": "sup is {sup} and lol is {lol}",
-        "result3": "{sup * 1e12:.1e}",
+        "result3": "{sup**3 * 1e12:.1e}",
         "lol": "{lol}",
     }
     subprocess.run(
@@ -64,6 +65,7 @@ Another is \theresults[sup].
     assert "The result is 185188.7." in text
     assert "The other result is 3." in text
     assert "Another is 5.555." in text
+    assert "Result 3 is 1.7e+14." in text
     # Now test some input validation
     with open("bad.json", "w") as f:
         f.write("not valid json")

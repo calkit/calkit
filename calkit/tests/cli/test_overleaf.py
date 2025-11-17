@@ -7,6 +7,7 @@ import uuid
 import git
 
 import calkit
+from calkit.git import ls_files
 
 
 def _make_temp_overleaf_project(project_id: str) -> git.Repo:
@@ -91,14 +92,36 @@ def test_overleaf(tmp_dir):
     # Test that if we add a file on Overleaf, it syncs back to the main repo
     with open(os.path.join(ol_repo.working_dir, "ol-new.txt"), "w") as f:
         f.write("Created on Overleaf")
+    ol_repo.git.add("ol-new.txt")
+    ol_repo.git.commit(["-m", "Update on Overleaf"])
     subprocess.run(["calkit", "overleaf", "sync"], check=True)
-    assert "ol-project/ol-new.txt" in calkit.git.ls_files(repo)
+    assert "ol-project/ol-new.txt" in ls_files(repo)
     # Test that if we add a file locally, it makes it to Overleaf
-    os.makedirs(os.path.join(repo.working_dir, "figs"))
-    with open(os.path.join(repo.working_dir, "figs", "fig1.txt"), "w") as f:
+    os.makedirs(os.path.join(repo.working_dir, "ol-project", "figs"))
+    with open(
+        os.path.join(repo.working_dir, "ol-project", "figs", "fig1.txt"), "w"
+    ) as f:
         f.write("Fig1 created in main repo")
+    repo.git.add("ol-project/figs")
+    repo.git.commit(["-m", "Add figure"])
     subprocess.run(["calkit", "overleaf", "sync"], check=True)
-    assert "figs/fig1.txt" in calkit.git.ls_files(ol_repo)
-    # TODO: Test that a file ignored in the main repo still makes it to Overleaf
+    assert "figs/fig1.txt" in ls_files(ol_repo)
+    # Test that a file ignored in the main repo still makes it to Overleaf
     # if it's in the synced subdirectory
-    # TODO: Test that LaTeX aux build files don't make it to Overleaf
+    with open(os.path.join(repo.working_dir, ".gitignore"), "a") as f:
+        f.write("\nol-project/figs/ignored-in-main.txt\n*.pdf\n*.aux\n*.log")
+    repo.git.add(".gitignore")
+    repo.git.commit(["-m", "Update gitignore"])
+    with open(
+        os.path.join(repo.working_dir, "figs", "ignored-in-main.txt"), "w"
+    ) as f:
+        f.write("This is ignored in main")
+    assert repo.ignored("ol-project/figs/ignored-in-main.txt")
+    subprocess.run(["calkit", "overleaf", "sync"], check=True)
+    assert "figs/ignored-in-main.txt" in ls_files(ol_repo)
+    # Test that LaTeX aux build files and main PDFs don't make it to Overleaf
+    for fname in ["main.pdf", "main.log", "main.aux"]:
+        with open(
+            os.path.join(repo.working_dir, "ol-project", fname), "w"
+        ) as f:
+            f.write("Ignored locally and shouldn't make it to Overleaf")

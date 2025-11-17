@@ -109,7 +109,7 @@ def get_sync_info_fpath(wdir: str | PathLike | None = None) -> str:
 
 
 def write_sync_info(
-    synced_path: str, info: dict, wdir: str | None = None
+    synced_path: str, info: dict, wdir: str | PathLike | None = None
 ) -> str:
     """Write sync info for a given path, overwriting the data for that path."""
     # First read in the data

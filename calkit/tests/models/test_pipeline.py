@@ -230,3 +230,7 @@ def test_jsontolatexstage():
         "--command theresults --format-json "
         '\'{"result1": "{value1:.2f}", "result2": "{value2}"}\''
     )
+    dvc_outs = s.dvc_outs
+    assert {
+        "paper/results.tex": {"cache": False, "persist": False}
+    } in dvc_outs

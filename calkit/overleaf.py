@@ -161,14 +161,26 @@ class OverleafSyncPaths:
         push paths or ignored in the main repo.
         """
         all_ol_files = calkit.git.ls_files(self.overleaf_repo)
+        # Normalize push paths (treat both files and directories)
+        push_paths = [
+            Path(p).as_posix().rstrip("/") for p in self.push_paths_from_config
+        ]
         res = []
         for fpath in all_ol_files:
-            relpath_main = os.path.join(self.path_in_project, fpath)
+            fpath_posix = Path(fpath).as_posix()
+            relpath_main = os.path.join(self.path_in_project, fpath_posix)
+            # Skip anything ignored in main repo
             if self.main_repo.ignored(relpath_main):
                 continue
-            # TODO: Make sure this isn't in push paths, including if it's in
-            # a push path directory
-            res.append(fpath)
+            # Skip files that are under any push-only path
+            in_push_path = False
+            for p in push_paths:
+                if fpath_posix == p or fpath_posix.startswith(p + "/"):
+                    in_push_path = True
+                    break
+            if in_push_path:
+                continue
+            res.append(fpath_posix)
         return res
 
     @property

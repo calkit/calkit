@@ -461,7 +461,7 @@ def sync(
                 "Overleaf since last sync"
             )
         try:
-            calkit.overleaf.sync(
+            res = calkit.overleaf.sync(
                 main_repo=repo,
                 overleaf_repo=overleaf_repo,
                 path_in_project=synced_folder,
@@ -477,9 +477,10 @@ def sync(
     if not no_push and not no_commit:
         if not repo.remotes:
             raise_error("Project has no Git remotes defined")
-        # Push to the project remote
-        typer.echo("Pushing changes to project Git remote")
-        repo.git.push()
+        if res.get("committed_project", True):
+            # Push to the project remote
+            typer.echo("Pushing changes to project Git remote")
+            repo.git.push()
     # TODO: Add option to run the pipeline after?
 
 

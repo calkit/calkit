@@ -2838,7 +2838,9 @@ def new_stage(
     if kind.value == "python-script":
         cmd += f"python {target}"
     elif kind.value == "latex":
-        cmd += f"latexmk -cd -interaction=nonstopmode -pdf {target}"
+        cmd = f"calkit latex build {target}"
+        if environment is not None:
+            cmd += f" --environment {environment}"
         out_target = target.removesuffix(".tex") + ".pdf"
         if out_target not in (
             outs + outs_no_cache + outs_persist + outs_persist_no_cache

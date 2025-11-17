@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from calkit.models.pipeline import (
+    JsonToLatexStage,
     JuliaCommandStage,
     JupyterNotebookStage,
     LatexStage,
@@ -59,7 +60,7 @@ def test_latexstage():
     s = LatexStage(
         name="something", environment="tex", target_path="my-paper.tex"
     )
-    assert s.dvc_cmd.startswith("calkit latexmk")
+    assert s.dvc_cmd.startswith("calkit latex build")
     assert " -e tex " in s.dvc_cmd
     assert " --verbose " not in s.dvc_cmd
     s.verbose = True
@@ -211,3 +212,21 @@ def test_mappathsstage():
     )
     assert "data/input.txt" in sd["deps"]
     assert {"data/output.txt": {"cache": False, "persist": True}} in sd["outs"]
+
+
+def test_jsontolatexstage():
+    s = JsonToLatexStage(
+        name="json2latex",
+        inputs=["data/results.json", "more.json"],
+        outputs=["paper/results.tex", "paper/results2.tex"],
+        command_name="theresults",
+        format={"result1": "{value1:.2f}", "result2": "{value2}"},
+    )
+    sd = s.to_dvc()
+    print(sd)
+    assert sd["cmd"] == (
+        "calkit latex from-json 'data/results.json' 'more.json' "
+        "--output 'paper/results.tex' --output 'paper/results2.tex' "
+        "--command theresults --format-json "
+        '\'{"result1": "{value1:.2f}", "result2": "{value2}"}\''
+    )

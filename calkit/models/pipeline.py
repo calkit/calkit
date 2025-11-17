@@ -304,7 +304,7 @@ class LatexStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"calkit latexmk -e {self.environment} --no-check"
+        cmd = f"calkit latex build -e {self.environment} --no-check"
         if self.latexmkrc_path is not None:
             cmd += f" -r {self.latexmkrc_path}"
         if self.verbose:
@@ -332,6 +332,31 @@ class LatexStage(Stage):
         if out_path not in outs:
             outs.append(out_path)
         return outs
+
+
+class JsonToLatexStage(Stage):
+    kind: Literal["json-to-latex"] = "json-to-latex"
+    environment: str = "_system"
+    command_name: str | None = None
+    format: dict[str, str] | None = None
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = "calkit latex from-json"
+        for input_path in self.inputs:
+            cmd += f" '{input_path}'"
+        for out in self.outputs:
+            if isinstance(out, str):
+                out_path = out
+            elif isinstance(out, PathOutput):
+                out_path = out.path
+            cmd += f" --output '{out_path}'"
+        if self.command_name is not None:
+            cmd += f" --command {self.command_name}"
+        if self.format is not None:
+            fmt_json = json.dumps(self.format)
+            cmd += f" --format-json '{fmt_json}'"
+        return cmd
 
 
 class MatlabScriptStage(Stage):
@@ -681,6 +706,7 @@ class Pipeline(BaseModel):
             (
                 PythonScriptStage
                 | LatexStage
+                | JsonToLatexStage
                 | MatlabScriptStage
                 | MatlabCommandStage
                 | ShellCommandStage

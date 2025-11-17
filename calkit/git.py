@@ -62,7 +62,7 @@ def get_staged_files_with_status(
     return res
 
 
-def ls_files(repo: git.Repo) -> list[str]:
+def ls_files(repo: git.Repo, *args, **kwargs) -> list[str]:
     """Get a list of all files tracked by git."""
-    output = repo.git.ls_files()
+    output = repo.git.ls_files(*args, **kwargs)
     return [f for f in output.split("\n") if f]

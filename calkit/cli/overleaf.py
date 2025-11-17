@@ -472,7 +472,6 @@ def sync(
                 verbose=verbose,
                 resolving_conflict=resolve,
                 print_info=typer.echo,
-                print_warning=warn,
             )
         except Exception as e:
             raise_error(str(e))

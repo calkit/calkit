@@ -287,7 +287,6 @@ def sync(
     last_sync_commit: str | None = None,
     no_commit: bool = False,
     print_info=print,
-    print_warning=warnings.warn,
     verbose: bool = False,
     resolving_conflict: bool = False,
 ) -> dict:

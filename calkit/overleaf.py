@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import warnings
 from copy import deepcopy
+from os import PathLike
 from pathlib import Path
 
 import git
@@ -34,12 +35,12 @@ def project_id_from_url(url: str) -> str:
 
 
 def get_sync_info(
-    wdir: str | None = None,
+    wdir: str | PathLike | None = None,
     ck_info: dict | None = None,
-    fix_legacy: bool = True,
+    fix_legacy: bool = False,
 ) -> dict:
     """Load in a dictionary of Overleaf sync data, keyed by path relative to
-    ``wdir``.
+    ``wdir`` (the project working directory).
     """
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -101,7 +102,7 @@ def get_sync_info(
     return overleaf_info
 
 
-def get_sync_info_fpath(wdir: str | None = None) -> str:
+def get_sync_info_fpath(wdir: str | PathLike | None = None) -> str:
     if wdir is None:
         wdir = ""
     return os.path.join(wdir, ".calkit", "overleaf.json")
@@ -120,13 +121,14 @@ def write_sync_info(
             existing = json.load(f)
     else:
         existing = {}
+    synced_path = Path(synced_path).as_posix()
     existing[synced_path] = {k: info.get(k) for k in PRIVATE_KEYS}
     with open(fpath, "w") as f:
         json.dump(existing, f, indent=2)
     return fpath
 
 
-def get_conflict_fpath(wdir: str | git.PathLike | None = None) -> str:
+def get_conflict_fpath(wdir: str | PathLike | None = None) -> str:
     if wdir is None:
         wdir = ""
     return os.path.join(str(wdir), ".calkit", "overleaf", "CONFLICT.json")
@@ -283,7 +285,7 @@ def sync(
     main_repo: git.Repo,
     overleaf_repo: git.Repo,
     path_in_project: str,
-    sync_info_for_path: dict,
+    sync_info_for_path: dict | None = None,
     last_sync_commit: str | None = None,
     no_commit: bool = False,
     print_info=print,
@@ -299,6 +301,13 @@ def sync(
     a map-paths stage.
     """
     res = {}
+    # Normalize ``path_in_project`` as a posix path
+    path_in_project = Path(path_in_project).as_posix()
+    if sync_info_for_path is None:
+        sync_info_for_path = get_sync_info(
+            wdir=main_repo.working_dir, fix_legacy=True
+        ).get(path_in_project, {})
+    assert isinstance(sync_info_for_path, dict)
     if last_sync_commit is None:
         last_sync_commit = sync_info_for_path.get("last_sync_commit")
     path_in_project_abs = os.path.join(main_repo.working_dir, path_in_project)
@@ -466,7 +475,9 @@ def sync(
         print_info("Committing changes to project repo")
         commit_message = f"Sync {path_in_project} with Overleaf project"
         main_repo.git.commit(
-            *[path_in_project, "calkit.yaml", overleaf_sync_data_fpath],
+            path_in_project,
+            "calkit.yaml",
+            overleaf_sync_data_fpath,
             "-m",
             commit_message,
         )

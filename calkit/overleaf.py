@@ -105,7 +105,7 @@ def get_sync_info(
 def get_sync_info_fpath(wdir: str | PathLike | None = None) -> str:
     if wdir is None:
         wdir = ""
-    return os.path.join(wdir, ".calkit", "overleaf.json")
+    return os.path.join(wdir, ".calkit", "overleaf-sync.json")
 
 
 def write_sync_info(

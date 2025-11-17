@@ -69,7 +69,7 @@ def test_overleaf(tmp_dir):
     assert stage["target_path"] == "ol-project/main.tex"
     # Test that we can sync
     subprocess.run(["calkit", "overleaf", "sync"], check=True)
-    # TODO: Test that we can properly resolve a merge conflict
+    # Test that we can properly resolve a merge conflict
     with open(os.path.join(ol_repo.working_dir, "main.tex"), "a") as f:
         f.write("\nHere's another line from Overleaf")
     ol_repo.git.commit(["main.tex", "-m", "Update on Overleaf"])
@@ -88,3 +88,17 @@ def test_overleaf(tmp_dir):
         f.write("\nHere's another line from Overleaf")
     ol_repo.git.commit(["main.tex", "-m", "Update on Overleaf"])
     subprocess.run(["calkit", "overleaf", "sync"], check=True)
+    # Test that if we add a file on Overleaf, it syncs back to the main repo
+    with open(os.path.join(ol_repo.working_dir, "ol-new.txt"), "w") as f:
+        f.write("Created on Overleaf")
+    subprocess.run(["calkit", "overleaf", "sync"], check=True)
+    assert "ol-project/ol-new.txt" in calkit.git.ls_files(repo)
+    # Test that if we add a file locally, it makes it to Overleaf
+    os.makedirs(os.path.join(repo.working_dir, "figs"))
+    with open(os.path.join(repo.working_dir, "figs", "fig1.txt"), "w") as f:
+        f.write("Fig1 created in main repo")
+    subprocess.run(["calkit", "overleaf", "sync"], check=True)
+    assert "figs/fig1.txt" in calkit.git.ls_files(ol_repo)
+    # TODO: Test that a file ignored in the main repo still makes it to Overleaf
+    # if it's in the synced subdirectory
+    # TODO: Test that LaTeX aux build files don't make it to Overleaf

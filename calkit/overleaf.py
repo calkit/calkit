@@ -321,6 +321,11 @@ def sync(
     assert isinstance(sync_info_for_path, dict)
     if last_sync_commit is None:
         last_sync_commit = sync_info_for_path.get("last_sync_commit")
+    res["commits_since_last_sync"] = get_commits_since_last_sync(
+        overleaf_repo=overleaf_repo, last_sync_commit=last_sync_commit
+    )
+    res["project_commit_before"] = main_repo.head.commit.hexsha
+    res["overleaf_commit_before"] = overleaf_repo.head.commit.hexsha
     path_in_project_abs = os.path.join(main_repo.working_dir, path_in_project)
     overleaf_project_dir_abs = overleaf_repo.working_dir
     conflict_fpath = get_conflict_fpath(wdir=main_repo.working_dir)
@@ -333,6 +338,7 @@ def sync(
         sync_info_for_path=sync_info_for_path,
     )
     paths_for_overleaf_patch = paths.paths_to_use_for_git_patch
+    res["paths_for_overleaf_patch"] = paths_for_overleaf_patch
     if last_sync_commit:
         # Compute a patch in the Overleaf project between HEAD and the last
         # sync
@@ -349,6 +355,7 @@ def sync(
             patch += "\n"
         if verbose:
             print_info(f"Git patch:\n{patch}")
+        res["patch"] = patch
         if patch:
             print_info("Applying to project repo")
             process = subprocess.run(
@@ -403,7 +410,10 @@ def sync(
             "No last sync commit defined; "
             "copying all files from Overleaf project"
         )
-        for sync_path in paths.files_to_copy_from_overleaf:
+        res["patch"] = None
+        files_to_copy_from_overleaf = paths.files_to_copy_from_overleaf
+        res["files_to_copy_from_overleaf"] = files_to_copy_from_overleaf
+        for sync_path in files_to_copy_from_overleaf:
             src = os.path.join(overleaf_project_dir_abs, sync_path)
             dst = os.path.join(path_in_project_abs, sync_path)
             if os.path.isdir(src):
@@ -420,6 +430,7 @@ def sync(
                 )
     # Copy our versions of sync and push paths into the Overleaf project
     files_to_copy_to_overleaf = paths.files_to_copy_to_overleaf
+    res["files_to_copy_to_overleaf"] = files_to_copy_to_overleaf
     if verbose:
         print_info(
             f"Copying the following files to Overleaf: "
@@ -449,6 +460,7 @@ def sync(
                 "please check your Overleaf config"
             )
     # Stage the changes in the Overleaf project
+    res["committed_overleaf"] = False
     overleaf_repo.git.add(".")
     if overleaf_repo.git.diff("--staged"):
         print_info("Committing changes to Overleaf")
@@ -456,9 +468,12 @@ def sync(
         overleaf_repo.git.commit("-m", commit_message)
         print_info("Pushing changes to Overleaf")
         overleaf_repo.git.push()
+        res["committed_overleaf"] = True
     # Update the last sync commit
     last_overleaf_commit = overleaf_repo.head.commit.hexsha
-    print_info(f"Updating last sync commit as {last_overleaf_commit}")
+    res["overleaf_commit_after"] = last_overleaf_commit
+    if res["committed_overleaf"]:
+        print_info(f"Updating last sync commit as {last_overleaf_commit}")
     overleaf_sync_data["last_sync_commit"] = last_overleaf_commit
     # Write Overleaf sync data
     overleaf_sync_data_fpath = write_sync_info(
@@ -471,6 +486,7 @@ def sync(
     if resolving_conflict and os.path.isfile(conflict_fpath):
         os.remove(conflict_fpath)
     # Stage the changes in the project repo
+    res["committed_project"] = False
     main_repo.git.add(path_in_project)
     if (
         main_repo.git.diff(
@@ -492,4 +508,6 @@ def sync(
             "-m",
             commit_message,
         )
+        res["committed_project"] = True
+    res["project_commit_after"] = main_repo.head.commit.hexsha
     return res

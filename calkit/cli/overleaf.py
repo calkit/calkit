@@ -588,19 +588,16 @@ def get_status(
                 "Overleaf since last sync"
             )
         # Determine which paths to use for computing diff
-        sync_paths, push_paths = calkit.overleaf.get_sync_push_paths(
+        path_info = calkit.overleaf.OverleafSyncPaths(
             main_repo=git.Repo(),
             overleaf_repo=overleaf_repo,
             path_in_project=path_in_project,
             sync_info_for_path=sync_data,
         )
-        if not sync_paths:
-            warn(
-                "No sync paths or DVC sync paths defined in the publication's "
-                "Overleaf config"
-            )
         status = compare_folders_recursively(
-            wdir, overleaf_project_dir, paths=sync_paths + push_paths
+            wdir,
+            overleaf_project_dir,
+            paths=path_info.all_synced_files,
         )
 
         def print_path(p, fg_color=None):

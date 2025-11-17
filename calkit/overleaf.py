@@ -156,7 +156,7 @@ class OverleafSyncPaths:
         return self.push_paths_from_config
 
     @property
-    def paths_to_copy_from_overleaf(self) -> list[str]:
+    def files_to_copy_from_overleaf(self) -> list[str]:
         """We basically copy all files from Overleaf unless they are in
         push paths or ignored in the main repo.
         """
@@ -184,50 +184,99 @@ class OverleafSyncPaths:
         return res
 
     @property
-    def paths_to_copy_to_overleaf(self) -> list[str]:
+    def files_to_copy_to_overleaf(self) -> list[str]:
         """We should basically copy all files to Overleaf except for
-        private (dot) files, the main PDF, and aux files."""
-        # TODO
-        return []
+        private (dot) files, the main PDF, and aux files.
+
+        These files should all be relative to the path in the project.
+        """
+        root = os.path.join(self.main_repo.working_dir, self.path_in_project)
+        if not os.path.isdir(root):
+            return []
+        # Determine main PDF name (prefer main.tex if present at root)
+        main_stem: str | None = None
+        main_tex_path = os.path.join(root, "main.tex")
+        if os.path.isfile(main_tex_path):
+            main_stem = "main"
+        else:
+            # Fallback: if there is exactly one top-level .tex file, use it
+            top_level_files = [
+                f
+                for f in os.listdir(root)
+                if os.path.isfile(os.path.join(root, f))
+            ]
+            root_tex = [f for f in top_level_files if f.endswith(".tex")]
+            if len(root_tex) == 1:
+                main_stem = Path(root_tex[0]).stem
+        main_pdf_rel = None
+        if main_stem is not None:
+            main_pdf_rel = Path(f"{main_stem}.pdf").as_posix()
+        # Common LaTeX aux/build artifacts to exclude
+        aux_suffixes = {
+            ".aux",
+            ".log",
+            ".out",
+            ".toc",
+            ".bbl",
+            ".blg",
+            ".fls",
+            ".fdb_latexmk",
+            ".lof",
+            ".lot",
+            ".lol",
+            ".nav",
+            ".snm",
+            ".vrb",
+            ".dvi",
+            ".xdv",
+        }
+        # Multi-part extension handled via endswith
+        aux_endswith = (".synctex.gz",)
+
+        def has_hidden_component(rel_path: str) -> bool:
+            parts = Path(rel_path).parts
+            return any(p.startswith(".") for p in parts)
+
+        results: list[str] = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            # Skip hidden directories early
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            for fname in filenames:
+                # Skip hidden files
+                if fname.startswith("."):
+                    continue
+                f_abs = os.path.join(dirpath, fname)
+                rel = os.path.relpath(f_abs, root)
+                rel_posix = Path(rel).as_posix()
+                if has_hidden_component(rel_posix):
+                    continue
+                # Skip main PDF specifically
+                if main_pdf_rel is not None and rel_posix == main_pdf_rel:
+                    continue
+                # Skip LaTeX aux/build artifacts
+                if (
+                    rel_posix.endswith(aux_endswith)
+                    or Path(rel_posix).suffix in aux_suffixes
+                ):
+                    continue
+                results.append(rel_posix)
+        return results
 
     @property
     def paths_to_use_for_git_patch(self) -> list[str]:
         """This should be anything in the Overleaf repo that isn't ignored
         or part of push paths in the main repo.
         """
-        return self.paths_to_copy_from_overleaf
+        return self.files_to_copy_from_overleaf
 
     @property
-    def paths_to_commit_to_main_repo(self) -> list[str]:
-        return [self.path_in_project]
-
-
-def get_sync_push_paths(
-    main_repo: git.Repo,
-    overleaf_repo: git.Repo,
-    path_in_project: str,
-    sync_info_for_path: dict,
-) -> tuple[list[str], list[str]]:
-    overleaf_sync_data = deepcopy(sync_info_for_path)
-    sync_paths = deepcopy(overleaf_sync_data.get("sync_paths", []))
-    push_paths = deepcopy(overleaf_sync_data.get("push_paths", []))
-    # TODO: Sync and push paths can't overlap?
-    implicit_sync_paths = os.listdir(overleaf_repo.working_dir)
-    for p in implicit_sync_paths:
-        if p.startswith("."):
-            continue
-        if p not in sync_paths and p not in push_paths:
-            sync_paths.append(p)
-    # Add implicit sync paths in project
-    # TODO: Ignore aux LaTeX build files?
-    path_in_project_abs = os.path.join(main_repo.working_dir, path_in_project)
-    paths_in_project = os.listdir(path_in_project_abs)
-    for p in paths_in_project:
-        if p.startswith(".") or p.endswith(".pdf"):
-            continue
-        if p not in sync_paths and p not in push_paths:
-            sync_paths.append(p)
-    return sync_paths, push_paths
+    def all_synced_files(self) -> list[str]:
+        return list(
+            set(
+                self.files_to_copy_from_overleaf
+                + self.files_to_copy_from_overleaf
+            )
+        )
 
 
 def sync(
@@ -254,7 +303,7 @@ def sync(
     if last_sync_commit is None:
         last_sync_commit = sync_info_for_path.get("last_sync_commit")
     path_in_project_abs = os.path.join(main_repo.working_dir, path_in_project)
-    overleaf_project_dir = overleaf_repo.working_dir
+    overleaf_project_dir_abs = overleaf_repo.working_dir
     conflict_fpath = get_conflict_fpath(wdir=main_repo.working_dir)
     # Determine which paths to sync and push
     overleaf_sync_data = deepcopy(sync_info_for_path)
@@ -335,8 +384,8 @@ def sync(
             "No last sync commit defined; "
             "copying all files from Overleaf project"
         )
-        for sync_path in paths.paths_to_copy_from_overleaf:
-            src = os.path.join(overleaf_project_dir, sync_path)
+        for sync_path in paths.files_to_copy_from_overleaf:
+            src = os.path.join(overleaf_project_dir_abs, sync_path)
             dst = os.path.join(path_in_project_abs, sync_path)
             if os.path.isdir(src):
                 # Copy the directory and its contents
@@ -351,9 +400,9 @@ def sync(
                     "please check your Overleaf config"
                 )
     # Copy our versions of sync and push paths into the Overleaf project
-    for sync_push_path in paths.paths_to_copy_to_overleaf:
+    for sync_push_path in paths.files_to_copy_to_overleaf:
         src = os.path.join(path_in_project_abs, sync_push_path)
-        dst = os.path.join(overleaf_project_dir, sync_push_path)
+        dst = os.path.join(overleaf_project_dir_abs, sync_push_path)
         if os.path.isdir(src):
             # Remove destination directory if it exists
             if os.path.isdir(dst):
@@ -374,7 +423,6 @@ def sync(
                 f"Source path {src} does not exist; "
                 "please check your Overleaf config"
             )
-            continue
     # Stage the changes in the Overleaf project
     overleaf_repo.git.add(".")
     if overleaf_repo.git.diff("--staged"):

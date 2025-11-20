@@ -174,30 +174,11 @@ def to_dvc(
                 outputs += stage.notebook_outputs
             # Deal with any gitignore changes necessary
             for out in outputs:
-                gitignore_path = ".gitignore"
-                if wdir is not None:
-                    gitignore_path = os.path.join(wdir, gitignore_path)
-                if (
-                    isinstance(out, PathOutput)
-                    and out.storage is None
-                    and not repo.ignored(out.path)
-                ):
-                    with open(gitignore_path, "a") as f:
-                        f.write("\n" + out.path + "\n")
+                if isinstance(out, PathOutput) and out.storage is None:
+                    calkit.git.ensure_path_is_ignored(repo, path=out.path)
                 # Unignore path if necessary
-                elif (
-                    isinstance(out, PathOutput)
-                    and out.storage == "git"
-                    and repo.ignored(out.path)
-                ):
-                    with open(gitignore_path, "r") as f:
-                        gitignore_lines = f.read().split("\n")
-                    if out.path in gitignore_lines:
-                        gitignore_lines.remove(out.path)
-                    if repo.ignored(out.path):
-                        gitignore_lines.append(f"!{out.path}")
-                    with open(gitignore_path, "w") as f:
-                        f.write("\n".join(gitignore_lines))
+                elif isinstance(out, PathOutput) and out.storage == "git":
+                    calkit.git.ensure_path_is_not_ignored(repo, path=out.path)
     # Now process any inputs from stage outputs
     for stage_name, stage in pipeline.stages.items():
         for i in stage.inputs:

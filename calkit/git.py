@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+from os import PathLike
+from pathlib import Path
+
 import git
 
 
@@ -66,3 +70,48 @@ def ls_files(repo: git.Repo, *args, **kwargs) -> list[str]:
     """Get a list of all files tracked by git."""
     output = repo.git.ls_files(*args, **kwargs)
     return [f for f in output.split("\n") if f]
+
+
+def ensure_path_is_ignored(
+    repo: git.Repo, path: str | PathLike
+) -> None | bool:
+    """Ensure that the given path is ignored by Git.
+
+    Returns True if ``.gitignore`` was modified.
+    """
+    if repo.ignored(path):
+        return
+    # Read gitignore first to check if the path is already ignored
+    # If not, we don't want to add a line for it since it was added
+    # TODO: Add an option to remove cached (`git rm --cached`)
+    gitignore_path = os.path.join(repo.working_dir, ".gitignore")
+    if os.path.isfile(gitignore_path):
+        with open(gitignore_path) as f:
+            gitignore_txt = f.read()
+        lines = gitignore_txt.splitlines()
+        path = Path(path).as_posix()
+        if path in lines:
+            return
+    with open(gitignore_path, "a") as f:
+        f.write(f"\n{path}\n")
+        return True
+
+
+def ensure_path_is_not_ignored(
+    repo: git.Repo, path: str | PathLike
+) -> None | bool:
+    """Ensure a path is not ignored by Git."""
+    if not repo.ignored(path):
+        return
+    gitignore_path = os.path.join(repo.working_dir, ".gitignore")
+    with open(gitignore_path) as f:
+        gitignore_txt = f.read()
+    lines = gitignore_txt.splitlines()
+    path = Path(path).as_posix()
+    if path in lines:
+        lines.remove(path)
+    else:
+        lines.append(f"!{path}")
+    with open(gitignore_path, "w") as f:
+        f.write(os.linesep.join(lines))
+    return True

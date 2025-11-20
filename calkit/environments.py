@@ -29,6 +29,7 @@ CONDA_VENV_ARCHS = [
     "win-64",
 ]
 ENV_CHECK_CACHE_TTL_SECONDS = 3600
+KINDS_NO_CHECK = ["_system", "slurm", "ssh"]
 
 
 def get_env_lock_dir(wdir: str | None = None) -> str:
@@ -383,6 +384,8 @@ def check_all_in_pipeline(
     envs = ck_info.get("environments", {})
     for env_name in envs_in_pipeline:
         env = envs.get(env_name)
+        if env.get("kind") in KINDS_NO_CHECK:
+            continue
         if not force:
             up_to_date = check_cache(env_name=env_name, env=env, wdir=wdir)
             if up_to_date:

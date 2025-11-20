@@ -72,7 +72,7 @@ class Environment(BaseModel):
         "poetry",
         "npm",
         "yarn",
-        "remote-ssh",
+        "ssh",
         "uv",
         "pixi",
         "venv",

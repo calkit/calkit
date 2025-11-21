@@ -332,6 +332,16 @@ def sync(
             ),
         ),
     ] = False,
+    auto_commit: Annotated[
+        bool,
+        typer.Option(
+            "--auto-commit",
+            help=(
+                "Automatically commit changes to the project repo if a synced "
+                "folder has changes."
+            ),
+        ),
+    ] = False,
     no_push: Annotated[
         bool,
         typer.Option(
@@ -414,12 +424,18 @@ def sync(
         elif resolve:
             continue
         # If there are any uncommitted changes in the publication working
-        # directory, raise an error
+        # directory, raise an error unless auto-commit is specified
         if repo.git.diff(wdir) or repo.index.diff("HEAD", wdir):
-            raise_error(
-                f"Uncommitted changes found in {wdir}; "
-                "please commit or stash them before syncing with Overleaf"
-            )
+            if auto_commit:
+                repo.git.add(wdir)
+                repo.git.commit(
+                    [wdir, "-m", f"Save {wdir} before syncing with Overleaf"]
+                )
+            else:
+                raise_error(
+                    f"Uncommitted changes found in {wdir}; "
+                    "please commit or stash them before syncing with Overleaf"
+                )
         # Ensure we've cloned the Overleaf project
         overleaf_project_dir = os.path.join(
             ".calkit", "overleaf", overleaf_project_id

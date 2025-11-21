@@ -379,9 +379,9 @@ def sync(
                 cwd=main_repo.working_dir,
             )
             # Handle merge conflicts
-            if (
-                process.returncode != 0
-                and "merge conflict" in process.stdout.lower()
+            if process.returncode != 0 and (
+                "merge conflict" in process.stdout.lower()
+                or "merge conflict" in process.stderr.lower()
             ):
                 msg = ""
                 for line in process.stdout.split("\n"):
@@ -402,7 +402,11 @@ def sync(
                     "    calkit overleaf sync --resolve"
                 )
             elif process.returncode != 0:
-                raise RuntimeError(f"Could not apply:\n{process.stdout}")
+                main_repo.git.am("--abort")
+                raise RuntimeError(
+                    "Could not apply Git patch:\n"
+                    f"{process.stdout}\n{process.stderr}"
+                )
         elif resolving_conflict:
             # We have no patch since the last sync, but we need to update
             # our latest sync commit

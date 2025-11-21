@@ -635,7 +635,7 @@ def save(
     staged_files = calkit.git.get_staged_files()
     if not staged_files:
         typer.echo("No changes to commit; exiting")
-        raise typer.Exit(0)
+        return
     any_dvc = any(
         [path == "dvc.lock" or path.endswith(".dvc") for path in staged_files]
     )
@@ -1276,15 +1276,19 @@ def run(
                 "utf-8", errors="replace"
             )
         )
-    # If specified, perform final Overleaf sync
-    if sync_overleaf:
-        overleaf_sync(verbose=verbose, no_commit=save_after_run, no_push=True)
     if save_after_run or save_message is not None:
         if save_message is None:
             save_message = "Run pipeline"
         if not quiet:
             typer.echo("Saving the project after successful run")
         save(save_all=True, message=save_message)
+    # If specified, perform final Overleaf sync
+    if sync_overleaf:
+        overleaf_sync(
+            verbose=verbose,
+            no_commit=False,
+            no_push=not save_after_run,
+        )
 
 
 @app.command(name="manual-step", help="Execute a manual step.")

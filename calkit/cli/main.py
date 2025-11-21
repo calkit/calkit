@@ -1021,6 +1021,14 @@ def run(
             help="Run stages that produce the given output path.",
         ),
     ] = [],
+    sync_overleaf: Annotated[
+        bool,
+        typer.Option(
+            "--overleaf",
+            "-O",
+            help="Sync with Overleaf before and after running.",
+        ),
+    ] = False,
 ):
     """Check dependencies and run the pipeline."""
     import dvc.log
@@ -1031,6 +1039,7 @@ def run(
 
     import calkit.environments
     import calkit.pipeline
+    from calkit.cli.overleaf import sync as overleaf_sync
 
     if (target_inputs or target_outputs) and targets:
         raise_error("Cannot specify both targets and inputs")
@@ -1079,6 +1088,9 @@ def run(
         failed = not result.get("success", False)
         if failed:
             warn(f"Failed to check environment '{env_name}'")
+    # If specified, perform initial Overleaf sync
+    if sync_overleaf:
+        overleaf_sync(no_commit=False, no_push=True, verbose=verbose)
     # Compile the DVC pipeline
     dvc_stages = None
     if ck_info.get("pipeline", {}):
@@ -1264,6 +1276,9 @@ def run(
                 "utf-8", errors="replace"
             )
         )
+    # If specified, perform final Overleaf sync
+    if sync_overleaf:
+        overleaf_sync(verbose=verbose, no_commit=save_after_run, no_push=True)
     if save_after_run or save_message is not None:
         if save_message is None:
             save_message = "Run pipeline"

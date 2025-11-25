@@ -259,8 +259,16 @@ def clone(
 
 
 @app.command(name="status")
-def get_status():
+def get_status(
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Output status as JSON.")
+    ] = False,
+):
     """Get a unified Git and DVC status."""
+    if as_json:
+        status_dict = {"git": "nice", "dvc": "cool", "dvc_pipeline": "rad"}
+        print(json.dumps(status_dict, indent=2))
+        return
     ck_info = calkit.load_calkit_info()
     try:
         calkit.pipeline.to_dvc(ck_info=ck_info, write=True)

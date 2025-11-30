@@ -161,7 +161,7 @@ def check_env(
     create_file = (
         lock_to_use_for_creation if lock_to_use_for_creation else env_fpath
     )
-    create_cmd = ["conda", "env", "create", "-y", "-f", create_file]
+    create_cmd = ["conda", "env", "create", "--force", "-f", create_file]
     if prefix is not None:
         export_cmd += ["--prefix", prefix]
         create_cmd += ["--prefix", prefix]
@@ -194,7 +194,14 @@ def check_env(
                 log_func(
                     "Failed to create from lock file, trying from env spec"
                 )
-                create_cmd = ["conda", "env", "create", "-y", "-f", env_fpath]
+                create_cmd = [
+                    "conda",
+                    "env",
+                    "create",
+                    "--force",
+                    "-f",
+                    env_fpath,
+                ]
                 if prefix is not None:
                     create_cmd += ["--prefix", prefix]
                 subprocess.check_call(create_cmd)

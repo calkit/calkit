@@ -59,8 +59,10 @@ def test_check_env(tmp_dir, conda_env_name):
         ]
     )
     res = check_env()
+    print("Res before env exists:", res)
     assert not res.env_exists
     res = check_env()
+    print("Res after env created:", res)
     assert res.env_exists
     assert not res.env_needs_export
     assert not res.env_needs_rebuild

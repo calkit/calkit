@@ -293,3 +293,8 @@ setup(
     res = check_env()
     assert res.env_exists
     assert not res.env_needs_rebuild
+    # Check that the lock file has the editable syntax, not the package name
+    with open("environment-lock.yml") as f:
+        lock = calkit.ryaml.load(f)
+    pip_deps = lock["dependencies"][-1]["pip"]
+    assert "-e ." in pip_deps

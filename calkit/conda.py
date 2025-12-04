@@ -143,6 +143,7 @@ def check_env(
                 break
     elif output_fpath and os.path.isfile(output_fpath):
         lock_to_use_for_creation = output_fpath
+        log_func(f"Using existing lock file for creation: {output_fpath}")
     res = EnvCheckResult()
     info = json.loads(subprocess.check_output(["conda", "info", "--json"]))
     root_prefix = info["root_prefix"]

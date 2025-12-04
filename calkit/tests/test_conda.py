@@ -51,7 +51,7 @@ def test_check_env(tmp_dir, conda_env_name):
             "-n",
             ENV_NAME,
             "--no-check",
-            "python",
+            "python=3.13",
             "pip",
             "h5py",
             "--pip",

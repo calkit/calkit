@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import warnings
+from pathlib import Path
 
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
@@ -16,11 +17,41 @@ import calkit
 from calkit import ryaml
 
 
+def _editable_package_name_from_dir(dir_path: str) -> str:
+    """Get the package name from a directory containing ``setup.py`` or
+    ``pyproject.toml``.
+    """
+    if os.path.isfile(os.path.join(dir_path, "setup.py")):
+        # Read setup.py to get the package name
+        with open(os.path.join(dir_path, "setup.py")) as f:
+            setup_contents = f.read()
+        match = re.search(r"name\s*=\s*['\"]([^'\"]+)['\"]", setup_contents)
+        if match:
+            return match.group(1)
+    elif os.path.isfile(os.path.join(dir_path, "pyproject.toml")):
+        # Read pyproject.toml to get the package name
+        with open(os.path.join(dir_path, "pyproject.toml")) as f:
+            pyproject_contents = f.read()
+        match = re.search(
+            r'name\s*=\s*["\']([^"\']+)["\']', pyproject_contents
+        )
+        if match:
+            return match.group(1)
+    raise ValueError(f"Could not determine package name from {dir_path}")
+
+
 def _check_single(req: str, actual: str, conda: bool = False) -> bool:
     """Helper function for checking actual versions against requirements.
 
     Note that this also doesn't check optional dependencies.
     """
+    # If this is an editable install it needs to be handled specially
+    if req.startswith("-e ") or req.startswith("--editable "):
+        req = req.split(" ", 1)[1]
+        if "#" in req:
+            req = req.split("#", 1)[0]
+        req = req.strip()
+        req = _editable_package_name_from_dir(req)
     # If this is a Git version, we can't check it
     # TODO: Clone Git repos to check?
     if "@git" in req:
@@ -56,6 +87,7 @@ def _check_single(req: str, actual: str, conda: bool = False) -> bool:
 
 
 def _check_list(req: str, actual: list[str], conda: bool = False) -> bool:
+    """Check a requirement against a list of installed packages."""
     for installed in actual:
         if _check_single(req, installed, conda=conda):
             return True
@@ -112,6 +144,7 @@ def check_env(
                 break
     elif output_fpath and os.path.isfile(output_fpath):
         lock_to_use_for_creation = output_fpath
+        log_func(f"Using existing lock file for creation: {output_fpath}")
     res = EnvCheckResult()
     info = json.loads(subprocess.check_output(["conda", "info", "--json"]))
     root_prefix = info["root_prefix"]
@@ -349,6 +382,35 @@ def check_env(
         if prefix is not None:
             _ = env_export.pop("name")
             env_export["prefix"] = prefix_orig
+        # If we have any editable installs, convert them back to editable from
+        # their exported package names
+        # Note that this needs to be relative to the env lock directory,
+        # since that's how pip will interpret it
+        editable_pip_deps = {}
+        if isinstance(env_spec["dependencies"][-1], dict):
+            # Map editable install dir to package name we'd see in lock
+            required_pip_deps = env_spec["dependencies"][-1]["pip"]
+            for dep in required_pip_deps:
+                if dep.startswith("-e ") or dep.startswith("--editable "):
+                    dir_path = dep.split(" ", 1)[1]
+                    if "#" in dir_path:
+                        dir_path = dir_path.split("#", 1)[0]
+                    dir_path = dir_path.strip()
+                    pkg_name = _editable_package_name_from_dir(dir_path)
+                    editable_pip_deps[pkg_name] = dir_path
+        if isinstance(env_export["dependencies"][-1], dict):
+            export_pip_deps = env_export["dependencies"][-1]["pip"]
+            for i, dep in enumerate(export_pip_deps):
+                dep_name = re.split("[=<>]+", dep, maxsplit=1)[0]
+                if dep_name in editable_pip_deps:
+                    path_rel_to_project_root = editable_pip_deps[dep_name]
+                    lock_dir = os.path.dirname(output_fpath)
+                    path_rel_to_lock = os.path.relpath(
+                        path_rel_to_project_root, start=lock_dir
+                    )
+                    export_pip_deps[i] = (
+                        "-e " + Path(path_rel_to_lock).as_posix()
+                    )
         out_dir = os.path.dirname(output_fpath)
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)

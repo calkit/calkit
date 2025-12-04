@@ -51,7 +51,7 @@ def test_check_env(tmp_dir, conda_env_name):
             "-n",
             ENV_NAME,
             "--no-check",
-            "python",
+            "python=3.13",
             "pip",
             "h5py",
             "--pip",
@@ -59,8 +59,10 @@ def test_check_env(tmp_dir, conda_env_name):
         ]
     )
     res = check_env()
+    print("Res before env exists:", res)
     assert not res.env_exists
-    res = check_env()
+    res = check_env(log_func=print)
+    print("Res after env created:", res)
     assert res.env_exists
     assert not res.env_needs_export
     assert not res.env_needs_rebuild
@@ -250,3 +252,49 @@ def test_check_prefix_env(tmp_dir, conda_env_prefix):
             "import requests",
         ]
     )
+
+
+def test_check_editable(tmp_dir, conda_env_name):
+    subprocess.check_call(["calkit", "init"])
+    # Create a dummy package named 'src' to install in editable mode
+    os.makedirs("src", exist_ok=True)
+    with open("src/__init__.py", "w") as f:
+        f.write("def hello():\n    return 'Hello, World!'\n")
+    with open("setup.py", "w") as f:
+        f.write(
+            """from setuptools import setup, find_packages
+setup(
+    name="src",
+    version="0.0.1",
+    packages=find_packages(),
+)
+"""
+        )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "conda-env",
+            "-n",
+            ENV_NAME,
+            "--no-check",
+            "python=3.12",
+            "pip",
+            "h5py",
+            "--pip",
+            "-e .",
+        ]
+    )
+    res = check_env()
+    assert not res.env_exists
+    # Make sure we actually installed in editable mode by checking for
+    # src.egg-info
+    assert os.path.isdir("src.egg-info")
+    res = check_env()
+    assert res.env_exists
+    assert not res.env_needs_rebuild
+    # Check that the lock file has the editable syntax, not the package name
+    with open("environment-lock.yml") as f:
+        lock = calkit.ryaml.load(f)
+    pip_deps = lock["dependencies"][-1]["pip"]
+    assert "-e ." in pip_deps

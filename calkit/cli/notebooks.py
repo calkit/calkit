@@ -156,6 +156,7 @@ def check_env_kernel(
             env_name=env_name,
             no_check=no_check,
             verbose=verbose,
+            relaxed_check=True,
         )
         return kernel_name
     elif language == "julia":

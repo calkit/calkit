@@ -16,11 +16,46 @@ import calkit
 from calkit import ryaml
 
 
+def _editable_package_name_from_dir(dir_path: str) -> str:
+    """Get the package name from a directory containing ``setup.py`` or
+    ``pyproject.toml``.
+    """
+    if os.path.isfile(os.path.join(dir_path, "setup.py")):
+        # Read setup.py to get the package name
+        with open(os.path.join(dir_path, "setup.py")) as f:
+            setup_contents = f.read()
+        match = re.search(r"name\s*=\s*['\"]([^'\"]+)['\"]", setup_contents)
+        if match:
+            return match.group(1)
+    elif os.path.isfile(os.path.join(dir_path, "pyproject.toml")):
+        # Read pyproject.toml to get the package name
+        with open(os.path.join(dir_path, "pyproject.toml")) as f:
+            pyproject_contents = f.read()
+        match = re.search(
+            r'name\s*=\s*["\']([^"\']+)["\']', pyproject_contents
+        )
+        if match:
+            return match.group(1)
+    raise ValueError(f"Could not determine package name from {dir_path}")
+
+
 def _check_single(req: str, actual: str, conda: bool = False) -> bool:
     """Helper function for checking actual versions against requirements.
 
     Note that this also doesn't check optional dependencies.
     """
+    # If this is an editable install it needs to be handled specially
+    if req.startswith("-e ") or req.startswith("--editable "):
+        if conda:
+            warnings.warn(
+                "Editable installs are not supported in conda environments"
+            )
+            return False
+        req = req.split(" ", 1)[1]
+        if "#" in req:
+            req = req.split("#", 1)[0]
+        req = req.strip()
+        req = _editable_package_name_from_dir(req)
     # If this is a Git version, we can't check it
     # TODO: Clone Git repos to check?
     if "@git" in req:
@@ -56,6 +91,7 @@ def _check_single(req: str, actual: str, conda: bool = False) -> bool:
 
 
 def _check_list(req: str, actual: list[str], conda: bool = False) -> bool:
+    """Check a requirement against a list of installed packages."""
     for installed in actual:
         if _check_single(req, installed, conda=conda):
             return True

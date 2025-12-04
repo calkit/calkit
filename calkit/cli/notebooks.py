@@ -84,12 +84,13 @@ def _parse_params(params: list[str]) -> dict[str, Any]:
     return parameters
 
 
-@notebooks_app.command("check-env-kernel")
+@notebooks_app.command("check-kernel")
 def check_env_kernel(
     env_name: Annotated[
         str,
         typer.Option(
             "--environment",
+            "--env",
             "-e",
             help="Environment name in which to run the notebook.",
         ),
@@ -115,7 +116,7 @@ def check_env_kernel(
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
 ):
-    """Check that an environment has a registered kernel."""
+    """Check that an environment has a registered Jupyter kernel."""
     from calkit.cli.check import check_environment
     from calkit.cli.main import run_in_env
 

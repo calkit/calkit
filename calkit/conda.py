@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import warnings
+from pathlib import Path
 
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
@@ -381,6 +382,35 @@ def check_env(
         if prefix is not None:
             _ = env_export.pop("name")
             env_export["prefix"] = prefix_orig
+        # If we have any editable installs, convert them back to editable from
+        # their exported package names
+        # Note that this needs to be relative to the env lock directory,
+        # since that's how pip will interpret it
+        editable_pip_deps = {}
+        if isinstance(env_spec["dependencies"][-1], dict):
+            # Map editable install dir to package name we'd see in lock
+            required_pip_deps = env_spec["dependencies"][-1]["pip"]
+            for dep in required_pip_deps:
+                if dep.startswith("-e ") or dep.startswith("--editable "):
+                    dir_path = dep.split(" ", 1)[1]
+                    if "#" in dir_path:
+                        dir_path = dir_path.split("#", 1)[0]
+                    dir_path = dir_path.strip()
+                    pkg_name = _editable_package_name_from_dir(dir_path)
+                    editable_pip_deps[pkg_name] = dir_path
+        if isinstance(env_export["dependencies"][-1], dict):
+            export_pip_deps = env_export["dependencies"][-1]["pip"]
+            for i, dep in enumerate(export_pip_deps):
+                dep_name = re.split("[=<>]+", dep, maxsplit=1)[0]
+                if dep_name in editable_pip_deps:
+                    path_rel_to_project_root = editable_pip_deps[dep_name]
+                    lock_dir = os.path.dirname(output_fpath)
+                    path_rel_to_lock = os.path.relpath(
+                        path_rel_to_project_root, start=lock_dir
+                    )
+                    export_pip_deps[i] = (
+                        "-e " + Path(path_rel_to_lock).as_posix()
+                    )
         out_dir = os.path.dirname(output_fpath)
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)

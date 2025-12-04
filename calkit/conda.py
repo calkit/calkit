@@ -46,9 +46,6 @@ def _check_single(req: str, actual: str, conda: bool = False) -> bool:
     """
     # If this is an editable install it needs to be handled specially
     if req.startswith("-e ") or req.startswith("--editable "):
-        # Conda doesn't allow this, so don't try to check
-        if conda:
-            return False
         req = req.split(" ", 1)[1]
         if "#" in req:
             req = req.split("#", 1)[0]

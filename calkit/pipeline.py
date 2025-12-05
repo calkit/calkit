@@ -172,6 +172,8 @@ def to_dvc(
             outputs = stage.outputs.copy()
             if stage.kind == "jupyter-notebook":
                 outputs += stage.notebook_outputs
+            elif stage.kind == "sbatch":
+                outputs.append(stage.log_output)
             # Deal with any gitignore changes necessary
             for out in outputs:
                 if isinstance(out, PathOutput) and out.storage is None:

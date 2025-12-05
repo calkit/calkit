@@ -508,6 +508,16 @@ class SBatchStage(Stage):
     script_path: str
     args: list[str] = []
     sbatch_options: list[str] = []
+    log_storage: Literal["git", "dvc"] | None = "git"
+
+    @property
+    def log_output(self) -> PathOutput:
+        log_path = f".calkit/slurm/logs/{self.name}.out"
+        return PathOutput(
+            path=log_path,
+            storage=self.log_storage,
+            delete_before_run=False,
+        )
 
     @property
     def dvc_deps(self) -> list[str]:
@@ -518,6 +528,12 @@ class SBatchStage(Stage):
         # All outputs must be persistent, since ``calkit slurm batch``
         # handles deletion
         outs = super().dvc_outs
+        # Add log file output
+        log_path = self.log_output.path
+        if self.log_storage == "dvc":
+            outs.append({log_path: {"cache": True, "persist": True}})
+        else:
+            outs.append({log_path: {"cache": False, "persist": True}})
         final_outs = []
         for out in outs:
             if isinstance(out, str):

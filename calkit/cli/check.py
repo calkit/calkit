@@ -350,7 +350,6 @@ def check_docker_env(
             "RepoDigests",
             "Architecture",
             "Os",
-            "Size",
             "RootFS",
         ]
         resp = {}

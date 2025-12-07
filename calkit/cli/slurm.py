@@ -111,7 +111,7 @@ def run_sbatch(
             "--job-name",
             name,
             "-o",
-            ".calkit/slurm/logs/%j.out",
+            f".calkit/slurm/logs/{name}.out",
         ]
         + sbatch_opts
         + [script]

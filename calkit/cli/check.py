@@ -620,7 +620,6 @@ def check_venv(
         pip_install_args += f" --python {python}"
 
     def create_venv():
-        """Create the virtual environment."""
         if verbose:
             typer.echo(f"Creating {kind} at {prefix}")
         try:
@@ -666,12 +665,6 @@ def check_venv(
     def pip_install_and_freeze(
         reqs_arg: str, capture_output: bool = True
     ) -> None:
-        """Run pip install and freeze command.
-
-        Args:
-            reqs_arg: Requirements argument(s) for pip install
-            capture_output: If True, suppress output; if False, show all output
-        """
         check_cmd = (
             f"{activate_cmd} "
             f"&& {pip_cmd} install {pip_install_args} {reqs_arg} "

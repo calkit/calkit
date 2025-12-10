@@ -618,7 +618,9 @@ def check_venv(
     if python is not None and use_uv:
         create_cmd += ["--python", python]
         pip_install_args += f" --python {python}"
-    if not os.path.isdir(prefix):
+
+    def create_venv():
+        """Create the virtual environment."""
         if verbose:
             typer.echo(f"Creating {kind} at {prefix}")
         try:
@@ -626,9 +628,13 @@ def check_venv(
         except subprocess.CalledProcessError:
             raise_error(f"Failed to create {kind} at {prefix}")
         # Put a gitignore file in the env dir if one doesn't exist
-        if not os.path.isfile(os.path.join(prefix, ".gitignore")):
-            with open(os.path.join(prefix, ".gitignore"), "w") as f:
+        gitignore_fpath = os.path.join(wdir or ".", prefix, ".gitignore")
+        if not os.path.isfile(gitignore_fpath):
+            with open(gitignore_fpath, "w") as f:
                 f.write("*\n")
+
+    if not os.path.isdir(prefix):
+        create_venv()
     if lock_fpath is None:
         fname, ext = os.path.splitext(path)
         lock_fpath = fname + "-lock" + ext
@@ -722,10 +728,7 @@ def check_venv(
             )
             if os.path.isdir(prefix_full_path):
                 shutil.rmtree(prefix_full_path)
-            try:
-                subprocess.check_call(create_cmd + [prefix], cwd=wdir)
-            except subprocess.CalledProcessError:
-                raise_error(f"Failed to create {kind} at {prefix}")
+            create_venv()
             pip_install_and_freeze(dep_file_txt)
         except subprocess.CalledProcessError:
             warn(

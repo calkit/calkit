@@ -6,6 +6,7 @@ import functools
 import json
 import os
 import platform as _platform
+import shutil
 import subprocess
 from typing import Annotated
 
@@ -617,7 +618,10 @@ def check_venv(
     if python is not None and use_uv:
         create_cmd += ["--python", python]
         pip_install_args += f" --python {python}"
-    if not os.path.isdir(prefix):
+    # Ensure prefix is natively formatted for the OS
+    prefix = os.path.normpath(prefix)
+
+    def create_venv():
         if verbose:
             typer.echo(f"Creating {kind} at {prefix}")
         try:
@@ -625,9 +629,13 @@ def check_venv(
         except subprocess.CalledProcessError:
             raise_error(f"Failed to create {kind} at {prefix}")
         # Put a gitignore file in the env dir if one doesn't exist
-        if not os.path.isfile(os.path.join(prefix, ".gitignore")):
-            with open(os.path.join(prefix, ".gitignore"), "w") as f:
+        gitignore_fpath = os.path.join(wdir or ".", prefix, ".gitignore")
+        if not os.path.isfile(gitignore_fpath):
+            with open(gitignore_fpath, "w") as f:
                 f.write("*\n")
+
+    if not os.path.isdir(prefix):
+        create_venv()
     if lock_fpath is None:
         fname, ext = os.path.splitext(path)
         lock_fpath = fname + "-lock" + ext
@@ -655,28 +663,17 @@ def check_venv(
         activate_cmd = f"{prefix}\\Scripts\\activate"
     else:
         activate_cmd = f". {prefix}/bin/activate"
-    lock_dir = os.path.dirname(lock_fpath)
-    if lock_dir:
-        os.makedirs(lock_dir, exist_ok=True)
-    # If the lock file exists, try to install with that
-    dep_file_txt = f"-r {path}"
-    if os.path.isfile(reqs_to_use):
-        dep_file_txt += f" -r {reqs_to_use}"
-    check_cmd = (
-        f"{activate_cmd} "
-        f"&& {pip_cmd} install {pip_install_args} {dep_file_txt} "
-        f"&& {pip_freeze_cmd} > {lock_fpath} "
-        "&& deactivate"
-    )
-    try:
+
+    def pip_install_and_freeze(reqs_arg: str) -> None:
+        check_cmd = (
+            f"{activate_cmd} "
+            f"&& {pip_cmd} install {pip_install_args} {reqs_arg} "
+            f"&& {pip_freeze_cmd} > {lock_fpath} "
+            "&& deactivate"
+        )
         if verbose:
             typer.echo(f"Running command: {check_cmd}")
-        subprocess.check_call(
-            check_cmd,
-            shell=True,
-            cwd=wdir,
-            stderr=subprocess.STDOUT if not verbose else None,
-        )
+        subprocess.run(check_cmd, shell=True, cwd=wdir, check=True)
         # Delete legacy lock file after use
         if used_legacy_lock:
             try:
@@ -692,22 +689,39 @@ def check_venv(
                         "Failed to delete legacy lock file "
                         f"{used_legacy_lock}: {e}"
                     )
+
+    # If the lock file exists, try to install with that
+    dep_file_txt = f"-r {path}"
+    if os.path.isfile(reqs_to_use):
+        dep_file_txt += f" -r {reqs_to_use}"
+    try:
+        pip_install_and_freeze(dep_file_txt)
     except subprocess.CalledProcessError:
-        warn(
-            f"Failed to create environment from lock file ({reqs_to_use}); "
-            f"attempting rebuild from input file {path}"
-        )
-        check_cmd = (
-            f"{activate_cmd} "
-            f"&& {pip_cmd} install {pip_install_args} -r {path} "
-            f"&& {pip_freeze_cmd} > {lock_fpath} "
-            "&& deactivate"
-        )
-        # Try again and don't capture output
+        # Try to rebuild after removing the prefix
         try:
-            subprocess.run(check_cmd, shell=True, cwd=wdir, check=True)
+            if verbose:
+                typer.echo(
+                    f"Removing existing {kind} at {prefix} and rebuilding"
+                )
+            prefix_full_path = (
+                prefix
+                if os.path.isabs(prefix)
+                else os.path.join(wdir or ".", prefix)
+            )
+            if os.path.isdir(prefix_full_path):
+                shutil.rmtree(prefix_full_path)
+            create_venv()
+            pip_install_and_freeze(dep_file_txt)
         except subprocess.CalledProcessError:
-            raise_error(f"Failed to check {kind} from input file {path}")
+            warn(
+                f"Failed to create environment from lock file ({reqs_to_use}); "
+                f"attempting rebuild from input file {path}"
+            )
+            # Since we failed to use the lock file, rebuild from the spec
+            try:
+                pip_install_and_freeze(f"-r {path}")
+            except subprocess.CalledProcessError:
+                raise_error(f"Failed to check {kind} from input file {path}")
 
 
 @check_app.command(name="matlab-env")

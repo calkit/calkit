@@ -48,6 +48,21 @@ def test_check_venv(tmp_dir):
     with open("lock.txt") as f:
         lock_txt_3 = f.read()
     assert "polars==1.0.0" in lock_txt_3
+    # Test that if we specify a different Python or otherwise fail with an
+    # existing prefix, we can still build the environment since it will be
+    # deleted and recreated
+    subprocess.check_call(
+        [
+            "calkit",
+            "check",
+            "venv",
+            "reqs.txt",
+            "-o",
+            "lock.txt",
+            "--python",
+            "3.11",
+        ]
+    )
 
 
 def test_check_env_vars(tmp_dir):

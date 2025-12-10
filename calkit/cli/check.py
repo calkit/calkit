@@ -662,9 +662,6 @@ def check_venv(
         activate_cmd = f"{prefix}\\Scripts\\activate"
     else:
         activate_cmd = f". {prefix}/bin/activate"
-    lock_dir = os.path.dirname(lock_fpath)
-    if lock_dir:
-        os.makedirs(lock_dir, exist_ok=True)
 
     def pip_install_and_freeze(
         reqs_arg: str, capture_output: bool = True

@@ -659,25 +659,33 @@ def check_venv(
     lock_dir = os.path.dirname(lock_fpath)
     if lock_dir:
         os.makedirs(lock_dir, exist_ok=True)
-    # If the lock file exists, try to install with that
-    dep_file_txt = f"-r {path}"
-    if os.path.isfile(reqs_to_use):
-        dep_file_txt += f" -r {reqs_to_use}"
-    check_cmd = (
-        f"{activate_cmd} "
-        f"&& {pip_cmd} install {pip_install_args} {dep_file_txt} "
-        f"&& {pip_freeze_cmd} > {lock_fpath} "
-        "&& deactivate"
-    )
-    try:
+
+    def pip_install_and_freeze(
+        reqs_arg: str, capture_output: bool = True
+    ) -> None:
+        """Run pip install and freeze command.
+
+        Args:
+            reqs_arg: Requirements argument(s) for pip install
+            capture_output: If True, suppress output; if False, show all output
+        """
+        check_cmd = (
+            f"{activate_cmd} "
+            f"&& {pip_cmd} install {pip_install_args} {reqs_arg} "
+            f"&& {pip_freeze_cmd} > {lock_fpath} "
+            "&& deactivate"
+        )
         if verbose:
             typer.echo(f"Running command: {check_cmd}")
-        subprocess.check_call(
-            check_cmd,
-            shell=True,
-            cwd=wdir,
-            stderr=subprocess.STDOUT if not verbose else None,
-        )
+        if capture_output:
+            subprocess.check_call(
+                check_cmd,
+                shell=True,
+                cwd=wdir,
+                stderr=subprocess.STDOUT if not verbose else None,
+            )
+        else:
+            subprocess.run(check_cmd, shell=True, cwd=wdir, check=True)
         # Delete legacy lock file after use
         if used_legacy_lock:
             try:
@@ -693,6 +701,13 @@ def check_venv(
                         "Failed to delete legacy lock file "
                         f"{used_legacy_lock}: {e}"
                     )
+
+    # If the lock file exists, try to install with that
+    dep_file_txt = f"-r {path}"
+    if os.path.isfile(reqs_to_use):
+        dep_file_txt += f" -r {reqs_to_use}"
+    try:
+        pip_install_and_freeze(dep_file_txt)
     except subprocess.CalledProcessError:
         # Try to rebuild after removing the prefix
         try:
@@ -711,43 +726,15 @@ def check_venv(
                 subprocess.check_call(create_cmd + [prefix], cwd=wdir)
             except subprocess.CalledProcessError:
                 raise_error(f"Failed to create {kind} at {prefix}")
-            if verbose:
-                typer.echo(f"Running command: {check_cmd}")
-            subprocess.check_call(
-                check_cmd,
-                shell=True,
-                cwd=wdir,
-                stderr=subprocess.STDOUT if not verbose else None,
-            )
-            # Delete legacy lock file after use
-            if used_legacy_lock:
-                try:
-                    os.remove(used_legacy_lock)
-                    if verbose:
-                        typer.echo(
-                            "Deleted legacy lock file after use: "
-                            f"{used_legacy_lock}"
-                        )
-                except Exception as e:
-                    if verbose:
-                        typer.echo(
-                            "Failed to delete legacy lock file "
-                            f"{used_legacy_lock}: {e}"
-                        )
+            pip_install_and_freeze(dep_file_txt)
         except subprocess.CalledProcessError:
             warn(
                 f"Failed to create environment from lock file ({reqs_to_use}); "
                 f"attempting rebuild from input file {path}"
             )
-            check_cmd = (
-                f"{activate_cmd} "
-                f"&& {pip_cmd} install {pip_install_args} -r {path} "
-                f"&& {pip_freeze_cmd} > {lock_fpath} "
-                "&& deactivate"
-            )
             # Try again and don't capture output
             try:
-                subprocess.run(check_cmd, shell=True, cwd=wdir, check=True)
+                pip_install_and_freeze(f"-r {path}", capture_output=False)
             except subprocess.CalledProcessError:
                 raise_error(f"Failed to check {kind} from input file {path}")
 

@@ -662,9 +662,7 @@ def check_venv(
     else:
         activate_cmd = f". {prefix}/bin/activate"
 
-    def pip_install_and_freeze(
-        reqs_arg: str, capture_output: bool = True
-    ) -> None:
+    def pip_install_and_freeze(reqs_arg: str) -> None:
         check_cmd = (
             f"{activate_cmd} "
             f"&& {pip_cmd} install {pip_install_args} {reqs_arg} "
@@ -673,15 +671,7 @@ def check_venv(
         )
         if verbose:
             typer.echo(f"Running command: {check_cmd}")
-        if capture_output:
-            subprocess.check_call(
-                check_cmd,
-                shell=True,
-                cwd=wdir,
-                stderr=subprocess.STDOUT if not verbose else None,
-            )
-        else:
-            subprocess.run(check_cmd, shell=True, cwd=wdir, check=True)
+        subprocess.run(check_cmd, shell=True, cwd=wdir, check=True)
         # Delete legacy lock file after use
         if used_legacy_lock:
             try:
@@ -725,9 +715,9 @@ def check_venv(
                 f"Failed to create environment from lock file ({reqs_to_use}); "
                 f"attempting rebuild from input file {path}"
             )
-            # Try again and don't capture output
+            # Since we failed to use the lock file, rebuild from the spec
             try:
-                pip_install_and_freeze(f"-r {path}", capture_output=False)
+                pip_install_and_freeze(f"-r {path}")
             except subprocess.CalledProcessError:
                 raise_error(f"Failed to check {kind} from input file {path}")
 

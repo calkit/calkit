@@ -705,7 +705,8 @@ def check_venv(
                 if os.path.isabs(prefix)
                 else os.path.join(wdir or ".", prefix)
             )
-            shutil.rmtree(prefix_full_path)
+            if os.path.isdir(prefix_full_path):
+                shutil.rmtree(prefix_full_path)
             try:
                 subprocess.check_call(create_cmd + [prefix], cwd=wdir)
             except subprocess.CalledProcessError:

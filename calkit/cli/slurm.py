@@ -303,10 +303,10 @@ def cancel_jobs(
 
 @slurm_app.command(name="logs")
 def get_logs(
-    name: Annotated[
-        str,
-        typer.Argument(help="Name of the job to get logs for."),
-    ],
+    names: Annotated[
+        list[str] | None,
+        typer.Argument(help="Names of the jobs to get logs for."),
+    ] = None,
     follow: Annotated[
         bool,
         typer.Option(
@@ -316,29 +316,30 @@ def get_logs(
 ) -> None:
     """Get the logs for a SLURM job by its name in the project."""
     slurm_dir = os.path.join(".calkit", "slurm")
-    jobs_path = os.path.join(slurm_dir, "jobs.json")
-    if os.path.isfile(jobs_path):
-        with open(jobs_path, "r") as f:
-            jobs = json.load(f)
-    else:
-        jobs = {}
-    if len(jobs) == 0:
-        typer.echo("No jobs found for this project")
-        raise typer.Exit(0)
-    if name not in jobs:
-        raise_error(f"No job named '{name}' found for this project")
-    job_info = jobs[name]
-    job_id = job_info["job_id"]
-    log_path = os.path.join(slurm_dir, "logs", f"{job_id}.out")
-    if not os.path.isfile(log_path):
-        raise_error(f"No log file found for job '{name}' with ID {job_id}")
+    # If names are none, use all job names
+    if names is None:
+        jobs_path = os.path.join(slurm_dir, "jobs.json")
+        if os.path.isfile(jobs_path):
+            with open(jobs_path, "r") as f:
+                jobs = json.load(f)
+        else:
+            jobs = {}
+        names = list(jobs.keys())
+    log_fpaths = []
+    for name in names:
+        log_fpath = os.path.join(slurm_dir, "logs", f"{name}.out")
+        if os.path.isfile(log_fpath):
+            log_fpaths.append(log_fpath)
+    if not log_fpaths:
+        raise_error("No log files found")
     if follow:
-        p = subprocess.Popen(["tail", "-f", log_path])
+        p = subprocess.Popen(["tail", "-f"] + log_fpaths)
         try:
             p.wait()
         except KeyboardInterrupt:
             p.terminate()
             raise typer.Exit(0)
     else:
-        with open(log_path, "r") as f:
-            typer.echo(f.read())
+        for log_path in log_fpaths:
+            with open(log_path, "r") as f:
+                typer.echo(f.read())

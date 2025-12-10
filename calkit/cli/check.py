@@ -618,6 +618,8 @@ def check_venv(
     if python is not None and use_uv:
         create_cmd += ["--python", python]
         pip_install_args += f" --python {python}"
+    # Ensure prefix is natively formatted for the OS
+    prefix = os.path.normpath(prefix)
 
     def create_venv():
         if verbose:

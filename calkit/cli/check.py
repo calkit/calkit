@@ -6,6 +6,7 @@ import functools
 import json
 import os
 import platform as _platform
+import shutil
 import subprocess
 from typing import Annotated
 
@@ -693,21 +694,61 @@ def check_venv(
                         f"{used_legacy_lock}: {e}"
                     )
     except subprocess.CalledProcessError:
-        warn(
-            f"Failed to create environment from lock file ({reqs_to_use}); "
-            f"attempting rebuild from input file {path}"
-        )
-        check_cmd = (
-            f"{activate_cmd} "
-            f"&& {pip_cmd} install {pip_install_args} -r {path} "
-            f"&& {pip_freeze_cmd} > {lock_fpath} "
-            "&& deactivate"
-        )
-        # Try again and don't capture output
+        # Try to rebuild after removing the prefix
         try:
-            subprocess.run(check_cmd, shell=True, cwd=wdir, check=True)
+            if verbose:
+                typer.echo(
+                    f"Removing existing {kind} at {prefix} and rebuilding"
+                )
+            prefix_full_path = (
+                prefix
+                if os.path.isabs(prefix)
+                else os.path.join(wdir or ".", prefix)
+            )
+            shutil.rmtree(prefix_full_path)
+            try:
+                subprocess.check_call(create_cmd + [prefix], cwd=wdir)
+            except subprocess.CalledProcessError:
+                raise_error(f"Failed to create {kind} at {prefix}")
+            if verbose:
+                typer.echo(f"Running command: {check_cmd}")
+            subprocess.check_call(
+                check_cmd,
+                shell=True,
+                cwd=wdir,
+                stderr=subprocess.STDOUT if not verbose else None,
+            )
+            # Delete legacy lock file after use
+            if used_legacy_lock:
+                try:
+                    os.remove(used_legacy_lock)
+                    if verbose:
+                        typer.echo(
+                            "Deleted legacy lock file after use: "
+                            f"{used_legacy_lock}"
+                        )
+                except Exception as e:
+                    if verbose:
+                        typer.echo(
+                            "Failed to delete legacy lock file "
+                            f"{used_legacy_lock}: {e}"
+                        )
         except subprocess.CalledProcessError:
-            raise_error(f"Failed to check {kind} from input file {path}")
+            warn(
+                f"Failed to create environment from lock file ({reqs_to_use}); "
+                f"attempting rebuild from input file {path}"
+            )
+            check_cmd = (
+                f"{activate_cmd} "
+                f"&& {pip_cmd} install {pip_install_args} -r {path} "
+                f"&& {pip_freeze_cmd} > {lock_fpath} "
+                "&& deactivate"
+            )
+            # Try again and don't capture output
+            try:
+                subprocess.run(check_cmd, shell=True, cwd=wdir, check=True)
+            except subprocess.CalledProcessError:
+                raise_error(f"Failed to check {kind} from input file {path}")
 
 
 @check_app.command(name="matlab-env")

@@ -284,13 +284,21 @@ calkit new julia-env \
     Makie
 ```
 
-Unlike Python environments, for which `xenv` runs a shell command,
-`xenv` runs Julia commands.
-For example:
+With Julia environments, it's possible to execute a command:
 
 ```sh
-calkit xenv -n my-julia-env -- "println(\"hello world\");"
+calkit xenv -n my-julia-env -- -e "println(\"hello world\");"
 ```
+
+or a script:
+
+```sh
+calkit xenv -n my-julia-env -- my_julia_script.jl arg1 arg2
+```
+
+Running Julia this was will ensure the global environment is ignored,
+meaning you can be sure if it's successful on your machine,
+it will be successful on others.
 
 ### SLURM
 

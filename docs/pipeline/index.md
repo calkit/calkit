@@ -108,6 +108,7 @@ For more details, see `calkit.models.pipeline`.
 ### `julia-script`
 
 - `script_path`
+- `args`
 
 ### `julia-command`
 

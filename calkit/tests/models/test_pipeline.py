@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from calkit.models.pipeline import (
     JsonToLatexStage,
     JuliaCommandStage,
+    JuliaScriptStage,
     JupyterNotebookStage,
     LatexStage,
     MapPathsStage,
@@ -150,7 +151,21 @@ def test_juliacommandstage():
     sd = s.to_dvc()
     print(sd)
     assert sd["cmd"] == (
-        'calkit xenv -n j1 --no-check -- "println(\\"sup\\")"'
+        'calkit xenv -n j1 --no-check -- -e "println(\\"sup\\")"'
+    )
+
+
+def test_juliascriptstage():
+    s = JuliaScriptStage(
+        name="script1",
+        environment="julia-env",
+        script_path="scripts/my_script.jl",
+        args=["arg1", "arg2"],
+    )
+    sd = s.to_dvc()
+    print(sd)
+    assert sd["cmd"] == (
+        'calkit xenv -n julia-env --no-check -- "scripts/my_script.jl" arg1 arg2'
     )
 
 

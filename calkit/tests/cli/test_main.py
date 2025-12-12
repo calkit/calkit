@@ -257,6 +257,7 @@ def test_run_in_julia_env(tmp_dir):
             "julia-env",
             "-n",
             "my-julia",
+            "--julia=1.11",
             "--no-commit",
             "Revise",
             "PkgVersion",
@@ -270,6 +271,7 @@ def test_run_in_julia_env(tmp_dir):
                 "-n",
                 "my-julia",
                 "--",
+                "-e",
                 (
                     "using Revise; using PkgVersion; "
                     "println(PkgVersion.Version(Revise))"
@@ -279,8 +281,36 @@ def test_run_in_julia_env(tmp_dir):
         .decode()
         .strip()
     )
-    # TODO: Allow specifying version
-    assert out
+    # Check that we can run a script with arguments
+    with open("julia_script.jl", "w") as f:
+        f.write(
+            "import PkgVersion; "
+            " using Revise; "
+            'println("PkgVersion: ", PkgVersion.Version(Revise)); '
+            'println("Arg1: ", ARGS[1]); '
+            'println("Arg2: ", ARGS[2])'
+        )
+    out = (
+        subprocess.check_output(
+            [
+                "calkit",
+                "xenv",
+                "--no-check",
+                "-n",
+                "my-julia",
+                "--verbose",
+                "--",
+                "julia_script.jl",
+                "hello",
+                "world",
+            ]
+        )
+        .decode()
+        .strip()
+    )
+    assert "PkgVersion" in out
+    assert "Arg1: hello" in out
+    assert "Arg2: world" in out
 
 
 def test_to_shell_cmd():

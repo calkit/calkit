@@ -1590,13 +1590,15 @@ def run_in_env(
         env_dir = os.path.dirname(env_path)
         if not env_dir:
             env_dir = "."
+        # If command starts with 'julia', remove it since we are already
+        # calling julia
+        if cmd[0] == "julia":
+            cmd = cmd[1:]
         julia_cmd = [
             "julia",
             f"+{julia_version}",
             "--project=" + env_dir,
-            "-e",
-            " ".join(cmd),
-        ]
+        ] + cmd
         if verbose:
             typer.echo(f"Running command: {julia_cmd}")
         try:

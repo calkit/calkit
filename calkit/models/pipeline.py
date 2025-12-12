@@ -480,10 +480,13 @@ class RScriptStage(Stage):
 class JuliaScriptStage(Stage):
     kind: Literal["julia-script"] = "julia-script"
     script_path: str
+    args: list[str] = []
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f'{self.xenv_cmd} "include(\\"{self.script_path}\\")"'
+        cmd = f'{self.xenv_cmd} "{self.script_path}"'
+        for arg in self.args:
+            cmd += f" {arg}"
         return cmd
 
     @property
@@ -499,7 +502,7 @@ class JuliaCommandStage(Stage):
     def dvc_cmd(self) -> str:
         # We need to escape quotes in the command
         julia_cmd = self.command.replace('"', '\\"')
-        cmd = f'{self.xenv_cmd} "{julia_cmd}"'
+        cmd = f'{self.xenv_cmd} -e "{julia_cmd}"'
         return cmd
 
 

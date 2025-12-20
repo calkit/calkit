@@ -22,6 +22,7 @@ import { requestAPI } from "./request";
 import { CalkitSidebarWidget } from "./sidebar";
 import { filterLauncher } from "./launcher-filter";
 import { createOutputMarkerButton } from "./cell-output-marker";
+import { calkitIcon } from "./icons";
 
 /**
  * Initialization data for the calkit extension.
@@ -52,7 +53,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
     // Create the sidebar widget
     const sidebar = new CalkitSidebarWidget();
     sidebar.id = "calkit-sidebar";
-    sidebar.title.label = "Calkit";
+    sidebar.title.label = ""; // icon-only label
+    sidebar.title.caption = "Calkit";
+    sidebar.title.icon = calkitIcon;
 
     // Add the sidebar to the left panel
     app.shell.add(sidebar, "left");

@@ -42,20 +42,56 @@ export const CalkitSidebar: React.FC = () => {
     x: number;
     y: number;
   } | null>(null);
+  const [visibleSections, setVisibleSections] = useState<Set<string>>(() => {
+    const stored = localStorage.getItem("calkit-visible-sections");
+    if (stored) {
+      try {
+        return new Set(JSON.parse(stored));
+      } catch {
+        // Fall back to defaults if JSON parse fails
+      }
+    }
+    // Default visible sections
+    return new Set([
+      "environments",
+      "pipelineStages",
+      "notebooks",
+      "datasets",
+      "questions",
+    ]);
+  });
+  const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
+
+  // Persist visible sections to localStorage
+  React.useEffect(() => {
+    localStorage.setItem(
+      "calkit-visible-sections",
+      JSON.stringify([...visibleSections]),
+    );
+  }, [visibleSections]);
 
   // Close context menu on outside click
   React.useEffect(() => {
     const handleClickOutside = () => {
       setEnvContextMenu(null);
       setNotebookContextMenu(null);
+      setShowSettingsDropdown(false);
     };
-    if (envContextMenu?.visible || notebookContextMenu?.visible) {
+    if (
+      envContextMenu?.visible ||
+      notebookContextMenu?.visible ||
+      showSettingsDropdown
+    ) {
       document.addEventListener("click", handleClickOutside);
       return () => {
         document.removeEventListener("click", handleClickOutside);
       };
     }
-  }, [envContextMenu?.visible, notebookContextMenu?.visible]);
+  }, [
+    envContextMenu?.visible,
+    notebookContextMenu?.visible,
+    showSettingsDropdown,
+  ]);
 
   // Fetch sidebar data on mount
   React.useEffect(() => {
@@ -738,18 +774,330 @@ export const CalkitSidebar: React.FC = () => {
 
   return (
     <div className="calkit-sidebar">
-      <div className="calkit-sidebar-header" />
+      <div className="calkit-sidebar-header">
+        <div style={{ flex: 1 }} />
+        <div className="calkit-sidebar-settings-container">
+          <button
+            className="calkit-sidebar-settings-btn"
+            title="Show/hide categories"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowSettingsDropdown(!showSettingsDropdown);
+            }}
+          >
+            ⚙️
+          </button>
+          {showSettingsDropdown && (
+            <div
+              className="calkit-settings-dropdown"
+              onClick={(e) => {
+                e.stopPropagation();
+              }}
+            >
+              <div
+                className="calkit-settings-item"
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                <label
+                  className="calkit-settings-checkbox-label"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={visibleSections.has("environments")}
+                    onChange={(e) => {
+                      const next = new Set(visibleSections);
+                      if (e.target.checked) {
+                        next.add("environments");
+                      } else {
+                        next.delete("environments");
+                      }
+                      setVisibleSections(next);
+                    }}
+                  />
+                  Environments
+                </label>
+              </div>
+              <div
+                className="calkit-settings-item"
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                <label
+                  className="calkit-settings-checkbox-label"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={visibleSections.has("pipelineStages")}
+                    onChange={(e) => {
+                      const next = new Set(visibleSections);
+                      if (e.target.checked) {
+                        next.add("pipelineStages");
+                      } else {
+                        next.delete("pipelineStages");
+                      }
+                      setVisibleSections(next);
+                    }}
+                  />
+                  Pipeline
+                </label>
+              </div>
+              <div
+                className="calkit-settings-item"
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                <label
+                  className="calkit-settings-checkbox-label"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={visibleSections.has("notebooks")}
+                    onChange={(e) => {
+                      const next = new Set(visibleSections);
+                      if (e.target.checked) {
+                        next.add("notebooks");
+                      } else {
+                        next.delete("notebooks");
+                      }
+                      setVisibleSections(next);
+                    }}
+                  />
+                  Notebooks
+                </label>
+              </div>
+              <div
+                className="calkit-settings-item"
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                <label
+                  className="calkit-settings-checkbox-label"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={visibleSections.has("figures")}
+                    onChange={(e) => {
+                      const next = new Set(visibleSections);
+                      if (e.target.checked) {
+                        next.add("figures");
+                      } else {
+                        next.delete("figures");
+                      }
+                      setVisibleSections(next);
+                    }}
+                  />
+                  Figures
+                </label>
+              </div>
+              <div
+                className="calkit-settings-item"
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                <label
+                  className="calkit-settings-checkbox-label"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={visibleSections.has("datasets")}
+                    onChange={(e) => {
+                      const next = new Set(visibleSections);
+                      if (e.target.checked) {
+                        next.add("datasets");
+                      } else {
+                        next.delete("datasets");
+                      }
+                      setVisibleSections(next);
+                    }}
+                  />
+                  Datasets
+                </label>
+              </div>
+              <div
+                className="calkit-settings-item"
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                <label
+                  className="calkit-settings-checkbox-label"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={visibleSections.has("questions")}
+                    onChange={(e) => {
+                      const next = new Set(visibleSections);
+                      if (e.target.checked) {
+                        next.add("questions");
+                      } else {
+                        next.delete("questions");
+                      }
+                      setVisibleSections(next);
+                    }}
+                  />
+                  Questions
+                </label>
+              </div>
+              <div
+                className="calkit-settings-item"
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                <label
+                  className="calkit-settings-checkbox-label"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={visibleSections.has("history")}
+                    onChange={(e) => {
+                      const next = new Set(visibleSections);
+                      if (e.target.checked) {
+                        next.add("history");
+                      } else {
+                        next.delete("history");
+                      }
+                      setVisibleSections(next);
+                    }}
+                  />
+                  History
+                </label>
+              </div>
+              <div
+                className="calkit-settings-item"
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                <label
+                  className="calkit-settings-checkbox-label"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={visibleSections.has("publications")}
+                    onChange={(e) => {
+                      const next = new Set(visibleSections);
+                      if (e.target.checked) {
+                        next.add("publications");
+                      } else {
+                        next.delete("publications");
+                      }
+                      setVisibleSections(next);
+                    }}
+                  />
+                  Publications
+                </label>
+              </div>
+              <div
+                className="calkit-settings-item"
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                <label
+                  className="calkit-settings-checkbox-label"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={visibleSections.has("notes")}
+                    onChange={(e) => {
+                      const next = new Set(visibleSections);
+                      if (e.target.checked) {
+                        next.add("notes");
+                      } else {
+                        next.delete("notes");
+                      }
+                      setVisibleSections(next);
+                    }}
+                  />
+                  Notes
+                </label>
+              </div>
+              <div
+                className="calkit-settings-item"
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                <label
+                  className="calkit-settings-checkbox-label"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={visibleSections.has("models")}
+                    onChange={(e) => {
+                      const next = new Set(visibleSections);
+                      if (e.target.checked) {
+                        next.add("models");
+                      } else {
+                        next.delete("models");
+                      }
+                      setVisibleSections(next);
+                    }}
+                  />
+                  Models
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
       <div className="calkit-sidebar-content">
-        {renderSection("environments", "Environments", "⚙️")}
-        {renderSection("pipelineStages", "Pipeline", "🔄")}
-        {renderSection("notebooks", "Notebooks", "📓")}
-        {renderSection("figures", "Figures", "📊")}
-        {renderSection("datasets", "Datasets", "📁")}
-        {renderSection("questions", "Questions", "❓")}
-        {renderSection("history", "History", "📜")}
-        {renderSection("publications", "Publications", "📚")}
-        {renderSection("notes", "Notes", "📝")}
-        {renderSection("models", "Models", "🤖")}
+        {visibleSections.has("environments") &&
+          renderSection("environments", "Environments", "⚙️")}
+        {visibleSections.has("pipelineStages") &&
+          renderSection("pipelineStages", "Pipeline", "🔄")}
+        {visibleSections.has("notebooks") &&
+          renderSection("notebooks", "Notebooks", "📓")}
+        {visibleSections.has("figures") &&
+          renderSection("figures", "Figures", "📊")}
+        {visibleSections.has("datasets") &&
+          renderSection("datasets", "Datasets", "📁")}
+        {visibleSections.has("questions") &&
+          renderSection("questions", "Questions", "❓")}
+        {visibleSections.has("history") &&
+          renderSection("history", "History", "📜")}
+        {visibleSections.has("publications") &&
+          renderSection("publications", "Publications", "📚")}
+        {visibleSections.has("notes") && renderSection("notes", "Notes", "📝")}
+        {visibleSections.has("models") &&
+          renderSection("models", "Models", "🤖")}
       </div>
       {envContextMenu?.visible &&
         ReactDOM.createPortal(

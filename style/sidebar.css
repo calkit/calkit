@@ -27,6 +27,24 @@
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.calkit-sidebar-settings-btn {
+  padding: 4px 8px;
+  font-size: 16px;
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background-color 0.2s ease;
+  line-height: 1;
+}
+
+.calkit-sidebar-settings-btn:hover {
+  background-color: var(--jp-layout-color1);
 }
 
 .calkit-sidebar-content {
@@ -338,4 +356,52 @@
 .calkit-notebook-pipeline-checkbox {
   margin: 0;
   cursor: pointer;
+}
+
+/* Settings dropdown styling */
+.calkit-sidebar-settings-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.calkit-settings-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background-color: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  box-shadow: var(--jp-elevation-z4);
+  z-index: 10000;
+  min-width: 160px;
+  padding: 4px 0;
+  margin-top: 4px;
+}
+
+.calkit-settings-item {
+  padding: 6px 12px;
+  margin: 0;
+}
+
+.calkit-settings-item:hover {
+  background-color: var(--jp-layout-color2);
+}
+
+.calkit-settings-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--jp-ui-font-color1);
+  user-select: none;
+  margin: 0;
+  width: 100%;
+}
+
+.calkit-settings-checkbox-label input {
+  margin: 0;
+  cursor: pointer;
+  flex-shrink: 0;
 }

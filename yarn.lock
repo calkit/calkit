@@ -2226,7 +2226,28 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@jupyterlab/cells@npm:^4.5.1":
+"@jupyterlab/cell-toolbar@npm:^4.0.0":
+  version: 4.5.1
+  resolution: "@jupyterlab/cell-toolbar@npm:4.5.1"
+  dependencies:
+    "@jupyter/ydoc": ^3.1.0
+    "@jupyterlab/apputils": ^4.6.1
+    "@jupyterlab/cells": ^4.5.1
+    "@jupyterlab/docregistry": ^4.5.1
+    "@jupyterlab/notebook": ^4.5.1
+    "@jupyterlab/observables": ^5.5.1
+    "@jupyterlab/translation": ^4.5.1
+    "@jupyterlab/ui-components": ^4.5.1
+    "@lumino/algorithm": ^2.0.4
+    "@lumino/commands": ^2.3.3
+    "@lumino/disposable": ^2.1.5
+    "@lumino/signaling": ^2.1.5
+    "@lumino/widgets": ^2.7.2
+  checksum: fd97ac57558d5d3aa6c16b6d3adc0ae1a6edf726990342f6dba7b55857bec91058538779ee7e4f1b5af4efe26531fb22ef9e1e765061bc60fd6aa9a465ae19db
+  languageName: node
+  linkType: hard
+
+"@jupyterlab/cells@npm:^4.0.0, @jupyterlab/cells@npm:^4.5.1":
   version: 4.5.1
   resolution: "@jupyterlab/cells@npm:4.5.1"
   dependencies:
@@ -2524,7 +2545,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@jupyterlab/notebook@npm:^4.5.1":
+"@jupyterlab/notebook@npm:^4.0.0, @jupyterlab/notebook@npm:^4.5.1":
   version: 4.5.1
   resolution: "@jupyterlab/notebook@npm:4.5.1"
   dependencies:
@@ -2754,7 +2775,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@jupyterlab/translation@npm:^4.5.1":
+"@jupyterlab/translation@npm:^4.0.0, @jupyterlab/translation@npm:^4.5.1":
   version: 4.5.1
   resolution: "@jupyterlab/translation@npm:4.5.1"
   dependencies:
@@ -4656,11 +4677,15 @@ __metadata:
     "@jupyterlab/application": ^4.0.0
     "@jupyterlab/apputils": ^4.0.0
     "@jupyterlab/builder": ^4.0.0
+    "@jupyterlab/cell-toolbar": ^4.0.0
+    "@jupyterlab/cells": ^4.0.0
     "@jupyterlab/coreutils": ^6.0.0
     "@jupyterlab/launcher": ^4.0.0
+    "@jupyterlab/notebook": ^4.0.0
     "@jupyterlab/services": ^7.0.0
     "@jupyterlab/settingregistry": ^4.0.0
     "@jupyterlab/testutils": ^4.0.0
+    "@jupyterlab/translation": ^4.0.0
     "@types/jest": ^29.2.0
     "@types/json-schema": ^7.0.11
     "@types/react": ^18.0.26

@@ -1,0 +1,23 @@
+/* Cell output marker button styling */
+
+.calkit-output-marked {
+  color: var(--jp-brand-color1) !important;
+}
+
+/* Visual indicators for cells with marked outputs */
+
+.calkit-output-figure {
+  border-left: 3px solid var(--jp-success-color1);
+}
+
+.calkit-output-dataset {
+  border-left: 3px solid var(--jp-info-color1);
+}
+
+.calkit-output-result {
+  border-left: 3px solid var(--jp-warn-color1);
+}
+
+.calkit-output-table {
+  border-left: 3px solid var(--jp-error-color1);
+}

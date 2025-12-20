@@ -4,15 +4,24 @@ import {
   ILayoutRestorer
 } from '@jupyterlab/application';
 
-import { WidgetTracker } from '@jupyterlab/apputils';
+import { WidgetTracker, IToolbarWidgetRegistry } from '@jupyterlab/apputils';
+
+import { Widget } from '@lumino/widgets';
 
 import { ILauncher } from '@jupyterlab/launcher';
 
+import { INotebookTracker } from '@jupyterlab/notebook';
+
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
+
+import { ITranslator } from '@jupyterlab/translation';
+
+import { Cell } from '@jupyterlab/cells';
 
 import { requestAPI } from './request';
 import { CalkitSidebarWidget } from './sidebar';
 import { filterLauncher } from './launcher-filter';
+import { createOutputMarkerButton } from './cell-output-marker';
 
 /**
  * Initialization data for the calkit extension.
@@ -22,12 +31,21 @@ const plugin: JupyterFrontEndPlugin<void> = {
   description: 'A JupyterLab extension for Calkit projects.',
   autoStart: true,
   requires: [ILayoutRestorer],
-  optional: [ISettingRegistry, ILauncher],
+  optional: [
+    ISettingRegistry,
+    ILauncher,
+    INotebookTracker,
+    IToolbarWidgetRegistry,
+    ITranslator
+  ],
   activate: (
     app: JupyterFrontEnd,
     restorer: ILayoutRestorer,
     settingRegistry: ISettingRegistry | null,
-    launcher: ILauncher | null
+    launcher: ILauncher | null,
+    notebookTracker: INotebookTracker | null,
+    toolbarRegistry: IToolbarWidgetRegistry | null,
+    translator: ITranslator | null
   ) => {
     console.log('JupyterLab extension calkit is activated!');
 
@@ -57,6 +75,21 @@ const plugin: JupyterFrontEndPlugin<void> = {
     // Filter launcher if calkit.yaml exists
     if (launcher) {
       void filterLauncher(launcher);
+    }
+
+    // Register cell toolbar button for marking outputs
+    if (toolbarRegistry) {
+      toolbarRegistry.addFactory('Cell', 'calkit-output-marker', widget => {
+        // Only add to code cells
+        const cell = widget as Cell;
+        if (cell.model.type === 'code') {
+          return createOutputMarkerButton(cell, translator || undefined);
+        }
+        // Return an empty widget for non-code cells (required by type)
+        const emptyWidget = new Widget();
+        emptyWidget.hide();
+        return emptyWidget;
+      });
     }
 
     if (settingRegistry) {

@@ -31,7 +31,7 @@ jobs:
       - name: Install Juliaup
         uses: julia-actions/install-juliaup@v2
         with:
-          channel: '1' # Installs the latest v1 Julia version via Juliaup
+          channel: "1" # Installs the latest v1 Julia version via Juliaup
       - name: Run tests
         run: |
           source ~/.bashrc

@@ -92,7 +92,7 @@ environments:
   py:
     kind: uv-venv
     prefix: .venv
-    python: '3.13'
+    python: "3.13"
     path: requirements.txt
 pipeline:
   stages:
@@ -268,7 +268,7 @@ environments:
     kind: uv-venv
     path: requirements.txt
     prefix: .venv
-    python: '3.13'
+    python: "3.13"
 pipeline:
   stages:
     notebook-56-a:
@@ -316,8 +316,8 @@ pipeline:
           values:
             - parameter: param2
       parameters:
-        param1: '{param1}' # Notebook params can also be named differently
-        param2: '{param2}'
+        param1: "{param1}" # Notebook params can also be named differently
+        param2: "{param2}"
       outputs:
         - results/param1={param1}/param2={param2}/results.csv
 ```

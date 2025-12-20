@@ -334,7 +334,7 @@ An SSH environment defined in `calkit.yaml` looks like:
 environments:
   cluster:
     kind: ssh
-    host: '10.225.22.25'
+    host: "10.225.22.25"
     user: my-user-name
     wdir: /home/my-user-name/calkit/example-ssh
     key: ~/.ssh/id_ed25519

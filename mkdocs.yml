@@ -11,14 +11,14 @@ theme:
     - navigation.top
   palette:
     # Palette toggle for automatic mode
-    - media: '(prefers-color-scheme)'
+    - media: "(prefers-color-scheme)"
       primary: teal
       accent: cyan
       toggle:
         icon: material/brightness-auto
         name: Switch to light mode
     # Palette toggle for light mode
-    - media: '(prefers-color-scheme: light)'
+    - media: "(prefers-color-scheme: light)"
       scheme: default
       primary: teal
       accent: cyan
@@ -26,7 +26,7 @@ theme:
         icon: material/brightness-7
         name: Switch to dark mode
     # Palette toggle for dark mode
-    - media: '(prefers-color-scheme: dark)'
+    - media: "(prefers-color-scheme: dark)"
       primary: teal
       accent: cyan
       scheme: slate

@@ -30,7 +30,7 @@ environments:
   main:
     kind: uv-venv
     path: requirements.txt
-    python: '3.13'
+    python: "3.13"
   texlive:
     kind: docker
     image: texlive/texlive:latest-full
@@ -135,7 +135,7 @@ pipeline:
       kind: python-script
       script_path: scripts/my-script.py
       args:
-        - '--model={var}'
+        - "--model={var}"
       iterate_over:
         - arg_name: var
           values:
@@ -156,8 +156,8 @@ pipeline:
       kind: python-script
       script_path: scripts/my-script.py
       args:
-        - '--model={var1}'
-        - '--n_estimators={var2}'
+        - "--model={var1}"
+        - "--n_estimators={var2}"
       iterate_over:
         - arg_name: [var1, var2]
           values:
@@ -178,7 +178,7 @@ pipeline:
       kind: python-script
       script_path: scripts/my-script.py
       args:
-        - '--thresh={thresh}'
+        - "--thresh={thresh}"
       iterate_over:
         - arg_name: thresh
           values:

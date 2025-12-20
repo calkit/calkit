@@ -6,6 +6,8 @@
   height: 100%;
   background-color: var(--jp-layout-color1);
   border-right: 1px solid var(--jp-border-color1);
+  position: relative;
+  z-index: 100;
 }
 
 .calkit-sidebar {
@@ -30,7 +32,9 @@
 .calkit-sidebar-content {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 8px 0;
+  overflow-clip-margin: 999999px;
 }
 
 .calkit-sidebar-section {
@@ -144,6 +148,63 @@
   border-left: 2px solid var(--jp-brand-color1);
   margin-left: 32px;
   font-size: 11px;
+}
+
+/* Environment inline action buttons */
+.calkit-env-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.calkit-env-action-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  color: var(--jp-ui-font-color2);
+}
+
+.calkit-env-action-btn:hover {
+  color: var(--jp-brand-color1);
+}
+
+.calkit-env-delete:hover {
+  color: var(--jp-error-color1);
+}
+
+/* Context menu for environment items */
+.calkit-env-context-menu {
+  position: fixed;
+  background-color: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  box-shadow: var(--jp-elevation-z6);
+  z-index: 999999;
+  min-width: 140px;
+}
+
+.calkit-env-context-item {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+}
+
+.calkit-env-context-item:hover {
+  background-color: var(--jp-layout-color2);
+}
+
+.calkit-env-context-item.calkit-danger:hover {
+  color: var(--jp-error-color0);
+}
+
+.calkit-env-context-separator {
+  height: 1px;
+  background-color: var(--jp-border-color2);
+  margin: 4px 0;
 }
 
 .calkit-env-kind {

@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from "react";
-import { ReactWidget } from "@jupyterlab/apputils";
+import ReactDOM from "react-dom";
+import { ReactWidget, Dialog } from "@jupyterlab/apputils";
 import { requestAPI } from "./request";
 import { showEnvironmentEditor } from "./environment-editor";
 
@@ -26,14 +27,31 @@ export const CalkitSidebar: React.FC = () => {
   );
   const [loading, setLoading] = useState(true);
   const [newPackage, setNewPackage] = useState<Record<string, string>>({});
+  const [envContextMenu, setEnvContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    env?: SectionItem;
+  } | null>(null);
+
+  // Close context menu on outside click
+  React.useEffect(() => {
+    const handleClickOutside = () => {
+      setEnvContextMenu(null);
+    };
+    if (envContextMenu?.visible) {
+      document.addEventListener("click", handleClickOutside);
+      return () => {
+        document.removeEventListener("click", handleClickOutside);
+      };
+    }
+  }, [envContextMenu?.visible]);
 
   // Fetch sidebar data on mount
   React.useEffect(() => {
     const fetchSectionData = async () => {
       try {
         const info = await requestAPI<any>("project");
-        console.log("Fetched project info:", info);
-        // Extract sections from project info and transform to array format
         const transformed: Record<string, SectionItem[]> = {
           environments: Object.entries(info.environments || {}).map(
             ([name, obj]) => ({
@@ -80,7 +98,6 @@ export const CalkitSidebar: React.FC = () => {
           notes: [],
         };
         setSectionData(transformed);
-        console.log("Sidebar data loaded:", transformed);
         setLoading(false);
       } catch (error) {
         console.error("Failed to fetch project data:", error);
@@ -207,11 +224,105 @@ export const CalkitSidebar: React.FC = () => {
           <div
             className="calkit-sidebar-item calkit-env-item"
             onClick={() => toggleEnvironment(item.id)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setEnvContextMenu({
+                visible: true,
+                x: e.clientX,
+                y: e.clientY,
+                env: item,
+              });
+            }}
           >
             <span className="calkit-sidebar-section-icon">
               {isExpanded ? "▼" : "▶"}
             </span>
             <span className="calkit-sidebar-item-label">{item.label}</span>
+            <span className="calkit-env-actions">
+              <button
+                className="calkit-env-action-btn calkit-env-edit"
+                title="Edit environment"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  (async () => {
+                    const result = await showEnvironmentEditor({
+                      mode: "edit",
+                      initialName: item.id,
+                      initialKind: kind,
+                      initialPackages: packages,
+                    });
+                    if (!result) return;
+                    try {
+                      await requestAPI("environment/update", {
+                        method: "POST",
+                        body: JSON.stringify({
+                          name: item.id,
+                          kind: result.kind,
+                          packages: result.packages,
+                        }),
+                      });
+                      const info = await requestAPI<any>("project");
+                      const transformed = {
+                        ...sectionData,
+                        environments: Object.entries(
+                          info.environments || {},
+                        ).map(([name, obj]) => ({
+                          id: name,
+                          label: name,
+                          ...(typeof obj === "object" ? obj : {}),
+                        })),
+                      };
+                      setSectionData(transformed);
+                    } catch (error) {
+                      console.error("Failed to update environment:", error);
+                    }
+                  })();
+                }}
+              >
+                ✏️
+              </button>
+              <button
+                className="calkit-env-action-btn calkit-env-delete"
+                title="Delete environment"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  (async () => {
+                    const confirm = await new Dialog({
+                      title: `Delete environment '${item.id}'?`,
+                      body: "This action cannot be undone.",
+                      buttons: [
+                        Dialog.cancelButton(),
+                        Dialog.warnButton({ label: "Delete" }),
+                      ],
+                    }).launch();
+                    if (!confirm.button.accept) return;
+                    try {
+                      await requestAPI("environment/delete", {
+                        method: "POST",
+                        body: JSON.stringify({ name: item.id }),
+                      });
+                      const info = await requestAPI<any>("project");
+                      const transformed = {
+                        ...sectionData,
+                        environments: Object.entries(
+                          info.environments || {},
+                        ).map(([name, obj]) => ({
+                          id: name,
+                          label: name,
+                          ...(typeof obj === "object" ? obj : {}),
+                        })),
+                      };
+                      setSectionData(transformed);
+                    } catch (error) {
+                      console.error("Failed to delete environment:", error);
+                    }
+                  })();
+                }}
+              >
+                🗑️
+              </button>
+            </span>
           </div>
           {isExpanded && (
             <div className="calkit-env-details">
@@ -269,6 +380,7 @@ export const CalkitSidebar: React.FC = () => {
       toggleEnvironment,
       handleAddPackage,
       handleNewPackageChange,
+      sectionData,
     ],
   );
 
@@ -283,6 +395,16 @@ export const CalkitSidebar: React.FC = () => {
           <div
             className="calkit-sidebar-section-header"
             onClick={() => toggleSection(sectionId)}
+            onContextMenu={(e) => {
+              if (sectionId === "environments") {
+                e.preventDefault();
+                setEnvContextMenu({
+                  visible: true,
+                  x: e.clientX,
+                  y: e.clientY,
+                });
+              }
+            }}
           >
             <span className="calkit-sidebar-section-icon">
               {isExpanded ? "▼" : "▶"}
@@ -306,7 +428,19 @@ export const CalkitSidebar: React.FC = () => {
             </span>
           </div>
           {isExpanded && items.length > 0 && (
-            <div className="calkit-sidebar-section-content">
+            <div
+              className="calkit-sidebar-section-content"
+              onContextMenu={(e) => {
+                if (sectionId === "environments") {
+                  e.preventDefault();
+                  setEnvContextMenu({
+                    visible: true,
+                    x: e.clientX,
+                    y: e.clientY,
+                  });
+                }
+              }}
+            >
               {sectionId === "environments"
                 ? items.map((item) => renderEnvironmentItem(item))
                 : items.map((item) => (
@@ -338,9 +472,7 @@ export const CalkitSidebar: React.FC = () => {
       <div className="calkit-sidebar">
         <div className="calkit-sidebar-header" />
         <div className="calkit-sidebar-content">
-          <div className="calkit-sidebar-section-empty">
-            Loading... (sectionData keys: {Object.keys(sectionData).join(", ")})
-          </div>
+          <div className="calkit-sidebar-section-empty">Loading...</div>
         </div>
       </div>
     );
@@ -361,6 +493,111 @@ export const CalkitSidebar: React.FC = () => {
         {renderSection("notes", "Notes", "📝")}
         {renderSection("models", "Models", "🤖")}
       </div>
+      {envContextMenu?.visible &&
+        ReactDOM.createPortal(
+          <div
+            className="calkit-env-context-menu"
+            style={{ left: envContextMenu.x, top: envContextMenu.y }}
+          >
+            {envContextMenu.env && (
+              <>
+                <div
+                  className="calkit-env-context-item"
+                  onClick={() => {
+                    const env = envContextMenu.env!;
+                    setEnvContextMenu(null);
+                    (async () => {
+                      const result = await showEnvironmentEditor({
+                        mode: "edit",
+                        initialName: env.id,
+                        initialKind: env.kind || "unknown",
+                        initialPackages: env.packages || [],
+                      });
+                      if (!result) return;
+                      try {
+                        await requestAPI("environment/update", {
+                          method: "POST",
+                          body: JSON.stringify({
+                            name: env.id,
+                            kind: result.kind,
+                            packages: result.packages,
+                          }),
+                        });
+                        const info = await requestAPI<any>("project");
+                        const transformed = {
+                          ...sectionData,
+                          environments: Object.entries(
+                            info.environments || {},
+                          ).map(([name, obj]) => ({
+                            id: name,
+                            label: name,
+                            ...(typeof obj === "object" ? obj : {}),
+                          })),
+                        };
+                        setSectionData(transformed);
+                      } catch (error) {
+                        console.error("Failed to update environment:", error);
+                      }
+                    })();
+                  }}
+                >
+                  Edit
+                </div>
+                <div
+                  className="calkit-env-context-item calkit-danger"
+                  onClick={() => {
+                    const env = envContextMenu.env!;
+                    setEnvContextMenu(null);
+                    (async () => {
+                      const confirm = await new Dialog({
+                        title: `Delete environment '${env.id}'?`,
+                        body: "This action cannot be undone.",
+                        buttons: [
+                          Dialog.cancelButton(),
+                          Dialog.warnButton({ label: "Delete" }),
+                        ],
+                      }).launch();
+                      if (!confirm.button.accept) return;
+                      try {
+                        await requestAPI("environment/delete", {
+                          method: "POST",
+                          body: JSON.stringify({ name: env.id }),
+                        });
+                        const info = await requestAPI<any>("project");
+                        const transformed = {
+                          ...sectionData,
+                          environments: Object.entries(
+                            info.environments || {},
+                          ).map(([name, obj]) => ({
+                            id: name,
+                            label: name,
+                            ...(typeof obj === "object" ? obj : {}),
+                          })),
+                        };
+                        setSectionData(transformed);
+                      } catch (error) {
+                        console.error("Failed to delete environment:", error);
+                      }
+                    })();
+                  }}
+                >
+                  Delete
+                </div>
+                <div className="calkit-env-context-separator" />
+              </>
+            )}
+            <div
+              className="calkit-env-context-item"
+              onClick={() => {
+                setEnvContextMenu(null);
+                handleCreateEnvironment();
+              }}
+            >
+              New environment
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };
@@ -371,12 +608,10 @@ export const CalkitSidebar: React.FC = () => {
 export class CalkitSidebarWidget extends ReactWidget {
   constructor() {
     super();
-    console.log("CalkitSidebarWidget constructor called");
     this.addClass("calkit-sidebar-widget");
   }
 
   render() {
-    console.log("CalkitSidebarWidget render called");
     return <CalkitSidebar />;
   }
 }

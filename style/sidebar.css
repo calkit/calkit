@@ -54,7 +54,7 @@
   display: inline-block;
   width: 16px;
   min-width: 16px;
-  margin-right: 4px;
+  margin-right: 2px;
   font-size: 10px;
   color: var(--jp-ui-font-color2);
 }
@@ -63,7 +63,7 @@
   display: inline-block;
   width: 20px;
   min-width: 20px;
-  margin-right: 8px;
+  margin-right: 4px;
   font-size: 14px;
 }
 

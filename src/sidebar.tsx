@@ -37,7 +37,7 @@ export const CalkitSidebar: React.FC = () => {
               ...(typeof obj === "object" ? obj : {}),
             }),
           ),
-          pipelineStages: Object.entries(info.pipeline || {}).map(
+          pipelineStages: Object.entries(info.pipeline?.stages || {}).map(
             ([name, obj]) => ({
               id: name,
               label: name,
@@ -51,18 +51,19 @@ export const CalkitSidebar: React.FC = () => {
               ...(typeof obj === "object" ? obj : {}),
             }),
           ),
-          datasets: Object.entries(info.datasets || {}).map(([name, obj]) => ({
-            id: name,
-            label: name,
-            ...(typeof obj === "object" ? obj : {}),
+          datasets: (info.datasets || []).map((item: any, index: number) => ({
+            id: `dataset-${index}`,
+            label: item.title || item.path || `Dataset ${index}`,
+            ...(typeof item === "object" ? item : {}),
           })),
-          questions: Object.entries(info.questions || {}).map(
-            ([name, obj]) => ({
-              id: name,
-              label: name,
-              ...(typeof obj === "object" ? obj : {}),
-            }),
-          ),
+          questions: (info.questions || []).map((item: any, index: number) => ({
+            id: `question-${index}`,
+            label:
+              typeof item === "string"
+                ? item
+                : item.question || `Question ${index}`,
+            ...(typeof item === "object" ? item : {}),
+          })),
           models: Object.entries(info.models || {}).map(([name, obj]) => ({
             id: name,
             label: name,

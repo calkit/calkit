@@ -119,9 +119,7 @@ export const CalkitSidebar: React.FC = () => {
 
   return (
     <div className="calkit-sidebar">
-      <div className="calkit-sidebar-header">
-        <h2>Calkit</h2>
-      </div>
+      <div className="calkit-sidebar-header" />
       <div className="calkit-sidebar-content">
         {renderSection("environments", "Environments", "⚙️")}
         {renderSection("pipelineStages", "Pipeline Stages", "🔄")}

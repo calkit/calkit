@@ -36,13 +36,25 @@ class ProjectRouteHandler(APIHandler):
         self.finish(json.dumps(calkit.load_calkit_info()))
 
 
+class KernelspecsRouteHandler(APIHandler):
+    @tornado.web.authenticated
+    def get(self):
+        self.log.info("Received request for calkit kernelspec info")
+        specs = ["sup", "lol", "hehe"]
+        self.finish(json.dumps({"kernelspecs": specs}))
+
+
 def setup_route_handlers(web_app):
     host_pattern = ".*$"
     base_url = web_app.settings["base_url"]
     hello_route_pattern = url_path_join(base_url, "calkit", "hello")
     project_route_pattern = url_path_join(base_url, "calkit", "project")
+    kernelspecs_route_pattern = url_path_join(
+        base_url, "calkit", "kernelspecs"
+    )
     handlers = [
         (hello_route_pattern, HelloRouteHandler),
         (project_route_pattern, ProjectRouteHandler),
+        (kernelspecs_route_pattern, KernelspecsRouteHandler),
     ]
     web_app.add_handlers(host_pattern, handlers)

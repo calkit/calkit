@@ -4,6 +4,7 @@ import { ITranslator, nullTranslator } from "@jupyterlab/translation";
 import React, { useEffect, useState } from "react";
 import { requestAPI } from "./request";
 import { calkitIcon } from "./icons";
+import { showEnvironmentEditor } from "./environment-editor";
 
 /**
  * Environment selector component
@@ -47,14 +48,58 @@ const EnvironmentSelector: React.FC<{
     console.log(`Switching to environment: ${envName}`);
   };
 
-  const handleCreateEnvironment = () => {
-    // TODO: Open dialog to create new environment
-    console.log("Create new environment");
+  const handleCreateEnvironment = async () => {
+    const result = await showEnvironmentEditor({ mode: "create" });
+    if (!result) {
+      return;
+    }
+    try {
+      await requestAPI("environment/create", {
+        method: "POST",
+        body: JSON.stringify({
+          name: result.name,
+          kind: result.kind,
+          packages: result.packages,
+        }),
+      });
+      // Refresh environments
+      const info = await requestAPI<any>("project");
+      setEnvironments(info.environments || {});
+      setCurrentEnv(result.name);
+    } catch (error) {
+      console.error("Failed to create environment:", error);
+    }
   };
 
-  const handleEditEnvironment = () => {
-    // TODO: Open dialog to edit current environment
-    console.log("Edit current environment");
+  const handleEditEnvironment = async () => {
+    if (!currentEnv) {
+      return;
+    }
+    const currentEnvData = environments[currentEnv];
+    const result = await showEnvironmentEditor({
+      mode: "edit",
+      initialName: currentEnv,
+      initialKind: currentEnvData?.kind || "uv-venv",
+      initialPackages: currentEnvData?.packages || [],
+    });
+    if (!result) {
+      return;
+    }
+    try {
+      await requestAPI("environment/update", {
+        method: "POST",
+        body: JSON.stringify({
+          name: currentEnv,
+          kind: result.kind,
+          packages: result.packages,
+        }),
+      });
+      // Refresh environments
+      const info = await requestAPI<any>("project");
+      setEnvironments(info.environments || {});
+    } catch (error) {
+      console.error("Failed to update environment:", error);
+    }
   };
 
   if (loading) {

@@ -50,6 +50,24 @@
   background-color: var(--jp-layout-color2);
 }
 
+.calkit-sidebar-section-create {
+  font-size: 14px;
+  font-weight: bold;
+  padding: 1px 6px;
+  margin-left: 2px;
+  background-color: var(--jp-brand-color1);
+  color: var(--jp-layout-color1);
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  line-height: 1;
+}
+
+.calkit-sidebar-section-create:hover {
+  background-color: var(--jp-brand-color0);
+}
+
 .calkit-sidebar-section-icon {
   display: inline-block;
   width: 16px;
@@ -68,7 +86,6 @@
 }
 
 .calkit-sidebar-section-title {
-  flex: 1;
   font-size: 12px;
   font-weight: 500;
   color: var(--jp-ui-font-color1);
@@ -77,7 +94,7 @@
 .calkit-sidebar-section-count {
   font-size: 11px;
   color: var(--jp-ui-font-color2);
-  margin-left: 4px;
+  margin-left: auto;
 }
 
 .calkit-sidebar-section-content {
@@ -107,4 +124,92 @@
   font-size: 11px;
   color: var(--jp-ui-font-color3);
   font-style: italic;
+}
+
+/* Environment item styling */
+.calkit-env-item {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.calkit-env-item .calkit-sidebar-section-icon {
+  font-size: 8px;
+  margin-right: 4px;
+}
+
+.calkit-env-details {
+  padding: 8px 12px 8px 32px;
+  background-color: var(--jp-layout-color0);
+  border-left: 2px solid var(--jp-brand-color1);
+  margin-left: 32px;
+  font-size: 11px;
+}
+
+.calkit-env-kind {
+  margin-bottom: 8px;
+  color: var(--jp-ui-font-color2);
+}
+
+.calkit-env-packages-header {
+  margin-bottom: 4px;
+  color: var(--jp-ui-font-color2);
+}
+
+.calkit-env-packages-list {
+  max-height: 150px;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+
+.calkit-env-package-item {
+  padding: 3px 8px;
+  margin: 2px 0;
+  background-color: var(--jp-layout-color1);
+  border-radius: 2px;
+  font-family: var(--jp-code-font-family);
+  font-size: 10px;
+}
+
+.calkit-env-add-package {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.calkit-env-package-input {
+  flex: 1;
+  padding: 3px 6px;
+  font-size: 11px;
+  background-color: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 3px;
+  outline: none;
+}
+
+.calkit-env-package-input:focus {
+  border-color: var(--jp-brand-color1);
+  box-shadow: 0 0 0 1px var(--jp-brand-color1);
+}
+
+.calkit-env-add-button {
+  padding: 3px 10px;
+  font-size: 14px;
+  font-weight: bold;
+  background-color: var(--jp-brand-color1);
+  color: var(--jp-layout-color1);
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.calkit-env-add-button:hover:not(:disabled) {
+  background-color: var(--jp-brand-color0);
+}
+
+.calkit-env-add-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

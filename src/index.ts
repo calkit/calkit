@@ -16,12 +16,15 @@ import { ISettingRegistry } from "@jupyterlab/settingregistry";
 
 import { ITranslator } from "@jupyterlab/translation";
 
+import { IFileBrowserFactory } from "@jupyterlab/filebrowser";
+
 import { Cell } from "@jupyterlab/cells";
 
 import { requestAPI } from "./request";
 import { CalkitSidebarWidget } from "./sidebar";
 import { filterLauncher } from "./launcher-filter";
 import { createOutputMarkerButton } from "./cell-output-marker";
+import { addCommands, addContextMenuItems } from "./file-browser-menu";
 import { calkitIcon } from "./icons";
 
 /**
@@ -38,6 +41,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     INotebookTracker,
     IToolbarWidgetRegistry,
     ITranslator,
+    IFileBrowserFactory,
   ],
   activate: (
     app: JupyterFrontEnd,
@@ -47,6 +51,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     notebookTracker: INotebookTracker | null,
     toolbarRegistry: IToolbarWidgetRegistry | null,
     translator: ITranslator | null,
+    factory: IFileBrowserFactory | null,
   ) => {
     console.log("JupyterLab extension calkit is activated!");
 
@@ -93,6 +98,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
         emptyWidget.hide();
         return emptyWidget;
       });
+    }
+
+    // Add file browser context menu items
+    if (factory) {
+      addCommands(app, factory, translator || undefined);
+      addContextMenuItems(app, translator || undefined);
     }
 
     if (settingRegistry) {

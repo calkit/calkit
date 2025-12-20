@@ -13,6 +13,7 @@
   flex-direction: column;
   height: 100%;
   background-color: var(--jp-layout-color1);
+  padding: 4px;
 }
 
 .calkit-sidebar-header {

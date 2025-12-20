@@ -6,6 +6,8 @@ import tornado
 from jupyter_server.base.handlers import APIHandler
 from jupyter_server.utils import url_path_join
 
+import calkit
+
 
 class HelloRouteHandler(APIHandler):
     # The following decorator should be present on all verb methods
@@ -26,9 +28,19 @@ class HelloRouteHandler(APIHandler):
         )
 
 
+class ProjectRouteHandler(APIHandler):
+    @tornado.web.authenticated
+    def get(self):
+        self.finish(json.dumps(calkit.load_calkit_info()))
+
+
 def setup_route_handlers(web_app):
     host_pattern = ".*$"
     base_url = web_app.settings["base_url"]
     hello_route_pattern = url_path_join(base_url, "calkit", "hello")
-    handlers = [(hello_route_pattern, HelloRouteHandler)]
+    project_route_pattern = url_path_join(base_url, "calkit", "project")
+    handlers = [
+        (hello_route_pattern, HelloRouteHandler),
+        (project_route_pattern, ProjectRouteHandler),
+    ]
     web_app.add_handlers(host_pattern, handlers)

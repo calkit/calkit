@@ -8,3 +8,8 @@ site
 .coverage*
 coverage.xml
 import.log
+tsconfig.tsbuildinfo
+lib
+node_modules
+.yarn
+calkit/labextension

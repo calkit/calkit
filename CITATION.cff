@@ -7,7 +7,7 @@ repository-code: https://github.com/calkit/calkit
 authors:
   - family-names: Bachant
     given-names: Pete
-    orcid: "0000-0003-4039-6954"
+    orcid: '0000-0003-4039-6954'
   - family-names: McCabe
     given-names: Rebecca
     orcid:
@@ -15,10 +15,10 @@ authors:
     given-names: Mukul
     orcid:
 identifiers:
-  - description: "All Calkit releases"
+  - description: 'All Calkit releases'
     type: doi
     value: 10.5281/zenodo.16710624
-  - description: "Calkit v0.26.10"
+  - description: 'Calkit v0.26.10'
     type: doi
     value: 10.5281/zenodo.16710625
   - type: swh
@@ -38,5 +38,5 @@ references:
         website: https://github.com/iterative
     doi: 10.5281/zenodo.15828598
     repository-code: https://github.com/iterative/dvc
-    title: "DVC: Data Version Control - Git for Data & Models"
+    title: 'DVC: Data Version Control - Git for Data & Models'
     type: software

@@ -1,6 +1,7 @@
 """JupyterLab extension server routes."""
 
 import json
+import os
 
 import tornado
 from jupyter_server.base.handlers import APIHandler
@@ -31,6 +32,7 @@ class HelloRouteHandler(APIHandler):
 class ProjectRouteHandler(APIHandler):
     @tornado.web.authenticated
     def get(self):
+        self.log.info(f"Received request for project info in {os.getcwd()}")
         self.finish(json.dumps(calkit.load_calkit_info()))
 
 

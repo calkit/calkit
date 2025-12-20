@@ -1,9 +1,11 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { ReactWidget } from "@jupyterlab/apputils";
+import { requestAPI } from "./request";
 
 interface SectionItem {
   id: string;
   label: string;
+  [key: string]: any;
 }
 
 /**
@@ -15,6 +17,73 @@ export const CalkitSidebar: React.FC = () => {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     () => new Set(["environments", "notebooks"]),
   );
+  const [sectionData, setSectionData] = useState<Record<string, SectionItem[]>>(
+    {},
+  );
+  const [loading, setLoading] = useState(true);
+
+  // Fetch sidebar data on mount
+  React.useEffect(() => {
+    const fetchSectionData = async () => {
+      try {
+        const info = await requestAPI<any>("project");
+        console.log("Fetched project info:", info);
+        // Extract sections from project info and transform to array format
+        const transformed: Record<string, SectionItem[]> = {
+          environments: Object.entries(info.environments || {}).map(
+            ([name, obj]) => ({
+              id: name,
+              label: name,
+              ...(typeof obj === "object" ? obj : {}),
+            }),
+          ),
+          pipelineStages: Object.entries(info.pipeline || {}).map(
+            ([name, obj]) => ({
+              id: name,
+              label: name,
+              ...(typeof obj === "object" ? obj : {}),
+            }),
+          ),
+          notebooks: Object.entries(info.notebooks || {}).map(
+            ([name, obj]) => ({
+              id: name,
+              label: name,
+              ...(typeof obj === "object" ? obj : {}),
+            }),
+          ),
+          datasets: Object.entries(info.datasets || {}).map(([name, obj]) => ({
+            id: name,
+            label: name,
+            ...(typeof obj === "object" ? obj : {}),
+          })),
+          questions: Object.entries(info.questions || {}).map(
+            ([name, obj]) => ({
+              id: name,
+              label: name,
+              ...(typeof obj === "object" ? obj : {}),
+            }),
+          ),
+          models: Object.entries(info.models || {}).map(([name, obj]) => ({
+            id: name,
+            label: name,
+            ...(typeof obj === "object" ? obj : {}),
+          })),
+          figures: [],
+          history: [],
+          publications: [],
+          notes: [],
+        };
+        setSectionData(transformed);
+        console.log("Sidebar data loaded:", transformed);
+        setLoading(false);
+      } catch (error) {
+        console.error("Failed to fetch project data:", error);
+        setLoading(false);
+      }
+    };
+
+    fetchSectionData();
+  }, []);
 
   const toggleSection = useCallback((sectionId: string) => {
     setExpandedSections((prev) => {
@@ -28,59 +97,10 @@ export const CalkitSidebar: React.FC = () => {
     });
   }, []);
 
-  const mockData = useMemo<Record<string, SectionItem[]>>(
-    () => ({
-      environments: [
-        { id: "env2", label: "Python 3.10" },
-        { id: "env3", label: "R Environment" },
-      ],
-      pipelineStages: [
-        { id: "stage1", label: "Data Collection" },
-        { id: "stage2", label: "Processing" },
-        { id: "stage3", label: "Analysis" },
-        { id: "stage4", label: "Visualization" },
-      ],
-      notebooks: [
-        { id: "nb1", label: "Analysis.ipynb" },
-        { id: "nb2", label: "Preprocessing.ipynb" },
-      ],
-      figures: [
-        { id: "fig1", label: "distribution_plot.png" },
-        { id: "fig2", label: "correlation_matrix.pdf" },
-      ],
-      datasets: [
-        { id: "ds1", label: "raw_data.csv" },
-        { id: "ds2", label: "processed_data.parquet" },
-      ],
-      questions: [
-        { id: "q1", label: "What are the outliers?" },
-        { id: "q2", label: "How significant is the correlation?" },
-      ],
-      history: [
-        { id: "h1", label: "feat: Add analysis module" },
-        { id: "h2", label: "fix: Update data pipeline" },
-        { id: "h3", label: "docs: Update README" },
-      ],
-      publications: [
-        { id: "pub1", label: 'Nature 2024 - "Novel Approach..."' },
-        { id: "pub2", label: 'ArXiv 2023 - "Preliminary Results"' },
-      ],
-      notes: [
-        { id: "note1", label: "Check data quality" },
-        { id: "note2", label: "Follow up on edge cases" },
-      ],
-      models: [
-        { id: "model1", label: "Linear Regression v1" },
-        { id: "model2", label: "Neural Network v2" },
-      ],
-    }),
-    [],
-  );
-
   const renderSection = useCallback(
     (sectionId: string, sectionLabel: string, icon: string) => {
       const isExpanded = expandedSections.has(sectionId);
-      const items = mockData[sectionId] || [];
+      const items = sectionData[sectionId] || [];
 
       return (
         <div key={sectionId} className="calkit-sidebar-section">
@@ -114,8 +134,21 @@ export const CalkitSidebar: React.FC = () => {
         </div>
       );
     },
-    [expandedSections, mockData, toggleSection],
+    [expandedSections, sectionData, toggleSection],
   );
+
+  if (loading) {
+    return (
+      <div className="calkit-sidebar">
+        <div className="calkit-sidebar-header" />
+        <div className="calkit-sidebar-content">
+          <div className="calkit-sidebar-section-empty">
+            Loading... (sectionData keys: {Object.keys(sectionData).join(", ")})
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="calkit-sidebar">
@@ -142,10 +175,12 @@ export const CalkitSidebar: React.FC = () => {
 export class CalkitSidebarWidget extends ReactWidget {
   constructor() {
     super();
+    console.log("CalkitSidebarWidget constructor called");
     this.addClass("calkit-sidebar-widget");
   }
 
   render() {
+    console.log("CalkitSidebarWidget render called");
     return <CalkitSidebar />;
   }
 }

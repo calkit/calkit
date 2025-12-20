@@ -351,12 +351,12 @@ export const CalkitSidebar: React.FC = () => {
       <div className="calkit-sidebar-header" />
       <div className="calkit-sidebar-content">
         {renderSection("environments", "Environments", "⚙️")}
-        {renderSection("pipelineStages", "Pipeline Stages", "🔄")}
+        {renderSection("pipelineStages", "Pipeline", "🔄")}
         {renderSection("notebooks", "Notebooks", "📓")}
         {renderSection("figures", "Figures", "📊")}
         {renderSection("datasets", "Datasets", "📁")}
         {renderSection("questions", "Questions", "❓")}
-        {renderSection("history", "History (Git Commits)", "📜")}
+        {renderSection("history", "History", "📜")}
         {renderSection("publications", "Publications", "📚")}
         {renderSection("notes", "Notes", "📝")}
         {renderSection("models", "Models", "🤖")}

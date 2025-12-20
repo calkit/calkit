@@ -10,7 +10,7 @@ import { Widget } from "@lumino/widgets";
 
 import { ILauncher } from "@jupyterlab/launcher";
 
-import { INotebookTracker } from "@jupyterlab/notebook";
+import { INotebookTracker, NotebookPanel } from "@jupyterlab/notebook";
 
 import { ISettingRegistry } from "@jupyterlab/settingregistry";
 
@@ -25,6 +25,7 @@ import { CalkitSidebarWidget } from "./sidebar";
 import { filterLauncher } from "./launcher-filter";
 import { createOutputMarkerButton } from "./cell-output-marker";
 import { addCommands, addContextMenuItems } from "./file-browser-menu";
+import { createEnvironmentSelector } from "./environment-selector";
 import { calkitIcon } from "./icons";
 
 /**
@@ -98,6 +99,22 @@ const plugin: JupyterFrontEndPlugin<void> = {
         emptyWidget.hide();
         return emptyWidget;
       });
+
+      // Register environment selector for notebook toolbar
+      toolbarRegistry.addFactory(
+        "Notebook",
+        "calkit-environment-selector",
+        (widget) => {
+          console.log("Creating environment selector for:", widget);
+          if (widget instanceof NotebookPanel) {
+            return createEnvironmentSelector(widget, translator || undefined);
+          }
+          console.warn("Widget is not a NotebookPanel:", widget);
+          const emptyWidget = new Widget();
+          emptyWidget.hide();
+          return emptyWidget;
+        },
+      );
     }
 
     // Add file browser context menu items

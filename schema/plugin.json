@@ -6,6 +6,16 @@
         "name": "calkit-output-marker",
         "rank": 60
       }
+    ],
+    "Notebook": [
+      {
+        "name": "calkit-environment-selector",
+        "rank": 1000
+      },
+      {
+        "name": "kernelName",
+        "disabled": true
+      }
     ]
   },
   "title": "calkit",

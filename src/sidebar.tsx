@@ -3,6 +3,7 @@ import ReactDOM from "react-dom";
 import { ReactWidget, Dialog } from "@jupyterlab/apputils";
 import { requestAPI } from "./request";
 import { showEnvironmentEditor } from "./environment-editor";
+import { showNotebookRegistration } from "./notebook-registration";
 
 interface SectionItem {
   id: string;
@@ -22,6 +23,9 @@ export const CalkitSidebar: React.FC = () => {
   const [expandedEnvironments, setExpandedEnvironments] = useState<Set<string>>(
     new Set(),
   );
+  const [expandedNotebooks, setExpandedNotebooks] = useState<Set<string>>(
+    new Set(),
+  );
   const [sectionData, setSectionData] = useState<Record<string, SectionItem[]>>(
     {},
   );
@@ -33,19 +37,25 @@ export const CalkitSidebar: React.FC = () => {
     y: number;
     env?: SectionItem;
   } | null>(null);
+  const [notebookContextMenu, setNotebookContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Close context menu on outside click
   React.useEffect(() => {
     const handleClickOutside = () => {
       setEnvContextMenu(null);
+      setNotebookContextMenu(null);
     };
-    if (envContextMenu?.visible) {
+    if (envContextMenu?.visible || notebookContextMenu?.visible) {
       document.addEventListener("click", handleClickOutside);
       return () => {
         document.removeEventListener("click", handleClickOutside);
       };
     }
-  }, [envContextMenu?.visible]);
+  }, [envContextMenu?.visible, notebookContextMenu?.visible]);
 
   // Fetch sidebar data on mount
   React.useEffect(() => {
@@ -132,6 +142,18 @@ export const CalkitSidebar: React.FC = () => {
     });
   }, []);
 
+  const toggleNotebook = useCallback((notebookId: string) => {
+    setExpandedNotebooks((prev) => {
+      const next = new Set(prev);
+      if (next.has(notebookId)) {
+        next.delete(notebookId);
+      } else {
+        next.add(notebookId);
+      }
+      return next;
+    });
+  }, []);
+
   const handleAddPackage = useCallback(
     async (envName: string) => {
       const packageName = newPackage[envName];
@@ -204,6 +226,101 @@ export const CalkitSidebar: React.FC = () => {
       setSectionData(transformed);
     } catch (error) {
       console.error("Failed to create environment:", error);
+    }
+  }, [sectionData]);
+
+  const handleCreateNotebook = useCallback(async () => {
+    const environmentList = sectionData.environments || [];
+
+    const createEnvironmentCallback = async (): Promise<string | null> => {
+      const result = await showEnvironmentEditor({ mode: "create" });
+      if (!result) {
+        return null;
+      }
+      try {
+        await requestAPI("environment/create", {
+          method: "POST",
+          body: JSON.stringify({
+            name: result.name,
+            kind: result.kind,
+            packages: result.packages,
+          }),
+        });
+        // Refresh environments data
+        const info = await requestAPI<any>("project");
+        const transformed = {
+          ...sectionData,
+          environments: Object.entries(info.environments || {}).map(
+            ([name, obj]) => ({
+              id: name,
+              label: name,
+              ...(typeof obj === "object" ? obj : {}),
+            }),
+          ),
+        };
+        setSectionData(transformed);
+        return result.name;
+      } catch (error) {
+        console.error("Failed to create environment:", error);
+        return null;
+      }
+    };
+
+    const data = await showNotebookRegistration(
+      "create",
+      [],
+      environmentList.map((env) => ({ id: env.id, label: env.label })),
+      createEnvironmentCallback,
+    );
+    if (!data) {
+      return;
+    }
+    try {
+      await requestAPI("notebook/create", {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+      // Refresh data
+      const info = await requestAPI<any>("project");
+      const transformed = {
+        ...sectionData,
+        notebooks: Object.entries(info.notebooks || {}).map(([name, obj]) => ({
+          id: name,
+          label: name,
+          ...(typeof obj === "object" ? obj : {}),
+        })),
+      };
+      setSectionData(transformed);
+    } catch (error) {
+      console.error("Failed to create notebook:", error);
+    }
+  }, [sectionData]);
+
+  const handleRegisterNotebook = useCallback(async () => {
+    // TODO: Get list of existing notebooks from workspace
+    const existingNotebooks: string[] = [];
+    const data = await showNotebookRegistration("register", existingNotebooks);
+    if (!data) {
+      return;
+    }
+    try {
+      await requestAPI("notebook/register", {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+      // Refresh data
+      const info = await requestAPI<any>("project");
+      const transformed = {
+        ...sectionData,
+        notebooks: Object.entries(info.notebooks || {}).map(([name, obj]) => ({
+          id: name,
+          label: name,
+          ...(typeof obj === "object" ? obj : {}),
+        })),
+      };
+      setSectionData(transformed);
+    } catch (error) {
+      console.error("Failed to register notebook:", error);
     }
   }, [sectionData]);
 
@@ -378,17 +495,132 @@ export const CalkitSidebar: React.FC = () => {
       expandedEnvironments,
       newPackage,
       toggleEnvironment,
-      handleAddPackage,
       handleNewPackageChange,
+      handleAddPackage,
       sectionData,
     ],
+  );
+
+  const renderNotebookItem = useCallback(
+    (item: SectionItem) => {
+      const isExpanded = expandedNotebooks.has(item.id);
+      const environment = item.environment || "";
+      const inPipeline = item.in_pipeline || false;
+      const environmentList = sectionData.environments || [];
+
+      return (
+        <div key={item.id}>
+          <div
+            className="calkit-sidebar-item calkit-notebook-item"
+            onClick={() => toggleNotebook(item.id)}
+          >
+            <span className="calkit-sidebar-section-icon">
+              {isExpanded ? "▼" : "▶"}
+            </span>
+            <span className="calkit-sidebar-item-label">{item.label}</span>
+          </div>
+          {isExpanded && (
+            <div className="calkit-notebook-details">
+              <div className="calkit-notebook-field">
+                <label className="calkit-notebook-field-label">
+                  Environment:
+                </label>
+                <select
+                  className="calkit-notebook-env-select"
+                  value={environment}
+                  onChange={async (e) => {
+                    const newEnv = e.target.value;
+                    try {
+                      await requestAPI("notebook/set-environment", {
+                        method: "POST",
+                        body: JSON.stringify({
+                          notebook: item.id,
+                          environment: newEnv,
+                        }),
+                      });
+                      // Refresh data
+                      const info = await requestAPI<any>("project");
+                      const transformed = {
+                        ...sectionData,
+                        notebooks: Object.entries(info.notebooks || {}).map(
+                          ([name, obj]) => ({
+                            id: name,
+                            label: name,
+                            ...(typeof obj === "object" ? obj : {}),
+                          }),
+                        ),
+                      };
+                      setSectionData(transformed);
+                    } catch (error) {
+                      console.error(
+                        "Failed to set notebook environment:",
+                        error,
+                      );
+                    }
+                  }}
+                >
+                  <option value="">None</option>
+                  {environmentList.map((env) => (
+                    <option key={env.id} value={env.id}>
+                      {env.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="calkit-notebook-field">
+                <label className="calkit-notebook-field-label">
+                  <input
+                    type="checkbox"
+                    className="calkit-notebook-pipeline-checkbox"
+                    checked={inPipeline}
+                    onChange={async (e) => {
+                      const checked = e.target.checked;
+                      try {
+                        await requestAPI("notebook/set-in-pipeline", {
+                          method: "POST",
+                          body: JSON.stringify({
+                            notebook: item.id,
+                            in_pipeline: checked,
+                          }),
+                        });
+                        // Refresh data
+                        const info = await requestAPI<any>("project");
+                        const transformed = {
+                          ...sectionData,
+                          notebooks: Object.entries(info.notebooks || {}).map(
+                            ([name, obj]) => ({
+                              id: name,
+                              label: name,
+                              ...(typeof obj === "object" ? obj : {}),
+                            }),
+                          ),
+                        };
+                        setSectionData(transformed);
+                      } catch (error) {
+                        console.error(
+                          "Failed to set notebook pipeline status:",
+                          error,
+                        );
+                      }
+                    }}
+                  />
+                  Include in pipeline
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    },
+    [expandedNotebooks, toggleNotebook, sectionData],
   );
 
   const renderSection = useCallback(
     (sectionId: string, sectionLabel: string, icon: string) => {
       const isExpanded = expandedSections.has(sectionId);
       const items = sectionData[sectionId] || [];
-      const showCreateButton = sectionId === "environments";
+      const showCreateButton =
+        sectionId === "environments" || sectionId === "notebooks";
 
       return (
         <div key={sectionId} className="calkit-sidebar-section">
@@ -399,6 +631,13 @@ export const CalkitSidebar: React.FC = () => {
               if (sectionId === "environments") {
                 e.preventDefault();
                 setEnvContextMenu({
+                  visible: true,
+                  x: e.clientX,
+                  y: e.clientY,
+                });
+              } else if (sectionId === "notebooks") {
+                e.preventDefault();
+                setNotebookContextMenu({
                   visible: true,
                   x: e.clientX,
                   y: e.clientY,
@@ -416,9 +655,17 @@ export const CalkitSidebar: React.FC = () => {
                 className="calkit-sidebar-section-create"
                 onClick={(e) => {
                   e.stopPropagation();
-                  handleCreateEnvironment();
+                  if (sectionId === "environments") {
+                    handleCreateEnvironment();
+                  } else if (sectionId === "notebooks") {
+                    handleCreateNotebook();
+                  }
                 }}
-                title="Create new environment"
+                title={
+                  sectionId === "environments"
+                    ? "Create new environment"
+                    : "Create new notebook"
+                }
               >
                 +
               </button>
@@ -438,11 +685,20 @@ export const CalkitSidebar: React.FC = () => {
                     x: e.clientX,
                     y: e.clientY,
                   });
+                } else if (sectionId === "notebooks") {
+                  e.preventDefault();
+                  setNotebookContextMenu({
+                    visible: true,
+                    x: e.clientX,
+                    y: e.clientY,
+                  });
                 }
               }}
             >
               {sectionId === "environments"
                 ? items.map((item) => renderEnvironmentItem(item))
+                : sectionId === "notebooks"
+                ? items.map((item) => renderNotebookItem(item))
                 : items.map((item) => (
                     <div key={item.id} className="calkit-sidebar-item">
                       <span className="calkit-sidebar-item-label">
@@ -463,7 +719,9 @@ export const CalkitSidebar: React.FC = () => {
       sectionData,
       toggleSection,
       renderEnvironmentItem,
+      renderNotebookItem,
       handleCreateEnvironment,
+      handleCreateNotebook,
     ],
   );
 
@@ -594,6 +852,33 @@ export const CalkitSidebar: React.FC = () => {
               }}
             >
               New environment
+            </div>
+          </div>,
+          document.body,
+        )}
+      {notebookContextMenu?.visible &&
+        ReactDOM.createPortal(
+          <div
+            className="calkit-env-context-menu"
+            style={{ left: notebookContextMenu.x, top: notebookContextMenu.y }}
+          >
+            <div
+              className="calkit-env-context-item"
+              onClick={() => {
+                setNotebookContextMenu(null);
+                handleCreateNotebook();
+              }}
+            >
+              Create new notebook
+            </div>
+            <div
+              className="calkit-env-context-item"
+              onClick={() => {
+                setNotebookContextMenu(null);
+                handleRegisterNotebook();
+              }}
+            >
+              Register existing notebook
             </div>
           </div>,
           document.body,

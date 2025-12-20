@@ -87,7 +87,8 @@
 }
 
 .calkit-sidebar-item {
-  padding: 4px 24px;
+  padding: 6px 32px;
+  margin: 2px 0;
   font-size: 11px;
   color: var(--jp-ui-font-color1);
   cursor: pointer;

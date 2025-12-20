@@ -2142,7 +2142,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@jupyterlab/apputils@npm:^4.6.1":
+"@jupyterlab/apputils@npm:^4.0.0, @jupyterlab/apputils@npm:^4.6.1":
   version: 4.6.1
   resolution: "@jupyterlab/apputils@npm:4.6.1"
   dependencies:
@@ -2439,6 +2439,24 @@ __metadata:
     jest-environment-jsdom: ^29.3.0
     react: ^18.2.0
   checksum: e2e54540f1d621b3a29b8b4c7807e3218a2180f3cdc9b66c613cfaa9da83dd51ea7bcfd2d68af305dde7e603c555ccdf2447e073bf601ac0dc93bf2cdc306bc0
+  languageName: node
+  linkType: hard
+
+"@jupyterlab/launcher@npm:^4.0.0":
+  version: 4.5.1
+  resolution: "@jupyterlab/launcher@npm:4.5.1"
+  dependencies:
+    "@jupyterlab/apputils": ^4.6.1
+    "@jupyterlab/translation": ^4.5.1
+    "@jupyterlab/ui-components": ^4.5.1
+    "@lumino/algorithm": ^2.0.4
+    "@lumino/commands": ^2.3.3
+    "@lumino/coreutils": ^2.2.2
+    "@lumino/disposable": ^2.1.5
+    "@lumino/properties": ^2.0.4
+    "@lumino/widgets": ^2.7.2
+    react: ^18.2.0
+  checksum: 247d10897a9f5e703e1f64df4db8f58b34c0675658b4cc8f7f4d09dbb6cdbf6bd8498a3159a730862075da36624d282b76176c681ae48d1a6cd37a5cfc5749e8
   languageName: node
   linkType: hard
 
@@ -4636,8 +4654,10 @@ __metadata:
   resolution: "calkit@workspace:."
   dependencies:
     "@jupyterlab/application": ^4.0.0
+    "@jupyterlab/apputils": ^4.0.0
     "@jupyterlab/builder": ^4.0.0
     "@jupyterlab/coreutils": ^6.0.0
+    "@jupyterlab/launcher": ^4.0.0
     "@jupyterlab/services": ^7.0.0
     "@jupyterlab/settingregistry": ^4.0.0
     "@jupyterlab/testutils": ^4.0.0

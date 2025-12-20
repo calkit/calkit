@@ -6,10 +6,13 @@ import {
 
 import { WidgetTracker } from '@jupyterlab/apputils';
 
+import { ILauncher } from '@jupyterlab/launcher';
+
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
 
 import { requestAPI } from './request';
 import { CalkitSidebarWidget } from './sidebar';
+import { filterLauncher } from './launcher-filter';
 
 /**
  * Initialization data for the calkit extension.
@@ -19,11 +22,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
   description: 'A JupyterLab extension for Calkit projects.',
   autoStart: true,
   requires: [ILayoutRestorer],
-  optional: [ISettingRegistry],
+  optional: [ISettingRegistry, ILauncher],
   activate: (
     app: JupyterFrontEnd,
     restorer: ILayoutRestorer,
-    settingRegistry: ISettingRegistry | null
+    settingRegistry: ISettingRegistry | null,
+    launcher: ILauncher | null
   ) => {
     console.log('JupyterLab extension calkit is activated!');
 
@@ -49,6 +53,11 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
     // Track the sidebar widget
     tracker.add(sidebar);
+
+    // Filter launcher if calkit.yaml exists
+    if (launcher) {
+      void filterLauncher(launcher);
+    }
 
     if (settingRegistry) {
       settingRegistry

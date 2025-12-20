@@ -1,5 +1,13 @@
 {
   "jupyter.lab.shortcuts": [],
+  "jupyter.lab.toolbars": {
+    "Cell": [
+      {
+        "name": "calkit-output-marker",
+        "rank": 60
+      }
+    ]
+  },
   "title": "calkit",
   "description": "calkit settings.",
   "type": "object",

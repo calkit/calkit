@@ -288,15 +288,20 @@
 /* Status chips in section headers */
 .calkit-status-chips {
   display: inline-flex;
-  gap: 4px;
+  gap: 6px;
   margin-left: 6px;
 }
 .calkit-status-chip {
-  display: inline-block;
-  padding: 0 6px;
-  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
   font-size: 9px;
-  line-height: 1.4;
+  font-weight: 700;
+  line-height: 1;
   border: 1px solid var(--jp-border-color2);
 }
 .calkit-status-chip.new {
@@ -314,13 +319,18 @@
   color: var(--jp-layout-color0);
   border-color: var(--jp-info-color2);
 }
+.calkit-status-chip.clean {
+  background-color: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color2);
+  border-color: var(--jp-border-color2);
+}
 
 .calkit-sidebar-section-save {
   margin-left: 8px;
   padding: 2px 8px;
   font-size: 10px;
-  border: 1px solid var(--jp-border-color2);
-  background: var(--jp-layout-color1);
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--jp-ui-font-color1);
   border-radius: 4px;
   cursor: pointer;
@@ -328,6 +338,7 @@
 
 .calkit-sidebar-section-save:hover {
   background: var(--jp-layout-color2);
+  border-color: var(--jp-border-color1);
 }
 
 /* Save/Sync section styling */

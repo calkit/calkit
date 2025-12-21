@@ -33,7 +33,7 @@ const SECTION_DEFS: SectionDefinition[] = [
   { id: "figures", label: "Figures", icon: "📊", defaultVisible: false },
   { id: "datasets", label: "Datasets", icon: "📁" },
   { id: "questions", label: "Questions", icon: "❓" },
-  { id: "history", label: "Save & sync", icon: "🔃", toggleable: false },
+  { id: "history", label: "Save/sync", icon: "🔃", toggleable: false },
   {
     id: "publications",
     label: "Publications",
@@ -913,6 +913,17 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
       const showCreateButton =
         sectionId === "environments" || sectionId === "notebooks";
       const showEditButton = sectionId === "basicInfo";
+      const newCount =
+        sectionId === "history" ? (gitStatus.untracked || []).length : 0;
+      const modifiedCount =
+        sectionId === "history"
+          ? new Set([...(gitStatus.changed || []), ...(gitStatus.staged || [])])
+              .size
+          : 0;
+      const pullCount = sectionId === "history" ? gitStatus.behind || 0 : 0;
+      const hasChanges = newCount > 0 || modifiedCount > 0 || pullCount > 0;
+      const saveIcon = pullCount > 0 ? "⬇️" : "💾";
+      const saveTitle = pullCount > 0 ? "Pull changes" : "Save";
 
       return (
         <div key={sectionId} className="calkit-sidebar-section">
@@ -943,58 +954,49 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
             <span className="calkit-sidebar-section-label">{icon}</span>
             <span className="calkit-sidebar-section-title">{sectionLabel}</span>
             {sectionId === "history" &&
-              (() => {
-                const newCount = (gitStatus.untracked || []).length;
-                const modifiedSet = new Set([
-                  ...(gitStatus.changed || []),
-                  ...(gitStatus.staged || []),
-                ]);
-                const modifiedCount = modifiedSet.size;
-                const pullCount = gitStatus.behind || 0;
-                const hasChanges =
-                  newCount > 0 || modifiedCount > 0 || pullCount > 0;
-                return (
-                  <span className="calkit-status-chips">
-                    {newCount > 0 && (
-                      <span
-                        className="calkit-status-chip new"
-                        title="New (untracked) files"
-                      >
-                        N: {newCount}
-                      </span>
-                    )}
-                    {modifiedCount > 0 && (
-                      <span
-                        className="calkit-status-chip modified"
-                        title="Modified files"
-                      >
-                        M: {modifiedCount}
-                      </span>
-                    )}
-                    {pullCount > 0 && (
-                      <span
-                        className="calkit-status-chip pull"
-                        title="Commits to pull"
-                      >
-                        P: {pullCount}
-                      </span>
-                    )}
-                    {!hasChanges && (
-                      <span className="calkit-status-chip clean">Clean</span>
-                    )}
-                  </span>
-                );
-              })()}
+              (() => (
+                <span className="calkit-status-chips">
+                  {newCount > 0 && (
+                    <span
+                      className="calkit-status-chip new"
+                      title={`New (untracked) files: ${newCount}`}
+                    >
+                      {newCount}
+                    </span>
+                  )}
+                  {modifiedCount > 0 && (
+                    <span
+                      className="calkit-status-chip modified"
+                      title={`Modified files: ${modifiedCount}`}
+                    >
+                      {modifiedCount}
+                    </span>
+                  )}
+                  {pullCount > 0 && (
+                    <span
+                      className="calkit-status-chip pull"
+                      title={`Commits to pull: ${pullCount}`}
+                    >
+                      {pullCount}
+                    </span>
+                  )}
+                  {!hasChanges && (
+                    <span className="calkit-status-chip clean" title="Clean">
+                      ✓
+                    </span>
+                  )}
+                </span>
+              ))()}
             {sectionId === "history" && (
               <button
                 className="calkit-sidebar-section-save"
-                title="Save/sync"
+                title={saveTitle}
                 onClick={(e) => {
                   e.stopPropagation();
                   handleCommit();
                 }}
               >
-                Save/sync
+                {saveIcon}
               </button>
             )}
             {showEditButton && (
@@ -1095,17 +1097,6 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
           )}
           {isExpanded && sectionId === "history" && (
             <div className="calkit-sidebar-section-content">
-              <div className="calkit-git-actions">
-                <button
-                  className="calkit-sidebar-section-create"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleCommit();
-                  }}
-                >
-                  Save
-                </button>
-              </div>
               <div className="calkit-git-history">
                 <div className="calkit-git-history-header">Recent history</div>
                 {gitHistory.length === 0 && (

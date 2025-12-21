@@ -334,7 +334,7 @@ class GitHistoryRouteHandler(APIHandler):
             self.set_status(500)
             self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
             return
-        max_count = int(self.get_argument("max", 20))
+        max_count = int(self.get_argument("max", "20"))
         commits = []
         for c in repo.iter_commits(max_count=max_count):
             commits.append(

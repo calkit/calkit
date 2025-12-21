@@ -4,6 +4,7 @@ import { ReactWidget, Dialog } from "@jupyterlab/apputils";
 import { requestAPI } from "./request";
 import { showEnvironmentEditor } from "./environment-editor";
 import { showNotebookRegistration } from "./notebook-registration";
+import { showProjectInfoEditor } from "./project-info-editor";
 
 interface SectionItem {
   id: string;
@@ -18,7 +19,7 @@ interface SectionItem {
  */
 export const CalkitSidebar: React.FC = () => {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
-    () => new Set(["environments", "notebooks"]),
+    () => new Set(["basicInfo", "environments", "notebooks"]),
   );
   const [expandedEnvironments, setExpandedEnvironments] = useState<Set<string>>(
     new Set(),
@@ -61,6 +62,13 @@ export const CalkitSidebar: React.FC = () => {
     ]);
   });
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
+  const [projectInfo, setProjectInfo] = useState<{
+    name: string;
+    title: string;
+    description: string;
+    git_repo_url: string;
+    owner: string;
+  }>({ name: "", title: "", description: "", git_repo_url: "", owner: "" });
 
   // Persist visible sections to localStorage
   React.useEffect(() => {
@@ -98,6 +106,15 @@ export const CalkitSidebar: React.FC = () => {
     const fetchSectionData = async () => {
       try {
         const info = await requestAPI<any>("project");
+        // Populate project basic info; support both top-level and nested `project` shapes
+        const pi = {
+          name: info?.name ?? info?.project?.name ?? "",
+          title: info?.title ?? info?.project?.title ?? "",
+          description: info?.description ?? info?.project?.description ?? "",
+          git_repo_url: info?.git_repo_url ?? info?.project?.git_repo_url ?? "",
+          owner: info?.owner ?? info?.project?.owner ?? "",
+        };
+        setProjectInfo(pi);
         const transformed: Record<string, SectionItem[]> = {
           environments: Object.entries(info.environments || {}).map(
             ([name, obj]) => ({
@@ -232,6 +249,31 @@ export const CalkitSidebar: React.FC = () => {
     },
     [],
   );
+
+  const handleSaveProjectInfo = useCallback(async () => {
+    const result = await showProjectInfoEditor(projectInfo);
+    if (!result) {
+      return;
+    }
+    try {
+      await requestAPI("project", {
+        method: "PUT",
+        body: JSON.stringify(result),
+      });
+      // Re-fetch after save to reflect any server-side normalization
+      const info = await requestAPI<any>("project");
+      const pi = {
+        name: info?.name ?? info?.project?.name ?? "",
+        title: info?.title ?? info?.project?.title ?? "",
+        description: info?.description ?? info?.project?.description ?? "",
+        git_repo_url: info?.git_repo_url ?? info?.project?.git_repo_url ?? "",
+        owner: info?.owner ?? info?.project?.owner ?? "",
+      };
+      setProjectInfo(pi);
+    } catch (error) {
+      console.error("Failed to save project info:", error);
+    }
+  }, [projectInfo]);
 
   const handleCreateEnvironment = useCallback(async () => {
     const result = await showEnvironmentEditor({ mode: "create" });
@@ -657,6 +699,7 @@ export const CalkitSidebar: React.FC = () => {
       const items = sectionData[sectionId] || [];
       const showCreateButton =
         sectionId === "environments" || sectionId === "notebooks";
+      const showEditButton = sectionId === "basicInfo";
 
       return (
         <div key={sectionId} className="calkit-sidebar-section">
@@ -686,6 +729,18 @@ export const CalkitSidebar: React.FC = () => {
             </span>
             <span className="calkit-sidebar-section-label">{icon}</span>
             <span className="calkit-sidebar-section-title">{sectionLabel}</span>
+            {showEditButton && (
+              <button
+                className="calkit-sidebar-section-edit"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSaveProjectInfo();
+                }}
+                title="Edit project info"
+              >
+                ✏️
+              </button>
+            )}
             {showCreateButton && (
               <button
                 className="calkit-sidebar-section-create"
@@ -710,7 +765,67 @@ export const CalkitSidebar: React.FC = () => {
               {items.length > 0 && `(${items.length})`}
             </span>
           </div>
-          {isExpanded && items.length > 0 && (
+          {isExpanded && sectionId === "basicInfo" && (
+            <div className="calkit-sidebar-section-content">
+              <div className="calkit-basic-info-item">
+                <span className="calkit-basic-info-label">Name:</span>
+                <span className="calkit-basic-info-value">
+                  {projectInfo.name || "—"}
+                </span>
+              </div>
+              <div className="calkit-basic-info-item">
+                <span className="calkit-basic-info-label">Title:</span>
+                <span className="calkit-basic-info-value">
+                  {projectInfo.title || "—"}
+                </span>
+              </div>
+              <div className="calkit-basic-info-item">
+                <span className="calkit-basic-info-label">Description:</span>
+                <span className="calkit-basic-info-value">
+                  {projectInfo.description || "—"}
+                </span>
+              </div>
+              <div className="calkit-basic-info-item">
+                <span className="calkit-basic-info-label">Git repo:</span>
+                <span className="calkit-basic-info-value">
+                  {projectInfo.git_repo_url ? (
+                    /^https?:\/\//i.test(projectInfo.git_repo_url) ? (
+                      <a
+                        href={projectInfo.git_repo_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="calkit-basic-info-link"
+                      >
+                        {projectInfo.git_repo_url}
+                      </a>
+                    ) : (
+                      projectInfo.git_repo_url
+                    )
+                  ) : (
+                    "—"
+                  )}
+                </span>
+              </div>
+              <div className="calkit-basic-info-item">
+                <span className="calkit-basic-info-label">Calkit URL:</span>
+                <span className="calkit-basic-info-value">
+                  {projectInfo.owner && projectInfo.name ? (
+                    <a
+                      href={`https://calkit.io/${projectInfo.owner}/${projectInfo.name}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="calkit-basic-info-link"
+                    >
+                      {`https://calkit.io/${projectInfo.owner}/${projectInfo.name}`}
+                    </a>
+                  ) : (
+                    "—"
+                  )}
+                </span>
+              </div>
+            </div>
+          )}
+          {isExpanded && items.length > 0 && sectionId !== "basicInfo" && (
             <div
               className="calkit-sidebar-section-content"
               onContextMenu={(e) => {
@@ -744,7 +859,7 @@ export const CalkitSidebar: React.FC = () => {
                   ))}
             </div>
           )}
-          {isExpanded && items.length === 0 && (
+          {isExpanded && items.length === 0 && sectionId !== "basicInfo" && (
             <div className="calkit-sidebar-section-empty">No items found</div>
           )}
         </div>
@@ -758,6 +873,8 @@ export const CalkitSidebar: React.FC = () => {
       renderNotebookItem,
       handleCreateEnvironment,
       handleCreateNotebook,
+      projectInfo,
+      handleSaveProjectInfo,
     ],
   );
 
@@ -1079,6 +1196,7 @@ export const CalkitSidebar: React.FC = () => {
         </div>
       </div>
       <div className="calkit-sidebar-content">
+        {renderSection("basicInfo", "Basic info", "ℹ️")}
         {visibleSections.has("environments") &&
           renderSection("environments", "Environments", "⚙️")}
         {visibleSections.has("pipelineStages") &&

@@ -37,6 +37,28 @@ class ProjectRouteHandler(APIHandler):
         self.log.info(f"Received request for project info in {os.getcwd()}")
         self.finish(json.dumps(calkit.load_calkit_info()))
 
+    @tornado.web.authenticated
+    def put(self):
+        """Update project metadata (name, title, description, git_repo_url)."""
+        self.log.info("Received PUT request to update project info")
+        body = self.get_json_body()
+        if not body:
+            self.set_status(400)
+            self.finish(
+                json.dumps({"error": "Request body must be valid JSON"})
+            )
+            return
+        ck_info = calkit.load_calkit_info(process_includes=False)
+        # Update top-level fields from body
+        for field in ["name", "title", "description", "git_repo_url", "owner"]:
+            if field in body:
+                ck_info[field] = body[field]
+        # Write back to calkit.yaml
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        self.log.info("Updated project info successfully")
+        self.finish(json.dumps(ck_info))
+
 
 class KernelspecsRouteHandler(APIHandler):
     @tornado.web.authenticated

@@ -296,3 +296,48 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Project info editor dialog styles */
+.calkit-project-info-editor {
+  padding: 10px;
+  min-width: 400px;
+  max-width: 500px;
+}
+
+/* Shared dialog field styles */
+.calkit-dialog-field {
+  margin-bottom: 15px;
+}
+
+.calkit-dialog-field label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--jp-ui-font-color1);
+}
+
+.calkit-dialog-field input,
+.calkit-dialog-field textarea {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid var(--jp-border-color1);
+  background-color: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color0);
+  border-radius: 3px;
+  box-sizing: border-box;
+  font-family: var(--jp-ui-font-family);
+}
+
+.calkit-dialog-field input:focus,
+.calkit-dialog-field textarea:focus {
+  outline: none;
+  border-color: var(--jp-brand-color1);
+  box-shadow: 0 0 0 1px var(--jp-brand-color1);
+}
+
+.calkit-dialog-field textarea {
+  resize: vertical;
+  min-height: 80px;
+}

@@ -55,6 +55,88 @@
   overflow-clip-margin: 999999px;
 }
 
+/* Basic info display in sidebar */
+.calkit-basic-info-item {
+  padding: 4px 12px;
+  margin: 2px 0;
+  font-size: 11px;
+}
+
+.calkit-basic-info-label {
+  display: block;
+  font-weight: 500;
+  color: var(--jp-ui-font-color2);
+  margin-bottom: 2px;
+}
+
+.calkit-basic-info-value {
+  display: block;
+  color: var(--jp-ui-font-color1);
+  word-wrap: break-word;
+  white-space: normal;
+}
+
+.calkit-basic-info-link {
+  color: var(--jp-brand-color1);
+  text-decoration: none;
+}
+
+.calkit-basic-info-link:hover {
+  text-decoration: underline;
+}
+
+/* Basic Info section */
+.calkit-basic-info {
+  padding: 8px 12px 12px 12px;
+  background-color: var(--jp-layout-color0);
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  margin: 8px 8px 12px 8px;
+}
+
+.calkit-basic-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.calkit-basic-label {
+  width: 120px;
+  font-size: 12px;
+  color: var(--jp-ui-font-color2);
+}
+
+.calkit-basic-input {
+  flex: 1;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.calkit-basic-textarea {
+  flex: 1;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.calkit-basic-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.calkit-basic-save {
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 3px;
+  background-color: var(--jp-layout-color2);
+  cursor: pointer;
+}
+
+.calkit-basic-save:hover {
+  background-color: var(--jp-layout-color1);
+}
+
 .calkit-sidebar-section {
   border-bottom: 1px solid var(--jp-border-color2);
 }
@@ -88,6 +170,24 @@
 
 .calkit-sidebar-section-create:hover {
   background-color: var(--jp-brand-color0);
+}
+
+.calkit-sidebar-section-edit {
+  font-size: 14px;
+  padding: 2px 6px;
+  margin-left: 2px;
+  background-color: transparent;
+  color: var(--jp-ui-font-color2);
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  line-height: 1.2;
+}
+
+.calkit-sidebar-section-edit:hover {
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
 }
 
 .calkit-sidebar-section-icon {

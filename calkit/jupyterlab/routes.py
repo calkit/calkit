@@ -3,19 +3,20 @@
 import glob
 import json
 import os
+import subprocess
+import sys
 
+import git
 import tornado
 from jupyter_server.base.handlers import APIHandler
 from jupyter_server.utils import url_path_join
 from pydantic import BaseModel
 
 import calkit
+from calkit.git import ensure_path_is_ignored
 
 
 class HelloRouteHandler(APIHandler):
-    # The following decorator should be present on all verb methods
-    # (head, get, post, patch, put, delete, options) to ensure only authorized
-    # users can request the Jupyter server
     @tornado.web.authenticated
     def get(self):
         self.finish(
@@ -25,7 +26,7 @@ class HelloRouteHandler(APIHandler):
                         "Hello, world!"
                         " This is the '/calkit/hello' endpoint."
                         " Try visiting me in your browser!"
-                    ),
+                    )
                 }
             )
         )
@@ -111,11 +112,7 @@ class NotebooksRouteHandler(APIHandler):
 
     @tornado.web.authenticated
     def post(self):
-        """Post a new notebook.
-
-        If the file already exists, add it to the project notebooks and
-        pipeline.
-        """
+        """Add a notebook, and include if it exists."""
         body = self.get_json_body()
         if not body:
             self.set_status(400)
@@ -135,16 +132,12 @@ class NotebooksRouteHandler(APIHandler):
 class GitStatusRouteHandler(APIHandler):
     @tornado.web.authenticated
     def get(self):
-        import git as gitlib
-
         try:
-            repo = gitlib.Repo(os.getcwd())
+            repo = git.Repo(os.getcwd())
         except Exception as e:
             self.set_status(500)
             self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
             return
-
-        # Changed (unstaged), staged, untracked
         changed = [
             item.a_path for item in repo.index.diff(None) if item.a_path
         ]
@@ -152,14 +145,12 @@ class GitStatusRouteHandler(APIHandler):
             item.a_path for item in repo.index.diff("HEAD") if item.a_path
         ]
         untracked = list(repo.untracked_files)
-
         try:
             tracked = list(
                 {*changed, *staged, *repo.git.ls_files().splitlines()}
             )
         except Exception:
             tracked = list({*changed, *staged})
-
         sizes: dict[str, int] = {}
         for path in {
             **{p: None for p in changed},
@@ -170,8 +161,6 @@ class GitStatusRouteHandler(APIHandler):
                 sizes[path] = os.path.getsize(path)
             except Exception:
                 continue
-
-        # Ahead/behind counts
         ahead = 0
         behind = 0
         branch = None
@@ -192,7 +181,6 @@ class GitStatusRouteHandler(APIHandler):
                         ahead += 1
         except Exception:
             pass
-
         self.finish(
             json.dumps(
                 {
@@ -219,17 +207,12 @@ class GitIgnoreRouteHandler(APIHandler):
             self.set_status(400)
             self.finish(json.dumps({"error": "paths must be a list"}))
             return
-        import git as gitlib
-
-        from calkit.git import ensure_path_is_ignored
-
         try:
-            repo = gitlib.Repo(os.getcwd())
+            repo = git.Repo(os.getcwd())
         except Exception as e:
             self.set_status(500)
             self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
             return
-
         for path in paths:
             try:
                 ensure_path_is_ignored(repo, path)
@@ -239,7 +222,6 @@ class GitIgnoreRouteHandler(APIHandler):
                     json.dumps({"error": f"Failed to ignore {path}: {e}"})
                 )
                 return
-
         self.finish(json.dumps({"ok": True, "ignored": paths}))
 
 
@@ -249,27 +231,16 @@ class GitCommitRouteHandler(APIHandler):
         body = self.get_json_body() or {}
         message = body.get("message", "")
         files = body.get("files", [])
-
         if not message:
             self.set_status(400)
             self.finish(json.dumps({"error": "Commit 'message' is required"}))
             return
-
-        import subprocess
-        import sys
-
-        import git as gitlib
-
-        from calkit.git import ensure_path_is_ignored
-
         try:
-            repo = gitlib.Repo(os.getcwd())
+            repo = git.Repo(os.getcwd())
         except Exception as e:
             self.set_status(500)
             self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
             return
-
-        # Stage selected files, optionally via DVC
         staged_paths: list[str] = []
         for f in files:
             path = f.get("path")
@@ -278,13 +249,11 @@ class GitCommitRouteHandler(APIHandler):
             store_in_dvc = bool(f.get("store_in_dvc"))
             stage = f.get("stage", True)
             if store_in_dvc:
-                # dvc add the file, ensure original path is ignored
                 try:
                     subprocess.check_call(
                         [sys.executable, "-m", "dvc", "add", path]
                     )
                     ensure_path_is_ignored(repo, path)
-                    # Stage the .dvc file produced by dvc add
                     dvc_file = f"{path}.dvc"
                     if os.path.exists(dvc_file):
                         repo.git.add([dvc_file])
@@ -307,8 +276,6 @@ class GitCommitRouteHandler(APIHandler):
                         json.dumps({"error": f"Failed to stage {path}: {e}"})
                     )
                     return
-
-        # Commit
         try:
             if staged_paths:
                 repo.index.commit(message)
@@ -319,17 +286,14 @@ class GitCommitRouteHandler(APIHandler):
             self.set_status(500)
             self.finish(json.dumps({"error": f"Commit failed: {e}"}))
             return
-
         self.finish(json.dumps({"ok": True, "committed": staged_paths}))
 
 
 class GitHistoryRouteHandler(APIHandler):
     @tornado.web.authenticated
     def get(self):
-        import git as gitlib
-
         try:
-            repo = gitlib.Repo(os.getcwd())
+            repo = git.Repo(os.getcwd())
         except Exception as e:
             self.set_status(500)
             self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
@@ -351,22 +315,18 @@ class GitHistoryRouteHandler(APIHandler):
 class GitPushRouteHandler(APIHandler):
     @tornado.web.authenticated
     def post(self):
-        import git as gitlib
-
         try:
-            repo = gitlib.Repo(os.getcwd())
+            repo = git.Repo(os.getcwd())
         except Exception as e:
             self.set_status(500)
             self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
             return
-
         try:
             remote = repo.remotes[0]
         except Exception:
             self.set_status(400)
             self.finish(json.dumps({"error": "No git remote configured"}))
             return
-
         try:
             res = remote.push()
             messages = [str(r) for r in res]

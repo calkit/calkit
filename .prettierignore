@@ -4,3 +4,7 @@ node_modules
 **/package.json
 !/package.json
 calkit
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.venv

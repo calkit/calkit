@@ -1,21 +1,38 @@
 import React, { useCallback, useState } from "react";
 import ReactDOM from "react-dom";
 import { ReactWidget, Dialog } from "@jupyterlab/apputils";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient } from "./queryClient";
 import { requestAPI } from "./request";
 import type { ISettingRegistry } from "@jupyterlab/settingregistry";
 import type { IStateDB } from "@jupyterlab/statedb";
+import {
+  useProject,
+  useGitStatus,
+  useGitHistory,
+  useCreateNotebook,
+  useRegisterNotebook,
+  useAddPackage,
+  useCreateEnvironment,
+  useCommit,
+  usePush,
+  useUpdateEnvironment,
+  useDeleteEnvironment,
+  type IProjectInfo,
+  type IGitStatus,
+} from "./hooks/useQueries";
 import { showEnvironmentEditor } from "./environment-editor";
 import { showNotebookRegistration } from "./notebook-registration";
 import { showProjectInfoEditor } from "./project-info-editor";
 import { showCommitDialog } from "./commit-dialog";
 
-interface SectionItem {
+interface ISectionItem {
   id: string;
   label: string;
   [key: string]: any;
 }
 
-interface SectionDefinition {
+interface ISectionDefinition {
   id: string;
   label: string;
   icon: string;
@@ -25,7 +42,7 @@ interface SectionDefinition {
   defaultVisible?: boolean;
 }
 
-const SECTION_DEFS: SectionDefinition[] = [
+const SECTION_DEFS: ISectionDefinition[] = [
   { id: "basicInfo", label: "Basic info", icon: "ℹ️", toggleable: false },
   { id: "environments", label: "Environments", icon: "⚙️" },
   { id: "pipelineStages", label: "Pipeline", icon: "🔄" },
@@ -55,15 +72,31 @@ const DEFAULT_VISIBLE_SECTIONS = new Set(
  * Displays sections for environments, pipeline stages, notebooks, figures,
  * datasets, questions, history, publications, notes, and models.
  */
-export interface CalkitSidebarProps {
+export interface ICalkitSidebarProps {
   settings?: ISettingRegistry.ISettings | null;
   stateDB?: IStateDB | null;
 }
 
-export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
+export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   settings,
   stateDB,
 }) => {
+  // Query hooks - automatically manage data fetching and caching
+  const projectQuery = useProject();
+  const gitStatusQuery = useGitStatus();
+  const gitHistoryQuery = useGitHistory();
+
+  // Mutation hooks - automatically invalidate related queries on success
+  const createNotebookMutation = useCreateNotebook();
+  const registerNotebookMutation = useRegisterNotebook();
+  const addPackageMutation = useAddPackage();
+  const createEnvironmentMutation = useCreateEnvironment();
+  const commitMutation = useCommit();
+  const pushMutation = usePush();
+  const updateEnvironmentMutation = useUpdateEnvironment();
+  const deleteEnvironmentMutation = useDeleteEnvironment();
+
+  // Local UI state
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(["basicInfo", "environments", "notebooks"]),
   );
@@ -73,16 +106,12 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
   const [expandedNotebooks, setExpandedNotebooks] = useState<Set<string>>(
     new Set(),
   );
-  const [sectionData, setSectionData] = useState<Record<string, SectionItem[]>>(
-    {},
-  );
-  const [loading, setLoading] = useState(true);
   const [newPackage, setNewPackage] = useState<Record<string, string>>({});
   const [envContextMenu, setEnvContextMenu] = useState<{
     visible: boolean;
     x: number;
     y: number;
-    env?: SectionItem;
+    env?: ISectionItem;
   } | null>(null);
   const [notebookContextMenu, setNotebookContextMenu] = useState<{
     visible: boolean;
@@ -93,25 +122,76 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
     new Set(DEFAULT_VISIBLE_SECTIONS),
   );
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
-  const [projectInfo, setProjectInfo] = useState<{
-    name: string;
-    title: string;
-    description: string;
-    git_repo_url: string;
-    owner: string;
-  }>({ name: "", title: "", description: "", git_repo_url: "", owner: "" });
 
-  const [gitStatus, setGitStatus] = useState<{
-    changed: string[];
-    staged: string[];
-    untracked: string[];
-    tracked: string[];
-    sizes: Record<string, number>;
-    ahead: number;
-    behind: number;
-    branch?: string | null;
-    remote?: string | null;
-  }>({
+  // Transform project data into section data
+  const transformProjectData = useCallback((info: IProjectInfo | undefined) => {
+    if (!info) {
+      return {};
+    }
+
+    return {
+      environments: Object.entries(info.environments || {}).map(
+        ([name, obj]) => ({
+          id: name,
+          label: name,
+          ...(typeof obj === "object" ? obj : {}),
+        }),
+      ),
+      pipelineStages: Object.entries(info.pipeline?.stages || {}).map(
+        ([name, obj]) => ({
+          id: name,
+          label: name,
+          ...(typeof obj === "object" ? obj : {}),
+        }),
+      ),
+      notebooks: Object.entries(info.notebooks || {}).map(([name, obj]) => ({
+        id: name,
+        label: name,
+        ...(typeof obj === "object" ? obj : {}),
+      })),
+      datasets: (info.datasets || []).map((item: any, index: number) => ({
+        id: `dataset-${index}`,
+        label: item.title || item.path || `Dataset ${index}`,
+        ...(typeof item === "object" ? item : {}),
+      })),
+      questions: (info.questions || []).map((item: any, index: number) => ({
+        id: `question-${index}`,
+        label:
+          typeof item === "string"
+            ? item
+            : item.question || `Question ${index}`,
+        ...(typeof item === "object" ? item : {}),
+      })),
+      models: Object.entries(info.models || {}).map(([name, obj]) => ({
+        id: name,
+        label: name,
+        ...(typeof obj === "object" ? obj : {}),
+      })),
+      figures: [],
+      history: [],
+      publications: [],
+      notes: [],
+    };
+  }, []);
+
+  const sectionData = transformProjectData(projectQuery.data);
+  const projectInfo = projectQuery.data
+    ? {
+        name: projectQuery.data.name ?? "",
+        title: projectQuery.data.title ?? "",
+        description: projectQuery.data.description ?? "",
+        git_repo_url: projectQuery.data.git_repo_url ?? "",
+        owner: projectQuery.data.owner ?? "",
+      }
+    : {
+        name: "",
+        title: "",
+        description: "",
+        git_repo_url: "",
+        owner: "",
+      };
+
+  const gitStatus: IGitStatus = gitStatusQuery.data || {
     changed: [],
     staged: [],
     untracked: [],
@@ -121,35 +201,61 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
     behind: 0,
     branch: null,
     remote: null,
-  });
-  const [gitSelections, setGitSelections] = useState<
-    Record<string, { stage: boolean; storeInDvc: boolean }>
-  >({});
-  const [gitHistory, setGitHistory] = useState<
-    Array<{ hash: string; message: string; author: string; date: string }>
-  >([]);
+  };
 
+  // Convert git status to selections
+  const gitSelections: Record<string, { stage: boolean; storeInDvc: boolean }> =
+    {};
   const SIZE_THRESHOLD = 5 * 1024 * 1024; // 5MB
+  [...(gitStatus.changed || []), ...(gitStatus.untracked || [])].forEach(
+    (p: string) => {
+      const isTracked = (gitStatus.tracked || []).includes(p);
+      const size = gitStatus.sizes?.[p] ?? 0;
+      const shouldDvc = !isTracked && size > SIZE_THRESHOLD;
+      gitSelections[p] = { stage: true, storeInDvc: shouldDvc };
+    },
+  );
 
-  const fetchGitData = useCallback(async () => {
-    try {
-      const status = await requestAPI<any>("git/status");
-      setGitStatus(status);
-      const sel: Record<string, { stage: boolean; storeInDvc: boolean }> = {};
-      [...(status.changed || []), ...(status.untracked || [])].forEach(
-        (p: string) => {
-          const isTracked = (status.tracked || []).includes(p);
-          const size = status.sizes?.[p] ?? 0;
-          const shouldDvc = !isTracked && size > SIZE_THRESHOLD;
-          sel[p] = { stage: true, storeInDvc: shouldDvc };
-        },
-      );
-      setGitSelections(sel);
-      const history = await requestAPI<any>("git/history");
-      setGitHistory(history.commits || []);
-    } catch (err) {
-      console.error("Failed to fetch git status/history:", err);
-    }
+  const gitHistory = gitHistoryQuery.data?.commits || [];
+  const isLoading =
+    projectQuery.isPending ||
+    gitStatusQuery.isPending ||
+    gitHistoryQuery.isPending;
+
+  const toggleSection = useCallback((sectionId: string) => {
+    setExpandedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(sectionId)) {
+        next.delete(sectionId);
+      } else {
+        next.add(sectionId);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleEnvironment = useCallback((envId: string) => {
+    setExpandedEnvironments((prev) => {
+      const next = new Set(prev);
+      if (next.has(envId)) {
+        next.delete(envId);
+      } else {
+        next.add(envId);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleNotebook = useCallback((notebookId: string) => {
+    setExpandedNotebooks((prev) => {
+      const next = new Set(prev);
+      if (next.has(notebookId)) {
+        next.delete(notebookId);
+      } else {
+        next.add(notebookId);
+      }
+      return next;
+    });
   }, []);
 
   // Persist visible sections to localStorage
@@ -245,123 +351,6 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
     showSettingsDropdown,
   ]);
 
-  // Periodically refresh git status/history
-  React.useEffect(() => {
-    const id = window.setInterval(() => {
-      void fetchGitData();
-    }, 30000);
-    return () => {
-      window.clearInterval(id);
-    };
-  }, [fetchGitData]);
-
-  // Fetch sidebar data on mount
-  React.useEffect(() => {
-    const fetchSectionData = async () => {
-      try {
-        const info = await requestAPI<any>("project");
-        // Populate project basic info; support both top-level and nested `project` shapes
-        const pi = {
-          name: info?.name ?? info?.project?.name ?? "",
-          title: info?.title ?? info?.project?.title ?? "",
-          description: info?.description ?? info?.project?.description ?? "",
-          git_repo_url: info?.git_repo_url ?? info?.project?.git_repo_url ?? "",
-          owner: info?.owner ?? info?.project?.owner ?? "",
-        };
-        setProjectInfo(pi);
-        const transformed: Record<string, SectionItem[]> = {
-          environments: Object.entries(info.environments || {}).map(
-            ([name, obj]) => ({
-              id: name,
-              label: name,
-              ...(typeof obj === "object" ? obj : {}),
-            }),
-          ),
-          pipelineStages: Object.entries(info.pipeline?.stages || {}).map(
-            ([name, obj]) => ({
-              id: name,
-              label: name,
-              ...(typeof obj === "object" ? obj : {}),
-            }),
-          ),
-          notebooks: Object.entries(info.notebooks || {}).map(
-            ([name, obj]) => ({
-              id: name,
-              label: name,
-              ...(typeof obj === "object" ? obj : {}),
-            }),
-          ),
-          datasets: (info.datasets || []).map((item: any, index: number) => ({
-            id: `dataset-${index}`,
-            label: item.title || item.path || `Dataset ${index}`,
-            ...(typeof item === "object" ? item : {}),
-          })),
-          questions: (info.questions || []).map((item: any, index: number) => ({
-            id: `question-${index}`,
-            label:
-              typeof item === "string"
-                ? item
-                : item.question || `Question ${index}`,
-            ...(typeof item === "object" ? item : {}),
-          })),
-          models: Object.entries(info.models || {}).map(([name, obj]) => ({
-            id: name,
-            label: name,
-            ...(typeof obj === "object" ? obj : {}),
-          })),
-          figures: [],
-          history: [],
-          publications: [],
-          notes: [],
-        };
-        setSectionData(transformed);
-        setLoading(false);
-      } catch (error) {
-        console.error("Failed to fetch project data:", error);
-        setLoading(false);
-      }
-    };
-
-    fetchSectionData();
-    void fetchGitData();
-  }, []);
-
-  const toggleSection = useCallback((sectionId: string) => {
-    setExpandedSections((prev) => {
-      const next = new Set(prev);
-      if (next.has(sectionId)) {
-        next.delete(sectionId);
-      } else {
-        next.add(sectionId);
-      }
-      return next;
-    });
-  }, []);
-
-  const toggleEnvironment = useCallback((envId: string) => {
-    setExpandedEnvironments((prev) => {
-      const next = new Set(prev);
-      if (next.has(envId)) {
-        next.delete(envId);
-      } else {
-        next.add(envId);
-      }
-      return next;
-    });
-  }, []);
-
-  const toggleNotebook = useCallback((notebookId: string) => {
-    setExpandedNotebooks((prev) => {
-      const next = new Set(prev);
-      if (next.has(notebookId)) {
-        next.delete(notebookId);
-      } else {
-        next.add(notebookId);
-      }
-      return next;
-    });
-  }, []);
-
   const handleAddPackage = useCallback(
     async (envName: string) => {
       const packageName = newPackage[envName];
@@ -369,33 +358,17 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
         return;
       }
       try {
-        await requestAPI("environment/add-package", {
-          method: "POST",
-          body: JSON.stringify({
-            environment: envName,
-            package: packageName.trim(),
-          }),
+        await addPackageMutation.mutateAsync({
+          environment: envName,
+          package: packageName.trim(),
         });
-        // Clear input
+        // Clear input after successful mutation
         setNewPackage((prev) => ({ ...prev, [envName]: "" }));
-        // Refresh data
-        const info = await requestAPI<any>("project");
-        const transformed = {
-          ...sectionData,
-          environments: Object.entries(info.environments || {}).map(
-            ([name, obj]) => ({
-              id: name,
-              label: name,
-              ...(typeof obj === "object" ? obj : {}),
-            }),
-          ),
-        };
-        setSectionData(transformed);
       } catch (error) {
         console.error("Failed to add package:", error);
       }
     },
-    [newPackage, sectionData],
+    [newPackage, addPackageMutation],
   );
 
   const handleNewPackageChange = useCallback(
@@ -415,16 +388,8 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
         method: "PUT",
         body: JSON.stringify(result),
       });
-      // Re-fetch after save to reflect any server-side normalization
-      const info = await requestAPI<any>("project");
-      const pi = {
-        name: info?.name ?? info?.project?.name ?? "",
-        title: info?.title ?? info?.project?.title ?? "",
-        description: info?.description ?? info?.project?.description ?? "",
-        git_repo_url: info?.git_repo_url ?? info?.project?.git_repo_url ?? "",
-        owner: info?.owner ?? info?.project?.owner ?? "",
-      };
-      setProjectInfo(pi);
+      // Invalidate project query to refetch updated data
+      await queryClient.invalidateQueries({ queryKey: ["project"] });
     } catch (error) {
       console.error("Failed to save project info:", error);
     }
@@ -450,7 +415,9 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
           .join(", ")}${files.length > 5 ? ", …" : ""}`
       : "Update project";
     const msg = await showCommitDialog(defaultMsg, files);
-    if (!msg) return;
+    if (!msg) {
+      return;
+    }
     const ignoreForever = msg.files.filter((f) => f.ignore_forever);
     const stagedFiles = msg.files.filter((f) => f.stage);
     if (ignoreForever.length > 0) {
@@ -463,29 +430,31 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
         console.error("Failed to ignore paths:", e);
       }
     }
-    if (stagedFiles.length === 0) return;
+    if (stagedFiles.length === 0) {
+      return;
+    }
     try {
-      await requestAPI("git/commit", {
-        method: "POST",
-        body: JSON.stringify({ message: msg.message, files: stagedFiles }),
+      await commitMutation.mutateAsync({
+        message: msg.message,
+        files: stagedFiles,
       });
       if (msg.pushAfter) {
         try {
-          await requestAPI("git/push", { method: "POST" });
+          await pushMutation.mutateAsync();
         } catch (pushErr) {
           console.error("Push failed:", pushErr);
         }
       }
-      await fetchGitData();
     } catch (err) {
       console.error("Commit failed:", err);
     }
   }, [
-    fetchGitData,
     gitStatus.changed,
     gitStatus.sizes,
     gitStatus.tracked,
     gitStatus.untracked,
+    commitMutation,
+    pushMutation,
   ]);
 
   const handleCreateEnvironment = useCallback(async () => {
@@ -494,31 +463,15 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
       return;
     }
     try {
-      await requestAPI("environment/create", {
-        method: "POST",
-        body: JSON.stringify({
-          name: result.name,
-          kind: result.kind,
-          packages: result.packages,
-        }),
+      await createEnvironmentMutation.mutateAsync({
+        name: result.name,
+        kind: result.kind,
+        packages: result.packages,
       });
-      // Refresh data
-      const info = await requestAPI<any>("project");
-      const transformed = {
-        ...sectionData,
-        environments: Object.entries(info.environments || {}).map(
-          ([name, obj]) => ({
-            id: name,
-            label: name,
-            ...(typeof obj === "object" ? obj : {}),
-          }),
-        ),
-      };
-      setSectionData(transformed);
     } catch (error) {
       console.error("Failed to create environment:", error);
     }
-  }, [sectionData]);
+  }, [createEnvironmentMutation]);
 
   const handleCreateNotebook = useCallback(async () => {
     const environmentList = sectionData.environments || [];
@@ -529,27 +482,11 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
         return null;
       }
       try {
-        await requestAPI("environment/create", {
-          method: "POST",
-          body: JSON.stringify({
-            name: result.name,
-            kind: result.kind,
-            packages: result.packages,
-          }),
+        await createEnvironmentMutation.mutateAsync({
+          name: result.name,
+          kind: result.kind,
+          packages: result.packages,
         });
-        // Refresh environments data
-        const info = await requestAPI<any>("project");
-        const transformed = {
-          ...sectionData,
-          environments: Object.entries(info.environments || {}).map(
-            ([name, obj]) => ({
-              id: name,
-              label: name,
-              ...(typeof obj === "object" ? obj : {}),
-            }),
-          ),
-        };
-        setSectionData(transformed);
         return result.name;
       } catch (error) {
         console.error("Failed to create environment:", error);
@@ -567,25 +504,15 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
       return;
     }
     try {
-      await requestAPI("notebook/create", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-      // Refresh data
-      const info = await requestAPI<any>("project");
-      const transformed = {
-        ...sectionData,
-        notebooks: Object.entries(info.notebooks || {}).map(([name, obj]) => ({
-          id: name,
-          label: name,
-          ...(typeof obj === "object" ? obj : {}),
-        })),
-      };
-      setSectionData(transformed);
+      await createNotebookMutation.mutateAsync(data);
     } catch (error) {
       console.error("Failed to create notebook:", error);
     }
-  }, [sectionData]);
+  }, [
+    sectionData.environments,
+    createNotebookMutation,
+    createEnvironmentMutation,
+  ]);
 
   const handleRegisterNotebook = useCallback(async () => {
     // TODO: Get list of existing notebooks from workspace
@@ -595,28 +522,14 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
       return;
     }
     try {
-      await requestAPI("notebook/register", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-      // Refresh data
-      const info = await requestAPI<any>("project");
-      const transformed = {
-        ...sectionData,
-        notebooks: Object.entries(info.notebooks || {}).map(([name, obj]) => ({
-          id: name,
-          label: name,
-          ...(typeof obj === "object" ? obj : {}),
-        })),
-      };
-      setSectionData(transformed);
+      await registerNotebookMutation.mutateAsync(data);
     } catch (error) {
       console.error("Failed to register notebook:", error);
     }
-  }, [sectionData]);
+  }, [registerNotebookMutation]);
 
   const renderEnvironmentItem = useCallback(
-    (item: SectionItem) => {
+    (item: ISectionItem) => {
       const isExpanded = expandedEnvironments.has(item.id);
       const kind = item.kind || "unknown";
       const packages = item.packages || [];
@@ -660,28 +573,15 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
                       initialKind: kind,
                       initialPackages: packages,
                     });
-                    if (!result) return;
+                    if (!result) {
+                      return;
+                    }
                     try {
-                      await requestAPI("environment/update", {
-                        method: "POST",
-                        body: JSON.stringify({
-                          name: item.id,
-                          kind: result.kind,
-                          packages: result.packages,
-                        }),
+                      await updateEnvironmentMutation.mutateAsync({
+                        name: item.id,
+                        kind: result.kind,
+                        packages: result.packages,
                       });
-                      const info = await requestAPI<any>("project");
-                      const transformed = {
-                        ...sectionData,
-                        environments: Object.entries(
-                          info.environments || {},
-                        ).map(([name, obj]) => ({
-                          id: name,
-                          label: name,
-                          ...(typeof obj === "object" ? obj : {}),
-                        })),
-                      };
-                      setSectionData(transformed);
                     } catch (error) {
                       console.error("Failed to update environment:", error);
                     }
@@ -704,24 +604,11 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
                         Dialog.warnButton({ label: "Delete" }),
                       ],
                     }).launch();
-                    if (!confirm.button.accept) return;
+                    if (!confirm.button.accept) {
+                      return;
+                    }
                     try {
-                      await requestAPI("environment/delete", {
-                        method: "POST",
-                        body: JSON.stringify({ name: item.id }),
-                      });
-                      const info = await requestAPI<any>("project");
-                      const transformed = {
-                        ...sectionData,
-                        environments: Object.entries(
-                          info.environments || {},
-                        ).map(([name, obj]) => ({
-                          id: name,
-                          label: name,
-                          ...(typeof obj === "object" ? obj : {}),
-                        })),
-                      };
-                      setSectionData(transformed);
+                      await deleteEnvironmentMutation.mutateAsync(item.id);
                     } catch (error) {
                       console.error("Failed to delete environment:", error);
                     }
@@ -793,7 +680,7 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
   );
 
   const renderNotebookItem = useCallback(
-    (item: SectionItem) => {
+    (item: ISectionItem) => {
       const isExpanded = expandedNotebooks.has(item.id);
       const environment = item.environment || "";
       const inPipeline = item.in_pipeline || false;
@@ -829,19 +716,10 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
                           environment: newEnv,
                         }),
                       });
-                      // Refresh data
-                      const info = await requestAPI<any>("project");
-                      const transformed = {
-                        ...sectionData,
-                        notebooks: Object.entries(info.notebooks || {}).map(
-                          ([name, obj]) => ({
-                            id: name,
-                            label: name,
-                            ...(typeof obj === "object" ? obj : {}),
-                          }),
-                        ),
-                      };
-                      setSectionData(transformed);
+                      // Invalidate project query to refetch
+                      await queryClient.invalidateQueries({
+                        queryKey: ["project"],
+                      });
                     } catch (error) {
                       console.error(
                         "Failed to set notebook environment:",
@@ -874,19 +752,10 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
                             in_pipeline: checked,
                           }),
                         });
-                        // Refresh data
-                        const info = await requestAPI<any>("project");
-                        const transformed = {
-                          ...sectionData,
-                          notebooks: Object.entries(info.notebooks || {}).map(
-                            ([name, obj]) => ({
-                              id: name,
-                              label: name,
-                              ...(typeof obj === "object" ? obj : {}),
-                            }),
-                          ),
-                        };
-                        setSectionData(transformed);
+                        // Invalidate project query to refetch
+                        await queryClient.invalidateQueries({
+                          queryKey: ["project"],
+                        });
                       } catch (error) {
                         console.error(
                           "Failed to set notebook pipeline status:",
@@ -909,7 +778,8 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
   const renderSection = useCallback(
     (sectionId: string, sectionLabel: string, icon: string) => {
       const isExpanded = expandedSections.has(sectionId);
-      const items = sectionData[sectionId] || [];
+      const items: ISectionItem[] =
+        sectionData[sectionId as keyof typeof sectionData] || [];
       const showCreateButton =
         sectionId === "environments" || sectionId === "notebooks";
       const showEditButton = sectionId === "basicInfo";
@@ -1102,7 +972,7 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
                 {gitHistory.length === 0 && (
                   <div className="calkit-sidebar-section-empty">No history</div>
                 )}
-                {gitHistory.slice(0, 5).map((c) => (
+                {gitHistory.slice(0, 5).map((c: any) => (
                   <div key={c.hash} className="calkit-git-history-item">
                     <div className="calkit-git-history-message">
                       {c.message}
@@ -1175,7 +1045,7 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
     ],
   );
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="calkit-sidebar">
         <div className="calkit-sidebar-header" />
@@ -1275,28 +1145,15 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
                         initialKind: env.kind || "unknown",
                         initialPackages: env.packages || [],
                       });
-                      if (!result) return;
+                      if (!result) {
+                        return;
+                      }
                       try {
-                        await requestAPI("environment/update", {
-                          method: "POST",
-                          body: JSON.stringify({
-                            name: env.id,
-                            kind: result.kind,
-                            packages: result.packages,
-                          }),
+                        await updateEnvironmentMutation.mutateAsync({
+                          name: env.id,
+                          kind: result.kind,
+                          packages: result.packages,
                         });
-                        const info = await requestAPI<any>("project");
-                        const transformed = {
-                          ...sectionData,
-                          environments: Object.entries(
-                            info.environments || {},
-                          ).map(([name, obj]) => ({
-                            id: name,
-                            label: name,
-                            ...(typeof obj === "object" ? obj : {}),
-                          })),
-                        };
-                        setSectionData(transformed);
                       } catch (error) {
                         console.error("Failed to update environment:", error);
                       }
@@ -1319,24 +1176,11 @@ export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
                           Dialog.warnButton({ label: "Delete" }),
                         ],
                       }).launch();
-                      if (!confirm.button.accept) return;
+                      if (!confirm.button.accept) {
+                        return;
+                      }
                       try {
-                        await requestAPI("environment/delete", {
-                          method: "POST",
-                          body: JSON.stringify({ name: env.id }),
-                        });
-                        const info = await requestAPI<any>("project");
-                        const transformed = {
-                          ...sectionData,
-                          environments: Object.entries(
-                            info.environments || {},
-                          ).map(([name, obj]) => ({
-                            id: name,
-                            label: name,
-                            ...(typeof obj === "object" ? obj : {}),
-                          })),
-                        };
-                        setSectionData(transformed);
+                        await deleteEnvironmentMutation.mutateAsync(env.id);
                       } catch (error) {
                         console.error("Failed to delete environment:", error);
                       }
@@ -1411,6 +1255,10 @@ export class CalkitSidebarWidget extends ReactWidget {
   }
 
   render() {
-    return <CalkitSidebar settings={this._settings} stateDB={this._stateDB} />;
+    return (
+      <QueryClientProvider client={queryClient}>
+        <CalkitSidebar settings={this._settings} stateDB={this._stateDB} />
+      </QueryClientProvider>
+    );
   }
 }

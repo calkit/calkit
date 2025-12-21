@@ -1,21 +1,21 @@
-import { requestAPI } from './request';
+import { requestAPI } from "./request";
 
 /**
  * Interface for environment information from calkit.yaml
  */
 export interface CalkitEnvironment {
   kind:
-    | 'conda'
-    | 'docker'
-    | 'poetry'
-    | 'npm'
-    | 'yarn'
-    | 'ssh'
-    | 'uv'
-    | 'pixi'
-    | 'venv'
-    | 'uv-venv'
-    | 'renv';
+    | "conda"
+    | "docker"
+    | "poetry"
+    | "npm"
+    | "yarn"
+    | "ssh"
+    | "uv"
+    | "pixi"
+    | "venv"
+    | "uv-venv"
+    | "renv";
   path?: string;
   description?: string;
   stage?: string;
@@ -49,10 +49,10 @@ export interface CalkitProjectInfo {
  */
 export async function getCalkitConfig(): Promise<CalkitProjectInfo | null> {
   try {
-    const config = await requestAPI<CalkitProjectInfo>('config');
+    const config = await requestAPI<CalkitProjectInfo>("config");
     return config;
   } catch (error) {
-    console.warn('Failed to fetch calkit config:', error);
+    console.warn("Failed to fetch calkit config:", error);
     return null;
   }
 }
@@ -61,9 +61,7 @@ export async function getCalkitConfig(): Promise<CalkitProjectInfo | null> {
  * Extract kernel names from the project's environments and pipeline
  * Maps environment types to jupyter kernel names
  */
-export function extractKernelsFromConfig(
-  config: CalkitProjectInfo
-): string[] {
+export function extractKernelsFromConfig(config: CalkitProjectInfo): string[] {
   const kernels = new Set<string>();
 
   if (!config.environments) {
@@ -72,14 +70,21 @@ export function extractKernelsFromConfig(
 
   // Map environment kinds to common Jupyter kernel names
   const kindToKernels: Record<string, string[]> = {
-    conda: ['python3', 'python', 'python3.9', 'python3.10', 'python3.11', 'python3.12'],
-    'uv-venv': ['python3', 'python'],
-    venv: ['python3', 'python'],
-    uv: ['python3', 'python'],
-    pixi: ['python3', 'python'],
-    renv: ['ir'],
-    docker: ['python3', 'python'],
-    poetry: ['python3', 'python'],
+    conda: [
+      "python3",
+      "python",
+      "python3.9",
+      "python3.10",
+      "python3.11",
+      "python3.12",
+    ],
+    "uv-venv": ["python3", "python"],
+    venv: ["python3", "python"],
+    uv: ["python3", "python"],
+    pixi: ["python3", "python"],
+    renv: ["ir"],
+    docker: ["python3", "python"],
+    poetry: ["python3", "python"],
   };
 
   // Extract kernels from each environment
@@ -116,10 +121,10 @@ export async function getFilteredKernelSpecs(): Promise<string[]> {
     // const kernels = await requestAPI<string[]>('kernelspecs');
     // return kernels;
 
-    console.log('getFilteredKernelSpecs: Server endpoint not yet implemented');
+    console.log("getFilteredKernelSpecs: Server endpoint not yet implemented");
     return [];
   } catch (error) {
-    console.warn('Failed to fetch filtered kernel specs:', error);
+    console.warn("Failed to fetch filtered kernel specs:", error);
     return [];
   }
 }

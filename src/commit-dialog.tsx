@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Dialog } from "@jupyterlab/apputils";
 import { ReactWidget } from "@jupyterlab/apputils";
 
-interface CommitFile {
+interface ICommitFile {
   path: string;
   stage: boolean;
   store_in_dvc?: boolean;
@@ -11,23 +11,23 @@ interface CommitFile {
   ignore_forever?: boolean;
 }
 
-interface CommitDialogProps {
+interface ICommitDialogProps {
   defaultMessage: string;
-  files: CommitFile[];
+  files: ICommitFile[];
   onUpdate: (data: {
     message: string;
-    files: CommitFile[];
+    files: ICommitFile[];
     pushAfter?: boolean;
   }) => void;
 }
 
-const CommitDialogBody: React.FC<CommitDialogProps> = ({
+const CommitDialogBody: React.FC<ICommitDialogProps> = ({
   defaultMessage,
   files,
   onUpdate,
 }) => {
   const [message, setMessage] = useState(defaultMessage);
-  const [fileSelections, setFileSelections] = useState<CommitFile[]>(files);
+  const [fileSelections, setFileSelections] = useState<ICommitFile[]>(files);
   const [pushAfter, setPushAfter] = useState(false);
 
   React.useEffect(() => {
@@ -41,7 +41,9 @@ const CommitDialogBody: React.FC<CommitDialogProps> = ({
   ) => {
     setFileSelections((prev) =>
       prev.map((f) => {
-        if (f.path !== path) return f;
+        if (f.path !== path) {
+          return f;
+        }
         if (choice === "git") {
           return {
             ...f,
@@ -174,11 +176,11 @@ const CommitDialogBody: React.FC<CommitDialogProps> = ({
 };
 
 class CommitDialogWidget extends ReactWidget {
-  private data: { message: string; files: CommitFile[] } = {
+  private data: { message: string; files: ICommitFile[] } = {
     message: "",
     files: [],
   };
-  constructor(private props: CommitDialogProps) {
+  constructor(private props: ICommitDialogProps) {
     super();
     this.addClass("calkit-commit-dialog");
   }
@@ -198,10 +200,10 @@ class CommitDialogWidget extends ReactWidget {
 
 export async function showCommitDialog(
   defaultMessage: string,
-  files: CommitFile[],
+  files: ICommitFile[],
 ): Promise<{
   message: string;
-  files: CommitFile[];
+  files: ICommitFile[];
   pushAfter?: boolean;
 } | null> {
   const body = new CommitDialogWidget({
@@ -211,7 +213,7 @@ export async function showCommitDialog(
   });
   const result = await new Dialog<{
     message: string;
-    files: CommitFile[];
+    files: ICommitFile[];
     pushAfter?: boolean;
   }>({
     title: "Save changes",

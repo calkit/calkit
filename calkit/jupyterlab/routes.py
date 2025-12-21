@@ -132,6 +132,251 @@ class NotebooksRouteHandler(APIHandler):
             return
 
 
+class GitStatusRouteHandler(APIHandler):
+    @tornado.web.authenticated
+    def get(self):
+        import git as gitlib
+
+        try:
+            repo = gitlib.Repo(os.getcwd())
+        except Exception as e:
+            self.set_status(500)
+            self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
+            return
+
+        # Changed (unstaged), staged, untracked
+        changed = [
+            item.a_path for item in repo.index.diff(None) if item.a_path
+        ]
+        staged = [
+            item.a_path for item in repo.index.diff("HEAD") if item.a_path
+        ]
+        untracked = list(repo.untracked_files)
+
+        try:
+            tracked = list(
+                {*changed, *staged, *repo.git.ls_files().splitlines()}
+            )
+        except Exception:
+            tracked = list({*changed, *staged})
+
+        sizes: dict[str, int] = {}
+        for path in {
+            **{p: None for p in changed},
+            **{p: None for p in staged},
+            **{p: None for p in untracked},
+        }:
+            try:
+                sizes[path] = os.path.getsize(path)
+            except Exception:
+                continue
+
+        # Ahead/behind counts
+        ahead = 0
+        behind = 0
+        branch = None
+        remote = None
+        try:
+            branch = repo.active_branch.name
+            tracking = repo.active_branch.tracking_branch()
+            if tracking is not None:
+                remote = str(tracking)
+                # Use --left-right to count ahead/behind
+                commits = repo.git.rev_list(
+                    "--left-right", f"{tracking}...HEAD"
+                ).splitlines()
+                for c in commits:
+                    if c.startswith("<"):
+                        behind += 1
+                    elif c.startswith(">"):
+                        ahead += 1
+        except Exception:
+            pass
+
+        self.finish(
+            json.dumps(
+                {
+                    "changed": changed,
+                    "staged": staged,
+                    "untracked": untracked,
+                    "tracked": tracked,
+                    "sizes": sizes,
+                    "ahead": ahead,
+                    "behind": behind,
+                    "branch": branch,
+                    "remote": remote,
+                }
+            )
+        )
+
+
+class GitIgnoreRouteHandler(APIHandler):
+    @tornado.web.authenticated
+    def post(self):
+        body = self.get_json_body() or {}
+        paths = body.get("paths") or []
+        if not isinstance(paths, list):
+            self.set_status(400)
+            self.finish(json.dumps({"error": "paths must be a list"}))
+            return
+        import git as gitlib
+
+        from calkit.git import ensure_path_is_ignored
+
+        try:
+            repo = gitlib.Repo(os.getcwd())
+        except Exception as e:
+            self.set_status(500)
+            self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
+            return
+
+        for path in paths:
+            try:
+                ensure_path_is_ignored(repo, path)
+            except Exception as e:
+                self.set_status(500)
+                self.finish(
+                    json.dumps({"error": f"Failed to ignore {path}: {e}"})
+                )
+                return
+
+        self.finish(json.dumps({"ok": True, "ignored": paths}))
+
+
+class GitCommitRouteHandler(APIHandler):
+    @tornado.web.authenticated
+    def post(self):
+        body = self.get_json_body() or {}
+        message = body.get("message", "")
+        files = body.get("files", [])
+
+        if not message:
+            self.set_status(400)
+            self.finish(json.dumps({"error": "Commit 'message' is required"}))
+            return
+
+        import subprocess
+        import sys
+
+        import git as gitlib
+
+        from calkit.git import ensure_path_is_ignored
+
+        try:
+            repo = gitlib.Repo(os.getcwd())
+        except Exception as e:
+            self.set_status(500)
+            self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
+            return
+
+        # Stage selected files, optionally via DVC
+        staged_paths: list[str] = []
+        for f in files:
+            path = f.get("path")
+            if not path:
+                continue
+            store_in_dvc = bool(f.get("store_in_dvc"))
+            stage = f.get("stage", True)
+            if store_in_dvc:
+                # dvc add the file, ensure original path is ignored
+                try:
+                    subprocess.check_call(
+                        [sys.executable, "-m", "dvc", "add", path]
+                    )
+                    ensure_path_is_ignored(repo, path)
+                    # Stage the .dvc file produced by dvc add
+                    dvc_file = f"{path}.dvc"
+                    if os.path.exists(dvc_file):
+                        repo.git.add([dvc_file])
+                        staged_paths.append(dvc_file)
+                except Exception as e:
+                    self.set_status(500)
+                    self.finish(
+                        json.dumps(
+                            {"error": f"DVC add failed for {path}: {e}"}
+                        )
+                    )
+                    return
+            elif stage:
+                try:
+                    repo.git.add([path])
+                    staged_paths.append(path)
+                except Exception as e:
+                    self.set_status(500)
+                    self.finish(
+                        json.dumps({"error": f"Failed to stage {path}: {e}"})
+                    )
+                    return
+
+        # Commit
+        try:
+            if staged_paths:
+                repo.index.commit(message)
+            else:
+                # Allow empty commit to just annotate state
+                repo.git.commit(["--allow-empty", "-m", message])
+        except Exception as e:
+            self.set_status(500)
+            self.finish(json.dumps({"error": f"Commit failed: {e}"}))
+            return
+
+        self.finish(json.dumps({"ok": True, "committed": staged_paths}))
+
+
+class GitHistoryRouteHandler(APIHandler):
+    @tornado.web.authenticated
+    def get(self):
+        import git as gitlib
+
+        try:
+            repo = gitlib.Repo(os.getcwd())
+        except Exception as e:
+            self.set_status(500)
+            self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
+            return
+        max_count = int(self.get_argument("max", 20))
+        commits = []
+        for c in repo.iter_commits(max_count=max_count):
+            commits.append(
+                {
+                    "hash": c.hexsha,
+                    "message": c.message.strip(),
+                    "author": str(c.author),
+                    "date": c.committed_datetime.isoformat(),
+                }
+            )
+        self.finish(json.dumps({"commits": commits}))
+
+
+class GitPushRouteHandler(APIHandler):
+    @tornado.web.authenticated
+    def post(self):
+        import git as gitlib
+
+        try:
+            repo = gitlib.Repo(os.getcwd())
+        except Exception as e:
+            self.set_status(500)
+            self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
+            return
+
+        try:
+            remote = repo.remotes[0]
+        except Exception:
+            self.set_status(400)
+            self.finish(json.dumps({"error": "No git remote configured"}))
+            return
+
+        try:
+            res = remote.push()
+            messages = [str(r) for r in res]
+            self.finish(json.dumps({"ok": True, "result": messages}))
+        except Exception as e:
+            self.set_status(500)
+            self.finish(json.dumps({"error": f"Push failed: {e}"}))
+            return
+
+
 def setup_route_handlers(web_app):
     host_pattern = ".*$"
     base_url = web_app.settings["base_url"]
@@ -145,6 +390,26 @@ def setup_route_handlers(web_app):
         (
             url_path_join(base_url, "calkit", "notebooks"),
             NotebooksRouteHandler,
+        ),
+        (
+            url_path_join(base_url, "calkit", "git", "status"),
+            GitStatusRouteHandler,
+        ),
+        (
+            url_path_join(base_url, "calkit", "git", "commit"),
+            GitCommitRouteHandler,
+        ),
+        (
+            url_path_join(base_url, "calkit", "git", "history"),
+            GitHistoryRouteHandler,
+        ),
+        (
+            url_path_join(base_url, "calkit", "git", "ignore"),
+            GitIgnoreRouteHandler,
+        ),
+        (
+            url_path_join(base_url, "calkit", "git", "push"),
+            GitPushRouteHandler,
         ),
     ]
     web_app.add_handlers(host_pattern, handlers)

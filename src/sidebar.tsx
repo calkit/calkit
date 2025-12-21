@@ -2,9 +2,12 @@ import React, { useCallback, useState } from "react";
 import ReactDOM from "react-dom";
 import { ReactWidget, Dialog } from "@jupyterlab/apputils";
 import { requestAPI } from "./request";
+import type { ISettingRegistry } from "@jupyterlab/settingregistry";
+import type { IStateDB } from "@jupyterlab/statedb";
 import { showEnvironmentEditor } from "./environment-editor";
 import { showNotebookRegistration } from "./notebook-registration";
 import { showProjectInfoEditor } from "./project-info-editor";
+import { showCommitDialog } from "./commit-dialog";
 
 interface SectionItem {
   id: string;
@@ -12,14 +15,57 @@ interface SectionItem {
   [key: string]: any;
 }
 
+interface SectionDefinition {
+  id: string;
+  label: string;
+  icon: string;
+  /** Whether the section can be toggled in the settings dropdown. */
+  toggleable?: boolean;
+  /** Whether the section is visible by default when no user setting exists. */
+  defaultVisible?: boolean;
+}
+
+const SECTION_DEFS: SectionDefinition[] = [
+  { id: "basicInfo", label: "Basic info", icon: "ℹ️", toggleable: false },
+  { id: "environments", label: "Environments", icon: "⚙️" },
+  { id: "pipelineStages", label: "Pipeline", icon: "🔄" },
+  { id: "notebooks", label: "Notebooks", icon: "📓" },
+  { id: "figures", label: "Figures", icon: "📊", defaultVisible: false },
+  { id: "datasets", label: "Datasets", icon: "📁" },
+  { id: "questions", label: "Questions", icon: "❓" },
+  { id: "history", label: "Save & sync", icon: "🔃", toggleable: false },
+  {
+    id: "publications",
+    label: "Publications",
+    icon: "📚",
+    defaultVisible: false,
+  },
+  { id: "notes", label: "Notes", icon: "📝", defaultVisible: false },
+  { id: "models", label: "Models", icon: "🤖", defaultVisible: false },
+];
+
+const DEFAULT_VISIBLE_SECTIONS = new Set(
+  SECTION_DEFS.filter(
+    (s) => s.toggleable !== false && s.defaultVisible !== false,
+  ).map((s) => s.id),
+);
+
 /**
  * A sidebar component for Calkit JupyterLab extension.
  * Displays sections for environments, pipeline stages, notebooks, figures,
  * datasets, questions, history, publications, notes, and models.
  */
-export const CalkitSidebar: React.FC = () => {
+export interface CalkitSidebarProps {
+  settings?: ISettingRegistry.ISettings | null;
+  stateDB?: IStateDB | null;
+}
+
+export const CalkitSidebar: React.FC<CalkitSidebarProps> = ({
+  settings,
+  stateDB,
+}) => {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
-    () => new Set(["basicInfo", "environments", "notebooks"]),
+    new Set(["basicInfo", "environments", "notebooks"]),
   );
   const [expandedEnvironments, setExpandedEnvironments] = useState<Set<string>>(
     new Set(),
@@ -43,24 +89,9 @@ export const CalkitSidebar: React.FC = () => {
     x: number;
     y: number;
   } | null>(null);
-  const [visibleSections, setVisibleSections] = useState<Set<string>>(() => {
-    const stored = localStorage.getItem("calkit-visible-sections");
-    if (stored) {
-      try {
-        return new Set(JSON.parse(stored));
-      } catch {
-        // Fall back to defaults if JSON parse fails
-      }
-    }
-    // Default visible sections
-    return new Set([
-      "environments",
-      "pipelineStages",
-      "notebooks",
-      "datasets",
-      "questions",
-    ]);
-  });
+  const [visibleSections, setVisibleSections] = useState<Set<string>>(
+    new Set(DEFAULT_VISIBLE_SECTIONS),
+  );
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
   const [projectInfo, setProjectInfo] = useState<{
     name: string;
@@ -70,13 +101,126 @@ export const CalkitSidebar: React.FC = () => {
     owner: string;
   }>({ name: "", title: "", description: "", git_repo_url: "", owner: "" });
 
+  const [gitStatus, setGitStatus] = useState<{
+    changed: string[];
+    staged: string[];
+    untracked: string[];
+    tracked: string[];
+    sizes: Record<string, number>;
+    ahead: number;
+    behind: number;
+    branch?: string | null;
+    remote?: string | null;
+  }>({
+    changed: [],
+    staged: [],
+    untracked: [],
+    tracked: [],
+    sizes: {},
+    ahead: 0,
+    behind: 0,
+    branch: null,
+    remote: null,
+  });
+  const [gitSelections, setGitSelections] = useState<
+    Record<string, { stage: boolean; storeInDvc: boolean }>
+  >({});
+  const [gitHistory, setGitHistory] = useState<
+    Array<{ hash: string; message: string; author: string; date: string }>
+  >([]);
+
+  const SIZE_THRESHOLD = 5 * 1024 * 1024; // 5MB
+
+  const fetchGitData = useCallback(async () => {
+    try {
+      const status = await requestAPI<any>("git/status");
+      setGitStatus(status);
+      const sel: Record<string, { stage: boolean; storeInDvc: boolean }> = {};
+      [...(status.changed || []), ...(status.untracked || [])].forEach(
+        (p: string) => {
+          const isTracked = (status.tracked || []).includes(p);
+          const size = status.sizes?.[p] ?? 0;
+          const shouldDvc = !isTracked && size > SIZE_THRESHOLD;
+          sel[p] = { stage: true, storeInDvc: shouldDvc };
+        },
+      );
+      setGitSelections(sel);
+      const history = await requestAPI<any>("git/history");
+      setGitHistory(history.commits || []);
+    } catch (err) {
+      console.error("Failed to fetch git status/history:", err);
+    }
+  }, []);
+
   // Persist visible sections to localStorage
   React.useEffect(() => {
-    localStorage.setItem(
-      "calkit-visible-sections",
-      JSON.stringify([...visibleSections]),
-    );
-  }, [visibleSections]);
+    // Initialize expandedSections from stateDB
+    (async () => {
+      try {
+        if (stateDB) {
+          const saved = (await stateDB.fetch("calkit:expandedSections")) as
+            | string[]
+            | null;
+          if (saved && Array.isArray(saved)) {
+            setExpandedSections(new Set(saved));
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to fetch expandedSections from stateDB", e);
+      }
+    })();
+  }, [stateDB]);
+
+  React.useEffect(() => {
+    // Initialize visibleSections from settings
+    (async () => {
+      try {
+        const allowed = new Set(SECTION_DEFS.map((s) => s.id));
+        const vs = (settings?.composite as any)?.visibleSections as
+          | string[]
+          | undefined;
+        if (vs && Array.isArray(vs)) {
+          const filtered = vs.filter((id) => allowed.has(id));
+          setVisibleSections(
+            filtered.length > 0
+              ? new Set(filtered)
+              : new Set(DEFAULT_VISIBLE_SECTIONS),
+          );
+        } else {
+          setVisibleSections(new Set(DEFAULT_VISIBLE_SECTIONS));
+        }
+      } catch (e) {
+        console.warn("Failed to initialize visibleSections from settings", e);
+        setVisibleSections(new Set(DEFAULT_VISIBLE_SECTIONS));
+      }
+    })();
+  }, [settings]);
+
+  // Persist expanded sections via IStateDB
+  React.useEffect(() => {
+    (async () => {
+      try {
+        if (stateDB) {
+          await stateDB.save("calkit:expandedSections", [...expandedSections]);
+        }
+      } catch (e) {
+        console.warn("Failed to save expandedSections to stateDB", e);
+      }
+    })();
+  }, [expandedSections, stateDB]);
+
+  // Persist visible sections via ISettingRegistry
+  React.useEffect(() => {
+    (async () => {
+      try {
+        if (settings) {
+          await settings.set("visibleSections", [...visibleSections]);
+        }
+      } catch (e) {
+        console.warn("Failed to save visibleSections to settings", e);
+      }
+    })();
+  }, [visibleSections, settings]);
 
   // Close context menu on outside click
   React.useEffect(() => {
@@ -100,6 +244,16 @@ export const CalkitSidebar: React.FC = () => {
     notebookContextMenu?.visible,
     showSettingsDropdown,
   ]);
+
+  // Periodically refresh git status/history
+  React.useEffect(() => {
+    const id = window.setInterval(() => {
+      void fetchGitData();
+    }, 30000);
+    return () => {
+      window.clearInterval(id);
+    };
+  }, [fetchGitData]);
 
   // Fetch sidebar data on mount
   React.useEffect(() => {
@@ -169,6 +323,7 @@ export const CalkitSidebar: React.FC = () => {
     };
 
     fetchSectionData();
+    void fetchGitData();
   }, []);
 
   const toggleSection = useCallback((sectionId: string) => {
@@ -274,6 +429,64 @@ export const CalkitSidebar: React.FC = () => {
       console.error("Failed to save project info:", error);
     }
   }, [projectInfo]);
+
+  const handleCommit = useCallback(async () => {
+    const trackedSet = new Set([...(gitStatus.tracked || [])]);
+    const candidates = [
+      ...(gitStatus.changed || []),
+      ...(gitStatus.untracked || []),
+    ];
+    const files = candidates.map((path) => ({
+      path,
+      store_in_dvc: false,
+      stage: true,
+      tracked: trackedSet.has(path),
+      size: gitStatus.sizes?.[path],
+    }));
+    const defaultMsg = files.length
+      ? `Update ${files
+          .map((f) => f.path)
+          .slice(0, 5)
+          .join(", ")}${files.length > 5 ? ", …" : ""}`
+      : "Update project";
+    const msg = await showCommitDialog(defaultMsg, files);
+    if (!msg) return;
+    const ignoreForever = msg.files.filter((f) => f.ignore_forever);
+    const stagedFiles = msg.files.filter((f) => f.stage);
+    if (ignoreForever.length > 0) {
+      try {
+        await requestAPI("git/ignore", {
+          method: "POST",
+          body: JSON.stringify({ paths: ignoreForever.map((f) => f.path) }),
+        });
+      } catch (e) {
+        console.error("Failed to ignore paths:", e);
+      }
+    }
+    if (stagedFiles.length === 0) return;
+    try {
+      await requestAPI("git/commit", {
+        method: "POST",
+        body: JSON.stringify({ message: msg.message, files: stagedFiles }),
+      });
+      if (msg.pushAfter) {
+        try {
+          await requestAPI("git/push", { method: "POST" });
+        } catch (pushErr) {
+          console.error("Push failed:", pushErr);
+        }
+      }
+      await fetchGitData();
+    } catch (err) {
+      console.error("Commit failed:", err);
+    }
+  }, [
+    fetchGitData,
+    gitStatus.changed,
+    gitStatus.sizes,
+    gitStatus.tracked,
+    gitStatus.untracked,
+  ]);
 
   const handleCreateEnvironment = useCallback(async () => {
     const result = await showEnvironmentEditor({ mode: "create" });
@@ -729,6 +942,61 @@ export const CalkitSidebar: React.FC = () => {
             </span>
             <span className="calkit-sidebar-section-label">{icon}</span>
             <span className="calkit-sidebar-section-title">{sectionLabel}</span>
+            {sectionId === "history" &&
+              (() => {
+                const newCount = (gitStatus.untracked || []).length;
+                const modifiedSet = new Set([
+                  ...(gitStatus.changed || []),
+                  ...(gitStatus.staged || []),
+                ]);
+                const modifiedCount = modifiedSet.size;
+                const pullCount = gitStatus.behind || 0;
+                const hasChanges =
+                  newCount > 0 || modifiedCount > 0 || pullCount > 0;
+                return (
+                  <span className="calkit-status-chips">
+                    {newCount > 0 && (
+                      <span
+                        className="calkit-status-chip new"
+                        title="New (untracked) files"
+                      >
+                        N: {newCount}
+                      </span>
+                    )}
+                    {modifiedCount > 0 && (
+                      <span
+                        className="calkit-status-chip modified"
+                        title="Modified files"
+                      >
+                        M: {modifiedCount}
+                      </span>
+                    )}
+                    {pullCount > 0 && (
+                      <span
+                        className="calkit-status-chip pull"
+                        title="Commits to pull"
+                      >
+                        P: {pullCount}
+                      </span>
+                    )}
+                    {!hasChanges && (
+                      <span className="calkit-status-chip clean">Clean</span>
+                    )}
+                  </span>
+                );
+              })()}
+            {sectionId === "history" && (
+              <button
+                className="calkit-sidebar-section-save"
+                title="Save/sync"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleCommit();
+                }}
+              >
+                Save/sync
+              </button>
+            )}
             {showEditButton && (
               <button
                 className="calkit-sidebar-section-edit"
@@ -825,43 +1093,77 @@ export const CalkitSidebar: React.FC = () => {
               </div>
             </div>
           )}
-          {isExpanded && items.length > 0 && sectionId !== "basicInfo" && (
-            <div
-              className="calkit-sidebar-section-content"
-              onContextMenu={(e) => {
-                if (sectionId === "environments") {
-                  e.preventDefault();
-                  setEnvContextMenu({
-                    visible: true,
-                    x: e.clientX,
-                    y: e.clientY,
-                  });
-                } else if (sectionId === "notebooks") {
-                  e.preventDefault();
-                  setNotebookContextMenu({
-                    visible: true,
-                    x: e.clientX,
-                    y: e.clientY,
-                  });
-                }
-              }}
-            >
-              {sectionId === "environments"
-                ? items.map((item) => renderEnvironmentItem(item))
-                : sectionId === "notebooks"
-                ? items.map((item) => renderNotebookItem(item))
-                : items.map((item) => (
-                    <div key={item.id} className="calkit-sidebar-item">
-                      <span className="calkit-sidebar-item-label">
-                        {item.label}
-                      </span>
+          {isExpanded && sectionId === "history" && (
+            <div className="calkit-sidebar-section-content">
+              <div className="calkit-git-actions">
+                <button
+                  className="calkit-sidebar-section-create"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCommit();
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+              <div className="calkit-git-history">
+                <div className="calkit-git-history-header">Recent history</div>
+                {gitHistory.length === 0 && (
+                  <div className="calkit-sidebar-section-empty">No history</div>
+                )}
+                {gitHistory.slice(0, 5).map((c) => (
+                  <div key={c.hash} className="calkit-git-history-item">
+                    <div className="calkit-git-history-message">
+                      {c.message}
                     </div>
-                  ))}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
-          {isExpanded && items.length === 0 && sectionId !== "basicInfo" && (
-            <div className="calkit-sidebar-section-empty">No items found</div>
-          )}
+          {isExpanded &&
+            items.length > 0 &&
+            sectionId !== "basicInfo" &&
+            sectionId !== "history" && (
+              <div
+                className="calkit-sidebar-section-content"
+                onContextMenu={(e) => {
+                  if (sectionId === "environments") {
+                    e.preventDefault();
+                    setEnvContextMenu({
+                      visible: true,
+                      x: e.clientX,
+                      y: e.clientY,
+                    });
+                  } else if (sectionId === "notebooks") {
+                    e.preventDefault();
+                    setNotebookContextMenu({
+                      visible: true,
+                      x: e.clientX,
+                      y: e.clientY,
+                    });
+                  }
+                }}
+              >
+                {sectionId === "environments"
+                  ? items.map((item) => renderEnvironmentItem(item))
+                  : sectionId === "notebooks"
+                  ? items.map((item) => renderNotebookItem(item))
+                  : items.map((item) => (
+                      <div key={item.id} className="calkit-sidebar-item">
+                        <span className="calkit-sidebar-item-label">
+                          {item.label}
+                        </span>
+                      </div>
+                    ))}
+              </div>
+            )}
+          {isExpanded &&
+            items.length === 0 &&
+            sectionId !== "basicInfo" &&
+            sectionId !== "history" && (
+              <div className="calkit-sidebar-section-empty">No items found</div>
+            )}
         </div>
       );
     },
@@ -875,6 +1177,10 @@ export const CalkitSidebar: React.FC = () => {
       handleCreateNotebook,
       projectInfo,
       handleSaveProjectInfo,
+      gitStatus,
+      gitSelections,
+      gitHistory,
+      handleCommit,
     ],
   );
 
@@ -911,311 +1217,52 @@ export const CalkitSidebar: React.FC = () => {
                 e.stopPropagation();
               }}
             >
-              <div
-                className="calkit-settings-item"
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-              >
-                <label
-                  className="calkit-settings-checkbox-label"
+              {SECTION_DEFS.filter(
+                (section) => section.toggleable !== false,
+              ).map((section) => (
+                <div
+                  key={section.id}
+                  className="calkit-settings-item"
                   onClick={(e) => {
                     e.stopPropagation();
                   }}
                 >
-                  <input
-                    type="checkbox"
-                    checked={visibleSections.has("environments")}
-                    onChange={(e) => {
-                      const next = new Set(visibleSections);
-                      if (e.target.checked) {
-                        next.add("environments");
-                      } else {
-                        next.delete("environments");
-                      }
-                      setVisibleSections(next);
+                  <label
+                    className="calkit-settings-checkbox-label"
+                    onClick={(e) => {
+                      e.stopPropagation();
                     }}
-                  />
-                  Environments
-                </label>
-              </div>
-              <div
-                className="calkit-settings-item"
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-              >
-                <label
-                  className="calkit-settings-checkbox-label"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={visibleSections.has("pipelineStages")}
-                    onChange={(e) => {
-                      const next = new Set(visibleSections);
-                      if (e.target.checked) {
-                        next.add("pipelineStages");
-                      } else {
-                        next.delete("pipelineStages");
-                      }
-                      setVisibleSections(next);
-                    }}
-                  />
-                  Pipeline
-                </label>
-              </div>
-              <div
-                className="calkit-settings-item"
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-              >
-                <label
-                  className="calkit-settings-checkbox-label"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={visibleSections.has("notebooks")}
-                    onChange={(e) => {
-                      const next = new Set(visibleSections);
-                      if (e.target.checked) {
-                        next.add("notebooks");
-                      } else {
-                        next.delete("notebooks");
-                      }
-                      setVisibleSections(next);
-                    }}
-                  />
-                  Notebooks
-                </label>
-              </div>
-              <div
-                className="calkit-settings-item"
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-              >
-                <label
-                  className="calkit-settings-checkbox-label"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={visibleSections.has("figures")}
-                    onChange={(e) => {
-                      const next = new Set(visibleSections);
-                      if (e.target.checked) {
-                        next.add("figures");
-                      } else {
-                        next.delete("figures");
-                      }
-                      setVisibleSections(next);
-                    }}
-                  />
-                  Figures
-                </label>
-              </div>
-              <div
-                className="calkit-settings-item"
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-              >
-                <label
-                  className="calkit-settings-checkbox-label"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={visibleSections.has("datasets")}
-                    onChange={(e) => {
-                      const next = new Set(visibleSections);
-                      if (e.target.checked) {
-                        next.add("datasets");
-                      } else {
-                        next.delete("datasets");
-                      }
-                      setVisibleSections(next);
-                    }}
-                  />
-                  Datasets
-                </label>
-              </div>
-              <div
-                className="calkit-settings-item"
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-              >
-                <label
-                  className="calkit-settings-checkbox-label"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={visibleSections.has("questions")}
-                    onChange={(e) => {
-                      const next = new Set(visibleSections);
-                      if (e.target.checked) {
-                        next.add("questions");
-                      } else {
-                        next.delete("questions");
-                      }
-                      setVisibleSections(next);
-                    }}
-                  />
-                  Questions
-                </label>
-              </div>
-              <div
-                className="calkit-settings-item"
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-              >
-                <label
-                  className="calkit-settings-checkbox-label"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={visibleSections.has("history")}
-                    onChange={(e) => {
-                      const next = new Set(visibleSections);
-                      if (e.target.checked) {
-                        next.add("history");
-                      } else {
-                        next.delete("history");
-                      }
-                      setVisibleSections(next);
-                    }}
-                  />
-                  History
-                </label>
-              </div>
-              <div
-                className="calkit-settings-item"
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-              >
-                <label
-                  className="calkit-settings-checkbox-label"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={visibleSections.has("publications")}
-                    onChange={(e) => {
-                      const next = new Set(visibleSections);
-                      if (e.target.checked) {
-                        next.add("publications");
-                      } else {
-                        next.delete("publications");
-                      }
-                      setVisibleSections(next);
-                    }}
-                  />
-                  Publications
-                </label>
-              </div>
-              <div
-                className="calkit-settings-item"
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-              >
-                <label
-                  className="calkit-settings-checkbox-label"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={visibleSections.has("notes")}
-                    onChange={(e) => {
-                      const next = new Set(visibleSections);
-                      if (e.target.checked) {
-                        next.add("notes");
-                      } else {
-                        next.delete("notes");
-                      }
-                      setVisibleSections(next);
-                    }}
-                  />
-                  Notes
-                </label>
-              </div>
-              <div
-                className="calkit-settings-item"
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-              >
-                <label
-                  className="calkit-settings-checkbox-label"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={visibleSections.has("models")}
-                    onChange={(e) => {
-                      const next = new Set(visibleSections);
-                      if (e.target.checked) {
-                        next.add("models");
-                      } else {
-                        next.delete("models");
-                      }
-                      setVisibleSections(next);
-                    }}
-                  />
-                  Models
-                </label>
-              </div>
+                  >
+                    <input
+                      type="checkbox"
+                      checked={visibleSections.has(section.id)}
+                      onChange={(e) => {
+                        const next = new Set(visibleSections);
+                        if (e.target.checked) {
+                          next.add(section.id);
+                        } else {
+                          next.delete(section.id);
+                        }
+                        setVisibleSections(next);
+                      }}
+                    />
+                    {section.label}
+                  </label>
+                </div>
+              ))}
             </div>
           )}
         </div>
       </div>
       <div className="calkit-sidebar-content">
-        {renderSection("basicInfo", "Basic info", "ℹ️")}
-        {visibleSections.has("environments") &&
-          renderSection("environments", "Environments", "⚙️")}
-        {visibleSections.has("pipelineStages") &&
-          renderSection("pipelineStages", "Pipeline", "🔄")}
-        {visibleSections.has("notebooks") &&
-          renderSection("notebooks", "Notebooks", "📓")}
-        {visibleSections.has("figures") &&
-          renderSection("figures", "Figures", "📊")}
-        {visibleSections.has("datasets") &&
-          renderSection("datasets", "Datasets", "📁")}
-        {visibleSections.has("questions") &&
-          renderSection("questions", "Questions", "❓")}
-        {visibleSections.has("history") &&
-          renderSection("history", "History", "📜")}
-        {visibleSections.has("publications") &&
-          renderSection("publications", "Publications", "📚")}
-        {visibleSections.has("notes") && renderSection("notes", "Notes", "📝")}
-        {visibleSections.has("models") &&
-          renderSection("models", "Models", "🤖")}
+        {SECTION_DEFS.map((section) => {
+          const isVisible =
+            section.toggleable === false || visibleSections.has(section.id);
+          if (!isVisible) {
+            return null;
+          }
+          return renderSection(section.id, section.label, section.icon);
+        })}
       </div>
       {envContextMenu?.visible &&
         ReactDOM.createPortal(
@@ -1357,12 +1404,22 @@ export const CalkitSidebar: React.FC = () => {
  * A widget for the Calkit sidebar.
  */
 export class CalkitSidebarWidget extends ReactWidget {
+  private _settings: ISettingRegistry.ISettings | null = null;
+  private _stateDB: IStateDB | null = null;
   constructor() {
     super();
     this.addClass("calkit-sidebar-widget");
   }
+  setSettings(settings: ISettingRegistry.ISettings) {
+    this._settings = settings;
+    this.update();
+  }
+  setStateDB(stateDB: IStateDB) {
+    this._stateDB = stateDB;
+    this.update();
+  }
 
   render() {
-    return <CalkitSidebar />;
+    return <CalkitSidebar settings={this._settings} stateDB={this._stateDB} />;
   }
 }

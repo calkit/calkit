@@ -21,6 +21,24 @@
   "title": "calkit",
   "description": "calkit settings.",
   "type": "object",
-  "properties": {},
+  "properties": {
+    "visibleSections": {
+      "type": "array",
+      "title": "Visible sections",
+      "description": "Sidebar sections to show",
+      "items": {
+        "type": "string"
+      },
+      "default": [
+        "basicInfo",
+        "environments",
+        "pipelineStages",
+        "notebooks",
+        "datasets",
+        "questions",
+        "history"
+      ]
+    }
+  },
   "additionalProperties": false
 }

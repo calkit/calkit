@@ -109,7 +109,7 @@
 
 .calkit-env-package-add-button {
   padding: 6px 12px;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: bold;
   background-color: var(--jp-brand-color1);
   color: var(--jp-layout-color1);
@@ -189,6 +189,74 @@
   outline: none;
   border-color: var(--jp-brand-color1);
   box-shadow: 0 0 0 1px var(--jp-brand-color1);
+}
+
+/* Commit dialog file list */
+.calkit-commit-file-list {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 3px;
+  background: var(--jp-layout-color0);
+}
+
+.calkit-commit-file-header,
+.calkit-commit-file-row {
+  display: grid;
+  grid-template-columns: 1fr 56px 56px 76px 96px;
+  align-items: center;
+  padding: 6px 8px;
+  gap: 8px;
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.calkit-commit-file-row:last-child {
+  border-bottom: none;
+}
+
+.calkit-commit-file-header {
+  background: var(--jp-layout-color1);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--jp-ui-font-color2);
+}
+
+.calkit-commit-col-path {
+  padding-right: 8px;
+}
+
+.calkit-commit-col-choice {
+  text-align: center;
+}
+
+.calkit-commit-file-path {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--jp-ui-font-color1);
+}
+
+.calkit-commit-file-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  justify-content: center;
+}
+
+.calkit-commit-file-choice {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--jp-ui-font-color2);
+}
+
+.calkit-commit-file-empty {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--jp-ui-font-color2);
 }
 
 .calkit-checkbox-label {

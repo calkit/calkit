@@ -13,6 +13,7 @@ import { ILauncher } from "@jupyterlab/launcher";
 import { INotebookTracker, NotebookPanel } from "@jupyterlab/notebook";
 
 import { ISettingRegistry } from "@jupyterlab/settingregistry";
+import { IStateDB } from "@jupyterlab/statedb";
 
 import { ITranslator } from "@jupyterlab/translation";
 
@@ -38,6 +39,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
   requires: [ILayoutRestorer],
   optional: [
     ISettingRegistry,
+    IStateDB,
     ILauncher,
     INotebookTracker,
     IToolbarWidgetRegistry,
@@ -48,6 +50,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     app: JupyterFrontEnd,
     restorer: ILayoutRestorer,
     settingRegistry: ISettingRegistry | null,
+    stateDB: IStateDB | null,
     launcher: ILauncher | null,
     notebookTracker: INotebookTracker | null,
     toolbarRegistry: IToolbarWidgetRegistry | null,
@@ -128,10 +131,15 @@ const plugin: JupyterFrontEndPlugin<void> = {
         .load(plugin.id)
         .then((settings) => {
           console.log("calkit settings loaded:", settings.composite);
+          sidebar.setSettings(settings);
         })
         .catch((reason) => {
           console.error("Failed to load settings for calkit.", reason);
         });
+    }
+
+    if (stateDB) {
+      sidebar.setStateDB(stateDB);
     }
 
     requestAPI<any>("hello")

@@ -26,7 +26,7 @@ import { CalkitSidebarWidget } from "./sidebar";
 import { filterLauncher } from "./launcher-filter";
 import { createOutputMarkerButton } from "./cell-output-marker";
 import { addCommands, addContextMenuItems } from "./file-browser-menu";
-import { createEnvironmentSelector } from "./environment-selector";
+import { createNotebookToolbar } from "./notebook-toolbar";
 import { calkitIcon } from "./icons";
 
 /**
@@ -103,14 +103,14 @@ const plugin: JupyterFrontEndPlugin<void> = {
         return emptyWidget;
       });
 
-      // Register environment selector for notebook toolbar
+      // Register notebook toolbar with badges
       toolbarRegistry.addFactory(
         "Notebook",
-        "calkit-environment-selector",
+        "calkit-notebook-toolbar",
         (widget) => {
-          console.log("Creating environment selector for:", widget);
+          console.log("Creating notebook toolbar for:", widget);
           if (widget instanceof NotebookPanel) {
-            return createEnvironmentSelector(widget, translator || undefined);
+            return createNotebookToolbar(widget, translator || undefined);
           }
           console.warn("Widget is not a NotebookPanel:", widget);
           const emptyWidget = new Widget();

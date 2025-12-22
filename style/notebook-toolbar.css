@@ -1,0 +1,368 @@
+/* Notebook Toolbar Styling */
+
+.calkit-notebook-toolbar-widget {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+}
+
+.calkit-notebook-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+/* Badge Container */
+.calkit-badge-container {
+  position: relative;
+  display: inline-block;
+}
+
+/* Badge Button */
+.calkit-badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  background-color: var(--jp-brand-color1);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s ease;
+  min-height: 22px;
+  line-height: 1.2;
+}
+
+.calkit-badge:hover {
+  background-color: var(--jp-brand-color0);
+}
+
+.calkit-badge:active {
+  transform: none;
+}
+
+/* Unconfigured Badge (Red) */
+.calkit-badge-unconfigured {
+  background-color: #d32f2f;
+}
+
+.calkit-badge-unconfigured:hover {
+  background-color: #b71c1c;
+}
+
+/* Dropdown Menu */
+.calkit-badge-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  left: auto;
+  min-width: 280px;
+  max-width: min(420px, calc(100vw - 32px));
+  background-color: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  padding: 12px;
+  max-height: min(480px, calc(100vh - 120px));
+  overflow: auto;
+}
+
+.calkit-badge-icon {
+  padding: 0 8px;
+  text-transform: none;
+  letter-spacing: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color1);
+  height: 22px;
+}
+
+.calkit-badge-icon:hover {
+  background-color: var(--jp-layout-color3);
+  color: var(--jp-ui-font-color1);
+  border-color: var(--jp-border-color0);
+}
+
+.calkit-badge-gray {
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color1);
+}
+
+.calkit-badge-gray:hover {
+  background-color: var(--jp-layout-color3);
+  color: var(--jp-ui-font-color1);
+  border-color: var(--jp-border-color0);
+}
+
+/* Dropdown Content */
+.calkit-dropdown-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.calkit-dropdown-content h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--jp-ui-font-color1);
+  border-bottom: 1px solid var(--jp-border-color2);
+  padding-bottom: 6px;
+}
+
+.calkit-dropdown-content p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--jp-ui-font-color2);
+}
+
+/* Dropdown Section */
+.calkit-dropdown-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Dropdown Divider */
+.calkit-dropdown-divider {
+  height: 1px;
+  background-color: var(--jp-border-color2);
+  margin: 4px 0;
+}
+
+/* Dropdown Button */
+.calkit-dropdown-button {
+  font-size: 12px;
+  padding: 6px 12px;
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s ease;
+  width: 100%;
+  text-align: center;
+}
+
+.calkit-dropdown-button:hover {
+  background-color: var(--jp-layout-color3);
+  border-color: var(--jp-brand-color1);
+  color: var(--jp-brand-color1);
+}
+
+.calkit-dropdown-button:active {
+  background-color: var(--jp-layout-color3);
+}
+
+/* Environment List */
+.calkit-env-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.calkit-env-item {
+  font-size: 12px;
+  padding: 8px 12px;
+  background-color: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.calkit-env-item:hover {
+  background-color: var(--jp-layout-color2);
+  border-color: var(--jp-brand-color1);
+}
+
+.calkit-env-item-active {
+  background-color: var(--jp-brand-color3);
+  border-color: var(--jp-brand-color1);
+  color: var(--jp-brand-color1);
+  font-weight: 500;
+}
+
+/* Pipeline Stage List */
+.calkit-stage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.calkit-stage-item {
+  font-size: 12px;
+  padding: 8px 12px;
+  background-color: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.calkit-stage-item:hover {
+  background-color: var(--jp-layout-color2);
+  border-color: var(--jp-brand-color1);
+}
+
+.calkit-stage-item-active {
+  background-color: var(--jp-brand-color3);
+  border-color: var(--jp-brand-color1);
+  color: var(--jp-brand-color1);
+  font-weight: 500;
+}
+
+/* Input/Output List */
+.calkit-io-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.calkit-io-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  padding: 6px 10px;
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+}
+
+.calkit-io-item span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calkit-io-remove {
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 6px;
+  background: none;
+  color: var(--jp-error-color1);
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.calkit-io-remove:hover {
+  color: var(--jp-error-color0);
+  transform: scale(1.2);
+}
+
+/* Form Groups */
+.calkit-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.calkit-form-group label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--jp-ui-font-color1);
+}
+
+.calkit-form-group input,
+.calkit-form-group select,
+.calkit-form-group textarea {
+  font-size: 12px;
+  padding: 6px 10px;
+  background-color: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  outline: none;
+  font-family: var(--jp-ui-font-family);
+}
+
+.calkit-form-group input:focus,
+.calkit-form-group select:focus,
+.calkit-form-group textarea:focus {
+  border-color: var(--jp-brand-color1);
+  box-shadow: 0 0 0 1px var(--jp-brand-color1);
+}
+
+.calkit-form-group textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+/* Input Row (for add button) */
+.calkit-input-row {
+  display: flex;
+  gap: 6px;
+}
+
+.calkit-input-row input {
+  flex: 1;
+}
+
+.calkit-input-row button {
+  font-size: 12px;
+  padding: 6px 12px;
+  background-color: var(--jp-brand-color1);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.calkit-input-row button:hover {
+  background-color: var(--jp-brand-color0);
+}
+
+/* Form Actions */
+.calkit-form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.calkit-form-actions button {
+  flex: 1;
+  font-size: 12px;
+  padding: 8px 12px;
+  background-color: var(--jp-brand-color1);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.calkit-form-actions button:hover {
+  background-color: var(--jp-brand-color0);
+}
+
+.calkit-form-actions button:last-child {
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color1);
+}
+
+.calkit-form-actions button:last-child:hover {
+  background-color: var(--jp-layout-color3);
+  border-color: var(--jp-border-color0);
+}

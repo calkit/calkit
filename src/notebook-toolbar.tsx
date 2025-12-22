@@ -82,26 +82,29 @@ const EnvironmentBadge: React.FC<{
   const [environments, setEnvironments] = useState<Record<string, any>>({});
   const [currentEnv, setCurrentEnv] = useState<string>("");
   const [loading, setLoading] = useState(true);
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [newEnvName, setNewEnvName] = useState("");
-  const [newEnvLanguage, setNewEnvLanguage] = useState("python");
-  const [newEnvVersion, setNewEnvVersion] = useState("");
-  const [newEnvPackages, setNewEnvPackages] = useState("");
+  const [formMode, setFormMode] = useState<"" | "create" | "edit">("");
+  const [formName, setFormName] = useState("");
+  const [formKind, setFormKind] = useState("uv-venv");
+  const [formPackages, setFormPackages] = useState<string[]>([]);
+  const [newPackage, setNewPackage] = useState("");
+
+  const refreshEnvironments = async () => {
+    const info = await requestAPI<any>("project");
+    setEnvironments(info.environments || {});
+    // Try to determine current environment from kernel name
+    const kernelName = panel.sessionContext.session?.kernel?.name || "";
+    const envNames = Object.keys(info.environments || {});
+    const matchedEnv = envNames.find((name) =>
+      kernelName.toLowerCase().includes(name.toLowerCase()),
+    );
+    setCurrentEnv(matchedEnv || envNames[0] || "");
+  };
 
   // Fetch environments on mount
   useEffect(() => {
     const fetchEnvironments = async () => {
       try {
-        const info = await requestAPI<any>("project");
-        setEnvironments(info.environments || {});
-        // Try to determine current environment from kernel name
-        const kernelName = panel.sessionContext.session?.kernel?.name || "";
-        const envNames = Object.keys(info.environments || {});
-        // Simple heuristic: find environment that matches kernel name
-        const matchedEnv = envNames.find((name) =>
-          kernelName.toLowerCase().includes(name.toLowerCase()),
-        );
-        setCurrentEnv(matchedEnv || envNames[0] || "");
+        await refreshEnvironments();
         setLoading(false);
       } catch (error) {
         console.error("Failed to fetch environments:", error);
@@ -119,57 +122,91 @@ const EnvironmentBadge: React.FC<{
     console.log(`Switching to environment: ${envName}`);
   };
 
-  const handleCreateNew = () => {
-    setShowCreateForm(true);
+  const startCreateEnvironment = () => {
+    setFormMode("create");
+    setFormName("");
+    setFormKind("uv-venv");
+    setFormPackages([]);
+    setNewPackage("");
   };
 
-  const handleCancelCreate = () => {
-    setShowCreateForm(false);
-    setNewEnvName("");
-    setNewEnvVersion("");
-    setNewEnvPackages("");
+  const startEditEnvironment = () => {
+    if (!currentEnv) {
+      return;
+    }
+    const envData = environments[currentEnv] || {};
+    setFormMode("edit");
+    setFormName(currentEnv);
+    setFormKind(envData.kind || "uv-venv");
+    setFormPackages(envData.packages || []);
+    setNewPackage("");
   };
 
-  const handleSubmitCreate = async () => {
-    if (!newEnvName) {
+  const addPackage = () => {
+    const pkg = newPackage.trim();
+    if (!pkg) {
+      return;
+    }
+    if (formPackages.includes(pkg)) {
+      setNewPackage("");
+      return;
+    }
+    setFormPackages([...formPackages, pkg]);
+    setNewPackage("");
+  };
+
+  const removePackage = (pkg: string) => {
+    setFormPackages(formPackages.filter((p) => p !== pkg));
+  };
+
+  const handleSaveEnvironment = async () => {
+    const name = formName.trim();
+    if (!name) {
       alert("Environment name is required");
       return;
     }
 
     try {
-      const packages = newEnvPackages
-        .split("\n")
-        .map((p) => p.trim())
-        .filter((p) => p.length > 0);
+      if (formMode === "create") {
+        await requestAPI("environment/create", {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            kind: formKind,
+            packages: formPackages,
+          }),
+        });
+      } else if (formMode === "edit") {
+        await requestAPI("environment/update", {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            kind: formKind,
+            packages: formPackages,
+          }),
+        });
+      }
 
-      await requestAPI("environment/create", {
-        method: "POST",
-        body: JSON.stringify({
-          name: newEnvName,
-          language: newEnvLanguage,
-          version: newEnvVersion,
-          packages: packages,
-        }),
-      });
-
-      // Refresh environments
-      const info = await requestAPI<any>("project");
-      setEnvironments(info.environments || {});
-      setCurrentEnv(newEnvName);
-      setShowCreateForm(false);
-      setNewEnvName("");
-      setNewEnvVersion("");
-      setNewEnvPackages("");
+      await refreshEnvironments();
+      setCurrentEnv(name);
+      setFormMode("");
       setIsOpen(false);
     } catch (error) {
-      console.error("Failed to create environment:", error);
-      alert("Failed to create environment");
+      console.error("Failed to save environment:", error);
+      alert("Failed to save environment");
     }
+  };
+
+  const handleCancelForm = () => {
+    setFormMode("");
+    setNewPackage("");
   };
 
   const envNames = Object.keys(environments);
   const isConfigured = currentEnv !== "";
-  const label = isConfigured ? `Env: ${currentEnv}` : "No environment selected";
+  const label = isConfigured
+    ? `Environment: ${currentEnv}`
+    : "No environment selected";
 
   return (
     <BadgeDropdown
@@ -181,51 +218,83 @@ const EnvironmentBadge: React.FC<{
     >
       {loading ? (
         <div className="calkit-dropdown-content">Loading...</div>
-      ) : showCreateForm ? (
+      ) : formMode ? (
         <div className="calkit-dropdown-content">
-          <h4>Create new environment</h4>
+          <h4>
+            {formMode === "create" ? "Create environment" : "Edit environment"}
+          </h4>
           <div className="calkit-form-group">
-            <label>Name:</label>
+            <label>Environment name</label>
             <input
               type="text"
-              value={newEnvName}
-              onChange={(e) => setNewEnvName(e.target.value)}
+              value={formName}
+              onChange={(e) => setFormName(e.target.value)}
               placeholder="my-environment"
+              disabled={formMode === "edit"}
             />
           </div>
           <div className="calkit-form-group">
-            <label>Language:</label>
+            <label>Environment kind</label>
             <select
-              value={newEnvLanguage}
-              onChange={(e) => setNewEnvLanguage(e.target.value)}
+              value={formKind}
+              onChange={(e) => setFormKind(e.target.value)}
             >
-              <option value="python">Python</option>
+              <option value="uv-venv">uv-venv (Python)</option>
+              <option value="venv">venv (Python)</option>
               <option value="julia">Julia</option>
-              <option value="r">R</option>
-              <option value="matlab">MATLAB</option>
+              <option value="conda">Conda</option>
+              <option value="docker">Docker</option>
             </select>
           </div>
-          <div className="calkit-form-group">
-            <label>Version:</label>
-            <input
-              type="text"
-              value={newEnvVersion}
-              onChange={(e) => setNewEnvVersion(e.target.value)}
-              placeholder="e.g., 3.11"
-            />
-          </div>
-          <div className="calkit-form-group">
-            <label>Packages (one per line):</label>
-            <textarea
-              value={newEnvPackages}
-              onChange={(e) => setNewEnvPackages(e.target.value)}
-              placeholder="numpy&#10;pandas&#10;matplotlib"
-              rows={5}
-            />
-          </div>
+          {(formKind === "uv-venv" ||
+            formKind === "venv" ||
+            formKind === "julia" ||
+            formKind === "conda") && (
+            <div className="calkit-form-group">
+              <label>Packages</label>
+              <div className="calkit-env-packages-list">
+                {formPackages.map((pkg) => (
+                  <div key={pkg} className="calkit-env-package-item">
+                    <span className="calkit-env-package-name">{pkg}</span>
+                    <button
+                      className="calkit-env-package-remove"
+                      onClick={() => removePackage(pkg)}
+                      title="Remove package"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                {formPackages.length === 0 && (
+                  <div className="calkit-env-package-empty">
+                    No packages added
+                  </div>
+                )}
+              </div>
+              <div className="calkit-input-row">
+                <input
+                  type="text"
+                  value={newPackage}
+                  onChange={(e) => setNewPackage(e.target.value)}
+                  placeholder="Add package..."
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addPackage();
+                    }
+                  }}
+                />
+                <button onClick={addPackage} disabled={!newPackage.trim()}>
+                  Add
+                </button>
+              </div>
+            </div>
+          )}
           <div className="calkit-form-actions">
-            <button onClick={handleSubmitCreate}>Create</button>
-            <button onClick={handleCancelCreate}>Cancel</button>
+            <button onClick={handleSaveEnvironment}>
+              {formMode === "create" ? "Create" : "Save"}
+            </button>
+            <button onClick={handleCancelForm}>Cancel</button>
           </div>
         </div>
       ) : (
@@ -251,9 +320,21 @@ const EnvironmentBadge: React.FC<{
             )}
           </div>
           <div className="calkit-dropdown-divider" />
-          <button className="calkit-dropdown-button" onClick={handleCreateNew}>
-            + Create New Environment
-          </button>
+          <div className="calkit-dropdown-actions">
+            <button
+              className="calkit-dropdown-button"
+              onClick={startCreateEnvironment}
+            >
+              Create new environment
+            </button>
+            <button
+              className="calkit-dropdown-button"
+              onClick={startEditEnvironment}
+              disabled={!currentEnv}
+            >
+              Edit current environment
+            </button>
+          </div>
         </div>
       )}
     </BadgeDropdown>

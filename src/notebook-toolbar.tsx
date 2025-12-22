@@ -349,24 +349,22 @@ const PipelineStageBadge: React.FC<{
   translator?: ITranslator;
 }> = ({ panel }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [stages, setStages] = useState<string[]>([]);
   const [currentStage, setCurrentStage] = useState<string>("");
   const [loading, setLoading] = useState(true);
-  const [newStageName, setNewStageName] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [stageName, setStageName] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  // Fetch pipeline stages on mount
+  // Fetch notebook stage on mount
   useEffect(() => {
-    const fetchStages = async () => {
+    const fetchStage = async () => {
       try {
-        const info = await requestAPI<any>("pipeline/stages");
-        setStages(info.stages || []);
-        // Try to get notebook's current stage
         const notebookPath = panel.context.path;
         const notebookInfo = await requestAPI<any>(
           `notebook/info?path=${encodeURIComponent(notebookPath)}`,
         );
-        setCurrentStage(notebookInfo.stage || "");
+        const stage = notebookInfo.stage || "";
+        setCurrentStage(stage);
+        setStageName(stage);
         setLoading(false);
       } catch (error) {
         console.error("Failed to fetch pipeline stages:", error);
@@ -374,12 +372,15 @@ const PipelineStageBadge: React.FC<{
       }
     };
 
-    fetchStages();
+    fetchStage();
   }, [panel]);
 
-  const handleStageSelect = async (stage: string) => {
-    setCurrentStage(stage);
-    setIsOpen(false);
+  const handleSaveStage = async () => {
+    if (!stageName.trim()) {
+      return;
+    }
+    setSaving(true);
+    const stage = stageName.trim();
     const notebookPath = panel.context.path;
     try {
       await requestAPI("notebook/set-stage", {
@@ -389,34 +390,12 @@ const PipelineStageBadge: React.FC<{
           stage: stage,
         }),
       });
-    } catch (error) {
-      console.error("Failed to set pipeline stage:", error);
-    }
-  };
-
-  const handleCreateStage = async () => {
-    if (!newStageName.trim()) {
-      return;
-    }
-    setCreating(true);
-    const stage = newStageName.trim();
-    const notebookPath = panel.context.path;
-    try {
-      await requestAPI("pipeline/create-stage", {
-        method: "POST",
-        body: JSON.stringify({
-          stage,
-          path: notebookPath,
-        }),
-      });
-      setStages((prev) => Array.from(new Set([...prev, stage])));
       setCurrentStage(stage);
-      setNewStageName("");
       setIsOpen(false);
     } catch (error) {
-      console.error("Failed to create pipeline stage:", error);
+      console.error("Failed to set pipeline stage:", error);
     } finally {
-      setCreating(false);
+      setSaving(false);
     }
   };
 
@@ -435,42 +414,27 @@ const PipelineStageBadge: React.FC<{
         <div className="calkit-dropdown-content">Loading...</div>
       ) : (
         <div className="calkit-dropdown-content">
-          <h4>Select pipeline stage</h4>
-          {stages.length === 0 ? (
-            <p>No stages available</p>
-          ) : (
-            <div className="calkit-stage-list">
-              {stages.map((stage) => (
-                <div
-                  key={stage}
-                  className={`calkit-stage-item ${
-                    stage === currentStage ? "calkit-stage-item-active" : ""
-                  }`}
-                  onClick={() => handleStageSelect(stage)}
-                >
-                  {stage}
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="calkit-dropdown-divider" />
+          <h4>Set notebook stage</h4>
           <div className="calkit-form-group">
-            <label>Add a new stage</label>
+            <label>Stage name</label>
             <div className="calkit-input-row">
               <input
                 type="text"
-                value={newStageName}
-                onChange={(e) => setNewStageName(e.target.value)}
+                value={stageName}
+                onChange={(e) => setStageName(e.target.value)}
                 placeholder="e.g., postprocess"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    handleCreateStage();
+                    handleSaveStage();
                   }
                 }}
               />
-              <button onClick={handleCreateStage} disabled={creating}>
-                {creating ? "Creating..." : "Add"}
+              <button
+                onClick={handleSaveStage}
+                disabled={saving || !stageName.trim()}
+              >
+                {saving ? "Saving..." : "Save"}
               </button>
             </div>
           </div>

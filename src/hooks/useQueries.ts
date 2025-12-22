@@ -30,6 +30,12 @@ export interface IGitStatus {
   remote?: string | null;
 }
 
+export interface IPipelineStatus {
+  pipeline: Record<string, any>;
+  is_outdated: boolean;
+  error?: string;
+}
+
 export interface IGitCommit {
   hash: string;
   message: string;
@@ -59,6 +65,17 @@ export const useGitStatus = () => {
     queryKey: ["git", "status"],
     queryFn: () => requestAPI<IGitStatus>("git/status"),
     staleTime: 10 * 1000, // 10 seconds for git status
+  });
+};
+
+/**
+ * Query hook for fetching pipeline status
+ */
+export const usePipelineStatus = () => {
+  return useQuery<IPipelineStatus>({
+    queryKey: ["pipeline", "status"],
+    queryFn: () => requestAPI<IPipelineStatus>("pipeline/status"),
+    staleTime: 10 * 1000,
   });
 };
 

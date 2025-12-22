@@ -401,6 +401,38 @@
   color: var(--jp-error-color1);
 }
 
+/* Sidebar tab attention indicator */
+.lm-TabBar-tabIcon,
+.p-TabBar-tabIcon {
+  position: relative;
+}
+
+.lm-TabBar-tab.calkit-sidebar-tab .lm-TabBar-tabIcon::after,
+.p-TabBar-tab.calkit-sidebar-tab .p-TabBar-tabIcon::after {
+  content: "";
+  position: absolute;
+  bottom: -6px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--jp-info-color1);
+  border: 1px solid var(--jp-layout-color1);
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.lm-TabBar-tab.calkit-sidebar-tab.calkit-sidebar-attention
+  .lm-TabBar-tabIcon::after,
+.p-TabBar-tab.calkit-sidebar-tab.calkit-sidebar-attention
+  .p-TabBar-tabIcon::after {
+  opacity: 1;
+  transform: scale(1);
+}
+
 /* Context menu for environment items */
 .calkit-env-context-menu {
   position: fixed;

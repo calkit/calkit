@@ -6,8 +6,11 @@ import os
 import subprocess
 import sys
 
+import dvc
+import dvc.repo
 import git
 import tornado
+from dvc.exceptions import NotDvcRepoError
 from jupyter_server.base.handlers import APIHandler
 from jupyter_server.utils import url_path_join
 from pydantic import BaseModel
@@ -198,6 +201,43 @@ class GitStatusRouteHandler(APIHandler):
         )
 
 
+class PipelineStatusRouteHandler(APIHandler):
+    @tornado.web.authenticated
+    def get(self):
+        try:
+            dvc_repo = dvc.repo.Repo(os.getcwd())
+            raw_status = dvc_repo.status()
+            pipeline_status = {
+                k.split("dvc.yaml:")[-1]: v
+                for k, v in raw_status.items()
+                if v != ["always changed"] and not k.endswith(".dvc")
+            }
+            is_outdated = len(pipeline_status) > 0
+            self.finish(
+                json.dumps(
+                    {
+                        "pipeline": pipeline_status,
+                        "is_outdated": is_outdated,
+                    }
+                )
+            )
+        except NotDvcRepoError:
+            self.finish(json.dumps({"pipeline": {}, "is_outdated": False}))
+            return
+        except Exception as e:
+            self.set_status(500)
+            self.finish(
+                json.dumps(
+                    {
+                        "pipeline": {},
+                        "is_outdated": False,
+                        "error": f"Failed to get pipeline status: {e}",
+                    }
+                )
+            )
+            return
+
+
 class GitIgnoreRouteHandler(APIHandler):
     @tornado.web.authenticated
     def post(self):
@@ -354,6 +394,10 @@ def setup_route_handlers(web_app):
         (
             url_path_join(base_url, "calkit", "git", "status"),
             GitStatusRouteHandler,
+        ),
+        (
+            url_path_join(base_url, "calkit", "pipeline", "status"),
+            PipelineStatusRouteHandler,
         ),
         (
             url_path_join(base_url, "calkit", "git", "commit"),

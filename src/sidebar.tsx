@@ -18,6 +18,7 @@ import {
   usePush,
   useUpdateEnvironment,
   useDeleteEnvironment,
+  usePipelineStatus,
   type IProjectInfo,
   type IGitStatus,
 } from "./hooks/useQueries";
@@ -75,15 +76,18 @@ const DEFAULT_VISIBLE_SECTIONS = new Set(
 export interface ICalkitSidebarProps {
   settings?: ISettingRegistry.ISettings | null;
   stateDB?: IStateDB | null;
+  onStatusChange?: (needsAttention: boolean) => void;
 }
 
 export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   settings,
   stateDB,
+  onStatusChange,
 }) => {
   // Query hooks - automatically manage data fetching and caching
   const projectQuery = useProject();
   const gitStatusQuery = useGitStatus();
+  const pipelineStatusQuery = usePipelineStatus();
   const gitHistoryQuery = useGitHistory();
 
   // Mutation hooks - automatically invalidate related queries on success
@@ -202,6 +206,22 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     branch: null,
     remote: null,
   };
+
+  const pipelineStatus = pipelineStatusQuery.data;
+  const hasPipelineIssues = Boolean(
+    pipelineStatus?.is_outdated ||
+      (pipelineStatus?.pipeline &&
+        Object.keys(pipelineStatus.pipeline || {}).length > 0),
+  );
+  const hasGitChanges =
+    (gitStatus.changed?.length || 0) > 0 ||
+    (gitStatus.untracked?.length || 0) > 0 ||
+    (gitStatus.staged?.length || 0) > 0;
+  const needsAttention = hasPipelineIssues || hasGitChanges;
+
+  React.useEffect(() => {
+    onStatusChange?.(needsAttention);
+  }, [needsAttention, onStatusChange]);
 
   // Convert git status to selections
   const gitSelections: Record<string, { stage: boolean; storeInDvc: boolean }> =
@@ -1241,9 +1261,29 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
 export class CalkitSidebarWidget extends ReactWidget {
   private _settings: ISettingRegistry.ISettings | null = null;
   private _stateDB: IStateDB | null = null;
+  private _hasAttention = false;
+  private _handleStatusChange = (needsAttention: boolean) => {
+    if (this._hasAttention === needsAttention) {
+      return;
+    }
+    this._hasAttention = needsAttention;
+    const classes = new Set(
+      `${this.title.className || ""} calkit-sidebar-tab`
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (needsAttention) {
+      classes.add("calkit-sidebar-attention");
+    } else {
+      classes.delete("calkit-sidebar-attention");
+    }
+    this.title.className = Array.from(classes).join(" ");
+    this.node.classList.toggle("calkit-sidebar-attention", needsAttention);
+  };
   constructor() {
     super();
     this.addClass("calkit-sidebar-widget");
+    this.title.className = "calkit-sidebar-tab";
   }
   setSettings(settings: ISettingRegistry.ISettings) {
     this._settings = settings;
@@ -1257,7 +1297,11 @@ export class CalkitSidebarWidget extends ReactWidget {
   render() {
     return (
       <QueryClientProvider client={queryClient}>
-        <CalkitSidebar settings={this._settings} stateDB={this._stateDB} />
+        <CalkitSidebar
+          settings={this._settings}
+          stateDB={this._stateDB}
+          onStatusChange={this._handleStatusChange}
+        />
       </QueryClientProvider>
     );
   }

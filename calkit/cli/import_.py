@@ -16,6 +16,7 @@ from tqdm import tqdm
 
 import calkit
 from calkit.cli import raise_error
+from calkit.models.core import _ImportedFromProject
 
 import_app = typer.Typer(no_args_is_help=True)
 
@@ -32,11 +33,11 @@ def import_dataset(
         ),
     ],
     dest_path: Annotated[
-        str,
+        str | None,
         typer.Argument(help="Output path at which to save."),
     ] = None,
     filter_paths: Annotated[
-        list[str],
+        list[str] | None,
         typer.Option(
             "--filter-paths",
             help="Filter paths in target dataset if it's a folder.",
@@ -186,7 +187,7 @@ def import_dataset(
         title=resp.get("title"),
         description=resp.get("description"),
         stage=None,
-        imported_from=calkit.models._ImportedFromProject(
+        imported_from=_ImportedFromProject(
             project=f"{owner_name}/{project_name}",
             path=path,
             git_rev=resp.get("git_rev"),

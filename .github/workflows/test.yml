@@ -32,6 +32,10 @@ jobs:
         uses: julia-actions/install-juliaup@v2
         with:
           channel: "1" # Installs the latest v1 Julia version via Juliaup
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
       - name: Run tests
         run: |
           source ~/.bashrc

@@ -354,7 +354,7 @@ def import_from_zenodo(
         typer.Option("--no-commit", help="Do not commit changes to project."),
     ] = False,
 ):
-    """Import from Zenodo."""
+    """Import files from a Zenodo record."""
     # Ensure destination directory either doesn't exist or is empty
     if os.path.isdir(dest_dir):
         if os.listdir(dest_dir):

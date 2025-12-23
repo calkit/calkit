@@ -27,6 +27,13 @@ from typing_extensions import Annotated, Optional
 import calkit
 import calkit.matlab
 import calkit.pipeline
+from calkit import (
+    AUTO_IGNORE_PATHS,
+    AUTO_IGNORE_PREFIXES,
+    AUTO_IGNORE_SUFFIXES,
+    DVC_EXTENSIONS,
+    DVC_SIZE_THRESH_BYTES,
+)
 from calkit.cli import print_sep, raise_error, run_cmd, warn
 from calkit.cli.check import (
     check_app,
@@ -75,46 +82,6 @@ app.add_typer(latex_app, name="latex", help="Work with LaTeX.")
 app.add_typer(overleaf_app, name="overleaf", help="Interact with Overleaf.")
 app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
 app.add_typer(slurm_app, name="slurm", help="Work with SLURM.")
-
-# Constants for version control auto-ignore
-AUTO_IGNORE_SUFFIXES = [
-    ".DS_Store",
-    ".env",
-    ".pyc",
-    ".synctex.gz",
-    ".ipynb_checkpoints",
-]
-AUTO_IGNORE_PATHS = [os.path.join(".dvc", "config.local")]
-AUTO_IGNORE_PREFIXES = [
-    ".venv",
-    "__pycache__",
-    ".ipynb_checkpoints",
-    ".calkit/overleaf/",
-]
-# Constants for version control auto-add to DVC
-DVC_EXTENSIONS = [
-    ".png",
-    ".jpeg",
-    ".jpg",
-    ".gif",
-    ".h5",
-    ".parquet",
-    ".pickle",
-    ".mp4",
-    ".avi",
-    ".webm",
-    ".pdf",
-    ".xlsx",
-    ".docx",
-    ".pptx",
-    ".xls",
-    ".doc",
-    ".ppt",
-    ".nc",
-    ".nc4",
-    ".zarr",
-]
-DVC_SIZE_THRESH_BYTES = 1_000_000
 
 
 def _to_shell_cmd(cmd: list[str]) -> str:

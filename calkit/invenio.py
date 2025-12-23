@@ -55,13 +55,14 @@ def _request(
     json: dict | list | None = None,
     data: dict | bytes | None = None,
     headers: dict | None = None,
+    auth: bool = True,
     as_json: bool = True,
     service: ServiceName = DEFAULT_SERVICE,
     **kwargs,
 ):
     if params is None:
         params = {}
-    if "access_token" not in params:
+    if auth and "access_token" not in params:
         params = params | {"access_token": get_token(service=service)}
     func = getattr(requests, kind)
     resp = func(
@@ -95,9 +96,11 @@ delete = partial(_request, "delete")
 
 
 def get_download_urls(
-    record_id: int | str, service: ServiceName = DEFAULT_SERVICE
+    record_id: int | str,
+    service: ServiceName = DEFAULT_SERVICE,
+    auth: bool = True,
 ) -> dict[str, str]:
-    resp = get(f"/records/{record_id}", service=service)
+    resp = get(f"/records/{record_id}", service=service, auth=auth)
     download_urls = [f["links"]["self"] for f in resp["files"]]
     filenames = [f["key"] for f in resp["files"]]
     urls = {}

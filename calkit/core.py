@@ -52,6 +52,46 @@ ryaml.indent(mapping=2, sequence=4, offset=2)
 ryaml.preserve_quotes = True
 ryaml.width = 70
 
+# Constants for version control auto-ignore
+AUTO_IGNORE_SUFFIXES = [
+    ".DS_Store",
+    ".env",
+    ".pyc",
+    ".synctex.gz",
+    ".ipynb_checkpoints",
+]
+AUTO_IGNORE_PATHS = [os.path.join(".dvc", "config.local")]
+AUTO_IGNORE_PREFIXES = [
+    ".venv",
+    "__pycache__",
+    ".ipynb_checkpoints",
+    ".calkit/overleaf/",
+]
+# Constants for version control auto-add to DVC
+DVC_EXTENSIONS = [
+    ".png",
+    ".jpeg",
+    ".jpg",
+    ".gif",
+    ".h5",
+    ".parquet",
+    ".pickle",
+    ".mp4",
+    ".avi",
+    ".webm",
+    ".pdf",
+    ".xlsx",
+    ".docx",
+    ".pptx",
+    ".xls",
+    ".doc",
+    ".ppt",
+    ".nc",
+    ".nc4",
+    ".zarr",
+]
+DVC_SIZE_THRESH_BYTES = 5_000_000
+
 
 def find_project_dirs(relative=False, max_depth=3) -> list[str]:
     """Find all Calkit project directories."""

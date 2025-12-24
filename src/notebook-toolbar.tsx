@@ -102,13 +102,8 @@ const EnvironmentBadge: React.FC<{
       console.warn("Failed to fetch notebook environment:", error);
     }
 
-    // Fallback: Try to determine current environment from kernel name
-    const kernelName = panel.sessionContext.session?.kernel?.name || "";
-    const envNames = Object.keys(data.environments || {});
-    const matchedEnv = envNames.find((name) =>
-      kernelName.toLowerCase().includes(name.toLowerCase()),
-    );
-    setCurrentEnv(matchedEnv || envNames[0] || "");
+    // No environment explicitly set for this notebook; reflect as unconfigured
+    setCurrentEnv("");
   };
 
   // Fetch environments on mount

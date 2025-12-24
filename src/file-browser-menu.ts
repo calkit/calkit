@@ -68,7 +68,7 @@ export function addCommands(
 
   // Create a new notebook in a chosen environment (in current or selected folder)
   commands.addCommand(CommandIDs.newNotebookInEnvironment, {
-    label: trans.__("New Notebook in Environment"),
+    label: trans.__("New notebook in environment"),
     icon: calkitIcon,
     isEnabled: () => !!factory,
     execute: async () => {
@@ -150,7 +150,7 @@ export function addCommands(
 
   // Label as Figure command
   commands.addCommand(CommandIDs.labelAsFigure, {
-    label: trans.__("Label as Figure"),
+    label: trans.__("Label as figure"),
     icon: calkitIcon,
     execute: async () => {
       const path = getSelectedPath();
@@ -174,7 +174,7 @@ export function addCommands(
 
   // Label as Dataset command (works on both files and folders)
   commands.addCommand(CommandIDs.labelAsDataset, {
-    label: trans.__("Label as Dataset"),
+    label: trans.__("Label as dataset"),
     icon: calkitIcon,
     execute: async () => {
       const path = getSelectedPath();
@@ -198,7 +198,7 @@ export function addCommands(
 
   // Label as Result command
   commands.addCommand(CommandIDs.labelAsResult, {
-    label: trans.__("Label as Result"),
+    label: trans.__("Label as result"),
     icon: calkitIcon,
     execute: async () => {
       const path = getSelectedPath();
@@ -222,7 +222,7 @@ export function addCommands(
 
   // Label as Table command
   commands.addCommand(CommandIDs.labelAsTable, {
-    label: trans.__("Label as Table"),
+    label: trans.__("Label as table"),
     icon: calkitIcon,
     execute: async () => {
       const path = getSelectedPath();
@@ -246,7 +246,7 @@ export function addCommands(
 
   // Remove Label command (works on both files and folders)
   commands.addCommand(CommandIDs.removeLabel, {
-    label: trans.__("Remove Label"),
+    label: trans.__("Remove label"),
     execute: async () => {
       const path = getSelectedPath();
       if (path) {

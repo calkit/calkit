@@ -3,6 +3,26 @@ import { Dialog } from "@jupyterlab/apputils";
 import { ReactWidget } from "@jupyterlab/apputils";
 
 /**
+ * Predefined package groups
+ */
+const PACKAGE_GROUPS: Record<string, string[]> = {
+  PyData: [
+    "numpy",
+    "scipy",
+    "pandas",
+    "polars",
+    "matplotlib",
+    "statsmodels",
+    "scikit-learn",
+    "seaborn",
+    "duckdb",
+    "plotly",
+    "altair",
+    "bokeh",
+  ],
+};
+
+/**
  * Props for the environment editor dialog body
  */
 interface EnvironmentEditorProps {
@@ -50,6 +70,22 @@ const EnvironmentEditorBody: React.FC<
     setPackages(packages.filter((p) => p !== pkg));
   };
 
+  const handleSelectPackageGroup = (groupName: string) => {
+    const groupPackages = PACKAGE_GROUPS[groupName] || [];
+    // Merge with existing packages, ensuring no duplicates and ipykernel is included
+    const merged = new Set([
+      ...packages,
+      ...groupPackages,
+      ...(kind === "uv-venv" ||
+      kind === "venv" ||
+      kind === "conda" ||
+      kind === "julia"
+        ? ["ipykernel"]
+        : []),
+    ]);
+    setPackages(Array.from(merged).sort());
+  };
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -66,7 +102,7 @@ const EnvironmentEditorBody: React.FC<
   return (
     <div className="calkit-env-editor">
       <div className="calkit-env-editor-field">
-        <label htmlFor="env-name">Environment Name:</label>
+        <label htmlFor="env-name">Environment name:</label>
         <input
           id="env-name"
           type="text"
@@ -78,7 +114,7 @@ const EnvironmentEditorBody: React.FC<
         />
       </div>
       <div className="calkit-env-editor-field">
-        <label htmlFor="env-kind">Environment Kind:</label>
+        <label htmlFor="env-kind">Environment kind:</label>
         <select
           id="env-kind"
           value={kind}
@@ -91,6 +127,26 @@ const EnvironmentEditorBody: React.FC<
           <option value="docker">Docker</option>
         </select>
       </div>
+      {showPackages && (
+        <div className="calkit-env-editor-field">
+          <label>Package groups:</label>
+          <div className="calkit-env-package-groups">
+            {Object.keys(PACKAGE_GROUPS).map((groupName) => (
+              <button
+                key={groupName}
+                type="button"
+                className="calkit-env-package-group-btn"
+                onClick={() => handleSelectPackageGroup(groupName)}
+                title={`Add packages from ${groupName}: ${PACKAGE_GROUPS[
+                  groupName
+                ].join(", ")}`}
+              >
+                + {groupName}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {showPackages && (
         <div className="calkit-env-editor-field">
           <label>Packages:</label>
@@ -174,7 +230,7 @@ export async function showEnvironmentEditor(
 
   const dialog = new Dialog({
     title:
-      options.mode === "create" ? "Create Environment" : "Edit Environment",
+      options.mode === "create" ? "Create environment" : "Edit environment",
     body: widget,
     buttons: [
       Dialog.cancelButton(),

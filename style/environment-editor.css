@@ -42,6 +42,40 @@
   background-color: var(--jp-layout-color2);
 }
 
+/* Package groups styles */
+.calkit-env-package-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.calkit-env-package-group-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 3px;
+  cursor: pointer;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease;
+  white-space: nowrap;
+}
+
+.calkit-env-package-group-btn:hover {
+  background-color: var(--jp-brand-color1);
+  color: var(--jp-layout-color1);
+  border-color: var(--jp-brand-color1);
+}
+
+.calkit-env-package-group-btn:active {
+  background-color: var(--jp-brand-color0);
+  border-color: var(--jp-brand-color0);
+}
+
 /* Package list styles */
 .calkit-env-packages-list {
   max-height: 200px;

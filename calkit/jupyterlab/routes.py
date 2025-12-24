@@ -372,9 +372,9 @@ class NotebookStageRouteHandler(APIHandler):
         stage["kind"] = "jupyter-notebook"
         stage["notebook_path"] = notebook_path
         stage["environment"] = env_name
-        if inputs:
+        if "inputs" in body:
             stage["inputs"] = inputs
-        if outputs:
+        if "outputs" in body:
             stage["outputs"] = outputs
         if "pipeline" not in ck_info:
             ck_info["pipeline"] = {}
@@ -382,6 +382,10 @@ class NotebookStageRouteHandler(APIHandler):
         ck_info["pipeline"]["stages"] = stages
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)
+        self.log.info(
+            f"Set stage '{stage_name}' for notebook '{notebook_path}' with "
+            f"environment '{env_name}', inputs: {inputs}, outputs: {outputs}"
+        )
         self.finish(json.dumps({"ok": True}))
 
 

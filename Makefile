@@ -43,3 +43,7 @@ docs: ## Build and serve the documentation.
 .PHONY: import-profile
 import-profile: ## Profile the import time of the CLI.
 	uv run python -X importtime -m calkit --help 2> import.log && uvx tuna import.log
+
+.PHONY: jlab-dev
+jlab-dev: ## Develop the JupyterLab extension.
+	uv run jlpm run watch

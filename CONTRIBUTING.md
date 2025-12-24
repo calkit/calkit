@@ -31,6 +31,19 @@ This guide will help you get started.
    ```bash
    uv run pytest
    ```
+1. Install the Calkit CLI in dev mode:
+   ```sh
+   uv tool install -e .
+   ```
+1. Start the JupyterLab extension TypeScript compiler in watch mode
+   (If working on the JupyterLab extension):
+   ```sh
+   make jlab-dev
+   ```
+1. Start JupyterLab:
+   ```sh
+   calkit jupyter lab
+   ```
 
 ### 3. Make your changes
 

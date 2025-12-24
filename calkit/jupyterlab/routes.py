@@ -455,5 +455,9 @@ def setup_route_handlers(web_app):
             url_path_join(base_url, "calkit", "git", "push"),
             GitPushRouteHandler,
         ),
+        (
+            url_path_join(base_url, "calkit", "environments"),
+            EnvironmentsRouteHandler,
+        ),
     ]
     web_app.add_handlers(host_pattern, handlers)

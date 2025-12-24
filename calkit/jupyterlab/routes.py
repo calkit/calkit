@@ -139,6 +139,46 @@ class NotebooksRouteHandler(APIHandler):
             return
 
 
+class NotebookEnvironmentRouteHandler(APIHandler):
+    @tornado.web.authenticated
+    def get(self):
+        self.log.info("Received request for notebook environment info")
+        notebook_path = self.get_argument("path", "")
+        if not notebook_path or not os.path.isfile(notebook_path):
+            self.set_status(400)
+            self.finish(
+                json.dumps({"error": "Query parameter 'path' is required"})
+            )
+            return
+        ck_info = calkit.load_calkit_info()
+        envs = ck_info.get("environments", {})
+        stages = ck_info.get("pipeline", {}).get("stages", {})
+        env_name = None
+        # Notebook environment can either be specified in the notebook
+        # or the pipeline stage
+        # The latter if preferred since we want users to put their
+        # notebooks into the pipeline so they don't need to run them
+        # manually
+        for stage_name, stage in stages.items():
+            if (
+                stage.get("kind") == "jupyter-notebook"
+                and stage.get("notebook_path") == notebook_path
+            ):
+                env_name = stage.get("environment")
+                break
+        if not env_name:
+            # Check if the notebook is in the notebooks section
+            project_notebooks = ck_info.get("notebooks", [])
+            for nb in project_notebooks:
+                if nb.get("path") == notebook_path:
+                    env_name = nb.get("environment")
+                    break
+        env = dict(envs.get(env_name)) if env_name else None
+        if env and env_name:
+            env["name"] = env_name
+        self.finish(json.dumps({"environment": env}))
+
+
 class GitStatusRouteHandler(APIHandler):
     @tornado.web.authenticated
     def get(self):
@@ -508,6 +548,10 @@ def setup_route_handlers(web_app):
         (
             url_path_join(base_url, "calkit", "notebooks"),
             NotebooksRouteHandler,
+        ),
+        (
+            url_path_join(base_url, "calkit", "notebook-environment"),
+            NotebookEnvironmentRouteHandler,
         ),
         (
             url_path_join(base_url, "calkit", "git", "status"),

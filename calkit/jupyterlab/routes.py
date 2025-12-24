@@ -285,8 +285,15 @@ class NotebookKernelRouteHandler(APIHandler):
     @tornado.web.authenticated
     def post(self):
         """Get the kernel info for a notebook's environment."""
-        notebook_path = self.get_argument("path", "")
-        env_name = self.get_argument("environment", "")
+        body = self.get_json_body()
+        if not body:
+            self.set_status(400)
+            self.finish(
+                json.dumps({"error": "Request body must be valid JSON"})
+            )
+            return
+        notebook_path = body.get("path", "")
+        env_name = body.get("environment", "")
         self.log.info(
             f"NotebookKernelRouteHandler.post() called with path:"
             f" '{notebook_path}', environment: '{env_name}'"

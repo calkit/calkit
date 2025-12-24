@@ -1,4 +1,4 @@
-import { ReactWidget } from "@jupyterlab/apputils";
+import { ReactWidget, showErrorMessage } from "@jupyterlab/apputils";
 import { NotebookPanel } from "@jupyterlab/notebook";
 import { ITranslator } from "@jupyterlab/translation";
 import React, { useEffect, useRef, useState } from "react";
@@ -84,6 +84,32 @@ const EnvironmentBadge: React.FC<{
   const [environments, setEnvironments] = useState<Record<string, any>>({});
   const [currentEnv, setCurrentEnv] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const [switchingKernel, setSwitchingKernel] = useState(false);
+
+  const switchKernelForEnvironment = async (envName: string) => {
+    if (!envName) {
+      return;
+    }
+    const notebookPath = panel.context.path;
+    setSwitchingKernel(true);
+    try {
+      const res = await requestAPI<any>("notebook/kernel", {
+        method: "POST",
+        body: JSON.stringify({ path: notebookPath, environment: envName }),
+      });
+      const kernelName = res.kernel_name || res.name || envName;
+      await panel.sessionContext.changeKernel({ name: kernelName });
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error("Failed to switch kernel:", error);
+      await showErrorMessage(
+        "Failed to switch kernel for environment",
+        errorMsg,
+      );
+    } finally {
+      setSwitchingKernel(false);
+    }
+  };
 
   const refreshEnvironments = async () => {
     const data = await requestAPI<any>("environments?notebook_only=1");
@@ -97,6 +123,8 @@ const EnvironmentBadge: React.FC<{
       );
       if (nbEnvData.environment?.name) {
         setCurrentEnv(nbEnvData.environment.name);
+        // Ensure kernel matches environment when opening notebook
+        await switchKernelForEnvironment(nbEnvData.environment.name);
         return;
       }
     } catch (error) {
@@ -130,12 +158,14 @@ const EnvironmentBadge: React.FC<{
         body: JSON.stringify({ path: notebookPath, environment: envName }),
       });
       setCurrentEnv(envName);
+      await switchKernelForEnvironment(envName);
       // Invalidate queries so other UI reflects the change
       void queryClient.invalidateQueries({ queryKey: ["project"] });
       void queryClient.invalidateQueries({ queryKey: ["notebooks"] });
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
       console.error("Failed to set notebook environment:", error);
-      alert("Failed to set notebook environment");
+      await showErrorMessage("Failed to set notebook environment", errorMsg);
     } finally {
       setIsOpen(false);
     }
@@ -199,6 +229,9 @@ const EnvironmentBadge: React.FC<{
         <div className="calkit-dropdown-content">
           <div className="calkit-dropdown-section">
             <h4>Select environment</h4>
+            {switchingKernel && (
+              <p className="calkit-note">Switching kernel, please wait…</p>
+            )}
             {envNames.length === 0 ? (
               <p>No environments available</p>
             ) : (
@@ -209,7 +242,11 @@ const EnvironmentBadge: React.FC<{
                     className={`calkit-env-item ${
                       name === currentEnv ? "calkit-env-item-active" : ""
                     }`}
-                    onClick={() => handleEnvironmentSelect(name)}
+                    onClick={() => {
+                      if (!switchingKernel) {
+                        void handleEnvironmentSelect(name);
+                      }
+                    }}
                   >
                     {name}
                   </div>

@@ -306,7 +306,17 @@ const PipelineStageBadge: React.FC<{
         const stage = notebookInfo.stage?.name || "";
         const env = notebookInfo.environment?.name || "";
         setCurrentStage(stage);
-        setStageName(stage);
+
+        // If no stage is set, generate a default name from the notebook filename
+        if (!stage) {
+          const filename = notebookPath.split("/").pop() || "";
+          const nameWithoutExt = filename.replace(/\.ipynb$/, "");
+          const generatedStageName = `${nameWithoutExt}-notebook`;
+          setStageName(generatedStageName);
+        } else {
+          setStageName(stage);
+        }
+
         setCurrentEnv(env);
         setLoading(false);
       } catch (error) {

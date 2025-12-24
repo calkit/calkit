@@ -3,6 +3,7 @@ import { NotebookPanel } from "@jupyterlab/notebook";
 import { ITranslator } from "@jupyterlab/translation";
 import React, { useEffect, useRef, useState } from "react";
 import { requestAPI } from "./request";
+import { queryClient } from "./queryClient";
 import { calkitIcon } from "./icons";
 import { showEnvironmentEditor } from "./environment-editor";
 
@@ -122,10 +123,22 @@ const EnvironmentBadge: React.FC<{
   }, [panel]);
 
   const handleEnvironmentSelect = async (envName: string) => {
-    setCurrentEnv(envName);
-    setIsOpen(false);
-    // TODO: Switch kernel to match environment
-    console.log(`Switching to environment: ${envName}`);
+    const notebookPath = panel.context.path;
+    try {
+      await requestAPI("notebook/environment", {
+        method: "PUT",
+        body: JSON.stringify({ path: notebookPath, environment: envName }),
+      });
+      setCurrentEnv(envName);
+      // Invalidate queries so other UI reflects the change
+      void queryClient.invalidateQueries({ queryKey: ["project"] });
+      void queryClient.invalidateQueries({ queryKey: ["notebooks"] });
+    } catch (error) {
+      console.error("Failed to set notebook environment:", error);
+      alert("Failed to set notebook environment");
+    } finally {
+      setIsOpen(false);
+    }
   };
 
   const handleCreateEnvironment = async () => {

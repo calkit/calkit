@@ -262,6 +262,26 @@ export const useDeleteEnvironment = () => {
 };
 
 /**
+ * Mutation hook for setting a notebook's environment
+ * Uses PUT /notebook/environment and invalidates project/notebooks queries
+ */
+export const useSetNotebookEnvironment = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { path: string; environment: string }) =>
+      requestAPI("notebook/environment", {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["project"] });
+      void queryClient.invalidateQueries({ queryKey: ["notebooks"] });
+    },
+  });
+};
+
+/**
  * Mutation hook for updating a notebook
  */
 export const useUpdateNotebook = () => {

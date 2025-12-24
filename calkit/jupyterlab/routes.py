@@ -89,36 +89,104 @@ class Notebook(BaseModel):
 class NotebooksRouteHandler(APIHandler):
     @tornado.web.authenticated
     def get(self):
-        """Get a list of notebooks in the project.
+        """Get a list of notebooks or a specific notebook's info.
 
-        We indicate if these are included in the notebooks section and if they
-        are part of the pipeline.
+        If a path argument is provided, return info for that specific notebook.
+        Otherwise, return a list of all notebooks in the project.
         """
-        self.log.info("Received request for calkit notebooks info")
-        resp = []
-        # Search for notebooks up to 3 directories deep, but not under .calkit
-        # or .ipynb_checkpoints
-        notebooks = glob.glob("**/*.ipynb", recursive=True)
-        for nb in notebooks:
-            if ".calkit/" in nb or ".ipynb_checkpoints/" in nb:
-                continue
-            resp.append(Notebook(path=nb))
-        # Now check which notebooks are included in the project and pipeline
-        ck_info = calkit.load_calkit_info()
-        project_notebooks = ck_info.get("notebooks", [])
-        for nb in resp:
-            if nb.path in project_notebooks:
-                nb.included_in_project = True
-        stages = ck_info.get("pipeline", {}).get("stages", {})
-        for stage_name, stage in stages.items():
-            if stage.get("kind") == "jupyter-notebook":
-                nb_path = stage.get("notebook_path")
-                for nb in resp:
-                    if nb.path == nb_path:
-                        nb.included_in_pipeline = True
-                        nb.stage_name = stage_name
-        notebooks = [nb.model_dump() for nb in resp]
-        self.finish(json.dumps({"notebooks": notebooks}))
+        notebook_path = self.get_argument("path", "")
+        self.log.info(
+            f"NotebooksRouteHandler.get() called with path: '{notebook_path}'"
+        )
+        if notebook_path:
+            # Return info for a specific notebook
+            self.log.info(
+                f"Received request for notebook info: {notebook_path}"
+            )
+            if not os.path.isfile(notebook_path):
+                self.set_status(400)
+                self.finish(
+                    json.dumps(
+                        {"error": f"Notebook not found: {notebook_path}"}
+                    )
+                )
+                return
+            ck_info = calkit.load_calkit_info()
+            envs = ck_info.get("environments", {})
+            stages = ck_info.get("pipeline", {}).get("stages", {})
+            env_name = None
+            stage_name = None
+            stage_info = None
+            # Notebook environment can either be specified in the notebook
+            # or the pipeline stage
+            # The latter is preferred since we want users to put their
+            # notebooks into the pipeline so they don't need to run them
+            # manually
+            for sname, stage in stages.items():
+                if (
+                    stage.get("kind") == "jupyter-notebook"
+                    and stage.get("notebook_path") == notebook_path
+                ):
+                    env_name = stage.get("environment")
+                    stage_name = sname
+                    stage_info = stage
+                    break
+            nb_info = None
+            if not env_name:
+                # Check if the notebook is in the notebooks section
+                project_notebooks = ck_info.get("notebooks", [])
+                for nb in project_notebooks:
+                    if nb.get("path") == notebook_path:
+                        env_name = nb.get("environment")
+                        nb_info = nb
+                        break
+            env = dict(envs.get(env_name)) if env_name else None
+            if env and env_name:
+                env["name"] = env_name
+            # Build stage object with all stage metadata
+            stage = None
+            if stage_info:
+                stage = {
+                    "name": stage_name,
+                    "inputs": stage_info.get("inputs", []),
+                    "outputs": stage_info.get("outputs", []),
+                    "title": stage_info.get("title", ""),
+                    "description": stage_info.get("description", ""),
+                }
+            # Build response with all notebook metadata
+            response = {
+                "notebook": nb_info,
+                "environment": env,
+                "stage": stage,
+            }
+            self.finish(json.dumps(response))
+        else:
+            # Return list of all notebooks in the project
+            self.log.info("Received request for calkit notebooks info")
+            resp = []
+            # Search for notebooks up to 3 directories deep, but not under
+            # .calkit or .ipynb_checkpoints
+            notebooks = glob.glob("**/*.ipynb", recursive=True)
+            for nb in notebooks:
+                if ".calkit/" in nb or ".ipynb_checkpoints/" in nb:
+                    continue
+                resp.append(Notebook(path=nb))
+            # Now check which notebooks are included in the project and pipeline
+            ck_info = calkit.load_calkit_info()
+            project_notebooks = ck_info.get("notebooks", [])
+            for nb in resp:
+                if nb.path in project_notebooks:
+                    nb.included_in_project = True
+            stages = ck_info.get("pipeline", {}).get("stages", {})
+            for stage_name, stage in stages.items():
+                if stage.get("kind") == "jupyter-notebook":
+                    nb_path = stage.get("notebook_path")
+                    for nb in resp:
+                        if nb.path == nb_path:
+                            nb.included_in_pipeline = True
+                            nb.stage_name = stage_name
+            notebooks = [nb.model_dump() for nb in resp]
+            self.finish(json.dumps({"notebooks": notebooks}))
 
     @tornado.web.authenticated
     def post(self):
@@ -137,46 +205,6 @@ class NotebooksRouteHandler(APIHandler):
                 json.dumps({"error": "Request body must include 'path'"})
             )
             return
-
-
-class NotebookEnvironmentRouteHandler(APIHandler):
-    @tornado.web.authenticated
-    def get(self):
-        self.log.info("Received request for notebook environment info")
-        notebook_path = self.get_argument("path", "")
-        if not notebook_path or not os.path.isfile(notebook_path):
-            self.set_status(400)
-            self.finish(
-                json.dumps({"error": "Query parameter 'path' is required"})
-            )
-            return
-        ck_info = calkit.load_calkit_info()
-        envs = ck_info.get("environments", {})
-        stages = ck_info.get("pipeline", {}).get("stages", {})
-        env_name = None
-        # Notebook environment can either be specified in the notebook
-        # or the pipeline stage
-        # The latter if preferred since we want users to put their
-        # notebooks into the pipeline so they don't need to run them
-        # manually
-        for stage_name, stage in stages.items():
-            if (
-                stage.get("kind") == "jupyter-notebook"
-                and stage.get("notebook_path") == notebook_path
-            ):
-                env_name = stage.get("environment")
-                break
-        if not env_name:
-            # Check if the notebook is in the notebooks section
-            project_notebooks = ck_info.get("notebooks", [])
-            for nb in project_notebooks:
-                if nb.get("path") == notebook_path:
-                    env_name = nb.get("environment")
-                    break
-        env = dict(envs.get(env_name)) if env_name else None
-        if env and env_name:
-            env["name"] = env_name
-        self.finish(json.dumps({"environment": env}))
 
 
 class GitStatusRouteHandler(APIHandler):
@@ -548,10 +576,6 @@ def setup_route_handlers(web_app):
         (
             url_path_join(base_url, "calkit", "notebooks"),
             NotebooksRouteHandler,
-        ),
-        (
-            url_path_join(base_url, "calkit", "notebook-environment"),
-            NotebookEnvironmentRouteHandler,
         ),
         (
             url_path_join(base_url, "calkit", "git", "status"),

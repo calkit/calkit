@@ -35,6 +35,8 @@ export async function requestAPI<T>(
       data = JSON.parse(data);
     } catch (error) {
       console.log("Not a JSON response body.", response);
+      console.log("Requested URL:", requestUrl);
+      console.log("Response text:", data.substring(0, 500));
     }
   }
 

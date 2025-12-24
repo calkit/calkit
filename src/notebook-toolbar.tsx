@@ -1,4 +1,4 @@
-import { ReactWidget, showErrorMessage } from "@jupyterlab/apputils";
+import { ReactWidget } from "@jupyterlab/apputils";
 import { NotebookPanel } from "@jupyterlab/notebook";
 import { ITranslator } from "@jupyterlab/translation";
 import React, { useEffect, useRef, useState } from "react";
@@ -87,7 +87,22 @@ const EnvironmentBadge: React.FC<{
   const refreshEnvironments = async () => {
     const data = await requestAPI<any>("environments?notebook_only=1");
     setEnvironments(data.environments || {});
-    // Try to determine current environment from kernel name
+
+    // Fetch the notebook's specific environment
+    const notebookPath = panel.context.path;
+    try {
+      const nbEnvData = await requestAPI<any>(
+        `notebooks?path=${encodeURIComponent(notebookPath)}`,
+      );
+      if (nbEnvData.environment?.name) {
+        setCurrentEnv(nbEnvData.environment.name);
+        return;
+      }
+    } catch (error) {
+      console.warn("Failed to fetch notebook environment:", error);
+    }
+
+    // Fallback: Try to determine current environment from kernel name
     const kernelName = panel.sessionContext.session?.kernel?.name || "";
     const envNames = Object.keys(data.environments || {});
     const matchedEnv = envNames.find((name) =>
@@ -235,9 +250,9 @@ const PipelineStageBadge: React.FC<{
       try {
         const notebookPath = panel.context.path;
         const notebookInfo = await requestAPI<any>(
-          `notebook/info?path=${encodeURIComponent(notebookPath)}`,
+          `notebooks?path=${encodeURIComponent(notebookPath)}`,
         );
-        const stage = notebookInfo.stage || "";
+        const stage = notebookInfo.stage?.name || "";
         setCurrentStage(stage);
         setStageName(stage);
         setLoading(false);
@@ -336,9 +351,9 @@ const InputsBadge: React.FC<{
       try {
         const notebookPath = panel.context.path;
         const notebookInfo = await requestAPI<any>(
-          `notebook/info?path=${encodeURIComponent(notebookPath)}`,
+          `notebooks?path=${encodeURIComponent(notebookPath)}`,
         );
-        setInputs(notebookInfo.inputs || []);
+        setInputs(notebookInfo.stage?.inputs || []);
       } catch (error) {
         console.error("Failed to load inputs:", error);
       }
@@ -462,9 +477,9 @@ const OutputsBadge: React.FC<{
       try {
         const notebookPath = panel.context.path;
         const notebookInfo = await requestAPI<any>(
-          `notebook/info?path=${encodeURIComponent(notebookPath)}`,
+          `notebooks?path=${encodeURIComponent(notebookPath)}`,
         );
-        setOutputs(notebookInfo.outputs || []);
+        setOutputs(notebookInfo.stage?.outputs || []);
       } catch (error) {
         console.error("Failed to load outputs:", error);
       }
@@ -588,10 +603,10 @@ const InfoBadge: React.FC<{
       try {
         const notebookPath = panel.context.path;
         const notebookInfo = await requestAPI<any>(
-          `notebook/info?path=${encodeURIComponent(notebookPath)}`,
+          `notebooks?path=${encodeURIComponent(notebookPath)}`,
         );
-        setTitle(notebookInfo.title || "");
-        setDescription(notebookInfo.description || "");
+        setTitle(notebookInfo.stage?.title || "");
+        setDescription(notebookInfo.stage?.description || "");
       } catch (error) {
         console.error("Failed to load notebook info:", error);
       }

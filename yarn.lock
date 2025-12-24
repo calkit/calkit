@@ -3329,6 +3329,25 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@tanstack/query-devtools@npm:5.91.1":
+  version: 5.91.1
+  resolution: "@tanstack/query-devtools@npm:5.91.1"
+  checksum: 799aaac422311748026704f887a467f5ad7233e7183b458c32a8f2dc0018350c6c9734cbd146c3cc947e42528a63fa0fb89a8c8f5a40466319f7527f1d4ffbb6
+  languageName: node
+  linkType: hard
+
+"@tanstack/react-query-devtools@npm:^5.32.0":
+  version: 5.91.1
+  resolution: "@tanstack/react-query-devtools@npm:5.91.1"
+  dependencies:
+    "@tanstack/query-devtools": 5.91.1
+  peerDependencies:
+    "@tanstack/react-query": ^5.90.10
+    react: ^18 || ^19
+  checksum: c9b6254057aa748a32ee8ce8ac0d8444acdcdc218ad565249e579c844aed929f70772d3e04686d2b44d4847edaeb32f08d0b4842493ef34dcf0f00bacd3ea6ca
+  languageName: node
+  linkType: hard
+
 "@tanstack/react-query@npm:^5.32.0":
   version: 5.90.12
   resolution: "@tanstack/react-query@npm:5.90.12"
@@ -4730,6 +4749,7 @@ __metadata:
     "@jupyterlab/testutils": ^4.0.0
     "@jupyterlab/translation": ^4.0.0
     "@tanstack/react-query": ^5.32.0
+    "@tanstack/react-query-devtools": ^5.32.0
     "@types/jest": ^29.2.0
     "@types/json-schema": ^7.0.11
     "@types/react": ^18.0.26

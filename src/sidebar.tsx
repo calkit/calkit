@@ -2,6 +2,7 @@ import React, { useCallback, useState } from "react";
 import ReactDOM from "react-dom";
 import { ReactWidget, Dialog } from "@jupyterlab/apputils";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { queryClient } from "./queryClient";
 import { requestAPI } from "./request";
 import type { ISettingRegistry } from "@jupyterlab/settingregistry";
@@ -16,7 +17,6 @@ import {
   useCreateEnvironment,
   useCommit,
   usePush,
-  useUpdateEnvironment,
   useDeleteEnvironment,
   usePipelineStatus,
   type IProjectInfo,
@@ -97,7 +97,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   const createEnvironmentMutation = useCreateEnvironment();
   const commitMutation = useCommit();
   const pushMutation = usePush();
-  const updateEnvironmentMutation = useUpdateEnvironment();
   const deleteEnvironmentMutation = useDeleteEnvironment();
 
   // Local UI state
@@ -1313,11 +1312,14 @@ export class CalkitSidebarWidget extends ReactWidget {
   render() {
     return (
       <QueryClientProvider client={queryClient}>
-        <CalkitSidebar
-          settings={this._settings}
-          stateDB={this._stateDB}
-          onStatusChange={this._handleStatusChange}
-        />
+        <div style={{ display: "flex", width: "100%", height: "100%" }}>
+          <CalkitSidebar
+            settings={this._settings}
+            stateDB={this._stateDB}
+            onStatusChange={this._handleStatusChange}
+          />
+        </div>
+        <ReactQueryDevtools initialIsOpen={false} />
       </QueryClientProvider>
     );
   }

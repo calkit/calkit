@@ -152,11 +152,14 @@ const EnvironmentBadge: React.FC<{
 
   const handleEnvironmentSelect = async (envName: string) => {
     const notebookPath = panel.context.path;
+    console.log(`Setting environment for ${notebookPath} to ${envName}`);
     try {
-      await requestAPI("notebook/environment", {
+      console.log("Calling PUT notebook/environment");
+      const envResponse = await requestAPI("notebook/environment", {
         method: "PUT",
         body: JSON.stringify({ path: notebookPath, environment: envName }),
       });
+      console.log("Environment set response:", envResponse);
       setCurrentEnv(envName);
       await switchKernelForEnvironment(envName);
       // Invalidate queries so other UI reflects the change

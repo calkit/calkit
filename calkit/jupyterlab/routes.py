@@ -16,6 +16,13 @@ from jupyter_server.utils import url_path_join
 from pydantic import BaseModel
 
 import calkit
+from calkit.cli.new import (
+    new_conda_env,
+    new_julia_env,
+    new_pixi_env,
+    new_uv_venv,
+    new_venv,
+)
 from calkit.git import ensure_path_is_ignored
 
 
@@ -415,6 +422,77 @@ class EnvironmentsRouteHandler(APIHandler):
                             packages.append(line)
                 envs[env_name]["packages"] = packages
         self.finish(json.dumps({"environments": envs}))
+
+    @tornado.web.authenticated
+    def post(self):
+        """Create a new environment."""
+        body = self.get_json_body()
+        if not body:
+            self.set_status(400)
+            self.finish(
+                json.dumps({"error": "Request body must be valid JSON"})
+            )
+            return
+        env_name = body.get("name")
+        env_kind = body.get("kind")
+        env_path = body.get("path")
+        packages = body.get("packages", [])
+        if env_kind not in ["uv-venv", "venv", "pixi", "julia", "conda"]:
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            f"Unsupported environment kind '{env_kind}'."
+                            " Supported kinds are: uv-venv, venv, pixi,"
+                            " julia, conda."
+                        )
+                    }
+                )
+            )
+            return
+        if not env_name or not env_kind or not env_path or not packages:
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            "Request body must include 'name', 'kind',"
+                            " 'path', and 'packages'"
+                        )
+                    }
+                )
+            )
+            return
+        # Use the Calkit CLI to create the environment
+        func_to_kind = {
+            "uv-venv": new_uv_venv,
+            "venv": new_venv,
+            "pixi": new_pixi_env,
+            "julia": new_julia_env,
+            "conda": new_conda_env,
+        }
+        try:
+            func_to_kind[env_kind](
+                name=env_name,
+                path=env_path,
+                packages=packages,
+                no_commit=True,
+            )
+        except Exception as e:
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            f"Failed to create environment '{env_name}': {e}"
+                        )
+                    }
+                )
+            )
+            return
+        self.log.info(f"Created new environment '{env_name}' successfully")
+        self.finish(json.dumps({"message": "New environment created"}))
 
 
 def setup_route_handlers(web_app):

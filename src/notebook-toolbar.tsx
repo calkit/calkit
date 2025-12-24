@@ -1,4 +1,4 @@
-import { ReactWidget } from "@jupyterlab/apputils";
+import { ReactWidget, showErrorMessage } from "@jupyterlab/apputils";
 import { NotebookPanel } from "@jupyterlab/notebook";
 import { ITranslator } from "@jupyterlab/translation";
 import React, { useEffect, useRef, useState } from "react";
@@ -85,11 +85,11 @@ const EnvironmentBadge: React.FC<{
   const [loading, setLoading] = useState(true);
 
   const refreshEnvironments = async () => {
-    const info = await requestAPI<any>("project");
-    setEnvironments(info.environments || {});
+    const data = await requestAPI<any>("environments?notebook_only=1");
+    setEnvironments(data.environments || {});
     // Try to determine current environment from kernel name
     const kernelName = panel.sessionContext.session?.kernel?.name || "";
-    const envNames = Object.keys(info.environments || {});
+    const envNames = Object.keys(data.environments || {});
     const matchedEnv = envNames.find((name) =>
       kernelName.toLowerCase().includes(name.toLowerCase()),
     );
@@ -119,26 +119,18 @@ const EnvironmentBadge: React.FC<{
   };
 
   const handleCreateEnvironment = async () => {
-    const result = await showEnvironmentEditor({ mode: "create" });
-    if (!result) {
-      return;
-    }
-    try {
-      await requestAPI("environment/create", {
-        method: "POST",
-        body: JSON.stringify({
-          name: result.name,
-          kind: result.kind,
-          packages: result.packages,
-        }),
-      });
-      await refreshEnvironments();
-      setCurrentEnv(result.name);
-      setIsOpen(false);
-    } catch (error) {
-      console.error("Failed to create environment:", error);
-      alert("Failed to create environment");
-    }
+    await showEnvironmentEditor({
+      mode: "create",
+      onSubmit: async ({ name, kind, path, packages }) => {
+        await requestAPI("environments", {
+          method: "POST",
+          body: JSON.stringify({ name, kind, path, packages }),
+        });
+        await refreshEnvironments();
+        setCurrentEnv(name);
+        setIsOpen(false);
+      },
+    });
   };
 
   const handleEditEnvironment = async () => {
@@ -146,31 +138,22 @@ const EnvironmentBadge: React.FC<{
       return;
     }
     const envData = environments[currentEnv] || {};
-    const result = await showEnvironmentEditor({
+    await showEnvironmentEditor({
       mode: "edit",
       initialName: currentEnv,
       initialKind: envData.kind || "uv-venv",
+      initialPath: envData.path,
       initialPackages: envData.packages || [],
+      onSubmit: async ({ name, kind, path, packages }) => {
+        await requestAPI("environments", {
+          method: "POST",
+          body: JSON.stringify({ name, kind, path, packages }),
+        });
+        await refreshEnvironments();
+        setCurrentEnv(name);
+        setIsOpen(false);
+      },
     });
-    if (!result) {
-      return;
-    }
-    try {
-      await requestAPI("environment/update", {
-        method: "POST",
-        body: JSON.stringify({
-          name: currentEnv,
-          kind: result.kind,
-          packages: result.packages,
-        }),
-      });
-      await refreshEnvironments();
-      setCurrentEnv(currentEnv);
-      setIsOpen(false);
-    } catch (error) {
-      console.error("Failed to update environment:", error);
-      alert("Failed to update environment");
-    }
   };
 
   const envNames = Object.keys(environments);

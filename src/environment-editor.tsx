@@ -25,9 +25,10 @@ const PACKAGE_GROUPS: Record<string, string[]> = {
 /**
  * Props for the environment editor dialog body
  */
-interface EnvironmentEditorProps {
+interface IEnvironmentEditorProps {
   initialName?: string;
   initialKind?: string;
+  initialPath?: string;
   initialPackages?: string[];
   mode: "create" | "edit";
 }
@@ -36,28 +37,67 @@ interface EnvironmentEditorProps {
  * The body component for the environment editor dialog
  */
 const EnvironmentEditorBody: React.FC<
-  EnvironmentEditorProps & {
+  IEnvironmentEditorProps & {
     onUpdate: (data: {
       name: string;
       kind: string;
+      path: string;
       packages: string[];
     }) => void;
+    onSubmit: (data: {
+      name: string;
+      kind: string;
+      path: string;
+      packages: string[];
+    }) => Promise<void>;
+    onClose: () => void;
   }
 > = ({
   initialName = "",
   initialKind = "uv-venv",
+  initialPath = "",
   initialPackages = [],
   mode,
   onUpdate,
+  onSubmit,
+  onClose,
 }) => {
+  // Default paths based on environment kind
+  const getDefaultPath = (kind: string) => {
+    switch (kind) {
+      case "uv-venv":
+      case "venv":
+        return "requirements.txt";
+      case "conda":
+        return "environment.yml";
+      case "pixi":
+        return "pixi.toml";
+      case "julia":
+        return "project/Project.toml";
+      default:
+        return "";
+    }
+  };
+
   const [name, setName] = useState(initialName);
   const [kind, setKind] = useState(initialKind);
+  const [path, setPath] = useState(initialPath || getDefaultPath(initialKind));
   const [packages, setPackages] = useState<string[]>(initialPackages);
   const [newPackage, setNewPackage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   React.useEffect(() => {
-    onUpdate({ name, kind, packages });
-  }, [name, kind, packages, onUpdate]);
+    onUpdate({ name, kind, path, packages });
+  }, [name, kind, path, packages, onUpdate]);
+
+  // Update path when kind changes (in create mode)
+  const handleKindChange = (newKind: string) => {
+    setKind(newKind);
+    if (mode === "create") {
+      setPath(getDefaultPath(newKind));
+    }
+  };
 
   const handleAddPackage = () => {
     if (newPackage.trim() && !packages.includes(newPackage.trim())) {
@@ -118,7 +158,7 @@ const EnvironmentEditorBody: React.FC<
         <select
           id="env-kind"
           value={kind}
-          onChange={(e) => setKind(e.target.value)}
+          onChange={(e) => handleKindChange(e.target.value)}
         >
           <option value="uv-venv">uv-venv (Python)</option>
           <option value="venv">venv (Python)</option>
@@ -126,6 +166,17 @@ const EnvironmentEditorBody: React.FC<
           <option value="conda">Conda</option>
           <option value="docker">Docker</option>
         </select>
+      </div>
+      <div className="calkit-env-editor-field">
+        <label htmlFor="env-path">Path:</label>
+        <input
+          id="env-path"
+          type="text"
+          value={path}
+          onChange={(e) => setPath(e.target.value)}
+          placeholder={getDefaultPath(kind)}
+          title="Path to requirements/environment file"
+        />
       </div>
       {showPackages && (
         <div className="calkit-env-editor-field">
@@ -185,6 +236,42 @@ const EnvironmentEditorBody: React.FC<
           </div>
         </div>
       )}
+      <div className="calkit-env-editor-actions">
+        {submitError && (
+          <div className="calkit-env-error" title={submitError}>
+            {submitError}
+          </div>
+        )}
+        <button
+          type="button"
+          className="jp-Dialog-button jp-mod-accept"
+          disabled={isSubmitting || !name.trim()}
+          onClick={async () => {
+            setSubmitError(null);
+            setIsSubmitting(true);
+            try {
+              await onSubmit({ name, kind, path, packages });
+              onClose();
+            } catch (err: any) {
+              const msg =
+                typeof err?.message === "string"
+                  ? err.message
+                  : err?.message?.error || JSON.stringify(err?.message || err);
+              setSubmitError(msg);
+            } finally {
+              setIsSubmitting(false);
+            }
+          }}
+        >
+          {isSubmitting
+            ? mode === "create"
+              ? "Creating…"
+              : "Saving…"
+            : mode === "create"
+            ? "Create"
+            : "Save"}
+        </button>
+      </div>
     </div>
   );
 };
@@ -193,13 +280,46 @@ const EnvironmentEditorBody: React.FC<
  * A widget wrapper for the environment editor body
  */
 class EnvironmentEditorWidget extends ReactWidget {
-  private _data: { name: string; kind: string; packages: string[] };
+  private _data: {
+    name: string;
+    kind: string;
+    path: string;
+    packages: string[];
+  };
 
-  constructor(private options: EnvironmentEditorProps) {
+  constructor(
+    private options: IEnvironmentEditorProps & {
+      onSubmit: (data: {
+        name: string;
+        kind: string;
+        path: string;
+        packages: string[];
+      }) => Promise<void>;
+      onClose: () => void;
+    },
+  ) {
     super();
+    const getDefaultPath = (kind: string) => {
+      switch (kind) {
+        case "uv-venv":
+        case "venv":
+          return "requirements.txt";
+        case "conda":
+          return "environment.yml";
+        case "pixi":
+          return "pixi.toml";
+        case "julia":
+          return "project/Project.toml";
+        default:
+          return "";
+      }
+    };
+    const defaultPath = getDefaultPath(options.initialKind || "uv-venv");
+    const initPath = options.initialPath || defaultPath;
     this._data = {
       name: options.initialName || "",
       kind: options.initialKind || "uv-venv",
+      path: initPath,
       packages: options.initialPackages || [],
     };
   }
@@ -211,11 +331,18 @@ class EnvironmentEditorWidget extends ReactWidget {
         onUpdate={(data) => {
           this._data = data;
         }}
+        onSubmit={this.options.onSubmit}
+        onClose={this.options.onClose}
       />
     );
   }
 
-  getValue(): { name: string; kind: string; packages: string[] } {
+  getValue(): {
+    name: string;
+    kind: string;
+    path: string;
+    packages: string[];
+  } {
     return this._data;
   }
 }
@@ -224,26 +351,26 @@ class EnvironmentEditorWidget extends ReactWidget {
  * Show a dialog to create or edit an environment
  */
 export async function showEnvironmentEditor(
-  options: EnvironmentEditorProps,
-): Promise<{ name: string; kind: string; packages: string[] } | null> {
-  const widget = new EnvironmentEditorWidget(options);
-
+  options: IEnvironmentEditorProps & {
+    onSubmit: (data: {
+      name: string;
+      kind: string;
+      path: string;
+      packages: string[];
+    }) => Promise<void>;
+  },
+): Promise<void> {
+  let disposeRef: () => void = () => {};
+  const widget = new EnvironmentEditorWidget({
+    ...options,
+    onClose: () => disposeRef(),
+  });
   const dialog = new Dialog({
     title:
       options.mode === "create" ? "Create environment" : "Edit environment",
     body: widget,
-    buttons: [
-      Dialog.cancelButton(),
-      Dialog.okButton({ label: options.mode === "create" ? "Create" : "Save" }),
-    ],
+    buttons: [Dialog.cancelButton()],
   });
-
-  const result = await dialog.launch();
-  if (result.button.accept) {
-    const data = widget.getValue();
-    if (data.name.trim()) {
-      return data;
-    }
-  }
-  return null;
+  disposeRef = () => dialog.dispose();
+  await dialog.launch();
 }

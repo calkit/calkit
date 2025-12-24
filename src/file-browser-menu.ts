@@ -3,6 +3,7 @@ import { IFileBrowserFactory } from "@jupyterlab/filebrowser";
 import { ITranslator, nullTranslator } from "@jupyterlab/translation";
 import { RankedMenu } from "@jupyterlab/ui-components";
 import { calkitIcon } from "./icons";
+// import { showErrorMessage } from "@jupyterlab/apputils";
 import { requestAPI } from "./request";
 import { showNotebookRegistration } from "./notebook-registration";
 import { showEnvironmentEditor } from "./environment-editor";
@@ -84,8 +85,8 @@ export function addCommands(
       // Fetch environments from project info
       let environments: Array<{ id: string; label: string }> = [];
       try {
-        const info = await requestAPI<any>("project");
-        environments = Object.keys(info.environments || {}).map(
+        const data = await requestAPI<any>("environments?notebook_only=1");
+        environments = Object.keys(data.environments || {}).map(
           (name: string) => ({
             id: name,
             label: name,
@@ -96,24 +97,18 @@ export function addCommands(
       }
 
       const createEnvironmentCallback = async (): Promise<string | null> => {
-        const result = await showEnvironmentEditor({ mode: "create" });
-        if (!result) {
-          return null;
-        }
-        try {
-          await requestAPI("environment/create", {
-            method: "POST",
-            body: JSON.stringify({
-              name: result.name,
-              kind: result.kind,
-              packages: result.packages,
-            }),
-          });
-          return result.name;
-        } catch (e) {
-          console.error("Failed to create environment:", e);
-          return null;
-        }
+        let createdName: string | null = null;
+        await showEnvironmentEditor({
+          mode: "create",
+          onSubmit: async ({ name, kind, path, packages }) => {
+            await requestAPI("environments", {
+              method: "POST",
+              body: JSON.stringify({ name, kind, path, packages }),
+            });
+            createdName = name;
+          },
+        });
+        return createdName;
       };
 
       // Prompt for notebook file name and environment

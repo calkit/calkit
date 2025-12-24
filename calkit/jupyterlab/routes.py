@@ -393,9 +393,9 @@ class EnvironmentsRouteHandler(APIHandler):
         # filter down for notebook-appropriate envs only
         notebook_only = self.get_argument("notebook_only", "0") == "1"
         ck_info = calkit.load_calkit_info()
-        envs = ck_info.get("environments", {})
+        envs = dict(ck_info.get("environments", {}))
         if notebook_only:
-            for env_name, env in envs.items():
+            for env_name, env in list(envs.items()):
                 if env.get("kind") not in [
                     "uv-venv",
                     "venv",
@@ -407,7 +407,7 @@ class EnvironmentsRouteHandler(APIHandler):
                     envs.pop(env_name)
         # Get package spec for env and return with it
         # TODO: Enable this for other kinds of envs
-        for env_name, env in envs.items():
+        for env_name, env in list(envs.items()):
             env_path = env.get("path")
             if (
                 env.get("kind") in ["uv-venv", "venv"]

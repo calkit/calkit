@@ -478,40 +478,43 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   ]);
 
   const handleCreateEnvironment = useCallback(async () => {
-    const result = await showEnvironmentEditor({ mode: "create" });
-    if (!result) {
-      return;
-    }
-    try {
-      await createEnvironmentMutation.mutateAsync({
-        name: result.name,
-        kind: result.kind,
-        packages: result.packages,
-      });
-    } catch (error) {
-      console.error("Failed to create environment:", error);
-    }
-  }, [createEnvironmentMutation]);
+    await showEnvironmentEditor({
+      mode: "create",
+      onSubmit: async ({ name, kind, path, packages }) => {
+        try {
+          await requestAPI("environments", {
+            method: "POST",
+            body: JSON.stringify({ name, kind, path, packages }),
+          });
+        } catch (error) {
+          console.error("Failed to create environment:", error);
+          throw error;
+        }
+      },
+    });
+  }, []);
 
   const handleCreateNotebook = useCallback(async () => {
     const environmentList = sectionData.environments || [];
 
     const createEnvironmentCallback = async (): Promise<string | null> => {
-      const result = await showEnvironmentEditor({ mode: "create" });
-      if (!result) {
-        return null;
-      }
-      try {
-        await createEnvironmentMutation.mutateAsync({
-          name: result.name,
-          kind: result.kind,
-          packages: result.packages,
-        });
-        return result.name;
-      } catch (error) {
-        console.error("Failed to create environment:", error);
-        return null;
-      }
+      let createdName: string | null = null;
+      await showEnvironmentEditor({
+        mode: "create",
+        onSubmit: async ({ name, kind, path, packages }) => {
+          try {
+            await requestAPI("environments", {
+              method: "POST",
+              body: JSON.stringify({ name, kind, path, packages }),
+            });
+            createdName = name;
+          } catch (error) {
+            console.error("Failed to create environment:", error);
+            throw error;
+          }
+        },
+      });
+      return createdName;
     };
 
     const data = await showNotebookRegistration(
@@ -587,24 +590,29 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                 onClick={(e) => {
                   e.stopPropagation();
                   (async () => {
-                    const result = await showEnvironmentEditor({
+                    await showEnvironmentEditor({
                       mode: "edit",
                       initialName: item.id,
                       initialKind: kind,
+                      initialPath: item.path,
                       initialPackages: packages,
+                      onSubmit: async ({ name, kind, path, packages }) => {
+                        try {
+                          await requestAPI("environments", {
+                            method: "POST",
+                            body: JSON.stringify({
+                              name,
+                              kind,
+                              path,
+                              packages,
+                            }),
+                          });
+                        } catch (error) {
+                          console.error("Failed to update environment:", error);
+                          throw error;
+                        }
+                      },
                     });
-                    if (!result) {
-                      return;
-                    }
-                    try {
-                      await updateEnvironmentMutation.mutateAsync({
-                        name: item.id,
-                        kind: result.kind,
-                        packages: result.packages,
-                      });
-                    } catch (error) {
-                      console.error("Failed to update environment:", error);
-                    }
                   })();
                 }}
               >
@@ -1159,24 +1167,32 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                     const env = envContextMenu.env!;
                     setEnvContextMenu(null);
                     (async () => {
-                      const result = await showEnvironmentEditor({
+                      await showEnvironmentEditor({
                         mode: "edit",
                         initialName: env.id,
                         initialKind: env.kind || "unknown",
+                        initialPath: env.path,
                         initialPackages: env.packages || [],
+                        onSubmit: async ({ name, kind, path, packages }) => {
+                          try {
+                            await requestAPI("environments", {
+                              method: "POST",
+                              body: JSON.stringify({
+                                name,
+                                kind,
+                                path,
+                                packages,
+                              }),
+                            });
+                          } catch (error) {
+                            console.error(
+                              "Failed to update environment:",
+                              error,
+                            );
+                            throw error;
+                          }
+                        },
                       });
-                      if (!result) {
-                        return;
-                      }
-                      try {
-                        await updateEnvironmentMutation.mutateAsync({
-                          name: env.id,
-                          kind: result.kind,
-                          packages: result.packages,
-                        });
-                      } catch (error) {
-                        console.error("Failed to update environment:", error);
-                      }
                     })();
                   }}
                 >

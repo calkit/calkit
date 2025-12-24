@@ -320,6 +320,67 @@ class NotebookKernelRouteHandler(APIHandler):
         self.finish(json.dumps({"name": kernel_name}))
 
 
+class NotebookStageRouteHandler(APIHandler):
+    @tornado.web.authenticated
+    def put(self):
+        """Set the pipeline stage for a notebook."""
+        body = self.get_json_body()
+        if not body:
+            self.set_status(400)
+            self.finish(
+                json.dumps({"error": "Request body must be valid JSON"})
+            )
+            return
+        notebook_path = body.get("path")
+        stage_name = body.get("stage_name")
+        env_name = body.get("environment")
+        inputs = body.get("inputs", [])
+        outputs = body.get("outputs", [])
+        if not notebook_path or not stage_name or not env_name:
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            "Request body must include 'path' and 'stage_name'"
+                        )
+                    }
+                )
+            )
+            return
+        ck_info = calkit.load_calkit_info()
+        stages = ck_info.get("pipeline", {}).get("stages", {})
+        if (
+            stage_name in stages
+            and stages[stage_name].get("notebook_path") != notebook_path
+        ):
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            f"Stage '{stage_name}' already exists for a"
+                            " different notebook"
+                        )
+                    }
+                )
+            )
+            return
+        # Update or add the stage
+        stage = stages.get(stage_name, {})
+        stage["kind"] = "jupyter-notebook"
+        stage["notebook_path"] = notebook_path
+        stage["environmemnt"] = env_name
+        if inputs:
+            stage["inputs"] = inputs
+        if outputs:
+            stage["outputs"] = outputs
+        if "pipeline" not in ck_info:
+            ck_info["pipeline"] = {}
+        stages[stage_name] = stage
+        ck_info["pipeline"]["stages"] = stages
+
+
 class GitStatusRouteHandler(APIHandler):
     @tornado.web.authenticated
     def get(self):
@@ -697,6 +758,10 @@ def setup_route_handlers(web_app):
         (
             url_path_join(base_url, "calkit", "notebook", "kernel"),
             NotebookKernelRouteHandler,
+        ),
+        (
+            url_path_join(base_url, "calkit", "notebook", "stage"),
+            NotebookStageRouteHandler,
         ),
         (
             url_path_join(base_url, "calkit", "git", "status"),

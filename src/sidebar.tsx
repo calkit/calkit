@@ -1312,14 +1312,15 @@ export class CalkitSidebarWidget extends ReactWidget {
   render() {
     return (
       <QueryClientProvider client={queryClient}>
-        <div style={{ display: "flex", width: "100%", height: "100%" }}>
-          <CalkitSidebar
-            settings={this._settings}
-            stateDB={this._stateDB}
-            onStatusChange={this._handleStatusChange}
-          />
-        </div>
-        <ReactQueryDevtools initialIsOpen={false} />
+        <CalkitSidebar
+          settings={this._settings}
+          stateDB={this._stateDB}
+          onStatusChange={this._handleStatusChange}
+        />
+        {ReactDOM.createPortal(
+          <ReactQueryDevtools initialIsOpen={false} />,
+          document.body,
+        )}
       </QueryClientProvider>
     );
   }

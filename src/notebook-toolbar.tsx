@@ -345,10 +345,19 @@ const PipelineStageBadge: React.FC<{
     }
 
     try {
+      // Fetch current notebook info to get any existing inputs/outputs
+      const notebookInfo = await requestAPI<any>(
+        `notebooks?path=${encodeURIComponent(notebookPath)}`,
+      );
+      const existingInputs = notebookInfo.stage?.inputs || [];
+      const existingOutputs = notebookInfo.stage?.outputs || [];
+
       await setNotebookStageMutation.mutateAsync({
         path: notebookPath,
         stage_name: stage,
         environment: currentEnv,
+        inputs: existingInputs,
+        outputs: existingOutputs,
       });
       setCurrentStage(stage);
       setIsOpen(false);
@@ -416,6 +425,7 @@ const InputsBadge: React.FC<{
   const [isOpen, setIsOpen] = useState(false);
   const [inputs, setInputs] = useState<string[]>([]);
   const [manualInput, setManualInput] = useState("");
+  const setNotebookStageMutation = useSetNotebookStage();
 
   // Load inputs on mount
   useEffect(() => {
@@ -464,17 +474,27 @@ const InputsBadge: React.FC<{
   const handleSave = async () => {
     try {
       const notebookPath = panel.context.path;
-      await requestAPI("notebook/set-inputs", {
-        method: "POST",
-        body: JSON.stringify({
+      const notebookInfo = await requestAPI<any>(
+        `notebooks?path=${encodeURIComponent(notebookPath)}`,
+      );
+      const stageName = notebookInfo.stage?.name || "";
+      const env = notebookInfo.environment?.name || "";
+
+      // If there's a stage, update it with the new inputs
+      if (stageName && env) {
+        await setNotebookStageMutation.mutateAsync({
           path: notebookPath,
+          stage_name: stageName,
+          environment: env,
           inputs: inputs,
-        }),
-      });
+          outputs: notebookInfo.stage?.outputs || [],
+        });
+      }
       setIsOpen(false);
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
       console.error("Failed to save inputs:", error);
-      alert("Failed to save inputs");
+      await showErrorMessage("Failed to save inputs", errorMsg);
     }
   };
   const label = `Inputs (${inputs.length})`;
@@ -542,6 +562,7 @@ const OutputsBadge: React.FC<{
   const [isOpen, setIsOpen] = useState(false);
   const [outputs, setOutputs] = useState<string[]>([]);
   const [manualOutput, setManualOutput] = useState("");
+  const setNotebookStageMutation = useSetNotebookStage();
 
   // Load outputs on mount
   useEffect(() => {
@@ -590,19 +611,30 @@ const OutputsBadge: React.FC<{
   const handleSave = async () => {
     try {
       const notebookPath = panel.context.path;
-      await requestAPI("notebook/set-outputs", {
-        method: "POST",
-        body: JSON.stringify({
+      const notebookInfo = await requestAPI<any>(
+        `notebooks?path=${encodeURIComponent(notebookPath)}`,
+      );
+      const stageName = notebookInfo.stage?.name || "";
+      const env = notebookInfo.environment?.name || "";
+
+      // If there's a stage, update it with the new outputs
+      if (stageName && env) {
+        await setNotebookStageMutation.mutateAsync({
           path: notebookPath,
+          stage_name: stageName,
+          environment: env,
+          inputs: notebookInfo.stage?.inputs || [],
           outputs: outputs,
-        }),
-      });
+        });
+      }
       setIsOpen(false);
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
       console.error("Failed to save outputs:", error);
-      alert("Failed to save outputs");
+      await showErrorMessage("Failed to save outputs", errorMsg);
     }
   };
+
   const label = `Outputs (${outputs.length})`;
 
   return (

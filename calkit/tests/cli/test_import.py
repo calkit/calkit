@@ -3,8 +3,10 @@
 import subprocess
 
 
-def test_import_zenodo(tmp_dir):
+def test_import_zenodo(tmp_dir, monkeypatch):
     subprocess.run(["calkit", "init"], check=True)
+    # Temporarily disable dev mode so we can download a real record
+    monkeypatch.setenv("CALKIT_USE_PROD_FOR_TESTS", "1")
     result = subprocess.run(
         [
             "calkit",

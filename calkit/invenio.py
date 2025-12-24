@@ -36,11 +36,17 @@ def get_token(service: ServiceName = DEFAULT_SERVICE) -> str:
 def get_base_url(service: ServiceName = DEFAULT_SERVICE) -> str:
     current_env = calkit.config.get_env()
     if service == "zenodo":
-        if current_env in ["local", "test"]:
+        if (
+            current_env in ["local", "test"]
+            and not os.getenv("CALKIT_USE_PROD_FOR_TESTS") == "1"
+        ):
             return "https://sandbox.zenodo.org/api"
         return "https://zenodo.org/api"
     elif service == "caltechdata":
-        if current_env in ["local", "test"]:
+        if (
+            current_env in ["local", "test"]
+            and not os.getenv("CALKIT_USE_PROD_FOR_TESTS") == "1"
+        ):
             return "https://data.caltechlibrary.dev/api"
         else:
             return "https://data.caltech.edu/api"
@@ -74,12 +80,15 @@ def _request(
         **kwargs,
     )
     if resp.status_code >= 400:
-        resp_json = resp.json()
         msg = f"{resp.status_code}: "
-        if "message" in resp_json:
-            msg += resp_json["message"]
-        if "errors" in resp_json:
-            msg += f"\nErrors:\n{resp_json['errors']}"
+        try:
+            resp_json = resp.json()
+            if "message" in resp_json:
+                msg += resp_json["message"]
+            if "errors" in resp_json:
+                msg += f"\nErrors:\n{resp_json['errors']}"
+        except ValueError:
+            msg += resp.text
         raise HTTPError(msg)
     resp.raise_for_status()
     if as_json:

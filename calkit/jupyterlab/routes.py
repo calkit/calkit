@@ -81,9 +81,61 @@ class KernelspecsRouteHandler(APIHandler):
 
 class Notebook(BaseModel):
     path: str
-    included_in_project: bool = False
-    included_in_pipeline: bool = False
-    stage_name: str | None = None
+    environment: dict | None = None
+    stage: dict | None = None
+    notebook: dict | None = None
+
+
+def get_notebook(path: str, ck_info: dict) -> dict | None:
+    """Get notebook metadata for a given path.
+
+    If the notebook doesn't exist, return None.
+    """
+    if not os.path.isfile(path):
+        return None
+    envs = ck_info.get("environments", {})
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    env_name = None
+    stage_name = None
+    stage_info = None
+    # Notebook environment can either be specified in the notebook
+    # or the pipeline stage
+    # The latter is preferred since we want users to put their
+    # notebooks into the pipeline so they don't need to run them
+    # manually
+    for sname, stage in stages.items():
+        if (
+            stage.get("kind") == "jupyter-notebook"
+            and stage.get("notebook_path") == path
+        ):
+            env_name = stage.get("environment")
+            stage_name = sname
+            stage_info = stage
+            break
+    nb_info = None
+    if not env_name:
+        # Check if the notebook is in the notebooks section
+        project_notebooks = ck_info.get("notebooks", [])
+        for nb in project_notebooks:
+            if nb.get("path") == path:
+                env_name = nb.get("environment")
+                nb_info = nb
+                break
+    env = dict(envs.get(env_name)) if env_name else None
+    if env and env_name:
+        env["name"] = env_name
+    # Build stage object with all stage metadata
+    stage = None
+    if stage_info:
+        stage = {
+            "name": stage_name,
+            "inputs": stage_info.get("inputs", []),
+            "outputs": stage_info.get("outputs", []),
+            "description": stage_info.get("description"),
+        }
+    return Notebook(
+        path=path, environment=env, stage=stage, notebook=nb_info
+    ).model_dump()
 
 
 class NotebooksRouteHandler(APIHandler):
@@ -112,81 +164,21 @@ class NotebooksRouteHandler(APIHandler):
                 )
                 return
             ck_info = calkit.load_calkit_info()
-            envs = ck_info.get("environments", {})
-            stages = ck_info.get("pipeline", {}).get("stages", {})
-            env_name = None
-            stage_name = None
-            stage_info = None
-            # Notebook environment can either be specified in the notebook
-            # or the pipeline stage
-            # The latter is preferred since we want users to put their
-            # notebooks into the pipeline so they don't need to run them
-            # manually
-            for sname, stage in stages.items():
-                if (
-                    stage.get("kind") == "jupyter-notebook"
-                    and stage.get("notebook_path") == notebook_path
-                ):
-                    env_name = stage.get("environment")
-                    stage_name = sname
-                    stage_info = stage
-                    break
-            nb_info = None
-            if not env_name:
-                # Check if the notebook is in the notebooks section
-                project_notebooks = ck_info.get("notebooks", [])
-                for nb in project_notebooks:
-                    if nb.get("path") == notebook_path:
-                        env_name = nb.get("environment")
-                        nb_info = nb
-                        break
-            env = dict(envs.get(env_name)) if env_name else None
-            if env and env_name:
-                env["name"] = env_name
-            # Build stage object with all stage metadata
-            stage = None
-            if stage_info:
-                stage = {
-                    "name": stage_name,
-                    "inputs": stage_info.get("inputs", []),
-                    "outputs": stage_info.get("outputs", []),
-                    "title": stage_info.get("title", ""),
-                    "description": stage_info.get("description", ""),
-                }
-            # Build response with all notebook metadata
-            response = {
-                "notebook": nb_info,
-                "environment": env,
-                "stage": stage,
-            }
-            self.finish(json.dumps(response))
+            notebook = get_notebook(notebook_path, ck_info)
+            self.finish(json.dumps(notebook))
         else:
             # Return list of all notebooks in the project
             self.log.info("Received request for calkit notebooks info")
+            ck_info = calkit.load_calkit_info()
             resp = []
             # Search for notebooks up to 3 directories deep, but not under
             # .calkit or .ipynb_checkpoints
-            notebooks = glob.glob("**/*.ipynb", recursive=True)
-            for nb in notebooks:
-                if ".calkit/" in nb or ".ipynb_checkpoints/" in nb:
+            nb_paths = glob.glob("**/*.ipynb", recursive=True)
+            for nb_path in nb_paths:
+                if ".calkit/" in nb_path or ".ipynb_checkpoints/" in nb_path:
                     continue
-                resp.append(Notebook(path=nb))
-            # Now check which notebooks are included in the project and pipeline
-            ck_info = calkit.load_calkit_info()
-            project_notebooks = ck_info.get("notebooks", [])
-            for nb in resp:
-                if nb.path in project_notebooks:
-                    nb.included_in_project = True
-            stages = ck_info.get("pipeline", {}).get("stages", {})
-            for stage_name, stage in stages.items():
-                if stage.get("kind") == "jupyter-notebook":
-                    nb_path = stage.get("notebook_path")
-                    for nb in resp:
-                        if nb.path == nb_path:
-                            nb.included_in_pipeline = True
-                            nb.stage_name = stage_name
-            notebooks = [nb.model_dump() for nb in resp]
-            self.finish(json.dumps({"notebooks": notebooks}))
+                resp.append(get_notebook(nb_path, ck_info=ck_info))
+            self.finish(json.dumps(resp))
 
     @tornado.web.authenticated
     def post(self):

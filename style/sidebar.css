@@ -380,7 +380,7 @@
 }
 
 .calkit-git-history-item {
-  padding: 4px 12px;
+  padding: 4px 24px;
   margin: 0;
   font-size: 11px;
   color: var(--jp-ui-font-color1);
@@ -391,6 +391,59 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Git subsections (collapsible sections for status and history) */
+.calkit-git-subsection {
+  border-bottom: 1px solid var(--jp-border-color1);
+}
+
+.calkit-git-subsection-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 24px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--jp-ui-font-color1);
+}
+
+.calkit-git-subsection-header:hover {
+  background-color: var(--jp-layout-color2);
+}
+
+.calkit-git-subsection-icon {
+  display: inline-flex;
+  width: 16px;
+  font-size: 10px;
+  color: var(--jp-ui-font-color2);
+}
+
+.calkit-git-subsection-title {
+  flex: 1;
+}
+
+.calkit-git-subsection-items {
+  padding: 0;
+}
+
+.calkit-git-file-item {
+  padding: 4px 24px;
+  font-size: 11px;
+  color: var(--jp-ui-font-color1);
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calkit-git-file-more {
+  padding: 4px 24px;
+  font-size: 10px;
+  color: var(--jp-ui-font-color2);
+  font-style: italic;
 }
 
 .calkit-env-action-btn:hover {

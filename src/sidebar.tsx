@@ -127,6 +127,9 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     new Set(DEFAULT_VISIBLE_SECTIONS),
   );
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
+  const [expandedGitSubsections, setExpandedGitSubsections] = useState<
+    Set<string>
+  >(new Set(["modified", "untracked", "history"]));
 
   // Transform project data into section data
   const transformProjectData = useCallback((info: IProjectInfo | undefined) => {
@@ -1015,17 +1018,138 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
           {isExpanded && sectionId === "history" && (
             <div className="calkit-sidebar-section-content">
               <div className="calkit-git-history">
-                <div className="calkit-git-history-header">Recent history</div>
-                {gitHistory.length === 0 && (
-                  <div className="calkit-sidebar-section-empty">No history</div>
-                )}
-                {gitHistory.slice(0, 5).map((c: any) => (
-                  <div key={c.hash} className="calkit-git-history-item">
-                    <div className="calkit-git-history-message">
-                      {c.message}
+                {/* Modified files subsection */}
+                {(gitStatus.changed?.length || 0) > 0 && (
+                  <div className="calkit-git-subsection">
+                    <div
+                      className="calkit-git-subsection-header"
+                      onClick={() => {
+                        setExpandedGitSubsections((prev) => {
+                          const next = new Set(prev);
+                          if (next.has("modified")) {
+                            next.delete("modified");
+                          } else {
+                            next.add("modified");
+                          }
+                          return next;
+                        });
+                      }}
+                    >
+                      <span className="calkit-git-subsection-icon">
+                        {expandedGitSubsections.has("modified") ? "▼" : "▶"}
+                      </span>
+                      <span className="calkit-git-subsection-title">
+                        Modified ({gitStatus.changed?.length || 0})
+                      </span>
                     </div>
+                    {expandedGitSubsections.has("modified") && (
+                      <div className="calkit-git-subsection-items">
+                        {gitStatus.changed?.slice(0, 10).map((path: string) => (
+                          <div key={path} className="calkit-git-file-item">
+                            {path}
+                          </div>
+                        ))}
+                        {(gitStatus.changed?.length || 0) > 10 && (
+                          <div className="calkit-git-file-more">
+                            +{(gitStatus.changed?.length || 0) - 10} more
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                ))}
+                )}
+
+                {/* Untracked files subsection */}
+                {(gitStatus.untracked?.length || 0) > 0 && (
+                  <div className="calkit-git-subsection">
+                    <div
+                      className="calkit-git-subsection-header"
+                      onClick={() => {
+                        setExpandedGitSubsections((prev) => {
+                          const next = new Set(prev);
+                          if (next.has("untracked")) {
+                            next.delete("untracked");
+                          } else {
+                            next.add("untracked");
+                          }
+                          return next;
+                        });
+                      }}
+                    >
+                      <span className="calkit-git-subsection-icon">
+                        {expandedGitSubsections.has("untracked") ? "▼" : "▶"}
+                      </span>
+                      <span className="calkit-git-subsection-title">
+                        Untracked ({gitStatus.untracked?.length || 0})
+                      </span>
+                    </div>
+                    {expandedGitSubsections.has("untracked") && (
+                      <div className="calkit-git-subsection-items">
+                        {gitStatus.untracked
+                          ?.slice(0, 10)
+                          .map((path: string) => (
+                            <div key={path} className="calkit-git-file-item">
+                              {path}
+                            </div>
+                          ))}
+                        {(gitStatus.untracked?.length || 0) > 10 && (
+                          <div className="calkit-git-file-more">
+                            +{(gitStatus.untracked?.length || 0) - 10} more
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* No changes message */}
+                {(gitStatus.changed?.length || 0) === 0 &&
+                  (gitStatus.untracked?.length || 0) === 0 && (
+                    <div className="calkit-sidebar-section-empty">
+                      No changes
+                    </div>
+                  )}
+
+                {/* Recent history subsection */}
+                <div className="calkit-git-subsection">
+                  <div
+                    className="calkit-git-subsection-header"
+                    onClick={() => {
+                      setExpandedGitSubsections((prev) => {
+                        const next = new Set(prev);
+                        if (next.has("history")) {
+                          next.delete("history");
+                        } else {
+                          next.add("history");
+                        }
+                        return next;
+                      });
+                    }}
+                  >
+                    <span className="calkit-git-subsection-icon">
+                      {expandedGitSubsections.has("history") ? "▼" : "▶"}
+                    </span>
+                    <span className="calkit-git-subsection-title">
+                      Recent history
+                    </span>
+                  </div>
+                  {expandedGitSubsections.has("history") && (
+                    <div className="calkit-git-subsection-items">
+                      {gitHistory.length === 0 && (
+                        <div className="calkit-sidebar-section-empty">
+                          No history
+                        </div>
+                      )}
+                      {gitHistory.slice(0, 5).map((c: any) => (
+                        <div key={c.hash} className="calkit-git-history-item">
+                          <div className="calkit-git-history-message">
+                            {c.message}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}

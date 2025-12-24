@@ -377,6 +377,46 @@ class GitPushRouteHandler(APIHandler):
             return
 
 
+class EnvironmentsRouteHandler(APIHandler):
+    @tornado.web.authenticated
+    def get(self):
+        self.log.info("Received request for calkit environments")
+        # Parse params
+        # Check params for notebook only environments filtering so we can
+        # filter down for notebook-appropriate envs only
+        notebook_only = self.get_argument("notebook_only", "0") == "1"
+        ck_info = calkit.load_calkit_info()
+        envs = ck_info.get("environments", {})
+        if notebook_only:
+            for env_name, env in envs.items():
+                if env.get("kind") not in [
+                    "uv-venv",
+                    "venv",
+                    "pixi",
+                    "renv",
+                    "julia",
+                    "conda",
+                ]:
+                    envs.pop(env_name)
+        # Get package spec for env and return with it
+        # TODO: Enable this for other kinds of envs
+        for env_name, env in envs.items():
+            env_path = env.get("path")
+            if (
+                env.get("kind") in ["uv-venv", "venv"]
+                and env_path
+                and os.path.isfile(env_path)
+            ):
+                packages = []
+                with open(env_path) as f:
+                    for line in f.readlines():
+                        line = line.strip().split("#")[0].strip()
+                        if line:
+                            packages.append(line)
+                envs[env_name]["packages"] = packages
+        self.finish(json.dumps({"environments": envs}))
+
+
 def setup_route_handlers(web_app):
     host_pattern = ".*$"
     base_url = web_app.settings["base_url"]

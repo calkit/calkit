@@ -23,6 +23,7 @@ from calkit.cli.new import (
     new_uv_venv,
     new_venv,
 )
+from calkit.cli.notebooks import check_env_kernel
 from calkit.git import ensure_path_is_ignored
 
 
@@ -278,6 +279,38 @@ class NotebookEnvironmentRouteHandler(APIHandler):
             f" '{notebook_path}' successfully"
         )
         self.finish(json.dumps({"ok": True}))
+
+
+class NotebookKernelRouteHandler(APIHandler):
+    @tornado.web.authenticated
+    def post(self):
+        """Get the kernel info for a notebook's environment."""
+        notebook_path = self.get_argument("path", "")
+        env_name = self.get_argument("environment", "")
+        self.log.info(
+            f"NotebookKernelRouteHandler.post() called with path:"
+            f" '{notebook_path}', environment: '{env_name}'"
+        )
+        if not notebook_path or not env_name:
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {"error": "Both 'path' and 'environment' are required"}
+                )
+            )
+            return
+        try:
+            kernel_name = check_env_kernel(env_name=env_name)
+        except Exception as e:
+            self.log.error(f"Failed to check env kernel for {env_name}: {e}")
+            self.set_status(500)
+            self.finish(
+                json.dumps(
+                    {"error": f"Failed to check environment kernel: {e}"}
+                )
+            )
+            return
+        self.finish(json.dumps({"name": kernel_name}))
 
 
 class GitStatusRouteHandler(APIHandler):
@@ -653,6 +686,10 @@ def setup_route_handlers(web_app):
         (
             url_path_join(base_url, "calkit", "notebook", "environment"),
             NotebookEnvironmentRouteHandler,
+        ),
+        (
+            url_path_join(base_url, "notebook", "kernel"),
+            NotebookKernelRouteHandler,
         ),
         (
             url_path_join(base_url, "calkit", "git", "status"),

@@ -688,7 +688,7 @@ def setup_route_handlers(web_app):
             NotebookEnvironmentRouteHandler,
         ),
         (
-            url_path_join(base_url, "notebook", "kernel"),
+            url_path_join(base_url, "calkit", "notebook", "kernel"),
             NotebookKernelRouteHandler,
         ),
         (

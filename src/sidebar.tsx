@@ -17,6 +17,7 @@ import {
   useCreateEnvironment,
   useCommit,
   usePush,
+  useNotebooks,
   useDeleteEnvironment,
   usePipelineStatus,
   type IProjectInfo,
@@ -89,6 +90,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   const gitStatusQuery = useGitStatus();
   const pipelineStatusQuery = usePipelineStatus();
   const gitHistoryQuery = useGitHistory();
+  const notebooksQuery = useNotebooks();
 
   // Mutation hooks - automatically invalidate related queries on success
   const createNotebookMutation = useCreateNotebook();
@@ -147,11 +149,17 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
           ...(typeof obj === "object" ? obj : {}),
         }),
       ),
-      notebooks: Object.entries(info.notebooks || {}).map(([name, obj]) => ({
-        id: name,
-        label: name,
-        ...(typeof obj === "object" ? obj : {}),
-      })),
+      notebooks: Array.isArray((info as any).notebooks)
+        ? ((info as any).notebooks || []).map((nb: any) => ({
+            id: nb?.path ?? nb?.id ?? nb?.name ?? "",
+            label: nb?.path ?? nb?.name ?? "",
+            ...(typeof nb === "object" ? nb : {}),
+          }))
+        : Object.entries((info as any).notebooks || {}).map(([name, obj]) => ({
+            id: name,
+            label: name,
+            ...(typeof obj === "object" ? obj : {}),
+          })),
       datasets: (info.datasets || []).map((item: any, index: number) => ({
         id: `dataset-${index}`,
         label: item.title || item.path || `Dataset ${index}`,
@@ -805,8 +813,20 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   const renderSection = useCallback(
     (sectionId: string, sectionLabel: string, icon: string) => {
       const isExpanded = expandedSections.has(sectionId);
-      const items: ISectionItem[] =
+      let items: ISectionItem[] =
         sectionData[sectionId as keyof typeof sectionData] || [];
+      // Fallback: populate notebooks from discovery when project has none
+      if (
+        sectionId === "notebooks" &&
+        (!items || items.length === 0) &&
+        notebooksQuery.data
+      ) {
+        items = (notebooksQuery.data || []).map((nb: any) => ({
+          id: nb.path,
+          label: nb.path,
+          in_pipeline: !!nb.stage,
+        }));
+      }
       const showCreateButton =
         sectionId === "environments" || sectionId === "notebooks";
       const showEditButton = sectionId === "basicInfo";

@@ -48,6 +48,16 @@ export interface IGitHistory {
 }
 
 /**
+ * Types for notebooks list
+ */
+export interface INotebookItem {
+  path: string;
+  environment?: Record<string, any> | null;
+  stage?: Record<string, any> | null;
+  notebook?: Record<string, any> | null;
+}
+
+/**
  * Query hook for fetching project data (environments, notebooks, pipeline, etc.)
  */
 export const useProject = () => {
@@ -86,6 +96,16 @@ export const useGitHistory = () => {
   return useQuery<IGitHistory>({
     queryKey: ["git", "history"],
     queryFn: () => requestAPI<IGitHistory>("git/history"),
+  });
+};
+
+/**
+ * Query hook for fetching notebooks discovered in the workspace
+ */
+export const useNotebooks = () => {
+  return useQuery<INotebookItem[]>({
+    queryKey: ["notebooks"],
+    queryFn: () => requestAPI<INotebookItem[]>("notebooks"),
   });
 };
 

@@ -199,6 +199,87 @@ class NotebooksRouteHandler(APIHandler):
             return
 
 
+class NotebookEnvironmentRouteHandler(APIHandler):
+    @tornado.web.authenticated
+    def put(self):
+        """Set the environment for a notebook."""
+        body = self.get_json_body()
+        if not body:
+            self.set_status(400)
+            self.finish(
+                json.dumps({"error": "Request body must be valid JSON"})
+            )
+            return
+        notebook_path = body.get("path")
+        environment_name = body.get("environment")
+        if not notebook_path or not environment_name:
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            "Request body must include 'path' and"
+                            " 'environment'"
+                        )
+                    }
+                )
+            )
+            return
+        ck_info = calkit.load_calkit_info()
+        envs = ck_info.get("environments", {})
+        if environment_name not in envs:
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            f"Environment '{environment_name}' does not exist"
+                        )
+                    }
+                )
+            )
+        # First see if this notebook is part of a pipeline stage
+        stages = ck_info.get("pipeline", {}).get("stages", {})
+        for stage_name, stage_info in list(stages.items()):
+            if (
+                stage_info.get("kind") == "jupyter-notebook"
+                and stage_info.get("notebook_path") == notebook_path
+            ):
+                # Update environment for this stage
+                ck_info["pipeline"]["stages"][stage_name]["environment"] = (
+                    environment_name
+                )
+                # Write back to calkit.yaml
+                with open("calkit.yaml", "w") as f:
+                    calkit.ryaml.dump(ck_info, f)
+                self.log.info(
+                    f"Set environment '{environment_name}' for notebook"
+                    f" '{notebook_path}' in pipeline stage '{stage_name}'"
+                    " successfully"
+                )
+                self.finish(json.dumps({"ok": True}))
+                return
+        # Update or add notebook entry
+        notebooks = ck_info.get("notebooks", [])
+        for nb in notebooks:
+            if nb.get("path") == notebook_path:
+                nb["environment"] = environment_name
+                break
+        else:
+            notebooks.append(
+                {"path": notebook_path, "environment": environment_name}
+            )
+        ck_info["notebooks"] = notebooks
+        # Write back to calkit.yaml
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        self.log.info(
+            f"Set environment '{environment_name}' for notebook"
+            f" '{notebook_path}' successfully"
+        )
+        self.finish(json.dumps({"ok": True}))
+
+
 class GitStatusRouteHandler(APIHandler):
     @tornado.web.authenticated
     def get(self):
@@ -568,6 +649,10 @@ def setup_route_handlers(web_app):
         (
             url_path_join(base_url, "calkit", "notebooks"),
             NotebooksRouteHandler,
+        ),
+        (
+            url_path_join(base_url, "calkit", "notebook", "environment"),
+            NotebookEnvironmentRouteHandler,
         ),
         (
             url_path_join(base_url, "calkit", "git", "status"),

@@ -2,10 +2,12 @@ import { ReactWidget, showErrorMessage } from "@jupyterlab/apputils";
 import { NotebookPanel } from "@jupyterlab/notebook";
 import { ITranslator } from "@jupyterlab/translation";
 import React, { useEffect, useRef, useState } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { requestAPI } from "./request";
 import { queryClient } from "./queryClient";
 import { calkitIcon } from "./icons";
 import { showEnvironmentEditor } from "./environment-editor";
+import { useSetNotebookStage } from "./hooks/useQueries";
 
 /**
  * Badge dropdown component
@@ -290,7 +292,8 @@ const PipelineStageBadge: React.FC<{
   const [currentStage, setCurrentStage] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [stageName, setStageName] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [currentEnv, setCurrentEnv] = useState<string>("");
+  const setNotebookStageMutation = useSetNotebookStage();
 
   // Fetch notebook stage on mount
   useEffect(() => {
@@ -301,8 +304,10 @@ const PipelineStageBadge: React.FC<{
           `notebooks?path=${encodeURIComponent(notebookPath)}`,
         );
         const stage = notebookInfo.stage?.name || "";
+        const env = notebookInfo.environment?.name || "";
         setCurrentStage(stage);
         setStageName(stage);
+        setCurrentEnv(env);
         setLoading(false);
       } catch (error) {
         console.error("Failed to fetch pipeline stages:", error);
@@ -317,23 +322,30 @@ const PipelineStageBadge: React.FC<{
     if (!stageName.trim()) {
       return;
     }
-    setSaving(true);
     const stage = stageName.trim();
     const notebookPath = panel.context.path;
+
+    // Environment is required for the stage
+    if (!currentEnv) {
+      await showErrorMessage(
+        "Environment required",
+        "Please set an environment for this notebook before setting a stage.",
+      );
+      return;
+    }
+
     try {
-      await requestAPI("notebook/set-stage", {
-        method: "POST",
-        body: JSON.stringify({
-          path: notebookPath,
-          stage: stage,
-        }),
+      await setNotebookStageMutation.mutateAsync({
+        path: notebookPath,
+        stage_name: stage,
+        environment: currentEnv,
       });
       setCurrentStage(stage);
       setIsOpen(false);
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
       console.error("Failed to set pipeline stage:", error);
-    } finally {
-      setSaving(false);
+      await showErrorMessage("Failed to set notebook stage", errorMsg);
     }
   };
 
@@ -370,9 +382,11 @@ const PipelineStageBadge: React.FC<{
               />
               <button
                 onClick={handleSaveStage}
-                disabled={saving || !stageName.trim()}
+                disabled={
+                  setNotebookStageMutation.isPending || !stageName.trim()
+                }
               >
-                {saving ? "Saving..." : "Save"}
+                {setNotebookStageMutation.isPending ? "Saving..." : "Save"}
               </button>
             </div>
           </div>
@@ -751,7 +765,11 @@ export class NotebookToolbarWidget extends ReactWidget {
   }
 
   render() {
-    return <NotebookToolbar panel={this.panel} translator={this.translator} />;
+    return (
+      <QueryClientProvider client={queryClient}>
+        <NotebookToolbar panel={this.panel} translator={this.translator} />
+      </QueryClientProvider>
+    );
   }
 }
 

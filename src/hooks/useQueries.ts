@@ -316,3 +316,29 @@ export const useDeleteNotebook = () => {
     },
   });
 };
+
+/**
+ * Mutation hook for setting a notebook's pipeline stage
+ * Uses PUT /notebook/stage and invalidates project/notebooks queries
+ */
+export const useSetNotebookStage = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: {
+      path: string;
+      stage_name: string;
+      environment: string;
+      inputs?: string[];
+      outputs?: string[];
+    }) =>
+      requestAPI("notebook/stage", {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["project"] });
+      void queryClient.invalidateQueries({ queryKey: ["notebooks"] });
+    },
+  });
+};

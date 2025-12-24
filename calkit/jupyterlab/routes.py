@@ -366,11 +366,12 @@ class NotebookStageRouteHandler(APIHandler):
                 )
             )
             return
+        # TODO: If this notebook is already part of a stage, handle renaming
         # Update or add the stage
         stage = stages.get(stage_name, {})
         stage["kind"] = "jupyter-notebook"
         stage["notebook_path"] = notebook_path
-        stage["environmemnt"] = env_name
+        stage["environment"] = env_name
         if inputs:
             stage["inputs"] = inputs
         if outputs:
@@ -379,6 +380,9 @@ class NotebookStageRouteHandler(APIHandler):
             ck_info["pipeline"] = {}
         stages[stage_name] = stage
         ck_info["pipeline"]["stages"] = stages
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        self.finish(json.dumps({"ok": True}))
 
 
 class GitStatusRouteHandler(APIHandler):

@@ -313,36 +313,8 @@ export function addContextMenuItems(
     rank: 0.5,
   });
 
-  // Add items to the submenu for items (files and folders)
-  calkitMenu.addItem({
-    command: CommandIDs.labelAsFigure,
-    rank: 1,
-  });
-
-  calkitMenu.addItem({
-    command: CommandIDs.labelAsDataset,
-    rank: 2,
-  });
-
-  calkitMenu.addItem({
-    command: CommandIDs.labelAsResult,
-    rank: 3,
-  });
-
-  calkitMenu.addItem({
-    command: CommandIDs.labelAsTable,
-    rank: 4,
-  });
-
-  calkitMenu.addItem({
-    type: "separator",
-    rank: 5,
-  });
-
-  calkitMenu.addItem({
-    command: CommandIDs.removeLabel,
-    rank: 6,
-  });
+  // Note: Labeling actions removed from context menu per request
+  // Keep only actions relevant to notebooks
 
   // Bind a single Calkit submenu to the file browser content
   // Commands' `isVisible` determine whether actions show for items vs empty space

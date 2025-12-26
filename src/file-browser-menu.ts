@@ -7,6 +7,7 @@ import { calkitIcon } from "./icons";
 import { requestAPI } from "./request";
 import { showNotebookRegistration } from "./notebook-registration";
 import { showEnvironmentEditor } from "./environment-editor";
+import { NotebookPanel } from "@jupyterlab/notebook";
 
 /**
  * The command IDs for file labeling
@@ -69,7 +70,7 @@ export function addCommands(
 
   // Create a new notebook in a chosen environment (in current or selected folder)
   commands.addCommand(CommandIDs.newNotebookInEnvironment, {
-    label: trans.__("New notebook in environment"),
+    label: trans.__("New notebook"),
     icon: calkitIcon,
     isEnabled: () => !!factory,
     execute: async () => {
@@ -128,7 +129,7 @@ export function addCommands(
         : [targetDir, data.path].filter(Boolean).join("/");
 
       try {
-        await requestAPI("notebook/create", {
+        await requestAPI("notebooks", {
           method: "POST",
           body: JSON.stringify({
             ...data,
@@ -136,7 +137,30 @@ export function addCommands(
           }),
         });
         // Open the newly created notebook
-        await app.commands.execute("docmanager:open", { path: nbPath });
+        const widget = (await app.commands.execute("docmanager:open", {
+          path: nbPath,
+        })) as any;
+        // Set kernel to avoid selector dialog
+        try {
+          const kernel = await requestAPI<{ name: string }>("notebook/kernel", {
+            method: "POST",
+            body: JSON.stringify({
+              path: nbPath,
+              environment: data.environment,
+            }),
+          });
+          if (
+            widget &&
+            (widget as NotebookPanel).sessionContext &&
+            kernel?.name
+          ) {
+            await (widget as NotebookPanel).sessionContext.changeKernel({
+              name: kernel.name,
+            });
+          }
+        } catch (e) {
+          console.warn("Failed to set kernel automatically:", e);
+        }
       } catch (error) {
         console.error("Failed to create/open notebook:", error);
       }
@@ -278,6 +302,17 @@ export function addContextMenuItems(
   calkitMenu.title.label = trans.__("Calkit");
   calkitMenu.title.icon = calkitIcon;
 
+  // New notebook entry (top of menu)
+  calkitMenu.addItem({
+    command: CommandIDs.newNotebookInEnvironment,
+    rank: 0,
+  });
+
+  calkitMenu.addItem({
+    type: "separator",
+    rank: 0.5,
+  });
+
   // Add items to the submenu for items (files and folders)
   calkitMenu.addItem({
     command: CommandIDs.labelAsFigure,
@@ -309,31 +344,14 @@ export function addContextMenuItems(
     rank: 6,
   });
 
-  // Add the Calkit submenu for items (files and folders)
+  // Bind a single Calkit submenu to the file browser content
+  // Commands' `isVisible` determine whether actions show for items vs empty space
   app.contextMenu.addItem({
     type: "submenu",
     submenu: calkitMenu,
-    selector: ".jp-DirListing-item",
-    rank: 3,
-  });
-
-  // Create a separate menu for empty space
-  const emptySpaceMenu = new RankedMenu({
-    commands: app.commands,
-  });
-  emptySpaceMenu.title.label = trans.__("Calkit");
-  emptySpaceMenu.title.icon = calkitIcon;
-
-  emptySpaceMenu.addItem({
-    command: CommandIDs.newNotebookInEnvironment,
-    rank: 1,
-  });
-
-  // Add the empty space menu
-  app.contextMenu.addItem({
-    type: "submenu",
-    submenu: emptySpaceMenu,
     selector: ".jp-DirListing-content",
     rank: 3,
   });
+
+  // Note: Avoid adding a second submenu; a single binding prevents duplicates
 }

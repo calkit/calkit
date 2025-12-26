@@ -32,6 +32,7 @@ async function getAvailableKernels(): Promise<Set<string>> {
 /**
  * Filter the launcher to only show kernels available in the project
  * This works by wrapping the launcher's add() method to intercept new items
+ * and replace notebook creation commands with Calkit's dialog
  */
 export async function filterLauncher(launcher: ILauncher): Promise<void> {
   // Check if calkit.yaml exists
@@ -59,24 +60,18 @@ export async function filterLauncher(launcher: ILauncher): Promise<void> {
 
   // Wrap the add method to filter items
   launcher.add = (options: ILauncher.IItemOptions): IDisposable => {
-    // Only filter notebook category items
+    // Hide all notebook category items - users must use Calkit menu
     if (options.category === "Notebook") {
-      const kernelName = options.metadata?.kernelName as string | undefined;
-
-      // If we have a kernel name and it's not in our available list, skip it
-      if (kernelName && !availableKernels.has(kernelName)) {
-        console.log(`Filtering out kernel launcher: ${kernelName}`);
-        // Return a no-op disposable
-        return {
-          dispose: () => {
-            // Do nothing
-          },
-          isDisposed: false,
-        };
-      }
+      console.log(`Hiding notebook launcher: ${options.command}`);
+      // Return a no-op disposable
+      return {
+        dispose: () => {
+          // Do nothing
+        },
+        isDisposed: false,
+      };
     }
-
-    // For all other items, or allowed notebook items, add normally
+    // For all other items, or modified notebook items, add normally
     return originalAdd(options);
   };
 }

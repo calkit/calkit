@@ -154,8 +154,97 @@ const plugin: JupyterFrontEndPlugin<void> = {
         caption: "Create a new notebook in the current folder",
         isEnabled: () => !!factory,
         execute: async () => {
-          const cwd = (factory as any)?.defaultBrowser?.model?.path || "";
-          await app.commands.execute("notebook:create-new", { cwd });
+          const browser = (factory as any)?.defaultBrowser;
+          const cwd = browser?.model?.path || "";
+
+          // Fetch environments from project info
+          let environments: Array<{ id: string; label: string }> = [];
+          try {
+            const data = await requestAPI<any>("environments?notebook_only=1");
+            environments = Object.keys(data.environments || {}).map(
+              (name: string) => ({
+                id: name,
+                label: name,
+              }),
+            );
+          } catch (error) {
+            console.warn("Failed to fetch environments:", error);
+          }
+
+          const { showEnvironmentEditor } = await import(
+            "./environment-editor"
+          );
+          const { showNotebookRegistration } = await import(
+            "./notebook-registration"
+          );
+
+          const createEnvironmentCallback = async (): Promise<
+            string | null
+          > => {
+            let createdName: string | null = null;
+            await showEnvironmentEditor({
+              mode: "create",
+              onSubmit: async ({ name, kind, path, packages }) => {
+                await requestAPI("environments", {
+                  method: "POST",
+                  body: JSON.stringify({ name, kind, path, packages }),
+                });
+                createdName = name;
+              },
+            });
+            return createdName;
+          };
+
+          // Show Calkit notebook creation dialog
+          const data = await showNotebookRegistration(
+            "create",
+            [],
+            environments,
+            createEnvironmentCallback,
+          );
+          if (!data) {
+            return;
+          }
+
+          // Prepend the current directory to path if user provided a bare filename
+          const nbPath = data.path.includes("/")
+            ? data.path
+            : [cwd, data.path].filter(Boolean).join("/");
+
+          try {
+            // Use existing notebooks route
+            await requestAPI("notebooks", {
+              method: "POST",
+              body: JSON.stringify({
+                ...data,
+                path: nbPath,
+              }),
+            });
+            // Open the newly created notebook
+            const widget: any = await commands.execute("docmanager:open", {
+              path: nbPath,
+            });
+            // Set kernel to avoid selector dialog
+            try {
+              const kernel = await requestAPI<{ name: string }>(
+                "notebook/kernel",
+                {
+                  method: "POST",
+                  body: JSON.stringify({
+                    path: nbPath,
+                    environment: data.environment,
+                  }),
+                },
+              );
+              if (widget && widget.sessionContext && kernel?.name) {
+                await widget.sessionContext.changeKernel({ name: kernel.name });
+              }
+            } catch (e) {
+              console.warn("Failed to set kernel automatically:", e);
+            }
+          } catch (error) {
+            console.error("Failed to create/open notebook:", error);
+          }
         },
       });
 

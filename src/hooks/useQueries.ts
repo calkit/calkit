@@ -118,7 +118,7 @@ export const useCreateNotebook = () => {
 
   return useMutation({
     mutationFn: (data: any) =>
-      requestAPI("notebook/create", {
+      requestAPI("notebooks", {
         method: "POST",
         body: JSON.stringify(data),
       }),
@@ -138,7 +138,7 @@ export const useRegisterNotebook = () => {
 
   return useMutation({
     mutationFn: (data: any) =>
-      requestAPI("notebook/register", {
+      requestAPI("notebooks", {
         method: "POST",
         body: JSON.stringify(data),
       }),

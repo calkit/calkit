@@ -99,7 +99,11 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
     // Filter launcher if calkit.yaml exists
     if (launcher) {
-      void filterLauncher(launcher);
+      try {
+        void filterLauncher(launcher);
+      } catch (e) {
+        console.error("calkit: filterLauncher failed", e);
+      }
     }
 
     // Register cell toolbar button for marking outputs
@@ -318,8 +322,16 @@ const plugin: JupyterFrontEndPlugin<void> = {
 
     // Add file browser context menu items
     if (factory) {
-      addCommands(app, factory, translator || undefined);
-      addContextMenuItems(app, translator || undefined);
+      try {
+        addCommands(app, factory, translator || undefined);
+      } catch (e) {
+        console.error("calkit: addCommands failed", e);
+      }
+      try {
+        addContextMenuItems(app, translator || undefined);
+      } catch (e) {
+        console.error("calkit: addContextMenuItems failed", e);
+      }
     }
 
     if (settingRegistry) {

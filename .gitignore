@@ -13,3 +13,5 @@ lib
 node_modules
 .yarn
 calkit/labextension
+coverage
+junit.xml

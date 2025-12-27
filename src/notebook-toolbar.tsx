@@ -307,10 +307,10 @@ const RunStageModal: React.FC<{
       setLogs([`Starting stage: ${stageName}...`]);
 
       try {
-        const response = await requestAPI<any>("notebook/runs", {
+        const response = await requestAPI<any>("calkit/pipeline/runs", {
           method: "POST",
           body: JSON.stringify({
-            stage: stageName,
+            targets: [stageName],
           }),
         });
 

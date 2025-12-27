@@ -16,6 +16,7 @@ from jupyter_server.utils import url_path_join
 from pydantic import BaseModel
 
 import calkit
+import calkit.cli.main
 from calkit.cli.new import (
     new_conda_env,
     new_julia_env,
@@ -495,6 +496,20 @@ class PipelineStatusRouteHandler(APIHandler):
             return
 
 
+class PipelineRunsRouteHandler(APIHandler):
+    @tornado.web.authenticated
+    def post(self):
+        body = self.get_json_body() or {}
+        targets = body.get("targets")
+        try:
+            calkit.cli.main.run(targets=targets)
+        except Exception as e:
+            self.set_status(500)
+            self.finish(json.dumps({"error": f"Failed to run pipeline: {e}"}))
+            return
+        self.finish(json.dumps({"ok": True}))
+
+
 class GitIgnoreRouteHandler(APIHandler):
     @tornado.web.authenticated
     def post(self):
@@ -778,6 +793,10 @@ def setup_route_handlers(web_app):
         (
             url_path_join(base_url, "calkit", "pipeline", "status"),
             PipelineStatusRouteHandler,
+        ),
+        (
+            url_path_join(base_url, "calkit", "pipeline", "runs"),
+            PipelineRunsRouteHandler,
         ),
         (
             url_path_join(base_url, "calkit", "git", "commit"),

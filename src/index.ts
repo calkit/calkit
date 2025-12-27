@@ -24,7 +24,6 @@ import { IMainMenu } from "@jupyterlab/mainmenu";
 
 import { requestAPI } from "./request";
 import { CalkitSidebarWidget } from "./sidebar";
-import { filterLauncher } from "./launcher-filter";
 import { createOutputMarkerButton } from "./cell-output-marker";
 import { addCommands, addContextMenuItems } from "./file-browser-menu";
 import { createNotebookToolbar } from "./notebook-toolbar";
@@ -97,15 +96,6 @@ const plugin: JupyterFrontEndPlugin<void> = {
       },
     });
 
-    // Filter launcher if calkit.yaml exists
-    if (launcher) {
-      try {
-        void filterLauncher(launcher);
-      } catch (e) {
-        console.error("calkit: filterLauncher failed", e);
-      }
-    }
-
     // Register cell toolbar button for marking outputs
     if (toolbarRegistry) {
       toolbarRegistry.addFactory("Cell", "calkit-output-marker", (widget) => {
@@ -156,6 +146,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
       commands.addCommand("calkit:new-notebook", {
         label: "New notebook",
         caption: "Create a new notebook in the current folder",
+        icon: calkitIcon,
         isEnabled: () => !!factory,
         execute: async () => {
           const browser = (factory as any)?.defaultBrowser;
@@ -252,6 +243,26 @@ const plugin: JupyterFrontEndPlugin<void> = {
         },
       });
 
+      commands.addCommand("calkit:new-pipeline-stage", {
+        label: "New pipeline stage",
+        caption: "Create a new pipeline stage",
+        icon: calkitIcon,
+        execute: async () => {
+          console.log("New pipeline stage - not yet implemented");
+          // TODO: Implement pipeline stage creation
+        },
+      });
+
+      commands.addCommand("calkit:new-publication", {
+        label: "New publication",
+        caption: "Create a new publication",
+        icon: calkitIcon,
+        execute: async () => {
+          console.log("New publication - not yet implemented");
+          // TODO: Implement publication creation
+        },
+      });
+
       commands.addCommand("calkit:save-project", {
         label: "Save project",
         caption: "Commit project changes",
@@ -313,11 +324,34 @@ const plugin: JupyterFrontEndPlugin<void> = {
       calkitMenu.title.label = "Calkit";
       calkitMenu.addItem({ command: "calkit:run-pipeline" });
       calkitMenu.addItem({ command: "calkit:new-notebook" });
+      calkitMenu.addItem({ command: "calkit:new-pipeline-stage" });
+      calkitMenu.addItem({ command: "calkit:new-publication" });
       calkitMenu.addItem({ command: "calkit:save-project" });
       calkitMenu.addItem({ type: "separator" });
       calkitMenu.addItem({ command: "calkit:open-sidebar" });
 
       mainMenu.addMenu(calkitMenu, { rank: 90 });
+    }
+
+    // Add Calkit launcher items
+    if (launcher) {
+      launcher.add({
+        command: "calkit:new-notebook",
+        category: "Calkit",
+        rank: 1,
+      });
+
+      launcher.add({
+        command: "calkit:new-pipeline-stage",
+        category: "Calkit",
+        rank: 2,
+      });
+
+      launcher.add({
+        command: "calkit:new-publication",
+        category: "Calkit",
+        rank: 3,
+      });
     }
 
     // Add file browser context menu items

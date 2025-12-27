@@ -345,8 +345,9 @@ def test_add(tmp_dir):
     with open("text.txt", "w") as f:
         f.write("Hi")
     # Create a large-ish binary file that should be added to DVC
+    binary_size = 5_100_000
     with open("large.bin", "wb") as f:
-        f.write(os.urandom(2_000_000))
+        f.write(os.urandom(binary_size))
     # Create a small directory that should be added to Git
     os.makedirs("src")
     with open("src/code.py", "w") as f:
@@ -354,7 +355,7 @@ def test_add(tmp_dir):
     # Create a large data directory that should be added to DVC
     os.makedirs("data/raw")
     with open("data/raw/file1.bin", "wb") as f:
-        f.write(os.urandom(2_000_000))
+        f.write(os.urandom(binary_size))
     # Create a file with an extension that should automatically be added to DVC
     with open("data.parquet", "w") as f:
         f.write("This is a fake parquet file")
@@ -393,12 +394,12 @@ def test_add(tmp_dir):
     subprocess.check_call(["calkit", "add", "src/code.py", "-M"])
     assert repo.head.commit.message.strip() == "Update src/code.py"
     with open("data/raw/file2.bin", "wb") as f:
-        f.write(os.urandom(2_000_000))
+        f.write(os.urandom(binary_size))
     subprocess.check_call(["calkit", "add", "data", "-M"])
     assert repo.head.commit.message.strip() == "Update data"
     os.makedirs("data2")
     with open("data2/large2.bin", "wb") as f:
-        f.write(os.urandom(2_000_000))
+        f.write(os.urandom(binary_size))
     subprocess.check_call(["calkit", "add", "data2", "-M"])
     assert repo.head.commit.message.strip() == "Add data2"
     subprocess.check_call(["calkit", "add", "--to", "dvc", "large.bin"])

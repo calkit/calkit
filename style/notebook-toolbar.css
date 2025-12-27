@@ -428,3 +428,206 @@
   background-color: var(--jp-layout-color3);
   border-color: var(--jp-border-color0);
 }
+
+/* Badge with action container */
+.calkit-badge-with-action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Play button */
+.calkit-play-button {
+  font-size: 12px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background-color: var(--jp-success-color1);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.calkit-play-button:hover {
+  background-color: var(--jp-success-color0);
+}
+
+.calkit-play-button:active {
+  transform: scale(0.95);
+}
+
+.calkit-play-button-stale {
+  background-color: var(--jp-warn-color1);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.calkit-play-button-stale:hover {
+  background-color: var(--jp-warn-color0);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Modal overlay */
+.calkit-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+/* Modal content */
+.calkit-modal-content {
+  background-color: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  min-width: 500px;
+  max-width: 700px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Modal header */
+.calkit-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.calkit-modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--jp-ui-font-color1);
+}
+
+.calkit-modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--jp-ui-font-color2);
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.calkit-modal-close:hover {
+  color: var(--jp-ui-font-color1);
+  transform: scale(1.1);
+}
+
+/* Modal body */
+.calkit-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Logs container */
+.calkit-logs-container {
+  background-color: var(--jp-layout-color0);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  padding: 12px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: var(--jp-code-font-family);
+  font-size: 12px;
+}
+
+.calkit-log-line {
+  padding: 2px 0;
+  color: var(--jp-ui-font-color1);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.calkit-spinner {
+  color: var(--jp-brand-color1);
+  font-weight: 500;
+}
+
+.calkit-spinner-icon {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Modal footer */
+.calkit-modal-footer {
+  padding: 16px 20px;
+  border-top: 1px solid var(--jp-border-color2);
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.calkit-button-primary {
+  font-size: 13px;
+  padding: 8px 16px;
+  background-color: var(--jp-brand-color1);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: 500;
+}
+
+.calkit-button-primary:hover {
+  background-color: var(--jp-brand-color0);
+}
+
+.calkit-button-secondary {
+  font-size: 13px;
+  padding: 8px 16px;
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: 500;
+}
+
+.calkit-button-secondary:hover {
+  background-color: var(--jp-layout-color3);
+  border-color: var(--jp-border-color0);
+}

@@ -282,6 +282,118 @@ const EnvironmentBadge: React.FC<{
 };
 
 /**
+ * Run Stage Modal component
+ */
+const RunStageModal: React.FC<{
+  stageName: string;
+  notebookPath: string;
+  onClose: () => void;
+}> = ({ stageName, notebookPath, onClose }) => {
+  const [isRunning, setIsRunning] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [executedNotebookPath, setExecutedNotebookPath] = useState<string>("");
+  const [error, setError] = useState<string>("");
+  const logsEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Auto-scroll to bottom when logs update
+    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logs]);
+
+  useEffect(() => {
+    // Start running the stage when modal opens
+    const runStage = async () => {
+      setIsRunning(true);
+      setLogs([`Starting stage: ${stageName}...`]);
+
+      try {
+        const response = await requestAPI<any>("notebook/runs", {
+          method: "POST",
+          body: JSON.stringify({
+            stage: stageName,
+          }),
+        });
+
+        // Assuming the response contains logs and the executed notebook path
+        if (response.logs) {
+          setLogs((prev) => [...prev, ...response.logs]);
+        }
+        if (response.executed_notebook_path) {
+          setExecutedNotebookPath(response.executed_notebook_path);
+          setLogs((prev) => [...prev, `✓ Stage completed successfully!`]);
+        }
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        setError(errorMsg);
+        setLogs((prev) => [...prev, `✗ Error: ${errorMsg}`]);
+      } finally {
+        setIsRunning(false);
+      }
+    };
+
+    runStage();
+  }, [stageName]);
+
+  const handleViewNotebook = () => {
+    if (executedNotebookPath) {
+      // Open the executed notebook in JupyterLab
+      window.open(`/lab/tree/${executedNotebookPath}`, "_blank");
+    }
+  };
+
+  return (
+    <div className="calkit-modal-overlay" onClick={onClose}>
+      <div
+        className="calkit-modal-content"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="calkit-modal-header">
+          <h3>Running stage: {stageName}</h3>
+          <button className="calkit-modal-close" onClick={onClose}>
+            ×
+          </button>
+        </div>
+        <div className="calkit-modal-body">
+          <div className="calkit-logs-container">
+            {logs.map((log, index) => (
+              <div key={index} className="calkit-log-line">
+                {log}
+              </div>
+            ))}
+            {isRunning && (
+              <div className="calkit-log-line calkit-spinner">
+                <span className="calkit-spinner-icon">⏳</span> Running...
+              </div>
+            )}
+            <div ref={logsEndRef} />
+          </div>
+        </div>
+        <div className="calkit-modal-footer">
+          {executedNotebookPath && !isRunning && (
+            <button
+              className="calkit-button-primary"
+              onClick={handleViewNotebook}
+            >
+              View Executed Notebook
+            </button>
+          )}
+          {error && !isRunning && (
+            <button className="calkit-button-secondary" onClick={onClose}>
+              Close
+            </button>
+          )}
+          {!executedNotebookPath && !error && !isRunning && (
+            <button className="calkit-button-secondary" onClick={onClose}>
+              Close
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/**
  * Pipeline stage badge component
  */
 const PipelineStageBadge: React.FC<{
@@ -293,6 +405,8 @@ const PipelineStageBadge: React.FC<{
   const [loading, setLoading] = useState(true);
   const [stageName, setStageName] = useState("");
   const [currentEnv, setCurrentEnv] = useState<string>("");
+  const [showRunModal, setShowRunModal] = useState(false);
+  const [isStale, setIsStale] = useState(false);
   const setNotebookStageMutation = useSetNotebookStage();
 
   // Fetch notebook stage on mount
@@ -305,7 +419,9 @@ const PipelineStageBadge: React.FC<{
         );
         const stage = notebookInfo.stage?.name || "";
         const env = notebookInfo.environment?.name || "";
+        const stale = notebookInfo.stage?.is_stale || false;
         setCurrentStage(stage);
+        setIsStale(stale);
 
         // If no stage is set, generate a default name from the notebook filename
         if (!stage) {
@@ -372,46 +488,68 @@ const PipelineStageBadge: React.FC<{
   const label = isConfigured ? `Stage: ${currentStage}` : "Not in pipeline";
 
   return (
-    <BadgeDropdown
-      label={label}
-      isConfigured={isConfigured}
-      isOpen={isOpen}
-      onToggle={() => setIsOpen(!isOpen)}
-      onClose={() => setIsOpen(false)}
-    >
-      {loading ? (
-        <div className="calkit-dropdown-content">Loading...</div>
-      ) : (
-        <div className="calkit-dropdown-content">
-          <h4>Set notebook stage</h4>
-          <div className="calkit-form-group">
-            <label>Stage name</label>
-            <div className="calkit-input-row">
-              <input
-                type="text"
-                value={stageName}
-                onChange={(e) => setStageName(e.target.value)}
-                placeholder="e.g., postprocess"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleSaveStage();
-                  }
-                }}
-              />
-              <button
-                onClick={handleSaveStage}
-                disabled={
-                  setNotebookStageMutation.isPending || !stageName.trim()
-                }
-              >
-                {setNotebookStageMutation.isPending ? "Saving..." : "Save"}
-              </button>
-            </div>
-          </div>
-        </div>
+    <>
+      {showRunModal && (
+        <RunStageModal
+          stageName={currentStage}
+          notebookPath={panel.context.path}
+          onClose={() => setShowRunModal(false)}
+        />
       )}
-    </BadgeDropdown>
+      <div className="calkit-badge-with-action">
+        <BadgeDropdown
+          label={label}
+          isConfigured={isConfigured}
+          isOpen={isOpen}
+          onToggle={() => setIsOpen(!isOpen)}
+          onClose={() => setIsOpen(false)}
+        >
+          {loading ? (
+            <div className="calkit-dropdown-content">Loading...</div>
+          ) : (
+            <div className="calkit-dropdown-content">
+              <h4>Set notebook stage</h4>
+              <div className="calkit-form-group">
+                <label>Stage name</label>
+                <div className="calkit-input-row">
+                  <input
+                    type="text"
+                    value={stageName}
+                    onChange={(e) => setStageName(e.target.value)}
+                    placeholder="e.g., postprocess"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleSaveStage();
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={handleSaveStage}
+                    disabled={
+                      setNotebookStageMutation.isPending || !stageName.trim()
+                    }
+                  >
+                    {setNotebookStageMutation.isPending ? "Saving..." : "Save"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </BadgeDropdown>
+        {isConfigured && (
+          <button
+            className={`calkit-play-button ${
+              isStale ? "calkit-play-button-stale" : ""
+            }`}
+            onClick={() => setShowRunModal(true)}
+            title={isStale ? "Stage is stale - run to update" : "Run stage"}
+          >
+            ▶
+          </button>
+        )}
+      </div>
+    </>
   );
 };
 

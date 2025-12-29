@@ -672,87 +672,80 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
           <div
             className="calkit-sidebar-item calkit-env-item"
             onClick={() => toggleEnvironment(item.id)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setEnvContextMenu({
-                visible: true,
-                x: e.clientX,
-                y: e.clientY,
-                env: item,
-              });
-            }}
           >
             <span className="calkit-sidebar-section-icon">
               {isExpanded ? "▼" : "▶"}
             </span>
             <span className="calkit-sidebar-item-label">{item.label}</span>
-            <span className="calkit-env-actions">
-              <button
-                className="calkit-env-action-btn calkit-env-edit"
-                title="Edit environment"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  (async () => {
-                    await showEnvironmentEditor({
-                      mode: "edit",
-                      initialName: item.id,
-                      initialKind: kind,
-                      initialPath: item.path,
-                      initialPackages: packages,
-                      onSubmit: async ({ name, kind, path, packages }) => {
-                        try {
-                          await requestAPI("environments", {
-                            method: "POST",
-                            body: JSON.stringify({
-                              name,
-                              kind,
-                              path,
-                              packages,
-                            }),
-                          });
-                        } catch (error) {
-                          console.error("Failed to update environment:", error);
-                          throw error;
-                        }
-                      },
-                    });
-                  })();
-                }}
-              >
-                ✏️
-              </button>
-              <button
-                className="calkit-env-action-btn calkit-env-delete"
-                title="Delete environment"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  (async () => {
-                    const confirm = await new Dialog({
-                      title: `Delete environment '${item.id}'?`,
-                      body: "This action cannot be undone.",
-                      buttons: [
-                        Dialog.cancelButton(),
-                        Dialog.warnButton({ label: "Delete" }),
-                      ],
-                    }).launch();
-                    if (!confirm.button.accept) {
-                      return;
-                    }
-                    try {
-                      await deleteEnvironmentMutation.mutateAsync(item.id);
-                    } catch (error) {
-                      console.error("Failed to delete environment:", error);
-                    }
-                  })();
-                }}
-              >
-                🗑️
-              </button>
-            </span>
           </div>
           {isExpanded && (
             <div className="calkit-env-details">
+              <div className="calkit-env-actions">
+                <button
+                  className="calkit-env-action-btn calkit-env-edit"
+                  title="Edit environment"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    (async () => {
+                      await showEnvironmentEditor({
+                        mode: "edit",
+                        initialName: item.id,
+                        initialKind: kind,
+                        initialPath: item.path,
+                        initialPackages: packages,
+                        onSubmit: async ({ name, kind, path, packages }) => {
+                          try {
+                            await requestAPI("environments", {
+                              method: "POST",
+                              body: JSON.stringify({
+                                name,
+                                kind,
+                                path,
+                                packages,
+                              }),
+                            });
+                          } catch (error) {
+                            console.error(
+                              "Failed to update environment:",
+                              error,
+                            );
+                            throw error;
+                          }
+                        },
+                      });
+                    })();
+                  }}
+                >
+                  ✏️ Edit
+                </button>
+                <button
+                  className="calkit-env-action-btn calkit-env-delete"
+                  title="Delete environment"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    (async () => {
+                      const confirm = await new Dialog({
+                        title: `Delete environment '${item.id}'?`,
+                        body: "This action cannot be undone.",
+                        buttons: [
+                          Dialog.cancelButton(),
+                          Dialog.warnButton({ label: "Delete" }),
+                        ],
+                      }).launch();
+                      if (!confirm.button.accept) {
+                        return;
+                      }
+                      try {
+                        await deleteEnvironmentMutation.mutateAsync(item.id);
+                      } catch (error) {
+                        console.error("Failed to delete environment:", error);
+                      }
+                    })();
+                  }}
+                >
+                  🗑️ Delete
+                </button>
+              </div>
               <div className="calkit-env-kind">
                 <strong>Kind:</strong> {kind}
               </div>
@@ -1343,16 +1336,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                           <div
                             className="calkit-sidebar-item calkit-stage-item"
                             onClick={() => toggleStage(stage.id)}
-                            onContextMenu={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setStageContextMenu({
-                                visible: true,
-                                x: e.clientX,
-                                y: e.clientY,
-                                stage,
-                              });
-                            }}
                           >
                             <span className="calkit-sidebar-section-icon">
                               {isStageExpanded ? "▼" : "▶"}
@@ -1360,105 +1343,147 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                             <span className="calkit-sidebar-item-label">
                               {stage.label || stage.id}
                             </span>
-                            <span className="calkit-env-actions">
-                              <button
-                                className="calkit-env-action-btn calkit-env-edit"
-                                title="Edit stage"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  (async () => {
-                                    const envRef =
-                                      React.createRef<HTMLInputElement>();
-                                    const kindRef =
-                                      React.createRef<HTMLInputElement>();
-                                    const inputsRef =
-                                      React.createRef<HTMLTextAreaElement>();
-                                    const outputsRef =
-                                      React.createRef<HTMLTextAreaElement>();
-                                    const body = (
-                                      <div
-                                        style={{
-                                          display: "flex",
-                                          flexDirection: "column",
-                                          gap: 8,
-                                        }}
-                                      >
-                                        <label style={{ fontSize: 12 }}>
-                                          Environment
-                                        </label>
-                                        <input
-                                          ref={envRef}
-                                          defaultValue={environment}
+                          </div>
+                          {isStageExpanded && (
+                            <div className="calkit-env-details">
+                              <div className="calkit-env-actions">
+                                <button
+                                  className="calkit-env-action-btn calkit-env-edit"
+                                  title="Edit stage"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    (async () => {
+                                      const envRef =
+                                        React.createRef<HTMLInputElement>();
+                                      const kindRef =
+                                        React.createRef<HTMLInputElement>();
+                                      const inputsRef =
+                                        React.createRef<HTMLTextAreaElement>();
+                                      const outputsRef =
+                                        React.createRef<HTMLTextAreaElement>();
+                                      const body = (
+                                        <div
                                           style={{
-                                            fontSize: 12,
-                                            padding: "6px 8px",
+                                            display: "flex",
+                                            flexDirection: "column",
+                                            gap: 8,
                                           }}
-                                        />
-                                        <label style={{ fontSize: 12 }}>
-                                          Kind
-                                        </label>
-                                        <input
-                                          ref={kindRef}
-                                          defaultValue={kind}
-                                          style={{
-                                            fontSize: 12,
-                                            padding: "6px 8px",
-                                          }}
-                                        />
-                                        <label style={{ fontSize: 12 }}>
-                                          Inputs (comma-separated)
-                                        </label>
-                                        <textarea
-                                          ref={inputsRef}
-                                          defaultValue={inputs.join(", ")}
-                                          rows={3}
-                                          style={{
-                                            fontSize: 12,
-                                            padding: "6px 8px",
-                                          }}
-                                        />
-                                        <label style={{ fontSize: 12 }}>
-                                          Outputs (comma-separated)
-                                        </label>
-                                        <textarea
-                                          ref={outputsRef}
-                                          defaultValue={outputs.join(", ")}
-                                          rows={3}
-                                          style={{
-                                            fontSize: 12,
-                                            padding: "6px 8px",
-                                          }}
-                                        />
-                                      </div>
-                                    );
-                                    const res = await new Dialog({
-                                      title: `Edit stage '${stage.id}'`,
-                                      body,
+                                        >
+                                          <label style={{ fontSize: 12 }}>
+                                            Environment
+                                          </label>
+                                          <input
+                                            ref={envRef}
+                                            defaultValue={environment}
+                                            style={{
+                                              fontSize: 12,
+                                              padding: "6px 8px",
+                                            }}
+                                          />
+                                          <label style={{ fontSize: 12 }}>
+                                            Kind
+                                          </label>
+                                          <input
+                                            ref={kindRef}
+                                            defaultValue={kind}
+                                            style={{
+                                              fontSize: 12,
+                                              padding: "6px 8px",
+                                            }}
+                                          />
+                                          <label style={{ fontSize: 12 }}>
+                                            Inputs (comma-separated)
+                                          </label>
+                                          <textarea
+                                            ref={inputsRef}
+                                            defaultValue={inputs.join(", ")}
+                                            rows={3}
+                                            style={{
+                                              fontSize: 12,
+                                              padding: "6px 8px",
+                                            }}
+                                          />
+                                          <label style={{ fontSize: 12 }}>
+                                            Outputs (comma-separated)
+                                          </label>
+                                          <textarea
+                                            ref={outputsRef}
+                                            defaultValue={outputs.join(", ")}
+                                            rows={3}
+                                            style={{
+                                              fontSize: 12,
+                                              padding: "6px 8px",
+                                            }}
+                                          />
+                                        </div>
+                                      );
+                                      const res = await new Dialog({
+                                        title: `Edit stage '${stage.id}'`,
+                                        body,
+                                        buttons: [
+                                          Dialog.cancelButton(),
+                                          Dialog.okButton({ label: "Save" }),
+                                        ],
+                                      }).launch();
+                                      if (!res.button.accept) return;
+                                      try {
+                                        await requestAPI("pipeline/stages", {
+                                          method: "POST",
+                                          body: JSON.stringify({
+                                            name: stage.id,
+                                            environment:
+                                              envRef.current?.value || "",
+                                            kind:
+                                              kindRef.current?.value ||
+                                              "unknown",
+                                            inputs: (
+                                              inputsRef.current?.value || ""
+                                            )
+                                              .split(/\s*,\s*/)
+                                              .filter(Boolean),
+                                            outputs: (
+                                              outputsRef.current?.value || ""
+                                            )
+                                              .split(/\s*,\s*/)
+                                              .filter(Boolean),
+                                          }),
+                                        });
+                                        await queryClient.invalidateQueries({
+                                          queryKey: ["project"],
+                                        });
+                                        await queryClient.invalidateQueries({
+                                          queryKey: ["pipelineStatus"],
+                                        });
+                                      } catch (err) {
+                                        console.error(
+                                          "Failed to update stage:",
+                                          err,
+                                        );
+                                      }
+                                    })();
+                                  }}
+                                >
+                                  ✏️ Edit
+                                </button>
+                                <button
+                                  className="calkit-env-action-btn calkit-env-delete"
+                                  title="Delete stage"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    const confirm = await new Dialog({
+                                      title: `Delete stage '${stage.id}'?`,
+                                      body: "This action cannot be undone.",
                                       buttons: [
                                         Dialog.cancelButton(),
-                                        Dialog.okButton({ label: "Save" }),
+                                        Dialog.warnButton({ label: "Delete" }),
                                       ],
                                     }).launch();
-                                    if (!res.button.accept) return;
+                                    if (!confirm.button.accept) return;
                                     try {
                                       await requestAPI("pipeline/stages", {
-                                        method: "POST",
+                                        method: "DELETE",
                                         body: JSON.stringify({
                                           name: stage.id,
-                                          environment:
-                                            envRef.current?.value || "",
-                                          kind:
-                                            kindRef.current?.value || "unknown",
-                                          inputs: (
-                                            inputsRef.current?.value || ""
-                                          )
-                                            .split(/\s*,\s*/)
-                                            .filter(Boolean),
-                                          outputs: (
-                                            outputsRef.current?.value || ""
-                                          )
-                                            .split(/\s*,\s*/)
-                                            .filter(Boolean),
                                         }),
                                       });
                                       await queryClient.invalidateQueries({
@@ -1469,54 +1494,15 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                                       });
                                     } catch (err) {
                                       console.error(
-                                        "Failed to update stage:",
+                                        "Failed to delete stage:",
                                         err,
                                       );
                                     }
-                                  })();
-                                }}
-                              >
-                                ✏️
-                              </button>
-                              <button
-                                className="calkit-env-action-btn calkit-env-delete"
-                                title="Delete stage"
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  const confirm = await new Dialog({
-                                    title: `Delete stage '${stage.id}'?`,
-                                    body: "This action cannot be undone.",
-                                    buttons: [
-                                      Dialog.cancelButton(),
-                                      Dialog.warnButton({ label: "Delete" }),
-                                    ],
-                                  }).launch();
-                                  if (!confirm.button.accept) return;
-                                  try {
-                                    await requestAPI("pipeline/stages", {
-                                      method: "DELETE",
-                                      body: JSON.stringify({ name: stage.id }),
-                                    });
-                                    await queryClient.invalidateQueries({
-                                      queryKey: ["project"],
-                                    });
-                                    await queryClient.invalidateQueries({
-                                      queryKey: ["pipelineStatus"],
-                                    });
-                                  } catch (err) {
-                                    console.error(
-                                      "Failed to delete stage:",
-                                      err,
-                                    );
-                                  }
-                                }}
-                              >
-                                🗑️
-                              </button>
-                            </span>
-                          </div>
-                          {isStageExpanded && (
-                            <div className="calkit-env-details">
+                                  }}
+                                >
+                                  🗑️ Delete
+                                </button>
+                              </div>
                               <div className="calkit-env-kind">
                                 <strong>Kind:</strong> {kind}
                               </div>

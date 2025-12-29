@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 import calkit
 import calkit.cli.main
+import calkit.pipeline
 from calkit.cli.new import (
     new_conda_env,
     new_julia_env,
@@ -463,6 +464,8 @@ class PipelineStatusRouteHandler(APIHandler):
     @tornado.web.authenticated
     def get(self):
         try:
+            # First make sure pipeline is compiled
+            calkit.pipeline.to_dvc(write=True)
             dvc_repo = dvc.repo.Repo(os.getcwd())
             raw_status = dvc_repo.status()
             pipeline_status = {
@@ -474,20 +477,20 @@ class PipelineStatusRouteHandler(APIHandler):
             self.finish(
                 json.dumps(
                     {
-                        "pipeline": pipeline_status,
+                        "stale_stages": pipeline_status,
                         "is_outdated": is_outdated,
                     }
                 )
             )
         except NotDvcRepoError:
-            self.finish(json.dumps({"pipeline": {}, "is_outdated": False}))
+            self.finish(json.dumps({"stale_stages": {}, "is_outdated": False}))
             return
         except Exception as e:
             self.set_status(500)
             self.finish(
                 json.dumps(
                     {
-                        "pipeline": {},
+                        "stale_stagess": {},
                         "is_outdated": False,
                         "error": f"Failed to get pipeline status: {e}",
                     }

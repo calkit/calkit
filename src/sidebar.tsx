@@ -568,41 +568,191 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     }
   }, []);
 
-  const handleCreateStage = useCallback(async () => {
-    // Simple prompt via JupyterLab Dialog to create a stage by name
-    const inputRef = React.createRef<HTMLInputElement>();
+  const showStageEditorDialog = async (options: {
+    title: string;
+    stageName?: string;
+    inputs?: string[];
+    outputs?: string[];
+    onSave: (
+      name: string,
+      inputs: string[],
+      outputs: string[],
+    ) => Promise<void>;
+  }) => {
+    const stageNameRef = React.createRef<HTMLInputElement>();
+    let inputs = [...(options.inputs || [])];
+    let outputs = [...(options.outputs || [])];
+    const nameEditable = options.stageName === undefined;
+    const manualInputRef = React.createRef<HTMLInputElement>();
+    const manualOutputRef = React.createRef<HTMLInputElement>();
+
+    const renderInputsList = () => {
+      return inputs.map((input, index) => (
+        <div key={index} className="calkit-stage-io-item">
+          <span>{input}</span>
+          <button
+            className="calkit-stage-io-remove"
+            onClick={() => {
+              inputs = inputs.filter((_, i) => i !== index);
+            }}
+          >
+            ×
+          </button>
+        </div>
+      ));
+    };
+
+    const renderOutputsList = () => {
+      return outputs.map((output, index) => (
+        <div key={index} className="calkit-stage-io-item">
+          <span>{output}</span>
+          <button
+            className="calkit-stage-io-remove"
+            onClick={() => {
+              outputs = outputs.filter((_, i) => i !== index);
+            }}
+          >
+            ×
+          </button>
+        </div>
+      ));
+    };
+
     const body = (
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <label style={{ fontSize: 12 }}>Stage name</label>
-        <input
-          ref={inputRef}
-          type="text"
-          placeholder="e.g., preprocess"
-          style={{ fontSize: 12, padding: "6px 8px" }}
-        />
+      <div className="calkit-stage-editor">
+        <div className="calkit-stage-editor-field">
+          <label>Stage name</label>
+          <input
+            ref={stageNameRef}
+            type="text"
+            defaultValue={options.stageName || ""}
+            placeholder="e.g., process_data"
+            autoFocus
+            disabled={!nameEditable}
+          />
+        </div>
+
+        <div className="calkit-stage-editor-field">
+          <label>Inputs</label>
+          <div className="calkit-stage-io-list">
+            {inputs.length === 0 ? (
+              <div className="calkit-stage-io-empty">No inputs</div>
+            ) : (
+              renderInputsList()
+            )}
+          </div>
+          <div className="calkit-stage-io-input-container">
+            <input
+              ref={manualInputRef}
+              type="text"
+              placeholder="path/to/input"
+              onKeyPress={(e) => {
+                if (e.key === "Enter") {
+                  const val = manualInputRef.current?.value?.trim();
+                  if (val) {
+                    inputs = [...inputs, val];
+                    manualInputRef.current!.value = "";
+                  }
+                }
+              }}
+            />
+            <button
+              className="calkit-stage-io-add-button"
+              onClick={() => {
+                const val = manualInputRef.current?.value?.trim();
+                if (val) {
+                  inputs = [...inputs, val];
+                  manualInputRef.current!.value = "";
+                }
+              }}
+            >
+              Add
+            </button>
+          </div>
+        </div>
+
+        <div className="calkit-stage-editor-field">
+          <label>Outputs</label>
+          <div className="calkit-stage-io-list">
+            {outputs.length === 0 ? (
+              <div className="calkit-stage-io-empty">No outputs</div>
+            ) : (
+              renderOutputsList()
+            )}
+          </div>
+          <div className="calkit-stage-io-input-container">
+            <input
+              ref={manualOutputRef}
+              type="text"
+              placeholder="path/to/output"
+              onKeyPress={(e) => {
+                if (e.key === "Enter") {
+                  const val = manualOutputRef.current?.value?.trim();
+                  if (val) {
+                    outputs = [...outputs, val];
+                    manualOutputRef.current!.value = "";
+                  }
+                }
+              }}
+            />
+            <button
+              className="calkit-stage-io-add-button"
+              onClick={() => {
+                const val = manualOutputRef.current?.value?.trim();
+                if (val) {
+                  outputs = [...outputs, val];
+                  manualOutputRef.current!.value = "";
+                }
+              }}
+            >
+              Add
+            </button>
+          </div>
+        </div>
       </div>
     );
-    const result = await new Dialog({
-      title: "Create new stage",
+
+    const res = await new Dialog({
+      title: options.title,
       body,
-      buttons: [Dialog.cancelButton(), Dialog.okButton({ label: "Create" })],
+      buttons: [
+        Dialog.cancelButton(),
+        Dialog.okButton({ label: options.stageName ? "Save" : "Create" }),
+      ],
     }).launch();
-    if (!result.button.accept) {
-      return;
-    }
-    const name = inputRef.current?.value?.trim() || "";
-    if (!name) return;
-    try {
-      await requestAPI("pipeline/stages", {
-        method: "POST",
-        body: JSON.stringify({ name }),
-      });
-      await queryClient.invalidateQueries({ queryKey: ["project"] });
-      await queryClient.invalidateQueries({ queryKey: ["pipelineStatus"] });
-    } catch (error) {
-      console.error("Failed to create stage:", error);
-    }
-  }, []);
+
+    if (!res.button.accept) return;
+    const stageName = stageNameRef.current?.value?.trim();
+    if (!stageName) return;
+
+    await options.onSave(stageName, inputs, outputs);
+  };
+
+  const handleCreateStage = useCallback(async () => {
+    // Open stage editor directly for creating a new stage
+    await showStageEditorDialog({
+      title: "Create new stage",
+      inputs: [],
+      outputs: [],
+      onSave: async (name, inputs, outputs) => {
+        if (!name.trim()) return;
+        try {
+          await requestAPI("pipeline/stage", {
+            method: "PUT",
+            body: JSON.stringify({
+              inputs,
+              outputs,
+              name,
+            }),
+          });
+          await queryClient.invalidateQueries({ queryKey: ["project"] });
+          await queryClient.invalidateQueries({ queryKey: ["pipelineStatus"] });
+        } catch (error) {
+          console.error("Failed to create stage:", error);
+        }
+      },
+    });
+  }, [showStageEditorDialog]);
 
   const handleCreateEnvironment = useCallback(async () => {
     await showEnvironmentEditor({
@@ -861,95 +1011,35 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                   onClick={(e) => {
                     e.stopPropagation();
                     (async () => {
-                      const envRef = React.createRef<HTMLInputElement>();
-                      const kindRef = React.createRef<HTMLInputElement>();
-                      const inputsRef = React.createRef<HTMLTextAreaElement>();
-                      const outputsRef = React.createRef<HTMLTextAreaElement>();
-                      const body = (
-                        <div
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 8,
-                          }}
-                        >
-                          <label style={{ fontSize: 12 }}>Environment</label>
-                          <input
-                            ref={envRef}
-                            defaultValue={environment}
-                            style={{
-                              fontSize: 12,
-                              padding: "6px 8px",
-                            }}
-                          />
-                          <label style={{ fontSize: 12 }}>Kind</label>
-                          <input
-                            ref={kindRef}
-                            defaultValue={kind}
-                            style={{
-                              fontSize: 12,
-                              padding: "6px 8px",
-                            }}
-                          />
-                          <label style={{ fontSize: 12 }}>
-                            Inputs (comma-separated)
-                          </label>
-                          <textarea
-                            ref={inputsRef}
-                            defaultValue={inputs.join(", ")}
-                            rows={3}
-                            style={{
-                              fontSize: 12,
-                              padding: "6px 8px",
-                            }}
-                          />
-                          <label style={{ fontSize: 12 }}>
-                            Outputs (comma-separated)
-                          </label>
-                          <textarea
-                            ref={outputsRef}
-                            defaultValue={outputs.join(", ")}
-                            rows={3}
-                            style={{
-                              fontSize: 12,
-                              padding: "6px 8px",
-                            }}
-                          />
-                        </div>
-                      );
-                      const res = await new Dialog({
+                      await showStageEditorDialog({
                         title: `Edit stage '${stage.id}'`,
-                        body,
-                        buttons: [
-                          Dialog.cancelButton(),
-                          Dialog.okButton({ label: "Save" }),
-                        ],
-                      }).launch();
-                      if (!res.button.accept) return;
-                      try {
-                        await requestAPI("pipeline/stages", {
-                          method: "POST",
-                          body: JSON.stringify({
-                            name: stage.id,
-                            environment: envRef.current?.value || "",
-                            kind: kindRef.current?.value || "unknown",
-                            inputs: (inputsRef.current?.value || "")
-                              .split(/\s*,\s*/)
-                              .filter(Boolean),
-                            outputs: (outputsRef.current?.value || "")
-                              .split(/\s*,\s*/)
-                              .filter(Boolean),
-                          }),
-                        });
-                        await queryClient.invalidateQueries({
-                          queryKey: ["project"],
-                        });
-                        await queryClient.invalidateQueries({
-                          queryKey: ["pipelineStatus"],
-                        });
-                      } catch (err) {
-                        console.error("Failed to update stage:", err);
-                      }
+                        stageName: stage.id,
+                        inputs: inputs,
+                        outputs: outputs,
+                        onSave: async (name, newInputs, newOutputs) => {
+                          try {
+                            await requestAPI("pipeline/stage", {
+                              method: "PUT",
+                              body: JSON.stringify({
+                                current_stage_name: stage.id,
+                                name: name,
+                                environment: environment,
+                                kind: kind,
+                                inputs: newInputs,
+                                outputs: newOutputs,
+                              }),
+                            });
+                            await queryClient.invalidateQueries({
+                              queryKey: ["project"],
+                            });
+                            await queryClient.invalidateQueries({
+                              queryKey: ["pipelineStatus"],
+                            });
+                          } catch (err) {
+                            console.error("Failed to update stage:", err);
+                          }
+                        },
+                      });
                     })();
                   }}
                 >
@@ -1156,63 +1246,82 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                       onClick={(e) => {
                         e.stopPropagation();
                         (async () => {
-                          const stageNameRef =
-                            React.createRef<HTMLInputElement>();
-                          const body = (
-                            <div
-                              style={{
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: 8,
-                              }}
-                            >
-                              <label style={{ fontSize: 12 }}>Stage name</label>
-                              <input
-                                ref={stageNameRef}
-                                placeholder="e.g., process_data"
-                                style={{
-                                  fontSize: 12,
-                                  padding: "6px 8px",
-                                }}
-                              />
-                            </div>
-                          );
-                          const res = await new Dialog({
-                            title: "Create new pipeline stage",
-                            body,
-                            buttons: [
-                              Dialog.cancelButton(),
-                              Dialog.okButton({ label: "Create" }),
-                            ],
-                          }).launch();
-                          if (!res.button.accept) return;
-                          const stageName = stageNameRef.current?.value?.trim();
-                          if (!stageName) return;
-                          try {
-                            // Create the stage by setting it on the notebook
-                            await requestAPI("notebook/stage", {
-                              method: "PUT",
-                              body: JSON.stringify({
-                                path: item.id,
-                                stage_name: stageName,
-                                environment: "",
-                                inputs: [],
-                                outputs: [],
-                              }),
-                            });
-                            await queryClient.invalidateQueries({
-                              queryKey: ["project"],
-                            });
-                            await queryClient.invalidateQueries({
-                              queryKey: ["pipelineStatus"],
-                            });
-                          } catch (err) {
-                            console.error("Failed to create stage:", err);
-                          }
+                          await showStageEditorDialog({
+                            title: "Create new stage",
+                            inputs: [],
+                            outputs: [],
+                            onSave: async (stageName, inputs, outputs) => {
+                              if (!stageName.trim()) return;
+                              try {
+                                // Create the stage by setting it on the notebook
+                                await requestAPI("notebook/stage", {
+                                  method: "PUT",
+                                  body: JSON.stringify({
+                                    path: item.id,
+                                    stage_name: stageName,
+                                    environment: "",
+                                    inputs: inputs,
+                                    outputs: outputs,
+                                  }),
+                                });
+                                await queryClient.invalidateQueries({
+                                  queryKey: ["project"],
+                                });
+                                await queryClient.invalidateQueries({
+                                  queryKey: ["pipelineStatus"],
+                                });
+                              } catch (err) {
+                                console.error("Failed to create stage:", err);
+                              }
+                            },
+                          });
                         })();
                       }}
                     >
                       +
+                    </button>
+                  )}
+                  {stageName && (
+                    <button
+                      className="calkit-notebook-edit-stage-btn"
+                      title="Edit stage inputs/outputs"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        (async () => {
+                          const stageData = (item.stage as any) || {};
+                          await showStageEditorDialog({
+                            title: `Edit stage '${stageName}'`,
+                            stageName: stageName,
+                            inputs: stageData.inputs || [],
+                            outputs: stageData.outputs || [],
+                            onSave: async (name, inputs, outputs) => {
+                              try {
+                                // Update the stage with the new inputs/outputs
+                                await requestAPI("notebook/stage", {
+                                  method: "PUT",
+                                  body: JSON.stringify({
+                                    path: item.id,
+                                    stage_name: name,
+                                    environment: "",
+                                    inputs: inputs,
+                                    outputs: outputs,
+                                  }),
+                                });
+                                await queryClient.invalidateQueries({
+                                  queryKey: ["project"],
+                                });
+                                await queryClient.invalidateQueries({
+                                  queryKey: ["pipelineStatus"],
+                                });
+                              } catch (err) {
+                                console.error("Failed to update stage:", err);
+                              }
+                            },
+                          });
+                        })();
+                      }}
+                    >
+                      ✏️ Edit
                     </button>
                   )}
                 </div>

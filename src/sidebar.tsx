@@ -207,6 +207,16 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   }, []);
 
   const sectionData = transformProjectData(projectQuery.data);
+
+  // Override notebooks with enriched data from /notebooks endpoint that includes stage info
+  if (notebooksQuery.data && Array.isArray(notebooksQuery.data)) {
+    sectionData.notebooks = notebooksQuery.data.map((nb: any) => ({
+      id: nb.path,
+      label: nb.path,
+      ...nb,
+    }));
+  }
+
   const projectInfo = projectQuery.data
     ? {
         name: projectQuery.data.name ?? "",
@@ -1027,8 +1037,14 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   const renderNotebookItem = useCallback(
     (item: ISectionItem) => {
       const isExpanded = expandedNotebooks.has(item.id);
-      const environment = item.environment || "";
-      const inPipeline = item.in_pipeline || false;
+      // Extract environment name - it could be a string or an object with a "name" property
+      let environment = "";
+      if (typeof item.environment === "string") {
+        environment = item.environment;
+      } else if (item.environment && typeof item.environment === "object") {
+        environment = (item.environment as any).name || "";
+      }
+      const stageName = (item.stage as any)?.name || "";
       const environmentList = sectionData.environments || [];
 
       const handleOpenNotebook = (e: React.MouseEvent) => {
@@ -1097,34 +1113,109 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
               </div>
               <div className="calkit-notebook-field">
                 <label className="calkit-notebook-field-label">
+                  Pipeline stage:
+                </label>
+                <div className="calkit-notebook-pipeline-controls">
                   <input
-                    type="checkbox"
-                    className="calkit-notebook-pipeline-checkbox"
-                    checked={inPipeline}
+                    type="text"
+                    className="calkit-notebook-pipeline-input"
+                    placeholder="Not in pipeline"
+                    value={stageName}
                     onChange={async (e) => {
-                      const checked = e.target.checked;
-                      try {
-                        await requestAPI("notebook/set-in-pipeline", {
-                          method: "POST",
-                          body: JSON.stringify({
-                            notebook: item.id,
-                            in_pipeline: checked,
-                          }),
-                        });
-                        // Invalidate project query to refetch
-                        await queryClient.invalidateQueries({
-                          queryKey: ["project"],
-                        });
-                      } catch (error) {
-                        console.error(
-                          "Failed to set notebook pipeline status:",
-                          error,
-                        );
+                      const stageName = e.target.value;
+                      if (stageName.trim()) {
+                        try {
+                          // Use the NotebookStageRouteHandler to set the notebook's stage
+                          await requestAPI("notebook/stage", {
+                            method: "PUT",
+                            body: JSON.stringify({
+                              path: item.id,
+                              stage_name: stageName,
+                              environment: "",
+                              inputs: [],
+                              outputs: [],
+                            }),
+                          });
+                          // Invalidate queries to refetch
+                          await queryClient.invalidateQueries({
+                            queryKey: ["project"],
+                          });
+                          await queryClient.invalidateQueries({
+                            queryKey: ["pipelineStatus"],
+                          });
+                        } catch (error) {
+                          console.error("Failed to set notebook stage:", error);
+                        }
                       }
                     }}
                   />
-                  Include in pipeline
-                </label>
+                  {!stageName && (
+                    <button
+                      className="calkit-notebook-create-stage-btn"
+                      title="Create new stage"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        (async () => {
+                          const stageNameRef =
+                            React.createRef<HTMLInputElement>();
+                          const body = (
+                            <div
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: 8,
+                              }}
+                            >
+                              <label style={{ fontSize: 12 }}>Stage name</label>
+                              <input
+                                ref={stageNameRef}
+                                placeholder="e.g., process_data"
+                                style={{
+                                  fontSize: 12,
+                                  padding: "6px 8px",
+                                }}
+                              />
+                            </div>
+                          );
+                          const res = await new Dialog({
+                            title: "Create new pipeline stage",
+                            body,
+                            buttons: [
+                              Dialog.cancelButton(),
+                              Dialog.okButton({ label: "Create" }),
+                            ],
+                          }).launch();
+                          if (!res.button.accept) return;
+                          const stageName = stageNameRef.current?.value?.trim();
+                          if (!stageName) return;
+                          try {
+                            // Create the stage by setting it on the notebook
+                            await requestAPI("notebook/stage", {
+                              method: "PUT",
+                              body: JSON.stringify({
+                                path: item.id,
+                                stage_name: stageName,
+                                environment: "",
+                                inputs: [],
+                                outputs: [],
+                              }),
+                            });
+                            await queryClient.invalidateQueries({
+                              queryKey: ["project"],
+                            });
+                            await queryClient.invalidateQueries({
+                              queryKey: ["pipelineStatus"],
+                            });
+                          } catch (err) {
+                            console.error("Failed to create stage:", err);
+                          }
+                        })();
+                      }}
+                    >
+                      +
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}

@@ -792,6 +792,44 @@
   cursor: pointer;
 }
 
+.calkit-notebook-pipeline-controls {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.calkit-notebook-pipeline-input {
+  flex: 1;
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 3px;
+  background-color: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color1);
+}
+
+.calkit-notebook-create-stage-btn {
+  font-size: 14px;
+  font-weight: bold;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background-color: var(--jp-brand-color1);
+  color: var(--jp-layout-color1);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s ease;
+  line-height: 1;
+}
+
+.calkit-notebook-create-stage-btn:hover {
+  background-color: var(--jp-brand-color0);
+}
+
 /* Settings dropdown styling */
 .calkit-sidebar-settings-container {
   position: relative;

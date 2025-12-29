@@ -162,6 +162,18 @@
   cursor: not-allowed;
 }
 
+/* Error message styling */
+.calkit-env-error {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background-color: var(--jp-error-color3);
+  border: 1px solid var(--jp-error-color1);
+  border-radius: 3px;
+  color: var(--jp-error-color0);
+  font-size: 12px;
+  word-wrap: break-word;
+}
+
 /* Notebook registration dialog styles */
 .calkit-notebook-registration {
   padding: 10px;

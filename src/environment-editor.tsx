@@ -44,13 +44,6 @@ const EnvironmentEditorBody: React.FC<
       path: string;
       packages: string[];
     }) => void;
-    onSubmit: (data: {
-      name: string;
-      kind: string;
-      path: string;
-      packages: string[];
-    }) => Promise<void>;
-    onClose: () => void;
   }
 > = ({
   initialName = "",
@@ -59,8 +52,6 @@ const EnvironmentEditorBody: React.FC<
   initialPackages = [],
   mode,
   onUpdate,
-  onSubmit,
-  onClose,
 }) => {
   // Default paths based on environment kind
   const getDefaultPath = (kind: string) => {
@@ -84,8 +75,6 @@ const EnvironmentEditorBody: React.FC<
   const [path, setPath] = useState(initialPath || getDefaultPath(initialKind));
   const [packages, setPackages] = useState<string[]>(initialPackages);
   const [newPackage, setNewPackage] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
 
   React.useEffect(() => {
     onUpdate({ name, kind, path, packages });
@@ -236,42 +225,6 @@ const EnvironmentEditorBody: React.FC<
           </div>
         </div>
       )}
-      <div className="calkit-env-editor-actions">
-        {submitError && (
-          <div className="calkit-env-error" title={submitError}>
-            {submitError}
-          </div>
-        )}
-        <button
-          type="button"
-          className="jp-Dialog-button jp-mod-accept"
-          disabled={isSubmitting || !name.trim()}
-          onClick={async () => {
-            setSubmitError(null);
-            setIsSubmitting(true);
-            try {
-              await onSubmit({ name, kind, path, packages });
-              onClose();
-            } catch (err: any) {
-              const msg =
-                typeof err?.message === "string"
-                  ? err.message
-                  : err?.message?.error || JSON.stringify(err?.message || err);
-              setSubmitError(msg);
-            } finally {
-              setIsSubmitting(false);
-            }
-          }}
-        >
-          {isSubmitting
-            ? mode === "create"
-              ? "Creating…"
-              : "Saving…"
-            : mode === "create"
-            ? "Create"
-            : "Save"}
-        </button>
-      </div>
     </div>
   );
 };
@@ -289,13 +242,12 @@ class EnvironmentEditorWidget extends ReactWidget {
 
   constructor(
     private options: IEnvironmentEditorProps & {
-      onSubmit: (data: {
+      onUpdate?: (data: {
         name: string;
         kind: string;
         path: string;
         packages: string[];
-      }) => Promise<void>;
-      onClose: () => void;
+      }) => void;
     },
   ) {
     super();
@@ -331,8 +283,6 @@ class EnvironmentEditorWidget extends ReactWidget {
         onUpdate={(data) => {
           this._data = data;
         }}
-        onSubmit={this.options.onSubmit}
-        onClose={this.options.onClose}
       />
     );
   }
@@ -360,17 +310,21 @@ export async function showEnvironmentEditor(
     }) => Promise<void>;
   },
 ): Promise<void> {
-  let disposeRef: () => void = () => {};
-  const widget = new EnvironmentEditorWidget({
-    ...options,
-    onClose: () => disposeRef(),
-  });
+  const widget = new EnvironmentEditorWidget(options);
   const dialog = new Dialog({
     title:
       options.mode === "create" ? "Create environment" : "Edit environment",
     body: widget,
-    buttons: [Dialog.cancelButton()],
+    buttons: [
+      Dialog.cancelButton(),
+      Dialog.okButton({ label: options.mode === "create" ? "Create" : "Save" }),
+    ],
   });
-  disposeRef = () => dialog.dispose();
-  await dialog.launch();
+  const result = await dialog.launch();
+  if (result.button.accept) {
+    const data = widget.getValue();
+    if (data.name.trim()) {
+      await options.onSubmit(data);
+    }
+  }
 }

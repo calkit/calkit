@@ -111,6 +111,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   const [expandedNotebooks, setExpandedNotebooks] = useState<Set<string>>(
     new Set(),
   );
+  const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set());
   const [newPackage, setNewPackage] = useState<Record<string, string>>({});
   const [envContextMenu, setEnvContextMenu] = useState<{
     visible: boolean;
@@ -122,6 +123,17 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     visible: boolean;
     x: number;
     y: number;
+  } | null>(null);
+  const [pipelineContextMenu, setPipelineContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [stageContextMenu, setStageContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    stage?: ISectionItem;
   } | null>(null);
   const [visibleSections, setVisibleSections] = useState<Set<string>>(
     new Set(DEFAULT_VISIBLE_SECTIONS),
@@ -288,6 +300,18 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     });
   }, []);
 
+  const toggleStage = useCallback((stageId: string) => {
+    setExpandedStages((prev) => {
+      const next = new Set(prev);
+      if (next.has(stageId)) {
+        next.delete(stageId);
+      } else {
+        next.add(stageId);
+      }
+      return next;
+    });
+  }, []);
+
   // Persist visible sections to localStorage
   React.useEffect(() => {
     // Initialize expandedSections from stateDB
@@ -363,11 +387,15 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     const handleClickOutside = () => {
       setEnvContextMenu(null);
       setNotebookContextMenu(null);
+      setPipelineContextMenu(null);
+      setStageContextMenu(null);
       setShowSettingsDropdown(false);
     };
     if (
       envContextMenu?.visible ||
       notebookContextMenu?.visible ||
+      pipelineContextMenu?.visible ||
+      stageContextMenu?.visible ||
       showSettingsDropdown
     ) {
       document.addEventListener("click", handleClickOutside);
@@ -378,6 +406,8 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   }, [
     envContextMenu?.visible,
     notebookContextMenu?.visible,
+    pipelineContextMenu?.visible,
+    stageContextMenu?.visible,
     showSettingsDropdown,
   ]);
 
@@ -486,6 +516,70 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     commitMutation,
     pushMutation,
   ]);
+
+  const handleRunPipeline = useCallback(async () => {
+    try {
+      await requestAPI("pipeline/runs", {
+        method: "POST",
+        body: JSON.stringify({ targets: [] }),
+      });
+      // Refresh project and pipeline status after run
+      await queryClient.invalidateQueries({ queryKey: ["project"] });
+      await queryClient.invalidateQueries({ queryKey: ["pipelineStatus"] });
+    } catch (error) {
+      console.error("Failed to run pipeline:", error);
+    }
+  }, []);
+
+  const handleRunStage = useCallback(async (stageName: string) => {
+    if (!stageName) return;
+    try {
+      await requestAPI("pipeline/runs", {
+        method: "POST",
+        body: JSON.stringify({ targets: [stageName] }),
+      });
+      await queryClient.invalidateQueries({ queryKey: ["project"] });
+      await queryClient.invalidateQueries({ queryKey: ["pipelineStatus"] });
+    } catch (error) {
+      console.error("Failed to run stage:", error);
+    }
+  }, []);
+
+  const handleCreateStage = useCallback(async () => {
+    // Simple prompt via JupyterLab Dialog to create a stage by name
+    const inputRef = React.createRef<HTMLInputElement>();
+    const body = (
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <label style={{ fontSize: 12 }}>Stage name</label>
+        <input
+          ref={inputRef}
+          type="text"
+          placeholder="e.g., preprocess"
+          style={{ fontSize: 12, padding: "6px 8px" }}
+        />
+      </div>
+    );
+    const result = await new Dialog({
+      title: "Create new stage",
+      body,
+      buttons: [Dialog.cancelButton(), Dialog.okButton({ label: "Create" })],
+    }).launch();
+    if (!result.button.accept) {
+      return;
+    }
+    const name = inputRef.current?.value?.trim() || "";
+    if (!name) return;
+    try {
+      await requestAPI("pipeline/stages", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
+      await queryClient.invalidateQueries({ queryKey: ["project"] });
+      await queryClient.invalidateQueries({ queryKey: ["pipelineStatus"] });
+    } catch (error) {
+      console.error("Failed to create stage:", error);
+    }
+  }, []);
 
   const handleCreateEnvironment = useCallback(async () => {
     await showEnvironmentEditor({
@@ -831,7 +925,9 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
         }));
       }
       const showCreateButton =
-        sectionId === "environments" || sectionId === "notebooks";
+        sectionId === "environments" ||
+        sectionId === "notebooks" ||
+        sectionId === "pipelineStages";
       const showEditButton = sectionId === "basicInfo";
       const newCount =
         sectionId === "history" ? (gitStatus.untracked || []).length : 0;
@@ -865,6 +961,13 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                   x: e.clientX,
                   y: e.clientY,
                 });
+              } else if (sectionId === "pipelineStages") {
+                e.preventDefault();
+                setPipelineContextMenu({
+                  visible: true,
+                  x: e.clientX,
+                  y: e.clientY,
+                });
               }
             }}
           >
@@ -873,6 +976,49 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
             </span>
             <span className="calkit-sidebar-section-label">{icon}</span>
             <span className="calkit-sidebar-section-title">{sectionLabel}</span>
+            {sectionId === "pipelineStages" &&
+              (() => {
+                const ps: any = pipelineStatus;
+                let outdatedCount = 0;
+                if (ps) {
+                  if (typeof ps?.stages_outdated_count === "number") {
+                    outdatedCount = ps.stages_outdated_count;
+                  } else if (Array.isArray(ps?.outdated_stages)) {
+                    outdatedCount = ps.outdated_stages.length;
+                  } else if (
+                    ps?.pipeline?.stages &&
+                    typeof ps.pipeline.stages === "object"
+                  ) {
+                    outdatedCount = Object.values(ps.pipeline.stages).filter(
+                      (s: any) => s?.is_outdated || s?.outdated || s?.needs_run,
+                    ).length;
+                  }
+                }
+                return (
+                  <span className="calkit-pipeline-status">
+                    {outdatedCount > 0 && (
+                      <span
+                        className="calkit-pipeline-outdated-dot"
+                        title={`${outdatedCount} stage${
+                          outdatedCount === 1 ? "" : "s"
+                        } out of date`}
+                      >
+                        {outdatedCount}
+                      </span>
+                    )}
+                    <button
+                      className="calkit-sidebar-section-run"
+                      title="Run pipeline"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRunPipeline();
+                      }}
+                    >
+                      ▶
+                    </button>
+                  </span>
+                );
+              })()}
             {sectionId === "history" &&
               (() => (
                 <span className="calkit-status-chips">
@@ -940,12 +1086,16 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                     handleCreateEnvironment();
                   } else if (sectionId === "notebooks") {
                     handleCreateNotebook();
+                  } else if (sectionId === "pipelineStages") {
+                    handleCreateStage();
                   }
                 }}
                 title={
                   sectionId === "environments"
                     ? "Create new environment"
-                    : "Create new notebook"
+                    : sectionId === "notebooks"
+                    ? "Create new notebook"
+                    : "Create new stage"
                 }
               >
                 +
@@ -1181,6 +1331,244 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                   ? items.map((item) => renderEnvironmentItem(item))
                   : sectionId === "notebooks"
                   ? items.map((item) => renderNotebookItem(item))
+                  : sectionId === "pipelineStages"
+                  ? items.map((stage: ISectionItem) => {
+                      const isStageExpanded = expandedStages.has(stage.id);
+                      const kind = stage.kind || "unknown";
+                      const inputs: string[] = stage.inputs || [];
+                      const outputs: string[] = stage.outputs || [];
+                      const environment = stage.environment || "";
+                      return (
+                        <div key={stage.id}>
+                          <div
+                            className="calkit-sidebar-item calkit-stage-item"
+                            onClick={() => toggleStage(stage.id)}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setStageContextMenu({
+                                visible: true,
+                                x: e.clientX,
+                                y: e.clientY,
+                                stage,
+                              });
+                            }}
+                          >
+                            <span className="calkit-sidebar-section-icon">
+                              {isStageExpanded ? "▼" : "▶"}
+                            </span>
+                            <span className="calkit-sidebar-item-label">
+                              {stage.label || stage.id}
+                            </span>
+                            <span className="calkit-env-actions">
+                              <button
+                                className="calkit-env-action-btn calkit-env-edit"
+                                title="Edit stage"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  (async () => {
+                                    const envRef =
+                                      React.createRef<HTMLInputElement>();
+                                    const kindRef =
+                                      React.createRef<HTMLInputElement>();
+                                    const inputsRef =
+                                      React.createRef<HTMLTextAreaElement>();
+                                    const outputsRef =
+                                      React.createRef<HTMLTextAreaElement>();
+                                    const body = (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          flexDirection: "column",
+                                          gap: 8,
+                                        }}
+                                      >
+                                        <label style={{ fontSize: 12 }}>
+                                          Environment
+                                        </label>
+                                        <input
+                                          ref={envRef}
+                                          defaultValue={environment}
+                                          style={{
+                                            fontSize: 12,
+                                            padding: "6px 8px",
+                                          }}
+                                        />
+                                        <label style={{ fontSize: 12 }}>
+                                          Kind
+                                        </label>
+                                        <input
+                                          ref={kindRef}
+                                          defaultValue={kind}
+                                          style={{
+                                            fontSize: 12,
+                                            padding: "6px 8px",
+                                          }}
+                                        />
+                                        <label style={{ fontSize: 12 }}>
+                                          Inputs (comma-separated)
+                                        </label>
+                                        <textarea
+                                          ref={inputsRef}
+                                          defaultValue={inputs.join(", ")}
+                                          rows={3}
+                                          style={{
+                                            fontSize: 12,
+                                            padding: "6px 8px",
+                                          }}
+                                        />
+                                        <label style={{ fontSize: 12 }}>
+                                          Outputs (comma-separated)
+                                        </label>
+                                        <textarea
+                                          ref={outputsRef}
+                                          defaultValue={outputs.join(", ")}
+                                          rows={3}
+                                          style={{
+                                            fontSize: 12,
+                                            padding: "6px 8px",
+                                          }}
+                                        />
+                                      </div>
+                                    );
+                                    const res = await new Dialog({
+                                      title: `Edit stage '${stage.id}'`,
+                                      body,
+                                      buttons: [
+                                        Dialog.cancelButton(),
+                                        Dialog.okButton({ label: "Save" }),
+                                      ],
+                                    }).launch();
+                                    if (!res.button.accept) return;
+                                    try {
+                                      await requestAPI("pipeline/stages", {
+                                        method: "POST",
+                                        body: JSON.stringify({
+                                          name: stage.id,
+                                          environment:
+                                            envRef.current?.value || "",
+                                          kind:
+                                            kindRef.current?.value || "unknown",
+                                          inputs: (
+                                            inputsRef.current?.value || ""
+                                          )
+                                            .split(/\s*,\s*/)
+                                            .filter(Boolean),
+                                          outputs: (
+                                            outputsRef.current?.value || ""
+                                          )
+                                            .split(/\s*,\s*/)
+                                            .filter(Boolean),
+                                        }),
+                                      });
+                                      await queryClient.invalidateQueries({
+                                        queryKey: ["project"],
+                                      });
+                                      await queryClient.invalidateQueries({
+                                        queryKey: ["pipelineStatus"],
+                                      });
+                                    } catch (err) {
+                                      console.error(
+                                        "Failed to update stage:",
+                                        err,
+                                      );
+                                    }
+                                  })();
+                                }}
+                              >
+                                ✏️
+                              </button>
+                              <button
+                                className="calkit-env-action-btn calkit-env-delete"
+                                title="Delete stage"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  const confirm = await new Dialog({
+                                    title: `Delete stage '${stage.id}'?`,
+                                    body: "This action cannot be undone.",
+                                    buttons: [
+                                      Dialog.cancelButton(),
+                                      Dialog.warnButton({ label: "Delete" }),
+                                    ],
+                                  }).launch();
+                                  if (!confirm.button.accept) return;
+                                  try {
+                                    await requestAPI("pipeline/stages", {
+                                      method: "DELETE",
+                                      body: JSON.stringify({ name: stage.id }),
+                                    });
+                                    await queryClient.invalidateQueries({
+                                      queryKey: ["project"],
+                                    });
+                                    await queryClient.invalidateQueries({
+                                      queryKey: ["pipelineStatus"],
+                                    });
+                                  } catch (err) {
+                                    console.error(
+                                      "Failed to delete stage:",
+                                      err,
+                                    );
+                                  }
+                                }}
+                              >
+                                🗑️
+                              </button>
+                            </span>
+                          </div>
+                          {isStageExpanded && (
+                            <div className="calkit-env-details">
+                              <div className="calkit-env-kind">
+                                <strong>Kind:</strong> {kind}
+                              </div>
+                              <div className="calkit-env-kind">
+                                <strong>Environment:</strong>{" "}
+                                {environment || "—"}
+                              </div>
+                              <div className="calkit-env-packages">
+                                <div className="calkit-env-packages-header">
+                                  <strong>Inputs:</strong>
+                                </div>
+                                <div className="calkit-env-packages-list">
+                                  {inputs.length === 0 && (
+                                    <div className="calkit-env-package-item">
+                                      None
+                                    </div>
+                                  )}
+                                  {inputs.map((inp: string, idx: number) => (
+                                    <div
+                                      key={idx}
+                                      className="calkit-env-package-item"
+                                    >
+                                      {inp}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="calkit-env-packages">
+                                <div className="calkit-env-packages-header">
+                                  <strong>Outputs:</strong>
+                                </div>
+                                <div className="calkit-env-packages-list">
+                                  {outputs.length === 0 && (
+                                    <div className="calkit-env-package-item">
+                                      None
+                                    </div>
+                                  )}
+                                  {outputs.map((outp: string, idx: number) => (
+                                    <div
+                                      key={idx}
+                                      className="calkit-env-package-item"
+                                    >
+                                      {outp}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
                   : items.map((item) => (
                       <div key={item.id} className="calkit-sidebar-item">
                         <span className="calkit-sidebar-item-label">
@@ -1406,6 +1794,53 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
               }}
             >
               Register existing notebook
+            </div>
+          </div>,
+          document.body,
+        )}
+      {pipelineContextMenu?.visible &&
+        ReactDOM.createPortal(
+          <div
+            className="calkit-env-context-menu"
+            style={{ left: pipelineContextMenu.x, top: pipelineContextMenu.y }}
+          >
+            <div
+              className="calkit-env-context-item"
+              onClick={() => {
+                setPipelineContextMenu(null);
+                handleCreateStage();
+              }}
+            >
+              New stage
+            </div>
+            <div
+              className="calkit-env-context-item"
+              onClick={() => {
+                setPipelineContextMenu(null);
+                handleRunPipeline();
+              }}
+            >
+              Run pipeline
+            </div>
+          </div>,
+          document.body,
+        )}
+      {stageContextMenu?.visible &&
+        stageContextMenu.stage &&
+        ReactDOM.createPortal(
+          <div
+            className="calkit-env-context-menu"
+            style={{ left: stageContextMenu.x, top: stageContextMenu.y }}
+          >
+            <div
+              className="calkit-env-context-item"
+              onClick={() => {
+                const s = stageContextMenu.stage!;
+                setStageContextMenu(null);
+                handleRunStage(s.id);
+              }}
+            >
+              Run stage
             </div>
           </div>,
           document.body,

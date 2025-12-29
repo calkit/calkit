@@ -219,6 +219,45 @@
   margin-left: auto;
 }
 
+/* Pipeline header status and actions */
+.calkit-pipeline-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+}
+
+.calkit-pipeline-outdated-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  background-color: var(--jp-warn-color1);
+  color: var(--jp-layout-color0);
+  border: 1px solid var(--jp-warn-color2);
+}
+
+.calkit-sidebar-section-run {
+  padding: 2px 8px;
+  font-size: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--jp-ui-font-color1);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.calkit-sidebar-section-run:hover {
+  background: var(--jp-layout-color2);
+  border-color: var(--jp-border-color1);
+}
+
 .calkit-sidebar-section-content {
   padding: 4px 0;
   background-color: var(--jp-layout-color0);

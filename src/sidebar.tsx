@@ -1203,63 +1203,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
             </span>
             <span className="calkit-sidebar-section-label">{icon}</span>
             <span className="calkit-sidebar-section-title">{sectionLabel}</span>
-            {sectionId === "pipelineStages" &&
-              (() => {
-                const ps: any = pipelineStatus;
-                let outdatedCount = 0;
-                if (ps) {
-                  // Check for stale_stages object (new format)
-                  if (ps?.stale_stages && typeof ps.stale_stages === "object") {
-                    outdatedCount = Object.keys(ps.stale_stages).length;
-                  } else if (typeof ps?.stages_outdated_count === "number") {
-                    outdatedCount = ps.stages_outdated_count;
-                  } else if (Array.isArray(ps?.outdated_stages)) {
-                    outdatedCount = ps.outdated_stages.length;
-                  } else if (
-                    ps?.pipeline?.stages &&
-                    typeof ps.pipeline.stages === "object"
-                  ) {
-                    outdatedCount = Object.values(ps.pipeline.stages).filter(
-                      (s: any) => s?.is_outdated || s?.outdated || s?.needs_run,
-                    ).length;
-                  }
-                }
-                return (
-                  <span className="calkit-pipeline-status">
-                    {outdatedCount > 0 && (
-                      <span
-                        className="calkit-status-chip stale"
-                        title={`${outdatedCount} stage${
-                          outdatedCount === 1 ? "" : "s"
-                        } out of date`}
-                      >
-                        {outdatedCount}
-                      </span>
-                    )}
-                    <button
-                      className={`calkit-sidebar-section-run${
-                        pipelineRunning ? " running" : ""
-                      }`}
-                      title={
-                        pipelineRunning ? "Pipeline running..." : "Run pipeline"
-                      }
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (!pipelineRunning) {
-                          handleRunPipeline();
-                        }
-                      }}
-                      disabled={pipelineRunning}
-                    >
-                      {pipelineRunning ? (
-                        <span className="calkit-spinner">⟳</span>
-                      ) : (
-                        "▶"
-                      )}
-                    </button>
-                  </span>
-                );
-              })()}
             {sectionId === "history" &&
               (() => (
                 <span className="calkit-status-chips">
@@ -1342,6 +1285,63 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                 +
               </button>
             )}
+            {sectionId === "pipelineStages" && (
+              <button
+                className={`calkit-sidebar-section-run${
+                  pipelineRunning ? " running" : ""
+                }`}
+                title={pipelineRunning ? "Pipeline running..." : "Run pipeline"}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!pipelineRunning) {
+                    handleRunPipeline();
+                  }
+                }}
+                disabled={pipelineRunning}
+              >
+                {pipelineRunning ? (
+                  <span className="calkit-spinner">⟳</span>
+                ) : (
+                  "▶"
+                )}
+              </button>
+            )}
+            {sectionId === "pipelineStages" &&
+              (() => {
+                const ps: any = pipelineStatus;
+                let outdatedCount = 0;
+                if (ps) {
+                  // Check for stale_stages object (new format)
+                  if (ps?.stale_stages && typeof ps.stale_stages === "object") {
+                    outdatedCount = Object.keys(ps.stale_stages).length;
+                  } else if (typeof ps?.stages_outdated_count === "number") {
+                    outdatedCount = ps.stages_outdated_count;
+                  } else if (Array.isArray(ps?.outdated_stages)) {
+                    outdatedCount = ps.outdated_stages.length;
+                  } else if (
+                    ps?.pipeline?.stages &&
+                    typeof ps.pipeline.stages === "object"
+                  ) {
+                    outdatedCount = Object.values(ps.pipeline.stages).filter(
+                      (s: any) => s?.is_outdated || s?.outdated || s?.needs_run,
+                    ).length;
+                  }
+                }
+                return (
+                  <>
+                    {outdatedCount > 0 && (
+                      <span
+                        className="calkit-status-chip stale"
+                        title={`${outdatedCount} stage${
+                          outdatedCount === 1 ? "" : "s"
+                        } out of date`}
+                      >
+                        {outdatedCount}
+                      </span>
+                    )}
+                  </>
+                );
+              })()}
             <span className="calkit-sidebar-section-count">
               {items.length > 0 && `(${items.length})`}
             </span>

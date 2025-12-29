@@ -157,13 +157,18 @@
 .calkit-sidebar-section-create {
   font-size: 14px;
   font-weight: bold;
-  padding: 1px 6px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
   margin-left: 6px;
   background-color: var(--jp-brand-color1);
   color: var(--jp-layout-color1);
   border: none;
-  border-radius: 3px;
+  border-radius: 50%;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition: background-color 0.2s ease;
   line-height: 1;
 }
@@ -244,18 +249,29 @@
 }
 
 .calkit-sidebar-section-run {
-  padding: 2px 8px;
-  font-size: 10px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--jp-ui-font-color1);
-  border-radius: 4px;
+  font-size: 11px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin-left: 6px;
+  background-color: var(--jp-success-color1);
+  color: white;
+  border: none;
+  border-radius: 50%;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  outline: none;
 }
 
 .calkit-sidebar-section-run:hover {
-  background: var(--jp-layout-color2);
-  border-color: var(--jp-border-color1);
+  background-color: var(--jp-success-color0);
+}
+
+.calkit-sidebar-section-run:active {
+  transform: scale(0.95);
 }
 
 .calkit-sidebar-section-run:disabled {
@@ -265,7 +281,7 @@
 
 .calkit-sidebar-section-run.running .calkit-spinner {
   display: inline-block;
-  font-size: 1.4em;
+  font-size: 1.2em;
   animation: calkit-spin 1s linear infinite;
 }
 
@@ -401,19 +417,19 @@
   border: 1px solid var(--jp-border-color2);
 }
 .calkit-status-chip.new {
-  background-color: var(--jp-success-color1);
-  color: var(--jp-layout-color0);
-  border-color: var(--jp-success-color2);
+  background-color: rgba(76, 175, 80, 0.1);
+  color: var(--jp-success-color1);
+  border-color: rgba(76, 175, 80, 0.3);
 }
 .calkit-status-chip.modified {
-  background-color: var(--jp-warn-color1);
-  color: var(--jp-layout-color0);
-  border-color: var(--jp-warn-color2);
+  background-color: rgba(255, 193, 7, 0.1);
+  color: var(--jp-warn-color1);
+  border-color: rgba(255, 193, 7, 0.3);
 }
 .calkit-status-chip.pull {
-  background-color: var(--jp-info-color1);
-  color: var(--jp-layout-color0);
-  border-color: var(--jp-info-color2);
+  background-color: rgba(33, 150, 243, 0.1);
+  color: var(--jp-info-color1);
+  border-color: rgba(33, 150, 243, 0.3);
 }
 .calkit-status-chip.clean {
   background-color: var(--jp-layout-color1);
@@ -421,9 +437,9 @@
   border-color: var(--jp-border-color2);
 }
 .calkit-status-chip.stale {
-  background-color: var(--jp-warn-color1);
-  color: var(--jp-layout-color0);
-  border-color: var(--jp-warn-color2);
+  background-color: rgba(255, 193, 7, 0.1);
+  color: var(--jp-warn-color1);
+  margin-left: 6px;
 }
 
 .calkit-sidebar-section-save {

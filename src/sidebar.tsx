@@ -531,9 +531,10 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
         method: "POST",
         body: JSON.stringify({ targets: [] }),
       });
-      // Refresh project and pipeline status after run
+      // Refetch pipeline status immediately and wait for it to complete
+      await queryClient.refetchQueries({ queryKey: ["pipelineStatus"] });
+      // Also refresh project data
       await queryClient.invalidateQueries({ queryKey: ["project"] });
-      await queryClient.invalidateQueries({ queryKey: ["pipelineStatus"] });
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       setPipelineError(errorMsg);

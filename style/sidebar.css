@@ -342,9 +342,7 @@
 
 .calkit-stage-item.stale {
   background-color: rgba(255, 193, 7, 0.1);
-  border-left: 3px solid var(--jp-warn-color1);
-  padding-left: 29px;
-  margin-left: 0;
+  color: var(--jp-warn-color1);
 }
 
 .calkit-env-details {
@@ -393,11 +391,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
   border-radius: 999px;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
   line-height: 1;
   border: 1px solid var(--jp-border-color2);

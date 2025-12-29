@@ -1,6 +1,8 @@
 import React, { useCallback, useState } from "react";
 import ReactDOM from "react-dom";
 import { ReactWidget, Dialog } from "@jupyterlab/apputils";
+import type { CommandRegistry } from "@lumino/commands";
+import { launchIcon } from "@jupyterlab/ui-components";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { queryClient } from "./queryClient";
@@ -78,12 +80,14 @@ export interface ICalkitSidebarProps {
   settings?: ISettingRegistry.ISettings | null;
   stateDB?: IStateDB | null;
   onStatusChange?: (needsAttention: boolean) => void;
+  commands?: CommandRegistry;
 }
 
 export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   settings,
   stateDB,
   onStatusChange,
+  commands,
 }) => {
   // Query hooks - automatically manage data fetching and caching
   const projectQuery = useProject();
@@ -811,6 +815,13 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       const inPipeline = item.in_pipeline || false;
       const environmentList = sectionData.environments || [];
 
+      const handleOpenNotebook = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (commands) {
+          commands.execute("docmanager:open", { path: item.id });
+        }
+      };
+
       return (
         <div key={item.id}>
           <div
@@ -821,6 +832,13 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
               {isExpanded ? "▼" : "▶"}
             </span>
             <span className="calkit-sidebar-item-label">{item.label}</span>
+            <button
+              className="calkit-notebook-open-btn"
+              onClick={handleOpenNotebook}
+              title="Open notebook"
+            >
+              <launchIcon.react tag="span" />
+            </button>
           </div>
           {isExpanded && (
             <div className="calkit-notebook-details">
@@ -897,7 +915,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
         </div>
       );
     },
-    [expandedNotebooks, toggleNotebook, sectionData],
+    [expandedNotebooks, toggleNotebook, sectionData, commands],
   );
 
   const renderSection = useCallback(
@@ -1841,6 +1859,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
 export class CalkitSidebarWidget extends ReactWidget {
   private _settings: ISettingRegistry.ISettings | null = null;
   private _stateDB: IStateDB | null = null;
+  private _commands: CommandRegistry | null = null;
   private _hasAttention = false;
   private _handleStatusChange = (needsAttention: boolean) => {
     if (this._hasAttention === needsAttention) {
@@ -1874,6 +1893,11 @@ export class CalkitSidebarWidget extends ReactWidget {
     this.update();
   }
 
+  setCommands(commands: CommandRegistry) {
+    this._commands = commands;
+    this.update();
+  }
+
   render() {
     return (
       <QueryClientProvider client={queryClient}>
@@ -1881,6 +1905,7 @@ export class CalkitSidebarWidget extends ReactWidget {
           settings={this._settings}
           stateDB={this._stateDB}
           onStatusChange={this._handleStatusChange}
+          commands={this._commands || undefined}
         />
         {ReactDOM.createPortal(
           <ReactQueryDevtools initialIsOpen={false} />,

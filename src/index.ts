@@ -69,6 +69,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     sidebar.title.label = ""; // icon-only label
     sidebar.title.caption = "Calkit";
     sidebar.title.icon = calkitIcon;
+    sidebar.setCommands(app.commands);
 
     // Add the sidebar to the left panel
     app.shell.add(sidebar, "left");

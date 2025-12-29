@@ -258,6 +258,26 @@
   border-color: var(--jp-border-color1);
 }
 
+.calkit-sidebar-section-run:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.calkit-sidebar-section-run.running .calkit-spinner {
+  display: inline-block;
+  font-size: 1.4em;
+  animation: calkit-spin 1s linear infinite;
+}
+
+@keyframes calkit-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .calkit-sidebar-section-content {
   padding: 4px 0;
   background-color: var(--jp-layout-color0);
@@ -318,6 +338,13 @@
 .calkit-stage-item .calkit-sidebar-section-icon {
   font-size: 8px;
   margin-right: 4px;
+}
+
+.calkit-stage-item.stale {
+  background-color: rgba(255, 193, 7, 0.1);
+  border-left: 3px solid var(--jp-warn-color1);
+  padding-left: 29px;
+  margin-left: 0;
 }
 
 .calkit-env-details {
@@ -394,6 +421,11 @@
   background-color: var(--jp-layout-color1);
   color: var(--jp-ui-font-color2);
   border-color: var(--jp-border-color2);
+}
+.calkit-status-chip.stale {
+  background-color: var(--jp-warn-color1);
+  color: var(--jp-layout-color0);
+  border-color: var(--jp-warn-color2);
 }
 
 .calkit-sidebar-section-save {

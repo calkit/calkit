@@ -33,6 +33,7 @@ export interface IGitStatus {
 export interface IPipelineStatus {
   pipeline: Record<string, any>;
   is_outdated: boolean;
+  stale_stages?: Record<string, any>;
   error?: string;
 }
 

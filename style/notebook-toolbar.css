@@ -631,3 +631,30 @@
   background-color: var(--jp-layout-color3);
   border-color: var(--jp-border-color0);
 }
+.calkit-error-message {
+  padding: 12px;
+  background-color: var(--jp-error-color3);
+  border: 1px solid var(--jp-error-color1);
+  border-radius: 3px;
+  color: var(--jp-error-color0);
+  font-size: 13px;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  font-family: var(--jp-code-font-family);
+}
+
+.calkit-modal-button {
+  font-size: 13px;
+  padding: 6px 16px;
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.calkit-modal-button:hover {
+  background-color: var(--jp-layout-color3);
+  border-color: var(--jp-border-color0);
+}

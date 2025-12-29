@@ -146,6 +146,8 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   const [expandedGitSubsections, setExpandedGitSubsections] = useState<
     Set<string>
   >(new Set(["modified", "untracked", "history"]));
+  const [pipelineRunning, setPipelineRunning] = useState(false);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
 
   // Transform project data into section data
   const transformProjectData = useCallback((info: IProjectInfo | undefined) => {
@@ -522,6 +524,8 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   ]);
 
   const handleRunPipeline = useCallback(async () => {
+    setPipelineRunning(true);
+    setPipelineError(null);
     try {
       await requestAPI("pipeline/runs", {
         method: "POST",
@@ -531,7 +535,11 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       await queryClient.invalidateQueries({ queryKey: ["project"] });
       await queryClient.invalidateQueries({ queryKey: ["pipelineStatus"] });
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      setPipelineError(errorMsg);
       console.error("Failed to run pipeline:", error);
+    } finally {
+      setPipelineRunning(false);
     }
   }, []);
 
@@ -992,7 +1000,10 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                 const ps: any = pipelineStatus;
                 let outdatedCount = 0;
                 if (ps) {
-                  if (typeof ps?.stages_outdated_count === "number") {
+                  // Check for stale_stages object (new format)
+                  if (ps?.stale_stages && typeof ps.stale_stages === "object") {
+                    outdatedCount = Object.keys(ps.stale_stages).length;
+                  } else if (typeof ps?.stages_outdated_count === "number") {
                     outdatedCount = ps.stages_outdated_count;
                   } else if (Array.isArray(ps?.outdated_stages)) {
                     outdatedCount = ps.outdated_stages.length;
@@ -1009,7 +1020,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                   <span className="calkit-pipeline-status">
                     {outdatedCount > 0 && (
                       <span
-                        className="calkit-pipeline-outdated-dot"
+                        className="calkit-status-chip stale"
                         title={`${outdatedCount} stage${
                           outdatedCount === 1 ? "" : "s"
                         } out of date`}
@@ -1018,14 +1029,25 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                       </span>
                     )}
                     <button
-                      className="calkit-sidebar-section-run"
-                      title="Run pipeline"
+                      className={`calkit-sidebar-section-run${
+                        pipelineRunning ? " running" : ""
+                      }`}
+                      title={
+                        pipelineRunning ? "Pipeline running..." : "Run pipeline"
+                      }
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleRunPipeline();
+                        if (!pipelineRunning) {
+                          handleRunPipeline();
+                        }
                       }}
+                      disabled={pipelineRunning}
                     >
-                      ▶
+                      {pipelineRunning ? (
+                        <span className="calkit-spinner">⟳</span>
+                      ) : (
+                        "▶"
+                      )}
                     </button>
                   </span>
                 );
@@ -1349,10 +1371,14 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                       const inputs: string[] = stage.inputs || [];
                       const outputs: string[] = stage.outputs || [];
                       const environment = stage.environment || "";
+                      const staleStages = pipelineStatus?.stale_stages || {};
+                      const isStale = stage.id in staleStages;
                       return (
                         <div key={stage.id}>
                           <div
-                            className="calkit-sidebar-item calkit-stage-item"
+                            className={`calkit-sidebar-item calkit-stage-item${
+                              isStale ? " stale" : ""
+                            }`}
                             onClick={() => toggleStage(stage.id)}
                           >
                             <span className="calkit-sidebar-section-icon">
@@ -1845,6 +1871,40 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
               }}
             >
               Run stage
+            </div>
+          </div>,
+          document.body,
+        )}
+      {pipelineError &&
+        ReactDOM.createPortal(
+          <div
+            className="calkit-modal-overlay"
+            onClick={() => setPipelineError(null)}
+          >
+            <div
+              className="calkit-modal-content"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="calkit-modal-header">
+                <h2>Pipeline Error</h2>
+                <button
+                  className="calkit-modal-close"
+                  onClick={() => setPipelineError(null)}
+                >
+                  ×
+                </button>
+              </div>
+              <div className="calkit-modal-body">
+                <div className="calkit-error-message">{pipelineError}</div>
+              </div>
+              <div className="calkit-modal-footer">
+                <button
+                  className="calkit-modal-button"
+                  onClick={() => setPipelineError(null)}
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>,
           document.body,

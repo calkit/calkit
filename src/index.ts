@@ -26,9 +26,9 @@ import { requestAPI } from "./request";
 import { CalkitSidebarWidget } from "./sidebar";
 import { createOutputMarkerButton } from "./cell-output-marker";
 import { addCommands, addContextMenuItems } from "./file-browser-menu";
-import { createNotebookToolbar } from "./notebook-toolbar";
+import { createNotebookToolbar } from "./components/notebook-toolbar";
 import { calkitIcon } from "./icons";
-import { showCommitDialog } from "./commit-dialog";
+import { showCommitDialog } from "./components/commit-dialog";
 import { IGitStatus } from "./hooks/useQueries";
 
 /**
@@ -168,10 +168,10 @@ const plugin: JupyterFrontEndPlugin<void> = {
           }
 
           const { showEnvironmentEditor } = await import(
-            "./environment-editor"
+            "./components/environment-editor"
           );
           const { showNotebookRegistration } = await import(
-            "./notebook-registration"
+            "./components/notebook-registration"
           );
 
           const createEnvironmentCallback = async (): Promise<

@@ -25,10 +25,10 @@ import {
   type IProjectInfo,
   type IGitStatus,
 } from "./hooks/useQueries";
-import { showEnvironmentEditor } from "./environment-editor";
-import { showNotebookRegistration } from "./notebook-registration";
-import { showProjectInfoEditor } from "./project-info-editor";
-import { showCommitDialog } from "./commit-dialog";
+import { showEnvironmentEditor } from "./components/environment-editor";
+import { showNotebookRegistration } from "./components/notebook-registration";
+import { showProjectInfoEditor } from "./components/project-info-editor";
+import { showCommitDialog } from "./components/commit-dialog";
 import {
   showStageEditorDialog,
   STAGE_KIND_OPTIONS,

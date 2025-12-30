@@ -3,11 +3,11 @@ import { NotebookPanel } from "@jupyterlab/notebook";
 import { ITranslator } from "@jupyterlab/translation";
 import React, { useEffect, useRef, useState } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { requestAPI } from "./request";
-import { queryClient } from "./queryClient";
-import { calkitIcon } from "./icons";
+import { requestAPI } from "../request";
+import { queryClient } from "../queryClient";
+import { calkitIcon } from "../icons";
 import { showEnvironmentEditor } from "./environment-editor";
-import { useSetNotebookStage } from "./hooks/useQueries";
+import { useSetNotebookStage } from "../hooks/useQueries";
 
 /**
  * Badge dropdown component

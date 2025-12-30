@@ -5,8 +5,8 @@ import { RankedMenu } from "@jupyterlab/ui-components";
 import { calkitIcon } from "./icons";
 // import { showErrorMessage } from "@jupyterlab/apputils";
 import { requestAPI } from "./request";
-import { showNotebookRegistration } from "./notebook-registration";
-import { showEnvironmentEditor } from "./environment-editor";
+import { showNotebookRegistration } from "./components/notebook-registration";
+import { showEnvironmentEditor } from "./components/environment-editor";
 import { NotebookPanel } from "@jupyterlab/notebook";
 
 /**

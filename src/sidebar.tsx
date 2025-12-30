@@ -29,6 +29,11 @@ import { showEnvironmentEditor } from "./environment-editor";
 import { showNotebookRegistration } from "./notebook-registration";
 import { showProjectInfoEditor } from "./project-info-editor";
 import { showCommitDialog } from "./commit-dialog";
+import {
+  showStageEditorDialog,
+  STAGE_KIND_OPTIONS,
+  type StageEditorResult,
+} from "./components/stage-editor";
 
 interface ISectionItem {
   id: string;
@@ -568,181 +573,33 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     }
   }, []);
 
-  const showStageEditorDialog = async (options: {
-    title: string;
-    stageName?: string;
-    inputs?: string[];
-    outputs?: string[];
-    onSave: (
-      name: string,
-      inputs: string[],
-      outputs: string[],
-    ) => Promise<void>;
-  }) => {
-    const stageNameRef = React.createRef<HTMLInputElement>();
-    let inputs = [...(options.inputs || [])];
-    let outputs = [...(options.outputs || [])];
-    const nameEditable = options.stageName === undefined;
-    const manualInputRef = React.createRef<HTMLInputElement>();
-    const manualOutputRef = React.createRef<HTMLInputElement>();
-
-    const renderInputsList = () => {
-      return inputs.map((input, index) => (
-        <div key={index} className="calkit-stage-io-item">
-          <span>{input}</span>
-          <button
-            className="calkit-stage-io-remove"
-            onClick={() => {
-              inputs = inputs.filter((_, i) => i !== index);
-            }}
-          >
-            ×
-          </button>
-        </div>
-      ));
-    };
-
-    const renderOutputsList = () => {
-      return outputs.map((output, index) => (
-        <div key={index} className="calkit-stage-io-item">
-          <span>{output}</span>
-          <button
-            className="calkit-stage-io-remove"
-            onClick={() => {
-              outputs = outputs.filter((_, i) => i !== index);
-            }}
-          >
-            ×
-          </button>
-        </div>
-      ));
-    };
-
-    const body = (
-      <div className="calkit-stage-editor">
-        <div className="calkit-stage-editor-field">
-          <label>Stage name</label>
-          <input
-            ref={stageNameRef}
-            type="text"
-            defaultValue={options.stageName || ""}
-            placeholder="e.g., process_data"
-            autoFocus
-            disabled={!nameEditable}
-          />
-        </div>
-
-        <div className="calkit-stage-editor-field">
-          <label>Inputs</label>
-          <div className="calkit-stage-io-list">
-            {inputs.length === 0 ? (
-              <div className="calkit-stage-io-empty">No inputs</div>
-            ) : (
-              renderInputsList()
-            )}
-          </div>
-          <div className="calkit-stage-io-input-container">
-            <input
-              ref={manualInputRef}
-              type="text"
-              placeholder="path/to/input"
-              onKeyPress={(e) => {
-                if (e.key === "Enter") {
-                  const val = manualInputRef.current?.value?.trim();
-                  if (val) {
-                    inputs = [...inputs, val];
-                    manualInputRef.current!.value = "";
-                  }
-                }
-              }}
-            />
-            <button
-              className="calkit-stage-io-add-button"
-              onClick={() => {
-                const val = manualInputRef.current?.value?.trim();
-                if (val) {
-                  inputs = [...inputs, val];
-                  manualInputRef.current!.value = "";
-                }
-              }}
-            >
-              Add
-            </button>
-          </div>
-        </div>
-
-        <div className="calkit-stage-editor-field">
-          <label>Outputs</label>
-          <div className="calkit-stage-io-list">
-            {outputs.length === 0 ? (
-              <div className="calkit-stage-io-empty">No outputs</div>
-            ) : (
-              renderOutputsList()
-            )}
-          </div>
-          <div className="calkit-stage-io-input-container">
-            <input
-              ref={manualOutputRef}
-              type="text"
-              placeholder="path/to/output"
-              onKeyPress={(e) => {
-                if (e.key === "Enter") {
-                  const val = manualOutputRef.current?.value?.trim();
-                  if (val) {
-                    outputs = [...outputs, val];
-                    manualOutputRef.current!.value = "";
-                  }
-                }
-              }}
-            />
-            <button
-              className="calkit-stage-io-add-button"
-              onClick={() => {
-                const val = manualOutputRef.current?.value?.trim();
-                if (val) {
-                  outputs = [...outputs, val];
-                  manualOutputRef.current!.value = "";
-                }
-              }}
-            >
-              Add
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-
-    const res = await new Dialog({
-      title: options.title,
-      body,
-      buttons: [
-        Dialog.cancelButton(),
-        Dialog.okButton({ label: options.stageName ? "Save" : "Create" }),
-      ],
-    }).launch();
-
-    if (!res.button.accept) return;
-    const stageName = stageNameRef.current?.value?.trim();
-    if (!stageName) return;
-
-    await options.onSave(stageName, inputs, outputs);
-  };
-
   const handleCreateStage = useCallback(async () => {
-    // Open stage editor directly for creating a new stage
     await showStageEditorDialog({
       title: "Create new stage",
+      kind: STAGE_KIND_OPTIONS[0].value,
+      environment: "",
       inputs: [],
       outputs: [],
-      onSave: async (name, inputs, outputs) => {
+      attributes: {},
+      onSave: async ({
+        name,
+        inputs,
+        outputs,
+        kind,
+        environment,
+        attributes,
+      }: StageEditorResult) => {
         if (!name.trim()) return;
         try {
           await requestAPI("pipeline/stage", {
             method: "PUT",
             body: JSON.stringify({
+              name,
+              kind,
+              environment,
               inputs,
               outputs,
-              name,
+              ...attributes,
             }),
           });
           await queryClient.invalidateQueries({ queryKey: ["project"] });
@@ -752,7 +609,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
         }
       },
     });
-  }, [showStageEditorDialog]);
+  }, []);
 
   const handleCreateEnvironment = useCallback(async () => {
     await showEnvironmentEditor({
@@ -984,6 +841,23 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       const inputs: string[] = stage.inputs || [];
       const outputs: string[] = stage.outputs || [];
       const environment = stage.environment || "";
+      const baseStageKeys = new Set([
+        "id",
+        "label",
+        "kind",
+        "inputs",
+        "outputs",
+        "environment",
+      ]);
+      const attributes = Object.keys(stage || {}).reduce(
+        (acc: Record<string, any>, key) => {
+          if (!baseStageKeys.has(key)) {
+            acc[key] = (stage as any)[key];
+          }
+          return acc;
+        },
+        {},
+      );
       const staleStages = pipelineStatus?.stale_stages || {};
       const isStale = stage.id in staleStages;
 
@@ -1016,17 +890,28 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                         stageName: stage.id,
                         inputs: inputs,
                         outputs: outputs,
-                        onSave: async (name, newInputs, newOutputs) => {
+                        kind: kind,
+                        environment: environment,
+                        attributes,
+                        onSave: async ({
+                          name,
+                          inputs: newInputs,
+                          outputs: newOutputs,
+                          kind: newKind,
+                          environment: newEnvironment,
+                          attributes: newAttributes,
+                        }: StageEditorResult) => {
                           try {
                             await requestAPI("pipeline/stage", {
                               method: "PUT",
                               body: JSON.stringify({
                                 current_stage_name: stage.id,
                                 name: name,
-                                environment: environment,
-                                kind: kind,
+                                environment: newEnvironment,
+                                kind: newKind,
                                 inputs: newInputs,
                                 outputs: newOutputs,
+                                ...newAttributes,
                               }),
                             });
                             await queryClient.invalidateQueries({
@@ -1248,9 +1133,19 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                         (async () => {
                           await showStageEditorDialog({
                             title: "Create new stage",
+                            kind: "jupyter-notebook",
+                            environment: environment,
                             inputs: [],
                             outputs: [],
-                            onSave: async (stageName, inputs, outputs) => {
+                            attributes: {},
+                            onSave: async ({
+                              name: stageName,
+                              inputs,
+                              outputs,
+                              kind,
+                              environment,
+                              attributes,
+                            }: StageEditorResult) => {
                               if (!stageName.trim()) return;
                               try {
                                 // Create the stage by setting it on the notebook
@@ -1259,9 +1154,11 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                                   body: JSON.stringify({
                                     path: item.id,
                                     stage_name: stageName,
-                                    environment: "",
+                                    environment: environment,
                                     inputs: inputs,
                                     outputs: outputs,
+                                    kind: kind,
+                                    ...attributes,
                                   }),
                                 });
                                 await queryClient.invalidateQueries({
@@ -1289,12 +1186,37 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                         e.stopPropagation();
                         (async () => {
                           const stageData = (item.stage as any) || {};
+                          const baseStageKeys = new Set([
+                            "name",
+                            "kind",
+                            "inputs",
+                            "outputs",
+                            "environment",
+                          ]);
+                          const attributes = Object.keys(
+                            stageData || {},
+                          ).reduce((acc: Record<string, any>, key) => {
+                            if (!baseStageKeys.has(key)) {
+                              acc[key] = (stageData as any)[key];
+                            }
+                            return acc;
+                          }, {});
                           await showStageEditorDialog({
                             title: `Edit stage '${stageName}'`,
                             stageName: stageName,
+                            kind: stageData.kind || "jupyter-notebook",
+                            environment: stageData.environment || environment,
                             inputs: stageData.inputs || [],
                             outputs: stageData.outputs || [],
-                            onSave: async (name, inputs, outputs) => {
+                            attributes,
+                            onSave: async ({
+                              name,
+                              inputs,
+                              outputs,
+                              kind,
+                              environment,
+                              attributes,
+                            }: StageEditorResult) => {
                               try {
                                 // Update the stage with the new inputs/outputs
                                 await requestAPI("notebook/stage", {
@@ -1302,9 +1224,11 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                                   body: JSON.stringify({
                                     path: item.id,
                                     stage_name: name,
-                                    environment: "",
+                                    environment: environment,
                                     inputs: inputs,
                                     outputs: outputs,
+                                    kind: kind,
+                                    ...attributes,
                                   }),
                                 });
                                 await queryClient.invalidateQueries({

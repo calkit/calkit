@@ -27,6 +27,7 @@ from calkit.cli.new import (
 )
 from calkit.cli.notebooks import check_env_kernel
 from calkit.git import ensure_path_is_ignored
+from calkit.models.pipeline import JupyterNotebookStage
 
 
 class HelloRouteHandler(APIHandler):
@@ -389,6 +390,140 @@ class NotebookStageRouteHandler(APIHandler):
             f"environment '{env_name}', inputs: {inputs}, outputs: {outputs}"
         )
         self.finish(json.dumps({"ok": True}))
+
+
+class NotebookStageRunSessionRouteHandler(APIHandler):
+    @tornado.web.authenticated
+    def post(self):
+        """Create a notebook stage run session.
+
+        This endpoint exists such that when a notebook is run top-to-bottom
+        with a fresh kernel in the JupyterLab interface, we can cache it with
+        DVC to avoid having to run it again.
+
+        The back end will not keep track of state, so the front end must send
+        all of it back in the PUT request.
+
+        What goes in the lock file looks something like:
+
+        stages:
+          sup1-notebook:
+            cmd: calkit nb execute --environment main --no-check
+              --language python --to html "sup1.ipynb"
+            deps:
+            - path: .calkit/env-locks/main
+            hash: md5
+            md5: ca2ffab71e00d528b974e583d789ec97.dir
+            size: 1226
+            nfiles: 1
+            - path: .calkit/notebooks/cleaned/sup1.ipynb
+            hash: md5
+            md5: 1ea6e3cb971fa3f18a01f1d017e08b01
+            size: 753
+            - path: README.md
+            hash: md5
+            md5: ae7619a99c0b70a537a73f1cccb91f14
+            size: 26
+            outs:
+            - path: .calkit/notebooks/executed/sup1.ipynb
+            hash: md5
+            md5: 7b8186b295fbc66b85c504c7184591e5
+            size: 22306
+            - path: .calkit/notebooks/html/sup1.html
+            hash: md5
+            md5: 32795b3bb750c2e9fe162657c67d4fde
+            size: 291084
+        """
+        body = self.get_json_body()
+        if not body:
+            self.set_status(400)
+            self.finish(
+                json.dumps({"error": "Request body must be valid JSON"})
+            )
+            return
+        notebook_path = body.get("notebook_path")
+        stage_name = body.get("stage_name")
+        if not notebook_path or not stage_name:
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            "Request body must include 'notebook_path' and "
+                            "'stage_name'"
+                        )
+                    }
+                )
+            )
+            return
+        ck_info = calkit.load_calkit_info()
+        stages = ck_info.get("pipeline", {}).get("stages", {})
+        if stage_name not in stages:
+            self.set_status(400)
+            self.finish(
+                json.dumps({"error": f"Stage '{stage_name}' does not exist"})
+            )
+            return
+        stage_info = stages[stage_name]
+        try:
+            stage = JupyterNotebookStage.model_validate(stage_info)
+        except Exception as e:
+            self.set_status(500)
+            self.finish(
+                json.dumps(
+                    {"error": f"Failed to validate stage '{stage_name}': {e}"}
+                )
+            )
+            return
+        if not stage.notebook_path == notebook_path:
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            f"Stage '{stage_name}' is not for notebook "
+                            f"'{notebook_path}'"
+                        )
+                    }
+                )
+            )
+            return
+        # Ensure DVC pipeline is compiled
+        calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+        # Ensure all cleaned notebooks are up-to-date
+        calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
+        # Read the DVC stage so we can save that and hashes of its deps/outs
+        with open("dvc.yaml", "r") as f:
+            dvc_yaml = calkit.ryaml.load(f)
+        dvc_stages = dvc_yaml.get("stages", {})
+        if stage_name not in dvc_stages:
+            self.set_status(500)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            f"DVC stage '{stage_name}' not found in dvc.yaml"
+                        )
+                    }
+                )
+            )
+            return
+        dvc_stage = dvc_stages[stage_name]
+        session = {"dvc_stage": dvc_stage}
+        # Hash all deps and outs
+        # TODO: Hash these just like DVC does so we can insert into dvc.lock
+        # when the session is complete
+        dep_paths = dvc_stage.get("deps", [])
+        out_paths = calkit.dvc.out_paths_from_stage(dvc_stage)
+        lock_deps = []
+        for dep in dep_paths:
+            lock_deps.append({"path": dep})
+        lock_outs = []
+        for out in out_paths:
+            lock_outs.append({"path": out})
+        session["lock_deps"] = lock_deps
+        session["lock_outs"] = lock_outs
+        self.finish(json.dumps(session))
 
 
 class GitStatusRouteHandler(APIHandler):

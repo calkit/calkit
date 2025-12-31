@@ -209,3 +209,18 @@ def list_files(wdir: str | None = None, recursive=True) -> list[dict]:
 def get_output_revisions(path: str):
     """Get all revisions of a pipeline output."""
     pass
+
+
+def out_paths_from_stage(dvc_stage: dict) -> list[str]:
+    """Get output paths from a DVC stage dictionary taking into account that
+    some might be single key dictionaries.
+    """
+    outs = dvc_stage.get("outs", [])
+    out_paths = []
+    for out in outs:
+        if isinstance(out, str):
+            out_paths.append(out)
+        elif isinstance(out, dict):
+            out_path = list(out.keys())[0]
+            out_paths.append(out_path)
+    return out_paths

@@ -766,60 +766,25 @@ class EnvironmentsRouteHandler(APIHandler):
 def setup_route_handlers(web_app):
     host_pattern = ".*$"
     base_url = web_app.settings["base_url"]
-    handlers = [
-        (url_path_join(base_url, "calkit", "hello"), HelloRouteHandler),
-        (url_path_join(base_url, "calkit", "project"), ProjectRouteHandler),
-        (
-            url_path_join(base_url, "calkit", "kernelspecs"),
-            KernelspecsRouteHandler,
-        ),
-        (
-            url_path_join(base_url, "calkit", "notebooks"),
-            NotebooksRouteHandler,
-        ),
-        (
-            url_path_join(base_url, "calkit", "notebook", "environment"),
-            NotebookEnvironmentRouteHandler,
-        ),
-        (
-            url_path_join(base_url, "calkit", "notebook", "kernel"),
-            NotebookKernelRouteHandler,
-        ),
-        (
-            url_path_join(base_url, "calkit", "notebook", "stage"),
-            NotebookStageRouteHandler,
-        ),
-        (
-            url_path_join(base_url, "calkit", "git", "status"),
-            GitStatusRouteHandler,
-        ),
-        (
-            url_path_join(base_url, "calkit", "pipeline", "status"),
-            PipelineStatusRouteHandler,
-        ),
-        (
-            url_path_join(base_url, "calkit", "pipeline", "runs"),
-            PipelineRunsRouteHandler,
-        ),
-        (
-            url_path_join(base_url, "calkit", "git", "commit"),
-            GitCommitRouteHandler,
-        ),
-        (
-            url_path_join(base_url, "calkit", "git", "history"),
-            GitHistoryRouteHandler,
-        ),
-        (
-            url_path_join(base_url, "calkit", "git", "ignore"),
-            GitIgnoreRouteHandler,
-        ),
-        (
-            url_path_join(base_url, "calkit", "git", "push"),
-            GitPushRouteHandler,
-        ),
-        (
-            url_path_join(base_url, "calkit", "environments"),
-            EnvironmentsRouteHandler,
-        ),
+    # Automatically generate handlers from all APIHandler subclasses
+    route_handler_classes = [
+        cls
+        for cls in globals().values()
+        if isinstance(cls, type) and issubclass(cls, APIHandler)
     ]
+    # Create names by splitting on capital letters
+    handlers = []
+    for cls in route_handler_classes:
+        name = cls.__name__.removesuffix("RouteHandler")
+        parts = []
+        current_part = ""
+        for char in name:
+            if char.isupper() and current_part:
+                parts.append(current_part.lower())
+                current_part = char
+            else:
+                current_part += char
+        if current_part:
+            parts.append(current_part.lower())
+        handlers.append((url_path_join(base_url, "calkit", *parts), cls))
     web_app.add_handlers(host_pattern, handlers)

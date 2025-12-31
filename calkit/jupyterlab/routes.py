@@ -3,8 +3,10 @@
 import glob
 import json
 import os
+import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import dvc
 import dvc.repo
@@ -509,15 +511,207 @@ class NotebookStageRunSessionRouteHandler(APIHandler):
             )
             return
         dvc_stage = dvc_stages[stage_name]
-        session = {"dvc_stage": dvc_stage}
+        session = {
+            "notebook_path": notebook_path,
+            "stage_name": stage_name,
+            "dvc_stage": dvc_stage,
+        }
         # Hash all deps and outs
         dep_paths = dvc_stage.get("deps", [])
         out_paths = calkit.dvc.out_paths_from_stage(dvc_stage)
         lock_deps = [calkit.dvc.hash_path(dep) for dep in dep_paths]
-        lock_outs = [calkit.dvc.hash_path(out) for out in out_paths]
+        lock_outs = [
+            calkit.dvc.hash_path(out)
+            for out in out_paths
+            if os.path.exists(out)
+        ]
         session["lock_deps"] = lock_deps
         session["lock_outs"] = lock_outs
         self.finish(json.dumps(session))
+
+    @tornado.web.authenticated
+    def put(self):
+        """Update a notebook stage run session, which essentially means it
+        should be done.
+
+        If the DVC stage command or any of the dep hashes have changed, it
+        means we need to rerun the notebook, i.e., the run session can't be
+        used to update the DVC lock file.
+        """
+        body = self.get_json_body()
+        if not body:
+            self.set_status(400)
+            self.finish(
+                json.dumps({"error": "Request body must be valid JSON"})
+            )
+            return
+        required_keys = [
+            "notebook_path",
+            "stage_name",
+            "dvc_stage",
+            "lock_deps",
+        ]
+        for key in required_keys:
+            if key not in body:
+                self.set_status(400)
+                self.finish(
+                    json.dumps({"error": f"Request body must include '{key}'"})
+                )
+                return
+        notebook_path = body["notebook_path"]
+        stage_name = body["stage_name"]
+        session_dvc_stage = body["dvc_stage"]
+        session_lock_deps = body["lock_deps"]
+        ck_info = calkit.load_calkit_info()
+        stages = ck_info.get("pipeline", {}).get("stages", {})
+        if stage_name not in stages:
+            self.set_status(400)
+            self.finish(
+                json.dumps({"error": f"Stage '{stage_name}' does not exist"})
+            )
+            return
+        stage_info = stages[stage_name]
+        try:
+            stage = JupyterNotebookStage.model_validate(stage_info)
+        except Exception as e:
+            self.set_status(500)
+            self.finish(
+                json.dumps(
+                    {"error": f"Failed to validate stage '{stage_name}': {e}"}
+                )
+            )
+            return
+        if not stage.notebook_path == notebook_path:
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            f"Stage '{stage_name}' is not for notebook "
+                            f"'{notebook_path}'"
+                        )
+                    }
+                )
+            )
+            return
+        # Compile DVC pipeline again to be sure
+        calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+        # Clean pipeline notebooks again to check hashes
+        calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
+        # Read the DVC stage so we can compare that and hashes of its deps
+        with open("dvc.yaml", "r") as f:
+            dvc_yaml = calkit.ryaml.load(f)
+        dvc_stages = dvc_yaml.get("stages", {})
+        if stage_name not in dvc_stages:
+            self.set_status(500)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            f"DVC stage '{stage_name}' not found in dvc.yaml"
+                        )
+                    }
+                )
+            )
+            return
+        dvc_stage = dvc_stages[stage_name]
+        # Compare stage commands
+        if dvc_stage.get("cmd") != session_dvc_stage.get("cmd"):
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            "DVC stage command has changed since session"
+                            " creation"
+                        )
+                    }
+                )
+            )
+            return
+        # Compare dep hashes
+        current_lock_deps = []
+        dep_paths = dvc_stage.get("deps", [])
+        for dep in dep_paths:
+            dep_hash = calkit.dvc.hash_path(dep)
+            current_lock_deps.append(dep_hash)
+        if current_lock_deps != session_lock_deps:
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            "DVC stage dependencies have changed since"
+                            " session creation"
+                        )
+                    }
+                )
+            )
+            return
+        # If we've made it this far, we are okay to copy the notebook into the
+        # executed notebooks folder, convert to HTML, and update the DVC lock
+        # file
+        executed_ipynb_path = calkit.notebooks.get_executed_notebook_path(
+            notebook_path=notebook_path, to="notebook"
+        )
+        html_path = calkit.notebooks.get_executed_notebook_path(
+            notebook_path=notebook_path, to="html"
+        )
+        os.makedirs(os.path.dirname(executed_ipynb_path), exist_ok=True)
+        os.makedirs(os.path.dirname(html_path), exist_ok=True)
+        # Copy executed notebook
+        shutil.copy(notebook_path, executed_ipynb_path)
+        # Convert to HTML
+        folder = os.path.dirname(html_path)
+        os.makedirs(folder, exist_ok=True)
+        fname_out = os.path.basename(html_path)
+        # Now convert without executing or checking the environment
+        cmd = [
+            sys.executable,
+            "-m",
+            "jupyter",
+            "nbconvert",
+            executed_ipynb_path,
+            "--to",
+            "html",
+            "--output-dir",
+            Path(folder).as_posix(),
+            "--output",
+            fname_out,
+        ]
+        self.log.info(f"Exporting html via: {' '.join(cmd)}")
+        p = subprocess.run(cmd)
+        if p.returncode != 0:
+            self.set_status(500)
+            self.finish(
+                json.dumps({"error": "Failed to convert notebook to HTML"})
+            )
+            return
+        # Write to dvc.lock
+        dep_paths = dvc_stage.get("deps", [])
+        out_paths = calkit.dvc.out_paths_from_stage(dvc_stage)
+        lock_deps = [calkit.dvc.hash_path(dep) for dep in dep_paths]
+        lock_outs = [calkit.dvc.hash_path(out) for out in out_paths]
+        dvc_lock_entry = {
+            "cmd": dvc_stage.get("cmd"),
+            "deps": lock_deps,
+            "outs": lock_outs,
+        }
+        if not os.path.isfile("dvc.lock"):
+            dvc_lock = {"schema": "2.0", "stages": {}}
+        else:
+            with open("dvc.lock", "r") as f:
+                dvc_lock = calkit.ryaml.load(f)
+        if "stages" not in dvc_lock:
+            dvc_lock["stages"] = {}
+        dvc_lock["stages"][stage_name] = dvc_lock_entry
+        with open("dvc.lock", "w") as f:
+            calkit.ryaml.dump(dvc_lock, f)
+        self.log.info(
+            f"Updated DVC lock file for stage '{stage_name}' successfully"
+        )
+        # For now, just acknowledge the PUT
+        self.finish(json.dumps({"ok": True, "dvc_lock_entry": dvc_lock_entry}))
 
 
 class GitStatusRouteHandler(APIHandler):

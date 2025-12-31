@@ -960,7 +960,7 @@ def run(
     no_run_cache: Annotated[
         bool, typer.Option("--no-run-cache", help="Ignore the run cache.")
     ] = False,
-    log_run_and_system: Annotated[
+    save_logs: Annotated[
         bool,
         typer.Option(
             "--log", "-l", help="Log the run and system information."
@@ -1028,7 +1028,7 @@ def run(
         typer.echo("Getting system information")
     # Get system information
     system_info = calkit.get_system_info()
-    if log_run_and_system:
+    if save_logs:
         # Save the system to .calkit/systems
         if verbose:
             typer.echo("Saving system information:")
@@ -1113,7 +1113,7 @@ def run(
                         targets.append(dvc_stage_name)
         if not targets:
             raise_error("No stages found to run")
-    if log_run_and_system:
+    if save_logs:
         # Get status of Git repo before running
         repo = git.Repo()
         git_rev = repo.head.commit.hexsha
@@ -1190,7 +1190,7 @@ def run(
     with open(log_fpath, "r") as f:
         log_content = f.read()
         stage_run_info = _stage_run_info_from_log_content(log_content)
-    if log_run_and_system:
+    if save_logs:
         # Get Git status after running
         git_changed_files_after = calkit.git.get_changed_files(repo=repo)
         git_staged_files_after = calkit.git.get_staged_files(repo=repo)
@@ -1236,6 +1236,8 @@ def run(
         os.makedirs(os.path.dirname(run_info_fpath), exist_ok=True)
         with open(run_info_fpath, "w") as f:
             json.dump(run_info, f, indent=2)
+    else:
+        os.remove(log_fpath)
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
     if failed:
         raise_error("Pipeline failed")

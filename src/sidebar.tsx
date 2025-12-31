@@ -859,7 +859,19 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
         {},
       );
       const staleStages = pipelineStatus?.stale_stages || {};
-      const isStale = stage.id in staleStages;
+      let isStale = stage.id in staleStages;
+
+      if (!isStale) {
+        const stageInfo = pipelineStatus?.pipeline?.stages?.[stage.id];
+        if (stageInfo) {
+          isStale = Boolean(
+            stageInfo.is_stale ||
+              stageInfo.is_outdated ||
+              stageInfo.outdated ||
+              stageInfo.needs_run,
+          );
+        }
+      }
 
       return (
         <div key={stage.id}>

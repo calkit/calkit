@@ -7,7 +7,7 @@ import { requestAPI } from "../request";
 import { queryClient } from "../queryClient";
 import { calkitIcon } from "../icons";
 import { showEnvironmentEditor } from "./environment-editor";
-import { useSetNotebookStage } from "../hooks/useQueries";
+import { usePipelineStatus, useSetNotebookStage } from "../hooks/useQueries";
 
 /**
  * Badge dropdown component
@@ -407,6 +407,7 @@ const PipelineStageBadge: React.FC<{
   const [currentEnv, setCurrentEnv] = useState<string>("");
   const [showRunModal, setShowRunModal] = useState(false);
   const [isStale, setIsStale] = useState(false);
+  const { data: pipelineStatus } = usePipelineStatus();
   const setNotebookStageMutation = useSetNotebookStage();
 
   // Fetch notebook stage on mount
@@ -443,6 +444,30 @@ const PipelineStageBadge: React.FC<{
 
     fetchStage();
   }, [panel]);
+
+  useEffect(() => {
+    if (!pipelineStatus || !currentStage) {
+      return;
+    }
+
+    const staleStages = pipelineStatus.stale_stages;
+    if (staleStages && typeof staleStages === "object") {
+      setIsStale(Boolean(staleStages[currentStage]));
+      return;
+    }
+
+    const stageInfo = pipelineStatus.pipeline?.stages?.[currentStage];
+    if (stageInfo) {
+      const stageStale =
+        stageInfo.is_stale ||
+        stageInfo.is_outdated ||
+        stageInfo.outdated ||
+        stageInfo.needs_run;
+      setIsStale(Boolean(stageStale));
+    } else {
+      setIsStale(false);
+    }
+  }, [pipelineStatus, currentStage]);
 
   const handleSaveStage = async () => {
     if (!stageName.trim()) {

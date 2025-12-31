@@ -512,6 +512,27 @@ const PipelineStageBadge: React.FC<{
   const isConfigured = currentStage !== "";
   const label = isConfigured ? `Stage: ${currentStage}` : "Not in pipeline";
 
+  const handlePlayButtonClick = async () => {
+    try {
+      // Save the notebook before running the stage
+      console.log("Saving notebook...");
+      const savePromise = panel.context.save();
+      if (savePromise) {
+        await savePromise;
+      }
+      console.log("Notebook saved successfully");
+      // Add a small delay to ensure the save is fully processed
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      setShowRunModal(true);
+    } catch (error) {
+      console.error("Failed to save notebook:", error);
+      await showErrorMessage(
+        "Failed to save notebook",
+        "Could not save the notebook before running the stage.",
+      );
+    }
+  };
+
   return (
     <>
       {showRunModal && (
@@ -567,7 +588,7 @@ const PipelineStageBadge: React.FC<{
             className={`calkit-play-button ${
               isStale ? "calkit-play-button-stale" : ""
             }`}
-            onClick={() => setShowRunModal(true)}
+            onClick={handlePlayButtonClick}
             title={isStale ? "Stage is stale - run to update" : "Run stage"}
           >
             ▶

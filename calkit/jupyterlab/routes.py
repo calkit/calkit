@@ -465,7 +465,10 @@ class PipelineStatusRouteHandler(APIHandler):
     def get(self):
         try:
             # First make sure pipeline is compiled
-            calkit.pipeline.to_dvc(write=True)
+            ck_info = calkit.load_calkit_info()
+            calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+            # Clean all notebooks in the pipeline
+            calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
             dvc_repo = dvc.repo.Repo(os.getcwd())
             raw_status = dvc_repo.status()
             pipeline_status = {

@@ -14,6 +14,7 @@ from dvc.exceptions import NotDvcRepoError
 from git.exc import InvalidGitRepositoryError
 
 import calkit
+import calkit.cli.main
 from calkit.cli.main import _stage_run_info_from_log_content, _to_shell_cmd
 
 
@@ -550,6 +551,9 @@ def test_run(tmp_dir):
         ]
     )
     subprocess.check_call(["calkit", "run"])
+    res = calkit.cli.main.run()
+    assert "dvc_stages" in res
+    assert "stage_run_info" in res
 
 
 def test_stage_run_info_from_log_content():

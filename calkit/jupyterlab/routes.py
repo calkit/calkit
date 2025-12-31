@@ -511,16 +511,10 @@ class NotebookStageRunSessionRouteHandler(APIHandler):
         dvc_stage = dvc_stages[stage_name]
         session = {"dvc_stage": dvc_stage}
         # Hash all deps and outs
-        # TODO: Hash these just like DVC does so we can insert into dvc.lock
-        # when the session is complete
         dep_paths = dvc_stage.get("deps", [])
         out_paths = calkit.dvc.out_paths_from_stage(dvc_stage)
-        lock_deps = []
-        for dep in dep_paths:
-            lock_deps.append({"path": dep})
-        lock_outs = []
-        for out in out_paths:
-            lock_outs.append({"path": out})
+        lock_deps = [calkit.dvc.hash_path(dep) for dep in dep_paths]
+        lock_outs = [calkit.dvc.hash_path(out) for out in out_paths]
         session["lock_deps"] = lock_deps
         session["lock_outs"] = lock_outs
         self.finish(json.dumps(session))

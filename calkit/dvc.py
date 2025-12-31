@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import subprocess
@@ -224,3 +226,66 @@ def out_paths_from_stage(dvc_stage: dict) -> list[str]:
             out_path = list(out.keys())[0]
             out_paths.append(out_path)
     return out_paths
+
+
+def hash_file(path: str) -> dict:
+    """Compute MD5 hash and size of a file.
+
+    Returns a dictionary formatted like a DVC lock file entry.
+    """
+    md5_hash = hashlib.md5()
+    size = 0
+    with open(path, "rb") as f:
+        while chunk := f.read(65536):  # 64KB chunks
+            md5_hash.update(chunk)
+            size += len(chunk)
+    return {
+        "path": path,
+        "hash": "md5",
+        "md5": md5_hash.hexdigest(),
+        "size": size,
+    }
+
+
+def hash_directory(path: str) -> dict:
+    """Compute MD5 hash, total size, and file count of directory.
+
+    Returns a dictionary formatted like a DVC lock file entry.
+    Uses DVC's approach: hash each file and combine into directory hash.
+    """
+    file_hashes = []
+    total_size = 0
+    num_files = 0
+    for root, _, files in os.walk(path):
+        for name in sorted(files):
+            file_path = os.path.join(root, name)
+            try:
+                rel_path = os.path.relpath(file_path, path)
+                file_info = hash_file(file_path)
+                # DVC uses JSON format: [{relpath: hash}] for directory hashing
+                file_hashes.append({rel_path: file_info["md5"]})
+                total_size += file_info["size"]
+                num_files += 1
+            except Exception:
+                continue
+    # Compute directory hash from sorted file hashes
+    dir_hash = hashlib.md5(
+        json.dumps(file_hashes, sort_keys=True).encode()
+    ).hexdigest()
+    return {
+        "path": path,
+        "hash": "md5",
+        "md5": f"{dir_hash}.dir",
+        "size": total_size,
+        "nfiles": num_files,
+    }
+
+
+def hash_path(path: str) -> dict:
+    """Hash a file or directory and return DVC lock file entry."""
+    if os.path.isdir(path):
+        return hash_directory(path)
+    elif os.path.isfile(path):
+        return hash_file(path)
+    else:
+        raise ValueError(f"Path does not exist: {path}")

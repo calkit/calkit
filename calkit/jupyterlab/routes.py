@@ -491,9 +491,34 @@ class NotebookStageRunSessionRouteHandler(APIHandler):
             )
             return
         # Ensure DVC pipeline is compiled
-        calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+        try:
+            calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+        except Exception as e:
+            self.set_status(500)
+            self.finish(
+                json.dumps({"error": f"Failed to compile DVC pipeline: {e}"})
+            )
+            return
         # Ensure all cleaned notebooks are up-to-date
-        calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
+        try:
+            calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
+        except Exception as e:
+            self.set_status(500)
+            self.finish(
+                json.dumps(
+                    {"error": f"Failed to clean notebooks in pipeline: {e}"}
+                )
+            )
+            return
+        # Check the notebook environment
+        try:
+            calkit.cli.main.check_environment(env_name=stage.environment)
+        except Exception as e:
+            self.set_status(500)
+            self.finish(
+                json.dumps({"error": f"Environment check failed: {e}"})
+            )
+            return
         # Read the DVC stage so we can save that and hashes of its deps/outs
         with open("dvc.yaml", "r") as f:
             dvc_yaml = calkit.ryaml.load(f)
@@ -595,9 +620,34 @@ class NotebookStageRunSessionRouteHandler(APIHandler):
             )
             return
         # Compile DVC pipeline again to be sure
-        calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+        try:
+            calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+        except Exception as e:
+            self.set_status(500)
+            self.finish(
+                json.dumps({"error": f"Failed to compile DVC pipeline: {e}"})
+            )
+            return
         # Clean pipeline notebooks again to check hashes
-        calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
+        try:
+            calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
+        except Exception as e:
+            self.set_status(500)
+            self.finish(
+                json.dumps(
+                    {"error": f"Failed to clean notebooks in pipeline: {e}"}
+                )
+            )
+            return
+        # Check the notebook environment again
+        try:
+            calkit.cli.main.check_environment(env_name=stage.environment)
+        except Exception as e:
+            self.set_status(500)
+            self.finish(
+                json.dumps({"error": f"Environment check failed: {e}"})
+            )
+            return
         # Read the DVC stage so we can compare that and hashes of its deps
         with open("dvc.yaml", "r") as f:
             dvc_yaml = calkit.ryaml.load(f)
@@ -643,6 +693,38 @@ class NotebookStageRunSessionRouteHandler(APIHandler):
                         "error": (
                             "DVC stage dependencies have changed since"
                             " session creation"
+                        )
+                    }
+                )
+            )
+            return
+        # Check that the notebook has been executed top-to-bottom with no
+        # repeated cell executions
+        try:
+            with open(notebook_path, "r", encoding="utf-8") as f:
+                nb_content = json.load(f)
+            count = 0
+            for cell in nb_content.get("cells", []):
+                if cell.get("cell_type") != "code":
+                    continue
+                if (
+                    "execution_count" not in cell
+                    or cell["execution_count"] is None
+                ):
+                    raise ValueError("Notebook has unexecuted cells")
+                count += 1
+                if cell["execution_count"] != count:
+                    raise ValueError(
+                        "Notebook cells were not executed in order"
+                    )
+        except Exception as e:
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            f"Notebook '{notebook_path}' was not executed"
+                            f" top-to-bottom without repeated cells: {e}"
                         )
                     }
                 )

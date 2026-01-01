@@ -805,7 +805,6 @@ class NotebookStageRunSessionRouteHandler(APIHandler):
                 is_cached = out_config.get("cache", True)
             else:
                 continue
-
             if is_cached and os.path.exists(out_path):
                 self.log.info(f"Committing output to DVC cache: {out_path}")
                 p = subprocess.run(

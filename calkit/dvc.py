@@ -254,25 +254,29 @@ def hash_directory(path: str) -> dict:
     Returns a dictionary formatted like a DVC lock file entry.
     Uses DVC's approach: hash each file and combine into directory hash.
     """
-    file_hashes = []
+    entries = []
     total_size = 0
     num_files = 0
-    for root, _, files in os.walk(path):
+    # Walk directory in sorted order for deterministic results
+    for root, dirs, files in os.walk(path):
+        # Sort directories to ensure consistent walk order
+        dirs.sort()
+        # Sort files within each directory
         for name in sorted(files):
             file_path = os.path.join(root, name)
             try:
                 rel_path = Path(os.path.relpath(file_path, path)).as_posix()
                 file_info = hash_file(file_path)
-                file_hashes.append(
-                    {"md5": file_info["md5"], "relpath": rel_path}
-                )
+                # DVC format: entry with "md5" and "relpath" keys
+                entries.append({"md5": file_info["md5"], "relpath": rel_path})
                 total_size += file_info["size"]
                 num_files += 1
             except Exception:
                 continue
-    # Compute directory hash from sorted file hashes
+    # Compute directory hash from entries
+    # DVC uses json.dumps with sort_keys=True to ensure deterministic output
     dir_hash = hashlib.md5(
-        json.dumps(file_hashes, sort_keys=True).encode()
+        json.dumps(entries, sort_keys=True).encode()
     ).hexdigest()
     return {
         "path": path,

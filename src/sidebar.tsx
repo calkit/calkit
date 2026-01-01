@@ -1339,43 +1339,11 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
             </span>
             <span className="calkit-sidebar-section-label">{icon}</span>
             <span className="calkit-sidebar-section-title">{sectionLabel}</span>
-            {sectionId === "history" &&
-              (() => (
-                <span className="calkit-status-chips">
-                  {newCount > 0 && (
-                    <span
-                      className="calkit-status-chip new"
-                      title={`New (untracked) files: ${newCount}`}
-                    >
-                      {newCount}
-                    </span>
-                  )}
-                  {modifiedCount > 0 && (
-                    <span
-                      className="calkit-status-chip modified"
-                      title={`Modified files: ${modifiedCount}`}
-                    >
-                      {modifiedCount}
-                    </span>
-                  )}
-                  {pullCount > 0 && (
-                    <span
-                      className="calkit-status-chip pull"
-                      title={`Commits to pull: ${pullCount}`}
-                    >
-                      {pullCount}
-                    </span>
-                  )}
-                  {!hasChanges && (
-                    <span className="calkit-status-chip clean" title="Clean">
-                      ✓
-                    </span>
-                  )}
-                </span>
-              ))()}
             {sectionId === "history" && (
               <button
-                className="calkit-sidebar-section-save"
+                className={`calkit-sidebar-section-save${
+                  hasChanges ? " has-changes" : ""
+                }`}
                 title={saveTitle}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1384,6 +1352,34 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
               >
                 {saveIcon}
               </button>
+            )}
+            {sectionId === "history" && hasChanges && (
+              <span className="calkit-status-chips">
+                {newCount > 0 && (
+                  <span
+                    className="calkit-status-chip new"
+                    title={`New (untracked) files: ${newCount}`}
+                  >
+                    {newCount}
+                  </span>
+                )}
+                {modifiedCount > 0 && (
+                  <span
+                    className="calkit-status-chip modified"
+                    title={`Modified files: ${modifiedCount}`}
+                  >
+                    {modifiedCount}
+                  </span>
+                )}
+                {pullCount > 0 && (
+                  <span
+                    className="calkit-status-chip pull"
+                    title={`Commits to pull: ${pullCount}`}
+                  >
+                    {pullCount}
+                  </span>
+                )}
+              </span>
             )}
             {showEditButton && (
               <button

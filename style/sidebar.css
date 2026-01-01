@@ -467,19 +467,38 @@
 }
 
 .calkit-sidebar-section-save {
-  margin-left: 8px;
-  padding: 2px 8px;
-  font-size: 10px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--jp-ui-font-color1);
-  border-radius: 4px;
+  font-size: 11px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin-left: 6px;
+  background-color: var(--jp-layout-color3);
+  color: var(--jp-ui-font-color2);
+  border: none;
+  border-radius: 3px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  outline: none;
 }
 
 .calkit-sidebar-section-save:hover {
-  background: var(--jp-layout-color2);
-  border-color: var(--jp-border-color1);
+  background-color: var(--jp-layout-color4);
+}
+
+.calkit-sidebar-section-save:active {
+  transform: scale(0.95);
+}
+
+.calkit-sidebar-section-save.has-changes {
+  background-color: var(--jp-warn-color1);
+  color: white;
+}
+
+.calkit-sidebar-section-save.has-changes:hover {
+  background-color: var(--jp-warn-color0);
 }
 
 /* Save/Sync section styling */

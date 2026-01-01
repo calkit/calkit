@@ -41,7 +41,18 @@ export async function requestAPI<T>(
   }
 
   if (!response.ok) {
-    throw new ServerConnection.ResponseError(response, data.message || data);
+    // Extract error message from various possible formats
+    let errorMessage: string;
+    if (typeof data === "string") {
+      errorMessage = data;
+    } else if (data && typeof data === "object") {
+      // Try common error message fields
+      errorMessage =
+        data.message || data.error || data.reason || JSON.stringify(data);
+    } else {
+      errorMessage = "An error occurred";
+    }
+    throw new ServerConnection.ResponseError(response, errorMessage);
   }
 
   return data;

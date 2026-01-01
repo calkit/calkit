@@ -10,6 +10,126 @@ import { showEnvironmentEditor } from "./environment-editor";
 import { usePipelineStatus, useSetNotebookStage } from "../hooks/useQueries";
 
 /**
+ * Extract a readable error message from various error types
+ */
+function getErrorMessage(error: unknown): string {
+  if (!error) {
+    return "Unknown error";
+  }
+
+  // If it's a string, return it directly
+  if (typeof error === "string") {
+    return error;
+  }
+
+  // If it's an Error object, get the message
+  if (error instanceof Error) {
+    // Check if message is "[object Object]" - this happens when an object was passed as the message
+    if (error.message !== "[object Object]") {
+      return error.message;
+    }
+  }
+
+  // Handle object-like errors (including ServerConnection.ResponseError)
+  if (typeof error === "object") {
+    const err = error as any;
+
+    // For ServerConnection.ResponseError, the message property contains the parsed response data
+    // If message is an object with error or message fields, extract those
+    if (err.message && typeof err.message === "object") {
+      if (err.message.error && typeof err.message.error === "string") {
+        return err.message.error;
+      }
+      if (err.message.message && typeof err.message.message === "string") {
+        return err.message.message;
+      }
+      // Try to stringify the message object
+      try {
+        const stringified = JSON.stringify(err.message, null, 2);
+        if (stringified && stringified !== "{}" && stringified !== "{}") {
+          return stringified;
+        }
+      } catch {
+        // JSON.stringify can fail
+      }
+    }
+
+    // Check for traceback (often contains the response data)
+    if (err.traceback) {
+      // If traceback is a string, return it (but not if empty)
+      if (typeof err.traceback === "string" && err.traceback.trim()) {
+        return err.traceback;
+      }
+      // If traceback is an object with error property
+      if (typeof err.traceback === "object") {
+        if (err.traceback.error && typeof err.traceback.error === "string") {
+          return err.traceback.error;
+        }
+        if (
+          err.traceback.message &&
+          typeof err.traceback.message === "string"
+        ) {
+          return err.traceback.message;
+        }
+        // Try to stringify the traceback object
+        try {
+          const stringified = JSON.stringify(err.traceback, null, 2);
+          if (stringified && stringified !== "{}" && stringified !== "{}") {
+            return stringified;
+          }
+        } catch {
+          // JSON.stringify can fail
+        }
+      }
+    }
+
+    // Check for response object (from ServerConnection.ResponseError)
+    if (err.response && typeof err.response === "object") {
+      const response = err.response;
+
+      // Try to extract message from response
+      if (response.message && typeof response.message === "string") {
+        return response.message;
+      }
+      if (response.error && typeof response.error === "string") {
+        return response.error;
+      }
+    }
+
+    // Try to extract message from various possible locations
+    const possibleMessages = [err.error, err.reason];
+
+    for (const msg of possibleMessages) {
+      if (msg && typeof msg === "string" && msg !== "[object Object]") {
+        return msg;
+      }
+      // If message itself is an object with error property
+      if (msg && typeof msg === "object") {
+        if (msg.message && typeof msg.message === "string") {
+          return msg.message;
+        }
+        if (msg.error && typeof msg.error === "string") {
+          return msg.error;
+        }
+      }
+    }
+
+    // Try to stringify the object in a readable way
+    try {
+      const stringified = JSON.stringify(error, null, 2);
+      if (stringified && stringified !== "{}" && stringified !== "{}") {
+        return stringified;
+      }
+    } catch {
+      // JSON.stringify can fail for circular references
+    }
+  }
+
+  // Last resort
+  return String(error);
+}
+
+/**
  * Badge dropdown component
  */
 const BadgeDropdown: React.FC<{
@@ -409,6 +529,8 @@ const PipelineStageBadge: React.FC<{
       });
       setCurrentStage(stage);
       setIsOpen(false);
+      // Invalidate pipeline status since adding/updating a stage affects it
+      void queryClient.invalidateQueries({ queryKey: ["pipelineStatus"] });
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.error("Failed to set pipeline stage:", error);
@@ -481,8 +603,7 @@ const PipelineStageBadge: React.FC<{
 
       console.log("Stage run completed and cached successfully!");
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error("Failed to run stage:", error);
+      const errorMsg = getErrorMessage(error);
       await showErrorMessage("Failed to run stage", errorMsg);
     } finally {
       setIsExecuting(false);

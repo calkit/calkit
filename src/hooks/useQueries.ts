@@ -76,6 +76,7 @@ export const useGitStatus = () => {
     queryKey: ["git", "status"],
     queryFn: () => requestAPI<IGitStatus>("git/status"),
     staleTime: 10 * 1000, // 10 seconds for git status
+    refetchInterval: 5000, // Refetch every 5 seconds
   });
 };
 

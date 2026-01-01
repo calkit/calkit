@@ -297,6 +297,25 @@ const PipelineStageBadge: React.FC<{
   const { data: pipelineStatus } = usePipelineStatus();
   const setNotebookStageMutation = useSetNotebookStage();
 
+  const waitForKernelIdle = async (kernel: any) => {
+    if (!kernel) return;
+    if (kernel.status === "idle") return;
+    await new Promise<void>((resolve) => {
+      const onStatusChange = (_: any, status: any) => {
+        if (status === "idle") {
+          kernel.statusChanged.disconnect(onStatusChange);
+          clearTimeout(timeout);
+          resolve();
+        }
+      };
+      const timeout = setTimeout(() => {
+        kernel.statusChanged.disconnect(onStatusChange);
+        resolve();
+      }, 5000);
+      kernel.statusChanged.connect(onStatusChange);
+    });
+  };
+
   // Fetch notebook stage on mount
   useEffect(() => {
     const fetchStage = async () => {
@@ -431,16 +450,20 @@ const PipelineStageBadge: React.FC<{
       if (sessionContext.session?.kernel) {
         await sessionContext.session.kernel.restart();
         // Wait for kernel to be idle (ready)
-        await sessionContext.session.kernel.statusChanged.waitFor(
-          (_, status) => status === "idle",
-          5000, // 5 second timeout
-        );
+        await waitForKernelIdle(sessionContext.session.kernel);
       }
 
       // Step 3: Run all cells
       await NotebookActions.runAll(panel.content, sessionContext);
 
       console.log("All cells executed successfully. Finalizing session...");
+
+      // Step 3b: Save notebook after execution to persist outputs
+      const postRunSave = panel.context.save();
+      if (postRunSave) {
+        await postRunSave;
+      }
+      console.log("Notebook saved after execution");
 
       // Step 4: Finalize the session with the backend
       await requestAPI<any>("notebook/stage/run/session", {

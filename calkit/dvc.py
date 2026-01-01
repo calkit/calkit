@@ -8,6 +8,7 @@ import logging
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import git
 
@@ -260,10 +261,11 @@ def hash_directory(path: str) -> dict:
         for name in sorted(files):
             file_path = os.path.join(root, name)
             try:
-                rel_path = os.path.relpath(file_path, path)
+                rel_path = Path(os.path.relpath(file_path, path)).as_posix()
                 file_info = hash_file(file_path)
-                # DVC uses JSON format: [{relpath: hash}] for directory hashing
-                file_hashes.append({rel_path: file_info["md5"]})
+                file_hashes.append(
+                    {"md5": file_info["md5"], "relpath": rel_path}
+                )
                 total_size += file_info["size"]
                 num_files += 1
             except Exception:

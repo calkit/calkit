@@ -707,6 +707,10 @@ class NotebookStageRunSessionRouteHandler(APIHandler):
             for cell in nb_content.get("cells", []):
                 if cell.get("cell_type") != "code":
                     continue
+                # If the cell is all whitespace, it won't ever be run, so we
+                # can skip it
+                if "".join(cell.get("source", [])).strip() == "":
+                    continue
                 if (
                     "execution_count" not in cell
                     or cell["execution_count"] is None

@@ -470,6 +470,36 @@
   background-color: var(--jp-warn-color0);
 }
 
+.calkit-play-button-executing {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.calkit-play-button-executing:hover {
+  background-color: var(--jp-success-color1);
+}
+
+.calkit-play-button-stale.calkit-play-button-executing:hover {
+  background-color: var(--jp-warn-color1);
+}
+
+/* Spinner animation */
+.calkit-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: calkit-spin 0.8s linear infinite;
+}
+
+@keyframes calkit-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Modal overlay */
 .calkit-modal-overlay {
   position: fixed;

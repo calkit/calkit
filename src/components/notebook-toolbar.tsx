@@ -294,6 +294,7 @@ const PipelineStageBadge: React.FC<{
   const [stageName, setStageName] = useState("");
   const [currentEnv, setCurrentEnv] = useState<string>("");
   const [isStale, setIsStale] = useState(false);
+  const [isExecuting, setIsExecuting] = useState(false);
   const { data: pipelineStatus } = usePipelineStatus();
   const setNotebookStageMutation = useSetNotebookStage();
 
@@ -419,6 +420,7 @@ const PipelineStageBadge: React.FC<{
   const label = isConfigured ? `Stage: ${currentStage}` : "Not in pipeline";
 
   const handlePlayButtonClick = async () => {
+    setIsExecuting(true);
     try {
       // Save the notebook before running the stage
       console.log("Saving notebook...");
@@ -482,6 +484,8 @@ const PipelineStageBadge: React.FC<{
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.error("Failed to run stage:", error);
       await showErrorMessage("Failed to run stage", errorMsg);
+    } finally {
+      setIsExecuting(false);
     }
   };
 
@@ -531,11 +535,18 @@ const PipelineStageBadge: React.FC<{
         <button
           className={`calkit-play-button ${
             isStale ? "calkit-play-button-stale" : ""
-          }`}
+          } ${isExecuting ? "calkit-play-button-executing" : ""}`}
           onClick={handlePlayButtonClick}
-          title={isStale ? "Stage is stale - run to update" : "Run stage"}
+          disabled={isExecuting}
+          title={
+            isExecuting
+              ? "Executing notebook..."
+              : isStale
+              ? "Stage is stale - run to update"
+              : "Run stage"
+          }
         >
-          ▶
+          {isExecuting ? <span className="calkit-spinner" /> : "▶"}
         </button>
       )}
     </div>

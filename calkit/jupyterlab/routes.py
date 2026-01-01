@@ -792,7 +792,36 @@ class NotebookStageRunSessionRouteHandler(APIHandler):
         self.log.info(
             f"Updated DVC lock file for stage '{stage_name}' successfully"
         )
-        # For now, just acknowledge the PUT
+        # Now, lastly, we need to populate the DVC cache for any cached outputs
+        # so that the user doesn't have to rerun the notebook again
+        # Check which outputs are cacheable (don't have cache: false)
+        for out in dvc_stage.get("outs", []):
+            if isinstance(out, str):
+                out_path = out
+                is_cached = True
+            elif isinstance(out, dict):
+                out_path = list(out.keys())[0]
+                out_config = out[out_path]
+                is_cached = out_config.get("cache", True)
+            else:
+                continue
+
+            if is_cached and os.path.exists(out_path):
+                self.log.info(f"Committing output to DVC cache: {out_path}")
+                p = subprocess.run(
+                    [sys.executable, "-m", "dvc", "commit", out_path],
+                    capture_output=True,
+                    text=True,
+                )
+                if p.returncode != 0:
+                    self.log.warning(
+                        f"Failed to commit {out_path} to DVC cache: "
+                        f"{p.stderr.strip()}"
+                    )
+                else:
+                    self.log.info(
+                        f"Successfully committed {out_path} to DVC cache"
+                    )
         self.finish(json.dumps({"ok": True, "dvc_lock_entry": dvc_lock_entry}))
 
 

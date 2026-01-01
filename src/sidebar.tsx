@@ -1421,27 +1421,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                 +
               </button>
             )}
-            {sectionId === "pipelineStages" && (
-              <button
-                className={`calkit-sidebar-section-run${
-                  pipelineRunning ? " running" : ""
-                }`}
-                title={pipelineRunning ? "Pipeline running..." : "Run pipeline"}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!pipelineRunning) {
-                    handleRunPipeline();
-                  }
-                }}
-                disabled={pipelineRunning}
-              >
-                {pipelineRunning ? (
-                  <span className="calkit-spinner">⟳</span>
-                ) : (
-                  "▶"
-                )}
-              </button>
-            )}
             {sectionId === "pipelineStages" &&
               (() => {
                 const ps: any = pipelineStatus;
@@ -1463,8 +1442,34 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                     ).length;
                   }
                 }
+                const hasStaleStages = outdatedCount > 0;
                 return (
                   <>
+                    {sectionId === "pipelineStages" && (
+                      <button
+                        className={`calkit-sidebar-section-run${
+                          pipelineRunning ? " running" : ""
+                        }${hasStaleStages ? " stale" : ""}`}
+                        title={
+                          pipelineRunning
+                            ? "Pipeline running..."
+                            : "Run pipeline"
+                        }
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!pipelineRunning) {
+                            handleRunPipeline();
+                          }
+                        }}
+                        disabled={pipelineRunning}
+                      >
+                        {pipelineRunning ? (
+                          <span className="calkit-spinner" />
+                        ) : (
+                          "▶"
+                        )}
+                      </button>
+                    )}
                     {outdatedCount > 0 && (
                       <span
                         className="calkit-status-chip stale"

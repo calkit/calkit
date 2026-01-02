@@ -32,8 +32,8 @@ test-cov: ## Test the code coverage with pytest.
 	@echo "🚀 Testing code coverage with pytest"
 	@uv run pytest --cov --cov-config=pyproject.toml
 
-.PHONY: docs-test
-docs-test: ## Test if documentation can be built without warnings or errors.
+.PHONY: test-docs
+test-docs: ## Test if documentation can be built without warnings or errors.
 	@uv run mkdocs build -s
 
 .PHONY: docs
@@ -52,12 +52,12 @@ jlab-dev: ## Develop the JupyterLab extension.
 jlab: ## Build the JupyterLab extension.
 	uv run jlpm run build:prod
 
-.PHONY: frontend-test
-frontend-test: ## Run frontend unit tests with Jest.
+.PHONY: test-frontend
+test-frontend: ## Run frontend unit tests with Jest.
 	@echo "🚀 Running frontend unit tests"
 	@uv run jlpm test
 
-.PHONY: ui-test
-ui-test: jlab ## Run the JupyterLab UI tests.
+.PHONY: test-ui
+test-ui: jlab ## Run the JupyterLab UI integration tests.
 	@echo "🚀 Running JupyterLab UI tests with Playwright"
 	@cd ui-tests && uv run jlpm playwright test -u

@@ -13,16 +13,30 @@ const esModules = [
 ].join("|");
 
 const baseConfig = jestJupyterLab(__dirname);
+// Remove testRegex when using projects
+const { testRegex, ...baseConfigWithoutRegex } = baseConfig;
 
 module.exports = {
-  ...baseConfig,
-  automock: false,
+  projects: [
+    {
+      displayName: "ui",
+      ...baseConfigWithoutRegex,
+      automock: false,
+      testMatch: ["<rootDir>/src/__tests__/*.spec.ts"],
+      testPathIgnorePatterns: ["useQueries"],
+      transformIgnorePatterns: [`/node_modules/(?!${esModules}).+`],
+    },
+    {
+      displayName: "hooks",
+      preset: "ts-jest",
+      testEnvironment: "node",
+      testMatch: ["<rootDir>/src/__tests__/useQueries.spec.ts"],
+    },
+  ],
   collectCoverageFrom: [
     "src/**/*.{ts,tsx}",
     "!src/**/*.d.ts",
     "!src/**/.ipynb_checkpoints/*",
   ],
   coverageReporters: ["lcov", "text"],
-  testRegex: "src/.*/.*.spec.ts[x]?$",
-  transformIgnorePatterns: [`/node_modules/(?!${esModules}).+`],
 };

@@ -94,6 +94,8 @@ jobs:
         run: uv run jlpm install
       - name: Build JupyterLab extension
         run: uv run jlpm build:prod
+      - name: Run JupyterLab extension front end unit tests
+        run: uv run jlpm test
       - name: Install UI test dependencies
         run: |
           cd ui-tests

@@ -47,3 +47,12 @@ import-profile: ## Profile the import time of the CLI.
 .PHONY: jlab-dev
 jlab-dev: ## Develop the JupyterLab extension.
 	uv run jlpm run watch
+
+.PHONY: jlab
+jlab: ## Build the JupyterLab extension.
+	uv run jlpm run build:prod
+
+.PHONY: ui-test
+ui-test: jlab ## Run the JupyterLab UI tests.
+	@echo "🚀 Running JupyterLab UI tests with Playwright"
+	@cd ui-tests && uv run jlpm playwright test -u

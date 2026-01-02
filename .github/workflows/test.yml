@@ -80,3 +80,26 @@ jobs:
           docker --version
           conda activate base
           make test
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install JupyterLab extension dependencies
+        run: uv run jlpm install
+      - name: Build JupyterLab extension
+        run: uv run jlpm build:prod
+      - name: Install UI test dependencies
+        run: |
+          cd ui-tests
+          uv run jlpm install
+          uv run jlpm playwright install
+      - name: Run UI tests
+        run: |
+          cd ui-tests
+          uv run jlpm playwright test -u

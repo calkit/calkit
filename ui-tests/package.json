@@ -1,7 +1,7 @@
 {
   "name": "calkit-ui-tests",
   "version": "1.0.0",
-  "description": "JupyterLab calkit Integration Tests",
+  "description": "JupyterLab Calkit integration tests",
   "private": true,
   "scripts": {
     "start": "jupyter lab --config jupyter_server_test_config.py",

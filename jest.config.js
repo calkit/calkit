@@ -29,8 +29,8 @@ module.exports = {
     {
       displayName: "hooks",
       preset: "ts-jest",
-      testEnvironment: "node",
-      testMatch: ["<rootDir>/src/__tests__/useQueries.spec.ts"],
+      testEnvironment: "jsdom",
+      testMatch: ["<rootDir>/src/hooks/__tests__/useQueries.test.tsx"],
     },
   ],
   collectCoverageFrom: [

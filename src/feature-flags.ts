@@ -81,11 +81,11 @@ export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   pipelineStages: true,
   notebooks: true,
   history: true,
-  cellOutputMarking: true,
-  fileBrowserMenu: true,
   notebookToolbar: true,
 
   // Incomplete features - disabled by default
+  cellOutputMarking: false,
+  fileBrowserMenu: false,
   figures: false,
   datasets: false,
   questions: false,

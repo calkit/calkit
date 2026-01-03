@@ -121,8 +121,10 @@ const plugin: JupyterFrontEndPlugin<void> = {
         emptyWidget.hide();
         return emptyWidget;
       });
+    }
 
-      // Register notebook toolbar with badges
+    // Register notebook toolbar with badges
+    if (toolbarRegistry && isFeatureEnabled("notebookToolbar")) {
       toolbarRegistry.addFactory(
         "Notebook",
         "calkit-notebook-toolbar",

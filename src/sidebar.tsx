@@ -35,6 +35,7 @@ import {
   type StageEditorResult,
 } from "./components/stage-editor";
 import { isFeatureEnabled } from "./feature-flags";
+import { pipelineState } from "./pipeline-state";
 
 interface ISectionItem {
   id: string;
@@ -108,6 +109,7 @@ export interface ICalkitSidebarProps {
   stateDB?: IStateDB | null;
   onStatusChange?: (needsAttention: boolean) => void;
   commands?: CommandRegistry;
+  onSetExpandPipelineCallback?: (callback: () => void) => void;
 }
 
 export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
@@ -115,6 +117,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   stateDB,
   onStatusChange,
   commands,
+  onSetExpandPipelineCallback,
 }) => {
   // Query hooks - automatically manage data fetching and caching
   const projectQuery = useProject();
@@ -287,6 +290,19 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   React.useEffect(() => {
     onStatusChange?.(needsAttention);
   }, [needsAttention, onStatusChange]);
+
+  // Set up callback to expand pipeline section
+  React.useEffect(() => {
+    if (onSetExpandPipelineCallback) {
+      onSetExpandPipelineCallback(() => {
+        setExpandedSections((prev) => {
+          const next = new Set(prev);
+          next.add("pipelineStages");
+          return next;
+        });
+      });
+    }
+  }, [onSetExpandPipelineCallback]);
 
   // Convert git status to selections
   const gitSelections: Record<string, { stage: boolean; storeInDvc: boolean }> =
@@ -563,6 +579,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   const handleRunPipeline = useCallback(async () => {
     setPipelineRunning(true);
     setPipelineError(null);
+    pipelineState.setRunning(true, "Running pipeline...");
     try {
       await requestAPI("pipeline/runs", {
         method: "POST",
@@ -578,11 +595,13 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       console.error("Failed to run pipeline:", error);
     } finally {
       setPipelineRunning(false);
+      pipelineState.setRunning(false);
     }
   }, []);
 
   const handleRunStage = useCallback(async (stageName: string) => {
     if (!stageName) return;
+    pipelineState.setRunning(true, `Running stage: ${stageName}`);
     try {
       await requestAPI("pipeline/runs", {
         method: "POST",
@@ -592,6 +611,8 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       await queryClient.invalidateQueries({ queryKey: ["pipelineStatus"] });
     } catch (error) {
       console.error("Failed to run stage:", error);
+    } finally {
+      pipelineState.setRunning(false);
     }
   }, []);
 
@@ -2056,6 +2077,8 @@ export class CalkitSidebarWidget extends ReactWidget {
   private _stateDB: IStateDB | null = null;
   private _commands: CommandRegistry | null = null;
   private _hasAttention = false;
+  private _expandPipelineSectionCallback: (() => void) | null = null;
+
   private _handleStatusChange = (needsAttention: boolean) => {
     if (this._hasAttention === needsAttention) {
       return;
@@ -2074,15 +2097,18 @@ export class CalkitSidebarWidget extends ReactWidget {
     this.title.className = Array.from(classes).join(" ");
     this.node.classList.toggle("calkit-sidebar-attention", needsAttention);
   };
+
   constructor() {
     super();
     this.addClass("calkit-sidebar-widget");
     this.title.className = "calkit-sidebar-tab";
   }
+
   setSettings(settings: ISettingRegistry.ISettings) {
     this._settings = settings;
     this.update();
   }
+
   setStateDB(stateDB: IStateDB) {
     this._stateDB = stateDB;
     this.update();
@@ -2093,6 +2119,14 @@ export class CalkitSidebarWidget extends ReactWidget {
     this.update();
   }
 
+  setExpandPipelineSectionCallback(callback: () => void) {
+    this._expandPipelineSectionCallback = callback;
+  }
+
+  expandPipelineSection = () => {
+    this._expandPipelineSectionCallback?.();
+  };
+
   render() {
     return (
       <QueryClientProvider client={queryClient}>
@@ -2101,6 +2135,9 @@ export class CalkitSidebarWidget extends ReactWidget {
           stateDB={this._stateDB}
           onStatusChange={this._handleStatusChange}
           commands={this._commands || undefined}
+          onSetExpandPipelineCallback={this.setExpandPipelineSectionCallback.bind(
+            this,
+          )}
         />
         {ReactDOM.createPortal(
           <ReactQueryDevtools initialIsOpen={false} />,

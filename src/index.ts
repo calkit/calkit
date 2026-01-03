@@ -6,6 +6,8 @@ import {
 
 import { WidgetTracker, IToolbarWidgetRegistry } from "@jupyterlab/apputils";
 
+import { IStatusBar } from "@jupyterlab/statusbar";
+
 import { Widget, Menu } from "@lumino/widgets";
 
 import { ILauncher } from "@jupyterlab/launcher";
@@ -31,6 +33,12 @@ import { calkitIcon } from "./icons";
 import { showCommitDialog } from "./components/commit-dialog";
 import { IGitStatus } from "./hooks/useQueries";
 import { isFeatureEnabled } from "./feature-flags";
+import { queryClient } from "./queryClient";
+import { PipelineStatusWidget } from "./components/pipeline-status-bar";
+import { pipelineState } from "./pipeline-state";
+
+// Import CSS
+import "../style/pipeline-status-bar.css";
 
 /**
  * Initialization data for the calkit extension.
@@ -49,6 +57,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     ITranslator,
     IFileBrowserFactory,
     IMainMenu,
+    IStatusBar,
   ],
   activate: (
     app: JupyterFrontEnd,
@@ -61,6 +70,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     translator: ITranslator | null,
     factory: IFileBrowserFactory | null,
     mainMenu: IMainMenu | null,
+    statusBar: IStatusBar | null,
   ) => {
     console.log("JupyterLab extension calkit is activated!");
 
@@ -138,9 +148,22 @@ const plugin: JupyterFrontEndPlugin<void> = {
         caption: "Run the current project's pipeline",
         execute: async () => {
           try {
-            await requestAPI("pipeline/run", { method: "POST" });
+            pipelineState.setRunning(true, "Running pipeline...");
+            await requestAPI("pipeline/runs", {
+              method: "POST",
+              body: JSON.stringify({ targets: [] }),
+            });
+            // Refetch pipeline status and project data
+            await queryClient.invalidateQueries({
+              queryKey: ["pipeline", "status"],
+            });
+            await queryClient.invalidateQueries({ queryKey: ["project"] });
           } catch (error) {
-            console.error("Failed to run pipeline:", error);
+            const errorMsg =
+              error instanceof Error ? error.message : String(error);
+            console.error("Failed to run pipeline:", errorMsg);
+          } finally {
+            pipelineState.setRunning(false);
           }
         },
       });
@@ -376,6 +399,29 @@ const plugin: JupyterFrontEndPlugin<void> = {
       } catch (e) {
         console.error("calkit: addContextMenuItems failed", e);
       }
+    }
+
+    // Add pipeline status indicator to status bar
+    if (statusBar) {
+      // Create a command to open sidebar to pipeline section
+      app.commands.addCommand("calkit:open-sidebar-pipeline", {
+        label: "Show pipeline status",
+        execute: () => {
+          app.shell.activateById(sidebar.id);
+          // Trigger sidebar to expand pipeline section
+          // This is handled via the sidebar's state management
+          sidebar.expandPipelineSection?.();
+        },
+      });
+
+      const pipelineStatusWidget = new PipelineStatusWidget(() => {
+        void app.commands.execute("calkit:open-sidebar-pipeline");
+      });
+      statusBar.registerStatusItem("calkit-pipeline-status", {
+        item: pipelineStatusWidget,
+        align: "left",
+        priority: 10,
+      });
     }
 
     if (settingRegistry) {

@@ -1,0 +1,88 @@
+/* Pipeline Status Bar Styles */
+
+.calkit-pipeline-status {
+  display: flex;
+  align-items: center;
+  margin-right: 8px;
+}
+
+.calkit-status-bar-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 3px;
+  transition: background-color 0.2s ease;
+}
+
+.calkit-status-bar-item:hover {
+  background-color: rgba(0, 0, 0, 0.08);
+}
+
+.jp-DarkMode .calkit-status-bar-item:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.calkit-status-indicator {
+  font-size: 8px;
+  display: inline-block;
+}
+
+.calkit-status-indicator.uptodate {
+  color: #4caf50;
+  animation: none;
+}
+
+.calkit-status-indicator.stale {
+  color: #ff9800;
+  animation: calkit-pulse 1s infinite;
+}
+
+.calkit-status-indicator.error {
+  color: #f44336;
+  animation: calkit-pulse 0.6s infinite;
+}
+
+.calkit-status-indicator.running {
+  color: #2196f3;
+  animation: calkit-spin 1.5s linear infinite;
+  display: inline-block;
+}
+
+.calkit-status-label {
+  color: var(--jp-ui-font-color1);
+  user-select: none;
+  cursor: default;
+}
+
+@keyframes calkit-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes calkit-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Dark mode adjustments */
+.jp-DarkMode .calkit-status-label {
+  color: rgba(255, 255, 255, 0.87);
+}
+
+/* Light mode adjustments */
+.jp-LightMode .calkit-status-label {
+  color: rgba(0, 0, 0, 0.87);
+}

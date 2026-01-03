@@ -22,6 +22,9 @@ import {
   useNotebooks,
   useDeleteEnvironment,
   usePipelineStatus,
+  useDependencies,
+  useInstallDependency,
+  type IDependencyItem,
   type IProjectInfo,
   type IGitStatus,
 } from "../hooks/useQueries";
@@ -55,6 +58,7 @@ interface ISectionDefinition {
 
 const SECTION_DEFS: ISectionDefinition[] = [
   { id: "basicInfo", label: "Basic info", icon: "ℹ️", toggleable: false },
+  { id: "setup", label: "Setup", icon: "🛠️" },
   { id: "environments", label: "Environments", icon: "⚙️" },
   { id: "pipelineStages", label: "Pipeline", icon: "🔄" },
   { id: "notebooks", label: "Notebooks", icon: "📓" },
@@ -74,6 +78,7 @@ const SECTION_DEFS: ISectionDefinition[] = [
   // Filter out sections based on feature flags
   const featureMap: Record<string, string> = {
     basicInfo: "basicInfo",
+    setup: "setup",
     environments: "environments",
     pipelineStages: "pipelineStages",
     notebooks: "notebooks",
@@ -123,6 +128,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   const projectQuery = useProject();
   const gitStatusQuery = useGitStatus();
   const pipelineStatusQuery = usePipelineStatus();
+  const dependenciesQuery = useDependencies();
   const gitHistoryQuery = useGitHistory();
   const notebooksQuery = useNotebooks();
 
@@ -130,6 +136,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   const createNotebookMutation = useCreateNotebook();
   const registerNotebookMutation = useRegisterNotebook();
   const addPackageMutation = useAddPackage();
+  const installDependencyMutation = useInstallDependency();
   const createEnvironmentMutation = useCreateEnvironment();
   const commitMutation = useCommit();
   const pushMutation = usePush();
@@ -137,7 +144,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
 
   // Local UI state
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
-    new Set(["basicInfo", "environments", "notebooks"]),
+    new Set(["setup", "basicInfo", "environments", "notebooks"]),
   );
   const [expandedEnvironments, setExpandedEnvironments] = useState<Set<string>>(
     new Set(),
@@ -147,6 +154,9 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   );
   const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set());
   const [newPackage, setNewPackage] = useState<Record<string, string>>({});
+  const [installingDependency, setInstallingDependency] = useState<
+    string | null
+  >(null);
   const [envContextMenu, setEnvContextMenu] = useState<{
     visible: boolean;
     x: number;
@@ -182,10 +192,23 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   // Transform project data into section data
   const transformProjectData = useCallback((info: IProjectInfo | undefined) => {
     if (!info) {
-      return {};
+      return {
+        setup: [] as IDependencyItem[],
+        environments: [] as ISectionItem[],
+        pipelineStages: [] as ISectionItem[],
+        notebooks: [] as ISectionItem[],
+        datasets: [] as ISectionItem[],
+        questions: [] as ISectionItem[],
+        models: [] as ISectionItem[],
+        figures: [] as ISectionItem[],
+        history: [] as ISectionItem[],
+        publications: [] as ISectionItem[],
+        notes: [] as ISectionItem[],
+      };
     }
 
     return {
+      setup: [] as IDependencyItem[],
       environments: Object.entries(info.environments || {}).map(
         ([name, obj]) => ({
           id: name,
@@ -238,6 +261,12 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
 
   const sectionData = transformProjectData(projectQuery.data);
 
+  if (dependenciesQuery.data) {
+    sectionData.setup = dependenciesQuery.data as IDependencyItem[];
+  } else {
+    sectionData.setup = [];
+  }
+
   // Override notebooks with enriched data from /notebooks endpoint that includes stage info
   if (notebooksQuery.data && Array.isArray(notebooksQuery.data)) {
     sectionData.notebooks = notebooksQuery.data.map((nb: any) => ({
@@ -285,7 +314,28 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     (gitStatus.changed?.length || 0) > 0 ||
     (gitStatus.untracked?.length || 0) > 0 ||
     (gitStatus.staged?.length || 0) > 0;
-  const needsAttention = hasPipelineIssues || hasGitChanges;
+  const dependenciesList = (sectionData.setup || []) as IDependencyItem[];
+  const outstandingDependencies = dependenciesList.filter((dep) => {
+    if (dep.required === false) {
+      return false;
+    }
+    const status = (dep.status || "").toLowerCase();
+    const isHealthy =
+      status === "ok" ||
+      status === "ready" ||
+      status === "installed" ||
+      dep.installed === true;
+    const missingEnv = dep.env_var ? !dep.value : false;
+    const missing =
+      dep.installed === false ||
+      dep.configured === false ||
+      Boolean(dep.missing_reason) ||
+      missingEnv;
+    return missing || !isHealthy;
+  });
+  const outstandingSetupCount = outstandingDependencies.length;
+  const needsAttention =
+    hasPipelineIssues || hasGitChanges || outstandingSetupCount > 0;
 
   React.useEffect(() => {
     onStatusChange?.(needsAttention);
@@ -488,6 +538,23 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       }
     },
     [newPackage, addPackageMutation],
+  );
+
+  const handleInstallDependency = useCallback(
+    async (dep: IDependencyItem) => {
+      if (!dep.installable) {
+        return;
+      }
+      setInstallingDependency(dep.name);
+      try {
+        await installDependencyMutation.mutateAsync(dep.name);
+      } catch (error) {
+        console.error("Failed to install dependency:", error);
+      } finally {
+        setInstallingDependency(null);
+      }
+    },
+    [installDependencyMutation],
   );
 
   const handleNewPackageChange = useCallback(
@@ -1336,7 +1403,11 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
         sectionId === "pipelineStages";
       const showEditButton = sectionId === "basicInfo";
       const newCount =
-        sectionId === "history" ? (gitStatus.untracked || []).length : 0;
+        sectionId === "history"
+          ? (gitStatus.untracked || []).length
+          : sectionId === "setup"
+          ? outstandingSetupCount
+          : 0;
       const modifiedCount =
         sectionId === "history"
           ? new Set([...(gitStatus.changed || []), ...(gitStatus.staged || [])])
@@ -1422,6 +1493,18 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                     {pullCount}
                   </span>
                 )}
+              </span>
+            )}
+            {sectionId === "setup" && newCount > 0 && (
+              <span className="calkit-status-chips">
+                <span
+                  className="calkit-status-chip stale"
+                  title={`${newCount} setup item${
+                    newCount === 1 ? "" : "s"
+                  } need attention`}
+                >
+                  {newCount}
+                </span>
               </span>
             )}
             {showEditButton && (
@@ -1584,6 +1667,98 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                   )}
                 </span>
               </div>
+            </div>
+          )}
+          {isExpanded && sectionId === "setup" && (
+            <div className="calkit-sidebar-section-content">
+              {dependenciesQuery.isPending && (
+                <div className="calkit-sidebar-section-empty">Loading...</div>
+              )}
+              {!dependenciesQuery.isPending &&
+                dependenciesList.length === 0 && (
+                  <div className="calkit-sidebar-section-empty">All set!</div>
+                )}
+              {!dependenciesQuery.isPending && dependenciesList.length > 0 && (
+                <div className="calkit-setup-list">
+                  {dependenciesList.map((dep) => {
+                    const status = (dep.status || "").toLowerCase();
+                    const isOk =
+                      status === "ok" ||
+                      status === "ready" ||
+                      status === "installed" ||
+                      dep.installed === true;
+                    const needsEnv = dep.env_var && !dep.value;
+                    const missing =
+                      dep.installed === false ||
+                      dep.configured === false ||
+                      Boolean(dep.missing_reason) ||
+                      needsEnv;
+                    const showWarning = missing || !isOk;
+                    return (
+                      <div
+                        key={dep.name}
+                        className={`calkit-setup-item${
+                          showWarning ? " warning" : ""
+                        }`}
+                      >
+                        <div className="calkit-setup-main">
+                          <div className="calkit-setup-name">{dep.name}</div>
+                          <div className="calkit-setup-kind">{dep.kind}</div>
+                        </div>
+                        <div className="calkit-setup-status">
+                          {showWarning ? (
+                            <span className="calkit-setup-chip warning">
+                              Needs setup
+                            </span>
+                          ) : (
+                            <span className="calkit-setup-chip ok">OK</span>
+                          )}
+                          {dep.version && (
+                            <span className="calkit-setup-version">
+                              {dep.version}
+                            </span>
+                          )}
+                          {dep.missing_reason && (
+                            <div className="calkit-setup-message">
+                              {dep.missing_reason}
+                            </div>
+                          )}
+                          {needsEnv && dep.env_var && (
+                            <div className="calkit-setup-message">
+                              Set {dep.env_var} in .env
+                            </div>
+                          )}
+                        </div>
+                        <div className="calkit-setup-actions">
+                          {dep.installable && (
+                            <button
+                              className="calkit-setup-install"
+                              disabled={installingDependency === dep.name}
+                              onClick={() => handleInstallDependency(dep)}
+                            >
+                              {installingDependency === dep.name
+                                ? "Installing..."
+                                : "Install"}
+                            </button>
+                          )}
+                          {dep.env_var && (
+                            <button
+                              className="calkit-setup-install"
+                              onClick={() => {
+                                navigator.clipboard?.writeText(
+                                  dep.env_var || "",
+                                );
+                              }}
+                            >
+                              Copy env var
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
           {isExpanded && sectionId === "history" && (

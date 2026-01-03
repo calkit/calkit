@@ -48,6 +48,21 @@ export interface IGitHistory {
   commits: IGitCommit[];
 }
 
+export interface IDependencyItem {
+  name: string;
+  kind: string;
+  status?: string;
+  installed?: boolean;
+  configured?: boolean;
+  required?: boolean;
+  installable?: boolean;
+  version?: string;
+  missing_reason?: string;
+  message?: string;
+  env_var?: string;
+  value?: string | null;
+}
+
 /**
  * Types for notebooks list
  */
@@ -89,6 +104,18 @@ export const usePipelineStatus = () => {
     queryFn: () => requestAPI<IPipelineStatus>("pipeline/status"),
     staleTime: 10 * 1000,
     refetchInterval: 5000, // Refetch every 5 seconds
+  });
+};
+
+/**
+ * Query hook for fetching dependency/setup status
+ */
+export const useDependencies = () => {
+  return useQuery<IDependencyItem[]>({
+    queryKey: ["dependencies"],
+    queryFn: () => requestAPI<IDependencyItem[]>("dependencies"),
+    staleTime: 15 * 1000,
+    refetchInterval: 10000,
   });
 };
 
@@ -168,6 +195,24 @@ export const useAddPackage = () => {
     onSuccess: () => {
       // Invalidate project query to refetch environments
       void queryClient.invalidateQueries({ queryKey: ["project"] });
+    },
+  });
+};
+
+/**
+ * Mutation hook for installing a dependency via the backend
+ */
+export const useInstallDependency = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (name: string) =>
+      requestAPI("install", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["dependencies"] });
     },
   });
 };

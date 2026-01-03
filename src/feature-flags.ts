@@ -30,6 +30,9 @@ export interface IFeatureFlags {
   /** Git history, commit, and sync operations */
   history: boolean;
 
+  /** Project setup and dependency checks */
+  setup: boolean;
+
   /** Publication tracking and management */
   publications: boolean;
 
@@ -61,6 +64,7 @@ export interface IFeatureFlags {
  * - pipelineStages: Pipeline creation, editing, and execution
  * - notebooks: Notebook lifecycle management
  * - history: Git operations and commit history
+ * - setup: Dependency checks and setup guidance
  * - cellOutputMarking: Mark notebook cell outputs
  * - fileBrowserMenu: File browser context menus
  * - notebookToolbar: Notebook toolbar items
@@ -81,6 +85,7 @@ export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   pipelineStages: true,
   notebooks: true,
   history: true,
+  setup: true,
   notebookToolbar: true,
 
   // Incomplete features - disabled by default

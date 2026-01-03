@@ -466,6 +466,99 @@
   margin-left: 6px;
 }
 
+/* Setup section */
+.calkit-setup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.calkit-setup-item {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.calkit-setup-item.warning {
+  border-color: #ff9800;
+  background: #fff8e1;
+}
+
+.calkit-setup-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.calkit-setup-name {
+  font-weight: 600;
+}
+
+.calkit-setup-kind {
+  font-size: 12px;
+  color: #666;
+}
+
+.calkit-setup-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.calkit-setup-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.calkit-setup-chip.ok {
+  background: #4caf50;
+  color: white;
+}
+
+.calkit-setup-chip.warning {
+  background: #ff9800;
+  color: white;
+}
+
+.calkit-setup-version {
+  font-size: 12px;
+  color: #444;
+}
+
+.calkit-setup-message {
+  font-size: 12px;
+  color: #d84315;
+}
+
+.calkit-setup-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.calkit-setup-install {
+  border: 1px solid #1976d2;
+  background: #1976d2;
+  color: white;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.calkit-setup-install:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .calkit-sidebar-section-save {
   font-size: 11px;
   width: 18px;

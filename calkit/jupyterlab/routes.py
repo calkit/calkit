@@ -197,12 +197,86 @@ class NotebooksRouteHandler(APIHandler):
             )
             return
         notebook_path = body.get("path")
+        notebook_title = body.get("title")
+        notebook_description = body.get("description")
+        notebook_env = body.get("environment")
+        stage_name = body.get("stage")
         if not notebook_path:
             self.set_status(400)
             self.finish(
                 json.dumps({"error": "Request body must include 'path'"})
             )
             return
+        self.log.info(f"Received request to add notebook: {notebook_path}")
+        ck_info = calkit.load_calkit_info()
+        if notebook_env and notebook_env not in ck_info.get(
+            "environments", {}
+        ):
+            self.set_status(400)
+            self.finish(
+                {"error": f"Environment '{notebook_env}' does not exist"}
+            )
+            return
+        # Create a directory for the notebook if necessary
+        notebook_dir = os.path.dirname(notebook_path)
+        if notebook_dir:
+            os.makedirs(notebook_dir, exist_ok=True)
+        notebook_path = Path(notebook_path).as_posix()
+        nb_paths = [nb.get("path") for nb in ck_info.get("notebooks", [])]
+        if notebook_path not in nb_paths:
+            # Add notebook entry
+            if "notebooks" not in ck_info:
+                ck_info["notebooks"] = []
+            nb = {
+                "path": notebook_path,
+                "title": notebook_title,
+                "description": notebook_description,
+            }
+            if stage_name:
+                nb["stage"] = stage_name
+            elif notebook_env:
+                nb["environment"] = notebook_env
+            ck_info["notebooks"].append(nb)
+            # Write back to calkit.yaml
+            with open("calkit.yaml", "w") as f:
+                calkit.ryaml.dump(ck_info, f)
+            self.log.info(f"Added notebook '{notebook_path}' successfully")
+        if stage_name:
+            pipeline = ck_info.get("pipeline", {})
+            existing_stages = pipeline.get("stages", {})
+            if not notebook_env:
+                self.set_status(400)
+                self.finish(
+                    json.dumps(
+                        {"error": "Stage must have an environment defined"}
+                    )
+                )
+                return
+            if stage_name in existing_stages:
+                self.set_status(400)
+                self.finish(
+                    json.dumps(
+                        {"error": f"Stage '{stage_name}' already exists"}
+                    )
+                )
+                return
+            stage = {
+                "kind": "jupyter-notebook",
+                "notebook_path": notebook_path,
+                "environment": notebook_env,
+            }
+            inputs = body.get("inputs", [])
+            if inputs:
+                stage["inputs"] = inputs
+            outputs = body.get("outputs", [])
+            if outputs:
+                stage["outputs"] = outputs
+            existing_stages[stage_name] = stage
+            pipeline["stages"] = existing_stages
+            ck_info["pipeline"] = pipeline
+            with open("calkit.yaml", "w") as f:
+                calkit.ryaml.dump(ck_info, f)
+        self.finish(json.dumps(ck_info))
 
 
 class NotebookEnvironmentRouteHandler(APIHandler):

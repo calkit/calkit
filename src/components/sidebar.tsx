@@ -5,8 +5,8 @@ import type { CommandRegistry } from "@lumino/commands";
 import { launchIcon } from "@jupyterlab/ui-components";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
-import { queryClient } from "./queryClient";
-import { requestAPI } from "./request";
+import { queryClient } from "../queryClient";
+import { requestAPI } from "../request";
 import type { ISettingRegistry } from "@jupyterlab/settingregistry";
 import type { IStateDB } from "@jupyterlab/statedb";
 import {
@@ -24,18 +24,18 @@ import {
   usePipelineStatus,
   type IProjectInfo,
   type IGitStatus,
-} from "./hooks/useQueries";
-import { showEnvironmentEditor } from "./components/environment-editor";
-import { showNotebookRegistration } from "./components/notebook-registration";
-import { showProjectInfoEditor } from "./components/project-info-editor";
-import { showCommitDialog } from "./components/commit-dialog";
+} from "../hooks/useQueries";
+import { showEnvironmentEditor } from "./environment-editor";
+import { showNotebookRegistration } from "./notebook-registration";
+import { showProjectInfoEditor } from "./project-info-editor";
+import { showCommitDialog } from "./commit-dialog";
 import {
   showStageEditorDialog,
   STAGE_KIND_OPTIONS,
   type StageEditorResult,
-} from "./components/stage-editor";
-import { isFeatureEnabled } from "./feature-flags";
-import { pipelineState } from "./pipeline-state";
+} from "./stage-editor";
+import { isFeatureEnabled } from "../feature-flags";
+import { pipelineState } from "../pipeline-state";
 
 interface ISectionItem {
   id: string;
@@ -88,7 +88,7 @@ const SECTION_DEFS: ISectionDefinition[] = [
   const featureName = featureMap[section.id];
   return featureName
     ? isFeatureEnabled(
-        featureName as keyof import("./feature-flags").IFeatureFlags,
+        featureName as keyof import("../feature-flags").IFeatureFlags,
       )
     : true;
 });

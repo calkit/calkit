@@ -25,7 +25,7 @@ import { Cell } from "@jupyterlab/cells";
 import { IMainMenu } from "@jupyterlab/mainmenu";
 
 import { requestAPI } from "./request";
-import { CalkitSidebarWidget } from "./sidebar";
+import { CalkitSidebarWidget } from "./components/sidebar";
 import { createOutputMarkerButton } from "./cell-output-marker";
 import { addCommands, addContextMenuItems } from "./file-browser-menu";
 import { createNotebookToolbar } from "./components/notebook-toolbar";

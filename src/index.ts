@@ -30,6 +30,7 @@ import { createNotebookToolbar } from "./components/notebook-toolbar";
 import { calkitIcon } from "./icons";
 import { showCommitDialog } from "./components/commit-dialog";
 import { IGitStatus } from "./hooks/useQueries";
+import { isFeatureEnabled } from "./feature-flags";
 
 /**
  * Initialization data for the calkit extension.
@@ -98,7 +99,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     });
 
     // Register cell toolbar button for marking outputs
-    if (toolbarRegistry) {
+    if (toolbarRegistry && isFeatureEnabled("cellOutputMarking")) {
       toolbarRegistry.addFactory("Cell", "calkit-output-marker", (widget) => {
         // Only add to code cells
         const cell = widget as Cell;
@@ -325,8 +326,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
       calkitMenu.title.label = "Calkit";
       calkitMenu.addItem({ command: "calkit:run-pipeline" });
       calkitMenu.addItem({ command: "calkit:new-notebook" });
-      calkitMenu.addItem({ command: "calkit:new-pipeline-stage" });
-      calkitMenu.addItem({ command: "calkit:new-publication" });
+      if (isFeatureEnabled("pipelineStages")) {
+        calkitMenu.addItem({ command: "calkit:new-pipeline-stage" });
+      }
+      if (isFeatureEnabled("publications")) {
+        calkitMenu.addItem({ command: "calkit:new-publication" });
+      }
       calkitMenu.addItem({ command: "calkit:save-project" });
       calkitMenu.addItem({ type: "separator" });
       calkitMenu.addItem({ command: "calkit:open-sidebar" });
@@ -335,28 +340,32 @@ const plugin: JupyterFrontEndPlugin<void> = {
     }
 
     // Add Calkit launcher items
-    if (launcher) {
+    if (launcher && isFeatureEnabled("launcherItems")) {
       launcher.add({
         command: "calkit:new-notebook",
         category: "Calkit",
         rank: 1,
       });
 
-      launcher.add({
-        command: "calkit:new-pipeline-stage",
-        category: "Calkit",
-        rank: 2,
-      });
+      if (isFeatureEnabled("pipelineStages")) {
+        launcher.add({
+          command: "calkit:new-pipeline-stage",
+          category: "Calkit",
+          rank: 2,
+        });
+      }
 
-      launcher.add({
-        command: "calkit:new-publication",
-        category: "Calkit",
-        rank: 3,
-      });
+      if (isFeatureEnabled("publications")) {
+        launcher.add({
+          command: "calkit:new-publication",
+          category: "Calkit",
+          rank: 3,
+        });
+      }
     }
 
     // Add file browser context menu items
-    if (factory) {
+    if (factory && isFeatureEnabled("fileBrowserMenu")) {
       try {
         addCommands(app, factory, translator || undefined);
       } catch (e) {

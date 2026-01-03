@@ -34,6 +34,7 @@ import {
   STAGE_KIND_OPTIONS,
   type StageEditorResult,
 } from "./components/stage-editor";
+import { isFeatureEnabled } from "./feature-flags";
 
 interface ISectionItem {
   id: string;
@@ -68,7 +69,28 @@ const SECTION_DEFS: ISectionDefinition[] = [
   },
   { id: "notes", label: "Notes", icon: "📝", defaultVisible: false },
   { id: "models", label: "Models", icon: "🤖", defaultVisible: false },
-];
+].filter((section) => {
+  // Filter out sections based on feature flags
+  const featureMap: Record<string, string> = {
+    basicInfo: "basicInfo",
+    environments: "environments",
+    pipelineStages: "pipelineStages",
+    notebooks: "notebooks",
+    figures: "figures",
+    datasets: "datasets",
+    questions: "questions",
+    history: "history",
+    publications: "publications",
+    notes: "notes",
+    models: "models",
+  };
+  const featureName = featureMap[section.id];
+  return featureName
+    ? isFeatureEnabled(
+        featureName as keyof import("./feature-flags").IFeatureFlags,
+      )
+    : true;
+});
 
 const DEFAULT_VISIBLE_SECTIONS = new Set(
   SECTION_DEFS.filter(

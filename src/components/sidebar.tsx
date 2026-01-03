@@ -185,7 +185,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
   const [expandedGitSubsections, setExpandedGitSubsections] = useState<
     Set<string>
-  >(new Set(["modified", "untracked", "history"]));
+  >(new Set(["modified", "staged", "untracked", "history"]));
   const [pipelineRunning, setPipelineRunning] = useState(false);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
 
@@ -1805,6 +1805,47 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                   </div>
                 )}
 
+                {/* Staged files subsection */}
+                {(gitStatus.staged?.length || 0) > 0 && (
+                  <div className="calkit-git-subsection">
+                    <div
+                      className="calkit-git-subsection-header"
+                      onClick={() => {
+                        setExpandedGitSubsections((prev) => {
+                          const next = new Set(prev);
+                          if (next.has("staged")) {
+                            next.delete("staged");
+                          } else {
+                            next.add("staged");
+                          }
+                          return next;
+                        });
+                      }}
+                    >
+                      <span className="calkit-git-subsection-icon">
+                        {expandedGitSubsections.has("staged") ? "▼" : "▶"}
+                      </span>
+                      <span className="calkit-git-subsection-title">
+                        Staged ({gitStatus.staged?.length || 0})
+                      </span>
+                    </div>
+                    {expandedGitSubsections.has("staged") && (
+                      <div className="calkit-git-subsection-items">
+                        {gitStatus.staged?.slice(0, 10).map((path: string) => (
+                          <div key={path} className="calkit-git-file-item">
+                            {path}
+                          </div>
+                        ))}
+                        {(gitStatus.staged?.length || 0) > 10 && (
+                          <div className="calkit-git-file-more">
+                            +{(gitStatus.staged?.length || 0) - 10} more
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Untracked files subsection */}
                 {(gitStatus.untracked?.length || 0) > 0 && (
                   <div className="calkit-git-subsection">
@@ -1850,6 +1891,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
 
                 {/* No changes message */}
                 {(gitStatus.changed?.length || 0) === 0 &&
+                  (gitStatus.staged?.length || 0) === 0 &&
                   (gitStatus.untracked?.length || 0) === 0 && (
                     <div className="calkit-sidebar-section-empty">
                       No changes

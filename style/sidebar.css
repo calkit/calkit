@@ -633,7 +633,7 @@
 }
 
 .calkit-git-history-item {
-  padding: 4px 24px;
+  padding: 4px 24px 4px 48px;
   margin: 0;
   font-size: 11px;
   color: var(--jp-ui-font-color1);
@@ -683,7 +683,7 @@
 }
 
 .calkit-git-file-item {
-  padding: 4px 24px;
+  padding: 4px 24px 4px 48px;
   font-size: 11px;
   color: var(--jp-ui-font-color1);
   line-height: 1.4;
@@ -693,7 +693,7 @@
 }
 
 .calkit-git-file-more {
-  padding: 4px 24px;
+  padding: 4px 24px 4px 48px;
   font-size: 10px;
   color: var(--jp-ui-font-color2);
   font-style: italic;

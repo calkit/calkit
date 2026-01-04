@@ -368,10 +368,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   );
 
   const gitHistory = gitHistoryQuery.data?.commits || [];
-  const isLoading =
-    projectQuery.isPending ||
-    gitStatusQuery.isPending ||
-    gitHistoryQuery.isPending;
 
   const toggleSection = useCallback((sectionId: string) => {
     setExpandedSections((prev) => {
@@ -2006,17 +2002,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       handleCommit,
     ],
   );
-
-  if (isLoading) {
-    return (
-      <div className="calkit-sidebar">
-        <div className="calkit-sidebar-header" />
-        <div className="calkit-sidebar-content">
-          <div className="calkit-sidebar-section-empty">Loading...</div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="calkit-sidebar">

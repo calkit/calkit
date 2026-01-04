@@ -1285,6 +1285,58 @@ class SystemRouteHandler(APIHandler):
         self.finish(json.dumps(info))
 
 
+class SetupRouteHandler(APIHandler):
+    @tornado.web.authenticated
+    def get(self):
+        """Get system setup info.
+
+        This includes project and system requirements.
+
+        ## System-level requirements
+
+        1. Git installed.
+        2. Git user.name set.
+        3. Git user.email set.
+        4. Calkit token set.
+
+        ## Project-level
+
+        1. Git remote set.
+        2. DVC remote set.
+        3. Git auth set.
+        4. Calkit/DVC auth set.
+        5. System-level project dependencies.
+        6. Environmental variables.
+
+        Indicate if these can be addressed programmatically or if they must
+        be done with a URL.
+
+        Response looks like a list of:
+
+            kind: app | env-var | config
+            name: str
+            okay: bool
+            value: str | float | int | bool | None
+            programmatic: bool
+            url: str | None
+            instructions: str | None
+        """
+        pass
+
+    @tornado.web.authenticated
+    def post(self):
+        """Take action to address a setup requirement.
+
+        Body looks like:
+
+            requirement:
+              kind: app | env-var | config
+              name: str
+            value: str | None
+        """
+        pass
+
+
 def setup_route_handlers(web_app):
     host_pattern = ".*$"
     base_url = web_app.settings["base_url"]

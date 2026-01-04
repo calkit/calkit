@@ -608,6 +608,7 @@ def get_system_info() -> dict:
         pass
     # Get versions of important foundational dependencies
     for dep in [
+        "git",
         "docker",
         "conda",
         "mamba",
@@ -618,6 +619,16 @@ def get_system_info() -> dict:
         "julia",
     ]:
         system_info[f"{dep}_version"] = get_dep_version(dep)
+    # OS-specific app versions
+    if os_name == "Darwin":
+        for dep in ["brew", "port"]:
+            system_info[f"{dep}_version"] = get_dep_version(dep)
+    elif os_name == "Linux":
+        for dep in ["apt", "yum"]:
+            system_info[f"{dep}_version"] = get_dep_version(dep)
+    elif os_name == "Windows":
+        for dep in ["choco", "winget"]:
+            system_info[f"{dep}_version"] = get_dep_version(dep)
     system_info_str = json.dumps(system_info, sort_keys=True).encode()
     system_info["id"] = hashlib.sha1(system_info_str).hexdigest()
     return system_info

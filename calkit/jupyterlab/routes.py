@@ -1277,6 +1277,14 @@ class EnvironmentsRouteHandler(APIHandler):
         self.finish(json.dumps({"message": "New environment created"}))
 
 
+class SystemRouteHandler(APIHandler):
+    @tornado.web.authenticated
+    def get(self):
+        """Get system information."""
+        info = calkit.get_system_info()
+        self.finish(json.dumps(info))
+
+
 def setup_route_handlers(web_app):
     host_pattern = ".*$"
     base_url = web_app.settings["base_url"]

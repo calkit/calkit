@@ -390,7 +390,7 @@ class MatlabScriptStage(Stage):
     def dvc_cmd(self) -> str:
         cmd = self.xenv_cmd
         if self.environment == "_system":
-            cmd += "matlab -batch \""
+            cmd += 'matlab -batch "'
         if self.matlab_path is not None:
             cmd += f"addpath(genpath('{self.matlab_path}')); "
         cmd += f"run('{self.script_path}');\""

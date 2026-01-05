@@ -11,6 +11,7 @@ from calkit.models.pipeline import (
     LatexStage,
     MapPathsStage,
     MatlabCommandStage,
+    MatlabScriptStage,
     PythonScriptStage,
     SBatchStage,
     StageIteration,
@@ -196,7 +197,11 @@ def test_matlabscriptstage():
     )
     sd = s.to_dvc()
     print(sd)
-    assert sd["cmd"] == 'matlab -batch "addpath(genpath(\'scripts\')); run(\'scripts/my_script.m\');"'
+    assert (
+        sd["cmd"]
+        == "matlab -batch \"addpath(genpath('scripts')); run('scripts/my_script.m');\""
+    )
+
 
 def test_sbatchstage():
     s = SBatchStage(

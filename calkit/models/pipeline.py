@@ -380,6 +380,7 @@ class JsonToLatexStage(Stage):
 class MatlabScriptStage(Stage):
     kind: Literal["matlab-script"]
     script_path: str
+    matlab_path: str | None = None
 
     @property
     def dvc_deps(self) -> list[str]:
@@ -389,8 +390,10 @@ class MatlabScriptStage(Stage):
     def dvc_cmd(self) -> str:
         cmd = self.xenv_cmd
         if self.environment == "_system":
-            cmd += "matlab -batch"
-        cmd += f" \"run('{self.script_path}');\""
+            cmd += "matlab -batch \""
+        if self.matlab_path is not None:
+            cmd += f"addpath(genpath('{self.matlab_path}')); "
+        cmd += f"run('{self.script_path}');\""
         return cmd
 
 

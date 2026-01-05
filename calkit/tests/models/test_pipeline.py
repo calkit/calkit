@@ -186,6 +186,18 @@ def test_matlabcommandstage():
     assert sd["cmd"] == 'matlab -batch "disp(\\"Hello, MATLAB!\\");"'
 
 
+def test_matlabscriptstage():
+    s = MatlabScriptStage(
+        name="a",
+        kind="matlab-script",
+        environment="_system",
+        script_path="scripts/my_script.m",
+        matlab_path="scripts",
+    )
+    sd = s.to_dvc()
+    print(sd)
+    assert sd["cmd"] == 'matlab -batch "addpath(genpath(\'scripts\')); run(\'scripts/my_script.m\');"'
+
 def test_sbatchstage():
     s = SBatchStage(
         name="job1",

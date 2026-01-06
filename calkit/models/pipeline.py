@@ -198,18 +198,18 @@ def validate_relative_and_child_of_cwd(s: str) -> str:
     # 1. Enforce that the path is relative
     if p.is_absolute():
         raise ValueError(f"Path must be relative: {p}")
-    # 2. Enforce that the path is a child of the CWD
-    cwd = Path.cwd()
-    # Resolve the path relative to CWD to get a full path for comparison
-    absolute_path = (cwd / p).resolve()
-    # Check if the absolute path starts with the CWD, ensuring it's a child
+    # 2. Enforce that the path is a child of the (resolved) CWD
+    cwd = Path.cwd().resolve()
+    # Resolve the path relative to the resolved CWD to get a full path for comparison
+    absolute_path = (cwd / p).resolve(strict=False)
+    # Check if the absolute path starts with the resolved CWD, ensuring it's a child
     try:
         absolute_path.relative_to(cwd)
     except ValueError:
         raise ValueError(
             f"Path is not a child of the current working directory: {p}"
         )
-    return str(p)
+    return p.as_posix()
 
 
 RelativeChildPathString = Annotated[

@@ -201,8 +201,14 @@ def test_matlabscriptstage():
         sd["cmd"]
         == "matlab -batch \"addpath(genpath('scripts')); run('scripts/my_script.m');\""
     )
-    with pytest.raises(ValidationError): # from pydantic import ValidationError
-        s = MatlabScriptStage(..., matlab_path="/some/abs/path")
+    with pytest.raises(ValidationError):
+        s = MatlabScriptStage(
+            name="b",
+            kind="matlab-script",
+            environment="_system",
+            script_path="scripts/my_script.m",
+            matlab_path="/some/abs/path",
+        )
 
 
 def test_sbatchstage():

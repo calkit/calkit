@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Discriminator,
@@ -28,6 +29,32 @@ from calkit.notebooks import (
     get_cleaned_notebook_path,
     get_executed_notebook_path,
 )
+
+
+def _check_path_relative_and_child_of_cwd(s: str) -> str:
+    p = Path(s)
+    # Enforce that the path is relative
+    if p.is_absolute():
+        raise ValueError(f"Path must be relative: {p}")
+    # Enforce that the path is a child of the (resolved) CWD
+    cwd = Path.cwd().resolve()
+    # Resolve the path relative to the resolved CWD to get a full path for
+    # comparison
+    absolute_path = p.resolve(strict=False)
+    # Check if the absolute path starts with the resolved CWD, ensuring it's a
+    # child
+    try:
+        absolute_path.relative_to(cwd)
+    except ValueError:
+        raise ValueError(
+            f"Path is not a child of the current working directory: {p}"
+        )
+    return p.as_posix()
+
+
+RelativeChildPathString = Annotated[
+    str, AfterValidator(_check_path_relative_and_child_of_cwd)
+]
 
 
 class StageIteration(BaseModel):
@@ -194,7 +221,7 @@ class Stage(BaseModel):
 
 class PythonScriptStage(Stage):
     kind: Literal["python-script"] = "python-script"
-    script_path: str
+    script_path: RelativeChildPathString
     args: list[str] = []
 
     @property
@@ -379,7 +406,8 @@ class JsonToLatexStage(Stage):
 
 class MatlabScriptStage(Stage):
     kind: Literal["matlab-script"]
-    script_path: str
+    script_path: RelativeChildPathString
+    matlab_path: RelativeChildPathString | None = None
 
     @property
     def dvc_deps(self) -> list[str]:
@@ -390,7 +418,11 @@ class MatlabScriptStage(Stage):
         cmd = self.xenv_cmd
         if self.environment == "_system":
             cmd += "matlab -batch"
-        cmd += f" \"run('{self.script_path}');\""
+        matlab_cmd = ""
+        if self.matlab_path is not None:
+            matlab_cmd += f"addpath(genpath('{self.matlab_path}')); "
+        matlab_cmd += f"run('{self.script_path}');"
+        cmd += f' "{matlab_cmd}"'
         return cmd
 
 
@@ -428,7 +460,7 @@ class ShellCommandStage(Stage):
 
 class ShellScriptStage(Stage):
     kind: Literal["shell-script"]
-    script_path: str
+    script_path: RelativeChildPathString
     args: list[str] = []
     shell: Literal["sh", "bash", "zsh"] = "bash"
 
@@ -460,7 +492,7 @@ class DockerCommandStage(Stage):
 
 class RScriptStage(Stage):
     kind: Literal["r-script"]
-    script_path: str
+    script_path: RelativeChildPathString
     args: list[str] = []
 
     @property
@@ -479,7 +511,7 @@ class RScriptStage(Stage):
 
 class JuliaScriptStage(Stage):
     kind: Literal["julia-script"] = "julia-script"
-    script_path: str
+    script_path: RelativeChildPathString
     args: list[str] = []
 
     @property
@@ -508,7 +540,7 @@ class JuliaCommandStage(Stage):
 
 class SBatchStage(Stage):
     kind: Literal["sbatch"] = "sbatch"
-    script_path: str
+    script_path: RelativeChildPathString
     args: list[str] = []
     sbatch_options: list[str] = []
     log_storage: Literal["git", "dvc"] | None = "git"

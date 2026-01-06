@@ -31,6 +31,32 @@ from calkit.notebooks import (
 )
 
 
+def _check_path_relative_and_child_of_cwd(s: str) -> str:
+    p = Path(s)
+    # Enforce that the path is relative
+    if p.is_absolute():
+        raise ValueError(f"Path must be relative: {p}")
+    # Enforce that the path is a child of the (resolved) CWD
+    cwd = Path.cwd().resolve()
+    # Resolve the path relative to the resolved CWD to get a full path for
+    # comparison
+    absolute_path = p.resolve(strict=False)
+    # Check if the absolute path starts with the resolved CWD, ensuring it's a
+    # child
+    try:
+        absolute_path.relative_to(cwd)
+    except ValueError:
+        raise ValueError(
+            f"Path is not a child of the current working directory: {p}"
+        )
+    return p.as_posix()
+
+
+RelativeChildPathString = Annotated[
+    str, AfterValidator(_check_path_relative_and_child_of_cwd)
+]
+
+
 class StageIteration(BaseModel):
     """A model for the ``iterate_over`` key in a stage definition.
 
@@ -191,30 +217,6 @@ class Stage(BaseModel):
         if self.always_run:
             stage["always_changed"] = True
         return stage
-
-
-def validate_relative_and_child_of_cwd(s: str) -> str:
-    p = Path(s)
-    # 1. Enforce that the path is relative
-    if p.is_absolute():
-        raise ValueError(f"Path must be relative: {p}")
-    # 2. Enforce that the path is a child of the (resolved) CWD
-    cwd = Path.cwd().resolve()
-    # Resolve the path relative to the resolved CWD to get a full path for comparison
-    absolute_path = (cwd / p).resolve(strict=False)
-    # Check if the absolute path starts with the resolved CWD, ensuring it's a child
-    try:
-        absolute_path.relative_to(cwd)
-    except ValueError:
-        raise ValueError(
-            f"Path is not a child of the current working directory: {p}"
-        )
-    return p.as_posix()
-
-
-RelativeChildPathString = Annotated[
-    str, AfterValidator(validate_relative_and_child_of_cwd)
-]
 
 
 class PythonScriptStage(Stage):

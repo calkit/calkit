@@ -209,6 +209,15 @@ def test_matlabscriptstage():
             script_path="scripts/my_script.m",
             matlab_path="/some/abs/path",
         )
+    # Ensure we can't use a relative path outside the project folder
+    with pytest.raises(ValidationError):
+        s = MatlabScriptStage(
+            name="b",
+            kind="matlab-script",
+            environment="_system",
+            script_path="scripts/my_script.m",
+            matlab_path="../up/a/dir",
+        )
 
 
 def test_sbatchstage():

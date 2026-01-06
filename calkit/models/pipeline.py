@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Discriminator,
@@ -192,9 +193,33 @@ class Stage(BaseModel):
         return stage
 
 
+def validate_relative_and_child_of_cwd(s: str) -> str:
+    p = Path(s)
+    # 1. Enforce that the path is relative
+    if p.is_absolute():
+        raise ValueError(f"Path must be relative: {p}")
+    # 2. Enforce that the path is a child of the CWD
+    cwd = Path.cwd()
+    # Resolve the path relative to CWD to get a full path for comparison
+    absolute_path = (cwd / p).resolve()
+    # Check if the absolute path starts with the CWD, ensuring it's a child
+    try:
+        absolute_path.relative_to(cwd)
+    except ValueError:
+        raise ValueError(
+            f"Path is not a child of the current working directory: {p}"
+        )
+    return str(p)
+
+
+RelativeChildPathString = Annotated[
+    str, AfterValidator(validate_relative_and_child_of_cwd)
+]
+
+
 class PythonScriptStage(Stage):
     kind: Literal["python-script"] = "python-script"
-    script_path: str
+    script_path: RelativeChildPathString
     args: list[str] = []
 
     @property
@@ -379,8 +404,8 @@ class JsonToLatexStage(Stage):
 
 class MatlabScriptStage(Stage):
     kind: Literal["matlab-script"]
-    script_path: str
-    matlab_path: str | None = None
+    script_path: RelativeChildPathString
+    matlab_path: RelativeChildPathString | None = None
 
     @property
     def dvc_deps(self) -> list[str]:
@@ -433,7 +458,7 @@ class ShellCommandStage(Stage):
 
 class ShellScriptStage(Stage):
     kind: Literal["shell-script"]
-    script_path: str
+    script_path: RelativeChildPathString
     args: list[str] = []
     shell: Literal["sh", "bash", "zsh"] = "bash"
 
@@ -465,7 +490,7 @@ class DockerCommandStage(Stage):
 
 class RScriptStage(Stage):
     kind: Literal["r-script"]
-    script_path: str
+    script_path: RelativeChildPathString
     args: list[str] = []
 
     @property
@@ -484,7 +509,7 @@ class RScriptStage(Stage):
 
 class JuliaScriptStage(Stage):
     kind: Literal["julia-script"] = "julia-script"
-    script_path: str
+    script_path: RelativeChildPathString
     args: list[str] = []
 
     @property
@@ -513,7 +538,7 @@ class JuliaCommandStage(Stage):
 
 class SBatchStage(Stage):
     kind: Literal["sbatch"] = "sbatch"
-    script_path: str
+    script_path: RelativeChildPathString
     args: list[str] = []
     sbatch_options: list[str] = []
     log_storage: Literal["git", "dvc"] | None = "git"

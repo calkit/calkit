@@ -40,11 +40,28 @@ by enabling faster:
    making it easier to find something similar to a desired workflow to start
    from and adapt to new questions.
 
+### The status quo
+
+The figure below from the PLOS Open Science Indicators dataset
+shows how far away we are from the target.
+Code sharing rates are only ~10%,
+and of what is shared, it's reasonable to assume
+[only ~10% of that code will even run](https://doi.org/10.1093/bib/bbad375),
+never mind be included in a complete single-button pipeline.
+
+![Code sharing rates from PLOS OSI 2024.](img/plos-osi-code-2024-03.png)
+/// caption
+Code sharing rates from
+[PLOS Open Science Indicators](https://theplosblog.plos.org/2024/03/six-years-of-open-science-indicators-data/).
+///
+
 ## Strategy
 
 Our core philosophy is to remove the friction of rigor.
 We believe researchers shouldn't need to become expert software or DevOps
 engineers to work reproducibly.
+That is not to say that policy, education, and support are not part of the
+solution--they are--but we are focused on improving tooling and infrastructure.
 
 - **Path of least resistance:**
   Make it faster to work in a clean,

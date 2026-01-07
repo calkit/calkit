@@ -45,11 +45,11 @@ by enabling faster:
 ### The status quo
 
 The figure below from the PLOS Open Science Indicators dataset
-shows how far away we are from the target.
+shows how far away we are from our target.
 Code sharing rates are only ~10%,
 and of what is shared, it's reasonable to assume
 [only ~10% of that code will even run](https://doi.org/10.1093/bib/bbad375),
-never mind be included in a complete single-button pipeline.
+never mind be included in a complete, automated pipeline.
 
 ![Code sharing rates from PLOS OSI 2024.](img/plos-osi-code-2024-03.png){ style="max-width: 500px; width: auto; height: auto;" }
 /// caption
@@ -59,9 +59,13 @@ Code sharing rates from
 
 ## Strategy
 
-Our core philosophy is to remove the friction of rigor.
-We believe researchers shouldn't need to become expert software or DevOps
-engineers to work reproducibly.
+We believe one major hurdle preventing researchers from working reproducibly is
+the expectation that they become software engineering experts,
+choose and integrate multiple tools,
+and assemble a custom workflow.
+We want to provide a vertically-integrated, purpose-built,
+and user-friendly project format and toolset that reduces the required
+expertise and decision fatigue.
 That is not to say that policy, education, and support are not part of the
 solution—they certainly are—but we are focused on improving
 tooling and infrastructure.

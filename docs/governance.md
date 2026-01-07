@@ -2,7 +2,7 @@
 
 Calkit is a free, open-source, and openly-governed project.
 All [issues and ideas](https://github.com/calkit/calkit/issues)
-are discussed publicly and open to input from anyone.
+are discussed publicly and are open to input from anyone.
 Because the project is still early-stage,
 the [founder](https://github.com/petebachant)
 serves as the primary maintainer and decision maker.
@@ -51,7 +51,7 @@ and of what is shared, it's reasonable to assume
 [only ~10% of that code will even run](https://doi.org/10.1093/bib/bbad375),
 never mind be included in a complete single-button pipeline.
 
-![Code sharing rates from PLOS OSI 2024.](img/plos-osi-code-2024-03.png)
+![Code sharing rates from PLOS OSI 2024.](img/plos-osi-code-2024-03.png){ style="max-width: 500px; width: auto; height: auto;" }
 /// caption
 Code sharing rates from
 [PLOS Open Science Indicators](https://theplosblog.plos.org/2024/03/six-years-of-open-science-indicators-data/).
@@ -63,7 +63,8 @@ Our core philosophy is to remove the friction of rigor.
 We believe researchers shouldn't need to become expert software or DevOps
 engineers to work reproducibly.
 That is not to say that policy, education, and support are not part of the
-solution--they are--but we are focused on improving tooling and infrastructure.
+solution—they certainly are—but we are focused on improving
+tooling and infrastructure.
 
 - **Path of least resistance:**
   Make it faster to work in a clean,
@@ -75,8 +76,8 @@ solution--they are--but we are focused on improving tooling and infrastructure.
   Create a natural transition from interactive discovery (notebooks/shells)
   to automated batch pipelines.
 - **Builder's pride:**
-  When researchers can take pride in their workflows,
-  they will be more likely to share their full projects openly.
+  Enable researchers to take pride in what they create so
+  they will be more likely to share their projects openly.
 
 ## Objective and key results (OKRs)
 

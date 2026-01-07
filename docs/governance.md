@@ -10,7 +10,9 @@ As the number of
 [contributors](https://github.com/calkit/calkit/graphs/contributors) grows,
 maintainers will be added to share review and release duties.
 The contributor's guide can be found
-[here](https://github.com/calkit/calkit/blob/main/CONTRIBUTING.md).
+[here](https://github.com/calkit/calkit/blob/main/CONTRIBUTING.md)
+and our code of conduct can be found
+[here](https://github.com/calkit/calkit/blob/main/CODE_OF_CONDUCT.md)
 
 ## Vision
 

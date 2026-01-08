@@ -34,6 +34,7 @@ dependencies = [
   "gitpython",
   "keyring",
   "nbconvert",
+  "pathspec<1.0.0",
   "pillow",
   "pydantic[email]",
   "pydantic-settings",

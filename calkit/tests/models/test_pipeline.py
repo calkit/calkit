@@ -11,6 +11,7 @@ from calkit.models.pipeline import (
     LatexStage,
     MapPathsStage,
     MatlabCommandStage,
+    MatlabScriptStage,
     PythonScriptStage,
     SBatchStage,
     StageIteration,
@@ -184,6 +185,39 @@ def test_matlabcommandstage():
     sd = s.to_dvc()
     print(sd)
     assert sd["cmd"] == 'matlab -batch "disp(\\"Hello, MATLAB!\\");"'
+
+
+def test_matlabscriptstage():
+    s = MatlabScriptStage(
+        name="a",
+        kind="matlab-script",
+        environment="_system",
+        script_path="scripts/my_script.m",
+        matlab_path="scripts",
+    )
+    sd = s.to_dvc()
+    print(sd)
+    assert (
+        sd["cmd"]
+        == "matlab -batch \"addpath(genpath('scripts')); run('scripts/my_script.m');\""
+    )
+    with pytest.raises(ValidationError):
+        s = MatlabScriptStage(
+            name="b",
+            kind="matlab-script",
+            environment="_system",
+            script_path="scripts/my_script.m",
+            matlab_path="/some/abs/path",
+        )
+    # Ensure we can't use a relative path outside the project folder
+    with pytest.raises(ValidationError):
+        s = MatlabScriptStage(
+            name="b",
+            kind="matlab-script",
+            environment="_system",
+            script_path="scripts/my_script.m",
+            matlab_path="../up/a/dir",
+        )
 
 
 def test_sbatchstage():

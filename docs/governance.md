@@ -25,6 +25,10 @@ That is, all primary artifacts like source code and raw data are available,
 and all secondary artifacts like figures and article PDFs
 can be produced with a single command.
 
+![The single-button reproducible future.](img/calkit-fragmentation-compendium.png)
+
+<!-- Source: https://docs.google.com/drawings/d/1vAjGju_MOLD40oMXBTvIQfG-eZt9SRhEW9SDBzUt6xI/edit -->
+
 We believe that this will increase the pace of collective knowledge creation
 by enabling faster:
 

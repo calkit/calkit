@@ -87,10 +87,10 @@ tooling and infrastructure.
 
 ### 2026-Q1
 
-1. Objective: Empower researchers to create and share single-button
-   reproducible research projects.
-   1. Key result: 5 researchers (excluding direct collaborators) create and
-      share single-button reproducible research projects this quarter.
+1.  Objective: Empower researchers to create and share single-button
+    reproducible research projects.
+    1.  Key result: 5 researchers (excluding direct collaborators) create and
+        share single-button reproducible research projects this quarter.
 
 ## Funding and sustainability
 

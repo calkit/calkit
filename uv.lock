@@ -542,7 +542,7 @@ requires-dist = [
     { name = "dvc", specifier = "==3.64.2" },
     { name = "fastapi" },
     { name = "gitpython" },
-    { name = "json2latex", specifier = ">=0.0.2" },
+    { name = "json2latex", git = "https://github.com/rebeccamccabe/json2latex.git" },
     { name = "jupyterlab", specifier = ">=4.4.5" },
     { name = "keyring" },
     { name = "nbconvert" },
@@ -1792,7 +1792,7 @@ name = "importlib-metadata"
 version = "8.7.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "zipp" },
+    { name = "zipp", marker = "python_full_version < '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f3/49/3b30cad09e7771a4982d9975a8cbf64f00d4a1ececb53297f1d9a7be1b10/importlib_metadata-8.7.1.tar.gz", hash = "sha256:49fef1ae6440c182052f407c8d34a68f72efc36db9ca90dc0113398f2fdde8bb", size = 57107, upload-time = "2025-12-21T10:00:19.278Z" }
 wheels = [
@@ -2027,13 +2027,9 @@ wheels = [
 [[package]]
 name = "json2latex"
 version = "0.0.2"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/rebeccamccabe/json2latex.git#6cc15dcec77fa4ab95230e90efb025b9da89d41b" }
 dependencies = [
     { name = "roman" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/0c/6f/96dacfaf281181d67941c449f90e17f3b7fecca8a53d87fc336f0b4e6d0d/json2latex-0.0.2.tar.gz", hash = "sha256:b3e5cbc1c146fef7d3c68df8e7181d92bd377cbe413e82c5fbd38cdc2b5b168b", size = 4803, upload-time = "2020-03-01T00:32:34.208Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/66/20/d775b0a666d279d90f3e0bcc1aff5c03bc24c7f7e6e9bd4b91e850633739/json2latex-0.0.2-py3-none-any.whl", hash = "sha256:16736ec76bcbdd3ff60426259a5f462ade6a643106fe1c75baec4a27003cdfb9", size = 6058, upload-time = "2020-03-01T00:32:32.756Z" },
 ]
 
 [[package]]

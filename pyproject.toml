@@ -87,6 +87,9 @@ packages = ["calkit"]
 [tool.hatch.version]
 path = "calkit/__init__.py"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.mypy]
 files = ["calkit"]
 disallow_untyped_defs = true

@@ -36,7 +36,7 @@ dependencies = [
   "papermill>=2.6.0",
   "jupyterlab>=4.4.5",
   "sqlitedict>=2.1.0",
-  "json2latex @ git+https://github.com/rebeccamccabe/json2latex.git",
+  "json2latex>=0.0.3",
 ]
 description = "Reproducibility simplified."
 dynamic = ["version"]
@@ -86,9 +86,6 @@ packages = ["calkit"]
 
 [tool.hatch.version]
 path = "calkit/__init__.py"
-
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [tool.mypy]
 files = ["calkit"]

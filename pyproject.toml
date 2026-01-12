@@ -49,7 +49,7 @@ dependencies = [
   "papermill>=2.6.0",
   "jupyterlab>=4.4.5",
   "sqlitedict>=2.1.0",
-  "json2latex>=0.0.2",
+  "json2latex>=0.0.3",
 ]
 description = "Reproducibility simplified."
 dynamic = ["version"]

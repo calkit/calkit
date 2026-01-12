@@ -553,7 +553,7 @@ requires-dist = [
     { name = "dvc", specifier = "==3.64.2" },
     { name = "fastapi" },
     { name = "gitpython" },
-    { name = "json2latex", specifier = ">=0.0.2" },
+    { name = "json2latex", specifier = ">=0.0.3" },
     { name = "jupyterlab", specifier = ">=4.4.5" },
     { name = "keyring" },
     { name = "nbconvert" },
@@ -1805,7 +1805,7 @@ name = "importlib-metadata"
 version = "8.7.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "zipp" },
+    { name = "zipp", marker = "python_full_version < '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f3/49/3b30cad09e7771a4982d9975a8cbf64f00d4a1ececb53297f1d9a7be1b10/importlib_metadata-8.7.1.tar.gz", hash = "sha256:49fef1ae6440c182052f407c8d34a68f72efc36db9ca90dc0113398f2fdde8bb", size = 57107, upload-time = "2025-12-21T10:00:19.278Z" }
 wheels = [
@@ -2039,14 +2039,14 @@ wheels = [
 
 [[package]]
 name = "json2latex"
-version = "0.0.2"
+version = "0.0.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "roman" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0c/6f/96dacfaf281181d67941c449f90e17f3b7fecca8a53d87fc336f0b4e6d0d/json2latex-0.0.2.tar.gz", hash = "sha256:b3e5cbc1c146fef7d3c68df8e7181d92bd377cbe413e82c5fbd38cdc2b5b168b", size = 4803, upload-time = "2020-03-01T00:32:34.208Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/9a/de1c5444b10a242eb1e8105bbef4286beb65c8df28235dbbc827683903d0/json2latex-0.0.3.tar.gz", hash = "sha256:c3adae82299bd23f36cf9daefa5a0d95303023581562b70c0d67d327e288feac", size = 6073, upload-time = "2026-01-11T08:54:19.598Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/66/20/d775b0a666d279d90f3e0bcc1aff5c03bc24c7f7e6e9bd4b91e850633739/json2latex-0.0.2-py3-none-any.whl", hash = "sha256:16736ec76bcbdd3ff60426259a5f462ade6a643106fe1c75baec4a27003cdfb9", size = 6058, upload-time = "2020-03-01T00:32:32.756Z" },
+    { url = "https://files.pythonhosted.org/packages/39/d3/d70bd5a5e3c889faa0aca7868fb4025a771a884104d7593ca0acaf55cda4/json2latex-0.0.3-py3-none-any.whl", hash = "sha256:f15f65bfbe40bb9b704e6192d7ba16c9562b40408644a9e586018ab7735048a0", size = 6436, upload-time = "2026-01-11T08:54:18.068Z" },
 ]
 
 [[package]]

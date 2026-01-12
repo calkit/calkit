@@ -97,6 +97,9 @@ tooling and infrastructure.
         single-button reproducible research projects this quarter.
     2.  Key result: Of those who create projects, at least half share them
         openly and cite them in submitted articles.
+    3.  Key result: At least half of those who create projects agree that they
+        would have been slower to finish (typically submit a paper) without
+        Calkit.
 
 ## Funding and sustainability
 

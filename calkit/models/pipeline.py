@@ -588,6 +588,8 @@ class SBatchStage(Stage):
         cmd = f"calkit slurm batch --name {self.name}"
         if self.environment != "_system":
             cmd += f" --environment {self.environment}"
+        if self.log_path is not None:
+            cmd += f" --log-path '{self.log_path}'"
         for dep in self.dvc_deps:
             if dep != self.script_path:
                 cmd += f" --dep {dep}"

@@ -543,11 +543,14 @@ class SBatchStage(Stage):
     script_path: RelativeChildPathString
     args: list[str] = []
     sbatch_options: list[str] = []
+    log_path: str | None = None
     log_storage: Literal["git", "dvc"] | None = "git"
 
     @property
     def log_output(self) -> PathOutput:
-        log_path = f".calkit/slurm/logs/{self.name}.out"
+        log_path = self.log_path
+        if log_path is None:
+            log_path = f".calkit/slurm/logs/{self.name}.out"
         return PathOutput(
             path=log_path,
             storage=self.log_storage,

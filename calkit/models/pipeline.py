@@ -560,7 +560,7 @@ class SBatchStage(Stage):
                         arg_names.append(item.arg_name)
                 for arg_name in arg_names:
                     log_path += f"/{{{arg_name}}}"
-            log_path += ".log"
+            log_path += ".out"
         return PathOutput(
             path=log_path,
             storage=self.log_storage,

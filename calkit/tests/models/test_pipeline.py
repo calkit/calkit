@@ -255,7 +255,7 @@ def test_sbatchstage():
         ],
     )
     sd = s.to_dvc()
-    assert s.log_output.path == ".calkit/slurm/logs/job2/{input_file}.log"
+    assert s.log_output.path == ".calkit/slurm/logs/job2/{input_file}.out"
     print(sd)
     assert "--name job2@{input_file}" in sd["cmd"]
 

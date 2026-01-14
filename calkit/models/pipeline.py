@@ -604,7 +604,7 @@ class SBatchStage(Stage):
                 else:
                     arg_names.append(item.arg_name)
             cmd += "@" + ",".join(
-                [f"${{item.{arg_name}}}" for arg_name in arg_names]
+                [f"{{{arg_name}}}" for arg_name in arg_names]
             )
         if self.environment != "_system":
             cmd += f" --environment {self.environment}"

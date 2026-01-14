@@ -550,7 +550,17 @@ class SBatchStage(Stage):
     def log_output(self) -> PathOutput:
         log_path = self.log_path
         if log_path is None:
-            log_path = f".calkit/slurm/logs/{self.name}.out"
+            log_path = f".calkit/slurm/logs/{self.name}"
+            if self.iterate_over is not None:
+                arg_names = []
+                for item in self.iterate_over:
+                    if isinstance(item.arg_name, list):
+                        arg_names += item.arg_name
+                    else:
+                        arg_names.append(item.arg_name)
+                for arg_name in arg_names:
+                    log_path += f"/{{{arg_name}}}"
+            log_path += ".log"
         return PathOutput(
             path=log_path,
             storage=self.log_storage,
@@ -586,6 +596,16 @@ class SBatchStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         cmd = f"calkit slurm batch --name {self.name}"
+        if self.iterate_over is not None:
+            arg_names = []
+            for item in self.iterate_over:
+                if isinstance(item.arg_name, list):
+                    arg_names += item.arg_name
+                else:
+                    arg_names.append(item.arg_name)
+            cmd += "@" + ",".join(
+                [f"${{item.{arg_name}}}" for arg_name in arg_names]
+            )
         if self.environment != "_system":
             cmd += f" --environment {self.environment}"
         if self.log_path is not None:

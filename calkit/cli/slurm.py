@@ -75,6 +75,9 @@ def run_sbatch(
             help="Additional options to pass to sbatch (no spaces allowed).",
         ),
     ] = [],
+    log_path: Annotated[
+        str | None, typer.Option("--log-path", help="Output log path.")
+    ] = None,
 ) -> None:
     """Submit a SLURM batch job for the project.
 
@@ -104,6 +107,8 @@ def run_sbatch(
 
     if args is None:
         args = []
+    if log_path is None:
+        log_path = f".calkit/slurm/logs/{name}.out"
     cmd = (
         [
             "sbatch",
@@ -111,7 +116,7 @@ def run_sbatch(
             "--job-name",
             name,
             "-o",
-            f".calkit/slurm/logs/{name}.out",
+            log_path,
         ]
         + sbatch_opts
         + [script]
@@ -136,8 +141,10 @@ def run_sbatch(
             )
     deps = [script] + deps
     slurm_dir = os.path.join(".calkit", "slurm")
-    logs_dir = os.path.join(slurm_dir, "logs")
-    os.makedirs(logs_dir, exist_ok=True)
+    os.makedirs(slurm_dir, exist_ok=True)
+    logs_dir = os.path.dirname(log_path)
+    if logs_dir:
+        os.makedirs(logs_dir, exist_ok=True)
     jobs_path = os.path.join(slurm_dir, "jobs.json")
     if os.path.isfile(jobs_path):
         with open(jobs_path, "r") as f:

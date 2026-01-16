@@ -241,6 +241,23 @@ def test_sbatchstage():
     assert "data/input.txt" in sd["deps"]
     out = {"data/output.txt": {"persist": True}}
     assert out in sd["outs"]
+    # Test with `iterate_over`
+    s = SBatchStage(
+        name="job2",
+        script_path="scripts/run_job.sh",
+        environment="slurm-env",
+        args=["{input_file}"],
+        iterate_over=[
+            StageIteration(
+                arg_name="input_file",
+                values=["data/input1.txt", "data/input2.txt"],
+            )
+        ],
+    )
+    sd = s.to_dvc()
+    assert s.log_output.path == ".calkit/slurm/logs/job2/{input_file}.out"
+    print(sd)
+    assert "--name job2@{input_file}" in sd["cmd"]
 
 
 def test_mappathsstage():

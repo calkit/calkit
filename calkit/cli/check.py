@@ -15,6 +15,7 @@ import git
 import typer
 
 import calkit
+import calkit.environments
 import calkit.matlab
 import calkit.pipeline
 from calkit.check import check_reproducibility
@@ -225,7 +226,13 @@ def check_environments(
         typer.echo("No environments defined in calkit.yaml")
         return
     failures = []
-    for env_name in envs.keys():
+    for env_name, env in envs.items():
+        if env.get("kind") in calkit.environments.KINDS_NO_CHECK:
+            if verbose:
+                typer.echo(
+                    f"Skipping check for {env['kind']} env '{env_name}'"
+                )
+            continue
         typer.echo(f"Checking environment: '{env_name}'")
         try:
             check_environment(env_name=env_name, verbose=verbose)

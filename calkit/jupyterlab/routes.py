@@ -381,7 +381,7 @@ class NotebookEnvironmentRouteHandler(APIHandler):
 class NotebookKernelRouteHandler(APIHandler):
     @tornado.web.authenticated
     def post(self):
-        """Get the kernel info for a notebook's environment."""
+        """Set the kernel info for a notebook's environment."""
         body = self.get_json_body()
         if not body:
             self.set_status(400)
@@ -400,6 +400,18 @@ class NotebookKernelRouteHandler(APIHandler):
             self.finish(
                 json.dumps(
                     {"error": "Both 'path' and 'environment' are required"}
+                )
+            )
+            return
+        # We can't do this if we don't have a project name
+        try:
+            calkit.detect_project_name()
+        except Exception as e:
+            self.log.error(f"Failed to detect project name: {e}")
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {"error": "Project name is required to set kernel info"}
                 )
             )
             return
@@ -995,6 +1007,11 @@ class PipelineStatusRouteHandler(APIHandler):
         try:
             # First make sure pipeline is compiled
             ck_info = calkit.load_calkit_info()
+            if not ck_info.get("pipeline", {}).get("stages", {}):
+                self.finish(
+                    json.dumps({"stale_stages": {}, "is_outdated": False})
+                )
+                return
             calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
             # Clean all notebooks in the pipeline
             calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)

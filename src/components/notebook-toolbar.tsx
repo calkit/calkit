@@ -7,7 +7,52 @@ import { requestAPI } from "../request";
 import { queryClient } from "../queryClient";
 import { calkitIcon } from "../icons";
 import { showEnvironmentEditor } from "./environment-editor";
+import { showProjectInfoEditor } from "./project-info-editor";
 import { usePipelineStatus, useSetNotebookStage } from "../hooks/useQueries";
+
+/**
+ * Ensure project has a name before proceeding with operations
+ * Shows project info editor if needed
+ */
+async function ensureProjectName(): Promise<boolean> {
+  try {
+    const projectInfo = await requestAPI<any>("project");
+
+    if (projectInfo?.name) {
+      return true;
+    }
+
+    // If no name, show project info editor with suggestions
+    const suggestedName = projectInfo?.suggested_name || "my-project";
+    const suggestedTitle = projectInfo?.suggested_title || "My Project";
+
+    const result = await showProjectInfoEditor(
+      {
+        name: suggestedName,
+        title: suggestedTitle,
+        description: projectInfo?.description || "",
+        git_repo_url: projectInfo?.git_repo_url || "",
+        owner: projectInfo?.owner || "",
+      },
+      true,
+    );
+
+    if (!result) {
+      return false;
+    }
+
+    // Save project info
+    await requestAPI("project", {
+      method: "PUT",
+      body: JSON.stringify(result),
+    });
+
+    return true;
+  } catch (error) {
+    console.error("Failed to ensure project name:", error);
+    return false;
+  }
+}
 
 /**
  * Extract a readable error message from various error types
@@ -297,6 +342,11 @@ const EnvironmentBadge: React.FC<{
   };
 
   const handleCreateEnvironment = async () => {
+    // Ensure project has a name before creating environment
+    if (!(await ensureProjectName())) {
+      return;
+    }
+
     await showEnvironmentEditor({
       mode: "create",
       onSubmit: async ({ name, kind, path, packages }) => {
@@ -315,6 +365,12 @@ const EnvironmentBadge: React.FC<{
     if (!currentEnv) {
       return;
     }
+
+    // Ensure project has a name before editing environment
+    if (!(await ensureProjectName())) {
+      return;
+    }
+
     const envData = environments[currentEnv] || {};
     await showEnvironmentEditor({
       mode: "edit",
@@ -500,6 +556,12 @@ const PipelineStageBadge: React.FC<{
     if (!stageName.trim()) {
       return;
     }
+
+    // Ensure project has a name before saving stage
+    if (!(await ensureProjectName())) {
+      return;
+    }
+
     const stage = stageName.trim();
     const notebookPath = panel.context.path;
 

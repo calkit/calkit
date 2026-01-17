@@ -663,19 +663,12 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   }, [projectQuery.data]);
 
   const handleSaveProjectInfo = useCallback(async () => {
-    // If project has no name, suggest the current directory name
+    // Use suggested values if project has no name
     let suggestedInfo = { ...projectInfo };
-    if (!suggestedInfo.name) {
-      try {
-        const cwd = await requestAPI<{ cwd: string }>("system");
-        if (cwd && cwd.cwd) {
-          // Extract basename from path
-          const dirName = cwd.cwd.split("/").filter(Boolean).pop() || "";
-          suggestedInfo.name = dirName;
-        }
-      } catch (error) {
-        console.warn("Failed to get current directory:", error);
-      }
+    if (!suggestedInfo.name && projectQuery.data) {
+      suggestedInfo.name = projectQuery.data.suggested_name || projectInfo.name;
+      suggestedInfo.title =
+        projectQuery.data.suggested_title || projectInfo.title;
     }
 
     const result = await showProjectInfoEditor(suggestedInfo);

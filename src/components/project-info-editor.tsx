@@ -27,6 +27,20 @@ const ProjectInfoEditorBody: React.FC<
   const [gitRepoUrlValue, setGitRepoUrlValue] = useState(git_repo_url);
   const [ownerValue, setOwnerValue] = useState(owner);
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
+  const [userEditedName, setUserEditedName] = useState(false);
+
+  // Auto-update name when title changes (if user hasn't manually edited name)
+  React.useEffect(() => {
+    if (!userEditedName && titleValue) {
+      const kebabCaseName = titleValue
+        .toLowerCase()
+        .replace(/\s+/g, "-")
+        .replace(/[^a-z0-9-]/g, "")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "");
+      setNameValue(kebabCaseName);
+    }
+  }, [titleValue, userEditedName]);
 
   React.useEffect(() => {
     onUpdate({
@@ -48,18 +62,6 @@ const ProjectInfoEditorBody: React.FC<
   return (
     <div className="calkit-project-info-editor">
       <div className="calkit-dialog-field">
-        <label htmlFor="project-name">Project name:</label>
-        <input
-          id="project-name"
-          type="text"
-          value={nameValue}
-          onChange={(e) => setNameValue(e.target.value)}
-          placeholder="my-project"
-          autoFocus
-        />
-        <small>Use kebab-case (e.g., my-awesome-project)</small>
-      </div>
-      <div className="calkit-dialog-field">
         <label htmlFor="project-title">Title:</label>
         <input
           id="project-title"
@@ -67,6 +69,7 @@ const ProjectInfoEditorBody: React.FC<
           value={titleValue}
           onChange={(e) => setTitleValue(e.target.value)}
           placeholder="My Awesome Project"
+          autoFocus
         />
       </div>
       <div className="calkit-dialog-field">
@@ -75,8 +78,21 @@ const ProjectInfoEditorBody: React.FC<
           id="project-description"
           value={descriptionValue}
           onChange={(e) => setDescriptionValue(e.target.value)}
-          placeholder="A brief description of the project..."
+          placeholder="ex: A project about awesome things."
           rows={4}
+        />
+      </div>
+      <div className="calkit-dialog-field">
+        <label htmlFor="project-name">Name:</label>
+        <input
+          id="project-name"
+          type="text"
+          value={nameValue}
+          onChange={(e) => {
+            setNameValue(e.target.value);
+            setUserEditedName(true);
+          }}
+          placeholder="ex: my-awesome-project"
         />
       </div>
 
@@ -174,7 +190,7 @@ export async function showProjectInfoEditor(
   console.log("ProjectInfoEditorWidget created");
 
   const dialog = new Dialog<ProjectInfoEditorProps>({
-    title: isInitialSetup ? "Set Project Name" : "Edit Project Info",
+    title: "Set project info",
     body,
     buttons: [Dialog.cancelButton(), Dialog.okButton({ label: "Save" })],
   });

@@ -177,7 +177,6 @@ const plugin: JupyterFrontEndPlugin<void> = {
       commands.addCommand("calkit:new-notebook", {
         label: "New notebook",
         caption: "Create a new notebook in the current folder",
-        icon: calkitIcon,
         isEnabled: () => !!factory,
         execute: async () => {
           const browser = (factory as any)?.defaultBrowser;
@@ -275,7 +274,6 @@ const plugin: JupyterFrontEndPlugin<void> = {
       commands.addCommand("calkit:new-pipeline-stage", {
         label: "New pipeline stage",
         caption: "Create a new pipeline stage",
-        icon: calkitIcon,
         execute: async () => {
           try {
             await showStageEditorDialog({

@@ -140,6 +140,16 @@ export const useNotebooks = () => {
 };
 
 /**
+ * Query hook for fetching environments with packages
+ */
+export const useEnvironments = () => {
+  return useQuery<Record<string, any>>({
+    queryKey: ["environments"],
+    queryFn: () => requestAPI<Record<string, any>>("environments"),
+  });
+};
+
+/**
  * Mutation hook for creating a notebook
  * Automatically invalidates and refetches project data on success
  */

@@ -20,6 +20,7 @@ import {
   useCommit,
   usePush,
   useNotebooks,
+  useEnvironments,
   useDeleteEnvironment,
   usePipelineStatus,
   useDependencies,
@@ -131,6 +132,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   const dependenciesQuery = useDependencies();
   const gitHistoryQuery = useGitHistory();
   const notebooksQuery = useNotebooks();
+  const environmentsQuery = useEnvironments();
 
   // Mutation hooks - automatically invalidate related queries on success
   const createNotebookMutation = useCreateNotebook();
@@ -189,77 +191,92 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   const [pipelineRunning, setPipelineRunning] = useState(false);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
 
-  // Transform project data into section data
-  const transformProjectData = useCallback((info: IProjectInfo | undefined) => {
-    if (!info) {
+  // Transform project data into section data, merging with environments data that includes packages
+  const transformProjectData = useCallback(
+    (
+      info: IProjectInfo | undefined,
+      environmentsData: Record<string, any> | undefined,
+    ) => {
+      if (!info) {
+        return {
+          setup: [] as IDependencyItem[],
+          environments: [] as ISectionItem[],
+          pipelineStages: [] as ISectionItem[],
+          notebooks: [] as ISectionItem[],
+          datasets: [] as ISectionItem[],
+          questions: [] as ISectionItem[],
+          models: [] as ISectionItem[],
+          figures: [] as ISectionItem[],
+          history: [] as ISectionItem[],
+          publications: [] as ISectionItem[],
+          notes: [] as ISectionItem[],
+        };
+      }
+
       return {
         setup: [] as IDependencyItem[],
-        environments: [] as ISectionItem[],
-        pipelineStages: [] as ISectionItem[],
-        notebooks: [] as ISectionItem[],
-        datasets: [] as ISectionItem[],
-        questions: [] as ISectionItem[],
-        models: [] as ISectionItem[],
-        figures: [] as ISectionItem[],
-        history: [] as ISectionItem[],
-        publications: [] as ISectionItem[],
-        notes: [] as ISectionItem[],
-      };
-    }
-
-    return {
-      setup: [] as IDependencyItem[],
-      environments: Object.entries(info.environments || {}).map(
-        ([name, obj]) => ({
-          id: name,
-          label: name,
-          ...(typeof obj === "object" ? obj : {}),
-        }),
-      ),
-      pipelineStages: Object.entries(info.pipeline?.stages || {}).map(
-        ([name, obj]) => ({
-          id: name,
-          label: name,
-          ...(typeof obj === "object" ? obj : {}),
-        }),
-      ),
-      notebooks: Array.isArray((info as any).notebooks)
-        ? ((info as any).notebooks || []).map((nb: any) => ({
-            id: nb?.path ?? nb?.id ?? nb?.name ?? "",
-            label: nb?.path ?? nb?.name ?? "",
-            ...(typeof nb === "object" ? nb : {}),
-          }))
-        : Object.entries((info as any).notebooks || {}).map(([name, obj]) => ({
+        environments: Object.entries(info.environments || {}).map(
+          ([name, obj]) => ({
             id: name,
             label: name,
             ...(typeof obj === "object" ? obj : {}),
-          })),
-      datasets: (info.datasets || []).map((item: any, index: number) => ({
-        id: `dataset-${index}`,
-        label: item.title || item.path || `Dataset ${index}`,
-        ...(typeof item === "object" ? item : {}),
-      })),
-      questions: (info.questions || []).map((item: any, index: number) => ({
-        id: `question-${index}`,
-        label:
-          typeof item === "string"
-            ? item
-            : item.question || `Question ${index}`,
-        ...(typeof item === "object" ? item : {}),
-      })),
-      models: Object.entries(info.models || {}).map(([name, obj]) => ({
-        id: name,
-        label: name,
-        ...(typeof obj === "object" ? obj : {}),
-      })),
-      figures: [],
-      history: [],
-      publications: [],
-      notes: [],
-    };
-  }, []);
+            // Merge in packages from the environments API response if available
+            ...(environmentsData?.[name]
+              ? { packages: environmentsData[name].packages }
+              : {}),
+          }),
+        ),
+        pipelineStages: Object.entries(info.pipeline?.stages || {}).map(
+          ([name, obj]) => ({
+            id: name,
+            label: name,
+            ...(typeof obj === "object" ? obj : {}),
+          }),
+        ),
+        notebooks: Array.isArray((info as any).notebooks)
+          ? ((info as any).notebooks || []).map((nb: any) => ({
+              id: nb?.path ?? nb?.id ?? nb?.name ?? "",
+              label: nb?.path ?? nb?.name ?? "",
+              ...(typeof nb === "object" ? nb : {}),
+            }))
+          : Object.entries((info as any).notebooks || {}).map(
+              ([name, obj]) => ({
+                id: name,
+                label: name,
+                ...(typeof obj === "object" ? obj : {}),
+              }),
+            ),
+        datasets: (info.datasets || []).map((item: any, index: number) => ({
+          id: `dataset-${index}`,
+          label: item.title || item.path || `Dataset ${index}`,
+          ...(typeof item === "object" ? item : {}),
+        })),
+        questions: (info.questions || []).map((item: any, index: number) => ({
+          id: `question-${index}`,
+          label:
+            typeof item === "string"
+              ? item
+              : item.question || `Question ${index}`,
+          ...(typeof item === "object" ? item : {}),
+        })),
+        models: Object.entries(info.models || {}).map(([name, obj]) => ({
+          id: name,
+          label: name,
+          ...(typeof obj === "object" ? obj : {}),
+        })),
+        figures: [],
+        history: [],
+        publications: [],
+        notes: [],
+      };
+    },
+    [],
+  );
 
-  const sectionData = transformProjectData(projectQuery.data);
+  const sectionData = transformProjectData(
+    projectQuery.data,
+    environmentsQuery.data,
+  );
 
   if (dependenciesQuery.data) {
     sectionData.setup = dependenciesQuery.data as IDependencyItem[];

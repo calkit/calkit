@@ -1247,6 +1247,13 @@ class EnvironmentsRouteHandler(APIHandler):
                 )
             )
             return
+        # Start kwargs for environment creation
+        kwargs = dict(
+            name=env_name, path=env_path, packages=packages, no_commit=True
+        )
+        # uv-venv, venv, and conda envs can have a prefix defined
+        if env_kind in ["uv-venv", "venv", "conda"]:
+            kwargs["prefix"] = body.get("prefix")
         # Use the Calkit CLI to create the environment
         func_to_kind = {
             "uv-venv": new_uv_venv,
@@ -1256,12 +1263,7 @@ class EnvironmentsRouteHandler(APIHandler):
             "conda": new_conda_env,
         }
         try:
-            func_to_kind[env_kind](
-                name=env_name,
-                path=env_path,
-                packages=packages,
-                no_commit=True,
-            )
+            func_to_kind[env_kind](**kwargs)
         except Exception as e:
             self.set_status(400)
             self.finish(

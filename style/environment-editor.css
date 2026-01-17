@@ -455,3 +455,36 @@
   resize: vertical;
   min-height: 80px;
 }
+
+/* Advanced section styles */
+.calkit-env-editor-advanced {
+  margin-top: 10px;
+}
+
+.calkit-env-editor-advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--jp-ui-font-color1);
+  font-weight: 500;
+}
+
+.calkit-env-editor-advanced-toggle:hover {
+  color: var(--jp-ui-font-color0);
+}
+
+.calkit-env-editor-chevron {
+  display: inline-block;
+  width: 16px;
+  transition: transform 0.2s ease;
+}
+
+.calkit-env-editor-advanced-fields {
+  padding-left: 10px;
+  border-left: 2px solid var(--jp-border-color1);
+  margin-left: 3px;
+}

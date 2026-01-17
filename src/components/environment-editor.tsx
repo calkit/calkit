@@ -29,6 +29,7 @@ interface IEnvironmentEditorProps {
   initialName?: string;
   initialKind?: string;
   initialPath?: string;
+  initialPrefix?: string;
   initialPackages?: string[];
   mode: "create" | "edit";
 }
@@ -42,6 +43,7 @@ const EnvironmentEditorBody: React.FC<
       name: string;
       kind: string;
       path: string;
+      prefix?: string;
       packages: string[];
     }) => void;
   }
@@ -49,16 +51,17 @@ const EnvironmentEditorBody: React.FC<
   initialName = "",
   initialKind = "uv-venv",
   initialPath = "",
+  initialPrefix = "",
   initialPackages = [],
   mode,
   onUpdate,
 }) => {
   // Default paths based on environment kind
-  const getDefaultPath = (kind: string) => {
+  const getDefaultPath = (kind: string, envName: string = "") => {
     switch (kind) {
       case "uv-venv":
       case "venv":
-        return "requirements.txt";
+        return `.calkit/envs/${envName || "{name}"}.txt`;
       case "conda":
         return "environment.yml";
       case "pixi":
@@ -70,21 +73,61 @@ const EnvironmentEditorBody: React.FC<
     }
   };
 
+  // Default prefix for venv-based environments
+  const getDefaultPrefix = (kind: string, envName: string = "") => {
+    switch (kind) {
+      case "uv-venv":
+      case "venv":
+        return `.calkit/venvs/${envName || "{name}"}/.venv`;
+      default:
+        return "";
+    }
+  };
+
   const [name, setName] = useState(initialName);
   const [kind, setKind] = useState(initialKind);
-  const [path, setPath] = useState(initialPath || getDefaultPath(initialKind));
+  const [path, setPath] = useState(
+    initialPath || getDefaultPath(initialKind, initialName),
+  );
+  const [prefix, setPrefix] = useState(
+    initialPrefix || getDefaultPrefix(initialKind, initialName),
+  );
   const [packages, setPackages] = useState<string[]>(initialPackages);
   const [newPackage, setNewPackage] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [userEditedPath, setUserEditedPath] = useState(!!initialPath);
+  const [userEditedPrefix, setUserEditedPrefix] = useState(!!initialPrefix);
 
   React.useEffect(() => {
-    onUpdate({ name, kind, path, packages });
-  }, [name, kind, path, packages, onUpdate]);
+    const data: any = { name, kind, path, packages };
+    if (kind === "uv-venv" || kind === "venv") {
+      data.prefix = prefix;
+    }
+    onUpdate(data);
+  }, [name, kind, path, prefix, packages, onUpdate]);
+
+  // Update path and prefix when name changes (in create mode)
+  React.useEffect(() => {
+    if (mode === "create") {
+      if (!userEditedPath) {
+        setPath(getDefaultPath(kind, name));
+      }
+      if (!userEditedPrefix) {
+        setPrefix(getDefaultPrefix(kind, name));
+      }
+    }
+  }, [name, kind, mode, userEditedPath, userEditedPrefix]);
 
   // Update path when kind changes (in create mode)
   const handleKindChange = (newKind: string) => {
     setKind(newKind);
     if (mode === "create") {
-      setPath(getDefaultPath(newKind));
+      if (!userEditedPath) {
+        setPath(getDefaultPath(newKind, name));
+      }
+      if (!userEditedPrefix) {
+        setPrefix(getDefaultPrefix(newKind, name));
+      }
     }
   };
 
@@ -156,17 +199,6 @@ const EnvironmentEditorBody: React.FC<
           <option value="docker">Docker</option>
         </select>
       </div>
-      <div className="calkit-env-editor-field">
-        <label htmlFor="env-path">Path:</label>
-        <input
-          id="env-path"
-          type="text"
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-          placeholder={getDefaultPath(kind)}
-          title="Path to requirements/environment file"
-        />
-      </div>
       {showPackages && (
         <div className="calkit-env-editor-field">
           <label>Package groups:</label>
@@ -225,6 +257,52 @@ const EnvironmentEditorBody: React.FC<
           </div>
         </div>
       )}
+      {/* Advanced section for venv-based environments */}
+      {(kind === "uv-venv" || kind === "venv") && (
+        <div className="calkit-env-editor-advanced">
+          <div
+            className="calkit-env-editor-advanced-toggle"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+          >
+            <span className="calkit-env-editor-chevron">
+              {showAdvanced ? "▼" : "▶"}
+            </span>
+            <span>Advanced</span>
+          </div>
+          {showAdvanced && (
+            <div className="calkit-env-editor-advanced-fields">
+              <div className="calkit-env-editor-field">
+                <label htmlFor="env-path">Path:</label>
+                <input
+                  id="env-path"
+                  type="text"
+                  value={path}
+                  onChange={(e) => {
+                    setPath(e.target.value);
+                    setUserEditedPath(true);
+                  }}
+                  placeholder={getDefaultPath(kind, name)}
+                  title="Path to requirements/environment file"
+                />
+              </div>
+              <div className="calkit-env-editor-field">
+                <label htmlFor="env-prefix">Virtual environment prefix:</label>
+                <input
+                  id="env-prefix"
+                  type="text"
+                  value={prefix}
+                  onChange={(e) => {
+                    setPrefix(e.target.value);
+                    setUserEditedPrefix(true);
+                  }}
+                  placeholder={getDefaultPrefix(kind, name)}
+                  title="Path to virtual environment directory"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -237,6 +315,7 @@ class EnvironmentEditorWidget extends ReactWidget {
     name: string;
     kind: string;
     path: string;
+    prefix?: string;
     packages: string[];
   };
 
@@ -246,16 +325,17 @@ class EnvironmentEditorWidget extends ReactWidget {
         name: string;
         kind: string;
         path: string;
+        prefix?: string;
         packages: string[];
       }) => void;
     },
   ) {
     super();
-    const getDefaultPath = (kind: string) => {
+    const getDefaultPath = (kind: string, envName: string = "") => {
       switch (kind) {
         case "uv-venv":
         case "venv":
-          return "requirements.txt";
+          return `.calkit/envs/${envName || "{name}"}.txt`;
         case "conda":
           return "environment.yml";
         case "pixi":
@@ -266,12 +346,28 @@ class EnvironmentEditorWidget extends ReactWidget {
           return "";
       }
     };
-    const defaultPath = getDefaultPath(options.initialKind || "uv-venv");
+    const getDefaultPrefix = (kind: string, envName: string = "") => {
+      switch (kind) {
+        case "uv-venv":
+        case "venv":
+          return `.calkit/venvs/${envName || "{name}"}/.venv`;
+        default:
+          return "";
+      }
+    };
+    const envName = options.initialName || "";
+    const kind = options.initialKind || "uv-venv";
+    const defaultPath = getDefaultPath(kind, envName);
+    const defaultPrefix = getDefaultPrefix(kind, envName);
     const initPath = options.initialPath || defaultPath;
+    const initPrefix =
+      options.initialPrefix ||
+      (kind === "uv-venv" || kind === "venv" ? defaultPrefix : "");
     this._data = {
-      name: options.initialName || "",
-      kind: options.initialKind || "uv-venv",
+      name: envName,
+      kind,
       path: initPath,
+      prefix: initPrefix,
       packages: options.initialPackages || [],
     };
   }

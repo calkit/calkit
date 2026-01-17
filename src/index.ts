@@ -183,12 +183,10 @@ const plugin: JupyterFrontEndPlugin<void> = {
           let environments: Array<{ id: string; label: string }> = [];
           try {
             const data = await requestAPI<any>("environments?notebook_only=1");
-            environments = Object.keys(data.environments || {}).map(
-              (name: string) => ({
-                id: name,
-                label: name,
-              }),
-            );
+            environments = Object.keys(data || {}).map((name: string) => ({
+              id: name,
+              label: name,
+            }));
           } catch (error) {
             console.warn("Failed to fetch environments:", error);
           }

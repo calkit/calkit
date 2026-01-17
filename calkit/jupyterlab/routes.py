@@ -1174,6 +1174,7 @@ class EnvironmentsRouteHandler(APIHandler):
         # Check params for notebook only environments filtering so we can
         # filter down for notebook-appropriate envs only
         notebook_only = self.get_argument("notebook_only", "0") == "1"
+        name = self.get_argument("name", "")
         ck_info = calkit.load_calkit_info()
         envs = dict(ck_info.get("environments", {}))
         if notebook_only:
@@ -1185,7 +1186,7 @@ class EnvironmentsRouteHandler(APIHandler):
                     "renv",
                     "julia",
                     "conda",
-                ]:
+                ] or (name and env_name != name):
                     envs.pop(env_name)
         # Get package spec for env and return with it
         # TODO: Enable this for other kinds of envs
@@ -1203,7 +1204,7 @@ class EnvironmentsRouteHandler(APIHandler):
                         if line:
                             packages.append(line)
                 envs[env_name]["packages"] = packages
-        self.finish(json.dumps({"environments": envs}))
+        self.finish(json.dumps(envs))
 
     @tornado.web.authenticated
     def post(self):

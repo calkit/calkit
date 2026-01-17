@@ -235,7 +235,7 @@ const EnvironmentBadge: React.FC<{
 
   const refreshEnvironments = async () => {
     const data = await requestAPI<any>("environments?notebook_only=1");
-    setEnvironments(data.environments || {});
+    setEnvironments(data || {});
 
     // Fetch the notebook's specific environment
     const notebookPath = panel.context.path;

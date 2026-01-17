@@ -274,7 +274,8 @@
   transform: scale(0.95);
 }
 
-.calkit-sidebar-section-run:disabled {
+.calkit-sidebar-section-run:disabled,
+.calkit-sidebar-section-run.disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

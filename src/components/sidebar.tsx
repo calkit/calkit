@@ -40,11 +40,6 @@ import {
 } from "./stage-editor";
 import { isFeatureEnabled } from "../feature-flags";
 import { pipelineState } from "../pipeline-state";
-import {
-  generateProjectNameFromDir,
-  generateProjectTitleFromDir,
-  getDirNameFromPath,
-} from "../utils/project-utils";
 
 interface ISectionItem {
   id: string;
@@ -599,45 +594,73 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
    */
   const ensureProjectName = useCallback(async (): Promise<boolean> => {
     if (projectQuery.data?.name) {
+      console.log("Project name exists:", projectQuery.data.name);
       return true;
     }
 
-    // Get current directory to generate suggestions
+    console.log("No project name found, showing dialog...");
+    console.log("Current projectQuery.data:", projectQuery.data);
+
     try {
-      const cwd = await requestAPI<{ cwd: string }>("system");
-      const dirName = getDirNameFromPath(cwd.cwd);
+      // Get suggested values from the project data
+      // (The backend provides these when name is not set)
+      const suggestedName = projectQuery.data?.suggested_name || "my-project";
+      const suggestedTitle = projectQuery.data?.suggested_title || "My Project";
 
-      const suggestedName = generateProjectNameFromDir(dirName);
-      const suggestedTitle = generateProjectTitleFromDir(dirName);
-
-      // Use the project info editor with suggested values
-      const result = await showProjectInfoEditor({
+      console.log("Using suggested values:", {
         name: suggestedName,
         title: suggestedTitle,
-        description: projectInfo.description || "",
-        git_repo_url: projectInfo.git_repo_url || "",
-        owner: projectInfo.owner || "",
       });
 
+      console.log("About to show project info editor with options:", {
+        name: suggestedName,
+        title: suggestedTitle,
+      });
+
+      const result = await showProjectInfoEditor(
+        {
+          name: suggestedName,
+          title: suggestedTitle,
+          description: projectQuery.data?.description || "",
+          git_repo_url: projectQuery.data?.git_repo_url || "",
+          owner: projectQuery.data?.owner || "",
+        },
+        true,
+      );
+
+      console.log("Dialog result:", result);
+
       if (!result) {
+        console.log("User cancelled project name dialog or result is null");
         return false;
       }
 
+      console.log("Saving project info:", result);
+
       // Update project with the name and title
-      await requestAPI("project", {
+      const putResponse = await requestAPI("project", {
         method: "PUT",
         body: JSON.stringify(result),
       });
 
+      console.log("Project PUT response:", putResponse);
+      console.log("Project info saved successfully");
+
       // Invalidate project query to refetch updated data
+      console.log("Invalidating project query...");
       await queryClient.invalidateQueries({ queryKey: ["project"] });
+      console.log("Query invalidated, ensureProjectName returning true");
 
       return true;
     } catch (error) {
-      console.error("Failed to ensure project name:", error);
+      console.error("Failed to ensure project name - Error details:", {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        error,
+      });
       return false;
     }
-  }, [projectQuery.data?.name, projectInfo]);
+  }, [projectQuery.data]);
 
   const handleSaveProjectInfo = useCallback(async () => {
     // If project has no name, suggest the current directory name
@@ -817,14 +840,19 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   }, [ensureProjectName]);
 
   const handleCreateEnvironment = useCallback(async () => {
+    console.log("handleCreateEnvironment called");
     const hasName = await ensureProjectName();
+    console.log("ensureProjectName returned:", hasName);
     if (!hasName) {
+      console.log("Cancelling environment creation - no project name");
       return;
     }
 
+    console.log("About to show environment editor");
     await showEnvironmentEditor({
       mode: "create",
       onSubmit: async ({ name, kind, path, packages }) => {
+        console.log("Environment editor submitted");
         try {
           await requestAPI("environments", {
             method: "POST",
@@ -1685,25 +1713,31 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                   }
                 }
                 const hasStaleStages = outdatedCount > 0;
+                const hasNoStages = items.length === 0;
+                const isDisabled = pipelineRunning || hasNoStages;
                 return (
                   <>
                     {sectionId === "pipelineStages" && (
                       <button
                         className={`calkit-sidebar-section-run${
                           pipelineRunning ? " running" : ""
-                        }${hasStaleStages ? " stale" : ""}`}
+                        }${hasStaleStages ? " stale" : ""}${
+                          hasNoStages ? " disabled" : ""
+                        }`}
                         title={
-                          pipelineRunning
+                          hasNoStages
+                            ? "Create stages before running pipeline"
+                            : pipelineRunning
                             ? "Pipeline running..."
                             : "Run pipeline"
                         }
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (!pipelineRunning) {
+                          if (!isDisabled) {
                             handleRunPipeline();
                           }
                         }}
-                        disabled={pipelineRunning}
+                        disabled={isDisabled}
                       >
                         {pipelineRunning ? (
                           <span className="calkit-spinner" />

@@ -332,6 +332,8 @@ class EnvironmentEditorWidget extends ReactWidget {
     },
   ) {
     super();
+    this.addClass("calkit-environment-editor-dialog");
+
     const getDefaultPath = (kind: string, envName: string = "") => {
       switch (kind) {
         case "uv-venv":

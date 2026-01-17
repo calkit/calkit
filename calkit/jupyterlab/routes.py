@@ -3,6 +3,7 @@
 import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -52,7 +53,24 @@ class ProjectRouteHandler(APIHandler):
     @tornado.web.authenticated
     def get(self):
         self.log.info(f"Received request for project info in {os.getcwd()}")
-        self.finish(json.dumps(calkit.load_calkit_info()))
+        project_info = calkit.load_calkit_info()
+        # If project has no name, add suggested values based on current directory
+        if not project_info.get("name"):
+            cwd = os.getcwd()
+            dir_name = os.path.basename(cwd) or "project"
+            # Generate kebab-case name
+            name = dir_name.lower().replace("_", "-").replace(" ", "-")
+            name = re.sub(
+                r"[^a-z0-9-]", "", name
+            )  # Remove non-alphanumeric except dashes
+            name = name.strip("-")  # Remove leading/trailing dashes
+            name = re.sub(r"-+", "-", name)  # Collapse multiple dashes
+            # Generate title by replacing dashes with spaces and capitalizing
+            title = name.replace("-", " ").capitalize()
+            project_info["suggested_name"] = name
+            project_info["suggested_title"] = title
+            self.log.info(f"No project name found; suggested: {name}, {title}")
+        self.finish(json.dumps(project_info))
 
     @tornado.web.authenticated
     def put(self):

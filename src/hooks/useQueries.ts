@@ -16,6 +16,8 @@ export interface IProjectInfo {
   datasets: any[];
   questions: any[];
   models: Record<string, any>;
+  suggested_name?: string;
+  suggested_title?: string;
 }
 
 export interface IGitStatus {

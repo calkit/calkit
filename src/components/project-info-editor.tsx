@@ -130,46 +130,68 @@ const ProjectInfoEditorBody: React.FC<
  * A ReactWidget that wraps the project info editor dialog body
  */
 class ProjectInfoEditorWidget extends ReactWidget {
-  private _data: ProjectInfoEditorProps;
+  private data: ProjectInfoEditorProps;
 
-  constructor(private options: ProjectInfoEditorProps) {
+  constructor(options: ProjectInfoEditorProps) {
     super();
-    this._data = { ...options };
+    this.data = { ...options };
+    this.addClass("calkit-project-info-dialog");
   }
 
-  render(): JSX.Element {
+  render(): React.ReactElement<any> {
     return (
       <ProjectInfoEditorBody
-        {...this.options}
+        {...this.data}
         onUpdate={(data) => {
-          this._data = data;
+          this.data = data;
         }}
       />
     );
   }
 
-  getValue(): ProjectInfoEditorProps {
-    return this._data;
+  getData(): ProjectInfoEditorProps {
+    return this.data;
   }
 }
 
 /**
  * Show a dialog to edit project info
+ * @param options The project info to edit
+ * @param isInitialSetup Whether this is the initial project setup (affects title)
  */
 export async function showProjectInfoEditor(
   options: ProjectInfoEditorProps,
+  isInitialSetup: boolean = false,
 ): Promise<ProjectInfoEditorProps | null> {
-  const widget = new ProjectInfoEditorWidget(options);
+  console.log(
+    "showProjectInfoEditor called with options:",
+    options,
+    "isInitialSetup:",
+    isInitialSetup,
+  );
 
-  const dialog = new Dialog({
-    title: "Edit Project Info",
-    body: widget,
+  const body = new ProjectInfoEditorWidget(options);
+  console.log("ProjectInfoEditorWidget created");
+
+  const dialog = new Dialog<ProjectInfoEditorProps>({
+    title: isInitialSetup ? "Set Project Name" : "Edit Project Info",
+    body,
     buttons: [Dialog.cancelButton(), Dialog.okButton({ label: "Save" })],
   });
 
+  console.log("Dialog created, about to launch...");
+
   const result = await dialog.launch();
+
+  console.log("Dialog launch completed, result:", result);
+
   if (result.button.accept) {
-    return widget.getValue();
+    console.log("User accepted, getting data from widget...");
+    const data = body.getData();
+    console.log("Data from widget:", data);
+    return data;
   }
+
+  console.log("User cancelled or rejected");
   return null;
 }

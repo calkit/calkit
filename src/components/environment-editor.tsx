@@ -174,7 +174,7 @@ const EnvironmentEditorBody: React.FC<
   return (
     <div className="calkit-env-editor">
       <div className="calkit-env-editor-field">
-        <label htmlFor="env-name">Environment name:</label>
+        <label htmlFor="env-name">Name:</label>
         <input
           id="env-name"
           type="text"
@@ -186,7 +186,7 @@ const EnvironmentEditorBody: React.FC<
         />
       </div>
       <div className="calkit-env-editor-field">
-        <label htmlFor="env-kind">Environment kind:</label>
+        <label htmlFor="env-kind">Kind:</label>
         <select
           id="env-kind"
           value={kind}
@@ -199,26 +199,6 @@ const EnvironmentEditorBody: React.FC<
           <option value="docker">Docker</option>
         </select>
       </div>
-      {showPackages && (
-        <div className="calkit-env-editor-field">
-          <label>Package groups:</label>
-          <div className="calkit-env-package-groups">
-            {Object.keys(PACKAGE_GROUPS).map((groupName) => (
-              <button
-                key={groupName}
-                type="button"
-                className="calkit-env-package-group-btn"
-                onClick={() => handleSelectPackageGroup(groupName)}
-                title={`Add packages from ${groupName}: ${PACKAGE_GROUPS[
-                  groupName
-                ].join(", ")}`}
-              >
-                + {groupName}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
       {showPackages && (
         <div className="calkit-env-editor-field">
           <label>Packages:</label>
@@ -254,6 +234,27 @@ const EnvironmentEditorBody: React.FC<
             >
               +
             </button>
+          </div>
+        </div>
+      )}
+      {/* Package groups */}
+      {showPackages && (
+        <div className="calkit-env-editor-field">
+          <label>Package groups:</label>
+          <div className="calkit-env-package-groups">
+            {Object.keys(PACKAGE_GROUPS).map((groupName) => (
+              <button
+                key={groupName}
+                type="button"
+                className="calkit-env-package-group-btn"
+                onClick={() => handleSelectPackageGroup(groupName)}
+                title={`Add packages from ${groupName}: ${PACKAGE_GROUPS[
+                  groupName
+                ].join(", ")}`}
+              >
+                + {groupName}
+              </button>
+            ))}
           </div>
         </div>
       )}

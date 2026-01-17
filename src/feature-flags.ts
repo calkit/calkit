@@ -84,8 +84,8 @@ export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   environments: true,
   pipelineStages: true,
   notebooks: true,
-  history: true,
-  setup: true,
+  history: false,
+  setup: false,
   notebookToolbar: true,
 
   // Incomplete features - disabled by default

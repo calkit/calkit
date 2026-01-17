@@ -355,7 +355,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
       if (isFeatureEnabled("publications")) {
         calkitMenu.addItem({ command: "calkit:new-publication" });
       }
-      calkitMenu.addItem({ command: "calkit:save-project" });
+      if (isFeatureEnabled("history")) {
+        calkitMenu.addItem({ command: "calkit:save-project" });
+      }
       calkitMenu.addItem({ type: "separator" });
       calkitMenu.addItem({ command: "calkit:open-sidebar" });
 

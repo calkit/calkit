@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { requestAPI } from "../request";
+import { isFeatureEnabled } from "../feature-flags";
 
 /**
  * Type definitions for API responses
@@ -118,6 +119,7 @@ export const useDependencies = () => {
     queryFn: () => requestAPI<IDependencyItem[]>("dependencies"),
     staleTime: 15 * 1000,
     refetchInterval: 10000,
+    enabled: isFeatureEnabled("setup"),
   });
 };
 

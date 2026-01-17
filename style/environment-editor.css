@@ -91,11 +91,19 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 8px;
-  border-bottom: 1px solid var(--jp-border-color3);
+  border: 1px solid var(--jp-border-color3);
+  margin-bottom: -1px;
+}
+
+.calkit-env-package-item:first-child {
+  border-top-left-radius: 3px;
+  border-top-right-radius: 3px;
 }
 
 .calkit-env-package-item:last-child {
-  border-bottom: none;
+  border-bottom-left-radius: 3px;
+  border-bottom-right-radius: 3px;
+  margin-bottom: 0;
 }
 
 .calkit-env-package-name {
@@ -108,7 +116,7 @@
 .calkit-env-package-remove {
   background: none;
   border: none;
-  color: var(--jp-error-color1);
+  color: var(--jp-ui-font-color2);
   cursor: pointer;
   font-size: 18px;
   line-height: 1;
@@ -117,7 +125,7 @@
 }
 
 .calkit-env-package-remove:hover {
-  color: var(--jp-error-color0);
+  color: var(--jp-ui-font-color1);
 }
 
 .calkit-env-package-input-container {

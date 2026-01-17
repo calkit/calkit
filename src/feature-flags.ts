@@ -12,6 +12,9 @@ export interface IFeatureFlags {
   /** Environment management (create, edit, delete environments) */
   environments: boolean;
 
+  /** Advanced environment types (Julia, Conda, Docker) beyond the MVP */
+  advancedEnvironments: boolean;
+
   /** Pipeline stages and execution */
   pipelineStages: boolean;
 
@@ -89,6 +92,7 @@ export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   notebookToolbar: true,
 
   // Incomplete features - disabled by default
+  advancedEnvironments: false,
   cellOutputMarking: false,
   fileBrowserMenu: false,
   figures: false,

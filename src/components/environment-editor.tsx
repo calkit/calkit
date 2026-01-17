@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Dialog } from "@jupyterlab/apputils";
 import { ReactWidget } from "@jupyterlab/apputils";
+import { isFeatureEnabled } from "../feature-flags";
 
 /**
  * Predefined package groups
@@ -96,11 +97,69 @@ const EnvironmentEditorBody: React.FC<
     initialPrefix || getDefaultPrefix(initialKind, initialName),
   );
   const [python, setPython] = useState(initialPython);
-  const [packages, setPackages] = useState<string[]>(initialPackages);
+  // For uv-venv and venv, ensure ipykernel is included from the start
+  const [packages, setPackages] = useState<string[]>(() => {
+    const pkgs = initialPackages || [];
+    if (
+      (initialKind === "uv-venv" || initialKind === "venv") &&
+      !pkgs.includes("ipykernel")
+    ) {
+      return ["ipykernel", ...pkgs];
+    }
+    return pkgs;
+  });
   const [newPackage, setNewPackage] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [userEditedPath, setUserEditedPath] = useState(!!initialPath);
   const [userEditedPrefix, setUserEditedPrefix] = useState(!!initialPrefix);
+  const [nameError, setNameError] = useState<string>("");
+  const packageInputRef = useRef<HTMLInputElement>(null);
+
+  // Handle Enter key on package input to add package instead of closing dialog
+  useEffect(() => {
+    const handlePackageInputKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.key === "Enter" &&
+        packageInputRef.current === document.activeElement
+      ) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        handleAddPackage();
+      }
+    };
+
+    // Use capture phase to intercept before dialog handlers
+    document.addEventListener("keydown", handlePackageInputKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", handlePackageInputKeyDown, true);
+    };
+  }, [newPackage, packages]);
+
+  // Validate kebab-case name
+  const isValidKebabCase = (str: string): boolean => {
+    if (!str.trim()) return false;
+    // Must be lowercase letters, numbers, and hyphens only
+    // Cannot start or end with hyphen
+    const kebabCaseRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+    return kebabCaseRegex.test(str);
+  };
+
+  // Check name validity and set error
+  React.useEffect(() => {
+    if (name.trim() && !isValidKebabCase(name)) {
+      if (/[A-Z]/.test(name)) {
+        setNameError("Name must be lowercase");
+      } else if (/[^a-z0-9-]/.test(name)) {
+        setNameError("Name can only contain letters, numbers, and hyphens");
+      } else if (/^-|-$/.test(name)) {
+        setNameError("Name cannot start or end with a hyphen");
+      } else {
+        setNameError("Name must be kebab-case (e.g., my-env)");
+      }
+    } else {
+      setNameError("");
+    }
+  }, [name]);
 
   React.useEffect(() => {
     const data: any = { name, kind, path, packages };
@@ -167,13 +226,6 @@ const EnvironmentEditorBody: React.FC<
     setPackages(Array.from(merged).sort());
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      handleAddPackage();
-    }
-  };
-
   const showPackages =
     kind === "uv-venv" ||
     kind === "venv" ||
@@ -190,9 +242,20 @@ const EnvironmentEditorBody: React.FC<
           value={name}
           onChange={(e) => setName(e.target.value)}
           disabled={mode === "edit"}
-          placeholder="my-environment"
+          placeholder="ex: analysis"
           autoFocus={mode === "create"}
+          style={{
+            borderColor: nameError ? "#d32f2f" : undefined,
+            backgroundColor: nameError ? "rgba(211, 47, 47, 0.05)" : undefined,
+          }}
         />
+        {nameError && (
+          <small
+            style={{ color: "#d32f2f", display: "block", marginTop: "4px" }}
+          >
+            {nameError}
+          </small>
+        )}
       </div>
       <div className="calkit-env-editor-field">
         <label htmlFor="env-kind">Kind:</label>
@@ -203,9 +266,13 @@ const EnvironmentEditorBody: React.FC<
         >
           <option value="uv-venv">uv-venv (Python)</option>
           <option value="venv">venv (Python)</option>
-          <option value="julia">Julia</option>
-          <option value="conda">Conda</option>
-          <option value="docker">Docker</option>
+          {isFeatureEnabled("advancedEnvironments") && (
+            <>
+              <option value="julia">Julia</option>
+              <option value="conda">Conda</option>
+              <option value="docker">Docker</option>
+            </>
+          )}
         </select>
       </div>
       {showPackages && (
@@ -228,16 +295,19 @@ const EnvironmentEditorBody: React.FC<
           </div>
           <div className="calkit-env-package-input-container">
             <input
+              ref={packageInputRef}
               type="text"
               value={newPackage}
               onChange={(e) => setNewPackage(e.target.value)}
-              onKeyPress={handleKeyPress}
               placeholder="Add package..."
               className="calkit-env-package-add-input"
             />
             <button
               type="button"
-              onClick={handleAddPackage}
+              onClick={() => {
+                handleAddPackage();
+                packageInputRef.current?.focus();
+              }}
               className="calkit-env-package-add-button"
               disabled={!newPackage.trim()}
             >
@@ -433,6 +503,12 @@ export async function showEnvironmentEditor(
     }) => Promise<void>;
   },
 ): Promise<void> {
+  const isValidKebabCase = (str: string): boolean => {
+    if (!str.trim()) return false;
+    const kebabCaseRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+    return kebabCaseRegex.test(str);
+  };
+
   const widget = new EnvironmentEditorWidget(options);
   const dialog = new Dialog<{
     name: string;
@@ -453,8 +529,20 @@ export async function showEnvironmentEditor(
   const result = await dialog.launch();
   if (result.button.accept) {
     const data = widget.getData();
-    if (data.name.trim()) {
-      await options.onSubmit(data);
+
+    // Validate name is kebab-case
+    if (!data.name.trim() || !isValidKebabCase(data.name)) {
+      return;
     }
+
+    // For uv-venv and venv, require at least one package (ipykernel)
+    if (
+      (data.kind === "uv-venv" || data.kind === "venv") &&
+      data.packages.length === 0
+    ) {
+      return;
+    }
+
+    await options.onSubmit(data);
   }
 }

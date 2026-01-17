@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 import calkit
 import calkit.cli.main
+import calkit.environments
 import calkit.pipeline
 from calkit.cli.new import (
     new_conda_env,
@@ -1313,6 +1314,109 @@ class EnvironmentsRouteHandler(APIHandler):
             return
         self.log.info(f"Created new environment '{env_name}' successfully")
         self.finish(json.dumps({"message": "New environment created"}))
+
+    def put(self):
+        """Update an existing environment.
+
+        Requires the request to contain both the previous and new environment
+        details so we can determine which need to change.
+        """
+        body = self.get_json_body()
+        if not body:
+            self.set_status(400)
+            self.finish(
+                json.dumps({"error": "Request body must be valid JSON"})
+            )
+            return
+        existing_env = body.get("existing")
+        updated_env = body.get("updated")
+        if not existing_env or not updated_env:
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            "Request body must include 'existing' and"
+                            " 'updated' environment details"
+                        )
+                    }
+                )
+            )
+            return
+        # Env kind is not allowed to change for now
+        # We also only support uv-venv and venv env kinds for now
+        if existing_env.get("kind") != updated_env.get("kind"):
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            "Environment 'kind' cannot be changed during"
+                            " update"
+                        )
+                    }
+                )
+            )
+            return
+        if existing_env.get("kind") not in ["uv-venv", "venv"]:
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": (
+                            f"Environment kind"
+                            f" '{existing_env.get('kind')}' is not supported"
+                            " for updates"
+                        )
+                    }
+                )
+            )
+            return
+        # Changes to path or prefix require deleting the old ones, and the
+        # old env locks
+        existing_path = existing_env.get("path")
+        updated_path = updated_env.get("path")
+        existing_prefix = existing_env.get("prefix")
+        updated_prefix = updated_env.get("prefix")
+        updated_name = updated_env.get("name")
+        existing_name = existing_env.get("name")
+        updated_python = updated_env.get("python")
+        existing_python = existing_env.get("python")
+        if updated_path != existing_path:
+            if os.path.isfile(existing_path):
+                os.remove(existing_path)
+        if updated_name != existing_name:
+            env_lock_fpaths = calkit.environments.get_all_venv_lock_fpaths(
+                env_name=existing_name
+            )
+            for p in env_lock_fpaths:
+                if os.path.isfile(p):
+                    os.remove(p)
+        if (
+            updated_prefix != existing_prefix
+            or updated_python != existing_python
+        ):
+            if os.path.isdir(existing_prefix):
+                shutil.rmtree(existing_prefix)
+        ck_info = calkit.load_calkit_info()
+        envs = ck_info.get("environments", {})
+        if existing_name != updated_name:
+            envs.pop(existing_name, None)
+        envs[updated_name] = updated_env
+        ck_info["environments"] = envs
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        # Now check the environment
+        try:
+            calkit.cli.main.check_environment(env_name=updated_name)
+        except Exception as e:
+            self.set_status(500)
+            self.finish(
+                json.dumps({"error": f"Environment check failed: {e}"})
+            )
+            return
+        self.log.info(f"Updated environment '{updated_name}' successfully")
+        self.finish(json.dumps({"message": "Environment updated"}))
 
 
 class SystemRouteHandler(APIHandler):

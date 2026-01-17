@@ -31,6 +31,10 @@ import { addCommands, addContextMenuItems } from "./file-browser-menu";
 import { createNotebookToolbar } from "./components/notebook-toolbar";
 import { calkitIcon } from "./icons";
 import { showCommitDialog } from "./components/commit-dialog";
+import {
+  showStageEditorDialog,
+  STAGE_KIND_OPTIONS,
+} from "./components/stage-editor";
 import { IGitStatus } from "./hooks/useQueries";
 import { isFeatureEnabled } from "./feature-flags";
 import { queryClient } from "./queryClient";
@@ -273,8 +277,49 @@ const plugin: JupyterFrontEndPlugin<void> = {
         caption: "Create a new pipeline stage",
         icon: calkitIcon,
         execute: async () => {
-          console.log("New pipeline stage - not yet implemented");
-          // TODO: Implement pipeline stage creation
+          try {
+            await showStageEditorDialog({
+              title: "Create new stage",
+              kind: STAGE_KIND_OPTIONS[0].value,
+              environment: "",
+              inputs: [],
+              outputs: [],
+              attributes: {},
+              onSave: async ({
+                name,
+                inputs,
+                outputs,
+                kind,
+                environment,
+                attributes,
+              }: any) => {
+                if (!name.trim()) return;
+                try {
+                  await requestAPI("pipeline/stage", {
+                    method: "PUT",
+                    body: JSON.stringify({
+                      name,
+                      kind,
+                      environment,
+                      inputs,
+                      outputs,
+                      ...attributes,
+                    }),
+                  });
+                  await queryClient.invalidateQueries({
+                    queryKey: ["project"],
+                  });
+                  await queryClient.invalidateQueries({
+                    queryKey: ["pipelineStatus"],
+                  });
+                } catch (error) {
+                  console.error("Failed to create pipeline stage:", error);
+                }
+              },
+            });
+          } catch (error) {
+            console.error("Failed to open pipeline stage editor:", error);
+          }
         },
       });
 

@@ -465,6 +465,12 @@
   color: var(--jp-warn-color1);
   margin-left: 6px;
 }
+.calkit-status-chip.missing {
+  background-color: rgba(255, 152, 0, 0.15);
+  color: #ff9800;
+  border-color: rgba(255, 152, 0, 0.4);
+  margin-left: 6px;
+}
 
 /* Setup section */
 .calkit-setup-list {
@@ -1131,7 +1137,6 @@
   background-color: var(--jp-brand-color0);
   border-color: var(--jp-brand-color0);
 }
-
 .calkit-stage-io-empty {
   font-size: 12px;
   color: var(--jp-ui-font-color2);

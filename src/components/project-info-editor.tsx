@@ -26,6 +26,7 @@ const ProjectInfoEditorBody: React.FC<
   const [descriptionValue, setDescriptionValue] = useState(description);
   const [gitRepoUrlValue, setGitRepoUrlValue] = useState(git_repo_url);
   const [ownerValue, setOwnerValue] = useState(owner);
+  const [advancedExpanded, setAdvancedExpanded] = useState(false);
 
   React.useEffect(() => {
     onUpdate({
@@ -56,27 +57,16 @@ const ProjectInfoEditorBody: React.FC<
           placeholder="my-project"
           autoFocus
         />
+        <small>Use kebab-case (e.g., my-awesome-project)</small>
       </div>
       <div className="calkit-dialog-field">
-        {" "}
-        <label htmlFor="project-owner">Owner:</label>
-        <input
-          id="project-owner"
-          type="text"
-          value={ownerValue}
-          onChange={(e) => setOwnerValue(e.target.value)}
-          placeholder="username or organization"
-        />
-      </div>
-      <div className="calkit-dialog-field">
-        {" "}
         <label htmlFor="project-title">Title:</label>
         <input
           id="project-title"
           type="text"
           value={titleValue}
           onChange={(e) => setTitleValue(e.target.value)}
-          placeholder="My Project Title"
+          placeholder="My Awesome Project"
         />
       </div>
       <div className="calkit-dialog-field">
@@ -89,15 +79,48 @@ const ProjectInfoEditorBody: React.FC<
           rows={4}
         />
       </div>
-      <div className="calkit-dialog-field">
-        <label htmlFor="project-git-url">Git repo URL:</label>
-        <input
-          id="project-git-url"
-          type="text"
-          value={gitRepoUrlValue}
-          onChange={(e) => setGitRepoUrlValue(e.target.value)}
-          placeholder="https://github.com/user/repo"
-        />
+
+      {/* Advanced Section */}
+      <div className="calkit-project-info-advanced">
+        <button
+          className="calkit-project-info-advanced-toggle"
+          type="button"
+          onClick={() => setAdvancedExpanded(!advancedExpanded)}
+        >
+          <span
+            className={`calkit-project-info-chevron ${
+              advancedExpanded ? "expanded" : ""
+            }`}
+          >
+            ▼
+          </span>
+          Advanced
+        </button>
+
+        {advancedExpanded && (
+          <div className="calkit-project-info-advanced-fields">
+            <div className="calkit-dialog-field">
+              <label htmlFor="project-owner">Owner:</label>
+              <input
+                id="project-owner"
+                type="text"
+                value={ownerValue}
+                onChange={(e) => setOwnerValue(e.target.value)}
+                placeholder="username or organization"
+              />
+            </div>
+            <div className="calkit-dialog-field">
+              <label htmlFor="project-git-url">Git repo URL:</label>
+              <input
+                id="project-git-url"
+                type="text"
+                value={gitRepoUrlValue}
+                onChange={(e) => setGitRepoUrlValue(e.target.value)}
+                placeholder="https://github.com/user/repo"
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -40,6 +40,11 @@ import {
 } from "./stage-editor";
 import { isFeatureEnabled } from "../feature-flags";
 import { pipelineState } from "../pipeline-state";
+import {
+  generateProjectNameFromDir,
+  generateProjectTitleFromDir,
+  getDirNameFromPath,
+} from "../utils/project-utils";
 
 interface ISectionItem {
   id: string;
@@ -277,6 +282,17 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     projectQuery.data,
     environmentsQuery.data,
   );
+
+  // Auto-expand basicInfo if project has no name
+  React.useEffect(() => {
+    if (!projectQuery.data?.name) {
+      setExpandedSections((prev) => {
+        const next = new Set(prev);
+        next.add("basicInfo");
+        return next;
+      });
+    }
+  }, [projectQuery.data?.name]);
 
   if (dependenciesQuery.data) {
     sectionData.setup = dependenciesQuery.data as IDependencyItem[];
@@ -577,8 +593,69 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     [],
   );
 
+  /**
+   * Check if project has a name, and if not, prompt user to set one
+   * @returns true if project has a name (or user just set one), false if user cancelled
+   */
+  const ensureProjectName = useCallback(async (): Promise<boolean> => {
+    if (projectQuery.data?.name) {
+      return true;
+    }
+
+    // Get current directory to generate suggestions
+    try {
+      const cwd = await requestAPI<{ cwd: string }>("system");
+      const dirName = getDirNameFromPath(cwd.cwd);
+
+      const suggestedName = generateProjectNameFromDir(dirName);
+      const suggestedTitle = generateProjectTitleFromDir(dirName);
+
+      // Use the project info editor with suggested values
+      const result = await showProjectInfoEditor({
+        name: suggestedName,
+        title: suggestedTitle,
+        description: projectInfo.description || "",
+        git_repo_url: projectInfo.git_repo_url || "",
+        owner: projectInfo.owner || "",
+      });
+
+      if (!result) {
+        return false;
+      }
+
+      // Update project with the name and title
+      await requestAPI("project", {
+        method: "PUT",
+        body: JSON.stringify(result),
+      });
+
+      // Invalidate project query to refetch updated data
+      await queryClient.invalidateQueries({ queryKey: ["project"] });
+
+      return true;
+    } catch (error) {
+      console.error("Failed to ensure project name:", error);
+      return false;
+    }
+  }, [projectQuery.data?.name, projectInfo]);
+
   const handleSaveProjectInfo = useCallback(async () => {
-    const result = await showProjectInfoEditor(projectInfo);
+    // If project has no name, suggest the current directory name
+    let suggestedInfo = { ...projectInfo };
+    if (!suggestedInfo.name) {
+      try {
+        const cwd = await requestAPI<{ cwd: string }>("system");
+        if (cwd && cwd.cwd) {
+          // Extract basename from path
+          const dirName = cwd.cwd.split("/").filter(Boolean).pop() || "";
+          suggestedInfo.name = dirName;
+        }
+      } catch (error) {
+        console.warn("Failed to get current directory:", error);
+      }
+    }
+
+    const result = await showProjectInfoEditor(suggestedInfo);
     if (!result) {
       return;
     }
@@ -697,6 +774,11 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   }, []);
 
   const handleCreateStage = useCallback(async () => {
+    const hasName = await ensureProjectName();
+    if (!hasName) {
+      return;
+    }
+
     await showStageEditorDialog({
       title: "Create new stage",
       kind: STAGE_KIND_OPTIONS[0].value,
@@ -732,9 +814,14 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
         }
       },
     });
-  }, []);
+  }, [ensureProjectName]);
 
   const handleCreateEnvironment = useCallback(async () => {
+    const hasName = await ensureProjectName();
+    if (!hasName) {
+      return;
+    }
+
     await showEnvironmentEditor({
       mode: "create",
       onSubmit: async ({ name, kind, path, packages }) => {
@@ -751,9 +838,14 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
         }
       },
     });
-  }, []);
+  }, [ensureProjectName]);
 
   const handleCreateNotebook = useCallback(async () => {
+    const hasName = await ensureProjectName();
+    if (!hasName) {
+      return;
+    }
+
     const environmentList = sectionData.environments || [];
 
     const createEnvironmentCallback = async (): Promise<string | null> => {
@@ -796,6 +888,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     sectionData.environments,
     createNotebookMutation,
     createEnvironmentMutation,
+    ensureProjectName,
   ]);
 
   const handleRegisterNotebook = useCallback(async () => {
@@ -1521,6 +1614,16 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                   } need attention`}
                 >
                   {newCount}
+                </span>
+              </span>
+            )}
+            {sectionId === "basicInfo" && !projectQuery.data?.name && (
+              <span className="calkit-status-chips">
+                <span
+                  className="calkit-status-chip missing"
+                  title="Project name is required"
+                >
+                  ⚠
                 </span>
               </span>
             )}

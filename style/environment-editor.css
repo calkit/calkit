@@ -488,3 +488,44 @@
   border-left: 2px solid var(--jp-border-color1);
   margin-left: 3px;
 }
+
+/* Project info advanced section */
+.calkit-project-info-advanced {
+  margin-top: 10px;
+}
+
+.calkit-project-info-advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--jp-ui-font-color1);
+  font-weight: 500;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.calkit-project-info-advanced-toggle:hover {
+  color: var(--jp-ui-font-color0);
+}
+
+.calkit-project-info-chevron {
+  display: inline-block;
+  width: 16px;
+  transition: transform 0.2s ease;
+  transform: rotate(-90deg);
+}
+
+.calkit-project-info-chevron.expanded {
+  transform: rotate(0deg);
+}
+
+.calkit-project-info-advanced-fields {
+  padding-left: 10px;
+  border-left: 2px solid var(--jp-border-color1);
+  margin-left: 3px;
+}

@@ -743,6 +743,8 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
             method: "POST",
             body: JSON.stringify({ name, kind, path, packages }),
           });
+          await queryClient.invalidateQueries({ queryKey: ["environments"] });
+          await queryClient.invalidateQueries({ queryKey: ["project"] });
         } catch (error) {
           console.error("Failed to create environment:", error);
           throw error;
@@ -764,6 +766,8 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
               method: "POST",
               body: JSON.stringify({ name, kind, path, packages }),
             });
+            await queryClient.invalidateQueries({ queryKey: ["environments"] });
+            await queryClient.invalidateQueries({ queryKey: ["project"] });
             createdName = name;
           } catch (error) {
             console.error("Failed to create environment:", error);

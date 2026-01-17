@@ -31,6 +31,7 @@ interface IEnvironmentEditorProps {
   initialPath?: string;
   initialPrefix?: string;
   initialPackages?: string[];
+  initialPython?: string;
   mode: "create" | "edit";
 }
 
@@ -45,6 +46,7 @@ const EnvironmentEditorBody: React.FC<
       path: string;
       prefix?: string;
       packages: string[];
+      python?: string;
     }) => void;
   }
 > = ({
@@ -53,6 +55,7 @@ const EnvironmentEditorBody: React.FC<
   initialPath = "",
   initialPrefix = "",
   initialPackages = [],
+  initialPython = "3.14",
   mode,
   onUpdate,
 }) => {
@@ -92,6 +95,7 @@ const EnvironmentEditorBody: React.FC<
   const [prefix, setPrefix] = useState(
     initialPrefix || getDefaultPrefix(initialKind, initialName),
   );
+  const [python, setPython] = useState(initialPython);
   const [packages, setPackages] = useState<string[]>(initialPackages);
   const [newPackage, setNewPackage] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -102,9 +106,14 @@ const EnvironmentEditorBody: React.FC<
     const data: any = { name, kind, path, packages };
     if (kind === "uv-venv" || kind === "venv") {
       data.prefix = prefix;
+      data.python = python;
+      // Ensure ipykernel is always in packages for venv-based environments
+      if (!packages.includes("ipykernel")) {
+        data.packages = [...packages, "ipykernel"];
+      }
     }
     onUpdate(data);
-  }, [name, kind, path, prefix, packages, onUpdate]);
+  }, [name, kind, path, prefix, packages, python, onUpdate]);
 
   // Update path and prefix when name changes (in create mode)
   React.useEffect(() => {
@@ -273,6 +282,17 @@ const EnvironmentEditorBody: React.FC<
           {showAdvanced && (
             <div className="calkit-env-editor-advanced-fields">
               <div className="calkit-env-editor-field">
+                <label htmlFor="env-python">Python version:</label>
+                <input
+                  id="env-python"
+                  type="text"
+                  value={python}
+                  onChange={(e) => setPython(e.target.value)}
+                  placeholder="3.14"
+                  title="Python version for the environment"
+                />
+              </div>
+              <div className="calkit-env-editor-field">
                 <label htmlFor="env-path">Path:</label>
                 <input
                   id="env-path"
@@ -309,30 +329,23 @@ const EnvironmentEditorBody: React.FC<
 };
 
 /**
- * A widget wrapper for the environment editor body
+ * A ReactWidget that wraps the environment editor dialog body
  */
 class EnvironmentEditorWidget extends ReactWidget {
-  private _data: {
+  private data: {
     name: string;
     kind: string;
     path: string;
     prefix?: string;
     packages: string[];
+    python?: string;
   };
+  private mode: "create" | "edit";
 
-  constructor(
-    private options: IEnvironmentEditorProps & {
-      onUpdate?: (data: {
-        name: string;
-        kind: string;
-        path: string;
-        prefix?: string;
-        packages: string[];
-      }) => void;
-    },
-  ) {
+  constructor(options: IEnvironmentEditorProps) {
     super();
     this.addClass("calkit-environment-editor-dialog");
+    this.mode = options.mode;
 
     const getDefaultPath = (kind: string, envName: string = "") => {
       switch (kind) {
@@ -366,33 +379,42 @@ class EnvironmentEditorWidget extends ReactWidget {
     const initPrefix =
       options.initialPrefix ||
       (kind === "uv-venv" || kind === "venv" ? defaultPrefix : "");
-    this._data = {
+    this.data = {
       name: envName,
       kind,
       path: initPath,
       prefix: initPrefix,
       packages: options.initialPackages || [],
+      python: options.initialPython || "3.14",
     };
   }
 
-  render(): JSX.Element {
+  render(): React.ReactElement<any> {
     return (
       <EnvironmentEditorBody
-        {...this.options}
+        initialName={this.data.name}
+        initialKind={this.data.kind}
+        initialPath={undefined}
+        initialPrefix={undefined}
+        initialPackages={this.data.packages}
+        initialPython={this.data.python}
+        mode={this.mode}
         onUpdate={(data) => {
-          this._data = data;
+          this.data = data;
         }}
       />
     );
   }
 
-  getValue(): {
+  getData(): {
     name: string;
     kind: string;
     path: string;
+    prefix?: string;
     packages: string[];
+    python?: string;
   } {
-    return this._data;
+    return this.data;
   }
 }
 
@@ -405,12 +427,21 @@ export async function showEnvironmentEditor(
       name: string;
       kind: string;
       path: string;
+      prefix?: string;
       packages: string[];
+      python?: string;
     }) => Promise<void>;
   },
 ): Promise<void> {
   const widget = new EnvironmentEditorWidget(options);
-  const dialog = new Dialog({
+  const dialog = new Dialog<{
+    name: string;
+    kind: string;
+    path: string;
+    prefix?: string;
+    packages: string[];
+    python?: string;
+  }>({
     title:
       options.mode === "create" ? "Create environment" : "Edit environment",
     body: widget,
@@ -421,7 +452,7 @@ export async function showEnvironmentEditor(
   });
   const result = await dialog.launch();
   if (result.button.accept) {
-    const data = widget.getValue();
+    const data = widget.getData();
     if (data.name.trim()) {
       await options.onSubmit(data);
     }

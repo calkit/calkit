@@ -244,6 +244,7 @@ const EnvironmentEditorBody: React.FC<
           disabled={mode === "edit"}
           placeholder="ex: analysis"
           autoFocus={mode === "create"}
+          autoComplete="off"
           style={{
             borderColor: nameError ? "#d32f2f" : undefined,
             backgroundColor: nameError ? "rgba(211, 47, 47, 0.05)" : undefined,
@@ -301,6 +302,7 @@ const EnvironmentEditorBody: React.FC<
               onChange={(e) => setNewPackage(e.target.value)}
               placeholder="Add package..."
               className="calkit-env-package-add-input"
+              autoComplete="off"
             />
             <button
               type="button"
@@ -360,6 +362,7 @@ const EnvironmentEditorBody: React.FC<
                   onChange={(e) => setPython(e.target.value)}
                   placeholder="3.14"
                   title="Python version for the environment"
+                  autoComplete="off"
                 />
               </div>
               <div className="calkit-env-editor-field">
@@ -374,6 +377,7 @@ const EnvironmentEditorBody: React.FC<
                   }}
                   placeholder={getDefaultPath(kind, name)}
                   title="Path to requirements/environment file"
+                  autoComplete="off"
                 />
               </div>
               <div className="calkit-env-editor-field">
@@ -388,6 +392,7 @@ const EnvironmentEditorBody: React.FC<
                   }}
                   placeholder={getDefaultPrefix(kind, name)}
                   title="Path to virtual environment directory"
+                  autoComplete="off"
                 />
               </div>
             </div>

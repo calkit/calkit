@@ -700,6 +700,7 @@ const PipelineStageBadge: React.FC<{
                       handleSaveStage();
                     }
                   }}
+                  autoComplete="off"
                 />
                 <button
                   onClick={handleSaveStage}
@@ -860,6 +861,7 @@ const InputsBadge: React.FC<{
                   handleAddManual();
                 }
               }}
+              autoComplete="off"
             />
             <button onClick={handleAddManual}>Add</button>
           </div>
@@ -998,6 +1000,7 @@ const OutputsBadge: React.FC<{
                   handleAddManual();
                 }
               }}
+              autoComplete="off"
             />
             <button onClick={handleAddManual}>Add</button>
           </div>
@@ -1077,6 +1080,7 @@ const InfoBadge: React.FC<{
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Notebook title"
+            autoComplete="off"
           />
         </div>
         <div className="calkit-form-group">
@@ -1086,6 +1090,7 @@ const InfoBadge: React.FC<{
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Describe what this notebook does..."
             rows={5}
+            autoComplete="off"
           />
         </div>
         <div className="calkit-form-actions">

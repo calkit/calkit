@@ -73,6 +73,7 @@ const NotebookRegistrationBody: React.FC<NotebookRegistrationBodyProps> = ({
               value={notebookPath}
               onChange={(e) => setNotebookPath(e.target.value)}
               className="calkit-dialog-input"
+              autoComplete="off"
             />
           </div>
           <div className="calkit-dialog-field">
@@ -84,6 +85,7 @@ const NotebookRegistrationBody: React.FC<NotebookRegistrationBodyProps> = ({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="calkit-dialog-input"
+              autoComplete="off"
             />
           </div>
           <div className="calkit-dialog-field">
@@ -97,6 +99,7 @@ const NotebookRegistrationBody: React.FC<NotebookRegistrationBodyProps> = ({
               onChange={(e) => setDescription(e.target.value)}
               className="calkit-dialog-textarea"
               rows={3}
+              autoComplete="off"
             />
           </div>
           <div className="calkit-dialog-field">
@@ -170,6 +173,7 @@ const NotebookRegistrationBody: React.FC<NotebookRegistrationBodyProps> = ({
                   }
                 }}
                 className="calkit-dialog-input"
+                autoComplete="off"
               />
               <button
                 onClick={addInput}
@@ -211,6 +215,7 @@ const NotebookRegistrationBody: React.FC<NotebookRegistrationBodyProps> = ({
                   }
                 }}
                 className="calkit-dialog-input"
+                autoComplete="off"
               />
               <button
                 onClick={addOutput}

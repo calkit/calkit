@@ -70,6 +70,7 @@ const ProjectInfoEditorBody: React.FC<
           onChange={(e) => setTitleValue(e.target.value)}
           placeholder="My Awesome Project"
           autoFocus
+          autoComplete="off"
         />
       </div>
       <div className="calkit-dialog-field">
@@ -80,6 +81,7 @@ const ProjectInfoEditorBody: React.FC<
           onChange={(e) => setDescriptionValue(e.target.value)}
           placeholder="ex: A project about awesome things."
           rows={4}
+          autoComplete="off"
         />
       </div>
       <div className="calkit-dialog-field">
@@ -93,6 +95,7 @@ const ProjectInfoEditorBody: React.FC<
             setUserEditedName(true);
           }}
           placeholder="ex: my-awesome-project"
+          autoComplete="off"
         />
       </div>
 
@@ -123,6 +126,7 @@ const ProjectInfoEditorBody: React.FC<
                 value={ownerValue}
                 onChange={(e) => setOwnerValue(e.target.value)}
                 placeholder="username or organization"
+                autoComplete="off"
               />
             </div>
             <div className="calkit-dialog-field">
@@ -133,6 +137,7 @@ const ProjectInfoEditorBody: React.FC<
                 value={gitRepoUrlValue}
                 onChange={(e) => setGitRepoUrlValue(e.target.value)}
                 placeholder="https://github.com/user/repo"
+                autoComplete="off"
               />
             </div>
           </div>

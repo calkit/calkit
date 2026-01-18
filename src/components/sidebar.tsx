@@ -1049,6 +1049,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                           handleAddPackage(item.id);
                         }
                       }}
+                      autoComplete="off"
                     />
                     <button
                       className="calkit-env-add-button"
@@ -1376,6 +1377,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                         }
                       }
                     }}
+                    autoComplete="off"
                   />
                   {!stageName && (
                     <button

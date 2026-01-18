@@ -89,6 +89,7 @@ const CommitDialogBody: React.FC<ICommitDialogProps> = ({
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           placeholder="Describe your changes"
+          autoComplete="off"
         />
       </div>
       <div className="calkit-dialog-field">

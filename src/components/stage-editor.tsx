@@ -416,6 +416,7 @@ const StageEditorBody: React.FC<StageEditorBodyProps> = ({
                 if (inputRef.current) inputRef.current.value = "";
               }
             }}
+            autoComplete="off"
           />
           <button
             className="calkit-stage-io-add-button"
@@ -447,6 +448,7 @@ const StageEditorBody: React.FC<StageEditorBodyProps> = ({
             value={value ?? ""}
             placeholder={field.placeholder}
             onChange={(e) => setValue(e.target.value)}
+            autoComplete="off"
           />
         </div>
       );
@@ -513,6 +515,7 @@ const StageEditorBody: React.FC<StageEditorBodyProps> = ({
             }
             placeholder={field.placeholder}
             onChange={(e) => setValue(e.target.value)}
+            autoComplete="off"
           />
         </div>
       );
@@ -532,6 +535,7 @@ const StageEditorBody: React.FC<StageEditorBodyProps> = ({
           placeholder="e.g., process_data"
           autoFocus
           disabled={!nameEditable}
+          autoComplete="off"
         />
       </div>
 
@@ -553,6 +557,7 @@ const StageEditorBody: React.FC<StageEditorBodyProps> = ({
           value={environment}
           onChange={(e) => setEnvironment(e.target.value)}
           placeholder="environment name"
+          autoComplete="off"
         />
       </div>
 
@@ -575,6 +580,7 @@ const StageEditorBody: React.FC<StageEditorBodyProps> = ({
           value={additionalJson}
           onChange={(e) => setAdditionalJson(e.target.value)}
           placeholder='{"custom": true}'
+          autoComplete="off"
         />
       </div>
     </div>

@@ -71,7 +71,7 @@
 }
 
 .calkit-badge-icon {
-  padding: 0 8px;
+  padding: 0 4px;
   text-transform: none;
   letter-spacing: 0;
   display: flex;
@@ -81,6 +81,7 @@
   color: var(--jp-ui-font-color1);
   border: 1px solid var(--jp-border-color1);
   height: 22px;
+  line-height: 1;
 }
 
 .calkit-badge-icon:hover {

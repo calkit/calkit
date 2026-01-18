@@ -74,6 +74,9 @@ export interface IFeatureFlags {
 
   /** Notebooks section in the sidebar */
   notebooksSidebar: boolean;
+
+  /** Sidebar section visibility toggle menu (gear) */
+  sidebarSectionsMenu: boolean;
 }
 
 /**
@@ -104,6 +107,7 @@ export interface IFeatureFlags {
  * - notebookInfoButton: Notebook info button not yet implemented
  * - calkitActionsMenu: Calkit actions menu not yet implemented
  * - notebooksSidebar: Notebooks section in sidebar not yet implemented
+ * - sidebarSectionsMenu: Sidebar section visibility toggle not yet implemented
  */
 export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   // Fully implemented features
@@ -132,6 +136,7 @@ export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   notebookInfoButton: false,
   calkitActionsMenu: false,
   notebooksSidebar: false,
+  sidebarSectionsMenu: false,
 };
 
 /**

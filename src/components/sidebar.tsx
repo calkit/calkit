@@ -3,6 +3,7 @@ import ReactDOM from "react-dom";
 import { ReactWidget } from "@jupyterlab/apputils";
 import type { CommandRegistry } from "@lumino/commands";
 import { launchIcon } from "@jupyterlab/ui-components";
+import { SidebarSettings } from "./sidebar-settings";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { queryClient } from "../queryClient";
@@ -1826,60 +1827,15 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     <div className="calkit-sidebar">
       <div className="calkit-sidebar-header">
         <div style={{ flex: 1 }} />
-        <div className="calkit-sidebar-settings-container">
-          <button
-            className="calkit-sidebar-settings-btn"
-            title="Show/hide categories"
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowSettingsDropdown(!showSettingsDropdown);
-            }}
-          >
-            ⚙️
-          </button>
-          {showSettingsDropdown && (
-            <div
-              className="calkit-settings-dropdown"
-              onClick={(e) => {
-                e.stopPropagation();
-              }}
-            >
-              {SECTION_DEFS.filter(
-                (section) => section.toggleable !== false,
-              ).map((section) => (
-                <div
-                  key={section.id}
-                  className="calkit-settings-item"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                  }}
-                >
-                  <label
-                    className="calkit-settings-checkbox-label"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={visibleSections.has(section.id)}
-                      onChange={(e) => {
-                        const next = new Set(visibleSections);
-                        if (e.target.checked) {
-                          next.add(section.id);
-                        } else {
-                          next.delete(section.id);
-                        }
-                        setVisibleSections(next);
-                      }}
-                    />
-                    {section.label}
-                  </label>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        {isFeatureEnabled("sidebarSectionsMenu") && (
+          <SidebarSettings
+            sectionDefs={SECTION_DEFS}
+            visibleSections={visibleSections}
+            setVisibleSections={setVisibleSections}
+            showSettingsDropdown={showSettingsDropdown}
+            setShowSettingsDropdown={setShowSettingsDropdown}
+          />
+        )}
       </div>
       <div className="calkit-sidebar-content">
         {SECTION_DEFS.map((section) => {

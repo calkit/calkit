@@ -15,13 +15,11 @@ import {
   useGitHistory,
   useCreateNotebook,
   useRegisterNotebook,
-  useAddPackage,
   useCreateEnvironment,
   useCommit,
   usePush,
   useNotebooks,
   useEnvironments,
-  useDeleteEnvironment,
   usePipelineStatus,
   useDependencies,
   useInstallDependency,
@@ -137,12 +135,10 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   // Mutation hooks - automatically invalidate related queries on success
   const createNotebookMutation = useCreateNotebook();
   const registerNotebookMutation = useRegisterNotebook();
-  const addPackageMutation = useAddPackage();
   const installDependencyMutation = useInstallDependency();
   const createEnvironmentMutation = useCreateEnvironment();
   const commitMutation = useCommit();
   const pushMutation = usePush();
-  const deleteEnvironmentMutation = useDeleteEnvironment();
 
   // Local UI state
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
@@ -155,7 +151,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     new Set(),
   );
   const [expandedStages, setExpandedStages] = useState<Set<string>>(new Set());
-  const [newPackage, setNewPackage] = useState<Record<string, string>>({});
   const [installingDependency, setInstallingDependency] = useState<
     string | null
   >(null);
@@ -544,26 +539,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     showSettingsDropdown,
   ]);
 
-  const handleAddPackage = useCallback(
-    async (envName: string) => {
-      const packageName = newPackage[envName];
-      if (!packageName?.trim()) {
-        return;
-      }
-      try {
-        await addPackageMutation.mutateAsync({
-          environment: envName,
-          package: packageName.trim(),
-        });
-        // Clear input after successful mutation
-        setNewPackage((prev) => ({ ...prev, [envName]: "" }));
-      } catch (error) {
-        console.error("Failed to add package:", error);
-      }
-    },
-    [newPackage, addPackageMutation],
-  );
-
   const handleInstallDependency = useCallback(
     async (dep: IDependencyItem) => {
       if (!dep.installable) {
@@ -579,13 +554,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       }
     },
     [installDependencyMutation],
-  );
-
-  const handleNewPackageChange = useCallback(
-    (envName: string, value: string) => {
-      setNewPackage((prev) => ({ ...prev, [envName]: value }));
-    },
-    [],
   );
 
   /**
@@ -1020,33 +988,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                 >
                   ✏️ Edit
                 </button>
-                <button
-                  className="calkit-env-action-btn calkit-env-delete"
-                  title="Delete environment"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    (async () => {
-                      const confirm = await new Dialog({
-                        title: `Delete environment '${item.id}'?`,
-                        body: "This action cannot be undone.",
-                        buttons: [
-                          Dialog.cancelButton(),
-                          Dialog.warnButton({ label: "Delete" }),
-                        ],
-                      }).launch();
-                      if (!confirm.button.accept) {
-                        return;
-                      }
-                      try {
-                        await deleteEnvironmentMutation.mutateAsync(item.id);
-                      } catch (error) {
-                        console.error("Failed to delete environment:", error);
-                      }
-                    })();
-                  }}
-                >
-                  🗑️ Delete
-                </button>
               </div>
               <div className="calkit-env-kind">
                 <strong>Kind:</strong> {kind}
@@ -1066,30 +1007,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                       </div>
                     ))}
                   </div>
-                  <div className="calkit-env-add-package">
-                    <input
-                      type="text"
-                      className="calkit-env-package-input"
-                      placeholder="Add package..."
-                      value={newPackage[item.id] || ""}
-                      onChange={(e) =>
-                        handleNewPackageChange(item.id, e.target.value)
-                      }
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          handleAddPackage(item.id);
-                        }
-                      }}
-                      autoComplete="off"
-                    />
-                    <button
-                      className="calkit-env-add-button"
-                      onClick={() => handleAddPackage(item.id)}
-                      disabled={!newPackage[item.id]?.trim()}
-                    >
-                      +
-                    </button>
-                  </div>
                 </div>
               )}
             </div>
@@ -1097,14 +1014,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
         </div>
       );
     },
-    [
-      expandedEnvironments,
-      newPackage,
-      toggleEnvironment,
-      handleNewPackageChange,
-      handleAddPackage,
-      sectionData,
-    ],
+    [expandedEnvironments, toggleEnvironment, sectionData],
   );
 
   const renderPipelineStage = useCallback(
@@ -2331,33 +2241,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                   }}
                 >
                   Edit
-                </div>
-                <div
-                  className="calkit-env-context-item calkit-danger"
-                  onClick={() => {
-                    const env = envContextMenu.env!;
-                    setEnvContextMenu(null);
-                    (async () => {
-                      const confirm = await new Dialog({
-                        title: `Delete environment '${env.id}'?`,
-                        body: "This action cannot be undone.",
-                        buttons: [
-                          Dialog.cancelButton(),
-                          Dialog.warnButton({ label: "Delete" }),
-                        ],
-                      }).launch();
-                      if (!confirm.button.accept) {
-                        return;
-                      }
-                      try {
-                        await deleteEnvironmentMutation.mutateAsync(env.id);
-                      } catch (error) {
-                        console.error("Failed to delete environment:", error);
-                      }
-                    })();
-                  }}
-                >
-                  Delete
                 </div>
                 <div className="calkit-env-context-separator" />
               </>

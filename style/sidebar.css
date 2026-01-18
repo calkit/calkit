@@ -729,8 +729,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--jp-info-color1);
-  border: 1px solid var(--jp-layout-color1);
+  background: var(--jp-warn-color1);
   opacity: 0;
   transform: scale(0.6);
   transition:

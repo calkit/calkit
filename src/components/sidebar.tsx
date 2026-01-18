@@ -1000,6 +1000,12 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                                 },
                               }),
                             });
+                            await queryClient.invalidateQueries({
+                              queryKey: ["project"],
+                            });
+                            await queryClient.invalidateQueries({
+                              queryKey: ["environments"],
+                            });
                           } catch (error) {
                             console.error(
                               "Failed to update environment:",
@@ -2305,6 +2311,12 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                                   python,
                                 },
                               }),
+                            });
+                            await queryClient.invalidateQueries({
+                              queryKey: ["project"],
+                            });
+                            await queryClient.invalidateQueries({
+                              queryKey: ["environments"],
                             });
                           } catch (error) {
                             console.error(

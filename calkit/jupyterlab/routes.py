@@ -446,48 +446,42 @@ class NotebookStageRouteHandler(APIHandler):
         """Set the pipeline stage for a notebook."""
         body = self.get_json_body()
         if not body:
-            self.set_status(400)
-            self.finish(
-                json.dumps({"error": "Request body must be valid JSON"})
-            )
-            return
+            return self.error(400, "Request body must be valid JSON")
         notebook_path = body.get("path")
         stage_name = body.get("stage_name")
         env_name = body.get("environment")
         inputs = body.get("inputs", [])
         outputs = body.get("outputs", [])
         if not notebook_path or not stage_name or not env_name:
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            "Request body must include 'path' and 'stage_name'"
-                        )
-                    }
-                )
+            return self.error(
+                400, "Request body must include 'path' and 'stage_name'"
             )
-            return
         ck_info = calkit.load_calkit_info()
         stages = ck_info.get("pipeline", {}).get("stages", {})
         if (
             stage_name in stages
             and stages[stage_name].get("notebook_path") != notebook_path
         ):
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            f"Stage '{stage_name}' already exists for a"
-                            " different notebook"
-                        )
-                    }
-                )
+            return self.error(
+                400,
+                f"Stage '{stage_name}' already exists for another notebook",
             )
-            return
-        # TODO: If this notebook is already part of a stage, handle renaming
+        # If this notebook is already part of a stage, handle renaming
         # Update or add the stage
+        existing_stage_name = None
+        for sname, stage in stages.items():
+            if (
+                stage.get("kind") == "jupyter-notebook"
+                and stage.get("notebook_path") == notebook_path
+            ):
+                existing_stage_name = sname
+                break
+        if existing_stage_name and existing_stage_name != stage_name:
+            self.log.info(
+                f"Renaming existing stage '{existing_stage_name}' to"
+                f" '{stage_name}' for notebook '{notebook_path}'"
+            )
+            stages.pop(existing_stage_name)
         stage = stages.get(stage_name, {})
         stage["kind"] = "jupyter-notebook"
         stage["notebook_path"] = notebook_path

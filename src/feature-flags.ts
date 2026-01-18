@@ -65,6 +65,9 @@ export interface IFeatureFlags {
 
   /** Create new pipeline stages from the sidebar */
   createPipelineStage: boolean;
+
+  /** Notebook info button in the toolbar */
+  notebookInfoButton: boolean;
 }
 
 /**
@@ -92,6 +95,7 @@ export interface IFeatureFlags {
  * - autoDetectInputsOutputs: Auto-detection not yet implemented
  * - createNotebook: Create notebook feature not yet implemented
  * - createPipelineStage: Create pipeline stage feature not yet implemented
+ * - notebookInfoButton: Notebook info button not yet implemented
  */
 export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   // Fully implemented features
@@ -117,6 +121,7 @@ export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   autoDetectInputsOutputs: false,
   createNotebook: false,
   createPipelineStage: false,
+  notebookInfoButton: false,
 };
 
 /**

@@ -1089,6 +1089,10 @@ const InfoBadge: React.FC<{
     }
   };
 
+  if (!isFeatureEnabled("notebookInfoButton")) {
+    return null;
+  }
+
   return (
     <BadgeDropdown
       label="Info"

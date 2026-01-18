@@ -1,14 +1,14 @@
 import {
+  ILayoutRestorer,
   JupyterFrontEnd,
   JupyterFrontEndPlugin,
-  ILayoutRestorer,
 } from "@jupyterlab/application";
 
-import { WidgetTracker, IToolbarWidgetRegistry } from "@jupyterlab/apputils";
+import { IToolbarWidgetRegistry, WidgetTracker } from "@jupyterlab/apputils";
 
 import { IStatusBar } from "@jupyterlab/statusbar";
 
-import { Widget, Menu } from "@lumino/widgets";
+import { Menu, Widget } from "@lumino/widgets";
 
 import { ILauncher } from "@jupyterlab/launcher";
 
@@ -24,22 +24,22 @@ import { IFileBrowserFactory } from "@jupyterlab/filebrowser";
 import { Cell } from "@jupyterlab/cells";
 import { IMainMenu } from "@jupyterlab/mainmenu";
 
-import { requestAPI } from "./request";
-import { CalkitSidebarWidget } from "./components/sidebar";
 import { createOutputMarkerButton } from "./cell-output-marker";
-import { addCommands, addContextMenuItems } from "./file-browser-menu";
-import { createNotebookToolbar } from "./components/notebook-toolbar";
-import { calkitIcon } from "./icons";
 import { showCommitDialog } from "./components/commit-dialog";
+import { createNotebookToolbar } from "./components/notebook-toolbar";
+import { PipelineStatusWidget } from "./components/pipeline-status-bar";
+import { CalkitSidebarWidget } from "./components/sidebar";
 import {
   showStageEditorDialog,
   STAGE_KIND_OPTIONS,
 } from "./components/stage-editor";
-import { IGitStatus } from "./hooks/useQueries";
 import { isFeatureEnabled } from "./feature-flags";
-import { queryClient } from "./queryClient";
-import { PipelineStatusWidget } from "./components/pipeline-status-bar";
+import { addCommands, addContextMenuItems } from "./file-browser-menu";
+import { IGitStatus } from "./hooks/useQueries";
+import { calkitIcon } from "./icons";
 import { pipelineState } from "./pipeline-state";
+import { queryClient } from "./queryClient";
+import { requestAPI } from "./request";
 
 // Import CSS
 import "../style/pipeline-status-bar.css";

@@ -59,6 +59,9 @@ export interface IFeatureFlags {
 
   /** Auto-detect inputs and outputs from notebook toolbar */
   autoDetectInputsOutputs: boolean;
+
+  /** Create new notebooks from the sidebar */
+  createNotebook: boolean;
 }
 
 /**
@@ -84,6 +87,7 @@ export interface IFeatureFlags {
  * - models: Placeholder only, no backend
  * - launcherItems: Not yet implemented
  * - autoDetectInputsOutputs: Auto-detection not yet implemented
+ * - createNotebook: Create notebook feature not yet implemented
  */
 export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   // Fully implemented features
@@ -107,6 +111,7 @@ export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   models: false,
   launcherItems: false,
   autoDetectInputsOutputs: false,
+  createNotebook: false,
 };
 
 /**

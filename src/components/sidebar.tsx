@@ -1284,7 +1284,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       }
       const showCreateButton =
         sectionId === "environments" ||
-        sectionId === "notebooks" ||
+        (sectionId === "notebooks" && isFeatureEnabled("createNotebook")) ||
         sectionId === "pipelineStages";
       const showEditButton = sectionId === "basicInfo";
       const newCount =

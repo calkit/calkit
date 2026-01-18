@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { requestAPI } from "../request";
 import { queryClient } from "../queryClient";
-import { calkitIcon } from "../icons";
+import { infoLetterIcon } from "../icons";
 import { showEnvironmentEditor } from "./environment-editor";
 import { showProjectInfoEditor } from "./project-info-editor";
 import { usePipelineStatus, useSetNotebookStage } from "../hooks/useQueries";
@@ -1092,7 +1092,7 @@ const InfoBadge: React.FC<{
   return (
     <BadgeDropdown
       label="Info"
-      labelNode={<calkitIcon.react height={14} />}
+      labelNode={<infoLetterIcon.react height={14} />}
       isConfigured={true}
       buttonClassName="calkit-badge-icon"
       isOpen={isOpen}

@@ -29,3 +29,13 @@ export const calkitIcon = new LabIcon({
   name: "calkit:sidebar",
   svgstr: calkitIconSvg,
 });
+
+const infoLetterSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+  <circle cx="12" cy="7" r="1.5" />
+  <rect x="11" y="11" width="2" height="8" />
+</svg>`;
+
+export const infoLetterIcon = new LabIcon({
+  name: "calkit:info-letter",
+  svgstr: infoLetterSvg,
+});

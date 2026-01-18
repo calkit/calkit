@@ -71,6 +71,9 @@ export interface IFeatureFlags {
 
   /** Calkit actions menu in the main menu bar */
   calkitActionsMenu: boolean;
+
+  /** Notebooks section in the sidebar */
+  notebooksSidebar: boolean;
 }
 
 /**
@@ -100,6 +103,7 @@ export interface IFeatureFlags {
  * - createPipelineStage: Create pipeline stage feature not yet implemented
  * - notebookInfoButton: Notebook info button not yet implemented
  * - calkitActionsMenu: Calkit actions menu not yet implemented
+ * - notebooksSidebar: Notebooks section in sidebar not yet implemented
  */
 export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   // Fully implemented features
@@ -127,6 +131,7 @@ export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   createPipelineStage: false,
   notebookInfoButton: false,
   calkitActionsMenu: false,
+  notebooksSidebar: false,
 };
 
 /**

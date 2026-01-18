@@ -80,7 +80,7 @@ const SECTION_DEFS: ISectionDefinition[] = [
     setup: "setup",
     environments: "environments",
     pipelineStages: "pipelineStages",
-    notebooks: "notebooks",
+    notebooks: "notebooksSidebar",
     figures: "figures",
     datasets: "datasets",
     questions: "questions",
@@ -1024,6 +1024,16 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       const inputs: string[] = stage.inputs || [];
       const outputs: string[] = stage.outputs || [];
       const environment = stage.environment || "";
+      const notebookPath = (stage as any).notebook_path || "";
+      const isNotebookStage =
+        kind === "jupyter-notebook" || kind === "notebook";
+
+      const handleOpenNotebook = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (commands && notebookPath) {
+          commands.execute("docmanager:open", { path: notebookPath });
+        }
+      };
       const staleStages = pipelineStatus?.stale_stages || {};
       let isStale = stage.id in staleStages;
 
@@ -1060,6 +1070,23 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                 <span className="calkit-stage-info-label">Kind:</span>
                 <span className="calkit-stage-info-value">{kind || "—"}</span>
               </div>
+              {isNotebookStage && notebookPath && (
+                <div className="calkit-stage-info-item">
+                  <span className="calkit-stage-info-label">Notebook:</span>
+                  <div className="calkit-stage-info-value calkit-stage-info-row">
+                    <span className="calkit-stage-info-path">
+                      {notebookPath}
+                    </span>
+                    <button
+                      className="calkit-notebook-open-btn"
+                      onClick={handleOpenNotebook}
+                      title="Open notebook"
+                    >
+                      <launchIcon.react tag="span" />
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="calkit-stage-info-item">
                 <span className="calkit-stage-info-label">Environment:</span>
                 <span className="calkit-stage-info-value">
@@ -1087,7 +1114,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
         </div>
       );
     },
-    [expandedStages, toggleStage, pipelineStatus, queryClient],
+    [expandedStages, toggleStage, pipelineStatus, queryClient, commands],
   );
 
   const renderNotebookItem = useCallback(

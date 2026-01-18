@@ -404,7 +404,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
       calkitMenu.addItem({ type: "separator" });
       calkitMenu.addItem({ command: "calkit:open-sidebar" });
 
-      mainMenu.addMenu(calkitMenu, { rank: 90 });
+      if (isFeatureEnabled("calkitActionsMenu")) {
+        mainMenu.addMenu(calkitMenu, { rank: 90 });
+      }
     }
 
     // Add Calkit launcher items

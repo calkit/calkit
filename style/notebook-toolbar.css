@@ -321,14 +321,14 @@
   line-height: 1;
   padding: 0 6px;
   background: none;
-  color: var(--jp-error-color1);
+  color: var(--jp-ui-font-color2);
   border: none;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .calkit-io-remove:hover {
-  color: var(--jp-error-color0);
+  color: var(--jp-ui-font-color1);
   transform: scale(1.2);
 }
 

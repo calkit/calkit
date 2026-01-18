@@ -520,7 +520,11 @@ def get_latest_project_status(wdir: str | None = None) -> ProjectStatus | None:
 def detect_project_name(
     wdir: str | None = None, prepend_owner: bool = True
 ) -> str:
-    """Detect a Calkit project owner and name."""
+    """Detect a Calkit project owner and name.
+
+    If ``prepend_owner`` is False, fall back to working directory name if
+    there is no Git repo or name specified in ``calkit.yaml``.
+    """
     ck_info = load_calkit_info(wdir=wdir)
     name = ck_info.get("name")
     if name is not None and not prepend_owner:
@@ -529,7 +533,13 @@ def detect_project_name(
     if name is None or owner is None:
         try:
             url = Repo(path=wdir).remote().url
-        except ValueError:
+        except (ValueError, InvalidGitRepositoryError):
+            if name is not None and not prepend_owner:
+                return name
+            if not prepend_owner:
+                if wdir is None:
+                    wdir = os.getcwd()
+                return os.path.basename(os.path.abspath(wdir))
             raise ValueError("No Git remote set with name 'origin'")
         from_url = url.split("github.com")[-1][1:].removesuffix(".git")
         owner_name, project_name = from_url.split("/")

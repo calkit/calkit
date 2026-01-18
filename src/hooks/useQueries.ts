@@ -233,20 +233,29 @@ export const useInstallDependency = () => {
 
 /**
  * Mutation hook for creating an environment
+ * Uses POST /environments endpoint
  * Automatically invalidates and refetches project data on success
  */
 export const useCreateEnvironment = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (data: any) =>
-      requestAPI("environment/create", {
+    mutationFn: (data: {
+      name: string;
+      kind: string;
+      path: string;
+      prefix?: string;
+      packages: string[];
+      python?: string;
+    }) =>
+      requestAPI("environments", {
         method: "POST",
         body: JSON.stringify(data),
       }),
     onSuccess: () => {
       // Invalidate project query to refetch environments and pipeline
       void queryClient.invalidateQueries({ queryKey: ["project"] });
+      void queryClient.invalidateQueries({ queryKey: ["environments"] });
     },
   });
 };
@@ -289,18 +298,37 @@ export const usePush = () => {
 
 /**
  * Mutation hook for updating an environment
+ * Sends both existing and updated environment data to the backend
  */
 export const useUpdateEnvironment = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (data: any) =>
-      requestAPI("environment/update", {
-        method: "POST",
+    mutationFn: (data: {
+      existing: {
+        name: string;
+        kind: string;
+        path: string;
+        prefix?: string;
+        packages: string[];
+        python?: string;
+      };
+      updated: {
+        name: string;
+        kind: string;
+        path: string;
+        prefix?: string;
+        packages: string[];
+        python?: string;
+      };
+    }) =>
+      requestAPI("environments", {
+        method: "PUT",
         body: JSON.stringify(data),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["project"] });
+      void queryClient.invalidateQueries({ queryKey: ["environments"] });
     },
   });
 };

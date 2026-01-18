@@ -963,16 +963,41 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                         initialName: item.id,
                         initialKind: kind,
                         initialPath: item.path,
+                        initialPrefix: item.prefix,
+                        initialPython: item.python || "3.14",
                         initialPackages: packages,
-                        onSubmit: async ({ name, kind, path, packages }) => {
+                        existingEnvironment: {
+                          name: item.id,
+                          kind,
+                          path: item.path,
+                          prefix: item.prefix,
+                          python: item.python || "3.14",
+                          packages,
+                        },
+                        onSubmit: async (
+                          { name, kind, path, prefix, packages, python },
+                          initialData,
+                        ) => {
                           try {
                             await requestAPI("environments", {
-                              method: "POST",
+                              method: "PUT",
                               body: JSON.stringify({
-                                name,
-                                kind,
-                                path,
-                                packages,
+                                existing: initialData || {
+                                  name: item.id,
+                                  kind,
+                                  path: item.path,
+                                  prefix: item.prefix,
+                                  python: item.python || "3.14",
+                                  packages,
+                                },
+                                updated: {
+                                  name,
+                                  kind,
+                                  path,
+                                  prefix,
+                                  packages,
+                                  python,
+                                },
                               }),
                             });
                           } catch (error) {
@@ -2244,16 +2269,41 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                         initialName: env.id,
                         initialKind: env.kind || "unknown",
                         initialPath: env.path,
+                        initialPrefix: env.prefix,
+                        initialPython: env.python || "3.14",
                         initialPackages: env.packages || [],
-                        onSubmit: async ({ name, kind, path, packages }) => {
+                        existingEnvironment: {
+                          name: env.id,
+                          kind: env.kind || "unknown",
+                          path: env.path,
+                          prefix: env.prefix,
+                          python: env.python || "3.14",
+                          packages: env.packages || [],
+                        },
+                        onSubmit: async (
+                          { name, kind, path, prefix, packages, python },
+                          initialData,
+                        ) => {
                           try {
                             await requestAPI("environments", {
-                              method: "POST",
+                              method: "PUT",
                               body: JSON.stringify({
-                                name,
-                                kind,
-                                path,
-                                packages,
+                                existing: initialData || {
+                                  name: env.id,
+                                  kind: env.kind || "unknown",
+                                  path: env.path,
+                                  prefix: env.prefix,
+                                  python: env.python || "3.14",
+                                  packages: env.packages || [],
+                                },
+                                updated: {
+                                  name,
+                                  kind,
+                                  path,
+                                  prefix,
+                                  packages,
+                                  python,
+                                },
                               }),
                             });
                           } catch (error) {

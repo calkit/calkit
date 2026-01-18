@@ -377,11 +377,34 @@ const EnvironmentBadge: React.FC<{
       initialName: currentEnv,
       initialKind: envData.kind || "uv-venv",
       initialPath: envData.path,
+      initialPrefix: envData.prefix,
+      initialPython: envData.python || "3.14",
       initialPackages: envData.packages || [],
-      onSubmit: async ({ name, kind, path, packages }) => {
+      existingEnvironment: {
+        name: currentEnv,
+        kind: envData.kind || "uv-venv",
+        path: envData.path,
+        prefix: envData.prefix,
+        python: envData.python || "3.14",
+        packages: envData.packages || [],
+      },
+      onSubmit: async (
+        { name, kind, path, prefix, packages, python },
+        initialData,
+      ) => {
         await requestAPI("environments", {
-          method: "POST",
-          body: JSON.stringify({ name, kind, path, packages }),
+          method: "PUT",
+          body: JSON.stringify({
+            existing: initialData || {
+              name: currentEnv,
+              kind: envData.kind || "uv-venv",
+              path: envData.path,
+              prefix: envData.prefix,
+              python: envData.python || "3.14",
+              packages: envData.packages || [],
+            },
+            updated: { name, kind, path, prefix, packages, python },
+          }),
         });
         await refreshEnvironments();
         setCurrentEnv(name);

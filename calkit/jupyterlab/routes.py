@@ -1338,6 +1338,11 @@ class EnvironmentsRouteHandler(APIHandler):
         updated_env = body.get("updated")
         if not existing_env or not updated_env:
             return self.error(400, "Existing and updated env required")
+        self.log.info(
+            f"Received request to update environment\n"
+            f"Existing: {existing_env}\n"
+            f"Updated: {updated_env}"
+        )
         # Env kind is not allowed to change for now
         # We also only support uv-venv and venv env kinds for now
         if existing_env.get("kind") != updated_env.get("kind"):
@@ -1352,7 +1357,7 @@ class EnvironmentsRouteHandler(APIHandler):
         updated_path = updated_env.get("path")
         if not existing_path or not updated_path:
             return self.error(400, "Environment 'path' is required")
-        existing_prefix = existing_env.get("prefix", ".venv")
+        existing_prefix = existing_env.get("prefix") or ".venv"
         updated_prefix = updated_env.get("prefix")
         if not updated_prefix:
             return self.error(400, "Environment 'prefix' is required")
@@ -1380,10 +1385,18 @@ class EnvironmentsRouteHandler(APIHandler):
         envs = ck_info.get("environments", {})
         if existing_name != updated_name:
             envs.pop(existing_name, None)
+        # Pop some keys off of updated_env that we don't want to store
+        updated_packages = updated_env.pop("packages", [])
+        for key in ["name"]:
+            updated_env.pop(key, None)
         envs[updated_name] = updated_env
         ck_info["environments"] = envs
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)
+        # Write packages out to environment path
+        with open(updated_path, "w") as f:
+            for pkg in updated_packages:
+                f.write(f"{pkg}\n")
         # Now check the environment
         try:
             calkit.cli.main.check_environment(env_name=updated_name)

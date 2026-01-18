@@ -34,6 +34,14 @@ interface IEnvironmentEditorProps {
   initialPackages?: string[];
   initialPython?: string;
   mode: "create" | "edit";
+  existingEnvironment?: {
+    name: string;
+    kind: string;
+    path: string;
+    prefix?: string;
+    packages: string[];
+    python?: string;
+  };
 }
 
 /**
@@ -137,7 +145,9 @@ const EnvironmentEditorBody: React.FC<
 
   // Validate kebab-case name
   const isValidKebabCase = (str: string): boolean => {
-    if (!str.trim()) return false;
+    if (!str.trim()) {
+      return false;
+    }
     // Must be lowercase letters, numbers, and hyphens only
     // Cannot start or end with hyphen
     const kebabCaseRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -415,6 +425,14 @@ class EnvironmentEditorWidget extends ReactWidget {
     packages: string[];
     python?: string;
   };
+  private initialData: {
+    name: string;
+    kind: string;
+    path: string;
+    prefix?: string;
+    packages: string[];
+    python?: string;
+  };
   private mode: "create" | "edit";
 
   constructor(options: IEnvironmentEditorProps) {
@@ -454,7 +472,7 @@ class EnvironmentEditorWidget extends ReactWidget {
     const initPrefix =
       options.initialPrefix ||
       (kind === "uv-venv" || kind === "venv" ? defaultPrefix : "");
-    this.data = {
+    this.initialData = {
       name: envName,
       kind,
       path: initPath,
@@ -462,6 +480,7 @@ class EnvironmentEditorWidget extends ReactWidget {
       packages: options.initialPackages || [],
       python: options.initialPython || "3.14",
     };
+    this.data = { ...this.initialData };
   }
 
   render(): React.ReactElement<any> {
@@ -469,8 +488,8 @@ class EnvironmentEditorWidget extends ReactWidget {
       <EnvironmentEditorBody
         initialName={this.data.name}
         initialKind={this.data.kind}
-        initialPath={undefined}
-        initialPrefix={undefined}
+        initialPath={this.data.path}
+        initialPrefix={this.data.prefix}
         initialPackages={this.data.packages}
         initialPython={this.data.python}
         mode={this.mode}
@@ -491,6 +510,17 @@ class EnvironmentEditorWidget extends ReactWidget {
   } {
     return this.data;
   }
+
+  getInitialData(): {
+    name: string;
+    kind: string;
+    path: string;
+    prefix?: string;
+    packages: string[];
+    python?: string;
+  } {
+    return this.initialData;
+  }
 }
 
 /**
@@ -498,23 +528,36 @@ class EnvironmentEditorWidget extends ReactWidget {
  */
 export async function showEnvironmentEditor(
   options: IEnvironmentEditorProps & {
-    onSubmit: (data: {
-      name: string;
-      kind: string;
-      path: string;
-      prefix?: string;
-      packages: string[];
-      python?: string;
-    }) => Promise<void>;
+    onSubmit: (
+      data: {
+        name: string;
+        kind: string;
+        path: string;
+        prefix?: string;
+        packages: string[];
+        python?: string;
+      },
+      initialData?: {
+        name: string;
+        kind: string;
+        path: string;
+        prefix?: string;
+        packages: string[];
+        python?: string;
+      },
+    ) => Promise<void>;
   },
 ): Promise<void> {
   const isValidKebabCase = (str: string): boolean => {
-    if (!str.trim()) return false;
+    if (!str.trim()) {
+      return false;
+    }
     const kebabCaseRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
     return kebabCaseRegex.test(str);
   };
 
   const widget = new EnvironmentEditorWidget(options);
+
   const dialog = new Dialog<{
     name: string;
     kind: string;
@@ -531,9 +574,11 @@ export async function showEnvironmentEditor(
       Dialog.okButton({ label: options.mode === "create" ? "Create" : "Save" }),
     ],
   });
+
   const result = await dialog.launch();
   if (result.button.accept) {
     const data = widget.getData();
+    const initialData = widget.getInitialData();
 
     // Validate name is kebab-case
     if (!data.name.trim() || !isValidKebabCase(data.name)) {
@@ -548,6 +593,37 @@ export async function showEnvironmentEditor(
       return;
     }
 
-    await options.onSubmit(data);
+    // Mark dialog as non-closable while submitting
+    const okButton = dialog.node?.querySelector(
+      ".jp-mod-accept",
+    ) as HTMLButtonElement | null;
+    if (okButton) {
+      okButton.disabled = true;
+    }
+
+    try {
+      // For edit mode, pass both existing and updated data
+      if (options.mode === "edit") {
+        await options.onSubmit(data, initialData);
+      } else {
+        await options.onSubmit(data);
+      }
+      // Close the dialog after successful submission
+      dialog.dispose();
+    } catch (error) {
+      if (okButton) {
+        okButton.disabled = false;
+      }
+      // Show error dialog
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      const actionText = options.mode === "create" ? "create" : "update";
+      const errorDialog = new Dialog({
+        title: "Error",
+        body: `Failed to ${actionText} environment: ${errorMessage}`,
+        buttons: [Dialog.okButton({ label: "OK" })],
+      });
+      await errorDialog.launch();
+    }
   }
 }

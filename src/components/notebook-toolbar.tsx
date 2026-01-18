@@ -9,6 +9,7 @@ import { calkitIcon } from "../icons";
 import { showEnvironmentEditor } from "./environment-editor";
 import { showProjectInfoEditor } from "./project-info-editor";
 import { usePipelineStatus, useSetNotebookStage } from "../hooks/useQueries";
+import { isFeatureEnabled } from "../feature-flags";
 
 /**
  * Ensure project has a name before proceeding with operations
@@ -855,9 +856,11 @@ const InputsBadge: React.FC<{
     >
       <div className="calkit-dropdown-content">
         <h4>Notebook inputs</h4>
-        <button className="calkit-dropdown-button" onClick={handleAutoDetect}>
-          🔍 Auto-Detect Inputs
-        </button>
+        {isFeatureEnabled("autoDetectInputsOutputs") && (
+          <button className="calkit-dropdown-button" onClick={handleAutoDetect}>
+            🔍 Auto-Detect Inputs
+          </button>
+        )}
         <div className="calkit-io-list">
           {inputs.map((input, index) => (
             <div key={index} className="calkit-io-item">
@@ -994,9 +997,11 @@ const OutputsBadge: React.FC<{
     >
       <div className="calkit-dropdown-content">
         <h4>Notebook outputs</h4>
-        <button className="calkit-dropdown-button" onClick={handleAutoDetect}>
-          🔍 Auto-Detect Outputs
-        </button>
+        {isFeatureEnabled("autoDetectInputsOutputs") && (
+          <button className="calkit-dropdown-button" onClick={handleAutoDetect}>
+            🔍 Auto-Detect Outputs
+          </button>
+        )}
         <div className="calkit-io-list">
           {outputs.map((output, index) => (
             <div key={index} className="calkit-io-item">

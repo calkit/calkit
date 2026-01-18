@@ -56,6 +56,9 @@ export interface IFeatureFlags {
 
   /** Launcher menu items */
   launcherItems: boolean;
+
+  /** Auto-detect inputs and outputs from notebook toolbar */
+  autoDetectInputsOutputs: boolean;
 }
 
 /**
@@ -80,6 +83,7 @@ export interface IFeatureFlags {
  * - notes: Placeholder only, no backend
  * - models: Placeholder only, no backend
  * - launcherItems: Not yet implemented
+ * - autoDetectInputsOutputs: Auto-detection not yet implemented
  */
 export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   // Fully implemented features
@@ -102,6 +106,7 @@ export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   notes: false,
   models: false,
   launcherItems: false,
+  autoDetectInputsOutputs: false,
 };
 
 /**

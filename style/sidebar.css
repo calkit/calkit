@@ -1014,6 +1014,22 @@
   white-space: normal;
 }
 
+/* Inline row for stage notebook path + open button */
+.calkit-stage-info-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.calkit-stage-info-path {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
 /* Settings dropdown styling */
 .calkit-sidebar-settings-container {
   position: relative;

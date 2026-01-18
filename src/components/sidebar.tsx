@@ -358,8 +358,11 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     return missing || !isHealthy;
   });
   const outstandingSetupCount = outstandingDependencies.length;
-  const needsAttention =
-    hasPipelineIssues || hasGitChanges || outstandingSetupCount > 0;
+  const pipelineAttention =
+    isFeatureEnabled("pipelineStages") && hasPipelineIssues;
+  const gitAttention = isFeatureEnabled("history") && hasGitChanges;
+  const setupAttention = isFeatureEnabled("setup") && outstandingSetupCount > 0;
+  const needsAttention = pipelineAttention || gitAttention || setupAttention;
 
   React.useEffect(() => {
     onStatusChange?.(needsAttention);

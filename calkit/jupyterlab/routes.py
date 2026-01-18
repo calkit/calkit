@@ -14,7 +14,7 @@ import dvc.repo
 import git
 import tornado
 from dvc.exceptions import NotDvcRepoError
-from jupyter_server.base.handlers import APIHandler
+from jupyter_server.base.handlers import APIHandler as _APIHandler
 from jupyter_server.utils import url_path_join
 from pydantic import BaseModel
 
@@ -32,6 +32,16 @@ from calkit.cli.new import (
 from calkit.cli.notebooks import check_env_kernel
 from calkit.git import ensure_path_is_ignored
 from calkit.models.pipeline import JupyterNotebookStage
+
+
+class APIHandler(_APIHandler):
+    def error(self, code: int, message: str):
+        # This might be kind of risk to define with inheritance, but it seems
+        # like none of the classes in the hierarchy define an error method
+        # In the future, we could consider composing in a calkit attribute
+        # to "namespace" calkit-specific methods
+        self.set_status(code)
+        self.finish(json.dumps({"error": message}))
 
 
 class HelloRouteHandler(APIHandler):
@@ -1323,65 +1333,33 @@ class EnvironmentsRouteHandler(APIHandler):
         """
         body = self.get_json_body()
         if not body:
-            self.set_status(400)
-            self.finish(
-                json.dumps({"error": "Request body must be valid JSON"})
-            )
-            return
+            return self.error(400, "Request body must be valid JSON")
         existing_env = body.get("existing")
         updated_env = body.get("updated")
         if not existing_env or not updated_env:
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            "Request body must include 'existing' and"
-                            " 'updated' environment details"
-                        )
-                    }
-                )
-            )
-            return
+            return self.error(400, "Existing and updated env required")
         # Env kind is not allowed to change for now
         # We also only support uv-venv and venv env kinds for now
         if existing_env.get("kind") != updated_env.get("kind"):
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            "Environment 'kind' cannot be changed during"
-                            " update"
-                        )
-                    }
-                )
-            )
-            return
+            return self.error(400, "Environment 'kind' cannot be changed")
         if existing_env.get("kind") not in ["uv-venv", "venv"]:
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            f"Environment kind"
-                            f" '{existing_env.get('kind')}' is not supported"
-                            " for updates"
-                        )
-                    }
-                )
+            return self.error(
+                400, "Environment kind not supported for updates"
             )
-            return
         # Changes to path or prefix require deleting the old ones, and the
         # old env locks
         existing_path = existing_env.get("path")
         updated_path = updated_env.get("path")
-        existing_prefix = existing_env.get("prefix")
+        if not existing_path or not updated_path:
+            return self.error(400, "Environment 'path' is required")
+        existing_prefix = existing_env.get("prefix", ".venv")
         updated_prefix = updated_env.get("prefix")
+        if not updated_prefix:
+            return self.error(400, "Environment 'prefix' is required")
         updated_name = updated_env.get("name")
         existing_name = existing_env.get("name")
-        updated_python = updated_env.get("python")
-        existing_python = existing_env.get("python")
+        updated_python = updated_env.get("python", "3.14")
+        existing_python = existing_env.get("python", "3.14")
         if updated_path != existing_path:
             if os.path.isfile(existing_path):
                 os.remove(existing_path)

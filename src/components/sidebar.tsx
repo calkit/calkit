@@ -1215,7 +1215,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
         environment = (item.environment as any).name || "";
       }
       const stageName = (item.stage as any)?.name || "";
-      const environmentList = sectionData.environments || [];
 
       const handleOpenNotebook = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -1244,207 +1243,19 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
           </div>
           {isExpanded && (
             <div className="calkit-notebook-details">
-              <div className="calkit-notebook-field">
-                <label className="calkit-notebook-field-label">
-                  Environment:
-                </label>
-                <select
-                  className="calkit-notebook-env-select"
-                  value={environment}
-                  onChange={async (e) => {
-                    const newEnv = e.target.value;
-                    try {
-                      await requestAPI("notebook/set-environment", {
-                        method: "POST",
-                        body: JSON.stringify({
-                          notebook: item.id,
-                          environment: newEnv,
-                        }),
-                      });
-                      // Invalidate project query to refetch
-                      await queryClient.invalidateQueries({
-                        queryKey: ["project"],
-                      });
-                    } catch (error) {
-                      console.error(
-                        "Failed to set notebook environment:",
-                        error,
-                      );
-                    }
-                  }}
-                >
-                  <option value="">None</option>
-                  {environmentList.map((env) => (
-                    <option key={env.id} value={env.id}>
-                      {env.label}
-                    </option>
-                  ))}
-                </select>
+              <div className="calkit-notebook-info-item">
+                <span className="calkit-notebook-info-label">Environment:</span>
+                <span className="calkit-notebook-info-value">
+                  {environment || "—"}
+                </span>
               </div>
-              <div className="calkit-notebook-field">
-                <label className="calkit-notebook-field-label">
+              <div className="calkit-notebook-info-item">
+                <span className="calkit-notebook-info-label">
                   Pipeline stage:
-                </label>
-                <div className="calkit-notebook-pipeline-controls">
-                  <input
-                    type="text"
-                    className="calkit-notebook-pipeline-input"
-                    placeholder="Not in pipeline"
-                    value={stageName}
-                    onChange={async (e) => {
-                      const stageName = e.target.value;
-                      if (stageName.trim()) {
-                        try {
-                          // Use the NotebookStageRouteHandler to set the notebook's stage
-                          await requestAPI("notebook/stage", {
-                            method: "PUT",
-                            body: JSON.stringify({
-                              path: item.id,
-                              stage_name: stageName,
-                              environment: "",
-                              inputs: [],
-                              outputs: [],
-                            }),
-                          });
-                          // Invalidate queries to refetch
-                          await queryClient.invalidateQueries({
-                            queryKey: ["project"],
-                          });
-                          await queryClient.invalidateQueries({
-                            queryKey: ["pipelineStatus"],
-                          });
-                        } catch (error) {
-                          console.error("Failed to set notebook stage:", error);
-                        }
-                      }
-                    }}
-                    autoComplete="off"
-                  />
-                  {!stageName && (
-                    <button
-                      className="calkit-notebook-create-stage-btn"
-                      title="Create new stage"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        (async () => {
-                          await showStageEditorDialog({
-                            title: "Create new stage",
-                            kind: "jupyter-notebook",
-                            environment: environment,
-                            inputs: [],
-                            outputs: [],
-                            attributes: {},
-                            onSave: async ({
-                              name: stageName,
-                              inputs,
-                              outputs,
-                              kind,
-                              environment,
-                              attributes,
-                            }: StageEditorResult) => {
-                              if (!stageName.trim()) return;
-                              try {
-                                // Create the stage by setting it on the notebook
-                                await requestAPI("notebook/stage", {
-                                  method: "PUT",
-                                  body: JSON.stringify({
-                                    path: item.id,
-                                    stage_name: stageName,
-                                    environment: environment,
-                                    inputs: inputs,
-                                    outputs: outputs,
-                                    kind: kind,
-                                    ...attributes,
-                                  }),
-                                });
-                                await queryClient.invalidateQueries({
-                                  queryKey: ["project"],
-                                });
-                                await queryClient.invalidateQueries({
-                                  queryKey: ["pipelineStatus"],
-                                });
-                              } catch (err) {
-                                console.error("Failed to create stage:", err);
-                              }
-                            },
-                          });
-                        })();
-                      }}
-                    >
-                      +
-                    </button>
-                  )}
-                  {stageName && (
-                    <button
-                      className="calkit-notebook-edit-stage-btn"
-                      title="Edit stage inputs/outputs"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        (async () => {
-                          const stageData = (item.stage as any) || {};
-                          const baseStageKeys = new Set([
-                            "name",
-                            "kind",
-                            "inputs",
-                            "outputs",
-                            "environment",
-                          ]);
-                          const attributes = Object.keys(
-                            stageData || {},
-                          ).reduce((acc: Record<string, any>, key) => {
-                            if (!baseStageKeys.has(key)) {
-                              acc[key] = (stageData as any)[key];
-                            }
-                            return acc;
-                          }, {});
-                          await showStageEditorDialog({
-                            title: `Edit stage '${stageName}'`,
-                            stageName: stageName,
-                            kind: stageData.kind || "jupyter-notebook",
-                            environment: stageData.environment || environment,
-                            inputs: stageData.inputs || [],
-                            outputs: stageData.outputs || [],
-                            attributes,
-                            onSave: async ({
-                              name,
-                              inputs,
-                              outputs,
-                              kind,
-                              environment,
-                              attributes,
-                            }: StageEditorResult) => {
-                              try {
-                                // Update the stage with the new inputs/outputs
-                                await requestAPI("notebook/stage", {
-                                  method: "PUT",
-                                  body: JSON.stringify({
-                                    path: item.id,
-                                    stage_name: name,
-                                    environment: environment,
-                                    inputs: inputs,
-                                    outputs: outputs,
-                                    kind: kind,
-                                    ...attributes,
-                                  }),
-                                });
-                                await queryClient.invalidateQueries({
-                                  queryKey: ["project"],
-                                });
-                                await queryClient.invalidateQueries({
-                                  queryKey: ["pipelineStatus"],
-                                });
-                              } catch (err) {
-                                console.error("Failed to update stage:", err);
-                              }
-                            },
-                          });
-                        })();
-                      }}
-                    >
-                      ✏️ Edit
-                    </button>
-                  )}
-                </div>
+                </span>
+                <span className="calkit-notebook-info-value">
+                  {stageName || "—"}
+                </span>
               </div>
             </div>
           )}

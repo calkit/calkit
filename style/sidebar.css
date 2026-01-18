@@ -973,6 +973,26 @@
   background-color: var(--jp-brand-color0);
 }
 
+.calkit-notebook-info-item {
+  padding: 4px 12px;
+  margin: 2px 0;
+  font-size: 11px;
+}
+
+.calkit-notebook-info-label {
+  display: block;
+  font-weight: 500;
+  color: var(--jp-ui-font-color2);
+  margin-bottom: 2px;
+}
+
+.calkit-notebook-info-value {
+  display: block;
+  color: var(--jp-ui-font-color1);
+  word-wrap: break-word;
+  white-space: normal;
+}
+
 /* Settings dropdown styling */
 .calkit-sidebar-settings-container {
   position: relative;

@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from "react";
 import ReactDOM from "react-dom";
-import { ReactWidget, Dialog } from "@jupyterlab/apputils";
+import { ReactWidget } from "@jupyterlab/apputils";
 import type { CommandRegistry } from "@lumino/commands";
 import { launchIcon } from "@jupyterlab/ui-components";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -1024,23 +1024,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       const inputs: string[] = stage.inputs || [];
       const outputs: string[] = stage.outputs || [];
       const environment = stage.environment || "";
-      const baseStageKeys = new Set([
-        "id",
-        "label",
-        "kind",
-        "inputs",
-        "outputs",
-        "environment",
-      ]);
-      const attributes = Object.keys(stage || {}).reduce(
-        (acc: Record<string, any>, key) => {
-          if (!baseStageKeys.has(key)) {
-            acc[key] = (stage as any)[key];
-          }
-          return acc;
-        },
-        {},
-      );
       const staleStages = pipelineStatus?.stale_stages || {};
       let isStale = stage.id in staleStages;
 
@@ -1072,129 +1055,32 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
             </span>
           </div>
           {isStageExpanded && (
-            <div className="calkit-env-details">
-              <div className="calkit-env-actions">
-                <button
-                  className="calkit-env-action-btn calkit-env-edit"
-                  title="Edit stage"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    (async () => {
-                      await showStageEditorDialog({
-                        title: `Edit stage '${stage.id}'`,
-                        stageName: stage.id,
-                        inputs: inputs,
-                        outputs: outputs,
-                        kind: kind,
-                        environment: environment,
-                        attributes,
-                        onSave: async ({
-                          name,
-                          inputs: newInputs,
-                          outputs: newOutputs,
-                          kind: newKind,
-                          environment: newEnvironment,
-                          attributes: newAttributes,
-                        }: StageEditorResult) => {
-                          try {
-                            await requestAPI("pipeline/stage", {
-                              method: "PUT",
-                              body: JSON.stringify({
-                                current_stage_name: stage.id,
-                                name: name,
-                                environment: newEnvironment,
-                                kind: newKind,
-                                inputs: newInputs,
-                                outputs: newOutputs,
-                                ...newAttributes,
-                              }),
-                            });
-                            await queryClient.invalidateQueries({
-                              queryKey: ["project"],
-                            });
-                            await queryClient.invalidateQueries({
-                              queryKey: ["pipelineStatus"],
-                            });
-                          } catch (err) {
-                            console.error("Failed to update stage:", err);
-                          }
-                        },
-                      });
-                    })();
-                  }}
-                >
-                  ✏️ Edit
-                </button>
-                <button
-                  className="calkit-env-action-btn calkit-env-delete"
-                  title="Delete stage"
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    const confirm = await new Dialog({
-                      title: `Delete stage '${stage.id}'?`,
-                      body: "This action cannot be undone.",
-                      buttons: [
-                        Dialog.cancelButton(),
-                        Dialog.warnButton({ label: "Delete" }),
-                      ],
-                    }).launch();
-                    if (!confirm.button.accept) return;
-                    try {
-                      await requestAPI("pipeline/stages", {
-                        method: "DELETE",
-                        body: JSON.stringify({
-                          name: stage.id,
-                        }),
-                      });
-                      await queryClient.invalidateQueries({
-                        queryKey: ["project"],
-                      });
-                      await queryClient.invalidateQueries({
-                        queryKey: ["pipelineStatus"],
-                      });
-                    } catch (err) {
-                      console.error("Failed to delete stage:", err);
-                    }
-                  }}
-                >
-                  🗑️ Delete
-                </button>
+            <div className="calkit-stage-details">
+              <div className="calkit-stage-info-item">
+                <span className="calkit-stage-info-label">Kind:</span>
+                <span className="calkit-stage-info-value">{kind || "—"}</span>
               </div>
-              <div className="calkit-env-kind">
-                <strong>Kind:</strong> {kind}
+              <div className="calkit-stage-info-item">
+                <span className="calkit-stage-info-label">Environment:</span>
+                <span className="calkit-stage-info-value">
+                  {environment || "—"}
+                </span>
               </div>
-              <div className="calkit-env-kind">
-                <strong>Environment:</strong> {environment || "—"}
+              <div className="calkit-stage-info-item">
+                <span className="calkit-stage-info-label">Inputs:</span>
+                <span className="calkit-stage-info-value">
+                  {inputs.length === 0
+                    ? "—"
+                    : inputs.map((inp) => inp).join(", ")}
+                </span>
               </div>
-              <div className="calkit-env-packages">
-                <div className="calkit-env-packages-header">
-                  <strong>Inputs:</strong>
-                </div>
-                <div className="calkit-env-packages-list">
-                  {inputs.length === 0 && (
-                    <div className="calkit-env-package-item">None</div>
-                  )}
-                  {inputs.map((inp: string, idx: number) => (
-                    <div key={idx} className="calkit-env-package-item">
-                      {inp}
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="calkit-env-packages">
-                <div className="calkit-env-packages-header">
-                  <strong>Outputs:</strong>
-                </div>
-                <div className="calkit-env-packages-list">
-                  {outputs.length === 0 && (
-                    <div className="calkit-env-package-item">None</div>
-                  )}
-                  {outputs.map((outp: string, idx: number) => (
-                    <div key={idx} className="calkit-env-package-item">
-                      {outp}
-                    </div>
-                  ))}
-                </div>
+              <div className="calkit-stage-info-item">
+                <span className="calkit-stage-info-label">Outputs:</span>
+                <span className="calkit-stage-info-value">
+                  {outputs.length === 0
+                    ? "—"
+                    : outputs.map((outp) => outp).join(", ")}
+                </span>
               </div>
             </div>
           )}
@@ -1285,7 +1171,8 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       const showCreateButton =
         sectionId === "environments" ||
         (sectionId === "notebooks" && isFeatureEnabled("createNotebook")) ||
-        sectionId === "pipelineStages";
+        (sectionId === "pipelineStages" &&
+          isFeatureEnabled("createPipelineStage"));
       const showEditButton = sectionId === "basicInfo";
       const newCount =
         sectionId === "history"

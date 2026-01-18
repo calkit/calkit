@@ -881,7 +881,8 @@
   height: 16px;
 }
 
-.calkit-notebook-details {
+.calkit-notebook-details,
+.calkit-stage-details {
   padding: 8px 12px 8px 32px;
   background-color: var(--jp-layout-color0);
   border-left: 2px solid var(--jp-brand-color1);
@@ -987,6 +988,26 @@
 }
 
 .calkit-notebook-info-value {
+  display: block;
+  color: var(--jp-ui-font-color1);
+  word-wrap: break-word;
+  white-space: normal;
+}
+
+.calkit-stage-info-item {
+  padding: 4px 12px;
+  margin: 2px 0;
+  font-size: 11px;
+}
+
+.calkit-stage-info-label {
+  display: block;
+  font-weight: 500;
+  color: var(--jp-ui-font-color2);
+  margin-bottom: 2px;
+}
+
+.calkit-stage-info-value {
   display: block;
   color: var(--jp-ui-font-color1);
   word-wrap: break-word;

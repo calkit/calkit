@@ -62,6 +62,9 @@ export interface IFeatureFlags {
 
   /** Create new notebooks from the sidebar */
   createNotebook: boolean;
+
+  /** Create new pipeline stages from the sidebar */
+  createPipelineStage: boolean;
 }
 
 /**
@@ -88,6 +91,7 @@ export interface IFeatureFlags {
  * - launcherItems: Not yet implemented
  * - autoDetectInputsOutputs: Auto-detection not yet implemented
  * - createNotebook: Create notebook feature not yet implemented
+ * - createPipelineStage: Create pipeline stage feature not yet implemented
  */
 export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   // Fully implemented features
@@ -112,6 +116,7 @@ export const FEATURE_FLAGS: Readonly<IFeatureFlags> = {
   launcherItems: false,
   autoDetectInputsOutputs: false,
   createNotebook: false,
+  createPipelineStage: false,
 };
 
 /**

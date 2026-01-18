@@ -466,6 +466,10 @@ class NotebookStageRouteHandler(APIHandler):
                 400,
                 f"Stage '{stage_name}' already exists for another notebook",
             )
+        # If the project hasn't been initialized, do that so we can get the
+        # pipeline status
+        if not os.path.isfile(".dvc/config"):
+            calkit.cli.main.init()
         # If this notebook is already part of a stage, handle renaming
         # Update or add the stage
         existing_stage_name = None

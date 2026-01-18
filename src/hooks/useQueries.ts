@@ -95,6 +95,7 @@ export const useGitStatus = () => {
     queryFn: () => requestAPI<IGitStatus>("git/status"),
     staleTime: 10 * 1000, // 10 seconds for git status
     refetchInterval: 5000, // Refetch every 5 seconds
+    enabled: isFeatureEnabled("history"),
   });
 };
 
@@ -130,6 +131,7 @@ export const useGitHistory = () => {
   return useQuery<IGitHistory>({
     queryKey: ["git", "history"],
     queryFn: () => requestAPI<IGitHistory>("git/history"),
+    enabled: isFeatureEnabled("history"),
   });
 };
 

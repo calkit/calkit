@@ -38,6 +38,12 @@ def _load_jupyter_server_extension(server_app):
     server_app: jupyterlab.labapp.LabApp
         JupyterLab application instance
     """
+    import os
+
+    # Change to root_dir so all handlers work in the correct directory context
+    root_dir = server_app.root_dir
+    os.chdir(root_dir)
+    server_app.log.info(f"Changed working directory to {root_dir}")
     setup_route_handlers(server_app.web_app)
     name = "calkit"
     server_app.log.info(f"Registered {name} server extension")

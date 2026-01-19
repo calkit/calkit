@@ -1,20 +1,20 @@
 import React from "react";
 
-export interface SidebarSectionDef {
+export interface ISidebarSectionDef {
   id: string;
   label: string;
   toggleable?: boolean;
 }
 
-interface SidebarSettingsProps {
-  sectionDefs: SidebarSectionDef[];
+interface ISidebarSettingsProps {
+  sectionDefs: ISidebarSectionDef[];
   visibleSections: Set<string>;
   setVisibleSections: React.Dispatch<React.SetStateAction<Set<string>>>;
   showSettingsDropdown: boolean;
   setShowSettingsDropdown: (show: boolean) => void;
 }
 
-export const SidebarSettings: React.FC<SidebarSettingsProps> = ({
+export const SidebarSettings: React.FC<ISidebarSettingsProps> = ({
   sectionDefs,
   visibleSections,
   setVisibleSections,

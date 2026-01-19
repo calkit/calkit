@@ -291,7 +291,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
                 environment,
                 attributes,
               }: any) => {
-                if (!name.trim()) return;
+                if (!name.trim()) {
+                  return;
+                }
                 try {
                   await requestAPI("pipeline/stage", {
                     method: "PUT",

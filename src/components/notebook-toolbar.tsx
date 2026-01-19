@@ -8,7 +8,12 @@ import { queryClient } from "../queryClient";
 import { infoLetterIcon } from "../icons";
 import { showEnvironmentEditor } from "./environment-editor";
 import { showProjectInfoEditor } from "./project-info-editor";
-import { usePipelineStatus, useSetNotebookStage } from "../hooks/useQueries";
+import {
+  usePipelineStatus,
+  useSetNotebookStage,
+  useCreateEnvironment,
+  useUpdateEnvironment,
+} from "../hooks/useQueries";
 import { isFeatureEnabled } from "../feature-flags";
 
 /**
@@ -251,6 +256,9 @@ const EnvironmentBadge: React.FC<{
   const [isOpen, setIsOpen] = useState(false);
   const [environments, setEnvironments] = useState<Record<string, any>>({});
   const [currentEnv, setCurrentEnv] = useState<string>("");
+
+  const createEnvironmentMutation = useCreateEnvironment();
+  const updateEnvironmentMutation = useUpdateEnvironment();
   const [loading, setLoading] = useState(true);
   const [switchingKernel, setSwitchingKernel] = useState(false);
 
@@ -350,10 +358,14 @@ const EnvironmentBadge: React.FC<{
 
     await showEnvironmentEditor({
       mode: "create",
-      onSubmit: async ({ name, kind, path, packages }) => {
-        await requestAPI("environments", {
-          method: "POST",
-          body: JSON.stringify({ name, kind, path, packages }),
+      onSubmit: async ({ name, kind, path, packages, prefix, python }) => {
+        await createEnvironmentMutation.mutateAsync({
+          name,
+          kind,
+          path,
+          packages,
+          prefix,
+          python,
         });
         await refreshEnvironments();
         setCurrentEnv(name);
@@ -393,19 +405,16 @@ const EnvironmentBadge: React.FC<{
         { name, kind, path, prefix, packages, python },
         initialData,
       ) => {
-        await requestAPI("environments", {
-          method: "PUT",
-          body: JSON.stringify({
-            existing: initialData || {
-              name: currentEnv,
-              kind: envData.kind || "uv-venv",
-              path: envData.path,
-              prefix: envData.prefix,
-              python: envData.python || "3.14",
-              packages: envData.packages || [],
-            },
-            updated: { name, kind, path, prefix, packages, python },
-          }),
+        await updateEnvironmentMutation.mutateAsync({
+          existing: initialData || {
+            name: currentEnv,
+            kind: envData.kind || "uv-venv",
+            path: envData.path,
+            prefix: envData.prefix,
+            python: envData.python || "3.14",
+            packages: envData.packages || [],
+          },
+          updated: { name, kind, path, prefix, packages, python },
         });
         await refreshEnvironments();
         setCurrentEnv(name);
@@ -499,8 +508,12 @@ const PipelineStageBadge: React.FC<{
   const setNotebookStageMutation = useSetNotebookStage();
 
   const waitForKernelIdle = async (kernel: any) => {
-    if (!kernel) return;
-    if (kernel.status === "idle") return;
+    if (!kernel) {
+      return;
+    }
+    if (kernel.status === "idle") {
+      return;
+    }
     await new Promise<void>((resolve) => {
       const onStatusChange = (_: any, status: any) => {
         if (status === "idle") {

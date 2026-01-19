@@ -636,7 +636,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
 
   const handleSaveProjectInfo = useCallback(async () => {
     // Use suggested values if project has no name
-    let suggestedInfo = { ...projectInfo };
+    const suggestedInfo = { ...projectInfo };
     if (!suggestedInfo.name && projectQuery.data) {
       suggestedInfo.name = projectQuery.data.suggested_name || projectInfo.name;
       suggestedInfo.title =
@@ -745,7 +745,9 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   }, []);
 
   const handleRunStage = useCallback(async (stageName: string) => {
-    if (!stageName) return;
+    if (!stageName) {
+      return;
+    }
     pipelineState.setRunning(true, `Running stage: ${stageName}`);
     try {
       await requestAPI("pipeline/runs", {
@@ -782,7 +784,9 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
         environment,
         attributes,
       }: StageEditorResult) => {
-        if (!name.trim()) return;
+        if (!name.trim()) {
+          return;
+        }
         try {
           await requestAPI("pipeline/stage", {
             method: "PUT",
@@ -816,19 +820,16 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     console.log("About to show environment editor");
     await showEnvironmentEditor({
       mode: "create",
-      onSubmit: async ({ name, kind, path, packages }) => {
+      onSubmit: async ({ name, kind, path, packages, prefix, python }) => {
         console.log("Environment editor submitted");
-        try {
-          await requestAPI("environments", {
-            method: "POST",
-            body: JSON.stringify({ name, kind, path, packages }),
-          });
-          await queryClient.invalidateQueries({ queryKey: ["environments"] });
-          await queryClient.invalidateQueries({ queryKey: ["project"] });
-        } catch (error) {
-          console.error("Failed to create environment:", error);
-          throw error;
-        }
+        await createEnvironmentMutation.mutateAsync({
+          name,
+          kind,
+          path,
+          packages,
+          prefix,
+          python,
+        });
       },
     });
   }, [ensureProjectName]);
@@ -845,19 +846,16 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       let createdName: string | null = null;
       await showEnvironmentEditor({
         mode: "create",
-        onSubmit: async ({ name, kind, path, packages }) => {
-          try {
-            await requestAPI("environments", {
-              method: "POST",
-              body: JSON.stringify({ name, kind, path, packages }),
-            });
-            await queryClient.invalidateQueries({ queryKey: ["environments"] });
-            await queryClient.invalidateQueries({ queryKey: ["project"] });
-            createdName = name;
-          } catch (error) {
-            console.error("Failed to create environment:", error);
-            throw error;
-          }
+        onSubmit: async ({ name, kind, path, packages, prefix, python }) => {
+          await createEnvironmentMutation.mutateAsync({
+            name,
+            kind,
+            path,
+            packages,
+            prefix,
+            python,
+          });
+          createdName = name;
         },
       });
       return createdName;

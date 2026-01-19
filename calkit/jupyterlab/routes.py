@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 
 import dvc
@@ -1255,42 +1256,16 @@ class EnvironmentsRouteHandler(APIHandler):
         """Create a new environment."""
         body = self.get_json_body()
         if not body:
-            self.set_status(400)
-            self.finish(
-                json.dumps({"error": "Request body must be valid JSON"})
-            )
-            return
+            return self.error(400, "Request body must be valid JSON")
+        self.log.info(f"Received request to create environment: {body}")
         env_name = body.get("name")
         env_kind = body.get("kind")
         env_path = body.get("path")
         packages = body.get("packages", [])
-        if env_kind not in ["uv-venv", "venv", "pixi", "julia", "conda"]:
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            f"Unsupported environment kind '{env_kind}'."
-                            " Supported kinds are: uv-venv, venv, pixi,"
-                            " julia, conda."
-                        )
-                    }
-                )
-            )
-            return
+        if env_kind not in ["uv-venv", "venv"]:
+            return self.error(400, "Unsupported environment kind")
         if not env_name or not env_kind or not env_path or not packages:
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            "Request body must include 'name', 'kind',"
-                            " 'path', and 'packages'"
-                        )
-                    }
-                )
-            )
-            return
+            return self.error(400, "Missing required environment fields")
         # Start kwargs for environment creation
         kwargs = dict(
             name=env_name, path=env_path, packages=packages, no_commit=True
@@ -1309,17 +1284,9 @@ class EnvironmentsRouteHandler(APIHandler):
         try:
             func_to_kind[env_kind](**kwargs)
         except Exception as e:
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            f"Failed to create environment '{env_name}': {e}"
-                        )
-                    }
-                )
-            )
-            return
+            msg = f"Failed to create environment '{env_name}': {e}"
+            self.log.error(msg + "\n" + traceback.format_exc())
+            return self.error(400, msg)
         self.log.info(f"Created new environment '{env_name}' successfully")
         self.finish(json.dumps({"message": "New environment created"}))
 

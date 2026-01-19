@@ -57,6 +57,7 @@ const EnvironmentEditorBody: React.FC<
       packages: string[];
       python?: string;
     }) => void;
+    onValidityChange?: (isValid: boolean) => void;
   }
 > = ({
   initialName = "",
@@ -67,34 +68,41 @@ const EnvironmentEditorBody: React.FC<
   initialPython = "3.14",
   mode,
   onUpdate,
+  onValidityChange,
 }) => {
   // Default paths based on environment kind
-  const getDefaultPath = (kind: string, envName: string = "") => {
-    switch (kind) {
-      case "uv-venv":
-      case "venv":
-        return `.calkit/envs/${envName || "{name}"}.txt`;
-      case "conda":
-        return "environment.yml";
-      case "pixi":
-        return "pixi.toml";
-      case "julia":
-        return "project/Project.toml";
-      default:
-        return "";
-    }
-  };
+  const getDefaultPath = React.useCallback(
+    (kind: string, envName: string = "") => {
+      switch (kind) {
+        case "uv-venv":
+        case "venv":
+          return `.calkit/envs/${envName || "{name}"}.txt`;
+        case "conda":
+          return "environment.yml";
+        case "pixi":
+          return "pixi.toml";
+        case "julia":
+          return "project/Project.toml";
+        default:
+          return "";
+      }
+    },
+    [],
+  );
 
   // Default prefix for venv-based environments
-  const getDefaultPrefix = (kind: string, envName: string = "") => {
-    switch (kind) {
-      case "uv-venv":
-      case "venv":
-        return `.calkit/venvs/${envName || "{name}"}/.venv`;
-      default:
-        return "";
-    }
-  };
+  const getDefaultPrefix = React.useCallback(
+    (kind: string, envName: string = "") => {
+      switch (kind) {
+        case "uv-venv":
+        case "venv":
+          return `.calkit/venvs/${envName || "{name}"}/.venv`;
+        default:
+          return "";
+      }
+    },
+    [],
+  );
 
   const [name, setName] = useState(initialName);
   const [kind, setKind] = useState(initialKind);
@@ -118,9 +126,13 @@ const EnvironmentEditorBody: React.FC<
   });
   const [newPackage, setNewPackage] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [userEditedPath, setUserEditedPath] = useState(!!initialPath);
-  const [userEditedPrefix, setUserEditedPrefix] = useState(!!initialPrefix);
-  const [nameError, setNameError] = useState<string>("");
+  // Only mark as user-edited in edit mode, not create mode
+  const [userEditedPath, setUserEditedPath] = useState(
+    mode === "edit" && !!initialPath,
+  );
+  const [userEditedPrefix, setUserEditedPrefix] = useState(
+    mode === "edit" && !!initialPrefix,
+  );
   const packageInputRef = useRef<HTMLInputElement>(null);
 
   // Handle Enter key on package input to add package instead of closing dialog
@@ -154,22 +166,13 @@ const EnvironmentEditorBody: React.FC<
     return kebabCaseRegex.test(str);
   };
 
-  // Check name validity and set error
+  // Check name validity and notify parent (no inline error display)
   React.useEffect(() => {
-    if (name.trim() && !isValidKebabCase(name)) {
-      if (/[A-Z]/.test(name)) {
-        setNameError("Name must be lowercase");
-      } else if (/[^a-z0-9-]/.test(name)) {
-        setNameError("Name can only contain letters, numbers, and hyphens");
-      } else if (/^-|-$/.test(name)) {
-        setNameError("Name cannot start or end with a hyphen");
-      } else {
-        setNameError("Name must be kebab-case (e.g., my-env)");
-      }
-    } else {
-      setNameError("");
+    const isValid = !!name.trim() && isValidKebabCase(name);
+    if (onValidityChange) {
+      onValidityChange(isValid);
     }
-  }, [name]);
+  }, [name, onValidityChange]);
 
   React.useEffect(() => {
     const data: any = { name, kind, path, packages };
@@ -194,7 +197,15 @@ const EnvironmentEditorBody: React.FC<
         setPrefix(getDefaultPrefix(kind, name));
       }
     }
-  }, [name, kind, mode, userEditedPath, userEditedPrefix]);
+  }, [
+    name,
+    kind,
+    mode,
+    userEditedPath,
+    userEditedPrefix,
+    getDefaultPath,
+    getDefaultPrefix,
+  ]);
 
   // Update path when kind changes (in create mode)
   const handleKindChange = (newKind: string) => {
@@ -255,18 +266,7 @@ const EnvironmentEditorBody: React.FC<
           placeholder="ex: analysis"
           autoFocus={mode === "create"}
           autoComplete="off"
-          style={{
-            borderColor: nameError ? "#d32f2f" : undefined,
-            backgroundColor: nameError ? "rgba(211, 47, 47, 0.05)" : undefined,
-          }}
         />
-        {nameError && (
-          <small
-            style={{ color: "#d32f2f", display: "block", marginTop: "4px" }}
-          >
-            {nameError}
-          </small>
-        )}
       </div>
       <div className="calkit-env-editor-field">
         <label htmlFor="env-kind">Kind:</label>
@@ -434,6 +434,8 @@ class EnvironmentEditorWidget extends ReactWidget {
     python?: string;
   };
   private mode: "create" | "edit";
+  private isValid: boolean = false;
+  public onValidityChange?: (isValid: boolean) => void;
 
   constructor(options: IEnvironmentEditorProps) {
     super();
@@ -496,6 +498,12 @@ class EnvironmentEditorWidget extends ReactWidget {
         onUpdate={(data) => {
           this.data = data;
         }}
+        onValidityChange={(isValid) => {
+          this.isValid = isValid;
+          if (this.onValidityChange) {
+            this.onValidityChange(isValid);
+          }
+        }}
       />
     );
   }
@@ -520,6 +528,10 @@ class EnvironmentEditorWidget extends ReactWidget {
     python?: string;
   } {
     return this.initialData;
+  }
+
+  getIsValid(): boolean {
+    return this.isValid;
   }
 }
 
@@ -575,6 +587,34 @@ export async function showEnvironmentEditor(
     ],
   });
 
+  // Set up validity monitoring to enable/disable OK button
+  const updateOkButton = () => {
+    const okButton = dialog.node?.querySelector(
+      ".jp-mod-accept",
+    ) as HTMLButtonElement | null;
+    if (okButton) {
+      okButton.disabled = !widget.getIsValid();
+    }
+  };
+
+  widget.onValidityChange = (isValid: boolean) => {
+    const okButton = dialog.node?.querySelector(
+      ".jp-mod-accept",
+    ) as HTMLButtonElement | null;
+    if (okButton) {
+      okButton.disabled = !isValid;
+    }
+  };
+
+  // Wait for dialog to be attached to DOM, then set initial button state
+  const observer = new MutationObserver(() => {
+    if (dialog.node?.isConnected) {
+      observer.disconnect();
+      updateOkButton();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+
   const result = await dialog.launch();
   if (result.button.accept) {
     const data = widget.getData();
@@ -608,22 +648,41 @@ export async function showEnvironmentEditor(
       } else {
         await options.onSubmit(data);
       }
-      // Close the dialog after successful submission
-      dialog.dispose();
     } catch (error) {
+      // Re-enable OK button on error
       if (okButton) {
         okButton.disabled = false;
       }
-      // Show error dialog
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+
+      // Extract error message from API response or error object
+      let errorMessage = "Unknown error";
+      if (error && typeof error === "object") {
+        if ("message" in error && typeof error.message === "string") {
+          errorMessage = error.message;
+        } else if (
+          "traceback" in error &&
+          typeof error.traceback === "string"
+        ) {
+          errorMessage = error.traceback;
+        } else {
+          errorMessage = String(error);
+        }
+      } else {
+        errorMessage = String(error);
+      }
+
       const actionText = options.mode === "create" ? "create" : "update";
       const errorDialog = new Dialog({
-        title: "Error",
-        body: `Failed to ${actionText} environment: ${errorMessage}`,
+        title: `Failed to ${actionText} environment`,
+        body: errorMessage,
         buttons: [Dialog.okButton({ label: "OK" })],
       });
       await errorDialog.launch();
+      // Don't close the main dialog, let user fix the issue
+      return;
     }
+
+    // Close the dialog only after successful submission
+    dialog.dispose();
   }
 }

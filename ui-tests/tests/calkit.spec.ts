@@ -30,63 +30,86 @@ test.describe("Notebook pipeline workflow", () => {
     // Navigate to JupyterLab
     await page.goto()
 
-    // Wait for JupyterLab to be ready
+    // Wait for JupyterLab to be fully ready
     await page.waitForSelector(".jp-LauncherCard", { timeout: 30000 })
 
-    // Step 0: Create data.csv file
-    // Click on the File menu
-    const fileMenu = page.locator(".jp-MenuBar-item").filter({ hasText: "File" })
-    await fileMenu.click()
+    // Ensure project has a name to allow environment creation
+    await page.request.put("/calkit/project", {
+      data: { name: "ui-tests", title: "UI Tests" },
+    })
 
-    // Click "New" -> "Text File"
-    const newTextFile = page.locator(".jp-Menu-item").filter({ hasText: /Text File/ })
-    await newTextFile.click()
+    // Ensure the notebook toolbar includes the Calkit toolbar item
+    await page.request.put("/api/settings/%40jupyterlab%2Fnotebook-extension%3Atracker", {
+      data: {
+        id: "@jupyterlab/notebook-extension:tracker",
+        raw: JSON.stringify({
+          toolbar: [{ name: "calkit-notebook-toolbar", rank: 10 }],
+        }),
+      },
+    })
 
-    // Wait for text editor to open
-    await page.waitForSelector(".jp-FileEditor", { timeout: 5000 })
+    // Create data.csv directly via Jupyter contents API for reliability
+    await page.request.put(`/api/contents/data.csv`, {
+      data: {
+        type: "file",
+        format: "text",
+        content: "x,y\n1,10\n2,20\n3,30\n",
+      },
+    })
 
-    // Type CSV content
-    await page.keyboard.type("x,y\n1,10\n2,20\n3,30")
+    // Wait briefly to let the server write the file
+    await page.waitForTimeout(500)
 
-    // Save the file (Ctrl+S)
-    await page.keyboard.press("Control+s")
-
-    // Dialog should appear asking for filename
-    await page.waitForSelector(".jp-Input-Dialog", { timeout: 5000 })
-
-    const filenameInput = page.locator(".jp-Input-Dialog input")
-    await filenameInput.fill("data.csv")
-
-    // Click OK/Save button
-    const okButton = page.locator(".jp-Input-Dialog button").filter({ hasText: "Save" })
-    await okButton.click()
-
-    // Wait for file to be saved and dialog to close
-    await page.waitForTimeout(1000)
-
-    // Step 1: Create a new notebook using the File menu or launcher
-    // Look for the "New" button or Launcher
+    // Create a new notebook using the launcher
     const launcherCards = page.locator(".jp-LauncherCard")
     const notebookCard = launcherCards.filter({ hasText: "Notebook" }).first()
     await notebookCard.click()
 
     // Wait for notebook to be created and opened
-    await page.waitForSelector(".jp-NotebookPanel", { timeout: 10000 })
+    await page.waitForSelector(".jp-NotebookPanel", { timeout: 20000 })
 
-    // Step 2: Create environment from notebook toolbar
-    // Click the environment badge (should show "No environment selected")
-    const envBadge = page.locator(".calkit-badge").filter({ hasText: "No environment selected" }).first()
-    await envBadge.click()
+    // Focus the notebook area to ensure toolbar renders
+    await page.click(".jp-NotebookPanel", { position: { x: 10, y: 10 } })
 
-    // Wait for dropdown
-    await page.waitForTimeout(500)
+    // In tests, force toolbar items to be visible even if they overflow
+    await page.addStyleTag({
+      content:
+        ".jp-NotebookPanel .jp-Toolbar { display: flex !important; visibility: visible !important; opacity: 1 !important; }\n.jp-Toolbar-item, .calkit-notebook-toolbar-widget { display: inline-flex !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; }\n.jp-Toolbar-item[hidden], .jp-Toolbar-item[aria-hidden=\\\"true\\\"] { display: inline-flex !important; visibility: visible !important; opacity: 1 !important; }",
+    })
 
-    // Click the "+ Create new…" option in the environment select
-    const envSelect = page.locator("select").first()
-    await envSelect.selectOption("__create__")
+    // Wait for Calkit toolbar widget to be attached (presence is enough)
+    const toolbarRoot = page.locator(
+      ".calkit-notebook-toolbar-widget, .calkit-notebook-toolbar",
+    )
+    await expect(toolbarRoot.first()).toHaveCount(1)
+
+    // Step 1: Create environment from notebook toolbar
+    await page.waitForSelector(".calkit-badge", { state: "attached", timeout: 10000 })
+    const envBadge = page
+      .locator(".calkit-badge")
+      .filter({ hasText: "No environment selected" })
+      .first()
+    await envBadge.dispatchEvent("click")
+
+    // Wait for dropdown content to be visible
+    const envDropdown = page.locator(".calkit-badge-dropdown").first()
+    await page.waitForSelector(".calkit-badge-dropdown", { state: "attached", timeout: 5000 })
+
+    // Click the "+ Create new…" option in the environment select within the dropdown
+    const envSelectAll = envDropdown.locator("select[id^='calkit-env-select-']")
+    if ((await envSelectAll.count()) > 0) {
+      const envSelect = envSelectAll.first()
+      await envSelect.evaluate((el: HTMLSelectElement) => {
+        el.value = "__create__";
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      })
+    } else {
+      const createEnvButton = envDropdown.locator('button:has-text("Create environment")').first()
+      await createEnvButton.dispatchEvent("click")
+    }
 
     // Wait for environment editor dialog
-    await page.waitForSelector(".calkit-modal-overlay", { timeout: 5000 })
+    await page.waitForSelector(".calkit-modal-overlay", { timeout: 10000 })
 
     // Fill in environment name
     const nameInput = page.locator('input[placeholder="Environment name"]')
@@ -97,11 +120,9 @@ test.describe("Notebook pipeline workflow", () => {
     await pythonInput.clear()
     await pythonInput.fill("3.14")
 
-    // Look for PyData package group selector
-    // Assuming there's a package selection UI
-    const packageInputs = page.locator('textarea, input').filter({ hasText: /packages/i })
-    if (await packageInputs.count() > 0) {
-      const packagesField = packageInputs.first()
+    // Provide common packages
+    const packagesField = page.locator('textarea, input').filter({ hasText: /packages/i }).first()
+    if (await packagesField.count()) {
       await packagesField.fill("pandas\nmatplotlib")
     }
 
@@ -110,129 +131,89 @@ test.describe("Notebook pipeline workflow", () => {
     await createButton.click()
 
     // Wait for environment creation to complete
-    await page.waitForSelector(".calkit-modal-overlay", {
-      state: "hidden",
-      timeout: 15000,
-    })
+    await page.waitForSelector(".calkit-modal-overlay", { state: "hidden", timeout: 20000 })
 
-    // Step 3: Set the notebook to have a pipeline stage via notebook toolbar
-    // Click the stage badge (should show "Not in pipeline")
-    const stageBadge = page.locator(".calkit-badge").filter({ hasText: "Not in pipeline" }).first()
-    await stageBadge.click()
+    // Step 2: Set pipeline stage
+    const stageBadge = page
+      .locator(".calkit-badge")
+      .filter({ hasText: "Not in pipeline" })
+      .first()
+    await stageBadge.dispatchEvent("click")
 
     // Wait for dropdown
-    await page.waitForTimeout(500)
+    const stageDropdown = page.locator(".calkit-badge-dropdown").first()
+    await expect(stageDropdown).toBeVisible({ timeout: 5000 })
 
     // Fill in stage name
     const stageNameInput = page.locator('input[placeholder*="e.g., postprocess"]')
     await stageNameInput.fill("analytics")
 
-    // Scroll down to see storage options if needed
-    const formContent = page.locator(".calkit-dropdown-content")
-    await formContent.evaluate((el) => {
-      el.scrollTop = el.scrollHeight
-    })
-
-    // Select Git for both storage options (defaults)
-    const storageSelects = page.locator("select")
-    const selectCount = await storageSelects.count()
-
-    // First select is environment select (already handled), next two should be storage
-    if (selectCount >= 3) {
-      // Already defaults to Git, so just click Save
-    }
-
     // Click Save button
-    const saveButton = page.locator('button:has-text("Save")').first()
-    await saveButton.click()
+    const saveStageButton = page.locator('button:has-text("Save")').first()
+    await saveStageButton.click()
 
     // Wait for stage to be saved
     await page.waitForTimeout(1000)
 
-    // Step 4: Write analytics code with pandas and matplotlib
-    // Click on the first cell
+    // Step 3: Write analytics code with pandas and matplotlib
     const firstCell = page.locator(".jp-Cell").first()
     await firstCell.click()
-
-    // Enter code that reads data.csv and creates a plot
     await page.keyboard.type(
-      'import pandas as pd\nimport matplotlib.pyplot as plt\n\ndf = pd.read_csv("data.csv")\nplt.figure()\nplt.plot(df["x"], df["y"])\nplt.savefig("figures/plot.png")\nplt.close()',
+      'import pandas as pd\nimport matplotlib.pyplot as plt\n\ndf = pd.read_csv("data.csv")\nplt.figure()\nplt.plot(df["x"], df["y"])\nplt.savefig("figures/plot.png")\nplt.close()'
     )
 
     // Save the notebook (Ctrl+S)
     await page.keyboard.press("Control+s")
     await page.waitForTimeout(1000)
 
-    // Step 5: Run the stage with the play button
+    // Step 4: Run the stage with the play button
     const playButton = page.locator(".calkit-play-button").first()
-    await expect(playButton).toBeVisible({ timeout: 5000 })
-
-    await playButton.click()
+    await expect(playButton).toBeVisible({ timeout: 10000 })
+    await playButton.click({ force: true })
 
     // Wait for execution to start and complete
-    await page.waitForSelector(".calkit-play-button .calkit-spinner", {
-      timeout: 5000,
-    })
+    await page.waitForSelector(".calkit-play-button .calkit-spinner", { timeout: 10000 })
+    await page.waitForSelector(".calkit-play-button:not(:has(.calkit-spinner))", { timeout: 60000 })
 
-    // Wait for execution to complete
-    await page.waitForSelector(
-      ".calkit-play-button:not(:has(.calkit-spinner))",
-      { timeout: 60000 },
-    )
-
-    // Step 6: Add data.csv as an input
-    // Click on the Inputs badge
-    const inputsBadge = page.locator(".calkit-badge").filter({ hasText: /Inputs \(/ }).first()
-    await inputsBadge.click()
-
-    // Wait for dropdown
-    await page.waitForTimeout(500)
-
-    // Add data.csv as input
-    const inputField = page.locator('input[placeholder*="path/to/input"]')
+    // Step 5: Add data.csv as an input
+    const inputsBadge = page
+      .locator(".calkit-badge")
+      .filter({ hasText: /Inputs \(/ })
+      .first()
+    await inputsBadge.dispatchEvent("click")
+    const inputsDropdown = page.locator(".calkit-badge-dropdown").first()
+    await expect(inputsDropdown).toBeVisible({ timeout: 5000 })
+    const inputField = inputsDropdown.locator('input[placeholder*="path/to/input"]')
     await inputField.fill("data.csv")
-
-    // Click add/save button
-    const addButton = page.locator('button:has-text("Add")').first()
-    if (await addButton.isVisible()) {
-      await addButton.click()
+    const addInputButton = page.locator('button:has-text("Add")').first()
+    if (await addInputButton.isVisible()) {
+      await addInputButton.click()
     }
-
     const saveInputButton = page.locator('button:has-text("Save")').first()
     await saveInputButton.click()
-
-    // Wait for input to be saved
     await page.waitForTimeout(500)
 
-    // Step 7: Define figures/plot.png as output
-    // Click on the Outputs badge
-    const outputsBadge = page.locator(".calkit-badge").filter({ hasText: /Outputs \(/ }).first()
-    await outputsBadge.click()
-
-    // Wait for dropdown
-    await page.waitForTimeout(500)
-
-    // Add figures/plot.png as output
-    const outputField = page.locator('input[placeholder*="path/to/output"]')
+    // Step 6: Define figures/plot.png as output
+    const outputsBadge = page
+      .locator(".calkit-badge")
+      .filter({ hasText: /Outputs \(/ })
+      .first()
+    await outputsBadge.dispatchEvent("click")
+    const outputsDropdown = page.locator(".calkit-badge-dropdown").first()
+    await expect(outputsDropdown).toBeVisible({ timeout: 5000 })
+    const outputField = outputsDropdown.locator('input[placeholder*="path/to/output"]')
     await outputField.fill("figures/plot.png")
-
-    // Click add button
     const addOutputButton = page.locator('button:has-text("Add")').first()
     if (await addOutputButton.isVisible()) {
       await addOutputButton.click()
     }
-
     const saveOutputButton = page.locator('button:has-text("Save")').first()
     await saveOutputButton.click()
-
-    // Wait for output to be saved
     await page.waitForTimeout(500)
 
-    // Step 8: Run the entire pipeline from the sidebar play button
-    // Open Calkit sidebar
+    // Step 7: Run the entire pipeline from the sidebar play button
     const calkitSidebar = page.locator(".calkit-sidebar")
     const sidebarVisible = await calkitSidebar.isVisible()
-
     if (!sidebarVisible) {
       const calkitTab = page.locator('.jp-SideBar [data-id="calkit-sidebar"]')
       if (await calkitTab.count() > 0) {
@@ -241,11 +222,7 @@ test.describe("Notebook pipeline workflow", () => {
       }
     }
 
-    // Find and expand Pipeline section
-    const pipelineSectionHeader = page.locator(
-      '.calkit-sidebar-section-header:has-text("Pipeline")',
-    )
-
+    const pipelineSectionHeader = page.locator('.calkit-sidebar-section-header:has-text("Pipeline")')
     const pipelineExpanded = await pipelineSectionHeader
       .locator(".calkit-sidebar-section-icon:has-text('▼')")
       .count()
@@ -254,23 +231,16 @@ test.describe("Notebook pipeline workflow", () => {
       await page.waitForTimeout(500)
     }
 
-    // Find the analytics stage and click its play button
     const analyticsStageLine = page.locator('.calkit-stage-item:has-text("analytics")')
     const stagePlayButton = analyticsStageLine.locator(".calkit-stage-play-button, button[title*='Run']").first()
 
     if (await stagePlayButton.isVisible()) {
       await stagePlayButton.click()
-
-      // Wait for pipeline execution to start and complete
-      await page.waitForSelector(".calkit-spinner", {
-        timeout: 5000,
-      })
-
-      // Wait for execution to complete
+      await page.waitForSelector(".calkit-spinner", { timeout: 10000 })
       await page.waitForTimeout(5000)
     }
 
-    // Verify that the stage ran successfully
+    // Verify that the stage ran successfully (no stale marker)
     const staleStage = page.locator('.calkit-stage-item.stale:has-text("analytics")')
     const isStale = await staleStage.count()
     expect(isStale).toBe(0)

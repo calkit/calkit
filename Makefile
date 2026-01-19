@@ -58,6 +58,7 @@ test-frontend: ## Run frontend unit tests with Jest.
 	@uv run jlpm test
 
 .PHONY: test-ui
-test-ui: jlab ## Run the JupyterLab UI integration tests.
+test-ui: ## Run the JupyterLab UI integration tests.
 	@echo "🚀 Running JupyterLab UI tests with Playwright"
-	@cd ui-tests && uv run jlpm playwright test -u --reporter=list
+	@uv run npm run build
+	@uv run --directory=ui-tests jlpm playwright test -u --reporter=list

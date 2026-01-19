@@ -4,7 +4,7 @@
   "description": "JupyterLab Calkit integration tests",
   "private": true,
   "scripts": {
-    "start": "jupyter lab --config jupyter_server_test_config.py",
+    "start": "rm -rf test-project && mkdir test-project && jupyter lab --notebook-dir test-project --config jupyter_server_test_config.py",
     "test": "jlpm playwright test",
     "test:update": "jlpm playwright test --update-snapshots"
   },

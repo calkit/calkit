@@ -451,7 +451,16 @@ const EnvironmentBadge: React.FC<{
           <div className="calkit-dropdown-section">
             <h4>Select environment</h4>
             {envNames.length === 0 ? (
-              <p>No environments available</p>
+              <div>
+                <p>No environments available</p>
+                <button
+                  className="calkit-dropdown-button"
+                  onClick={handleCreateEnvironment}
+                  disabled={switchingKernel}
+                >
+                  Create new environment
+                </button>
+              </div>
             ) : (
               <div className="calkit-form-group">
                 <label htmlFor={envSelectId}>Notebook environment</label>

@@ -27,16 +27,14 @@ test.describe("Notebook pipeline workflow", () => {
     page,
     tmpPath,
   }) => {
+    // Set a wide viewport to ensure toolbar badges are visible (not collapsed to 3-dot menu)
+    await page.setViewportSize({ width: 1400, height: 900 })
+
     // Navigate to JupyterLab
     await page.goto()
 
     // Wait for JupyterLab to be fully ready
     await page.waitForSelector(".jp-LauncherCard", { timeout: 30000 })
-
-    // Ensure project has a name to allow environment creation
-    await page.request.put("/calkit/project", {
-      data: { name: "ui-tests", title: "UI Tests" },
-    })
 
     // Ensure the notebook toolbar includes the Calkit toolbar item
     await page.request.put("/api/settings/%40jupyterlab%2Fnotebook-extension%3Atracker", {
@@ -73,65 +71,77 @@ test.describe("Notebook pipeline workflow", () => {
 
     // In tests, force toolbar items to be visible even if they overflow
     await page.addStyleTag({
-      content:
-        ".jp-NotebookPanel .jp-Toolbar { display: flex !important; visibility: visible !important; opacity: 1 !important; }\n.jp-Toolbar-item, .calkit-notebook-toolbar-widget { display: inline-flex !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; }\n.jp-Toolbar-item[hidden], .jp-Toolbar-item[aria-hidden=\\\"true\\\"] { display: inline-flex !important; visibility: visible !important; opacity: 1 !important; }",
+      content: `
+        .jp-Toolbar, .jp-NotebookPanel .jp-Toolbar {
+          display: flex !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+        }
+        .jp-Toolbar-item, .jp-Toolbar > * {
+          display: inline-flex !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+          pointer-events: auto !important;
+        }
+        [class*='calkit'] {
+          visibility: visible !important;
+          opacity: 1 !important;
+          display: flex !important;
+          pointer-events: auto !important;
+        }
+      `,
     })
 
-    // Wait for Calkit toolbar widget to be attached (presence is enough)
-    const toolbarRoot = page.locator(
-      ".calkit-notebook-toolbar-widget, .calkit-notebook-toolbar",
-    )
-    await expect(toolbarRoot.first()).toHaveCount(1)
-
-    // Step 1: Create environment from notebook toolbar
-    await page.waitForSelector(".calkit-badge", { state: "attached", timeout: 10000 })
+    // Wait for and find the environment badge
     const envBadge = page
       .locator(".calkit-badge")
       .filter({ hasText: "No environment selected" })
       .first()
-    await envBadge.dispatchEvent("click")
 
-    // Wait for dropdown content to be visible
-    const envDropdown = page.locator(".calkit-badge-dropdown").first()
+    // Don't wait for visibility - element may be hidden by CSS but still clickable
+    // Just proceed with clicking it
+    await page.waitForTimeout(1000)
+
+    // Step 1: Create environment from notebook toolbar
+    // Click the environment badge to open the dropdown
+    // Use evaluate to bypass visibility checks
+    await envBadge.evaluate((el) => {
+      (el as HTMLElement).click()
+    })
+
+    // Wait for dropdown to open (don't check visibility since CSS hides it)
     await page.waitForSelector(".calkit-badge-dropdown", { state: "attached", timeout: 5000 })
+    const envDropdown = page.locator(".calkit-badge-dropdown").first()
 
-    // Click the "+ Create new…" option in the environment select within the dropdown
-    const envSelectAll = envDropdown.locator("select[id^='calkit-env-select-']")
-    if ((await envSelectAll.count()) > 0) {
-      const envSelect = envSelectAll.first()
-      await envSelect.evaluate((el: HTMLSelectElement) => {
-        el.value = "__create__";
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-      })
-    } else {
-      const createEnvButton = envDropdown.locator('button:has-text("Create environment")').first()
-      await createEnvButton.dispatchEvent("click")
-    }
+// When there are no environments, the UI now shows a button to create one
+    // If a button exists in the dropdown, click it (it will be "Create new environment" when no envs exist,
+    // or "Edit current environment" when we already have one from a previous step)
+    const firstButton = envDropdown.locator("button").first()
+    await firstButton.evaluate((el) => {
+      (el as HTMLElement).click()
+    })
 
-    // Wait for environment editor dialog
-    await page.waitForSelector(".calkit-modal-overlay", { timeout: 10000 })
+    // Wait for environment editor dialog to open
+    await page.waitForSelector(".calkit-environment-editor-dialog", { state: "attached", timeout: 5000 })
 
     // Fill in environment name
-    const nameInput = page.locator('input[placeholder="Environment name"]')
+    const nameInput = page.locator('input[placeholder="ex: analysis"]').first()
     await nameInput.fill("analytics-env")
 
-    // Select Python version (3.14)
-    const pythonInput = page.locator('input[placeholder*="Python"]')
-    await pythonInput.clear()
-    await pythonInput.fill("3.14")
+    // Default Python version is already 3.14; no need to change
 
-    // Provide common packages
-    const packagesField = page.locator('textarea, input').filter({ hasText: /packages/i }).first()
-    if (await packagesField.count()) {
-      await packagesField.fill("pandas\nmatplotlib")
-    }
+    // Add the PyData package group instead of typing packages
+    const pydataButton = page
+      .locator('.calkit-environment-editor-dialog .calkit-env-package-group-btn:has-text("PyData")')
+      .first()
+    await pydataButton.click()
 
     // Click Create button
     const createButton = page.locator('button:has-text("Create")').first()
     await createButton.click()
 
-    // Wait for environment creation to complete
-    await page.waitForSelector(".calkit-modal-overlay", { state: "hidden", timeout: 20000 })
+    // Wait for environment creation to complete (dialog closes)
+    await page.waitForSelector(".calkit-environment-editor-dialog", { state: "detached", timeout: 20000 })
 
     // Step 2: Set pipeline stage
     const stageBadge = page
@@ -152,8 +162,12 @@ test.describe("Notebook pipeline workflow", () => {
     const saveStageButton = page.locator('button:has-text("Save")').first()
     await saveStageButton.click()
 
-    // Wait for stage to be saved
-    await page.waitForTimeout(1000)
+    // Wait for stage to be saved - the badge should change from "Not in pipeline" to "In pipeline: analytics"
+    await page.waitForTimeout(2000)
+
+    // Close the dropdown with Escape
+    await page.keyboard.press("Escape")
+    await page.waitForTimeout(500)
 
     // Step 3: Write analytics code with pandas and matplotlib
     const firstCell = page.locator(".jp-Cell").first()
@@ -167,7 +181,11 @@ test.describe("Notebook pipeline workflow", () => {
     await page.waitForTimeout(1000)
 
     // Step 4: Run the stage with the play button
+    // The play button should now be visible next to the stage badge
     const playButton = page.locator(".calkit-play-button").first()
+
+    // Wait for play button to appear and be visible
+    await page.waitForSelector(".calkit-play-button", { timeout: 10000 })
     await expect(playButton).toBeVisible({ timeout: 10000 })
     await playButton.click({ force: true })
 

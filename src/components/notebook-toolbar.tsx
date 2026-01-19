@@ -288,10 +288,7 @@ const EnvironmentBadge: React.FC<{
   };
 
   const refreshEnvironments = async () => {
-    const data = await requestAPI<any>("environments?notebook_only=1");
-    setEnvironments(data || {});
-
-    // Fetch the notebook's specific environment
+    // Fetch the notebook's specific environment first to initialize selection
     const notebookPath = panel.context.path;
     try {
       const nbEnvData = await requestAPI<any>(
@@ -301,14 +298,17 @@ const EnvironmentBadge: React.FC<{
         setCurrentEnv(nbEnvData.environment.name);
         // Ensure kernel matches environment when opening notebook
         await switchKernelForEnvironment(nbEnvData.environment.name);
-        return;
+      } else {
+        setCurrentEnv("");
       }
     } catch (error) {
       console.warn("Failed to fetch notebook environment:", error);
+      setCurrentEnv("");
     }
 
-    // No environment explicitly set for this notebook; reflect as unconfigured
-    setCurrentEnv("");
+    // Then fetch full list of environments so the current notebook's env is present
+    const data = await requestAPI<any>("environments");
+    setEnvironments(data || {});
   };
 
   // Fetch environments on mount
@@ -346,7 +346,7 @@ const EnvironmentBadge: React.FC<{
       console.error("Failed to set notebook environment:", error);
       await showErrorMessage("Failed to set notebook environment", errorMsg);
     } finally {
-      setIsOpen(false);
+      // Keep the selector open after change to show details
     }
   };
 
@@ -369,7 +369,6 @@ const EnvironmentBadge: React.FC<{
         });
         await refreshEnvironments();
         setCurrentEnv(name);
-        setIsOpen(false);
       },
     });
   };
@@ -424,6 +423,14 @@ const EnvironmentBadge: React.FC<{
   };
 
   const envNames = Object.keys(environments);
+  const selectedEnv = currentEnv ? environments[currentEnv] : null;
+  const pythonVersion =
+    selectedEnv?.python || selectedEnv?.python_version || "Unknown";
+  const packagesList = Array.isArray(selectedEnv?.packages)
+    ? selectedEnv.packages
+    : [];
+  const envSelectId = `calkit-env-select-${panel.id || "default"}`;
+  const hasCurrentEnvOption = currentEnv && envNames.includes(currentEnv);
   const isConfigured = currentEnv !== "";
   const label = isConfigured
     ? `Environment: ${currentEnv}`
@@ -443,43 +450,80 @@ const EnvironmentBadge: React.FC<{
         <div className="calkit-dropdown-content">
           <div className="calkit-dropdown-section">
             <h4>Select environment</h4>
-            {switchingKernel && (
-              <p className="calkit-note">Switching kernel, please wait…</p>
-            )}
             {envNames.length === 0 ? (
               <p>No environments available</p>
             ) : (
-              <div className="calkit-env-list">
-                {envNames.map((name) => (
-                  <div
-                    key={name}
-                    className={`calkit-env-item ${
-                      name === currentEnv ? "calkit-env-item-active" : ""
-                    }`}
-                    onClick={() => {
-                      if (!switchingKernel) {
-                        void handleEnvironmentSelect(name);
-                      }
-                    }}
-                  >
-                    {name}
-                  </div>
-                ))}
+              <div className="calkit-form-group">
+                <label htmlFor={envSelectId}>Notebook environment</label>
+                <select
+                  id={envSelectId}
+                  value={currentEnv}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (!value || switchingKernel) {
+                      return;
+                    }
+                    if (value === "__create__") {
+                      void handleCreateEnvironment();
+                      return;
+                    }
+                    void handleEnvironmentSelect(value);
+                  }}
+                  disabled={switchingKernel || envNames.length === 0}
+                >
+                  <option value="">Select an environment</option>
+                  <option value="__create__">+ Create new…</option>
+                  {currentEnv && !hasCurrentEnvOption && (
+                    <option value={currentEnv}>
+                      {currentEnv} (not listed)
+                    </option>
+                  )}
+                  {envNames.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
               </div>
+            )}
+            {selectedEnv ? (
+              <div className="calkit-env-details">
+                <p>
+                  <strong>Python:</strong> {pythonVersion}
+                </p>
+                <div className="calkit-env-packages">
+                  <div className="calkit-env-packages-header">
+                    <strong>Packages:</strong>
+                  </div>
+                  {packagesList.length === 0 ? (
+                    <p className="calkit-env-packages-empty">No packages</p>
+                  ) : (
+                    <ul className="calkit-env-packages-list">
+                      {packagesList.map((pkg: string, idx: number) => (
+                        <li key={idx} className="calkit-env-package-item">
+                          {pkg}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            ) : (
+              envNames.length > 0 && (
+                <p className="calkit-note">
+                  {currentEnv && !hasCurrentEnvOption
+                    ? "Current notebook environment is not listed."
+                    : "Select an environment to view details."}
+                </p>
+              )
             )}
           </div>
           <div className="calkit-dropdown-divider" />
           <div className="calkit-dropdown-actions">
             <button
               className="calkit-dropdown-button"
-              onClick={handleCreateEnvironment}
-            >
-              Create new environment
-            </button>
-            <button
-              className="calkit-dropdown-button"
               onClick={handleEditEnvironment}
-              disabled={!currentEnv}
+              disabled={!currentEnv || !hasCurrentEnvOption}
             >
               Edit current environment
             </button>
@@ -602,27 +646,28 @@ const PipelineStageBadge: React.FC<{
     const stage = stageName.trim();
     const notebookPath = panel.context.path;
 
-    // Environment is required for the stage
-    if (!currentEnv) {
-      await showErrorMessage(
-        "Environment required",
-        "Please set an environment for this notebook before setting a stage.",
-      );
-      return;
-    }
-
     try {
       // Fetch current notebook info to get any existing inputs/outputs
       const notebookInfo = await requestAPI<any>(
         `notebooks?path=${encodeURIComponent(notebookPath)}`,
       );
+      const envName = notebookInfo.environment?.name || currentEnv || "";
+
+      // Environment is required for the stage
+      if (!envName) {
+        await showErrorMessage(
+          "Environment required",
+          "Please set an environment for this notebook before setting a stage.",
+        );
+        return;
+      }
       const existingInputs = notebookInfo.stage?.inputs || [];
       const existingOutputs = notebookInfo.stage?.outputs || [];
 
       await setNotebookStageMutation.mutateAsync({
         path: notebookPath,
         stage_name: stage,
-        environment: currentEnv,
+        environment: envName,
         inputs: existingInputs,
         outputs: existingOutputs,
       });

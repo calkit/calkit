@@ -999,16 +999,17 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                   <div className="calkit-env-packages-header">
                     <strong>Packages:</strong>
                   </div>
-                  <div className="calkit-env-packages-list">
-                    {packages.length === 0 && (
-                      <div className="calkit-env-package-item">No packages</div>
-                    )}
-                    {packages.map((pkg: string, idx: number) => (
-                      <div key={idx} className="calkit-env-package-item">
-                        {pkg}
-                      </div>
-                    ))}
-                  </div>
+                  {packages.length === 0 ? (
+                    <p className="calkit-env-packages-empty">No packages</p>
+                  ) : (
+                    <ul className="calkit-env-packages-list">
+                      {packages.map((pkg: string, idx: number) => (
+                        <li key={idx} className="calkit-env-package-item">
+                          {pkg}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
             </div>

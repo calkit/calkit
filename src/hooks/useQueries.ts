@@ -423,6 +423,8 @@ export const useSetNotebookStage = () => {
       environment: string;
       inputs?: string[];
       outputs?: string[];
+      executed_ipynb_storage?: string;
+      html_storage?: string;
     }) =>
       requestAPI("notebook/stage", {
         method: "PUT",

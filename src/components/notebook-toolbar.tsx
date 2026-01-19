@@ -548,6 +548,9 @@ const PipelineStageBadge: React.FC<{
   const [currentEnv, setCurrentEnv] = useState<string>("");
   const [isStale, setIsStale] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [executedIpynbStorage, setExecutedIpynbStorage] =
+    useState<string>("git");
+  const [htmlStorage, setHtmlStorage] = useState<string>("git");
   const { data: pipelineStatus } = usePipelineStatus();
   const setNotebookStageMutation = useSetNotebookStage();
 
@@ -587,6 +590,10 @@ const PipelineStageBadge: React.FC<{
         const stale = notebookInfo.stage?.is_stale || false;
         setCurrentStage(stage);
         setIsStale(stale);
+        setExecutedIpynbStorage(
+          notebookInfo.stage?.executed_ipynb_storage || "git",
+        );
+        setHtmlStorage(notebookInfo.stage?.html_storage || "git");
 
         // If no stage is set, generate a default name from the notebook filename
         if (!stage) {
@@ -670,6 +677,8 @@ const PipelineStageBadge: React.FC<{
         environment: envName,
         inputs: existingInputs,
         outputs: existingOutputs,
+        executed_ipynb_storage: executedIpynbStorage || undefined,
+        html_storage: htmlStorage || undefined,
       });
       setCurrentStage(stage);
       setIsOpen(false);
@@ -770,29 +779,56 @@ const PipelineStageBadge: React.FC<{
             <h4>Set notebook stage</h4>
             <div className="calkit-form-group">
               <label>Stage name</label>
-              <div className="calkit-input-row">
-                <input
-                  type="text"
-                  value={stageName}
-                  onChange={(e) => setStageName(e.target.value)}
-                  placeholder="e.g., postprocess"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleSaveStage();
-                    }
-                  }}
-                  autoComplete="off"
-                />
-                <button
-                  onClick={handleSaveStage}
-                  disabled={
-                    setNotebookStageMutation.isPending || !stageName.trim()
+              <input
+                type="text"
+                value={stageName}
+                onChange={(e) => setStageName(e.target.value)}
+                placeholder="e.g., postprocess"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleSaveStage();
                   }
-                >
-                  {setNotebookStageMutation.isPending ? "Saving..." : "Save"}
-                </button>
-              </div>
+                }}
+                autoComplete="off"
+              />
+            </div>
+            <div className="calkit-form-group">
+              <label htmlFor="executed-ipynb-storage">
+                Executed ipynb storage
+              </label>
+              <select
+                id="executed-ipynb-storage"
+                value={executedIpynbStorage}
+                onChange={(e) => setExecutedIpynbStorage(e.target.value)}
+              >
+                <option value="git">Git</option>
+                <option value="dvc">DVC</option>
+                <option value="none">None</option>
+              </select>
+            </div>
+            <div className="calkit-form-group">
+              <label htmlFor="html-storage">HTML storage</label>
+              <select
+                id="html-storage"
+                value={htmlStorage}
+                onChange={(e) => setHtmlStorage(e.target.value)}
+              >
+                <option value="git">Git</option>
+                <option value="dvc">DVC</option>
+                <option value="none">None</option>
+              </select>
+            </div>
+            <div className="calkit-form-actions">
+              <button
+                className="calkit-primary-button"
+                onClick={handleSaveStage}
+                disabled={
+                  setNotebookStageMutation.isPending || !stageName.trim()
+                }
+              >
+                {setNotebookStageMutation.isPending ? "Saving..." : "Save"}
+              </button>
             </div>
           </div>
         )}

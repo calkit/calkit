@@ -588,12 +588,50 @@ export async function showEnvironmentEditor(
   });
 
   // Set up validity monitoring to enable/disable OK button
+  let saving = false;
+  const setSavingState = (isSaving: boolean) => {
+    saving = isSaving;
+    const okButton = dialog.node?.querySelector(
+      ".jp-mod-accept",
+    ) as HTMLButtonElement | null;
+    if (!okButton) {
+      return;
+    }
+    if (!okButton.dataset.originalLabel) {
+      okButton.dataset.originalLabel = okButton.textContent || "Save";
+    }
+
+    if (isSaving) {
+      okButton.disabled = true;
+      const originalLabel = okButton.dataset.originalLabel || "Save";
+      okButton.textContent = originalLabel;
+      let spinner = okButton.querySelector(".jp-Spinner") as HTMLElement | null;
+      if (!spinner) {
+        spinner = document.createElement("span");
+        spinner.className = "jp-Spinner";
+        spinner.setAttribute("role", "progressbar");
+        spinner.style.marginRight = "6px";
+        okButton.prepend(spinner);
+      }
+      okButton.textContent = `${originalLabel}`;
+      spinner.style.display = "inline-block";
+    } else {
+      const spinner = okButton.querySelector(".jp-Spinner");
+      if (spinner) {
+        spinner.remove();
+      }
+      const originalLabel = okButton.dataset.originalLabel || "Save";
+      okButton.textContent = originalLabel;
+      okButton.disabled = !widget.getIsValid();
+    }
+  };
+
   const updateOkButton = () => {
     const okButton = dialog.node?.querySelector(
       ".jp-mod-accept",
     ) as HTMLButtonElement | null;
     if (okButton) {
-      okButton.disabled = !widget.getIsValid();
+      okButton.disabled = saving || !widget.getIsValid();
     }
   };
 
@@ -602,7 +640,9 @@ export async function showEnvironmentEditor(
       ".jp-mod-accept",
     ) as HTMLButtonElement | null;
     if (okButton) {
-      okButton.disabled = !isValid;
+      if (!saving) {
+        okButton.disabled = !isValid;
+      }
     }
   };
 
@@ -634,12 +674,7 @@ export async function showEnvironmentEditor(
     }
 
     // Mark dialog as non-closable while submitting
-    const okButton = dialog.node?.querySelector(
-      ".jp-mod-accept",
-    ) as HTMLButtonElement | null;
-    if (okButton) {
-      okButton.disabled = true;
-    }
+    setSavingState(true);
 
     try {
       // For edit mode, pass both existing and updated data
@@ -650,9 +685,7 @@ export async function showEnvironmentEditor(
       }
     } catch (error) {
       // Re-enable OK button on error
-      if (okButton) {
-        okButton.disabled = false;
-      }
+      setSavingState(false);
 
       // Extract error message from API response or error object
       let errorMessage = "Unknown error";

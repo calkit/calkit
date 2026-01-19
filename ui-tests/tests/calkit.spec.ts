@@ -69,29 +69,6 @@ test.describe("Notebook pipeline workflow", () => {
     // Focus the notebook area to ensure toolbar renders
     await page.click(".jp-NotebookPanel", { position: { x: 10, y: 10 } })
 
-    // In tests, force toolbar items to be visible even if they overflow
-    await page.addStyleTag({
-      content: `
-        .jp-Toolbar, .jp-NotebookPanel .jp-Toolbar {
-          display: flex !important;
-          visibility: visible !important;
-          opacity: 1 !important;
-        }
-        .jp-Toolbar-item, .jp-Toolbar > * {
-          display: inline-flex !important;
-          visibility: visible !important;
-          opacity: 1 !important;
-          pointer-events: auto !important;
-        }
-        [class*='calkit'] {
-          visibility: visible !important;
-          opacity: 1 !important;
-          display: flex !important;
-          pointer-events: auto !important;
-        }
-      `,
-    })
-
     // Wait for and find the environment badge
     const envBadge = page
       .locator(".calkit-badge")
@@ -113,7 +90,7 @@ test.describe("Notebook pipeline workflow", () => {
     await page.waitForSelector(".calkit-badge-dropdown", { state: "attached", timeout: 5000 })
     const envDropdown = page.locator(".calkit-badge-dropdown").first()
 
-// When there are no environments, the UI now shows a button to create one
+    // When there are no environments, the UI now shows a button to create one
     // If a button exists in the dropdown, click it (it will be "Create new environment" when no envs exist,
     // or "Edit current environment" when we already have one from a previous step)
     const firstButton = envDropdown.locator("button").first()

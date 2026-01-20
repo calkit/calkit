@@ -13,6 +13,7 @@ import {
   useSetNotebookStage,
 } from "../useQueries";
 import { requestAPI } from "../../request";
+import { isFeatureEnabled } from "../../feature-flags";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { ReactNode } from "react";
 
@@ -70,33 +71,36 @@ describe("useQueries", () => {
       expect(requestAPI).toHaveBeenCalledWith("project");
     });
 
-    it("useGitStatus should fetch git status", async () => {
-      const mockStatus = {
-        changed: ["file.txt"],
-        staged: [],
-        untracked: [],
-        tracked: ["file.txt"],
-        sizes: {},
-        ahead: 0,
-        behind: 0,
-      };
+    (isFeatureEnabled("history") ? it : it.skip)(
+      "useGitStatus should fetch git status",
+      async () => {
+        const mockStatus = {
+          changed: ["file.txt"],
+          staged: [],
+          untracked: [],
+          tracked: ["file.txt"],
+          sizes: {},
+          ahead: 0,
+          behind: 0,
+        };
 
-      (requestAPI as jest.Mock).mockResolvedValue(mockStatus);
+        (requestAPI as jest.Mock).mockResolvedValue(mockStatus);
 
-      const TestComponent = () => {
-        const { data, isSuccess } = useGitStatus();
-        if (!isSuccess) return null;
-        return <div>{data?.changed.length}</div>;
-      };
+        const TestComponent = () => {
+          const { data, isSuccess } = useGitStatus();
+          if (!isSuccess) return null;
+          return <div>{data?.changed.length}</div>;
+        };
 
-      render(<TestComponent />, { wrapper: createTestWrapper() });
+        render(<TestComponent />, { wrapper: createTestWrapper() });
 
-      await waitFor(() => {
-        expect(screen.getByText("1")).toBeInTheDocument();
-      });
+        await waitFor(() => {
+          expect(screen.getByText("1")).toBeInTheDocument();
+        });
 
-      expect(requestAPI).toHaveBeenCalledWith("git/status");
-    });
+        expect(requestAPI).toHaveBeenCalledWith("git/status");
+      },
+    );
 
     it("usePipelineStatus should fetch pipeline status", async () => {
       const mockPipeline = {
@@ -122,34 +126,37 @@ describe("useQueries", () => {
       expect(requestAPI).toHaveBeenCalledWith("pipeline/status");
     });
 
-    it("useGitHistory should fetch git history", async () => {
-      const mockHistory = {
-        commits: [
-          {
-            hash: "abc123",
-            message: "Initial commit",
-            author: "Test Author",
-            date: "2024-01-01",
-          },
-        ],
-      };
+    (isFeatureEnabled("history") ? it : it.skip)(
+      "useGitHistory should fetch git history",
+      async () => {
+        const mockHistory = {
+          commits: [
+            {
+              hash: "abc123",
+              message: "Initial commit",
+              author: "Test Author",
+              date: "2024-01-01",
+            },
+          ],
+        };
 
-      (requestAPI as jest.Mock).mockResolvedValue(mockHistory);
+        (requestAPI as jest.Mock).mockResolvedValue(mockHistory);
 
-      const TestComponent = () => {
-        const { data, isSuccess } = useGitHistory();
-        if (!isSuccess) return null;
-        return <div>{data?.commits.length}</div>;
-      };
+        const TestComponent = () => {
+          const { data, isSuccess } = useGitHistory();
+          if (!isSuccess) return null;
+          return <div>{data?.commits.length}</div>;
+        };
 
-      render(<TestComponent />, { wrapper: createTestWrapper() });
+        render(<TestComponent />, { wrapper: createTestWrapper() });
 
-      await waitFor(() => {
-        expect(screen.getByText("1")).toBeInTheDocument();
-      });
+        await waitFor(() => {
+          expect(screen.getByText("1")).toBeInTheDocument();
+        });
 
-      expect(requestAPI).toHaveBeenCalledWith("git/history");
-    });
+        expect(requestAPI).toHaveBeenCalledWith("git/history");
+      },
+    );
 
     it("useNotebooks should fetch notebooks list", async () => {
       const mockNotebooks = [

@@ -51,7 +51,7 @@ test.describe("Notebook pipeline workflow", () => {
 
     // Create a new notebook using the launcher
     const launcherCards = page.locator(".jp-LauncherCard")
-    const notebookCard = launcherCards.filter({ hasText: "Notebook" }).first()
+    const notebookCard = launcherCards.filter({ hasText: "ipykernel" }).first()
     await notebookCard.click()
 
     // Wait for notebook to be created and opened

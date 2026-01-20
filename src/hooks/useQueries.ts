@@ -107,7 +107,7 @@ export const usePipelineStatus = () => {
     queryKey: ["pipeline", "status"],
     queryFn: () => requestAPI<IPipelineStatus>("pipeline/status"),
     staleTime: 10 * 1000,
-    refetchInterval: 5000, // Refetch every 5 seconds
+    refetchInterval: 3000, // Refetch every 3 seconds
   });
 };
 

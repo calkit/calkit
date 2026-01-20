@@ -7,58 +7,14 @@ import { requestAPI } from "../request";
 import { queryClient } from "../queryClient";
 import { infoLetterIcon } from "../icons";
 import { showEnvironmentEditor } from "./environment-editor";
-import { showProjectInfoEditor } from "./project-info-editor";
 import {
   usePipelineStatus,
   useSetNotebookStage,
   useCreateEnvironment,
   useUpdateEnvironment,
+  useSetNotebookEnvironment,
 } from "../hooks/useQueries";
 import { isFeatureEnabled } from "../feature-flags";
-
-/**
- * Ensure project has a name before proceeding with operations
- * Shows project info editor if needed
- */
-async function ensureProjectName(): Promise<boolean> {
-  try {
-    const projectInfo = await requestAPI<any>("project");
-
-    if (projectInfo?.name) {
-      return true;
-    }
-
-    // If no name, show project info editor with suggestions
-    const suggestedName = projectInfo?.suggested_name || "my-project";
-    const suggestedTitle = projectInfo?.suggested_title || "My Project";
-
-    const result = await showProjectInfoEditor(
-      {
-        name: suggestedName,
-        title: suggestedTitle,
-        description: projectInfo?.description || "",
-        git_repo_url: projectInfo?.git_repo_url || "",
-        owner: projectInfo?.owner || "",
-      },
-      true,
-    );
-
-    if (!result) {
-      return false;
-    }
-
-    // Save project info
-    await requestAPI("project", {
-      method: "PUT",
-      body: JSON.stringify(result),
-    });
-
-    return true;
-  } catch (error) {
-    console.error("Failed to ensure project name:", error);
-    return false;
-  }
-}
 
 /**
  * Extract a readable error message from various error types
@@ -67,7 +23,6 @@ function getErrorMessage(error: unknown): string {
   if (!error) {
     return "Unknown error";
   }
-
   // If it's a string, return it directly
   if (typeof error === "string") {
     return error;
@@ -259,6 +214,7 @@ const EnvironmentBadge: React.FC<{
 
   const createEnvironmentMutation = useCreateEnvironment();
   const updateEnvironmentMutation = useUpdateEnvironment();
+  const setNotebookEnvMutation = useSetNotebookEnvironment();
   const [loading, setLoading] = useState(true);
   const [switchingKernel, setSwitchingKernel] = useState(false);
 
@@ -351,11 +307,7 @@ const EnvironmentBadge: React.FC<{
   };
 
   const handleCreateEnvironment = async () => {
-    // Ensure project has a name before creating environment
-    if (!(await ensureProjectName())) {
-      return;
-    }
-
+    // Project detection and naming now happens naturally in the backend
     await showEnvironmentEditor({
       mode: "create",
       onSubmit: async ({ name, kind, path, packages, prefix, python }) => {
@@ -367,6 +319,14 @@ const EnvironmentBadge: React.FC<{
           prefix,
           python,
         });
+        // Associate environment to this notebook on the backend
+        await setNotebookEnvMutation.mutateAsync({
+          path: panel.context.path,
+          environment: name,
+        });
+        // Switch kernel to match environment
+        await switchKernelForEnvironment(name);
+        // Refresh and update local state
         await refreshEnvironments();
         setCurrentEnv(name);
       },
@@ -375,11 +335,6 @@ const EnvironmentBadge: React.FC<{
 
   const handleEditEnvironment = async () => {
     if (!currentEnv) {
-      return;
-    }
-
-    // Ensure project has a name before editing environment
-    if (!(await ensureProjectName())) {
       return;
     }
 
@@ -651,11 +606,6 @@ const PipelineStageBadge: React.FC<{
 
   const handleSaveStage = async () => {
     if (!stageName.trim()) {
-      return;
-    }
-
-    // Ensure project has a name before saving stage
-    if (!(await ensureProjectName())) {
       return;
     }
 

@@ -564,75 +564,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
    * Check if project has a name, and if not, prompt user to set one
    * @returns true if project has a name (or user just set one), false if user cancelled
    */
-  const ensureProjectName = useCallback(async (): Promise<boolean> => {
-    if (projectQuery.data?.name) {
-      console.log("Project name exists:", projectQuery.data.name);
-      return true;
-    }
-
-    console.log("No project name found, showing dialog...");
-    console.log("Current projectQuery.data:", projectQuery.data);
-
-    try {
-      // Get suggested values from the project data
-      // (The backend provides these when name is not set)
-      const suggestedName = projectQuery.data?.suggested_name || "my-project";
-      const suggestedTitle = projectQuery.data?.suggested_title || "My Project";
-
-      console.log("Using suggested values:", {
-        name: suggestedName,
-        title: suggestedTitle,
-      });
-
-      console.log("About to show project info editor with options:", {
-        name: suggestedName,
-        title: suggestedTitle,
-      });
-
-      const result = await showProjectInfoEditor(
-        {
-          name: suggestedName,
-          title: suggestedTitle,
-          description: projectQuery.data?.description || "",
-          git_repo_url: projectQuery.data?.git_repo_url || "",
-          owner: projectQuery.data?.owner || "",
-        },
-        true,
-      );
-
-      console.log("Dialog result:", result);
-
-      if (!result) {
-        console.log("User cancelled project name dialog or result is null");
-        return false;
-      }
-
-      console.log("Saving project info:", result);
-
-      // Update project with the name and title
-      const putResponse = await requestAPI("project", {
-        method: "PUT",
-        body: JSON.stringify(result),
-      });
-
-      console.log("Project PUT response:", putResponse);
-      console.log("Project info saved successfully");
-
-      // Invalidate project query to refetch updated data
-      console.log("Invalidating project query...");
-      await queryClient.invalidateQueries({ queryKey: ["project"] });
-      console.log("Query invalidated, ensureProjectName returning true");
-
-      return true;
-    } catch (error) {
-      console.error("Failed to ensure project name - Error details:", {
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-        error,
-      });
-      return false;
-    }
-  }, [projectQuery.data]);
+  // Removed ensureProjectName gating; operations should proceed without requiring a name
 
   const handleSaveProjectInfo = useCallback(async () => {
     // Use suggested values if project has no name
@@ -764,11 +696,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   }, []);
 
   const handleCreateStage = useCallback(async () => {
-    const hasName = await ensureProjectName();
-    if (!hasName) {
-      return;
-    }
-
     await showStageEditorDialog({
       title: "Create new stage",
       kind: STAGE_KIND_OPTIONS[0].value,
@@ -806,17 +733,10 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
         }
       },
     });
-  }, [ensureProjectName]);
+  }, []);
 
   const handleCreateEnvironment = useCallback(async () => {
     console.log("handleCreateEnvironment called");
-    const hasName = await ensureProjectName();
-    console.log("ensureProjectName returned:", hasName);
-    if (!hasName) {
-      console.log("Cancelling environment creation - no project name");
-      return;
-    }
-
     console.log("About to show environment editor");
     await showEnvironmentEditor({
       mode: "create",
@@ -832,14 +752,9 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
         });
       },
     });
-  }, [ensureProjectName]);
+  }, []);
 
   const handleCreateNotebook = useCallback(async () => {
-    const hasName = await ensureProjectName();
-    if (!hasName) {
-      return;
-    }
-
     const environmentList = sectionData.environments || [];
 
     const createEnvironmentCallback = async (): Promise<string | null> => {
@@ -879,7 +794,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     sectionData.environments,
     createNotebookMutation,
     createEnvironmentMutation,
-    ensureProjectName,
   ]);
 
   const handleRegisterNotebook = useCallback(async () => {

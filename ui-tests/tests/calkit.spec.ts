@@ -21,7 +21,6 @@ test("should emit an activation console message", async ({ page }) => {
 })
 
 test.describe("Notebook pipeline workflow", () => {
-  test.use({ tmpPath: "test-notebook-pipeline" })
 
   test("should create environment from notebook toolbar, add stage, run, and execute pipeline", async ({
     page,
@@ -35,16 +34,6 @@ test.describe("Notebook pipeline workflow", () => {
 
     // Wait for JupyterLab to be fully ready
     await page.waitForSelector(".jp-LauncherCard", { timeout: 30000 })
-
-    // Ensure the notebook toolbar includes the Calkit toolbar item
-    await page.request.put("/api/settings/%40jupyterlab%2Fnotebook-extension%3Atracker", {
-      data: {
-        id: "@jupyterlab/notebook-extension:tracker",
-        raw: JSON.stringify({
-          toolbar: [{ name: "calkit-notebook-toolbar", rank: 10 }],
-        }),
-      },
-    })
 
     // Create data.csv directly via Jupyter contents API for reliability
     await page.request.put(`/api/contents/data.csv`, {
@@ -136,15 +125,27 @@ test.describe("Notebook pipeline workflow", () => {
     await stageNameInput.fill("analytics")
 
     // Click Save button
-    const saveStageButton = page.locator('button:has-text("Save")').first()
+    const saveStageButton = stageDropdown.locator('button:has-text("Save")').first()
     await saveStageButton.click()
+
+  // Debug: Log to console
+  console.log("Save button clicked. Checking if button is enabled...")
+  const isDisabled = await saveStageButton.isDisabled()
+  console.log("Save button disabled:", isDisabled)
+    // Wait for stage to be saved - the badge should change from "Not in pipeline" to "In pipeline: analytics"
+    await page.waitForTimeout(3000)
+
+    // Wait for the stage save request to complete
+    await page.waitForResponse(
+      (response) => response.url().includes("/calkit/notebook/stage") && response.request().method() === "PUT",
+      { timeout: 10000 }
+    )
 
     // Wait for stage to be saved - the badge should change from "Not in pipeline" to "In pipeline: analytics"
     await page.waitForTimeout(2000)
-
     // Close the dropdown with Escape
     await page.keyboard.press("Escape")
-    await page.waitForTimeout(500)
+    await page.waitForTimeout(1000)
 
     // Step 3: Write analytics code with pandas and matplotlib
     const firstCell = page.locator(".jp-Cell").first()
@@ -155,15 +156,15 @@ test.describe("Notebook pipeline workflow", () => {
 
     // Save the notebook (Ctrl+S)
     await page.keyboard.press("Control+s")
-    await page.waitForTimeout(1000)
+    await page.waitForTimeout(2000)
 
     // Step 4: Run the stage with the play button
     // The play button should now be visible next to the stage badge
     const playButton = page.locator(".calkit-play-button").first()
 
-    // Wait for play button to appear and be visible
-    await page.waitForSelector(".calkit-play-button", { timeout: 10000 })
-    await expect(playButton).toBeVisible({ timeout: 10000 })
+    // Wait for play button to appear and be visible (with longer timeout since it depends on stage refresh)
+    await page.waitForSelector(".calkit-play-button", { state: "attached", timeout: 15000 })
+    await expect(playButton).toBeVisible({ timeout: 5000 })
     await playButton.click({ force: true })
 
     // Wait for execution to start and complete

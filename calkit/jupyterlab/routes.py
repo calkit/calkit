@@ -396,11 +396,7 @@ class NotebookKernelRouteHandler(APIHandler):
         """Set the kernel info for a notebook's environment."""
         body = self.get_json_body()
         if not body:
-            self.set_status(400)
-            self.finish(
-                json.dumps({"error": "Request body must be valid JSON"})
-            )
-            return
+            return self.error(400, "Request body must be valid JSON")
         notebook_path = body.get("path", "")
         env_name = body.get("environment", "")
         self.log.info(
@@ -408,36 +404,14 @@ class NotebookKernelRouteHandler(APIHandler):
             f" '{notebook_path}', environment: '{env_name}'"
         )
         if not notebook_path or not env_name:
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {"error": "Both 'path' and 'environment' are required"}
-                )
+            return self.error(
+                400, "Both 'path' and 'environment' are required"
             )
-            return
-        # We can't do this if we don't have a project name
-        try:
-            calkit.detect_project_name()
-        except Exception as e:
-            self.log.error(f"Failed to detect project name: {e}")
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {"error": "Project name is required to set kernel info"}
-                )
-            )
-            return
         try:
             kernel_name = check_env_kernel(env_name=env_name)
         except Exception as e:
             self.log.error(f"Failed to check env kernel for {env_name}: {e}")
-            self.set_status(500)
-            self.finish(
-                json.dumps(
-                    {"error": f"Failed to check environment kernel: {e}"}
-                )
-            )
-            return
+            return self.error(500, f"Failed to check environment kernel: {e}")
         self.finish(json.dumps({"name": kernel_name}))
 
 

@@ -2,7 +2,10 @@
 
 import subprocess
 
+import pytest
 
+
+@pytest.mark.skip(reason="Automated requests to Zenodo can be flaky")
 def test_import_zenodo(tmp_dir, monkeypatch):
     subprocess.run(["calkit", "init"], check=True)
     # Temporarily disable dev mode so we can download a real record

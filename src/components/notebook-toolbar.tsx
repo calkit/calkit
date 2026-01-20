@@ -403,7 +403,6 @@ const EnvironmentBadge: React.FC<{
               </div>
             ) : (
               <div className="calkit-form-group">
-                <label htmlFor={envSelectId}>Notebook environment</label>
                 <select
                   id={envSelectId}
                   value={currentEnv}
@@ -421,7 +420,7 @@ const EnvironmentBadge: React.FC<{
                   disabled={switchingKernel || envNames.length === 0}
                 >
                   <option value="">Select an environment</option>
-                  <option value="__create__">+ Create new…</option>
+                  <option value="__create__">Create new environment...</option>
                   {currentEnv && !hasCurrentEnvOption && (
                     <option value={currentEnv}>
                       {currentEnv} (not listed)
@@ -917,13 +916,13 @@ const InputsBadge: React.FC<{
           ))}
         </div>
         <div className="calkit-form-group">
-          <label>Add manually:</label>
+          <label>Add new input:</label>
           <div className="calkit-input-row">
             <input
               type="text"
               value={manualInput}
               onChange={(e) => setManualInput(e.target.value)}
-              placeholder="path/to/input.csv"
+              placeholder="ex: data/raw.csv"
               onKeyPress={(e) => {
                 if (e.key === "Enter") {
                   handleAddManual();

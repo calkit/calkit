@@ -427,6 +427,8 @@ class NotebookStageRouteHandler(APIHandler):
         env_name = body.get("environment")
         inputs = body.get("inputs", [])
         outputs = body.get("outputs", [])
+        html_storage = body.get("html_storage", "git")
+        executed_ipynb_storage = body.get("executed_ipynb_storage", "git")
         if not notebook_path or not stage_name or not env_name:
             return self.error(
                 400, "Request body must include 'path' and 'stage_name'"
@@ -469,6 +471,8 @@ class NotebookStageRouteHandler(APIHandler):
             stage["inputs"] = inputs
         if "outputs" in body:
             stage["outputs"] = outputs
+        stage["html_storage"] = html_storage
+        stage["executed_ipynb_storage"] = executed_ipynb_storage
         if "pipeline" not in ck_info:
             ck_info["pipeline"] = {}
         stages[stage_name] = stage

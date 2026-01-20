@@ -636,8 +636,9 @@ const PipelineStageBadge: React.FC<{
         environment: envName,
         inputs: existingInputs,
         outputs: existingOutputs,
-        executed_ipynb_storage: executedIpynbStorage || undefined,
-        html_storage: htmlStorage || undefined,
+        executed_ipynb_storage:
+          executedIpynbStorage === "none" ? null : executedIpynbStorage,
+        html_storage: htmlStorage === "none" ? null : htmlStorage,
       });
       setCurrentStage(stage);
       setIsOpen(false);

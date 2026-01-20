@@ -2,4 +2,4 @@ test-results
 playwright-report
 calkit.yaml
 .calkit
-test-project
+/test-project

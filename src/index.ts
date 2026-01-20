@@ -310,7 +310,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
                     queryKey: ["project"],
                   });
                   await queryClient.invalidateQueries({
-                    queryKey: ["pipelineStatus"],
+                    queryKey: ["pipeline", "status"],
                   });
                 } catch (error) {
                   console.error("Failed to create pipeline stage:", error);

@@ -642,7 +642,7 @@ const PipelineStageBadge: React.FC<{
       setCurrentStage(stage);
       setIsOpen(false);
       // Invalidate pipeline status since adding/updating a stage affects it
-      void queryClient.invalidateQueries({ queryKey: ["pipelineStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["pipeline", "status"] });
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.error("Failed to set pipeline stage:", error);
@@ -714,6 +714,9 @@ const PipelineStageBadge: React.FC<{
       });
 
       console.log("Stage run completed and cached successfully!");
+      // Invalidate queries to immediately refresh UI state
+      void queryClient.invalidateQueries({ queryKey: ["pipeline", "status"] });
+      void queryClient.invalidateQueries({ queryKey: ["notebooks"] });
     } catch (error) {
       const errorMsg = getErrorMessage(error);
       await showErrorMessage("Failed to run stage", errorMsg);

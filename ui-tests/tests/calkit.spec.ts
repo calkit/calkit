@@ -132,7 +132,7 @@ test.describe("Notebook pipeline workflow", () => {
     await expect(stageDropdown).toBeVisible({ timeout: 5000 })
 
     // Fill in stage name
-    const stageNameInput = page.locator('input[placeholder*="e.g., postprocess"]')
+    const stageNameInput = page.locator('input[placeholder*="ex: postprocess"]')
     await stageNameInput.fill("analytics")
 
     // Prepare network waits to observe the stage save request/response
@@ -227,7 +227,7 @@ test.describe("Notebook pipeline workflow", () => {
     await inputsBadge.dispatchEvent("click")
     const inputsDropdown = page.locator(".calkit-badge-dropdown").first()
     await expect(inputsDropdown).toBeVisible({ timeout: 5000 })
-    const inputField = inputsDropdown.locator('input[placeholder*="path/to/input"]')
+    const inputField = inputsDropdown.locator('input[placeholder*="ex: data/raw.csv"]')
     await inputField.fill("data.csv")
     const addInputButton = page.locator('button:has-text("Add")').first()
     if (await addInputButton.isVisible()) {
@@ -245,7 +245,7 @@ test.describe("Notebook pipeline workflow", () => {
     await outputsBadge.dispatchEvent("click")
     const outputsDropdown = page.locator(".calkit-badge-dropdown").first()
     await expect(outputsDropdown).toBeVisible({ timeout: 5000 })
-    const outputField = outputsDropdown.locator('input[placeholder*="path/to/output"]')
+    const outputField = outputsDropdown.locator('input[placeholder*="ex: figures/plot.png"]')
     await outputField.fill("figures/plot.png")
     const addOutputButton = page.locator('button:has-text("Add")').first()
     if (await addOutputButton.isVisible()) {

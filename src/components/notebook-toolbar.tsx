@@ -730,7 +730,7 @@ const PipelineStageBadge: React.FC<{
                 type="text"
                 value={stageName}
                 onChange={(e) => setStageName(e.target.value)}
-                placeholder="e.g., postprocess"
+                placeholder="ex: postprocess"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
@@ -1109,7 +1109,7 @@ const OutputsBadge: React.FC<{
               type="text"
               value={manualOutput}
               onChange={(e) => setManualOutput(e.target.value)}
-              placeholder="ex: figures/the-plot.png"
+              placeholder="ex: figures/plot.png"
               onKeyPress={(e) => {
                 if (e.key === "Enter") {
                   handleAddManual();

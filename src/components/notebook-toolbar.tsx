@@ -966,7 +966,9 @@ const OutputsBadge: React.FC<{
   translator?: ITranslator;
 }> = ({ panel }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [outputs, setOutputs] = useState<string[]>([]);
+  const [outputs, setOutputs] = useState<
+    Array<{ path: string; storage: string }>
+  >([]);
   const [manualOutput, setManualOutput] = useState("");
   const setNotebookStageMutation = useSetNotebookStage();
 
@@ -978,7 +980,15 @@ const OutputsBadge: React.FC<{
         const notebookInfo = await requestAPI<any>(
           `notebooks?path=${encodeURIComponent(notebookPath)}`,
         );
-        setOutputs(notebookInfo.stage?.outputs || []);
+        const rawOutputs = notebookInfo.stage?.outputs || [];
+        // Normalize outputs to objects with path and storage
+        const normalizedOutputs = rawOutputs.map((output: any) => {
+          if (typeof output === "string") {
+            return { path: output, storage: "dvc" };
+          }
+          return output;
+        });
+        setOutputs(normalizedOutputs);
       } catch (error) {
         console.error("Failed to load outputs:", error);
       }
@@ -996,7 +1006,15 @@ const OutputsBadge: React.FC<{
           path: notebookPath,
         }),
       });
-      setOutputs(result.outputs || []);
+      const detectedOutputs = result.outputs || [];
+      // Convert detected outputs to objects with default DVC storage
+      const normalizedOutputs = detectedOutputs.map((output: any) => {
+        if (typeof output === "string") {
+          return { path: output, storage: "dvc" };
+        }
+        return output;
+      });
+      setOutputs(normalizedOutputs);
     } catch (error) {
       console.error("Failed to auto-detect outputs:", error);
       alert("Failed to auto-detect outputs");
@@ -1005,13 +1023,19 @@ const OutputsBadge: React.FC<{
 
   const handleAddManual = () => {
     if (manualOutput.trim()) {
-      setOutputs([...outputs, manualOutput.trim()]);
+      setOutputs([...outputs, { path: manualOutput.trim(), storage: "dvc" }]);
       setManualOutput("");
     }
   };
 
   const handleRemoveOutput = (index: number) => {
     setOutputs(outputs.filter((_, i) => i !== index));
+  };
+
+  const handleStorageChange = (index: number, storage: string) => {
+    const newOutputs = [...outputs];
+    newOutputs[index].storage = storage;
+    setOutputs(newOutputs);
   };
 
   const handleSave = async () => {
@@ -1025,12 +1049,17 @@ const OutputsBadge: React.FC<{
 
       // If there's a stage, update it with the new outputs
       if (stageName && env) {
+        // Normalize outputs: convert "none" storage to null
+        const normalizedOutputs = outputs.map((output) => ({
+          ...output,
+          storage: output.storage === "none" ? null : output.storage,
+        }));
         await setNotebookStageMutation.mutateAsync({
           path: notebookPath,
           stage_name: stageName,
           environment: env,
           inputs: notebookInfo.stage?.inputs || [],
-          outputs: outputs,
+          outputs: normalizedOutputs,
         });
       }
       setIsOpen(false);
@@ -1062,7 +1091,24 @@ const OutputsBadge: React.FC<{
         <div className="calkit-io-list">
           {outputs.map((output, index) => (
             <div key={index} className="calkit-io-item">
-              <span>{output}</span>
+              <div className="calkit-io-item-content">
+                <div className="calkit-io-field">
+                  <span className="calkit-io-label">Path:</span>
+                  <span className="calkit-io-value">{output.path}</span>
+                </div>
+                <div className="calkit-io-field">
+                  <label className="calkit-io-label">Storage:</label>
+                  <select
+                    value={output.storage || ""}
+                    onChange={(e) => handleStorageChange(index, e.target.value)}
+                    className="calkit-io-storage-select"
+                  >
+                    <option value="dvc">DVC</option>
+                    <option value="git">Git</option>
+                    <option value="none">None</option>
+                  </select>
+                </div>
+              </div>
               <button
                 className="calkit-io-remove"
                 onClick={() => handleRemoveOutput(index)}
@@ -1073,13 +1119,13 @@ const OutputsBadge: React.FC<{
           ))}
         </div>
         <div className="calkit-form-group">
-          <label>Add manually:</label>
+          <label>Add new output:</label>
           <div className="calkit-input-row">
             <input
               type="text"
               value={manualOutput}
               onChange={(e) => setManualOutput(e.target.value)}
-              placeholder="path/to/output.png"
+              placeholder="ex: figures/the-plot.png"
               onKeyPress={(e) => {
                 if (e.key === "Enter") {
                   handleAddManual();

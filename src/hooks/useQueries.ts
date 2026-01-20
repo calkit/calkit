@@ -422,7 +422,7 @@ export const useSetNotebookStage = () => {
       stage_name: string;
       environment: string;
       inputs?: string[];
-      outputs?: string[];
+      outputs?: string[] | Array<{ path: string; storage: string | null }>;
       executed_ipynb_storage?: string | null;
       html_storage?: string | null;
     }) =>

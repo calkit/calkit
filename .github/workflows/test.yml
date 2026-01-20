@@ -40,6 +40,10 @@ jobs:
         run: |
           source ~/.bashrc
           pixi --version
+          conda --version
+          docker --version
+          juliaup --version
+          uv --version
           uv run pytest -n 4
   windows:
     runs-on: windows-latest

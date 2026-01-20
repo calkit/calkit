@@ -105,3 +105,10 @@ jobs:
         run: |
           cd ui-tests
           uv run jlpm playwright test -u --reporter=list
+      - name: Upload Playwright test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: ui-tests/test-results/
+          retention-days: 7

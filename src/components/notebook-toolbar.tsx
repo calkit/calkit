@@ -13,6 +13,7 @@ import {
   useCreateEnvironment,
   useUpdateEnvironment,
   useSetNotebookEnvironment,
+  useEnvironments,
 } from "../hooks/useQueries";
 import { isFeatureEnabled } from "../feature-flags";
 
@@ -209,13 +210,13 @@ const EnvironmentBadge: React.FC<{
   translator?: ITranslator;
 }> = ({ panel }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [environments, setEnvironments] = useState<Record<string, any>>({});
   const [currentEnv, setCurrentEnv] = useState<string>("");
+  const { data: allEnvironments = {}, isLoading: isLoadingEnvs } =
+    useEnvironments();
 
   const createEnvironmentMutation = useCreateEnvironment();
   const updateEnvironmentMutation = useUpdateEnvironment();
   const setNotebookEnvMutation = useSetNotebookEnvironment();
-  const [loading, setLoading] = useState(true);
   const [switchingKernel, setSwitchingKernel] = useState(false);
 
   const switchKernelForEnvironment = async (envName: string) => {
@@ -243,43 +244,28 @@ const EnvironmentBadge: React.FC<{
     }
   };
 
-  const refreshEnvironments = async () => {
-    // Fetch the notebook's specific environment first to initialize selection
-    const notebookPath = panel.context.path;
-    try {
-      const nbEnvData = await requestAPI<any>(
-        `notebooks?path=${encodeURIComponent(notebookPath)}`,
-      );
-      if (nbEnvData.environment?.name) {
-        setCurrentEnv(nbEnvData.environment.name);
-        // Ensure kernel matches environment when opening notebook
-        await switchKernelForEnvironment(nbEnvData.environment.name);
-      } else {
-        setCurrentEnv("");
-      }
-    } catch (error) {
-      console.warn("Failed to fetch notebook environment:", error);
-      setCurrentEnv("");
-    }
-
-    // Then fetch full list of environments so the current notebook's env is present
-    const data = await requestAPI<any>("environments");
-    setEnvironments(data || {});
-  };
-
-  // Fetch environments on mount
+  // Fetch notebook's specific environment on mount or when panel changes
   useEffect(() => {
-    const fetchEnvironments = async () => {
+    const fetchNotebookEnvironment = async () => {
+      const notebookPath = panel.context.path;
       try {
-        await refreshEnvironments();
-        setLoading(false);
+        const nbEnvData = await requestAPI<any>(
+          `notebooks?path=${encodeURIComponent(notebookPath)}`,
+        );
+        if (nbEnvData.environment?.name) {
+          setCurrentEnv(nbEnvData.environment.name);
+          // Ensure kernel matches environment when opening notebook
+          await switchKernelForEnvironment(nbEnvData.environment.name);
+        } else {
+          setCurrentEnv("");
+        }
       } catch (error) {
-        console.error("Failed to fetch environments:", error);
-        setLoading(false);
+        console.warn("Failed to fetch notebook environment:", error);
+        setCurrentEnv("");
       }
     };
 
-    fetchEnvironments();
+    fetchNotebookEnvironment();
   }, [panel]);
 
   const handleEnvironmentSelect = async (envName: string) => {
@@ -326,8 +312,7 @@ const EnvironmentBadge: React.FC<{
         });
         // Switch kernel to match environment
         await switchKernelForEnvironment(name);
-        // Refresh and update local state
-        await refreshEnvironments();
+        // Set current env - React Query will auto-update from the invalidation
         setCurrentEnv(name);
       },
     });
@@ -338,7 +323,7 @@ const EnvironmentBadge: React.FC<{
       return;
     }
 
-    const envData = environments[currentEnv] || {};
+    const envData = allEnvironments[currentEnv] || {};
     await showEnvironmentEditor({
       mode: "edit",
       initialName: currentEnv,
@@ -370,15 +355,15 @@ const EnvironmentBadge: React.FC<{
           },
           updated: { name, kind, path, prefix, packages, python },
         });
-        await refreshEnvironments();
+        // React Query will auto-update from the invalidation
         setCurrentEnv(name);
         setIsOpen(false);
       },
     });
   };
 
-  const envNames = Object.keys(environments);
-  const selectedEnv = currentEnv ? environments[currentEnv] : null;
+  const envNames = Object.keys(allEnvironments);
+  const selectedEnv = currentEnv ? allEnvironments[currentEnv] : null;
   const pythonVersion =
     selectedEnv?.python || selectedEnv?.python_version || "Unknown";
   const packagesList = Array.isArray(selectedEnv?.packages)
@@ -399,7 +384,7 @@ const EnvironmentBadge: React.FC<{
       onToggle={() => setIsOpen(!isOpen)}
       onClose={() => setIsOpen(false)}
     >
-      {loading ? (
+      {isLoadingEnvs ? (
         <div className="calkit-dropdown-content">Loading...</div>
       ) : (
         <div className="calkit-dropdown-content">

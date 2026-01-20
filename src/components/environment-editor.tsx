@@ -76,7 +76,7 @@ const EnvironmentEditorBody: React.FC<
       switch (kind) {
         case "uv-venv":
         case "venv":
-          return `.calkit/envs/${envName || "{name}"}.txt`;
+          return `.calkit/envs/${envName || "{name}"}/requirements.txt`;
         case "conda":
           return "environment.yml";
         case "pixi":
@@ -96,7 +96,7 @@ const EnvironmentEditorBody: React.FC<
       switch (kind) {
         case "uv-venv":
         case "venv":
-          return `.calkit/venvs/${envName || "{name}"}/.venv`;
+          return `.calkit/envs/${envName || "{name}"}/.venv`;
         default:
           return "";
       }
@@ -446,7 +446,7 @@ class EnvironmentEditorWidget extends ReactWidget {
       switch (kind) {
         case "uv-venv":
         case "venv":
-          return `.calkit/envs/${envName || "{name}"}.txt`;
+          return `.calkit/envs/${envName || "{name}"}/requirements.txt`;
         case "conda":
           return "environment.yml";
         case "pixi":
@@ -461,7 +461,7 @@ class EnvironmentEditorWidget extends ReactWidget {
       switch (kind) {
         case "uv-venv":
         case "venv":
-          return `.calkit/venvs/${envName || "{name}"}/.venv`;
+          return `.calkit/envs/${envName || "{name}"}/.venv`;
         default:
           return "";
       }

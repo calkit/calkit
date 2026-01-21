@@ -383,6 +383,33 @@
   margin-right: 4px;
 }
 
+.calkit-env-kind-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.calkit-env-edit-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 8px;
+  color: var(--jp-ui-font-color1);
+  border-radius: 3px;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.calkit-env-edit-btn:hover {
+  background: var(--jp-layout-color2);
+}
+
+.calkit-env-edit-btn:active {
+  transform: translateY(1px);
+}
+
 .calkit-stage-item {
   display: flex;
   align-items: center;
@@ -796,6 +823,11 @@
 }
 
 .calkit-env-kind {
+  margin-bottom: 8px;
+  color: var(--jp-ui-font-color2);
+}
+
+.calkit-env-python {
   margin-bottom: 8px;
   color: var(--jp-ui-font-color2);
 }

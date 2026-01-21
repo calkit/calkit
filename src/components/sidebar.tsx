@@ -829,6 +829,16 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
           <div
             className="calkit-sidebar-item calkit-env-item"
             onClick={() => toggleEnvironment(item.id)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setEnvContextMenu({
+                visible: true,
+                x: e.clientX,
+                y: e.clientY,
+                env: item,
+              });
+            }}
           >
             <span className="calkit-sidebar-section-icon">
               {isExpanded ? "▼" : "▶"}
@@ -836,10 +846,25 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
             <span className="calkit-sidebar-item-label">{item.label}</span>
           </div>
           {isExpanded && (
-            <div className="calkit-env-details">
-              <div className="calkit-env-actions">
+            <div
+              className="calkit-env-details"
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setEnvContextMenu({
+                  visible: true,
+                  x: e.clientX,
+                  y: e.clientY,
+                  env: item,
+                });
+              }}
+            >
+              <div className="calkit-env-kind-row">
+                <div className="calkit-env-kind">
+                  <strong>Kind:</strong> {kind}
+                </div>
                 <button
-                  className="calkit-env-action-btn calkit-env-edit"
+                  className="calkit-env-edit-btn"
                   title="Edit environment"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -904,12 +929,14 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                     })();
                   }}
                 >
-                  ✏️ Edit
+                  ✏️
                 </button>
               </div>
-              <div className="calkit-env-kind">
-                <strong>Kind:</strong> {kind}
-              </div>
+              {item.python && (
+                <div className="calkit-env-python">
+                  <strong>Python:</strong> {item.python}
+                </div>
+              )}
               {showPackages && (
                 <div className="calkit-env-packages">
                   <div className="calkit-env-packages-header">
@@ -1852,7 +1879,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                     })();
                   }}
                 >
-                  Edit
+                  Edit environment
                 </div>
                 <div className="calkit-env-context-separator" />
               </>

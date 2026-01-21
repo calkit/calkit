@@ -1745,9 +1745,19 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     ],
   );
 
+  const handleLogoClick = useCallback(() => {
+    window.open("https://docs.calkit.org", "_blank");
+  }, []);
+
   return (
     <div className="calkit-sidebar">
       <div className="calkit-sidebar-header">
+        <button
+          className="calkit-sidebar-logo"
+          onClick={handleLogoClick}
+          title="Open Calkit documentation"
+          aria-label="Calkit documentation"
+        />
         {isFeatureEnabled("sidebarSectionsMenu") && (
           <SidebarSettings
             sectionDefs={SECTION_DEFS}

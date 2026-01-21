@@ -23,13 +23,31 @@
   border-bottom: 1px solid var(--jp-border-color2);
   background-color: var(--jp-layout-color2);
   min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.calkit-sidebar-logo {
+  flex: 1;
+  min-height: 28px;
   background-image: url("./img/calkit-no-bg.png");
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  border: none;
+  background-color: transparent;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+  padding: 0;
+}
+
+.calkit-sidebar-logo:hover {
+  opacity: 0.8;
+}
+
+.calkit-sidebar-logo:active {
+  opacity: 0.6;
 }
 
 .calkit-sidebar-settings-btn {

@@ -1748,7 +1748,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   return (
     <div className="calkit-sidebar">
       <div className="calkit-sidebar-header">
-        <div style={{ flex: 1 }} />
         {isFeatureEnabled("sidebarSectionsMenu") && (
           <SidebarSettings
             sectionDefs={SECTION_DEFS}

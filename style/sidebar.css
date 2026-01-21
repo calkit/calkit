@@ -19,7 +19,7 @@
 }
 
 .calkit-sidebar-header {
-  padding: 3px 12px;
+  padding: 0;
   border-bottom: 1px solid var(--jp-border-color2);
   background-color: var(--jp-layout-color2);
   min-height: 28px;
@@ -51,7 +51,7 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px 0;
+  padding: 0;
   overflow-clip-margin: 999999px;
 }
 

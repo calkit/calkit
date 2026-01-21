@@ -939,7 +939,11 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       const isStageExpanded = expandedStages.has(stage.id);
       const kind = stage.kind || "unknown";
       const inputs: string[] = stage.inputs || [];
-      const outputs: string[] = stage.outputs || [];
+      const rawOutputs = stage.outputs || [];
+      // Normalize outputs: handle both string and object formats
+      const outputs: string[] = rawOutputs.map((outp: any) =>
+        typeof outp === "string" ? outp : outp.path,
+      );
       const environment = stage.environment || "";
       const notebookPath = (stage as any).notebook_path || "";
       const isNotebookStage =

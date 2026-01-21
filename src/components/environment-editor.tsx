@@ -605,17 +605,20 @@ export async function showEnvironmentEditor(
     if (isSaving) {
       okButton.disabled = true;
       const originalLabel = okButton.dataset.originalLabel || "Save";
-      okButton.textContent = originalLabel;
       let spinner = okButton.querySelector(".jp-Spinner") as HTMLElement | null;
       if (!spinner) {
         spinner = document.createElement("span");
         spinner.className = "jp-Spinner";
         spinner.setAttribute("role", "progressbar");
         spinner.style.marginRight = "6px";
+        okButton.textContent = "";
         okButton.prepend(spinner);
       }
-      okButton.textContent = `${originalLabel}`;
-      spinner.style.display = "inline-block";
+      // Keep the spinner and label
+      if (!okButton.textContent?.includes(originalLabel)) {
+        const labelNode = document.createTextNode(` ${originalLabel}`);
+        okButton.appendChild(labelNode);
+      }
     } else {
       const spinner = okButton.querySelector(".jp-Spinner");
       if (spinner) {

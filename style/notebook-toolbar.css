@@ -98,6 +98,16 @@
   border-color: var(--jp-border-color0);
 }
 
+.calkit-badge-loading {
+  background-color: #ff9800;
+  color: white;
+  border: none;
+}
+
+.calkit-badge-loading:hover {
+  background-color: #f57c00;
+}
+
 /* Dropdown Content */
 .calkit-dropdown-content {
   display: flex;

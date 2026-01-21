@@ -325,6 +325,7 @@ const EnvironmentBadge: React.FC<{
 
   const handleEnvironmentSelect = async (envName: string) => {
     const notebookPath = panel.context.path;
+    setIsOpen(false);
     console.log(`Setting environment for ${notebookPath} to ${envName}`);
     try {
       console.log("Calling PUT notebook/environment");
@@ -342,8 +343,6 @@ const EnvironmentBadge: React.FC<{
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.error("Failed to set notebook environment:", error);
       await showErrorMessage("Failed to set notebook environment", errorMsg);
-    } finally {
-      // Keep the selector open after change to show details
     }
   };
 
@@ -427,7 +426,9 @@ const EnvironmentBadge: React.FC<{
   const envSelectId = `calkit-env-select-${panel.id || "default"}`;
   const hasCurrentEnvOption = currentEnv && envNames.includes(currentEnv);
   const isConfigured = currentEnv !== "";
-  const label = isConfigured
+  const label = switchingKernel
+    ? "Setting kernel..."
+    : isConfigured
     ? `Environment: ${currentEnv}`
     : "No environment selected";
 
@@ -438,6 +439,7 @@ const EnvironmentBadge: React.FC<{
       isOpen={isOpen}
       onToggle={() => setIsOpen(!isOpen)}
       onClose={() => setIsOpen(false)}
+      buttonClassName={switchingKernel ? "calkit-badge-loading" : ""}
     >
       {isLoadingEnvs ? (
         <div className="calkit-dropdown-content">Loading...</div>

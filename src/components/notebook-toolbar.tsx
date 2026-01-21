@@ -598,7 +598,7 @@ const PipelineStageBadge: React.FC<{
     return false;
   };
 
-  // Fetch notebook stage on mount
+  // Fetch notebook stage on mount or when notebook is renamed
   useEffect(() => {
     const fetchStage = async () => {
       try {
@@ -635,7 +635,7 @@ const PipelineStageBadge: React.FC<{
     };
 
     fetchStage();
-  }, [panel]);
+  }, [panel, panel.context.path]);
 
   useEffect(() => {
     if (!pipelineStatus || !currentStage) {

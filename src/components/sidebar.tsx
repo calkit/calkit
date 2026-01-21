@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from "react";
 import ReactDOM from "react-dom";
-import { ReactWidget } from "@jupyterlab/apputils";
+import { ReactWidget, showErrorMessage } from "@jupyterlab/apputils";
 import type { CommandRegistry } from "@lumino/commands";
 import { launchIcon } from "@jupyterlab/ui-components";
 import { SidebarSettings } from "./sidebar-settings";
@@ -185,7 +185,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
     Set<string>
   >(new Set(["modified", "staged", "untracked", "history"]));
   const [pipelineRunning, setPipelineRunning] = useState(false);
-  const [pipelineError, setPipelineError] = useState<string | null>(null);
 
   // Transform project data into section data, merging with environments data that includes packages
   const transformProjectData = useCallback(
@@ -655,7 +654,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
 
   const handleRunPipeline = useCallback(async () => {
     setPipelineRunning(true);
-    setPipelineError(null);
     pipelineState.setRunning(true, "Running pipeline...");
     try {
       await requestAPI("pipeline/runs", {
@@ -667,9 +665,9 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       // Also refresh project data
       await queryClient.invalidateQueries({ queryKey: ["project"] });
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      setPipelineError(errorMsg);
+      const errorMsg = "See output in the server terminal for details.";
       console.error("Failed to run pipeline:", error);
+      await showErrorMessage("Failed to run pipeline", errorMsg);
     } finally {
       setPipelineRunning(false);
       pipelineState.setRunning(false);
@@ -690,6 +688,10 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       await queryClient.invalidateQueries({ queryKey: ["pipelineStatus"] });
     } catch (error) {
       console.error("Failed to run stage:", error);
+      await showErrorMessage(
+        "Failed to run stage",
+        "See output in the server terminal for details.",
+      );
     } finally {
       pipelineState.setRunning(false);
     }
@@ -1928,40 +1930,6 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
               }}
             >
               Run stage
-            </div>
-          </div>,
-          document.body,
-        )}
-      {pipelineError &&
-        ReactDOM.createPortal(
-          <div
-            className="calkit-modal-overlay"
-            onClick={() => setPipelineError(null)}
-          >
-            <div
-              className="calkit-modal-content"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="calkit-modal-header">
-                <h2>Pipeline Error</h2>
-                <button
-                  className="calkit-modal-close"
-                  onClick={() => setPipelineError(null)}
-                >
-                  ×
-                </button>
-              </div>
-              <div className="calkit-modal-body">
-                <div className="calkit-error-message">{pipelineError}</div>
-              </div>
-              <div className="calkit-modal-footer">
-                <button
-                  className="calkit-modal-button"
-                  onClick={() => setPipelineError(null)}
-                >
-                  Close
-                </button>
-              </div>
             </div>
           </div>,
           document.body,

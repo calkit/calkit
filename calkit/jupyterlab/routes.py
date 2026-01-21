@@ -1043,10 +1043,8 @@ class PipelineRunsRouteHandler(APIHandler):
         targets = body.get("targets")
         try:
             res = calkit.cli.main.run(targets=targets)
-        except Exception as e:
-            self.set_status(500)
-            self.finish(json.dumps({"error": f"Failed to run pipeline: {e}"}))
-            return
+        except Exception:
+            return self.error(500, "Failed to run pipeline")
         self.finish(json.dumps(res))
 
 

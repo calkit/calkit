@@ -54,17 +54,13 @@
 
 /* Dropdown Menu */
 .calkit-badge-dropdown {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  left: auto;
   min-width: 280px;
   max-width: min(420px, calc(100vw - 32px));
   background-color: var(--jp-layout-color1);
   border: 1px solid var(--jp-border-color1);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  z-index: 1000;
+  z-index: 10000;
   padding: 12px;
   max-height: min(480px, calc(100vh - 120px));
   overflow: auto;

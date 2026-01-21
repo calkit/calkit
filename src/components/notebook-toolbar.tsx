@@ -2,6 +2,7 @@ import { ReactWidget, showErrorMessage } from "@jupyterlab/apputils";
 import { NotebookPanel, NotebookActions } from "@jupyterlab/notebook";
 import { ITranslator } from "@jupyterlab/translation";
 import React, { useEffect, useRef, useState } from "react";
+import ReactDOM from "react-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { requestAPI } from "../request";
 import { queryClient } from "../queryClient";
@@ -159,6 +160,38 @@ const BadgeDropdown: React.FC<{
   children,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [dropdownPosition, setDropdownPosition] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || !buttonRef.current) {
+      return;
+    }
+
+    // Calculate dropdown position based on button position
+    const updatePosition = () => {
+      if (!buttonRef.current) {
+        return;
+      }
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + 4,
+        left: rect.right,
+      });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -191,13 +224,29 @@ const BadgeDropdown: React.FC<{
   return (
     <div className="calkit-badge-container" ref={containerRef}>
       <button
+        ref={buttonRef}
         className={buttonClasses}
         onClick={onToggle}
         title={isConfigured ? label : `${label} (not configured)`}
       >
         {labelNode || label}
       </button>
-      {isOpen && <div className="calkit-badge-dropdown">{children}</div>}
+      {isOpen &&
+        dropdownPosition &&
+        ReactDOM.createPortal(
+          <div
+            className="calkit-badge-dropdown"
+            style={{
+              position: "fixed",
+              top: `${dropdownPosition.top}px`,
+              left: `${dropdownPosition.left}px`,
+              transform: "translateX(-100%)",
+            }}
+          >
+            {children}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };

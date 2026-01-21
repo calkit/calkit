@@ -1238,6 +1238,7 @@ class EnvironmentsRouteHandler(APIHandler):
         env_kind = body.get("kind")
         env_path = body.get("path")
         packages = body.get("packages", [])
+        prefix = body.get("prefix")
         if env_kind not in ["uv-venv", "venv"]:
             return self.error(400, "Unsupported environment kind")
         if not env_name or not env_kind or not env_path or not packages:
@@ -1247,8 +1248,8 @@ class EnvironmentsRouteHandler(APIHandler):
             name=env_name, path=env_path, packages=packages, no_commit=True
         )
         # uv-venv, venv, and conda envs can have a prefix defined
-        if env_kind in ["uv-venv", "venv", "conda"]:
-            kwargs["prefix"] = body.get("prefix")
+        if env_kind in ["uv-venv", "venv", "conda"] and prefix:
+            kwargs["prefix"] = prefix
         # Use the Calkit CLI to create the environment
         func_to_kind = {
             "uv-venv": new_uv_venv,
@@ -1262,6 +1263,19 @@ class EnvironmentsRouteHandler(APIHandler):
         except Exception as e:
             msg = f"Failed to create environment '{env_name}': {e}"
             self.log.error(msg + "\n" + traceback.format_exc())
+            # Roll back any changes we created
+            ck_info = calkit.load_calkit_info()
+            envs = ck_info.get("environments", {})
+            envs.pop(env_name, None)
+            ck_info["environments"] = envs
+            with open("calkit.yaml", "w") as f:
+                calkit.ryaml.dump(ck_info, f)
+            if os.path.isfile(env_path):
+                self.log.info(f"Removing environment spec: {env_path}")
+                os.remove(env_path)
+            if prefix and os.path.isdir(prefix):
+                self.log.info(f"Removing environment prefix: {prefix}")
+                shutil.rmtree(prefix)
             return self.error(400, msg)
         self.log.info(f"Created new environment '{env_name}' successfully")
         self.finish(json.dumps({"message": "New environment created"}))

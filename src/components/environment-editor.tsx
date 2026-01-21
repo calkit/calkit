@@ -688,22 +688,8 @@ export async function showEnvironmentEditor(
       // Re-enable OK button on error
       setSavingState(false);
 
-      // Extract error message from API response or error object
-      let errorMessage = "Unknown error";
-      if (error && typeof error === "object") {
-        if ("message" in error && typeof error.message === "string") {
-          errorMessage = error.message;
-        } else if (
-          "traceback" in error &&
-          typeof error.traceback === "string"
-        ) {
-          errorMessage = error.traceback;
-        } else {
-          errorMessage = String(error);
-        }
-      } else {
-        errorMessage = String(error);
-      }
+      // Note: API sends back generic exception, which is not informative
+      const errorMessage = "See the server console for details.";
 
       const actionText = options.mode === "create" ? "create" : "update";
       const errorDialog = new Dialog({

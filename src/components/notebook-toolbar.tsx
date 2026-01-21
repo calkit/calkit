@@ -161,6 +161,7 @@ const BadgeDropdown: React.FC<{
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const [dropdownPosition, setDropdownPosition] = useState<{
     top: number;
     left: number;
@@ -199,9 +200,13 @@ const BadgeDropdown: React.FC<{
     }
 
     const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      // Check if click is outside both container and portaled dropdown
       if (
         containerRef.current &&
-        !containerRef.current.contains(event.target as Node)
+        !containerRef.current.contains(target) &&
+        dropdownRef.current &&
+        !dropdownRef.current.contains(target)
       ) {
         onClose();
       }
@@ -235,6 +240,7 @@ const BadgeDropdown: React.FC<{
         dropdownPosition &&
         ReactDOM.createPortal(
           <div
+            ref={dropdownRef}
             className="calkit-badge-dropdown"
             style={{
               position: "fixed",

@@ -225,16 +225,40 @@ test.describe("Notebook pipeline workflow", () => {
       .filter({ hasText: /Inputs \(/ })
       .first()
     await inputsBadge.dispatchEvent("click")
-    const inputsDropdown = page.locator(".calkit-badge-dropdown").first()
-    await expect(inputsDropdown).toBeVisible({ timeout: 5000 })
-    const inputField = inputsDropdown.locator('input[placeholder*="ex: data/raw.csv"]')
+    // Wait for the portaled dropdown to appear
+    await page.waitForSelector(".calkit-badge-dropdown", { state: "attached", timeout: 5000 })
+    // Search globally since dropdown is portaled to document.body
+    const inputField = page.locator('input[placeholder*="ex: data/raw.csv"]').first()
     await inputField.fill("data.csv")
-    const addInputButton = page.locator('button:has-text("Add")').first()
-    if (await addInputButton.isVisible()) {
-      await addInputButton.click()
+    // Find all "Add" buttons and pick the first visible one
+    const addInputButtons = page.locator('button:has-text("Add")')
+    let addInputButtonFound = false
+    const addInputButtonCount = await addInputButtons.count()
+    for (let i = 0; i < addInputButtonCount; i++) {
+      const btn = addInputButtons.nth(i)
+      if (await btn.isVisible()) {
+        await btn.click()
+        addInputButtonFound = true
+        break
+      }
     }
-    const saveInputButton = page.locator('button:has-text("Save")').first()
-    await saveInputButton.click()
+    if (!addInputButtonFound && addInputButtonCount > 0) {
+      await addInputButtons.first().click()
+    }
+    // After clicking Add, wait a moment for the dropdown state to update
+    await page.waitForTimeout(200)
+    // Find all "Save" buttons globally and click the first visible one
+    const saveInputButtons = page.locator('button:has-text("Save")')
+    const saveInputButtonCount = await saveInputButtons.count()
+    if (saveInputButtonCount > 0) {
+      for (let i = 0; i < saveInputButtonCount; i++) {
+        const btn = saveInputButtons.nth(i)
+        if (await btn.isVisible()) {
+          await btn.click()
+          break
+        }
+      }
+    }
     await page.waitForTimeout(500)
 
     // Step 6: Define figures/plot.png as output
@@ -243,16 +267,40 @@ test.describe("Notebook pipeline workflow", () => {
       .filter({ hasText: /Outputs \(/ })
       .first()
     await outputsBadge.dispatchEvent("click")
-    const outputsDropdown = page.locator(".calkit-badge-dropdown").first()
-    await expect(outputsDropdown).toBeVisible({ timeout: 5000 })
-    const outputField = outputsDropdown.locator('input[placeholder*="ex: figures/plot.png"]')
+    // Wait for the portaled dropdown to appear
+    await page.waitForSelector(".calkit-badge-dropdown", { state: "attached", timeout: 5000 })
+    // Search globally since dropdown is portaled to document.body
+    const outputField = page.locator('input[placeholder*="ex: figures/plot.png"]').first()
     await outputField.fill("figures/plot.png")
-    const addOutputButton = page.locator('button:has-text("Add")').first()
-    if (await addOutputButton.isVisible()) {
-      await addOutputButton.click()
+    // Find all "Add" buttons and pick the first visible one
+    const addOutputButtons = page.locator('button:has-text("Add")')
+    let addOutputButtonFound = false
+    const addOutputButtonCount = await addOutputButtons.count()
+    for (let i = 0; i < addOutputButtonCount; i++) {
+      const btn = addOutputButtons.nth(i)
+      if (await btn.isVisible()) {
+        await btn.click()
+        addOutputButtonFound = true
+        break
+      }
     }
-    const saveOutputButton = page.locator('button:has-text("Save")').first()
-    await saveOutputButton.click()
+    if (!addOutputButtonFound && addOutputButtonCount > 0) {
+      await addOutputButtons.first().click()
+    }
+    // After clicking Add, wait a moment for the dropdown state to update
+    await page.waitForTimeout(200)
+    // Find all "Save" buttons globally and click the first visible one
+    const saveOutputButtons = page.locator('button:has-text("Save")')
+    const saveOutputButtonCount = await saveOutputButtons.count()
+    if (saveOutputButtonCount > 0) {
+      for (let i = 0; i < saveOutputButtonCount; i++) {
+        const btn = saveOutputButtons.nth(i)
+        if (await btn.isVisible()) {
+          await btn.click()
+          break
+        }
+      }
+    }
     await page.waitForTimeout(500)
 
     // Step 7: Run the entire pipeline from the sidebar play button

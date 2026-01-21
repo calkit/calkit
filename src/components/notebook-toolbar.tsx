@@ -525,6 +525,24 @@ const PipelineStageBadge: React.FC<{
     });
   };
 
+  const hasCellErrors = (): boolean => {
+    const cells = panel.content.model?.cells;
+    if (!cells) {
+      return false;
+    }
+    for (let i = 0; i < cells.length; i++) {
+      const cell = cells.get(i);
+      const outputs = (cell as any).outputs?.toJSON?.() || [];
+      const cellOutputArray = Array.isArray(outputs) ? outputs : [];
+      for (const output of cellOutputArray) {
+        if (output?.output_type === "error") {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
   // Fetch notebook stage on mount
   useEffect(() => {
     const fetchStage = async () => {
@@ -677,7 +695,7 @@ const PipelineStageBadge: React.FC<{
       // Step 3: Run all cells
       await NotebookActions.runAll(panel.content, sessionContext);
 
-      console.log("All cells executed successfully. Finalizing session...");
+      console.log("All cells executed. Checking for errors...");
 
       // Step 3b: Save notebook after execution to persist outputs
       const postRunSave = panel.context.save();
@@ -685,6 +703,14 @@ const PipelineStageBadge: React.FC<{
         await postRunSave;
       }
       console.log("Notebook saved after execution");
+
+      // Check if any cells raised an exception
+      if (hasCellErrors()) {
+        console.log("Cells have errors. Skipping session finalization.");
+        return;
+      }
+
+      console.log("No errors detected. Finalizing session...");
 
       // Step 4: Finalize the session with the backend
       await requestAPI<any>("notebook/stage/run/session", {

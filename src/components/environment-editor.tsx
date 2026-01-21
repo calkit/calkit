@@ -12,6 +12,7 @@ const PACKAGE_GROUPS: Record<string, string[]> = {
     "scipy",
     "pandas",
     "polars",
+    "pyarrow",
     "matplotlib",
     "statsmodels",
     "scikit-learn",

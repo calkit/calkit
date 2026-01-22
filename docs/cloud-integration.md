@@ -14,6 +14,9 @@ Then execute:
 calkit config set token ${YOUR_TOKEN_HERE}
 ```
 
+Like the rest of Calkit, the Cloud platform is free and open source,
+so [you can host your own](https://github.com/calkit/calkit-cloud).
+
 ## Using DVC remotes other than calkit.io
 
 It's possible to configure DVC to use a different remote storage location,

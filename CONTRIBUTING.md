@@ -35,14 +35,19 @@ This guide will help you get started.
    ```sh
    uv tool install -e .
    ```
+1. Install the JupyterLab extension in development mode
+   (if working on the JupyterLab extension):
+   ```sh
+   uv run jupyter labextension develop . --overwrite
+   ```
 1. Start the JupyterLab extension TypeScript compiler in watch mode
-   (If working on the JupyterLab extension):
+   (if working on the JupyterLab extension):
    ```sh
    make jlab-dev
    ```
 1. Start JupyterLab:
    ```sh
-   calkit jupyter lab
+   uv run jupyter lab
    ```
 
 ### 3. Make your changes

@@ -12,8 +12,10 @@ calkit jupyter lab
 
 With the extension, you won't need to remember to:
 
-1. Fully document the environment for a notebook.
-2. Ensure each notebook was run top-to-bottom any time its code or input
+1. Fully document the environment for a notebook with
+   `pip freeze` or `conda env export`.
+1. Ensure the correct kernel is being used when a notebook is opened.
+1. Ensure each notebook was run top-to-bottom any time its code or input
    files (e.g., datasets) have change.
 
 Further, it will be obvious if any notebook outputs, e.g.,

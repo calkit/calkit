@@ -45,6 +45,9 @@ we can focus on three rules:
    This means notebooks need to be able to run from top-to-bottom with no
    manual intervention. We'll see how below.
 
+If you use JupyterLab, check out the
+[Calkit JupyterLab extension docs](jupyterlab.md).
+
 ## Creating an environment for a notebook
 
 Assuming you want to run Python in the notebook, you can create an environment

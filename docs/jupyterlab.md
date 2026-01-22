@@ -75,3 +75,8 @@ Notebook stages will also show up as stale if their environment has changed,
 ensuring that all code is always run with the correct dependencies.
 
 ![Sidebar pipeline.](img/jupyterlab/collect-data-stale.png)
+
+After running the full pipeline, the play button will turn green,
+indicating that all notebooks and outputs are up-to-date.
+
+![Sidebar pipeline up-to-date.](img/jupyterlab/all-green.png)

@@ -25,8 +25,12 @@ jobs:
           miniforge-version: latest
           auto-activate-base: true
           conda-remove-defaults: true
-      - name: Clear Conda cache
-        run: conda clean --all --yes
+      - name: Warm up Conda Cache
+        run: |
+          # Create a dummy env with the core packages your tests use
+          conda create -n warmup ncurses krb5 libsqlite --yes
+          # Remove it immediately; the packages stay in the cache safely extracted
+          conda env remove -n warmup
       - name: Install Pixi
         run: |
           curl -fsSL https://pixi.sh/install.sh | bash

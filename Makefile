@@ -38,7 +38,7 @@ test-docs: ## Test if documentation can be built without warnings or errors.
 
 .PHONY: docs
 docs: ## Build and serve the documentation.
-	@uv run mkdocs serve
+	@uv run mkdocs serve --livereload
 
 .PHONY: import-profile
 import-profile: ## Profile the import time of the CLI.

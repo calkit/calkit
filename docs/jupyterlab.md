@@ -39,6 +39,9 @@ SciPy, and more.
 After assigning an environment to the notebook,
 the kernel will be switched automatically,
 and the badge will update to show the selected environment.
+Note that if you move the project to a different machine or share it with
+a collaborator, Calkit will recreate the environment automatically
+based on the defined packages.
 
 Next, click the pipeline badge to assign a pipeline stage to the notebook.
 You'll see options for which type of storage (Git, DVC, or none)

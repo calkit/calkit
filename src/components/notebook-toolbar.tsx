@@ -672,19 +672,33 @@ const PipelineStageBadge: React.FC<{
     const notebookPath = panel.context.path;
 
     try {
-      // Fetch current notebook info to get any existing inputs/outputs
-      const notebookInfo = await requestAPI<any>(
-        `notebooks?path=${encodeURIComponent(notebookPath)}`,
-      );
-      const envName = notebookInfo.environment?.name || currentEnv || "";
+      // Use currentEnv if available (user has set it in this session),
+      // otherwise try to fetch from backend
+      let envName = currentEnv;
+      let notebookInfo: any = null;
+
+      if (!envName) {
+        // Fetch current notebook info to get environment and existing inputs/outputs
+        notebookInfo = await requestAPI<any>(
+          `notebooks?path=${encodeURIComponent(notebookPath)}`,
+        );
+        envName = notebookInfo.environment?.name || "";
+      }
 
       // Environment is required for the stage
       if (!envName) {
         await showErrorMessage(
           "Environment required",
-          "Please set an environment for this notebook before setting a stage.",
+          "Please set an environment for this notebook before setting a stage. If this notebook was renamed, you may need to set the environment again.",
         );
         return;
+      }
+
+      // Fetch notebook info if not already fetched (to get existing inputs/outputs)
+      if (!notebookInfo) {
+        notebookInfo = await requestAPI<any>(
+          `notebooks?path=${encodeURIComponent(notebookPath)}`,
+        );
       }
       const existingInputs = notebookInfo.stage?.inputs || [];
       const existingOutputs = notebookInfo.stage?.outputs || [];

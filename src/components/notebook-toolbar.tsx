@@ -23,8 +23,9 @@ import { isFeatureEnabled } from "../feature-flags";
  */
 function getErrorMessage(error: unknown): string {
   if (!error) {
-    return "Unknown error";
+    return "Unknown error occurred. Check the JupyterLab server logs for details.";
   }
+
   // If it's a string, return it directly
   if (typeof error === "string") {
     return error;
@@ -33,7 +34,7 @@ function getErrorMessage(error: unknown): string {
   // If it's an Error object, get the message
   if (error instanceof Error) {
     // Check if message is "[object Object]" - this happens when an object was passed as the message
-    if (error.message !== "[object Object]") {
+    if (error.message && error.message !== "[object Object]") {
       return error.message;
     }
   }
@@ -54,7 +55,7 @@ function getErrorMessage(error: unknown): string {
       // Try to stringify the message object
       try {
         const stringified = JSON.stringify(err.message, null, 2);
-        if (stringified && stringified !== "{}" && stringified !== "{}") {
+        if (stringified && stringified !== "{}" && stringified !== "null") {
           return stringified;
         }
       } catch {
@@ -78,15 +79,6 @@ function getErrorMessage(error: unknown): string {
           typeof err.traceback.message === "string"
         ) {
           return err.traceback.message;
-        }
-        // Try to stringify the traceback object
-        try {
-          const stringified = JSON.stringify(err.traceback, null, 2);
-          if (stringified && stringified !== "{}" && stringified !== "{}") {
-            return stringified;
-          }
-        } catch {
-          // JSON.stringify can fail
         }
       }
     }
@@ -125,7 +117,7 @@ function getErrorMessage(error: unknown): string {
     // Try to stringify the object in a readable way
     try {
       const stringified = JSON.stringify(error, null, 2);
-      if (stringified && stringified !== "{}" && stringified !== "{}") {
+      if (stringified && stringified !== "{}" && stringified !== "null") {
         return stringified;
       }
     } catch {
@@ -133,8 +125,8 @@ function getErrorMessage(error: unknown): string {
     }
   }
 
-  // Last resort
-  return String(error);
+  // Last resort - provide a generic message that directs users to logs
+  return "An error occurred. Check the JupyterLab server logs for details.";
 }
 
 /**
@@ -776,29 +768,57 @@ const PipelineStageBadge: React.FC<{
       console.log("Notebook saved after execution");
 
       // Check if any cells raised an exception
-      if (hasCellErrors()) {
+      const hasErrors = hasCellErrors();
+      if (hasErrors) {
         console.log("Cells have errors. Skipping session finalization.");
-        return;
+      } else {
+        console.log("No errors detected. Finalizing session...");
+
+        // Step 4: Finalize the session with the backend
+        try {
+          await requestAPI<any>("notebook/stage/run/session", {
+            method: "PUT",
+            body: JSON.stringify({
+              notebook_path: notebookPath,
+              stage_name: currentStage,
+              dvc_stage: sessionResponse.dvc_stage,
+              lock_deps: sessionResponse.lock_deps,
+              lock_outs: sessionResponse.lock_outs,
+            }),
+          });
+          console.log("Stage run completed and cached successfully!");
+        } catch (finalizeError) {
+          // If finalization fails (e.g., inputs/outputs changed mid-run),
+          // show a specific message to the user
+          const errorMsg = getErrorMessage(finalizeError);
+          if (
+            errorMsg.includes("changed since session") ||
+            errorMsg.includes("have changed since")
+          ) {
+            console.warn(
+              "Stage configuration changed during execution:",
+              finalizeError,
+            );
+            await showErrorMessage(
+              "Stage configuration changed",
+              "The notebook executed successfully, but the stage inputs or outputs were modified during execution. The results were not cached. Please run the stage again to cache the results with the updated configuration.",
+            );
+          } else {
+            // Other finalization errors - use a generic message
+            console.error("Failed to finalize session:", finalizeError);
+            await showErrorMessage(
+              "Failed to cache stage results",
+              "The notebook executed successfully, but caching failed. Check the JupyterLab server logs for details.",
+            );
+          }
+        }
+
+        // Invalidate queries to refresh UI state regardless of finalization result
+        void queryClient.invalidateQueries({
+          queryKey: ["pipeline", "status"],
+        });
+        void queryClient.invalidateQueries({ queryKey: ["notebooks"] });
       }
-
-      console.log("No errors detected. Finalizing session...");
-
-      // Step 4: Finalize the session with the backend
-      await requestAPI<any>("notebook/stage/run/session", {
-        method: "PUT",
-        body: JSON.stringify({
-          notebook_path: notebookPath,
-          stage_name: currentStage,
-          dvc_stage: sessionResponse.dvc_stage,
-          lock_deps: sessionResponse.lock_deps,
-          lock_outs: sessionResponse.lock_outs,
-        }),
-      });
-
-      console.log("Stage run completed and cached successfully!");
-      // Invalidate queries to immediately refresh UI state
-      void queryClient.invalidateQueries({ queryKey: ["pipeline", "status"] });
-      void queryClient.invalidateQueries({ queryKey: ["notebooks"] });
     } catch (error) {
       const errorMsg = getErrorMessage(error);
       await showErrorMessage("Failed to run stage", errorMsg);

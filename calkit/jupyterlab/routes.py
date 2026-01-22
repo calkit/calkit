@@ -530,103 +530,55 @@ class NotebookStageRunSessionRouteHandler(APIHandler):
         """
         body = self.get_json_body()
         if not body:
-            self.set_status(400)
-            self.finish(
-                json.dumps({"error": "Request body must be valid JSON"})
-            )
-            return
+            return self.error(400, "Request body must be valid JSON")
         notebook_path = body.get("notebook_path")
         stage_name = body.get("stage_name")
         if not notebook_path or not stage_name:
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            "Request body must include 'notebook_path' and "
-                            "'stage_name'"
-                        )
-                    }
-                )
+            return self.error(
+                400,
+                "Request body must include 'notebook_path' and 'stage_name'",
             )
-            return
         ck_info = calkit.load_calkit_info()
         stages = ck_info.get("pipeline", {}).get("stages", {})
         if stage_name not in stages:
-            self.set_status(400)
-            self.finish(
-                json.dumps({"error": f"Stage '{stage_name}' does not exist"})
-            )
-            return
+            return self.error(400, f"Stage '{stage_name}' does not exist")
         stage_info = stages[stage_name]
         try:
             stage = JupyterNotebookStage.model_validate(stage_info)
         except Exception as e:
-            self.set_status(500)
-            self.finish(
-                json.dumps(
-                    {"error": f"Failed to validate stage '{stage_name}': {e}"}
-                )
+            return self.error(
+                500, f"Failed to validate stage '{stage_name}': {e}"
             )
-            return
         if not stage.notebook_path == notebook_path:
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            f"Stage '{stage_name}' is not for notebook "
-                            f"'{notebook_path}'"
-                        )
-                    }
-                )
+            return self.error(
+                400,
+                f"Stage '{stage_name}' is not for notebook '{notebook_path}'",
             )
-            return
         # Ensure DVC pipeline is compiled
         try:
             calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
         except Exception as e:
-            self.set_status(500)
-            self.finish(
-                json.dumps({"error": f"Failed to compile DVC pipeline: {e}"})
-            )
-            return
+            return self.error(500, f"Failed to compile DVC pipeline: {e}")
         # Ensure all cleaned notebooks are up-to-date
         try:
             calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
         except Exception as e:
-            self.set_status(500)
-            self.finish(
-                json.dumps(
-                    {"error": f"Failed to clean notebooks in pipeline: {e}"}
-                )
+            return self.error(
+                500, f"Failed to clean notebooks in pipeline: {e}"
             )
-            return
         # Check the notebook environment
         try:
             calkit.cli.main.check_environment(env_name=stage.environment)
         except Exception as e:
-            self.set_status(500)
-            self.finish(
-                json.dumps({"error": f"Environment check failed: {e}"})
-            )
-            return
+            return self.error(500, f"Environment check failed: {e}")
         # Read the DVC stage so we can save that and hashes of its deps/outs
         with open("dvc.yaml", "r") as f:
             dvc_yaml = calkit.ryaml.load(f)
         dvc_stages = dvc_yaml.get("stages", {})
         if stage_name not in dvc_stages:
-            self.set_status(500)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            f"DVC stage '{stage_name}' not found in dvc.yaml"
-                        )
-                    }
-                )
+            return self.error(
+                500, f"DVC stage '{stage_name}' not found in dvc.yaml"
             )
-            return
         dvc_stage = dvc_stages[stage_name]
         session = {
             "notebook_path": notebook_path,
@@ -636,12 +588,18 @@ class NotebookStageRunSessionRouteHandler(APIHandler):
         # Hash all deps and outs
         dep_paths = dvc_stage.get("deps", [])
         out_paths = calkit.dvc.out_paths_from_stage(dvc_stage)
-        lock_deps = [calkit.dvc.hash_path(dep) for dep in dep_paths]
-        lock_outs = [
-            calkit.dvc.hash_path(out)
-            for out in out_paths
-            if os.path.exists(out)
-        ]
+        try:
+            lock_deps = [calkit.dvc.hash_path(dep) for dep in dep_paths]
+        except Exception as e:
+            return self.error(500, f"Failed to hash dependencies: {e}")
+        try:
+            lock_outs = [
+                calkit.dvc.hash_path(out)
+                for out in out_paths
+                if os.path.exists(out)
+            ]
+        except Exception as e:
+            return self.error(500, f"Failed to hash outputs: {e}")
         session["lock_deps"] = lock_deps
         session["lock_outs"] = lock_outs
         self.finish(json.dumps(session))
@@ -657,11 +615,7 @@ class NotebookStageRunSessionRouteHandler(APIHandler):
         """
         body = self.get_json_body()
         if not body:
-            self.set_status(400)
-            self.finish(
-                json.dumps({"error": "Request body must be valid JSON"})
-            )
-            return
+            return self.error(400, "Request body must be valid JSON")
         required_keys = [
             "notebook_path",
             "stage_name",
@@ -670,11 +624,7 @@ class NotebookStageRunSessionRouteHandler(APIHandler):
         ]
         for key in required_keys:
             if key not in body:
-                self.set_status(400)
-                self.finish(
-                    json.dumps({"error": f"Request body must include '{key}'"})
-                )
-                return
+                return self.error(400, f"Request body must include '{key}'")
         notebook_path = body["notebook_path"]
         stage_name = body["stage_name"]
         session_dvc_stage = body["dvc_stage"]
@@ -682,95 +632,64 @@ class NotebookStageRunSessionRouteHandler(APIHandler):
         ck_info = calkit.load_calkit_info()
         stages = ck_info.get("pipeline", {}).get("stages", {})
         if stage_name not in stages:
-            self.set_status(400)
-            self.finish(
-                json.dumps({"error": f"Stage '{stage_name}' does not exist"})
-            )
-            return
+            return self.error(400, f"Stage '{stage_name}' does not exist")
         stage_info = stages[stage_name]
         try:
             stage = JupyterNotebookStage.model_validate(stage_info)
         except Exception as e:
-            self.set_status(500)
-            self.finish(
-                json.dumps(
-                    {"error": f"Failed to validate stage '{stage_name}': {e}"}
-                )
+            return self.error(
+                500, f"Failed to validate stage '{stage_name}': {e}"
             )
-            return
         if not stage.notebook_path == notebook_path:
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            f"Stage '{stage_name}' is not for notebook "
-                            f"'{notebook_path}'"
-                        )
-                    }
-                )
+            return self.error(
+                400,
+                f"Stage '{stage_name}' is not for notebook '{notebook_path}'",
             )
-            return
         # Compile DVC pipeline again to be sure
         try:
             calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
         except Exception as e:
-            self.set_status(500)
-            self.finish(
-                json.dumps({"error": f"Failed to compile DVC pipeline: {e}"})
-            )
-            return
+            return self.error(500, f"Failed to compile DVC pipeline: {e}")
         # Clean pipeline notebooks again to check hashes
         try:
             calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
         except Exception as e:
-            self.set_status(500)
-            self.finish(
-                json.dumps(
-                    {"error": f"Failed to clean notebooks in pipeline: {e}"}
-                )
+            return self.error(
+                500, f"Failed to clean notebooks in pipeline: {e}"
             )
-            return
         # Check the notebook environment again
         try:
             calkit.cli.main.check_environment(env_name=stage.environment)
         except Exception as e:
-            self.set_status(500)
-            self.finish(
-                json.dumps({"error": f"Environment check failed: {e}"})
-            )
-            return
+            return self.error(500, f"Environment check failed: {e}")
         # Read the DVC stage so we can compare that and hashes of its deps
         with open("dvc.yaml", "r") as f:
             dvc_yaml = calkit.ryaml.load(f)
         dvc_stages = dvc_yaml.get("stages", {})
         if stage_name not in dvc_stages:
-            self.set_status(500)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            f"DVC stage '{stage_name}' not found in dvc.yaml"
-                        )
-                    }
-                )
+            return self.error(
+                500, f"DVC stage '{stage_name}' not found in dvc.yaml"
             )
-            return
         dvc_stage = dvc_stages[stage_name]
         # Compare stage commands
         if dvc_stage.get("cmd") != session_dvc_stage.get("cmd"):
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            "DVC stage command has changed since session"
-                            " creation"
-                        )
-                    }
-                )
+            return self.error(
+                400, "DVC stage command has changed since session creation"
             )
-            return
+        # Compare dep paths (inputs)
+        current_dep_paths = dvc_stage.get("deps", [])
+        session_dep_paths = session_dvc_stage.get("deps", [])
+        if current_dep_paths != session_dep_paths:
+            return self.error(
+                400, "DVC stage inputs have changed since session creation"
+            )
+        # Compare output paths
+        current_out_paths = calkit.dvc.out_paths_from_stage(dvc_stage)
+        session_out_paths = calkit.dvc.out_paths_from_stage(session_dvc_stage)
+        if current_out_paths != session_out_paths:
+            return self.error(
+                400, "DVC stage outputs have changed since session creation"
+            )
         # Compare dep hashes
         current_lock_deps = []
         dep_paths = dvc_stage.get("deps", [])
@@ -778,18 +697,10 @@ class NotebookStageRunSessionRouteHandler(APIHandler):
             dep_hash = calkit.dvc.hash_path(dep)
             current_lock_deps.append(dep_hash)
         if current_lock_deps != session_lock_deps:
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            "DVC stage dependencies have changed since"
-                            " session creation"
-                        )
-                    }
-                )
+            return self.error(
+                400,
+                "DVC stage dependencies have changed since session creation",
             )
-            return
         # Check that the notebook has been executed top-to-bottom with no
         # repeated cell executions
         try:

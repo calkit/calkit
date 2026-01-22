@@ -42,7 +42,7 @@ dependencies = [
   "python-dotenv>=1",
   "pywin32; platform_system == 'Windows'",
   "requests",
-  "typer==0.20.1",
+  "typer==0.21.1",
   "uvicorn",
   "tqdm>=4.67.1",
   "psutil>=7.0.0",

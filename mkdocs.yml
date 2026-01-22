@@ -92,6 +92,7 @@ markdown_extensions:
 plugins:
   - search
   - mermaid2
+  - glightbox
 
 extra:
   analytics:

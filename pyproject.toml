@@ -83,6 +83,7 @@ dev = [
   "pytest-env>=1.1.5",
   "pytest-xdist>=3.8.0",
   "pypdf>=6.4.2",
+  "mkdocs-glightbox>=0.5.2",
 ]
 
 [project.urls]

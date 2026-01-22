@@ -48,6 +48,7 @@ nav:
       - pipeline/manual-steps.md
       - pipeline/slurm.md
   - Notebooks: notebooks.md
+  - JupyterLab: jupyterlab.md
   - Datasets: datasets.md
   - References: references.md
   - Calculations: calculations.md

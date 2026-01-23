@@ -315,38 +315,18 @@ class NotebookEnvironmentRouteHandler(APIHandler):
         """Set the environment for a notebook."""
         body = self.get_json_body()
         if not body:
-            self.set_status(400)
-            self.finish(
-                json.dumps({"error": "Request body must be valid JSON"})
-            )
-            return
+            return self.error(400, "Request body must be valid JSON")
         notebook_path = body.get("path")
         environment_name = body.get("environment")
         if not notebook_path or not environment_name:
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            "Request body must include 'path' and"
-                            " 'environment'"
-                        )
-                    }
-                )
+            return self.error(
+                400, "Both 'path' and 'environment' are required"
             )
-            return
         ck_info = calkit.load_calkit_info()
         envs = ck_info.get("environments", {})
         if environment_name not in envs:
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            f"Environment '{environment_name}' does not exist"
-                        )
-                    }
-                )
+            return self.error(
+                400, f"Environment '{environment_name}' does not exist"
             )
         # First see if this notebook is part of a pipeline stage
         stages = ck_info.get("pipeline", {}).get("stages", {})

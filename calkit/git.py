@@ -108,9 +108,10 @@ def ensure_path_is_not_ignored(
         gitignore_txt = f.read()
     lines = gitignore_txt.splitlines()
     path = Path(path).as_posix()
+    no_ignore_line = f"!{path}"
     if path in lines:
         lines.remove(path)
-    else:
+    elif no_ignore_line not in lines:
         lines.append(f"!{path}")
     with open(gitignore_path, "w") as f:
         f.write(os.linesep.join(lines))

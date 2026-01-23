@@ -27,6 +27,13 @@ from typing_extensions import Annotated, Optional
 import calkit
 import calkit.matlab
 import calkit.pipeline
+from calkit import (
+    AUTO_IGNORE_PATHS,
+    AUTO_IGNORE_PREFIXES,
+    AUTO_IGNORE_SUFFIXES,
+    DVC_EXTENSIONS,
+    DVC_SIZE_THRESH_BYTES,
+)
 from calkit.cli import print_sep, raise_error, run_cmd, warn
 from calkit.cli.check import (
     check_app,
@@ -75,46 +82,6 @@ app.add_typer(latex_app, name="latex", help="Work with LaTeX.")
 app.add_typer(overleaf_app, name="overleaf", help="Interact with Overleaf.")
 app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
 app.add_typer(slurm_app, name="slurm", help="Work with SLURM.")
-
-# Constants for version control auto-ignore
-AUTO_IGNORE_SUFFIXES = [
-    ".DS_Store",
-    ".env",
-    ".pyc",
-    ".synctex.gz",
-    ".ipynb_checkpoints",
-]
-AUTO_IGNORE_PATHS = [os.path.join(".dvc", "config.local")]
-AUTO_IGNORE_PREFIXES = [
-    ".venv",
-    "__pycache__",
-    ".ipynb_checkpoints",
-    ".calkit/overleaf/",
-]
-# Constants for version control auto-add to DVC
-DVC_EXTENSIONS = [
-    ".png",
-    ".jpeg",
-    ".jpg",
-    ".gif",
-    ".h5",
-    ".parquet",
-    ".pickle",
-    ".mp4",
-    ".avi",
-    ".webm",
-    ".pdf",
-    ".xlsx",
-    ".docx",
-    ".pptx",
-    ".xls",
-    ".doc",
-    ".ppt",
-    ".nc",
-    ".nc4",
-    ".zarr",
-]
-DVC_SIZE_THRESH_BYTES = 1_000_000
 
 
 def _to_shell_cmd(cmd: list[str]) -> str:
@@ -891,9 +858,9 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
 
 @app.command(name="run")
 def run(
-    targets: Optional[list[str]] = typer.Argument(
-        default=None, help="Stages to run."
-    ),
+    targets: Annotated[
+        list[str] | None, typer.Argument(help="Stages to run.")
+    ] = None,
     quiet: Annotated[
         bool, typer.Option("-q", "--quiet", help="Be quiet.")
     ] = False,
@@ -993,9 +960,11 @@ def run(
     no_run_cache: Annotated[
         bool, typer.Option("--no-run-cache", help="Ignore the run cache.")
     ] = False,
-    save_log: Annotated[
+    save_logs: Annotated[
         bool,
-        typer.Option("--log", "-l", help="Log the run."),
+        typer.Option(
+            "--log", "-l", help="Log the run and system information."
+        ),
     ] = False,
     save_after_run: Annotated[
         bool,
@@ -1031,7 +1000,7 @@ def run(
             help="Sync with Overleaf before and after running.",
         ),
     ] = False,
-):
+) -> dict:
     """Check dependencies and run the pipeline."""
     import dvc.log
     import dvc.repo
@@ -1059,7 +1028,7 @@ def run(
         typer.echo("Getting system information")
     # Get system information
     system_info = calkit.get_system_info()
-    if save_log:
+    if save_logs:
         # Save the system to .calkit/systems
         if verbose:
             typer.echo("Saving system information:")
@@ -1144,7 +1113,7 @@ def run(
                         targets.append(dvc_stage_name)
         if not targets:
             raise_error("No stages found to run")
-    if save_log:
+    if save_logs:
         # Get status of Git repo before running
         repo = git.Repo()
         git_rev = repo.head.commit.hexsha
@@ -1191,35 +1160,37 @@ def run(
     start_time_no_tz = calkit.utcnow(remove_tz=True)
     start_time = calkit.utcnow(remove_tz=False)
     run_id = uuid.uuid4().hex
-    if save_log:
-        log_fpath = os.path.join(
-            ".calkit",
-            "logs",
-            start_time_no_tz.isoformat(timespec="seconds").replace(":", "-")
-            + "-"
-            + run_id
-            + ".log",
-        )
-        if verbose:
-            typer.echo(f"Starting run ID: {run_id}")
-            typer.echo(f"Saving logs to {log_fpath}")
-        os.makedirs(os.path.dirname(log_fpath), exist_ok=True)
-        # Create a file handler for dvc.stage.run logger
-        file_handler = logging.FileHandler(log_fpath, mode="w")
-        file_handler.setLevel(logging.DEBUG)
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-        formatter.converter = time.gmtime  # Use UTC time for asctime
-        file_handler.setFormatter(formatter)
-        dvc.log.logger.addHandler(file_handler)
+    # Always log output, but only save systems/run data if specified
+    log_fpath = os.path.join(
+        ".calkit",
+        "logs",
+        start_time_no_tz.isoformat(timespec="seconds").replace(":", "-")
+        + "-"
+        + run_id
+        + ".log",
+    )
+    if verbose:
+        typer.echo(f"Starting run ID: {run_id}")
+        typer.echo(f"Saving logs to {log_fpath}")
+    os.makedirs(os.path.dirname(log_fpath), exist_ok=True)
+    # Create a file handler for dvc.stage.run logger
+    file_handler = logging.FileHandler(log_fpath, mode="w")
+    file_handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    formatter.converter = time.gmtime  # Use UTC time for asctime
+    file_handler.setFormatter(formatter)
+    dvc.log.logger.addHandler(file_handler)
     # Remove newline logging in dvc.repo.reproduce
     dvc.repo.reproduce.logger.setLevel(logging.ERROR)
     # Disable other misc DVC output
     dvc.ui.ui.write = lambda *args, **kwargs: None
     res = dvc_cli_main(["repro"] + args)
     failed = res != 0
-    if save_log:
+    # Parse log to get timing
+    with open(log_fpath, "r") as f:
+        log_content = f.read()
+        stage_run_info = _stage_run_info_from_log_content(log_content)
+    if save_logs:
         # Get Git status after running
         git_changed_files_after = calkit.git.get_changed_files(repo=repo)
         git_staged_files_after = calkit.git.get_staged_files(repo=repo)
@@ -1228,10 +1199,6 @@ def run(
         dvc_status_after = dvc_repo.status()
         dvc_data_status_after = dvc_repo.data_status()
         dvc_data_status_after.pop("git", None)  # Remove git status
-        # Parse log to get timing
-        with open(log_fpath, "r") as f:
-            log_content = f.read()
-            stage_run_info = _stage_run_info_from_log_content(log_content)
         # Save run information to a file
         if verbose:
             typer.echo("Saving run info")
@@ -1269,6 +1236,8 @@ def run(
         os.makedirs(os.path.dirname(run_info_fpath), exist_ok=True)
         with open(run_info_fpath, "w") as f:
             json.dump(run_info, f, indent=2)
+    else:
+        os.remove(log_fpath)
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
     if failed:
         raise_error("Pipeline failed")
@@ -1291,6 +1260,7 @@ def run(
             no_commit=False,
             no_push=not save_after_run,
         )
+    return {"dvc_stages": dvc_stages, "stage_run_info": stage_run_info}
 
 
 @app.command(name="manual-step", help="Execute a manual step.")

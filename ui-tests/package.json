@@ -1,0 +1,15 @@
+{
+  "name": "calkit-ui-tests",
+  "version": "1.0.0",
+  "description": "JupyterLab Calkit integration tests",
+  "private": true,
+  "scripts": {
+    "start": "rm -rf test-project && mkdir test-project && jupyter lab --ServerApp.root_dir=test-project --config jupyter_server_test_config.py",
+    "test": "jlpm playwright test",
+    "test:update": "jlpm playwright test --update-snapshots"
+  },
+  "devDependencies": {
+    "@jupyterlab/galata": "^5.0.5",
+    "@playwright/test": "^1.37.0"
+  }
+}

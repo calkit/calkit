@@ -25,6 +25,15 @@ def test_to_kebab_case():
 
 
 def test_detect_project_name(tmp_dir):
+    # First check we can detect with no git remote and no calkit.yaml
+    # In this case the project name should be the current directory name
+    cwd = os.getcwd()
+    dir_name = os.path.basename(cwd)
+    assert calkit.detect_project_name(prepend_owner=False) == dir_name
+    # If prepend_owner is True, this should raise an error
+    with pytest.raises(ValueError):
+        calkit.detect_project_name(prepend_owner=True)
+    # Now create an actual project
     subprocess.check_output(["calkit", "init"])
     repo = git.Repo()
     repo.create_remote("origin", "https://github.com/someone/some-repo.git")
@@ -34,7 +43,7 @@ def test_detect_project_name(tmp_dir):
     assert calkit.detect_project_name() == "someone-else/some-project"
 
 
-def test_load_calkit_info(tmp_dir):
+def test_load_calkit_info(tmp_dir, monkeypatch):
     subpath = "some/project"
     os.makedirs(subpath)
     os.makedirs(subpath + "/.calkit/environments")
@@ -60,7 +69,7 @@ def test_load_calkit_info(tmp_dir):
     ck_info = calkit.load_calkit_info(wdir=subpath, process_includes=True)
     assert ck_info["environments"]["env1"]["image"] == "ubuntu"
     assert ck_info["environments"]["env2"]["image"] == "openfoam"
-    os.chdir(subpath)
+    monkeypatch.chdir(subpath)
     ck_info = calkit.load_calkit_info(process_includes=True)
     assert ck_info["environments"]["env1"]["image"] == "ubuntu"
     assert ck_info["environments"]["env2"]["image"] == "openfoam"

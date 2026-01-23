@@ -1246,7 +1246,7 @@ def new_uv_venv(
     ] = ".venv",
     python_version: Annotated[
         str | None, typer.Option("--python", "-p", help="Python version.")
-    ] = "3.13",
+    ] = "3.14",
     description: Annotated[
         str | None, typer.Option("--description", help="Description.")
     ] = None,
@@ -1274,7 +1274,6 @@ def new_uv_venv(
         raise_error("Output path already exists (use -f to overwrite)")
     elif packages is None and not os.path.isfile(path):
         raise_error("If path doesn't exist, packages must be specified")
-    repo = git.Repo()
     # Add environment to Calkit info
     ck_info = calkit.load_calkit_info()
     # If environments is a list instead of a dict, reformulate it
@@ -1301,7 +1300,6 @@ def new_uv_venv(
         _check_path_dir(path)
         with open(path, "w") as f:
             f.write(packages_txt)
-    repo.git.add(path)
     typer.echo("Adding environment to calkit.yaml")
     env = dict(path=path, kind="uv-venv", prefix=prefix)
     if python_version is not None:
@@ -1312,10 +1310,13 @@ def new_uv_venv(
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
-    repo.git.add("calkit.yaml")
+    if not no_commit:
+        repo = git.Repo()
+        repo.git.add(path)
+        repo.git.add("calkit.yaml")
     if not no_check:
         env_lock_fpath = check_environment(env_name=name)
-        if env_lock_fpath is not None:
+        if env_lock_fpath is not None and not no_commit:
             repo.git.add(env_lock_fpath)
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add uv venv {name}"])

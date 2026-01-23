@@ -52,6 +52,46 @@ ryaml.indent(mapping=2, sequence=4, offset=2)
 ryaml.preserve_quotes = True
 ryaml.width = 70
 
+# Constants for version control auto-ignore
+AUTO_IGNORE_SUFFIXES = [
+    ".DS_Store",
+    ".env",
+    ".pyc",
+    ".synctex.gz",
+    ".ipynb_checkpoints",
+]
+AUTO_IGNORE_PATHS = [os.path.join(".dvc", "config.local")]
+AUTO_IGNORE_PREFIXES = [
+    ".venv",
+    "__pycache__",
+    ".ipynb_checkpoints",
+    ".calkit/overleaf/",
+]
+# Constants for version control auto-add to DVC
+DVC_EXTENSIONS = [
+    ".png",
+    ".jpeg",
+    ".jpg",
+    ".gif",
+    ".h5",
+    ".parquet",
+    ".pickle",
+    ".mp4",
+    ".avi",
+    ".webm",
+    ".pdf",
+    ".xlsx",
+    ".docx",
+    ".pptx",
+    ".xls",
+    ".doc",
+    ".ppt",
+    ".nc",
+    ".nc4",
+    ".zarr",
+]
+DVC_SIZE_THRESH_BYTES = 5_000_000
+
 
 def find_project_dirs(relative=False, max_depth=3) -> list[str]:
     """Find all Calkit project directories."""
@@ -480,7 +520,11 @@ def get_latest_project_status(wdir: str | None = None) -> ProjectStatus | None:
 def detect_project_name(
     wdir: str | None = None, prepend_owner: bool = True
 ) -> str:
-    """Detect a Calkit project owner and name."""
+    """Detect a Calkit project owner and name.
+
+    If ``prepend_owner`` is False, fall back to working directory name if
+    there is no Git repo or name specified in ``calkit.yaml``.
+    """
     ck_info = load_calkit_info(wdir=wdir)
     name = ck_info.get("name")
     if name is not None and not prepend_owner:
@@ -489,7 +533,13 @@ def detect_project_name(
     if name is None or owner is None:
         try:
             url = Repo(path=wdir).remote().url
-        except ValueError:
+        except (ValueError, InvalidGitRepositoryError):
+            if name is not None and not prepend_owner:
+                return name
+            if not prepend_owner:
+                if wdir is None:
+                    wdir = os.getcwd()
+                return os.path.basename(os.path.abspath(wdir))
             raise ValueError("No Git remote set with name 'origin'")
         from_url = url.split("github.com")[-1][1:].removesuffix(".git")
         owner_name, project_name = from_url.split("/")
@@ -568,6 +618,7 @@ def get_system_info() -> dict:
         pass
     # Get versions of important foundational dependencies
     for dep in [
+        "git",
         "docker",
         "conda",
         "mamba",
@@ -578,6 +629,16 @@ def get_system_info() -> dict:
         "julia",
     ]:
         system_info[f"{dep}_version"] = get_dep_version(dep)
+    # OS-specific app versions
+    if os_name == "Darwin":
+        for dep in ["brew", "port"]:
+            system_info[f"{dep}_version"] = get_dep_version(dep)
+    elif os_name == "Linux":
+        for dep in ["apt", "yum"]:
+            system_info[f"{dep}_version"] = get_dep_version(dep)
+    elif os_name == "Windows":
+        for dep in ["choco", "winget"]:
+            system_info[f"{dep}_version"] = get_dep_version(dep)
     system_info_str = json.dumps(system_info, sort_keys=True).encode()
     system_info["id"] = hashlib.sha1(system_info_str).hexdigest()
     return system_info

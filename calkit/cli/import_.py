@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import fnmatch
+import json
 import os
 import subprocess
 import sys
@@ -15,7 +17,9 @@ import typer
 from tqdm import tqdm
 
 import calkit
+import calkit.invenio
 from calkit.cli import raise_error
+from calkit.models.core import _ImportedFromProject
 
 import_app = typer.Typer(no_args_is_help=True)
 
@@ -32,11 +36,11 @@ def import_dataset(
         ),
     ],
     dest_path: Annotated[
-        str,
+        str | None,
         typer.Argument(help="Output path at which to save."),
     ] = None,
     filter_paths: Annotated[
-        list[str],
+        list[str] | None,
         typer.Option(
             "--filter-paths",
             help="Filter paths in target dataset if it's a folder.",
@@ -186,7 +190,7 @@ def import_dataset(
         title=resp.get("title"),
         description=resp.get("description"),
         stage=None,
-        imported_from=calkit.models._ImportedFromProject(
+        imported_from=_ImportedFromProject(
             project=f"{owner_name}/{project_name}",
             path=path,
             git_rev=resp.get("git_rev"),
@@ -301,3 +305,196 @@ def import_environment(
     repo.git.add("calkit.yaml")
     if not no_commit and calkit.git.get_staged_files():
         repo.git.commit(["-m", f"Import environment {src}"])
+
+
+@import_app.command(name="zenodo")
+def import_from_zenodo(
+    src: Annotated[str, typer.Argument(help="Source URL or DOI.")],
+    dest_dir: Annotated[
+        str,
+        typer.Argument(
+            help="Destination folder. Will be created if it doesn't exist"
+        ),
+    ],
+    kind: Annotated[
+        str | None,
+        typer.Option(
+            "--kind",
+            "-k",
+            help=(
+                "What kind of artifact is being imported, "
+                "e.g., a figure, dataset, publication."
+            ),
+        ),
+    ] = None,
+    name_like: Annotated[
+        list[str],
+        typer.Option(
+            "--name-like",
+            help="Filter for file names like this. Glob patterns accepted.",
+        ),
+    ] = [],
+    name_not_like: Annotated[
+        list[str],
+        typer.Option(
+            "--name-not-like",
+            help="Exclude names matching pattern.",
+        ),
+    ] = [],
+    storage: Annotated[
+        str | None,
+        typer.Option(
+            "--storage",
+            help="Storage backend to use (Git or DVC). "
+            "If not specified, will be chosen based on size.",
+        ),
+    ] = None,
+    no_commit: Annotated[
+        bool,
+        typer.Option("--no-commit", help="Do not commit changes to project."),
+    ] = False,
+):
+    """Import files from a Zenodo record."""
+    # Ensure destination directory either doesn't exist or is empty
+    if os.path.isdir(dest_dir):
+        if os.listdir(dest_dir):
+            raise_error("Destination directory exists and is not empty")
+    if kind is not None and kind not in ["figure", "dataset", "publication"]:
+        raise_error(
+            "Invalid kind; must be one of 'figure', 'dataset', or "
+            "'publication'"
+        )
+    # Fetch information about the record
+    # First, extract the record ID from the src
+    if "zenodo.org/record/" in src:
+        try:
+            record_id = int(src.split("zenodo.org/record/")[1].split("/")[0])
+        except Exception:
+            raise_error("Could not parse Zenodo record ID from URL")
+    elif "10.5281/zenodo." in src:
+        try:
+            record_id = int(src.split("10.5281/zenodo.")[1])
+        except Exception:
+            raise_error("Could not parse Zenodo record ID from DOI")
+    else:
+        raise_error("Source must be a Zenodo URL or DOI")
+    typer.echo(f"Fetching info for Zenodo record {record_id}")
+    try:
+        record = calkit.invenio.get(
+            f"/records/{record_id}", service="zenodo", auth=False
+        )
+    except Exception as e:
+        raise_error(f"Could not fetch record info from Zenodo: {e}")
+    # Get download URLs
+    download_urls = calkit.invenio.get_download_urls(
+        record_id, service="zenodo", auth=False
+    )
+    # Filter download URLs
+    filtered_urls = {}
+    for fname, url in download_urls.items():
+        if name_like:
+            if not any(
+                fnmatch.fnmatch(fname, pattern) for pattern in name_like
+            ):
+                continue
+        if name_not_like:
+            if any(
+                fnmatch.fnmatch(fname, pattern) for pattern in name_not_like
+            ):
+                continue
+        filtered_urls[fname] = url
+    if not filtered_urls:
+        raise_error("No files matched the specified name filters")
+    # Download files
+    for fname, url in filtered_urls.items():
+        out_path = os.path.join(dest_dir, fname)  # fname may include subdirs
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        typer.echo(f"Downloading {fname} to {out_path}")
+        resp = requests.get(url, stream=True)
+        try:
+            resp.raise_for_status()
+        except Exception as e:
+            raise_error(f"Failed to download {fname} from {url}: {e}")
+        with open(out_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                f.write(chunk)
+    # Decide if this should be stored in Git or DVC
+    repo = git.Repo()
+    commit_paths = []
+    if storage is None:
+        if calkit.get_size(dest_dir) > calkit.DVC_SIZE_THRESH_BYTES:
+            res = subprocess.run(
+                [sys.executable, "-m", "dvc", "add"], check=False
+            )
+            if res.returncode != 0:
+                raise_error("Failed to DVC add")
+            # Git add the .dvc file
+            dvc_file = dest_dir + ".dvc"
+            repo.git.add(dvc_file)
+            commit_paths.append(dvc_file)
+        else:
+            repo.git.add(dest_dir)
+            commit_paths.append(dest_dir)
+    elif storage.lower() == "dvc":
+        res = subprocess.run(
+            [sys.executable, "-m", "dvc", "add", dest_dir], check=False
+        )
+        if res.returncode != 0:
+            raise_error("Failed to DVC add")
+        # Git add the .dvc file
+        dvc_file = dest_dir + ".dvc"
+        repo.git.add(dvc_file)
+        commit_paths.append(dvc_file)
+    elif storage.lower() == "git":
+        repo.git.add(dest_dir)
+        commit_paths.append(dest_dir)
+    else:
+        raise_error("Invalid storage option; must be 'git' or 'dvc'")
+    # Determine if we should put this in one of the calkit.yaml categories
+    if kind is not None:
+        ck_info = calkit.load_calkit_info()
+        items = ck_info.get(kind + "s", [])
+        item_record = {
+            "path": dest_dir,
+            "imported_from": {
+                "doi": record.get("doi"),
+            },
+            "title": record.get("metadata", {}).get("title"),
+        }
+        items.append(item_record)
+        ck_info[kind + "s"] = items
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        commit_paths.append("calkit.yaml")
+    # Save a record of this import in .calkit/imports.json
+    import_record = {
+        "from": "zenodo",
+        "record_id": record_id,
+        "src": src,
+        "dest_dir": dest_dir,
+        "timestamp": calkit.utcnow(),
+        "kind": kind,
+        "storage": storage,
+        "name_like": name_like,
+        "name_not_like": name_not_like,
+    }
+    os.makedirs(".calkit", exist_ok=True)
+    imports_fpath = os.path.join(".calkit", "imports.json")
+    commit_paths.append(imports_fpath)
+    if os.path.isfile(imports_fpath):
+        with open(imports_fpath) as f:
+            imports = json.load(f)
+    else:
+        imports = []
+    imports.append(import_record)
+    with open(imports_fpath, "w") as f:
+        json.dump(imports, f, indent=2)
+    # Commit if desired
+    if not no_commit:
+        repo = git.Repo()
+        repo.git.add(commit_paths)
+        if repo.git.diff(commit_paths + ["--staged"]):
+            repo.git.commit(
+                commit_paths
+                + ["-m", f"Import {src} from Zenodo to {dest_dir}"]
+            )

@@ -1,14 +1,12 @@
 """Tests for ``calkit.check``."""
 
-import os
 import subprocess
 import sys
 
 from calkit.check import check_reproducibility
 
 
-def test_check_reproducibility(tmp_path):
-    os.chdir(tmp_path)
+def test_check_reproducibility(tmp_dir):
     res = check_reproducibility()
     assert not res.is_git_repo
     subprocess.run(["git", "init"])
@@ -16,7 +14,7 @@ def test_check_reproducibility(tmp_path):
     assert res.is_git_repo
     assert not res.is_dvc_repo
     assert not res.has_readme
-    assert "no README.md" in res.recommendation
+    assert "no README.md" in res.recommendation  # type: ignore
     subprocess.run([sys.executable, "-m", "dvc", "init"])
     res = check_reproducibility()
     assert res.is_dvc_repo

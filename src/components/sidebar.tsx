@@ -653,6 +653,15 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   ]);
 
   const handleRunPipeline = useCallback(async () => {
+    // Save all open documents before running pipeline
+    if (commands) {
+      try {
+        await commands.execute("docmanager:save-all");
+      } catch (error) {
+        console.warn("Failed to save all documents:", error);
+      }
+    }
+
     setPipelineRunning(true);
     pipelineState.setRunning(true, "Running pipeline...");
     try {
@@ -665,14 +674,14 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       // Also refresh project data
       await queryClient.invalidateQueries({ queryKey: ["project"] });
     } catch (error) {
-      const errorMsg = "See output in the server terminal for details.";
+      const errorMsg = "See output in the server console for details.";
       console.error("Failed to run pipeline:", error);
       await showErrorMessage("Failed to run pipeline", errorMsg);
     } finally {
       setPipelineRunning(false);
       pipelineState.setRunning(false);
     }
-  }, []);
+  }, [commands]);
 
   const handleRunStage = useCallback(async (stageName: string) => {
     if (!stageName) {

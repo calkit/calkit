@@ -340,8 +340,18 @@ const EnvironmentBadge: React.FC<{
 
   const handleCreateEnvironment = async () => {
     // Project detection and naming now happens naturally in the backend
+    // Extract notebook name and convert to kebab-case for suggested environment name
+    const notebookPath = panel.context.path;
+    const notebookName = notebookPath.split("/").pop() || "";
+    const nameWithoutExt = notebookName.replace(/\.ipynb$/, "");
+    const suggestedName = nameWithoutExt
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+
     await showEnvironmentEditor({
       mode: "create",
+      initialName: suggestedName,
       onSubmit: async ({ name, kind, path, packages, prefix, python }) => {
         await createEnvironmentMutation.mutateAsync({
           name,

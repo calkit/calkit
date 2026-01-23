@@ -39,9 +39,9 @@ def test_get_remotes(tmp_dir):
 
 
 def test_hash_directory():
-    res = calkit.dvc.hash_directory("test/dvc-md5-dir")
-    print("CWD:", os.getcwd())
-    print("Contents:", os.listdir("test/dvc-md5-dir"))
+    this_dir = os.path.dirname(__file__)
+    fpath = os.path.join(this_dir, "..", "..", "test", "dvc-md5-dir")
+    res = calkit.dvc.hash_directory(fpath)
     assert res["nfiles"] == 1
     assert res["size"] == 1226
     assert res["hash"] == "md5"

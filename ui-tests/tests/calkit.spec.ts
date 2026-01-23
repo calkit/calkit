@@ -60,6 +60,26 @@ test.describe("Notebook pipeline workflow", () => {
     // Focus the notebook area to ensure toolbar renders
     await page.click(".jp-NotebookPanel", { position: { x: 10, y: 10 } })
 
+    // Rename the notebook to main.ipynb using the File menu
+    await page.click('text=File')
+    await page.waitForTimeout(200)
+    await page.click('text=Rename Notebook…')
+
+    // Wait for the rename dialog input
+    await page.waitForSelector('.jp-Dialog input', { timeout: 5000 })
+
+    // Clear and type the new filename
+    const renameInput = page.locator('.jp-Dialog input').first()
+    await renameInput.click()
+    await renameInput.fill("main.ipynb")
+
+    // Click Rename button
+    const renameButton = page.locator('.jp-Dialog button:has-text("Rename")').first()
+    await renameButton.click()
+
+    // Wait for dialog to close
+    await page.waitForTimeout(500)
+
     // Wait for and find the environment badge
     const envBadge = page
       .locator(".calkit-badge")

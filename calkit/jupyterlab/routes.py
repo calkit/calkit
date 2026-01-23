@@ -315,38 +315,18 @@ class NotebookEnvironmentRouteHandler(APIHandler):
         """Set the environment for a notebook."""
         body = self.get_json_body()
         if not body:
-            self.set_status(400)
-            self.finish(
-                json.dumps({"error": "Request body must be valid JSON"})
-            )
-            return
+            return self.error(400, "Request body must be valid JSON")
         notebook_path = body.get("path")
         environment_name = body.get("environment")
         if not notebook_path or not environment_name:
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            "Request body must include 'path' and"
-                            " 'environment'"
-                        )
-                    }
-                )
+            return self.error(
+                400, "Both 'path' and 'environment' are required"
             )
-            return
         ck_info = calkit.load_calkit_info()
         envs = ck_info.get("environments", {})
         if environment_name not in envs:
-            self.set_status(400)
-            self.finish(
-                json.dumps(
-                    {
-                        "error": (
-                            f"Environment '{environment_name}' does not exist"
-                        )
-                    }
-                )
+            return self.error(
+                400, f"Environment '{environment_name}' does not exist"
             )
         # First see if this notebook is part of a pipeline stage
         stages = ck_info.get("pipeline", {}).get("stages", {})
@@ -1150,6 +1130,7 @@ class EnvironmentsRouteHandler(APIHandler):
         env_path = body.get("path")
         packages = body.get("packages", [])
         prefix = body.get("prefix")
+        python = body.get("python")
         if env_kind not in ["uv-venv", "venv"]:
             return self.error(400, "Unsupported environment kind")
         if not env_name or not env_kind or not env_path or not packages:
@@ -1161,6 +1142,9 @@ class EnvironmentsRouteHandler(APIHandler):
         # uv-venv, venv, and conda envs can have a prefix defined
         if env_kind in ["uv-venv", "venv", "conda"] and prefix:
             kwargs["prefix"] = prefix
+        # Only uv-venv can have a python version defined here
+        if env_kind == "uv-venv" and python:
+            kwargs["python_version"] = python
         # Use the Calkit CLI to create the environment
         func_to_kind = {
             "uv-venv": new_uv_venv,
@@ -1266,12 +1250,8 @@ class EnvironmentsRouteHandler(APIHandler):
         # Now check the environment
         try:
             calkit.cli.main.check_environment(env_name=updated_name)
-        except Exception as e:
-            self.set_status(500)
-            self.finish(
-                json.dumps({"error": f"Environment check failed: {e}"})
-            )
-            return
+        except Exception:
+            return self.error(400, "Environment check failed.")
         self.log.info(f"Updated environment '{updated_name}' successfully")
         self.finish(json.dumps({"message": "Environment updated"}))
 

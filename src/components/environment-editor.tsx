@@ -690,22 +690,8 @@ export async function showEnvironmentEditor(
               cancelButton.disabled = false;
             }
 
-            // Extract error message
-            let errorMessage = "See the server console for details.";
-            if (error && typeof error === "object") {
-              if ("message" in error && typeof error.message === "string") {
-                errorMessage = error.message;
-              } else if (
-                "toString" in error &&
-                typeof error.toString === "function"
-              ) {
-                const errorStr = error.toString();
-                if (errorStr !== "[object Object]") {
-                  errorMessage = errorStr;
-                }
-              }
-            }
-
+            // Generic error message
+            const errorMessage = "See the server console for details.";
             const actionText = options.mode === "create" ? "create" : "update";
             const errorDialog = new Dialog({
               title: `Failed to ${actionText} environment`,

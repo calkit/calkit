@@ -196,6 +196,8 @@
 }
 
 .calkit-sidebar-section-edit {
+  display: inline-flex;
+  align-items: center;
   font-size: 14px;
   padding: 2px 6px;
   margin-left: 2px;
@@ -223,11 +225,13 @@
 }
 
 .calkit-sidebar-section-label {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   width: 20px;
   min-width: 20px;
   margin-right: 4px;
   font-size: 14px;
+  vertical-align: middle;
 }
 
 .calkit-sidebar-section-title {

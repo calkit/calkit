@@ -69,7 +69,8 @@
     "@jupyterlab/settingregistry": "^4.0.0",
     "@jupyterlab/translation": "^4.0.0",
     "@tanstack/react-query": "^5.32.0",
-    "@tanstack/react-query-devtools": "^5.32.0"
+    "@tanstack/react-query-devtools": "^5.32.0",
+    "react-icons": "^5.5.0"
   },
   "devDependencies": {
     "@jupyterlab/builder": "^4.0.0",

@@ -1,6 +1,9 @@
 import React, { useCallback, useState } from "react";
 import ReactDOM from "react-dom";
 import { ReactWidget, showErrorMessage } from "@jupyterlab/apputils";
+import { FcParallelTasks, FcAbout } from "react-icons/fc";
+import { BsBoxes } from "react-icons/bs";
+import { MdModeEdit } from "react-icons/md";
 import type { CommandRegistry } from "@lumino/commands";
 import { launchIcon } from "@jupyterlab/ui-components";
 import { SidebarSettings } from "./sidebar-settings";
@@ -49,7 +52,7 @@ interface ISectionItem {
 interface ISectionDefinition {
   id: string;
   label: string;
-  icon: string;
+  icon: string | React.ReactElement;
   /** Whether the section can be toggled in the settings dropdown. */
   toggleable?: boolean;
   /** Whether the section is visible by default when no user setting exists. */
@@ -57,10 +60,19 @@ interface ISectionDefinition {
 }
 
 const SECTION_DEFS: ISectionDefinition[] = [
-  { id: "basicInfo", label: "Basic info", icon: "ℹ️", toggleable: false },
+  {
+    id: "basicInfo",
+    label: "Basic info",
+    icon: <FcAbout />,
+    toggleable: false,
+  },
   { id: "setup", label: "Setup", icon: "🛠️" },
-  { id: "environments", label: "Environments", icon: "⚙️" },
-  { id: "pipelineStages", label: "Pipeline", icon: "🔄" },
+  { id: "environments", label: "Environments", icon: <BsBoxes /> },
+  {
+    id: "pipelineStages",
+    label: "Pipeline",
+    icon: <FcParallelTasks style={{ transform: "rotate(-90deg)" }} />,
+  },
   { id: "notebooks", label: "Notebooks", icon: "📓" },
   { id: "figures", label: "Figures", icon: "📊", defaultVisible: false },
   { id: "datasets", label: "Datasets", icon: "📁" },
@@ -938,7 +950,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                     })();
                   }}
                 >
-                  ✏️
+                  <MdModeEdit />
                 </button>
               </div>
               {item.python && (
@@ -1138,7 +1150,11 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   );
 
   const renderSection = useCallback(
-    (sectionId: string, sectionLabel: string, icon: string) => {
+    (
+      sectionId: string,
+      sectionLabel: string,
+      icon: string | React.ReactElement,
+    ) => {
       const isExpanded = expandedSections.has(sectionId);
       let items: ISectionItem[] =
         sectionData[sectionId as keyof typeof sectionData] || [];
@@ -1284,7 +1300,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
                 }}
                 title="Edit project info"
               >
-                ✏️
+                <MdModeEdit />
               </button>
             )}
             {showCreateButton && (

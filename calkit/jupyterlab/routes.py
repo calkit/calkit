@@ -1142,8 +1142,8 @@ class EnvironmentsRouteHandler(APIHandler):
         # uv-venv, venv, and conda envs can have a prefix defined
         if env_kind in ["uv-venv", "venv", "conda"] and prefix:
             kwargs["prefix"] = prefix
-        # uv-venv and venv can have a python version defined
-        if env_kind in ["uv-venv", "venv"] and python:
+        # Only uv-venv can have a python version defined here
+        if env_kind == "uv-venv" and python:
             kwargs["python_version"] = python
         # Use the Calkit CLI to create the environment
         func_to_kind = {

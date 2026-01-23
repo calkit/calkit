@@ -28,7 +28,7 @@ jobs:
           --user
       - name: Install JupyterLab extension dependencies and build
         run: |
-          uv run jlpm install --frozen-lockfile
+          uv run jlpm install --immutable
           uv run jlpm run build:prod
       - name: Build a binary wheel and a source tarball
         run: python3 -m build

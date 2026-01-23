@@ -64,7 +64,6 @@ data = ["pandas>=2.2.3", "polars>=1.18.0"]
 dev = [
   "deptry>=0.22.0",
   "ipykernel",
-  "jupyter",
   "kaleido==0.2.1",
   "numpy",
   "pandas>=2.2.3",

@@ -280,11 +280,10 @@ const EnvironmentBadge: React.FC<{
       const kernelName = res.kernel_name || res.name || envName;
       await panel.sessionContext.changeKernel({ name: kernelName });
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
       console.error("Failed to switch kernel:", error);
       await showErrorMessage(
         "Failed to switch kernel for environment",
-        errorMsg,
+        "Please check that its specification is valid.",
       );
     } finally {
       setSwitchingKernel(false);
@@ -332,9 +331,10 @@ const EnvironmentBadge: React.FC<{
       void queryClient.invalidateQueries({ queryKey: ["project"] });
       void queryClient.invalidateQueries({ queryKey: ["notebooks"] });
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error("Failed to set notebook environment:", error);
-      await showErrorMessage("Failed to set notebook environment", errorMsg);
+      await showErrorMessage(
+        "Failed to set notebook environment",
+        "Please check that its specification is valid.",
+      );
     }
   };
 

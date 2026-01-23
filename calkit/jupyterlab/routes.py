@@ -1250,12 +1250,8 @@ class EnvironmentsRouteHandler(APIHandler):
         # Now check the environment
         try:
             calkit.cli.main.check_environment(env_name=updated_name)
-        except Exception as e:
-            self.set_status(500)
-            self.finish(
-                json.dumps({"error": f"Environment check failed: {e}"})
-            )
-            return
+        except Exception:
+            return self.error(400, "Environment check failed.")
         self.log.info(f"Updated environment '{updated_name}' successfully")
         self.finish(json.dumps({"message": "Environment updated"}))
 

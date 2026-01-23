@@ -589,53 +589,12 @@ export async function showEnvironmentEditor(
   });
 
   // Set up validity monitoring to enable/disable OK button
-  let saving = false;
-  const setSavingState = (isSaving: boolean) => {
-    saving = isSaving;
-    const okButton = dialog.node?.querySelector(
-      ".jp-mod-accept",
-    ) as HTMLButtonElement | null;
-    if (!okButton) {
-      return;
-    }
-    if (!okButton.dataset.originalLabel) {
-      okButton.dataset.originalLabel = okButton.textContent || "Save";
-    }
-
-    if (isSaving) {
-      okButton.disabled = true;
-      const originalLabel = okButton.dataset.originalLabel || "Save";
-      let spinner = okButton.querySelector(".jp-Spinner") as HTMLElement | null;
-      if (!spinner) {
-        spinner = document.createElement("span");
-        spinner.className = "jp-Spinner";
-        spinner.setAttribute("role", "progressbar");
-        spinner.style.marginRight = "6px";
-        okButton.textContent = "";
-        okButton.prepend(spinner);
-      }
-      // Keep the spinner and label
-      if (!okButton.textContent?.includes(originalLabel)) {
-        const labelNode = document.createTextNode(` ${originalLabel}`);
-        okButton.appendChild(labelNode);
-      }
-    } else {
-      const spinner = okButton.querySelector(".jp-Spinner");
-      if (spinner) {
-        spinner.remove();
-      }
-      const originalLabel = okButton.dataset.originalLabel || "Save";
-      okButton.textContent = originalLabel;
-      okButton.disabled = !widget.getIsValid();
-    }
-  };
-
   const updateOkButton = () => {
     const okButton = dialog.node?.querySelector(
       ".jp-mod-accept",
     ) as HTMLButtonElement | null;
     if (okButton) {
-      okButton.disabled = saving || !widget.getIsValid();
+      okButton.disabled = !widget.getIsValid();
     }
   };
 
@@ -644,68 +603,123 @@ export async function showEnvironmentEditor(
       ".jp-mod-accept",
     ) as HTMLButtonElement | null;
     if (okButton) {
-      if (!saving) {
-        okButton.disabled = !isValid;
-      }
+      okButton.disabled = !isValid;
     }
   };
 
-  // Wait for dialog to be attached to DOM, then set initial button state
+  // Wait for dialog to be attached to DOM, then set initial button state and override button behavior
   const observer = new MutationObserver(() => {
     if (dialog.node?.isConnected) {
       observer.disconnect();
       updateOkButton();
+
+      // Override the OK button to prevent immediate dialog closure
+      const okButton = dialog.node?.querySelector(
+        ".jp-mod-accept",
+      ) as HTMLButtonElement | null;
+
+      if (okButton) {
+        // Remove the default click handler by cloning the button
+        const newOkButton = okButton.cloneNode(true) as HTMLButtonElement;
+        okButton.parentNode?.replaceChild(newOkButton, okButton);
+
+        // Add our custom click handler
+        newOkButton.addEventListener("click", async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          const data = widget.getData();
+          const initialData = widget.getInitialData();
+
+          // Validate name is kebab-case
+          if (!data.name.trim() || !isValidKebabCase(data.name)) {
+            return;
+          }
+
+          // For uv-venv and venv, require at least one package (ipykernel)
+          if (
+            (data.kind === "uv-venv" || data.kind === "venv") &&
+            data.packages.length === 0
+          ) {
+            return;
+          }
+
+          // Mark dialog as non-closable while submitting
+          const okButton = dialog.node?.querySelector(
+            ".jp-mod-accept",
+          ) as HTMLButtonElement | null;
+          const cancelButton = dialog.node?.querySelector(
+            ".jp-mod-reject",
+          ) as HTMLButtonElement | null;
+
+          // Disable both buttons and add spinner to OK button
+          if (okButton) {
+            okButton.disabled = true;
+            const spinner = document.createElement("span");
+            spinner.className = "jp-Spinner";
+            spinner.setAttribute("role", "progressbar");
+            okButton.textContent = "";
+            okButton.appendChild(spinner);
+          }
+          if (cancelButton) {
+            cancelButton.disabled = true;
+          }
+
+          try {
+            // For edit mode, pass both existing and updated data
+            if (options.mode === "edit") {
+              await options.onSubmit(data, initialData);
+            } else {
+              await options.onSubmit(data);
+            }
+
+            // Close the dialog only after successful submission
+            dialog.resolve(0);
+          } catch (error) {
+            // Re-enable both buttons and restore OK button text
+            if (okButton) {
+              okButton.disabled = false;
+              const spinner = okButton.querySelector(".jp-Spinner");
+              if (spinner) {
+                spinner.remove();
+              }
+              okButton.textContent =
+                options.mode === "create" ? "Create" : "Save";
+            }
+            if (cancelButton) {
+              cancelButton.disabled = false;
+            }
+
+            // Extract error message
+            let errorMessage = "See the server console for details.";
+            if (error && typeof error === "object") {
+              if ("message" in error && typeof error.message === "string") {
+                errorMessage = error.message;
+              } else if (
+                "toString" in error &&
+                typeof error.toString === "function"
+              ) {
+                const errorStr = error.toString();
+                if (errorStr !== "[object Object]") {
+                  errorMessage = errorStr;
+                }
+              }
+            }
+
+            const actionText = options.mode === "create" ? "create" : "update";
+            const errorDialog = new Dialog({
+              title: `Failed to ${actionText} environment`,
+              body: errorMessage,
+              buttons: [Dialog.okButton({ label: "OK" })],
+            });
+            await errorDialog.launch();
+            // Don't close the main dialog, let user fix the issue
+          }
+        });
+      }
     }
   });
   observer.observe(document.body, { childList: true, subtree: true });
 
-  const result = await dialog.launch();
-  if (result.button.accept) {
-    const data = widget.getData();
-    const initialData = widget.getInitialData();
-
-    // Validate name is kebab-case
-    if (!data.name.trim() || !isValidKebabCase(data.name)) {
-      return;
-    }
-
-    // For uv-venv and venv, require at least one package (ipykernel)
-    if (
-      (data.kind === "uv-venv" || data.kind === "venv") &&
-      data.packages.length === 0
-    ) {
-      return;
-    }
-
-    // Mark dialog as non-closable while submitting
-    setSavingState(true);
-
-    try {
-      // For edit mode, pass both existing and updated data
-      if (options.mode === "edit") {
-        await options.onSubmit(data, initialData);
-      } else {
-        await options.onSubmit(data);
-      }
-    } catch (error) {
-      // Re-enable OK button on error
-      setSavingState(false);
-
-      // Note: API sends back generic exception, which is not informative
-      const errorMessage = "See the server console for details.";
-
-      const actionText = options.mode === "create" ? "create" : "update";
-      const errorDialog = new Dialog({
-        title: `Failed to ${actionText} environment`,
-        body: errorMessage,
-        buttons: [Dialog.okButton({ label: "OK" })],
-      });
-      await errorDialog.launch();
-      // Don't close the main dialog, let user fix the issue
-      return;
-    }
-
-    // Close the dialog only after successful submission
-    dialog.dispose();
-  }
+  await dialog.launch();
 }

@@ -693,12 +693,120 @@ export async function showEnvironmentEditor(
             // Generic error message
             const errorMessage = "See the server console for details.";
             const actionText = options.mode === "create" ? "create" : "update";
-            const errorDialog = new Dialog({
-              title: `Failed to ${actionText} environment`,
-              body: errorMessage,
-              buttons: [Dialog.okButton({ label: "OK" })],
-            });
-            await errorDialog.launch();
+
+            // Create a custom error overlay instead of using Dialog
+            const errorOverlay = document.createElement("div");
+            errorOverlay.className = "calkit-error-overlay";
+            errorOverlay.style.cssText = `
+              position: absolute;
+              top: 0;
+              left: 0;
+              right: 0;
+              bottom: 0;
+              background: rgba(0, 0, 0, 0.5);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              z-index: 10000;
+            `;
+
+            const errorBox = document.createElement("div");
+            errorBox.style.cssText = `
+              background: var(--jp-layout-color1);
+              border: 1px solid var(--jp-border-color1);
+              border-radius: 4px;
+              padding: 20px;
+              min-width: 300px;
+              box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            `;
+
+            const errorTitle = document.createElement("h3");
+            errorTitle.textContent = `Failed to ${actionText} environment`;
+            errorTitle.style.cssText = `
+              margin: 0 0 12px 0;
+              color: var(--jp-ui-font-color1);
+              font-size: 16px;
+              font-weight: 600;
+            `;
+
+            const errorText = document.createElement("p");
+            errorText.textContent = errorMessage;
+            errorText.style.cssText = `
+              margin: 0 0 16px 0;
+              color: var(--jp-ui-font-color1);
+            `;
+
+            const buttonContainer = document.createElement("div");
+            buttonContainer.style.cssText = `
+              display: flex;
+              justify-content: flex-end;
+            `;
+
+            const okBtn = document.createElement("button");
+            okBtn.textContent = "OK";
+            okBtn.type = "button";
+            okBtn.className = "jp-Dialog-button jp-mod-styled jp-mod-accept";
+            okBtn.style.cssText = `
+              background: var(--jp-brand-color1);
+              color: var(--jp-ui-inverse-font-color1);
+              border: none;
+              border-radius: 3px;
+              padding: 6px 16px;
+              cursor: pointer;
+              font-size: 14px;
+              font-weight: 500;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              min-width: 60px;
+            `;
+
+            okBtn.addEventListener(
+              "click",
+              (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                errorOverlay.remove();
+                return false;
+              },
+              false,
+            );
+
+            buttonContainer.appendChild(okBtn);
+            errorBox.appendChild(errorTitle);
+            errorBox.appendChild(errorText);
+            errorBox.appendChild(buttonContainer);
+            errorOverlay.appendChild(errorBox);
+
+            // Stop clicks on the backdrop itself from bubbling, but allow child clicks
+            errorOverlay.addEventListener(
+              "click",
+              (e) => {
+                if (e.target === errorOverlay) {
+                  e.stopPropagation();
+                }
+              },
+              false,
+            );
+
+            if (dialog.node && dialog.node.parentNode) {
+              // Position error overlay relative to the dialog node
+              const dialogParent = dialog.node.parentNode;
+              const dialogRect = dialog.node.getBoundingClientRect();
+
+              // Make error overlay positioned relative to dialog parent
+              errorOverlay.style.position = "fixed";
+              errorOverlay.style.top = dialogRect.top + "px";
+              errorOverlay.style.left = dialogRect.left + "px";
+              errorOverlay.style.width = dialogRect.width + "px";
+              errorOverlay.style.height = dialogRect.height + "px";
+
+              // Add to dialog parent so it's a sibling, not a child
+              dialogParent.appendChild(errorOverlay);
+            } else if (dialog.node) {
+              dialog.node.appendChild(errorOverlay);
+            }
             // Don't close the main dialog, let user fix the issue
           }
         });

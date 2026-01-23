@@ -1798,7 +1798,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   );
 
   const handleLogoClick = useCallback(() => {
-    window.open("https://docs.calkit.org", "_blank");
+    window.open("https://docs.calkit.org/jupyterlab", "_blank");
   }, []);
 
   return (

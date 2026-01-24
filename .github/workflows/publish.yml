@@ -35,7 +35,7 @@ jobs:
       - name: Generate and build calk9 alias package
         run: |
           bash scripts/make-calk9.sh
-          python3 -m build calk9
+          python3 -m build calk9 -o dist/
       - name: Store the distribution packages
         uses: actions/upload-artifact@v4
         with:

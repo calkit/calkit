@@ -32,8 +32,10 @@ jobs:
           uv run jlpm run build:prod
       - name: Build a binary wheel and a source tarball
         run: python3 -m build
-      - name: Build the alias package
-        run: uvx pypi-alias calk9
+      - name: Generate and build calk9 alias package
+        run: |
+          bash scripts/make-calk9.sh
+          python3 -m build calk9
       - name: Store the distribution packages
         uses: actions/upload-artifact@v4
         with:

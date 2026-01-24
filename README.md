@@ -106,6 +106,15 @@ app is the easiest way to get everything set up and ready to work in
 VS Code, which can then be used as the primary app for working on
 all scientific or analytical computing projects.
 
+### Use without installing
+
+If you want to use Calkit without installing it,
+you can use uv's `uvx` command to run it directly:
+
+```sh
+uvx calk9 --help
+```
+
 ## Cloud integration
 
 The Calkit Cloud ([calkit.io](https://calkit.io)) serves as a project

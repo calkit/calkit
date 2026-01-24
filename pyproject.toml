@@ -92,6 +92,7 @@ Repository = "https://github.com/calkit/calkit"
 
 [project.scripts]
 calkit = "calkit.cli:run"
+calk9 = "calkit.cli:run"
 
 [tool.hatch.build.targets.wheel]
 packages = ["calkit"]

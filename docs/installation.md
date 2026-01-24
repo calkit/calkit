@@ -34,6 +34,15 @@ Next,
 [connect to a Calkit Hub](cloud-integration.md)
 for collaboration and backup.
 
+### Use without installing
+
+If you want to use Calkit without installing it,
+you can use uv's `uvx` command to run it directly:
+
+```sh
+uvx calk9 --help
+```
+
 ## Calkit Assistant
 
 For Windows users, the

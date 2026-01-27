@@ -75,25 +75,7 @@ drop a note in a
 
 ## Create the Codespace
 
-In order to push artifacts like PDFs up to the Calkit Cloud's DVC remote,
-we will need a token and we'll need to set it as a secret for the Codespace.
-On the Calkit project homepage you'll see a link in the quick actions
-section for managing user tokens.
-
-![Project home page.](img/latex-codespaces/project-home-3.png)
-
-Head over there and create one, selecting "DVC" as the purpose.
-Save this in a password manager if you have one,
-then head back to the project homepage and click the quick action link
-to configure GitHub Codespaces secrets for the project.
-Create a secret called `CALKIT_DVC_TOKEN`
-and paste in the token.
-
-![Creating the token.](img/latex-codespaces/new-token.png)
-
-![Adding the secret.](img/latex-codespaces/codespaces-secrets-2.png)
-
-Next, from the project homepage,
+From the project homepage,
 click "Open in GitHub Codespaces."
 Alternatively, if you haven't created your own project,
 you can

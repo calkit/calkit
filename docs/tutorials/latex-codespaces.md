@@ -30,13 +30,6 @@ environment with Calkit and
 [GitHub Codespaces](https://github.com/features/codespaces),
 a container-based virtual machine service.
 
-**Disclosure:** There is a paid aspect of the Calkit Cloud,
-which I manage,
-to help with the costs of running the system,
-and to prevent users for pushing up unreasonable amounts of data.
-However, the software is open source and there is a free plan
-that provides more than enough storage to do what we'll do here.
-
 ## Create the project
 
 In order to follow along, you'll need a GitHub account,

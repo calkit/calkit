@@ -80,6 +80,8 @@ tooling and infrastructure.
 - **Intuitive tooling:**
   Simplify the "hard parts" of modern scientific computing:
   caching, version control, and environment management.
+  Instead of telling scientists to adapt software development tools for
+  their science, build the tools that do the adaptation.
 - **Bridging the gap:**
   Create a natural transition from interactive discovery (notebooks/shells)
   to automated batch pipelines.

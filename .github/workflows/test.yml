@@ -28,7 +28,7 @@ jobs:
       - name: Warm up Conda Cache
         run: |
           # Create a dummy env with the core packages your tests use
-          conda create -n warmup ncurses krb5 libsqlite setuptools libcurl libgfortran5 libopenblas --yes
+          conda create -n warmup ncurses krb5 libsqlite setuptools libcurl libgfortran5 libopenblas h5py --yes
           # Remove it immediately; the packages stay in the cache safely extracted
           conda env remove -n warmup
       - name: Install Pixi

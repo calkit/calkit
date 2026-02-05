@@ -60,6 +60,7 @@ nav:
   - Tutorials:
       - tutorials/index.md
       - tutorials/first-project.md
+      - tutorials/jupyterlab.md
       - tutorials/existing-project.md
       - tutorials/openfoam.md
       - tutorials/adding-latex-pub-docker.md

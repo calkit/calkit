@@ -1,6 +1,7 @@
 # Tutorials
 
 - [Creating your first project](first-project.md)
+- [Composing a pipeline from multiple Jupyter notebooks in JupyterLab](jupyterlab.md)
 - [Converting an existing project to a Calkit project](existing-project.md)
 - [Reproducible OpenFOAM simulations](openfoam.md)
 - [LaTeX collaboration with GitHub Codespaces](latex-codespaces.md)

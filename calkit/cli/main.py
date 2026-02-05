@@ -1072,6 +1072,13 @@ def run(
         except Exception as e:
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Pipeline compilation failed: {e}")
+    # Initialize DVC repo if necessary
+    try:
+        dvc.repo.Repo()
+    except Exception:
+        if not quiet:
+            typer.echo("Initializing DVC repo")
+        dvc.repo.Repo.init()
     # Convert deps into target stage names
     # TODO: This could probably be merged back upstream into DVC
     if dvc_stages is None:

@@ -509,6 +509,11 @@ def env_from_name_and_or_path(
         if name:
             res.name = name
         return res
+    # If we have neither name nor path, we can only detect the environment
+    # if there's only one
+    if len(envs) == 1:
+        env_name, env = next(iter(envs.items()))
+        return EnvDetectResult(name=env_name, env=env, exists=True)
     raise ValueError(
         f"Environment could not be detected from name: {name} "
         f"and/or path: {path}"

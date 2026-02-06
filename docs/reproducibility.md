@@ -66,3 +66,14 @@ Can we call the study reproducible if everything sounds logical and plausible?
 This is of course subjective,
 but we believe prose descriptions of how the inputs were generated and
 processed are insufficient.
+
+## Consequences of poor reproducibility
+
+- It may not be trustworthy.
+  The steps claimed to have been taken to produce evidence to back up a
+  conclusion may not have actually been taken as described.
+  This could simply be due to a lack of knowledge, memory,
+  or they may be described imprecisely.
+  Peer review is supposed to catch these sorts of instances in theory,
+  but doing a reproducibility check is often a large undertaking.
+- It indicates inefficient and error-prone project management practices.

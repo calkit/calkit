@@ -157,3 +157,22 @@ def test_env_from_name_or_path(tmp_dir):
     assert res.env["path"] == "envs/uvsubdir/pyproject.toml"
     assert res.env["kind"] == "uv"
     assert not res.exists
+    # Check when the subdirectory name conflicts with an existing name
+    os.makedirs("envs/main")
+    subprocess.check_call(
+        [
+            "uv",
+            "init",
+            "--bare",
+            "--directory",
+            "envs/main",
+            "--no-workspace",
+        ]
+    )
+    res = calkit.environments.env_from_name_and_or_path(
+        name=None, path="envs/main/pyproject.toml"
+    )
+    assert res.name == "main-uv"
+    assert res.env["path"] == "envs/main/pyproject.toml"
+    assert res.env["kind"] == "uv"
+    assert not res.exists

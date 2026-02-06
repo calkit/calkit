@@ -122,3 +122,38 @@ def test_env_from_name_or_path(tmp_dir):
     assert res.name == "main"
     assert res.env["path"] == "pyproject.toml"
     assert not res.exists
+    # Test that we don't overwrite an existing name
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "environments": {
+                    "main": {"kind": "uv-venv", "path": "requirements.txt"}
+                }
+            },
+            f,
+        )
+    res = calkit.environments.env_from_name_and_or_path(
+        name=None, path="pyproject.toml"
+    )
+    assert res.name == "uv1"
+    assert res.env["path"] == "pyproject.toml"
+    assert not res.exists
+    # Now, what if we put the environment in a subdirectory
+    os.makedirs("envs/uvsubdir")
+    subprocess.check_call(
+        [
+            "uv",
+            "init",
+            "--bare",
+            "--directory",
+            "envs/uvsubdir",
+            "--no-workspace",
+        ]
+    )
+    res = calkit.environments.env_from_name_and_or_path(
+        name=None, path="envs/uvsubdir/pyproject.toml"
+    )
+    assert res.name == "uvsubdir"
+    assert res.env["path"] == "envs/uvsubdir/pyproject.toml"
+    assert res.env["kind"] == "uv"
+    assert not res.exists

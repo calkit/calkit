@@ -420,10 +420,26 @@ def env_from_name_or_path(
     Names take precedence.
     """
 
-    def name_from_path(path: str, all_env_names: list[str]) -> str:
+    def make_name(path: str, all_env_names: list[str], kind: str) -> str:
         dirname = os.path.basename(os.path.dirname(env_path))
-        # TODO: Increment env name if already exists
-        return dirname or "main"
+        # If this is the first env in the project, call it main
+        if not all_env_names:
+            return dirname or "main"
+        # Name based on dirname if possible
+        if dirname and dirname not in all_env_names:
+            return dirname
+        # Try a name based on the dirname and kind
+        if dirname and dirname in all_env_names:
+            name = f"{dirname}-{kind}"
+            if name not in all_env_names:
+                return name
+        # Otherwise increment a number after the kind
+        n = 1
+        name = f"{kind}{n}"
+        while name in all_env_names:
+            n += 1
+            name = f"{kind}{n}"
+        return name
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info()
@@ -439,7 +455,7 @@ def env_from_name_or_path(
         if env_path.endswith("requirements.txt"):
             # TODO: Detect if uv is installed, and use a plain venv if not
             return EnvDetectResult(
-                name=name_from_path(env_path, all_env_names),
+                name=make_name(env_path, all_env_names, kind="uv-venv"),
                 env={
                     "kind": "uv-venv",
                     "path": env_path,
@@ -460,7 +476,7 @@ def env_from_name_or_path(
                 )
             return EnvDetectResult(
                 name=env_spec.get(
-                    "name", name_from_path(env_path, all_env_names)
+                    "name", make_name(env_path, all_env_names, kind="conda")
                 ),
                 env={"kind": "conda", "path": env_path},
                 exists=False,
@@ -468,7 +484,7 @@ def env_from_name_or_path(
         elif env_path.endswith("pyproject.toml"):
             # This is a uv project env
             return EnvDetectResult(
-                name=name_from_path(env_path, all_env_names),
+                name=make_name(env_path, all_env_names, kind="uv"),
                 env={
                     "kind": "uv",
                     "path": env_path,

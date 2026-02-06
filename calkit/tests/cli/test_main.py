@@ -334,6 +334,26 @@ def test_run_in_env_by_path(tmp_dir):
     assert env["kind"] == "uv-venv"
     assert env["path"] == "requirements.txt"
     subprocess.check_call(cmd)
+    # Test with a uv project env
+    subprocess.check_call(["uv", "init", "--bare"])
+    subprocess.check_call(["uv", "add", "requests"])
+    cmd = [
+        "calkit",
+        "xenv",
+        "-p",
+        "pyproject.toml",
+        "--",
+        "python",
+        "-c",
+        "import requests",
+    ]
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info["environments"]
+    assert len(envs) == 2
+    env = ck_info["environments"]["main"]
+    assert env["kind"] == "uv"
+    assert env["path"] == "pyproject.toml"
+    subprocess.check_call(cmd)
 
 
 def test_to_shell_cmd():

@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import subprocess
 
 import calkit.environments
 
@@ -101,4 +102,13 @@ def test_env_from_name_or_path(tmp_dir):
     )
     assert res.name == "myenv"
     assert res.env["path"] == "environment.yml"
+    assert not res.exists
+    # Test with a uv project env
+    subprocess.check_call(["uv", "init", "--bare"])
+    subprocess.check_call(["uv", "add", "requests"])
+    res = calkit.environments.env_from_name_and_or_path(
+        name=None, path="pyproject.toml"
+    )
+    assert res.name == "main"
+    assert res.env["path"] == "pyproject.toml"
     assert not res.exists

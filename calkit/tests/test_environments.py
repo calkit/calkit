@@ -77,6 +77,7 @@ def test_check_all_in_pipeline(tmp_dir):
 
 
 def test_env_from_name_or_path(tmp_dir):
+    # Test with typical venvs
     with open("requirements.txt", "w") as f:
         f.write("requests")
     res = calkit.environments.env_from_name_and_or_path(
@@ -91,4 +92,13 @@ def test_env_from_name_or_path(tmp_dir):
     )
     assert res.name == "main"
     assert res.env["path"] == "requirements.txt"
+    assert not res.exists
+    # Test with a conda env
+    with open("environment.yml", "w") as f:
+        calkit.ryaml.dump({"name": "myenv", "dependencies": ["pandas"]}, f)
+    res = calkit.environments.env_from_name_and_or_path(
+        name=None, path="environment.yml"
+    )
+    assert res.name == "myenv"
+    assert res.env["path"] == "environment.yml"
     assert not res.exists

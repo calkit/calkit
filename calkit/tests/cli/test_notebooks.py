@@ -172,7 +172,7 @@ def test_execute_notebook_julia(tmp_dir):
     )
 
 
-def test_execute_notebook_auto_env():
+def test_execute_notebook_auto_env(tmp_dir):
     # Check that we can execute a notebook but only specify the environment's
     # path, rather than its name
     nb_fpath = os.path.join(
@@ -180,6 +180,8 @@ def test_execute_notebook_auto_env():
     )
     os.makedirs("notebooks/results")
     shutil.copy(nb_fpath, "notebooks/main.ipynb")
+    with open("requirements.txt", "w") as f:
+        f.write("ipykernel")
     cmd = [
         "calkit",
         "nb",

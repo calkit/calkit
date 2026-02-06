@@ -314,6 +314,28 @@ def test_run_in_julia_env(tmp_dir):
     assert "Arg2: world" in out
 
 
+def test_run_in_env_by_path():
+    # Test we can run in an environment by its path
+    with open("requirements.txt", "w") as f:
+        f.write("requests")
+    cmd = [
+        "calkit",
+        "xenv",
+        "-p",
+        "requirements.txt",
+        "--",
+        "python",
+        "-c",
+        "import os",
+    ]
+    subprocess.check_call(cmd)
+    ck_info = calkit.load_calkit_info()
+    env = ck_info["environments"]["main"]
+    assert env["kind"] == "uv-venv"
+    assert env["path"] == "requirements.txt"
+    subprocess.check_call(cmd)
+
+
 def test_to_shell_cmd():
     cmd = ["python", "-c", "import math; print('hello world')"]
     subprocess.check_call(cmd)

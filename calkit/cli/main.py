@@ -1374,7 +1374,6 @@ def run_in_env(
         res = env_from_name_and_or_path(
             name=env_name, path=env_path, ck_info=ck_info
         )
-        env_name = res.name
     except Exception as e:
         raise_error(f"Failed to determine environment: {e}")
     envs = ck_info.get("environments", {})
@@ -1383,6 +1382,7 @@ def run_in_env(
         ck_info["environments"] = envs
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)
+    env_name = res.name
     env = envs[env_name]
     image_name = env.get("image", env_name)
     docker_wdir = env.get("wdir", "/work")
@@ -1559,6 +1559,7 @@ def run_in_env(
             raise_error(
                 "Julia environments require a path pointing to Project.toml"
             )
+        assert isinstance(env_path, str)
         julia_version = env.get("julia")
         env_fname = os.path.basename(env_path)
         if not env_fname == "Project.toml":

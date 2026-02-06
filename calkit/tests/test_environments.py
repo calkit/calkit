@@ -94,6 +94,16 @@ def test_env_from_name_or_path(tmp_dir):
     assert res.name == "main"
     assert res.env["path"] == "requirements.txt"
     assert not res.exists
+    # Test a venv in a subdirectory
+    os.makedirs("envs")
+    os.makedirs("envs/myenv")
+    with open("envs/myenv/requirements.txt", "w") as f:
+        f.write("requests")
+    res = calkit.environments.env_from_name_and_or_path(
+        name=None, path="envs/myenv/requirements.txt"
+    )
+    assert res.name == "myenv"
+    assert res.env["prefix"] == "envs/myenv/.venv"
     # Test with a conda env
     with open("environment.yml", "w") as f:
         calkit.ryaml.dump({"name": "myenv", "dependencies": ["pandas"]}, f)

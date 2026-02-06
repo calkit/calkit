@@ -172,9 +172,7 @@ def clone(
         ),
     ] = False,
 ):
-    """Clone a Git repo and by default configure and pull from the DVC
-    remote.
-    """
+    """Clone or download a copy of a project."""
     # If the URL looks like just a project owner and name, fetch its repo URL
     # first
     if not url.startswith("https://") and not url.startswith("git@"):

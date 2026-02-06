@@ -170,3 +170,28 @@ def test_execute_notebook_julia(tmp_dir):
     subprocess.check_call(
         ["calkit", "nb", "execute", "-e", "main", "notebooks/main.ipynb"]
     )
+
+
+def test_execute_notebook_auto_env():
+    # Check that we can execute a notebook but only specify the environment's
+    # path, rather than its name
+    nb_fpath = os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "test", "nb-subdir.ipynb"
+    )
+    os.makedirs("notebooks/results")
+    shutil.copy(nb_fpath, "notebooks/main.ipynb")
+    cmd = [
+        "calkit",
+        "nb",
+        "exec",
+        "-e",
+        "requirements.txt",
+        "notebooks/main.ipynb",
+    ]
+    subprocess.check_call(cmd)
+    # Ensure we have an environment created
+    ck_info = calkit.load_calkit_info()
+    env = ck_info["environments"]["main"]
+    assert env["kind"] == "uv-venv"
+    # Run again--should not modify calkit.yaml this time
+    subprocess.check_call(cmd)

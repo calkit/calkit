@@ -6,6 +6,7 @@ import os
 import platform
 from pathlib import Path
 
+from pydantic import BaseModel
 from sqlitedict import SqliteDict
 
 import calkit
@@ -401,3 +402,77 @@ def check_all_in_pipeline(
                 env_name=env_name, env=env, wdir=wdir, success=False
             )
     return res
+
+
+class EnvDetectResult(BaseModel):
+    name: str
+    env: dict
+    exists: bool
+
+
+def env_from_name_or_path(
+    name_or_path: str,
+    ck_info: dict | None = None,
+) -> EnvDetectResult:
+    """Get an environment from its name or path.
+
+    Names take precedence.
+    """
+
+    def name_from_path(path: str, all_env_names: list[str]) -> str:
+        dirname = os.path.basename(os.path.dirname(env_path))
+        # TODO: Increment env name if already exists
+        return dirname or "main"
+
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    all_env_names = list(envs.keys())
+    for env_name, env in envs.items():
+        if env_name == name_or_path or env.get("path") == name_or_path:
+            return EnvDetectResult(name=env_name, env=env, exists=True)
+    env_path = name_or_path
+    if os.path.isfile(env_path):
+        if env_path.endswith("requirements.txt"):
+            # TODO: Detect if uv is installed, and use a plain venv if not
+            # TODO: Detect appropriate prefix
+            return EnvDetectResult(
+                name=name_from_path(env_path, all_env_names),
+                env={"kind": "uv-venv", "path": env_path},
+                exists=False,
+            )
+        elif env_path.endswith(".yml") or env_path.endswith(".yaml"):
+            # This is probably a Conda env
+            with open(env_path) as f:
+                env_spec = calkit.ryaml.load(f)
+            if "dependencies" not in env_spec:
+                raise ValueError(
+                    f"Could not detect environment from: {name_or_path}"
+                )
+            return EnvDetectResult(
+                name=env_spec.get(
+                    "name", name_from_path(env_path, all_env_names)
+                ),
+                env={"kind": "conda", "path": env_path},
+                exists=False,
+            )
+        elif env_path.endswith("pyproject.toml"):
+            # This is a uv project env
+            return EnvDetectResult(
+                name=name_from_path(env_path, all_env_names),
+                env={
+                    "kind": "uv",
+                    "path": env_path,
+                },
+                exists=False,
+            )
+        elif env_path.endswith("pixi.toml"):
+            # This is a pixi env
+            pass  # TODO
+        elif env_path.endswith("Project.toml"):
+            # This is a Julia env
+            pass  # TODO
+        elif "dockerfile" in env_path.lower():
+            # This is a Docker env
+            pass  # TODO
+    raise ValueError(f"Environment could not be detected from: {name_or_path}")

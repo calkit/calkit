@@ -12,7 +12,7 @@ A more measurable definition would be:
 
 What do we mean by inputs?
 
-Inputs are essentially primary artifacts--one created from nothing or
+Inputs are essentially primary artifacts--ones created from nothing or
 acquired from elsewhere.
 Examples include:
 

@@ -10,6 +10,12 @@ A more measurable definition would be:
 > Reproducibility is measured by the time it takes to verify the outputs
 > truly reflect the inputs and process definitions.
 
+```mermaid
+graph LR
+    A[Inputs] --> B[Processes]
+    B --> C[Outputs]
+```
+
 What do we mean by inputs?
 
 Inputs are essentially primary artifacts--ones created from nothing or

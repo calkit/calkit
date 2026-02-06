@@ -413,6 +413,7 @@ class EnvDetectResult(BaseModel):
 def env_from_name_or_path(
     name_or_path: str,
     ck_info: dict | None = None,
+    path_only: bool = False,
 ) -> EnvDetectResult:
     """Get an environment from its name or path.
 
@@ -429,7 +430,9 @@ def env_from_name_or_path(
     envs = ck_info.get("environments", {})
     all_env_names = list(envs.keys())
     for env_name, env in envs.items():
-        if env_name == name_or_path or env.get("path") == name_or_path:
+        if (not path_only and env_name == name_or_path) or env.get(
+            "path"
+        ) == name_or_path:
             return EnvDetectResult(name=env_name, env=env, exists=True)
     env_path = name_or_path
     if os.path.isfile(env_path):
@@ -476,3 +479,31 @@ def env_from_name_or_path(
             # This is a Docker env
             pass  # TODO
     raise ValueError(f"Environment could not be detected from: {name_or_path}")
+
+
+def env_from_name_and_or_path(
+    name: str | None, path: str | None, ck_info: dict | None = None
+) -> EnvDetectResult:
+    """Detect an environment from its name and/or path."""
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if name and name in envs:
+        env = envs[name]
+        if path and env.get("path") != path:
+            raise ValueError(
+                f"Environment '{name}' exists but has a different path "
+                f"('{env.get('path')}') than provided ('{path}')"
+            )
+        return EnvDetectResult(name=name, env=envs[name], exists=True)
+    if path:
+        res = env_from_name_or_path(
+            name_or_path=path, ck_info=ck_info, path_only=True
+        )
+        if name:
+            res.name = name
+        return res
+    raise ValueError(
+        f"Environment could not be detected from name: {name} "
+        f"and/or path: {path}"
+    )

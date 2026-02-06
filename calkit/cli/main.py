@@ -1321,7 +1321,19 @@ def run_in_env(
             "-n",
             help=(
                 "Environment name in which to run. "
-                "Only necessary if there are multiple in this project."
+                "Only necessary if there are multiple in this project and "
+                "path is not provided."
+            ),
+        ),
+    ] = None,
+    env_path: Annotated[
+        str | None,
+        typer.Option(
+            "--env-path",
+            "-p",
+            help=(
+                "Path of spec of environment in which to run. "
+                "Will be added to the project if it doesn't exist."
             ),
         ),
     ] = None,
@@ -1353,33 +1365,24 @@ def run_in_env(
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
 ):
+    from calkit.environments import env_from_name_and_or_path
+
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info(process_includes="environments")
     calkit.set_env_vars(ck_info=ck_info)
+    try:
+        res = env_from_name_and_or_path(
+            name=env_name, path=env_path, ck_info=ck_info
+        )
+        env_name = res.name
+    except Exception as e:
+        raise_error(f"Failed to determine environment: {e}")
     envs = ck_info.get("environments", {})
-    if not envs:
-        raise_error("No environments defined in calkit.yaml")
-    if isinstance(envs, list):
-        raise_error("Error: Environments should be a dict, not a list")
-    assert isinstance(envs, dict)
-    if env_name is None:
-        # See if there's a default env, or only one env defined
-        default_env_name = None
-        for n, e in envs.items():
-            if e.get("default"):
-                if default_env_name is not None:
-                    raise_error(
-                        "Only one default environment can be specified"
-                    )
-                default_env_name = n
-        if default_env_name is None and len(envs) == 1:
-            default_env_name = list(envs.keys())[0]
-        env_name = default_env_name
-    if env_name is None:
-        raise_error("Environment must be specified if there are multiple")
-    assert isinstance(env_name, str)
-    if env_name not in envs:
-        raise_error(f"Environment '{env_name}' does not exist")
+    if not res.exists:
+        envs[res.name] = res.env
+        ck_info["environments"] = envs
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
     env = envs[env_name]
     image_name = env.get("image", env_name)
     docker_wdir = env.get("wdir", "/work")

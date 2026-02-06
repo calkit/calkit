@@ -74,3 +74,20 @@ def test_check_all_in_pipeline(tmp_dir):
     print(res)
     assert res["py1"]["success"]
     assert res["py1"]["cached"]
+
+
+def test_env_from_name_or_path(tmp_dir):
+    with open("requirements.txt", "w") as f:
+        f.write("requests")
+    res = calkit.environments.env_from_name_and_or_path(
+        name=None, path="requirements.txt"
+    )
+    assert res.name == "main"
+    assert res.env["path"] == "requirements.txt"
+    assert not res.exists
+    res = calkit.environments.env_from_name_or_path(
+        name_or_path="requirements.txt"
+    )
+    assert res.name == "main"
+    assert res.env["path"] == "requirements.txt"
+    assert not res.exists

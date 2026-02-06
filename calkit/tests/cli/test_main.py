@@ -314,7 +314,7 @@ def test_run_in_julia_env(tmp_dir):
     assert "Arg2: world" in out
 
 
-def test_run_in_env_by_path():
+def test_run_in_env_by_path(tmp_dir):
     # Test we can run in an environment by its path
     with open("requirements.txt", "w") as f:
         f.write("requests")

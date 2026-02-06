@@ -326,7 +326,7 @@ def test_run_in_env_by_path(tmp_dir):
         "--",
         "python",
         "-c",
-        "import os",
+        "import requests",
     ]
     subprocess.check_call(cmd)
     ck_info = calkit.load_calkit_info()

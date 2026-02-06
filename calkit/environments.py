@@ -438,10 +438,16 @@ def env_from_name_or_path(
     if os.path.isfile(env_path):
         if env_path.endswith("requirements.txt"):
             # TODO: Detect if uv is installed, and use a plain venv if not
-            # TODO: Detect appropriate prefix
             return EnvDetectResult(
                 name=name_from_path(env_path, all_env_names),
-                env={"kind": "uv-venv", "path": env_path},
+                env={
+                    "kind": "uv-venv",
+                    "path": env_path,
+                    "python": "3.14",
+                    "prefix": os.path.join(
+                        os.path.split(env_path)[0], ".venv"
+                    ),
+                },
                 exists=False,
             )
         elif env_path.endswith(".yml") or env_path.endswith(".yaml"):

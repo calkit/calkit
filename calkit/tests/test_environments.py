@@ -85,6 +85,7 @@ def test_env_from_name_or_path(tmp_dir):
     assert res.name == "main"
     assert res.env["path"] == "requirements.txt"
     assert not res.exists
+    assert res.env["prefix"] == ".venv"
     res = calkit.environments.env_from_name_or_path(
         name_or_path="requirements.txt"
     )

@@ -13,6 +13,7 @@ import { queryClient } from "../queryClient";
 import { requestAPI } from "../request";
 import type { ISettingRegistry } from "@jupyterlab/settingregistry";
 import type { IStateDB } from "@jupyterlab/statedb";
+import type { INotebookTracker } from "@jupyterlab/notebook";
 import {
   useProject,
   useGitStatus,
@@ -126,6 +127,7 @@ export interface ICalkitSidebarProps {
   stateDB?: IStateDB | null;
   onStatusChange?: (needsAttention: boolean) => void;
   commands?: CommandRegistry;
+  notebookTracker?: INotebookTracker | null;
   onSetExpandPipelineCallback?: (callback: () => void) => void;
 }
 
@@ -134,6 +136,7 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
   stateDB,
   onStatusChange,
   commands,
+  notebookTracker,
   onSetExpandPipelineCallback,
 }) => {
   // Query hooks - automatically manage data fetching and caching
@@ -685,6 +688,31 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       await queryClient.refetchQueries({ queryKey: ["pipelineStatus"] });
       // Also refresh project data
       await queryClient.invalidateQueries({ queryKey: ["project"] });
+
+      // Automatically reload all open notebooks after pipeline completes
+      if (notebookTracker) {
+        try {
+          const reloadPromises: Promise<void>[] = [];
+          notebookTracker.forEach((widget) => {
+            const promise = Promise.resolve().then(async () => {
+              try {
+                // Discard any unsaved changes and reload from disk
+                widget.context.model.dirty = false;
+                await widget.context.revert();
+              } catch (error: any) {
+                console.warn(
+                  `Failed to reload notebook ${widget.context.path}:`,
+                  error,
+                );
+              }
+            });
+            reloadPromises.push(promise);
+          });
+          await Promise.all(reloadPromises);
+        } catch (error) {
+          console.warn("Failed to auto-reload notebooks:", error);
+        }
+      }
     } catch (error) {
       const errorMsg = "See output in the server console for details.";
       console.error("Failed to run pipeline:", error);
@@ -693,30 +721,58 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
       setPipelineRunning(false);
       pipelineState.setRunning(false);
     }
-  }, [commands]);
+  }, [commands, notebookTracker]);
 
-  const handleRunStage = useCallback(async (stageName: string) => {
-    if (!stageName) {
-      return;
-    }
-    pipelineState.setRunning(true, `Running stage: ${stageName}`);
-    try {
-      await requestAPI("pipeline/runs", {
-        method: "POST",
-        body: JSON.stringify({ targets: [stageName] }),
-      });
-      await queryClient.invalidateQueries({ queryKey: ["project"] });
-      await queryClient.invalidateQueries({ queryKey: ["pipelineStatus"] });
-    } catch (error) {
-      console.error("Failed to run stage:", error);
-      await showErrorMessage(
-        "Failed to run stage",
-        "See output in the server terminal for details.",
-      );
-    } finally {
-      pipelineState.setRunning(false);
-    }
-  }, []);
+  const handleRunStage = useCallback(
+    async (stageName: string) => {
+      if (!stageName) {
+        return;
+      }
+      pipelineState.setRunning(true, `Running stage: ${stageName}`);
+      try {
+        await requestAPI("pipeline/runs", {
+          method: "POST",
+          body: JSON.stringify({ targets: [stageName] }),
+        });
+        await queryClient.invalidateQueries({ queryKey: ["project"] });
+        await queryClient.invalidateQueries({ queryKey: ["pipelineStatus"] });
+
+        // Automatically reload all open notebooks after stage completes
+        if (notebookTracker) {
+          try {
+            const reloadPromises: Promise<void>[] = [];
+            notebookTracker.forEach((widget) => {
+              const promise = Promise.resolve().then(async () => {
+                try {
+                  // Discard any unsaved changes and reload from disk
+                  widget.context.model.dirty = false;
+                  await widget.context.revert();
+                } catch (error: any) {
+                  console.warn(
+                    `Failed to reload notebook ${widget.context.path}:`,
+                    error,
+                  );
+                }
+              });
+              reloadPromises.push(promise);
+            });
+            await Promise.all(reloadPromises);
+          } catch (error) {
+            console.warn("Failed to auto-reload notebooks:", error);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to run stage:", error);
+        await showErrorMessage(
+          "Failed to run stage",
+          "See output in the server terminal for details.",
+        );
+      } finally {
+        pipelineState.setRunning(false);
+      }
+    },
+    [notebookTracker],
+  );
 
   const handleCreateStage = useCallback(async () => {
     await showStageEditorDialog({
@@ -2006,6 +2062,7 @@ export class CalkitSidebarWidget extends ReactWidget {
   private _settings: ISettingRegistry.ISettings | null = null;
   private _stateDB: IStateDB | null = null;
   private _commands: CommandRegistry | null = null;
+  private _notebookTracker: INotebookTracker | null = null;
   private _hasAttention = false;
   private _expandPipelineSectionCallback: (() => void) | null = null;
 
@@ -2049,6 +2106,11 @@ export class CalkitSidebarWidget extends ReactWidget {
     this.update();
   }
 
+  setNotebookTracker(notebookTracker: INotebookTracker) {
+    this._notebookTracker = notebookTracker;
+    this.update();
+  }
+
   setExpandPipelineSectionCallback(callback: () => void) {
     this._expandPipelineSectionCallback = callback;
   }
@@ -2065,6 +2127,7 @@ export class CalkitSidebarWidget extends ReactWidget {
           stateDB={this._stateDB}
           onStatusChange={this._handleStatusChange}
           commands={this._commands || undefined}
+          notebookTracker={this._notebookTracker || undefined}
           onSetExpandPipelineCallback={this.setExpandPipelineSectionCallback.bind(
             this,
           )}

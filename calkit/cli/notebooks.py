@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -202,6 +203,7 @@ def check_env_kernel(
         raise_error(f"{language} not supported")
 
 
+@notebooks_app.command("exec", help="Alias for 'execute'.")
 @notebooks_app.command("execute")
 def execute_notebook(
     path: str,
@@ -210,7 +212,10 @@ def execute_notebook(
         typer.Option(
             "--environment",
             "-e",
-            help="Environment name in which to run the notebook.",
+            help=(
+                "Name or path to the spec of the environment in which "
+                "to run the notebook."
+            ),
         ),
     ],
     to: Annotated[
@@ -263,6 +268,18 @@ def execute_notebook(
             ),
         ),
     ] = None,
+    no_replace: Annotated[
+        bool,
+        typer.Option(
+            "--no-replace",
+            help=(
+                "Do not replace notebook with executed version. "
+                "By default, the executed notebook will overwrite the "
+                "original in addition to being saved in the executed "
+                "notebooks directory."
+            ),
+        ),
+    ] = False,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -275,17 +292,24 @@ def execute_notebook(
     import papermill
 
     from calkit.cli.main import run_in_env
+    from calkit.environments import env_from_name_or_path
 
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
+    # Detect environment
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    res = env_from_name_or_path(env_name, ck_info=ck_info)
+    env = res.env
+    env_name = res.name
+    if not res.exists:
+        # Create this environment and write it to file
+        envs[res.name] = res.env
+        ck_info["environments"] = envs
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
     # Detect language from environment
     if language is None:
-        ck_info = calkit.load_calkit_info()
-        envs = ck_info.get("environments", {})
-        if env_name not in envs:
-            raise_error(
-                f"No environment '{env_name}' defined for this project"
-            )
         env = envs[env_name]
         if env.get("kind") == "julia":
             language = "julia"
@@ -370,6 +394,10 @@ def execute_notebook(
             path,
         ]
         run_in_env(cmd, env_name=env_name, no_check=no_check, verbose=verbose)
+    if not no_replace:
+        # Replace original notebook with executed version
+        typer.echo("Replacing original notebook with executed version")
+        shutil.copy2(fpath_out_exec, path)
     for to_fmt in to:
         if to_fmt != "notebook":
             try:

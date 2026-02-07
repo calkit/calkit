@@ -85,6 +85,9 @@ const plugin: JupyterFrontEndPlugin<void> = {
     sidebar.title.caption = "Calkit";
     sidebar.title.icon = calkitIcon;
     sidebar.setCommands(app.commands);
+    if (notebookTracker) {
+      sidebar.setNotebookTracker(notebookTracker);
+    }
 
     // Add the sidebar to the left panel
     app.shell.add(sidebar, "left");
@@ -164,6 +167,40 @@ const plugin: JupyterFrontEndPlugin<void> = {
               queryKey: ["pipeline", "status"],
             });
             await queryClient.invalidateQueries({ queryKey: ["project"] });
+
+            // Automatically reload any open notebooks that were changed by the pipeline
+            if (notebookTracker) {
+              try {
+                const status = await requestAPI<IGitStatus>("git/status");
+                const changedFiles = new Set([
+                  ...(status.changed || []),
+                  ...(status.untracked || []),
+                ]);
+
+                // Reload all open notebooks that are in the changed files list
+                const reloadPromises: Promise<void>[] = [];
+                notebookTracker.forEach((widget) => {
+                  if (widget.context && changedFiles.has(widget.context.path)) {
+                    const promise = Promise.resolve().then(async () => {
+                      try {
+                        // Discard any unsaved changes and reload from disk
+                        widget.context.model.dirty = false;
+                        await widget.context.revert();
+                      } catch (error: any) {
+                        console.warn(
+                          `Failed to reload notebook ${widget.context.path}:`,
+                          error,
+                        );
+                      }
+                    });
+                    reloadPromises.push(promise);
+                  }
+                });
+                await Promise.all(reloadPromises);
+              } catch (error) {
+                console.warn("Failed to auto-reload notebooks:", error);
+              }
+            }
           } catch (error) {
             const errorMsg =
               error instanceof Error ? error.message : String(error);

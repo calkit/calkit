@@ -1229,6 +1229,76 @@ def new_conda_env(
         repo.git.commit(["-m", f"Add Conda environment {name}"])
 
 
+@new_app.command("uv-env")
+def new_uv_env(
+    name: Annotated[
+        str, typer.Option("--name", "-n", help="Environment name.")
+    ] = "main",
+    path: Annotated[
+        str | None,
+        typer.Option(
+            "--path",
+            help="Environment file path. Must end with 'pyproject.toml'.",
+        ),
+    ] = None,
+    python_version: Annotated[
+        str | None, typer.Option("--python", "-p", help="Python version.")
+    ] = None,
+    packages: Annotated[
+        list[str] | None,
+        typer.Argument(help="Packages to include in the environment."),
+    ] = None,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Do not check environment is up-to-date after creation.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
+):
+    """Create a new uv project environment."""
+    if path is not None and not path.endswith("pyproject.toml"):
+        raise_error("Environment path must end with 'pyproject.toml'")
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if name in envs:
+        raise_error(f"Environment with name {name} already exists")
+    if path is None:
+        envdir = f".calkit/envs/{name}"
+        os.makedirs(envdir, exist_ok=True)
+        path = os.path.join(envdir, "pyproject.toml")
+    else:
+        envdir = os.path.dirname(path)
+        if envdir:
+            os.makedirs(envdir, exist_ok=True)
+    if not os.path.isfile(path):
+        res = subprocess.run(
+            ["uv", "init", "--bare", "--directory", envdir, "--no-workspace"]
+            + (["--python", python_version] if python_version else []),
+        )
+        if res.returncode != 0:
+            raise_error("Failed to create uv environment")
+    if packages:
+        res = subprocess.run(["uv", "add"] + packages, cwd=envdir)
+        if res.returncode != 0:
+            raise_error("Failed to add packages to uv environment")
+    if not no_check:
+        subprocess.run(["uv", "sync"], cwd=envdir)
+    envs[name] = dict(kind="uv", path=path)
+    ck_info["environments"] = envs
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    if not no_commit:
+        repo = git.Repo()
+        repo.git.add(path)
+        repo.git.add("calkit.yaml")
+        if repo.git.diff("--staged"):
+            repo.git.commit(["-m", f"Add uv environment {name}"])
+
+
 @new_app.command("uv-venv")
 def new_uv_venv(
     name: Annotated[

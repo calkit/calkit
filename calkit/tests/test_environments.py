@@ -176,3 +176,31 @@ def test_env_from_name_or_path(tmp_dir):
     assert res.env["path"] == "envs/main/pyproject.toml"
     assert res.env["kind"] == "uv"
     assert not res.exists
+    # Test with a Julia env
+    os.makedirs("juliaenv")
+    with open("juliaenv/Project.toml", "w") as f:
+        f.write("doesn't need to work")
+    res = calkit.environments.env_from_name_and_or_path(
+        name=None, path="juliaenv/Project.toml"
+    )
+    assert res.name == "juliaenv"
+    assert res.env["path"] == "juliaenv/Project.toml"
+    assert res.env["kind"] == "julia"
+    assert not res.exists
+    # Test with a Dockerfile
+    with open("Dockerfile", "w") as f:
+        f.write("FROM python:3.9-slim")
+    res = calkit.environments.env_from_name_and_or_path(
+        name=None, path="Dockerfile"
+    )
+    assert res.name == "docker1"
+    assert res.env["path"] == "Dockerfile"
+    assert res.env["kind"] == "docker"
+    # Test with a pixi env
+    with open("pixi.toml", "w") as f:
+        f.write("doesn't need to work")
+    res = calkit.environments.env_from_name_and_or_path(
+        name=None, path="pixi.toml"
+    )
+    assert res.name == "pixi1"
+    assert res.env["path"] == "pixi.toml"

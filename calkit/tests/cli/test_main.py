@@ -355,6 +355,24 @@ def test_run_in_env_by_path(tmp_dir):
     assert env["kind"] == "uv"
     assert env["path"] == "pyproject.toml"
     subprocess.check_call(cmd)
+    # Create a pixi env
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(
+        ["calkit", "new", "pixi-env", "-n", "my-pixi", "pandas"]
+    )
+    cmd = [
+        "calkit",
+        "xenv",
+        "-p",
+        "pixi.toml",
+        "python",
+        "-c",
+        "import pandas",
+    ]
+    subprocess.check_call(cmd)
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info["environments"]
+    assert len(envs) == 3
 
 
 def test_to_shell_cmd():

@@ -493,13 +493,36 @@ def env_from_name_or_path(
             )
         elif env_path.endswith("pixi.toml"):
             # This is a pixi env
-            pass  # TODO
+            return EnvDetectResult(
+                name=make_name(env_path, all_env_names, kind="pixi"),
+                env={
+                    "kind": "pixi",
+                    "path": env_path,
+                },
+                exists=False,
+            )
         elif env_path.endswith("Project.toml"):
             # This is a Julia env
-            pass  # TODO
+            # TODO: Detect Julia version
+            return EnvDetectResult(
+                name=make_name(env_path, all_env_names, kind="julia"),
+                env={"kind": "julia", "path": env_path, "julia": "1.11"},
+                exists=False,
+            )
         elif "dockerfile" in env_path.lower():
             # This is a Docker env
-            pass  # TODO
+            project_name = calkit.detect_project_name(prepend_owner=False)
+            env_name = make_name(env_path, all_env_names, kind="docker")
+            image_name = f"{project_name}-{env_name}"
+            return EnvDetectResult(
+                name=env_name,
+                env={
+                    "kind": "docker",
+                    "path": env_path,
+                    "image": image_name,
+                },
+                exists=False,
+            )
     raise ValueError(f"Environment could not be detected from: {name_or_path}")
 
 

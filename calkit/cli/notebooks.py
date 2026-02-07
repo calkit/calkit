@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -267,6 +268,18 @@ def execute_notebook(
             ),
         ),
     ] = None,
+    no_replace: Annotated[
+        bool,
+        typer.Option(
+            "--no-replace",
+            help=(
+                "Do not replace notebook with executed version. "
+                "By default, the executed notebook will overwrite the "
+                "original in addition to being saved in the executed "
+                "notebooks directory."
+            ),
+        ),
+    ] = False,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -381,6 +394,10 @@ def execute_notebook(
             path,
         ]
         run_in_env(cmd, env_name=env_name, no_check=no_check, verbose=verbose)
+    if not no_replace:
+        # Replace original notebook with executed version
+        typer.echo("Replacing original notebook with executed version")
+        shutil.copy2(fpath_out_exec, path)
     for to_fmt in to:
         if to_fmt != "notebook":
             try:

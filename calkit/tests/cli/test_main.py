@@ -347,10 +347,11 @@ def test_run_in_env_by_path(tmp_dir):
         "-c",
         "import requests",
     ]
+    subprocess.check_call(cmd)
     ck_info = calkit.load_calkit_info()
     envs = ck_info["environments"]
     assert len(envs) == 2
-    env = ck_info["environments"]["main"]
+    env = ck_info["environments"]["uv1"]
     assert env["kind"] == "uv"
     assert env["path"] == "pyproject.toml"
     subprocess.check_call(cmd)

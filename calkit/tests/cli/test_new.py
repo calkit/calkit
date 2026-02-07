@@ -169,6 +169,25 @@ def test_new_publication(tmp_dir):
     assert stage["outputs"] == ["my-paper/paper.pdf"]
 
 
+def test_new_uv_env(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-env",
+            "--name",
+            "my-uv-env",
+            "--python",
+            "3.13",
+            "requests",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    env = ck_info["environments"]["my-uv-env"]
+    assert env["path"] == ".calkit/envs/my-uv-env/pyproject.toml"
+
+
 def test_new_uv_venv(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(

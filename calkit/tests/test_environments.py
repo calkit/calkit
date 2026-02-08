@@ -234,6 +234,19 @@ def test_detect_default_env(tmp_dir):
     assert res is not None
     assert res.name == "main"
     assert res.env["path"] == "requirements.txt"
+    # Test that with two environments we return None
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "environments": {
+                    "main": {"kind": "venv", "path": "requirements.txt"},
+                    "other": {"kind": "uv", "path": "pyproject.toml"},
+                }
+            },
+            f,
+        )
+    res = calkit.environments.detect_default_env()
+    assert res is None
 
 
 def test_env_from_notebook_path(tmp_dir):

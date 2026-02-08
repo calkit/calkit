@@ -608,6 +608,8 @@ def detect_default_env(ck_info: dict | None = None) -> EnvDetectResult | None:
     if len(envs) == 1:
         env_name, env = next(iter(envs.items()))
         return EnvDetectResult(name=env_name, env=env, exists=True)
+    elif len(envs) > 1:
+        return
     # Look for typical env spec files in order
     # There must only be one, however, otherwise the default is ambiguous
     env_spec_paths = [

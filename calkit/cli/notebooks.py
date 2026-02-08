@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -272,12 +271,7 @@ def execute_notebook(
         bool,
         typer.Option(
             "--no-replace",
-            help=(
-                "Do not replace notebook with executed version. "
-                "By default, the executed notebook will overwrite the "
-                "original in addition to being saved in the executed "
-                "notebooks directory."
-            ),
+            help="Do not replace notebook outputs from executed version.",
         ),
     ] = False,
     verbose: Annotated[
@@ -410,9 +404,18 @@ def execute_notebook(
         ]
         run_in_env(cmd, env_name=env_name, no_check=no_check, verbose=verbose)
     if not no_replace:
-        # Replace original notebook with executed version
-        typer.echo("Replacing original notebook with executed version")
-        shutil.copy2(fpath_out_exec, path)
+        # Replace original notebook outputs with those from executed version
+        with open(fpath_out_exec, "r") as f:
+            executed_nb = json.load(f)
+        with open(path, "r") as f:
+            original_nb = json.load(f)
+        for orig_cell, exec_cell in zip(
+            original_nb.get("cells", []), executed_nb.get("cells", [])
+        ):
+            if "outputs" in orig_cell and "outputs" in exec_cell:
+                orig_cell["outputs"] = exec_cell["outputs"]
+        with open(path, "w") as f:
+            json.dump(original_nb, f, indent=1)
     for to_fmt in to:
         if to_fmt != "notebook":
             try:

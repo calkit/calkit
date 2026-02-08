@@ -6,6 +6,8 @@ import os
 import shutil
 import subprocess
 
+import pytest
+
 import calkit
 
 
@@ -197,9 +199,23 @@ def test_execute_notebook_auto_env(tmp_dir):
     assert env["kind"] == "uv-venv"
     # Run again--should not modify calkit.yaml this time
     subprocess.check_call(cmd)
-    # TODO: Check that we can not specify the environment at all, and we'll
+    # Check that we can not specify the environment at all, and we'll
     # use pyproject.toml or requirements.txt
-    # If successful, we save the environment and attach it to the notebook
-    # Also, we can check if the notebook is saved in the project and if it
+    cmd = [
+        "calkit",
+        "nb",
+        "exec",
+        "notebooks/main.ipynb",
+    ]
+    subprocess.check_call(cmd)
+    # Add a second environment and ensure we fail to detect which to use for
+    # the notebook
+    os.remove("calkit.yaml")
+    subprocess.check_call(["uv", "init", "--bare"])
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(cmd)
+    # TODO: If successful, check we save the environment and attach it to the
+    # notebook
+    # TODO: Check if the notebook is saved in the project and if it
     # has an environment specified, either in the notebooks section or a
     # pipeline stage

@@ -375,6 +375,31 @@ def test_run_in_env_by_path(tmp_dir):
     assert len(envs) == 3
 
 
+def test_run_in_env_detect_default(tmp_dir):
+    # Check that if we don't specify an environment, we'll find a default one
+    # and add it to the project
+    subprocess.check_call(["uv", "init", "--bare"])
+    subprocess.check_call(["uv", "add", "requests"])
+    cmd = [
+        "calkit",
+        "xenv",
+        "--",
+        "python",
+        "-c",
+        "import requests",
+    ]
+    subprocess.check_call(cmd)
+    ck_info = calkit.load_calkit_info()
+    env = ck_info["environments"]["main"]
+    assert env["kind"] == "uv"
+    assert env["path"] == "pyproject.toml"
+    # Check that if we run again, we don't modify calkit.yaml since we already
+    # have an environment that matches pyproject.toml
+    subprocess.check_call(cmd)
+    ck_info_2 = calkit.load_calkit_info()
+    assert ck_info == ck_info_2
+
+
 def test_to_shell_cmd():
     cmd = ["python", "-c", "import math; print('hello world')"]
     subprocess.check_call(cmd)

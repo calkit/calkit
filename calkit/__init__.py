@@ -1,4 +1,6 @@
-__version__ = "0.33.5"
+from importlib.metadata import version as _version
+
+__version__ = _version("calkit-python")
 
 from .core import *  # noqa: F403, I001
 from . import git  # noqa: F401

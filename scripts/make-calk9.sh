@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-# Get version from calkit/__init__.py
-VERSION=$(grep '__version__ = "' calkit/__init__.py | sed 's/.*__version__ = "\([^"]*\)".*/\1/')
+# Get version from VCS via hatch
+VERSION="$(uvx hatch version)"
 
 # Create calk9 directory structure
 rm -rf calk9

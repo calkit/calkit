@@ -3,6 +3,7 @@ requires = [
   "hatchling>=1.5.0",
   "jupyterlab>=4.0.0,<5",
   "hatch-nodejs-version>=0.3.2",
+  "hatch-vcs>=0.3.0",
 ]
 build-backend = "hatchling.build"
 
@@ -140,7 +141,7 @@ before-build-python = ["jlpm clean:all"]
 ignore = ["W002"]
 
 [tool.hatch.version]
-path = "calkit/__init__.py"
+source = "vcs"
 
 [tool.mypy]
 files = ["calkit"]

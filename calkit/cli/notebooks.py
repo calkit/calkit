@@ -208,7 +208,7 @@ def check_env_kernel(
 def execute_notebook(
     path: str,
     env_name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--environment",
             "-e",
@@ -217,7 +217,7 @@ def execute_notebook(
                 "to run the notebook."
             ),
         ),
-    ],
+    ] = None,
     to: Annotated[
         list[str],
         typer.Option("--to", help="Output format ('html' or 'notebook')."),
@@ -292,16 +292,31 @@ def execute_notebook(
     import papermill
 
     from calkit.cli.main import run_in_env
-    from calkit.environments import env_from_name_or_path
+    from calkit.environments import (
+        env_from_name_or_path,
+        env_from_notebook_path,
+    )
 
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
     # Detect environment
     ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
-    res = env_from_name_or_path(env_name, ck_info=ck_info)
-    env = res.env
-    env_name = res.name
+    if env_name is not None:
+        res = env_from_name_or_path(env_name, ck_info=ck_info)
+        env = res.env
+        env_name = res.name
+    else:
+        try:
+            res = env_from_notebook_path(path, ck_info=ck_info)
+            typer.echo(
+                f"Detected environment '{res.name}' for notebook '{path}'"
+            )
+            env = res.env
+            env_name = res.name
+        except Exception:
+            raise_error(f"Could not detect environment for notebook: {path}")
+            return  # For typing analysis since raise_error exits
     if not res.exists:
         # Create this environment and write it to file
         envs[res.name] = res.env

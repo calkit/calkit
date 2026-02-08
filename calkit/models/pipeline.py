@@ -640,9 +640,6 @@ class JupyterNotebookStage(Stage):
     Alternatively, we could force the use of ``nbstripout`` so the cleaned
     notebook is saved at the notebook path.
 
-    TODO: Can/should we do something like Papermill and let users modify
-    parameters in the notebook?
-
     With this paradigm, we want to force users treat their notebooks as
     needing to be run from top to bottom every time they change.
     """

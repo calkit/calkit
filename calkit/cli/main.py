@@ -1374,6 +1374,8 @@ def run_in_env(
         res = env_from_name_and_or_path(
             name=env_name, path=env_path, ck_info=ck_info
         )
+        if res is None:
+            raise RuntimeError("No default detected")
     except Exception as e:
         raise_error(f"Failed to determine environment: {e}")
     envs = ck_info.get("environments", {})

@@ -414,6 +414,11 @@ def execute_notebook(
         ):
             if "outputs" in orig_cell and "outputs" in exec_cell:
                 orig_cell["outputs"] = exec_cell["outputs"]
+            if (
+                "execution_count" in orig_cell
+                and "execution_count" in exec_cell
+            ):
+                orig_cell["execution_count"] = exec_cell["execution_count"]
         with open(path, "w") as f:
             json.dump(original_nb, f, indent=1)
     for to_fmt in to:
@@ -425,7 +430,7 @@ def execute_notebook(
                     parameters=parsed_params,
                 )
             except ValueError:
-                raise_error(f"Invalid output format: '{to}'")
+                raise_error(f"Invalid output format: '{to_fmt}'")
             folder = os.path.dirname(fpath_out)
             os.makedirs(folder, exist_ok=True)
             fname_out = os.path.basename(fpath_out)

@@ -204,3 +204,121 @@ def test_env_from_name_or_path(tmp_dir):
     )
     assert res.name == "pixi1"
     assert res.env["path"] == "pixi.toml"
+
+
+def test_detect_default_env(tmp_dir):
+    # First start with only a single env spec file
+    with open("requirements.txt", "w") as f:
+        f.write("requests")
+    res = calkit.environments.detect_default_env()
+    assert res is not None
+    assert res.name == "main"
+    assert res.env["path"] == "requirements.txt"
+    # Now add a second env spec file--should not detect a default env anymore
+    with open("environment.yml", "w") as f:
+        calkit.ryaml.dump({"name": "myenv", "dependencies": ["pandas"]}, f)
+    res = calkit.environments.detect_default_env()
+    assert res is None
+    # Now add a single environment to calkit.yaml--should detect that as the
+    # default env
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "environments": {
+                    "main": {"kind": "venv", "path": "requirements.txt"}
+                }
+            },
+            f,
+        )
+    res = calkit.environments.detect_default_env()
+    assert res is not None
+    assert res.name == "main"
+    assert res.env["path"] == "requirements.txt"
+
+
+def test_env_from_notebook_path(tmp_dir):
+    with open("pyproject.toml", "w") as f:
+        f.write("doesn't need to work")
+    res = calkit.environments.env_from_notebook_path("notebooks/main.ipynb")
+    assert res.name == "main"
+    assert res.env["path"] == "pyproject.toml"
+    assert res.env["kind"] == "uv"
+    assert not res.exists
+    # Now add to calkit.yaml--should still work
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "environments": {
+                    "main": {"kind": "uv", "path": "pyproject.toml"}
+                }
+            },
+            f,
+        )
+    res = calkit.environments.env_from_notebook_path("notebooks/main.ipynb")
+    assert res.name == "main"
+    assert res.env["path"] == "pyproject.toml"
+    assert res.env["kind"] == "uv"
+    assert res.exists
+    # Now add a new environment and associate it with the notebook in
+    # calkit.yaml--should use that one instead
+    with open("requirements.txt", "w") as f:
+        f.write("requests")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "environments": {
+                    "main": {"kind": "uv", "path": "pyproject.toml"},
+                    "notebook-env": {
+                        "kind": "venv",
+                        "path": "requirements.txt",
+                    },
+                },
+                "notebooks": [
+                    {
+                        "path": "notebooks/main.ipynb",
+                        "environment": "notebook-env",
+                    }
+                ],
+            },
+            f,
+        )
+    res = calkit.environments.env_from_notebook_path("notebooks/main.ipynb")
+    assert res.name == "notebook-env"
+    assert res.env["path"] == "requirements.txt"
+    assert res.env["kind"] == "venv"
+    assert res.exists
+    # Check that we can detect the environment from a notebook stage
+    # TODO: Handle conflicts between notebook env and stage env
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "environments": {
+                    "main": {"kind": "uv", "path": "pyproject.toml"},
+                    "notebook-env": {
+                        "kind": "venv",
+                        "path": "requirements.txt",
+                    },
+                },
+                "pipeline": {
+                    "stages": {
+                        "notebook-stage": {
+                            "kind": "jupyter-notebook",
+                            "notebook_path": "notebooks/main.ipynb",
+                            "environment": "main",
+                        }
+                    }
+                },
+                "notebooks": [
+                    {
+                        "path": "notebooks/main.ipynb",
+                        "environment": "notebook-env",
+                    }
+                ],
+            },
+            f,
+        )
+    res = calkit.environments.env_from_notebook_path("notebooks/main.ipynb")
+    assert res.name == "main"
+    assert res.env["path"] == "pyproject.toml"
+    assert res.env["kind"] == "uv"
+    assert res.exists

@@ -550,10 +550,77 @@ def env_from_name_and_or_path(
         return res
     # If we have neither name nor path, we can only detect the environment
     # if there's only one
-    if len(envs) == 1:
-        env_name, env = next(iter(envs.items()))
-        return EnvDetectResult(name=env_name, env=env, exists=True)
+    default = detect_default_env(ck_info=ck_info)
+    if default:
+        return default
     raise ValueError(
         f"Environment could not be detected from name: {name} "
         f"and/or path: {path}"
     )
+
+
+def env_from_notebook_path(
+    notebook_path: str, ck_info: dict | None = None
+) -> EnvDetectResult:
+    """Detect an environment for a notebook based on its path.
+
+    First we look in pipeline stages, then in the notebooks list.
+    """
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info()
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    envs = ck_info.get("environments", {})
+    for stage in stages.values():
+        if (
+            stage.get("kind") == "jupyter-notebook"
+            and stage.get("notebook_path") == notebook_path
+        ):
+            env_name = stage.get("environment")
+            if env_name:
+                env = envs.get(env_name)
+                if env:
+                    return EnvDetectResult(name=env_name, env=env, exists=True)
+    for nb in ck_info.get("notebooks", []):
+        if nb.get("path") == notebook_path:
+            env_name = nb.get("environment")
+            if env_name:
+                env = envs.get(env_name)
+                if env:
+                    return EnvDetectResult(name=env_name, env=env, exists=True)
+    # Fall back to default env if possible
+    default = detect_default_env(ck_info=ck_info)
+    if default:
+        return default
+    raise ValueError(
+        f"Environment could not be detected for notebook path: {notebook_path}"
+    )
+
+
+def detect_default_env(ck_info: dict | None = None) -> EnvDetectResult | None:
+    """Detect a default environment for the project.
+
+    First, if the project has a single environment, we use that. Otherwise,
+    we look for a single typical env spec file.
+    """
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if len(envs) == 1:
+        env_name, env = next(iter(envs.items()))
+        return EnvDetectResult(name=env_name, env=env, exists=True)
+    # Look for typical env spec files in order
+    # There must only be one, however, otherwise the default is ambiguous
+    env_spec_paths = [
+        "pyproject.toml",
+        "requirements.txt",
+        "environment.yml",
+        "Dockerfile",
+        "Project.toml",
+        "pixi.toml",
+    ]
+    present = os.listdir(".")
+    present_env_specs = [p for p in env_spec_paths if p in present]
+    if len(present_env_specs) == 1:
+        return env_from_name_or_path(
+            present_env_specs[0], ck_info=ck_info, path_only=True
+        )

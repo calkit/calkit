@@ -138,6 +138,8 @@ def check_env_kernel(
         else:
             language = "python"
     project_name = calkit.detect_project_name(prepend_owner=False)
+    if not project_name:
+        raise_error("Project name cannot be empty")
     kernel_name = calkit.to_kebab_case(f"{project_name}-{env_name}")
     display_name = f"{project_name}: {env_name}"
     if language == "python":
@@ -202,17 +204,21 @@ def check_env_kernel(
         raise_error(f"{language} not supported")
 
 
+@notebooks_app.command("exec", help="Alias for 'execute'.")
 @notebooks_app.command("execute")
 def execute_notebook(
     path: str,
     env_name: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--environment",
             "-e",
-            help="Environment name in which to run the notebook.",
+            help=(
+                "Name or path to the spec of the environment in which "
+                "to run the notebook."
+            ),
         ),
-    ],
+    ] = None,
     to: Annotated[
         list[str],
         typer.Option("--to", help="Output format ('html' or 'notebook')."),
@@ -263,6 +269,13 @@ def execute_notebook(
             ),
         ),
     ] = None,
+    no_replace: Annotated[
+        bool,
+        typer.Option(
+            "--no-replace",
+            help="Do not replace notebook outputs from executed version.",
+        ),
+    ] = False,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -275,17 +288,39 @@ def execute_notebook(
     import papermill
 
     from calkit.cli.main import run_in_env
+    from calkit.environments import (
+        env_from_name_or_path,
+        env_from_notebook_path,
+    )
 
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
+    # Detect environment
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if env_name is not None:
+        res = env_from_name_or_path(env_name, ck_info=ck_info)
+        env = res.env
+        env_name = res.name
+    else:
+        try:
+            res = env_from_notebook_path(path, ck_info=ck_info)
+            typer.echo(
+                f"Detected environment '{res.name}' for notebook '{path}'"
+            )
+            env = res.env
+            env_name = res.name
+        except Exception:
+            raise_error(f"Could not detect environment for notebook: {path}")
+            return  # For typing analysis since raise_error exits
+    if not res.exists:
+        # Create this environment and write it to file
+        envs[res.name] = res.env
+        ck_info["environments"] = envs
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
     # Detect language from environment
     if language is None:
-        ck_info = calkit.load_calkit_info()
-        envs = ck_info.get("environments", {})
-        if env_name not in envs:
-            raise_error(
-                f"No environment '{env_name}' defined for this project"
-            )
         env = envs[env_name]
         if env.get("kind") == "julia":
             language = "julia"
@@ -370,6 +405,24 @@ def execute_notebook(
             path,
         ]
         run_in_env(cmd, env_name=env_name, no_check=no_check, verbose=verbose)
+    if not no_replace:
+        # Replace original notebook outputs with those from executed version
+        with open(fpath_out_exec, "r") as f:
+            executed_nb = json.load(f)
+        with open(path, "r") as f:
+            original_nb = json.load(f)
+        for orig_cell, exec_cell in zip(
+            original_nb.get("cells", []), executed_nb.get("cells", [])
+        ):
+            if "outputs" in orig_cell and "outputs" in exec_cell:
+                orig_cell["outputs"] = exec_cell["outputs"]
+            if (
+                "execution_count" in orig_cell
+                and "execution_count" in exec_cell
+            ):
+                orig_cell["execution_count"] = exec_cell["execution_count"]
+        with open(path, "w") as f:
+            json.dump(original_nb, f, indent=1)
     for to_fmt in to:
         if to_fmt != "notebook":
             try:
@@ -379,7 +432,7 @@ def execute_notebook(
                     parameters=parsed_params,
                 )
             except ValueError:
-                raise_error(f"Invalid output format: '{to}'")
+                raise_error(f"Invalid output format: '{to_fmt}'")
             folder = os.path.dirname(fpath_out)
             os.makedirs(folder, exist_ok=True)
             fname_out = os.path.basename(fpath_out)

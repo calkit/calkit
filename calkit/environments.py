@@ -6,6 +6,7 @@ import os
 import platform
 from pathlib import Path
 
+from pydantic import BaseModel
 from sqlitedict import SqliteDict
 
 import calkit
@@ -401,3 +402,227 @@ def check_all_in_pipeline(
                 env_name=env_name, env=env, wdir=wdir, success=False
             )
     return res
+
+
+class EnvDetectResult(BaseModel):
+    name: str
+    env: dict
+    exists: bool
+
+
+def env_from_name_or_path(
+    name_or_path: str,
+    ck_info: dict | None = None,
+    path_only: bool = False,
+) -> EnvDetectResult:
+    """Get an environment from its name or path.
+
+    Names take precedence.
+    """
+
+    def make_name(path: str, all_env_names: list[str], kind: str) -> str:
+        dirname = os.path.basename(os.path.dirname(env_path))
+        # If this is the first env in the project, call it main
+        if not all_env_names:
+            return dirname or "main"
+        # Name based on dirname if possible
+        if dirname and dirname not in all_env_names:
+            return dirname
+        # Try a name based on the dirname and kind
+        if dirname and dirname in all_env_names:
+            name = f"{dirname}-{kind}"
+            if name not in all_env_names:
+                return name
+        # Otherwise increment a number after the kind
+        n = 1
+        name = f"{kind}{n}"
+        while name in all_env_names:
+            n += 1
+            name = f"{kind}{n}"
+        return name
+
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    all_env_names = list(envs.keys())
+    for env_name, env in envs.items():
+        if (not path_only and env_name == name_or_path) or env.get(
+            "path"
+        ) == name_or_path:
+            return EnvDetectResult(name=env_name, env=env, exists=True)
+    env_path = name_or_path
+    if os.path.isfile(env_path):
+        if env_path.endswith("requirements.txt"):
+            # TODO: Detect if uv is installed, and use a plain venv if not
+            return EnvDetectResult(
+                name=make_name(env_path, all_env_names, kind="uv-venv"),
+                env={
+                    "kind": "uv-venv",
+                    "path": env_path,
+                    "python": "3.14",
+                    "prefix": os.path.join(
+                        os.path.split(env_path)[0], ".venv"
+                    ),
+                },
+                exists=False,
+            )
+        elif env_path.endswith(".yml") or env_path.endswith(".yaml"):
+            # This is probably a Conda env
+            with open(env_path) as f:
+                env_spec = calkit.ryaml.load(f)
+            if "dependencies" not in env_spec:
+                raise ValueError(
+                    f"Could not detect environment from: {name_or_path}"
+                )
+            return EnvDetectResult(
+                name=env_spec.get(
+                    "name", make_name(env_path, all_env_names, kind="conda")
+                ),
+                env={"kind": "conda", "path": env_path},
+                exists=False,
+            )
+        elif env_path.endswith("pyproject.toml"):
+            # This is a uv project env
+            return EnvDetectResult(
+                name=make_name(env_path, all_env_names, kind="uv"),
+                env={
+                    "kind": "uv",
+                    "path": env_path,
+                },
+                exists=False,
+            )
+        elif env_path.endswith("pixi.toml"):
+            # This is a pixi env
+            return EnvDetectResult(
+                name=make_name(env_path, all_env_names, kind="pixi"),
+                env={
+                    "kind": "pixi",
+                    "path": env_path,
+                },
+                exists=False,
+            )
+        elif env_path.endswith("Project.toml"):
+            # This is a Julia env
+            # TODO: Detect Julia version
+            return EnvDetectResult(
+                name=make_name(env_path, all_env_names, kind="julia"),
+                env={"kind": "julia", "path": env_path, "julia": "1.11"},
+                exists=False,
+            )
+        elif "dockerfile" in env_path.lower():
+            # This is a Docker env
+            project_name = calkit.detect_project_name(prepend_owner=False)
+            env_name = make_name(env_path, all_env_names, kind="docker")
+            image_name = f"{project_name}-{env_name}"
+            return EnvDetectResult(
+                name=env_name,
+                env={
+                    "kind": "docker",
+                    "path": env_path,
+                    "image": image_name,
+                },
+                exists=False,
+            )
+    raise ValueError(f"Environment could not be detected from: {name_or_path}")
+
+
+def env_from_name_and_or_path(
+    name: str | None, path: str | None, ck_info: dict | None = None
+) -> EnvDetectResult:
+    """Detect an environment from its name and/or path."""
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if name and name in envs:
+        env = envs[name]
+        if path and env.get("path") != path:
+            raise ValueError(
+                f"Environment '{name}' exists but has a different path "
+                f"('{env.get('path')}') than provided ('{path}')"
+            )
+        return EnvDetectResult(name=name, env=envs[name], exists=True)
+    if path:
+        res = env_from_name_or_path(
+            name_or_path=path, ck_info=ck_info, path_only=True
+        )
+        if name:
+            res.name = name
+        return res
+    # If we have neither name nor path, we can only detect the environment
+    # if there's only one
+    default = detect_default_env(ck_info=ck_info)
+    if default:
+        return default
+    raise ValueError(
+        f"Environment could not be detected from name: {name} "
+        f"and/or path: {path}"
+    )
+
+
+def env_from_notebook_path(
+    notebook_path: str, ck_info: dict | None = None
+) -> EnvDetectResult:
+    """Detect an environment for a notebook based on its path.
+
+    First we look in pipeline stages, then in the notebooks list.
+    """
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info()
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    envs = ck_info.get("environments", {})
+    for stage in stages.values():
+        if (
+            stage.get("kind") == "jupyter-notebook"
+            and stage.get("notebook_path") == notebook_path
+        ):
+            env_name = stage.get("environment")
+            if env_name:
+                env = envs.get(env_name)
+                if env:
+                    return EnvDetectResult(name=env_name, env=env, exists=True)
+    for nb in ck_info.get("notebooks", []):
+        if nb.get("path") == notebook_path:
+            env_name = nb.get("environment")
+            if env_name:
+                env = envs.get(env_name)
+                if env:
+                    return EnvDetectResult(name=env_name, env=env, exists=True)
+    # Fall back to default env if possible
+    default = detect_default_env(ck_info=ck_info)
+    if default:
+        return default
+    raise ValueError(
+        f"Environment could not be detected for notebook path: {notebook_path}"
+    )
+
+
+def detect_default_env(ck_info: dict | None = None) -> EnvDetectResult | None:
+    """Detect a default environment for the project.
+
+    First, if the project has a single environment, we use that. Otherwise,
+    we look for a single typical env spec file.
+    """
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if len(envs) == 1:
+        env_name, env = next(iter(envs.items()))
+        return EnvDetectResult(name=env_name, env=env, exists=True)
+    elif len(envs) > 1:
+        return
+    # Look for typical env spec files in order
+    # There must only be one, however, otherwise the default is ambiguous
+    env_spec_paths = [
+        "pyproject.toml",
+        "requirements.txt",
+        "environment.yml",
+        "Dockerfile",
+        "Project.toml",
+        "pixi.toml",
+    ]
+    present = os.listdir(".")
+    present_env_specs = [p for p in env_spec_paths if p in present]
+    if len(present_env_specs) == 1:
+        return env_from_name_or_path(
+            present_env_specs[0], ck_info=ck_info, path_only=True
+        )

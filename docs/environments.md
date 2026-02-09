@@ -4,9 +4,16 @@ A computational environment describes the
 necessary conditions for code to run properly.
 Ensuring that every stage in your pipeline is run within a
 defined environment is a great way to improve reproducibility.
+There are many different environment management tools out there to choose
+from, and Calkit attempts to provide a similar interface for all of them.
+Calkit also attempts to enforce
+their usage in such a way that all important information about the environment
+is captured locally in the project in so-called "lock files."
+This way, the project can be moved to other machines
+without needing to worry about manually installing packages.
 
 Calkit provides a means for defining or declaring environments
-in a project.
+inside a project's `calkit.yaml` file.
 There is also a command line utility `calkit xenv`
 for executing a command in one
 of these, which ensures that the environment
@@ -14,7 +21,7 @@ matches its specification before execution.
 
 ## Environment types and definitions
 
-Calkit supports defining and running code in these environment types:
+Calkit supports the following environment types:
 
 - [Docker](https://docker.com)
 - [Conda](https://docs.conda.io/projects/conda/en/stable/)
@@ -23,12 +30,15 @@ Calkit supports defining and running code in these environment types:
 - [`uv`](https://docs.astral.sh/uv/) (both `venv` and project-based)
 - [Pixi](https://github.com/prefix-dev/pixi)
 - [`renv`](https://rstudio.github.io/renv/index.html)
+- [Julia](https://julialang.org/)
+- [MATLAB](https://www.mathworks.com/products/matlab.html)
+- [SLURM](https://slurm.schedmd.com/documentation.html)
 - `ssh`
 
 Environment definitions live in the project's `calkit.yaml` file
 in the `environments` section.
 Most environments will have a `path` property pointing to a file
-that lists the necessary dependencies.
+that lists the necessary dependencies--the "spec."
 For example, a Python virtual environment or "venv" can be defined as
 a simple list of dependencies in a `requirements.txt` file,
 which might look like:
@@ -38,6 +48,29 @@ pandas>=2
 polars==0.17.1
 matplotlib
 ```
+
+## Automatic detection
+
+For common environment types,
+Calkit will register a new environment upon its first use with `calkit xenv`.
+For example, if you run:
+
+```sh
+calkit xenv python scripts/run.py
+```
+
+Calkit will attempt to find an environment spec, create the environment,
+save it in `calkit.yaml`, export a lock file,
+and run the command in that environment.
+If there are multiple env specs, e.g., `requirements.txt` and `environment.yml`,
+you can provide the path, e.g.,
+
+```sh
+calkit xenv -p environment.yml python scripts/run.py
+```
+
+and Calkit will use that one to create the environment and save the path in
+`calkit.yaml`.
 
 ## Checking, syncing, and executing
 
@@ -61,6 +94,12 @@ Before the command is executed,
 Calkit will check that the environment matches its specification,
 and if it needs to be updated,
 that will be done before execution.
+
+All project environments can be checked at once with:
+
+```sh
+calkit check envs
+```
 
 ## Choosing an environment type
 
@@ -184,20 +223,25 @@ There is no need to think about building images as a separate step.
 
 ### uv
 
-To create a new uv virtual environment,
+uv can create both _project_ and _venv_ virtual environments.
+Project environments are defined by a `pyproject.toml` file,
+while venv environments are defined by a `requirements.txt` file.
+
+To create a new uv project environment,
 inside a project directory run something like:
 
 ```sh
-calkit new uv-venv -n my-env "polars>=1.0" matplotlib
+calkit new uv-env -n my-env "polars>=1.0" matplotlib
 ```
 
-This will create a new `uv` virtual environment called `my-uv-env` defined in
-`requirements.txt` (changeable with the `--path` option),
-with the packages installed under a folder `.venv`.
+By default, this will create a `pyproject.toml` file in
+`.calkit/envs/my-env/pyproject.toml`,
+but the path can be controlled with the `--path` option.
 
-You can then run a command in this environment,
-and since it doesn't exist yet, will be created and a file
-`requirements-lock.txt` will be created.
+To create a new uv venv,
+simply replace `uv-env` with `uv-venv` in the above command and a
+`requirements.txt`
+file will be created instead.
 
 ```sh
 calkit xenv -n my-env python -c "import matplotlib, print(matplotlib.__version__)"
@@ -210,11 +254,11 @@ calkit xenv -n my-env python -c "import pandas, print(pandas.__version__)"
 ```
 
 it would fail,
-since `pandas` is not present in `requirements.txt`.
+since `pandas` is not present in the spec file
+(`pyproject.toml` or `requirements.txt`).
 However, if you add it in there,
-calling the above command again will succeed thanks to Calkit
-automatically syncing the environment before execution.
-The `requirements-lock.txt` file will also be updated.
+calling the above command again will succeed because Calkit
+automatically checks or syncs the environment before execution.
 
 ### venv
 
@@ -372,7 +416,7 @@ pipeline:
         - results
 ```
 
-## MATLAB
+### MATLAB
 
 Adding a MATLAB environment to a project will cause Calkit to automatically
 generate a Docker image based on its `version` and `products`
@@ -401,6 +445,7 @@ environments:
       - Simulink
       - Global_Optimization_Toolbox
       - Parallel_Computing_Toolbox
+
 pipeline:
   stages:
     my-matlab-script:

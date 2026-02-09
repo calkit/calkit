@@ -640,9 +640,6 @@ class JupyterNotebookStage(Stage):
     Alternatively, we could force the use of ``nbstripout`` so the cleaned
     notebook is saved at the notebook path.
 
-    TODO: Can/should we do something like Papermill and let users modify
-    parameters in the notebook?
-
     With this paradigm, we want to force users treat their notebooks as
     needing to be run from top to bottom every time they change.
     """
@@ -653,7 +650,7 @@ class JupyterNotebookStage(Stage):
     executed_ipynb_storage: Literal["git", "dvc"] | None = "dvc"
     html_storage: Literal["git", "dvc"] | None = "dvc"
     parameters: dict[str, Any] = {}
-    language: Literal["python", "matlab", "julia"] = "python"
+    language: Literal["python", "matlab", "julia"] | None = None
 
     def update_parameters(self, params: dict) -> None:
         """If we have any templated parameters, update those, e.g., from
@@ -712,9 +709,10 @@ class JupyterNotebookStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         cmd = (
-            f"calkit nb execute --environment {self.environment} "
-            f"--no-check --language {self.language}"
+            f"calkit nb execute --environment {self.environment} " "--no-check"
         )
+        if self.language is not None:
+            cmd += f" --language {self.language}"
         if self.html_storage:
             cmd += " --to html"
         if self.parameters:

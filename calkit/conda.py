@@ -69,7 +69,7 @@ def _check_single(req: str, actual: str, conda: bool = False) -> bool:
             # Check that the requirement spec is all numbers and dots and add
             # an asterisk if it's missing, since conda treats "package=1.2" as
             # "package=1.2.*"
-            numbers_and_dots = re.match(r"^[0-9.]+$", req_spec[1:])
+            numbers_and_dots = re.match(r"^[0-9.]+$", req_spec[2:])
             if numbers_and_dots and len(req_spec.split(".")) < 3:
                 req_spec += ".*"
     actual_name, actual_vers = re.split("[=<>]+", actual, maxsplit=1)

@@ -2141,7 +2141,16 @@ def execute_and_record(
     if all_inputs:
         stage["inputs"] = all_inputs
     if all_outputs:
-        stage["outputs"] = all_outputs
+        # Convert PathOutput objects to dicts for serialization
+        serialized_outputs = []
+        for output in all_outputs:
+            if isinstance(output, PathOutput):
+                serialized_outputs.append(
+                    output.model_dump(exclude_unset=True)
+                )
+            else:
+                serialized_outputs.append(output)
+        stage["outputs"] = serialized_outputs
     # Print detected I/O for user confirmation
     if not no_detect_io and (detected_inputs or detected_outputs):
         typer.echo("\nDetected I/O:")
@@ -2162,11 +2171,10 @@ def execute_and_record(
     # Create the stage, write to calkit.yaml, and run it to see if it's
     # successful
     try:
-        stage_obj = cls.model_validate(stage)
+        cls.model_validate(stage)
     except Exception as e:
         raise_error(f"Failed to create stage: {e}")
-    stage_dict = stage_obj.model_dump()
-    stages[stage_name] = stage_dict
+    stages[stage_name] = stage
     pipeline["stages"] = stages
     ck_info["pipeline"] = pipeline
     with open("calkit.yaml", "w") as f:
@@ -2175,7 +2183,7 @@ def execute_and_record(
         run(targets=[stage_name])
         typer.echo(
             f"Stage '{stage_name}' executed successfully and added to the "
-            f"pipeline:\n{json.dumps(stage_dict)}"
+            f"pipeline:\n{json.dumps(stage)}"
         )
     except Exception as e:
         # If the stage failed, write the old ck_info back to calkit.yaml to

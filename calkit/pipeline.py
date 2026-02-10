@@ -16,6 +16,58 @@ from calkit.models.pipeline import (
 )
 
 
+def stages_are_similar(stage1: dict, stage2: dict) -> bool:
+    """Check if two stage configurations are fundamentally the same.
+
+    Compares stage kind and key parameters to determine if stages represent
+    the same operation.
+
+    Parameters
+    ----------
+    stage1 : dict
+        First stage configuration.
+    stage2 : dict
+        Second stage configuration.
+
+    Returns
+    -------
+    bool
+        True if stages are similar, False otherwise.
+    """
+    # Different kind means different stage
+    if stage1.get("kind") != stage2.get("kind"):
+        return False
+    kind = stage1.get("kind")
+    # For script stages, check script path and args
+    if kind in [
+        "python-script",
+        "julia-script",
+        "matlab-script",
+        "shell-script",
+    ]:
+        if stage1.get("script_path") != stage2.get("script_path"):
+            return False
+        if stage1.get("args", []) != stage2.get("args", []):
+            return False
+    # For notebook stages
+    elif kind == "jupyter-notebook":
+        if stage1.get("notebook_path") != stage2.get("notebook_path"):
+            return False
+    # For latex
+    elif kind == "latex":
+        if stage1.get("target_path") != stage2.get("target_path"):
+            return False
+    # For command stages, check the command
+    elif kind in [
+        "shell-command",
+        "matlab-command",
+        "julia-command",
+    ]:
+        if stage1.get("command") != stage2.get("command"):
+            return False
+    return True
+
+
 def _expand_matrix(input_dict: dict[str, list]) -> list[dict]:
     """Restructure a dictionary with list values into a list of dictionaries,
     where each dictionary represents a permutation of the input dictionary's

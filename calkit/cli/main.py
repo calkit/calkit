@@ -1840,6 +1840,7 @@ def execute_and_record(
         ShellCommandStage,
         ShellScriptStage,
     )
+    from calkit.pipeline import stages_are_similar
 
     def _determine_output_storage(
         path: str,
@@ -2005,45 +2006,7 @@ def execute_and_record(
         # Check if this stage name already exists with different configuration
         if stage_name in stages:
             existing_stage = stages[stage_name]
-            # Check if it's fundamentally the same stage
-            is_same = True
-            # Different kind means different stage
-            if existing_stage.get("kind") != stage["kind"]:
-                is_same = False
-            # For script stages, check script path and args
-            elif stage["kind"] in [
-                "python-script",
-                "julia-script",
-                "matlab-script",
-                "shell-script",
-            ]:
-                if existing_stage.get("script_path") != stage.get(
-                    "script_path"
-                ):
-                    is_same = False
-                elif existing_stage.get("args", []) != stage.get("args", []):
-                    is_same = False
-            # For notebook stages
-            elif stage["kind"] == "jupyter-notebook":
-                if existing_stage.get("notebook_path") != stage.get(
-                    "notebook_path"
-                ):
-                    is_same = False
-            # For latex
-            elif stage["kind"] == "latex":
-                if existing_stage.get("target_path") != stage.get(
-                    "target_path"
-                ):
-                    is_same = False
-            # For command stages, check the command
-            elif stage["kind"] in [
-                "shell-command",
-                "matlab-command",
-                "julia-command",
-            ]:
-                if existing_stage.get("command") != stage.get("command"):
-                    is_same = False
-            if not is_same:
+            if not stages_are_similar(existing_stage, stage):
                 raise_error(
                     f"A stage named '{stage_name}' already exists with "
                     "different configuration; "

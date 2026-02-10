@@ -1938,10 +1938,12 @@ def execute_and_record(
         cls = MatlabScriptStage
         stage["kind"] = "matlab-script"
         stage["script_path"] = cmd[1]
+        language = "matlab"
     elif first_arg.endswith(".m"):
         cls = MatlabScriptStage
         stage["kind"] = "matlab-script"
         stage["script_path"] = first_arg
+        language = "matlab"
     elif first_arg == "matlab" and len(cmd) > 1:
         cls = MatlabCommandStage
         stage["kind"] = "matlab-command"
@@ -1966,6 +1968,29 @@ def execute_and_record(
         stage["kind"] = "shell-command"
         stage["command"] = " ".join(shlex.quote(arg) for arg in cmd)
         language = "shell"
+    # Create a stage name if one isn't provided and check for existing similar
+    # stages
+    if stage_name is None:
+        stage_name = generate_stage_name(cmd)
+    # Check if a similar stage already exists and reuse its environment if not
+    # specified
+    if stage_name in stages:
+        existing_stage = stages[stage_name]
+        if not stages_are_similar(existing_stage, stage):
+            raise_error(
+                f"A stage named '{stage_name}' already exists with "
+                "different configuration; "
+                f"Please specify a unique stage name with --stage"
+            )
+            return
+        # If no environment was specified and a similar stage exists,
+        # reuse its environment
+        if environment is None and "environment" in existing_stage:
+            environment = existing_stage["environment"]
+            typer.echo(
+                f"Reusing environment '{environment}' from existing "
+                f"stage '{stage_name}'"
+            )
     # Next, try to detect the environment
     try:
         res = env_from_name_or_path(
@@ -1986,19 +2011,6 @@ def execute_and_record(
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)
         ck_info = calkit.load_calkit_info()
-    # Create a stage name if one isn't provided
-    if stage_name is None:
-        stage_name = generate_stage_name(cmd)
-        # Check if this stage name already exists with different configuration
-        if stage_name in stages:
-            existing_stage = stages[stage_name]
-            if not stages_are_similar(existing_stage, stage):
-                raise_error(
-                    f"A stage named '{stage_name}' already exists with "
-                    "different configuration; "
-                    f"Please specify a unique stage name with --stage"
-                )
-                return
     env_name = res.name
     stage["environment"] = env_name
     # Detect inputs and outputs if not disabled

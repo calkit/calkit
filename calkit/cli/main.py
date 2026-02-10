@@ -2184,7 +2184,6 @@ def execute_and_record(
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     try:
-        run(targets=[stage_name])
         # Format stage as YAML for display
         yaml_output = io.StringIO()
         calkit.ryaml.dump({stage_name: stage}, yaml_output)
@@ -2194,9 +2193,10 @@ def execute_and_record(
             for line in yaml_output.getvalue().rstrip().split("\n")
         )
         typer.echo(
-            f"Stage '{stage_name}' executed successfully and added to the "
-            f"pipeline:\n{indented_yaml}"
+            f"Adding stage to pipeline and attempting to execute:"
+            f"\n{indented_yaml}"
         )
+        run(targets=[stage_name])
     except Exception as e:
         # If the stage failed, write the old ck_info back to calkit.yaml to
         # remove the stage that we added

@@ -1897,6 +1897,7 @@ def execute_and_record(
     first_arg = cmd[0]
     stage = {}
     script_path = None  # Track script path for I/O detection
+    language = None
     if first_arg.endswith(".ipynb"):
         cls = JupyterNotebookStage
         stage["kind"] = "jupyter-notebook"
@@ -1907,6 +1908,7 @@ def execute_and_record(
         stage["kind"] = "latex"
         stage["target_path"] = first_arg
         script_path = first_arg
+        language = "latex"
     elif first_arg == "python" and len(cmd) > 1 and cmd[1].endswith(".py"):
         cls = PythonScriptStage
         stage["kind"] = "python-script"
@@ -1914,6 +1916,7 @@ def execute_and_record(
         script_path = cmd[1]
         if len(cmd) > 2:
             stage["args"] = cmd[2:]
+        language = "python"
     elif first_arg.endswith(".py"):
         cls = PythonScriptStage
         stage["kind"] = "python-script"
@@ -1921,6 +1924,7 @@ def execute_and_record(
         script_path = first_arg
         if len(cmd) > 1:
             stage["args"] = cmd[1:]
+        language = "python"
     elif first_arg == "julia" and len(cmd) > 1 and cmd[1].endswith(".jl"):
         cls = JuliaScriptStage
         stage["kind"] = "julia-script"
@@ -1928,6 +1932,7 @@ def execute_and_record(
         script_path = cmd[1]
         if len(cmd) > 2:
             stage["args"] = cmd[2:]
+        language = "julia"
     elif first_arg.endswith(".jl"):
         cls = JuliaScriptStage
         stage["kind"] = "julia-script"
@@ -1935,10 +1940,12 @@ def execute_and_record(
         script_path = first_arg
         if len(cmd) > 1:
             stage["args"] = cmd[1:]
+        language = "julia"
     elif first_arg == "julia" and len(cmd) > 1:
         cls = JuliaCommandStage
         stage["kind"] = "julia-command"
         stage["command"] = " ".join(cmd[1:])
+        language = "julia"
     elif first_arg == "matlab" and len(cmd) > 1 and cmd[1].endswith(".m"):
         cls = MatlabScriptStage
         stage["kind"] = "matlab-script"
@@ -1953,6 +1960,7 @@ def execute_and_record(
         cls = MatlabCommandStage
         stage["kind"] = "matlab-command"
         stage["command"] = " ".join(cmd[1:])
+        language = "matlab"
     elif first_arg.endswith((".sh", ".bash", ".zsh")):
         cls = ShellScriptStage
         stage["kind"] = "shell-script"
@@ -1972,26 +1980,16 @@ def execute_and_record(
         stage["kind"] = "shell-command"
         stage["command"] = " ".join(shlex.quote(arg) for arg in cmd)
     # Next, try to detect the environment
-    if environment is None:
-        # For LaTeX stages, auto-detect a LaTeX environment
-        if stage["kind"] == "latex":
-            res = env_from_name_or_path(ck_info=ck_info, language="latex")
-        else:
-            res = None
-        if res is None:
-            # For shell commands and scripts, fall back to _system environment
-            if stage["kind"] in ["shell-command", "shell-script"]:
-                res = env_from_name_or_path(
-                    name_or_path="_system", ck_info=ck_info
-                )
-            else:
-                raise_error(
-                    "No environment specified and could not detect a default "
-                    "environment; Please specify with --environment/-e"
-                )
-                return
-    else:
-        res = env_from_name_or_path(name_or_path=environment, ck_info=ck_info)
+    try:
+        res = env_from_name_or_path(
+            name_or_path=environment, ck_info=ck_info, language=language
+        )
+    except Exception:
+        raise_error(
+            "No environment specified and could not detect a default "
+            "environment; Please specify with --environment/-e"
+        )
+        return
     if res is not None and not res.exists:
         # Create the environment if it doesn't exist,
         # since we will need it to run

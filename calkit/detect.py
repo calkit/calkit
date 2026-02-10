@@ -18,103 +18,10 @@ def detect_python_script_io(script_path: str) -> dict[str, list[str]]:
     try:
         with open(script_path, "r", encoding="utf-8") as f:
             content = f.read()
-        tree = ast.parse(content, filename=script_path)
-    except (SyntaxError, UnicodeDecodeError):
+    except UnicodeDecodeError:
         return {"inputs": inputs, "outputs": outputs}
     script_dir = os.path.dirname(script_path) if script_path else "."
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                local_file = _resolve_python_import(alias.name, script_dir)
-                if local_file:
-                    inputs.append(local_file)
-        elif isinstance(node, ast.ImportFrom):
-            if node.module and node.level == 0:
-                local_file = _resolve_python_import(node.module, script_dir)
-                if local_file:
-                    inputs.append(local_file)
-            elif node.level > 0:
-                parent_dir = script_dir
-                for _ in range(node.level - 1):
-                    parent_dir = os.path.dirname(parent_dir)
-                if node.module:
-                    module_path = node.module.replace(".", os.sep)
-                    local_file = _resolve_python_import(
-                        module_path, parent_dir
-                    )
-                    if local_file:
-                        inputs.append(local_file)
-        elif isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name):
-                func_name = node.func.id
-                if func_name == "open" and len(node.args) >= 1:
-                    path = _extract_string_from_node(node.args[0])
-                    if path:
-                        mode = "r"
-                        if len(node.args) >= 2:
-                            mode_str = _extract_string_from_node(node.args[1])
-                            if mode_str:
-                                mode = mode_str
-                        for keyword in node.keywords:
-                            if keyword.arg == "mode":
-                                mode_str = _extract_string_from_node(
-                                    keyword.value
-                                )
-                                if mode_str:
-                                    mode = mode_str
-                        if "w" in mode or "a" in mode or "x" in mode:
-                            outputs.append(path)
-                        else:
-                            inputs.append(path)
-            elif isinstance(node.func, ast.Attribute):
-                module = getattr(node.func.value, "id", None)
-                if module and isinstance(module, str):
-                    func = node.func.attr
-                    if module == "pd" and func.startswith("read_"):
-                        if len(node.args) >= 1:
-                            path = _extract_string_from_node(node.args[0])
-                            if path:
-                                inputs.append(path)
-                    elif module in [
-                        "df",
-                        "data",
-                        "frame",
-                        "result",
-                    ] and func.startswith("to_"):
-                        if len(node.args) >= 1:
-                            path = _extract_string_from_node(node.args[0])
-                            if path:
-                                outputs.append(path)
-                    elif module == "np" and func in [
-                        "load",
-                        "loadtxt",
-                        "genfromtxt",
-                        "fromfile",
-                    ]:
-                        if len(node.args) >= 1:
-                            path = _extract_string_from_node(node.args[0])
-                            if path:
-                                inputs.append(path)
-                    elif module == "np" and func in [
-                        "save",
-                        "savetxt",
-                        "savez",
-                        "savez_compressed",
-                    ]:
-                        if len(node.args) >= 1:
-                            path = _extract_string_from_node(node.args[0])
-                            if path:
-                                outputs.append(path)
-                    elif func == "savefig":
-                        if len(node.args) >= 1:
-                            path = _extract_string_from_node(node.args[0])
-                            if path:
-                                outputs.append(path)
-    inputs = [p for p in inputs if _is_valid_project_path(p)]
-    outputs = [p for p in outputs if _is_valid_project_path(p)]
-    inputs = list(dict.fromkeys(inputs))
-    outputs = list(dict.fromkeys(outputs))
-    return {"inputs": inputs, "outputs": outputs}
+    return _detect_python_code_io(content, script_dir=script_dir)
 
 
 def detect_julia_script_io(script_path: str) -> dict[str, list[str]]:
@@ -403,6 +310,17 @@ def _detect_python_code_io(
                 local_file = _resolve_python_import(node.module, script_dir)
                 if local_file:
                     inputs.append(local_file)
+            elif node.level > 0:
+                parent_dir = script_dir
+                for _ in range(node.level - 1):
+                    parent_dir = os.path.dirname(parent_dir)
+                if node.module:
+                    module_path = node.module.replace(".", os.sep)
+                    local_file = _resolve_python_import(
+                        module_path, parent_dir
+                    )
+                    if local_file:
+                        inputs.append(local_file)
         elif isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name):
                 func_name = node.func.id
@@ -434,13 +352,45 @@ def _detect_python_code_io(
                             path = _extract_string_from_node(node.args[0])
                             if path:
                                 inputs.append(path)
-                    elif func.startswith("to_"):
+                    elif module in [
+                        "df",
+                        "data",
+                        "frame",
+                        "result",
+                    ] and func.startswith("to_"):
+                        if len(node.args) >= 1:
+                            path = _extract_string_from_node(node.args[0])
+                            if path:
+                                outputs.append(path)
+                    elif module == "np" and func in [
+                        "load",
+                        "loadtxt",
+                        "genfromtxt",
+                        "fromfile",
+                    ]:
+                        if len(node.args) >= 1:
+                            path = _extract_string_from_node(node.args[0])
+                            if path:
+                                inputs.append(path)
+                    elif module == "np" and func in [
+                        "save",
+                        "savetxt",
+                        "savez",
+                        "savez_compressed",
+                    ]:
+                        if len(node.args) >= 1:
+                            path = _extract_string_from_node(node.args[0])
+                            if path:
+                                outputs.append(path)
+                    elif func == "savefig":
                         if len(node.args) >= 1:
                             path = _extract_string_from_node(node.args[0])
                             if path:
                                 outputs.append(path)
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     outputs = [p for p in outputs if _is_valid_project_path(p)]
+    inputs = list(dict.fromkeys(inputs))
+    outputs = list(dict.fromkeys(outputs))
     return {"inputs": inputs, "outputs": outputs}
 
 
@@ -614,8 +564,7 @@ def detect_io(stage: dict) -> dict[str, list[str]]:
         or stage.get("notebook_path")
         or stage.get("target_path")
     )
-    environment = stage.get("environment")
-
+    environment = stage.get("environment", "_system")
     if stage_kind == "python-script" and script_path:
         return detect_python_script_io(script_path)
     elif stage_kind == "julia-script" and script_path:
@@ -634,6 +583,5 @@ def detect_io(stage: dict) -> dict[str, list[str]]:
     elif stage_kind == "shell-command":
         command = stage.get("command", "")
         return detect_shell_command_io(command)
-
     # Return empty results for unsupported or unrecognized stage kinds
     return {"inputs": [], "outputs": []}

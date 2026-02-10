@@ -194,6 +194,50 @@ def test_detect_jupyter_notebook_io_python(tmp_dir):
     assert "result.txt" in result["outputs"]
 
 
+def test_detect_jupyter_notebook_io_matplotlib(tmp_dir):
+    """Test detection of matplotlib savefig in Python Jupyter notebooks."""
+    notebook = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "source": [
+                    "import matplotlib.pyplot as plt\n",
+                    "import numpy as np\n",
+                ],
+            },
+            {
+                "cell_type": "code",
+                "source": [
+                    "x = np.linspace(0, 10, 100)\n",
+                    "y = np.sin(x)\n",
+                    "plt.plot(x, y)\n",
+                    "plt.savefig('plot.png')\n",
+                ],
+            },
+            {
+                "cell_type": "code",
+                "source": [
+                    "fig, ax = plt.subplots()\n",
+                    "ax.plot(x, y)\n",
+                    "fig.savefig('result.pdf')\n",
+                ],
+            },
+        ],
+        "metadata": {
+            "kernelspec": {
+                "language": "python",
+                "name": "python3",
+            }
+        },
+    }
+    with open("notebook.ipynb", "w") as f:
+        json.dump(notebook, f)
+    result = detect_jupyter_notebook_io("notebook.ipynb")
+    # Check detected outputs
+    assert "plot.png" in result["outputs"]
+    assert "result.pdf" in result["outputs"]
+
+
 def test_detect_jupyter_notebook_io_julia(tmp_dir):
     """Test detection of inputs and outputs from Julia Jupyter notebooks."""
     notebook = {

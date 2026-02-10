@@ -1823,6 +1823,7 @@ def execute_and_record(
         detect_shell_script_io,
     )
     from calkit.environments import detect_default_env, env_from_name_or_path
+    from calkit.matlab import detect_matlab_command_io, detect_matlab_script_io
     from calkit.models.io import PathOutput
     from calkit.models.pipeline import (
         JuliaCommandStage,
@@ -2019,6 +2020,19 @@ def execute_and_record(
                 detected_outputs = io_info["outputs"]
             elif stage["kind"] == "latex" and script_path:
                 io_info = detect_latex_io(script_path, environment=env_name)
+                detected_inputs = io_info["inputs"]
+                detected_outputs = io_info["outputs"]
+            elif stage["kind"] == "matlab-script" and script_path:
+                io_info = detect_matlab_script_io(
+                    script_path, environment=env_name
+                )
+                detected_inputs = io_info["inputs"]
+                detected_outputs = io_info["outputs"]
+            elif stage["kind"] == "matlab-command":
+                command = stage.get("command", "")
+                io_info = detect_matlab_command_io(
+                    command, environment=env_name
+                )
                 detected_inputs = io_info["inputs"]
                 detected_outputs = io_info["outputs"]
             elif stage["kind"] == "shell-command":

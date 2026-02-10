@@ -2138,7 +2138,8 @@ def execute_and_record(
         stage_obj = cls.model_validate(stage)
     except Exception as e:
         raise_error(f"Failed to create stage: {e}")
-    stages[stage_name] = stage_obj.model_dump()
+    stage_dict = stage_obj.model_dump()
+    stages[stage_name] = stage_dict
     pipeline["stages"] = stages
     ck_info["pipeline"] = pipeline
     with open("calkit.yaml", "w") as f:
@@ -2147,7 +2148,7 @@ def execute_and_record(
         run(targets=[stage_name])
         typer.echo(
             f"Stage '{stage_name}' executed successfully and added to the "
-            f"pipeline:\n{json.dumps(stage)}"
+            f"pipeline:\n{json.dumps(stage_dict)}"
         )
     except Exception as e:
         # If the stage failed, write the old ck_info back to calkit.yaml to

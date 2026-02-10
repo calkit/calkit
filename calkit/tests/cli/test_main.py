@@ -731,3 +731,320 @@ def test_map_paths(tmp_dir):
         ["calkit", "map-paths", "--file-to-dir", "test.txt->paper/data"]
     )
     assert os.path.isfile("paper/data/test.txt")
+
+
+def test_execute_and_record_python_script(tmp_dir):
+    """Test xr command with Python script."""
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-venv",
+            "-n",
+            "py-env",
+            "--python",
+            "3.12",
+            "setuptools",
+        ]
+    )
+    # Create a simple Python script with I/O
+    with open("process.py", "w") as f:
+        f.write("""
+# Read input
+with open('input.txt', 'r') as f:
+    data = f.read()
+
+# Write output
+with open('output.txt', 'w') as f:
+    f.write(data.upper())
+
+print("Processing complete")
+""")
+    # Create input file
+    with open("input.txt", "w") as f:
+        f.write("hello world")
+    # Execute and record
+    result = subprocess.run(
+        ["calkit", "xr", "process.py", "-e", "py-env"],
+        capture_output=True,
+        text=True,
+    )
+    print("stdout:", result.stdout)
+    print("stderr:", result.stderr)
+    assert result.returncode == 0
+    assert "Processing complete" in result.stdout
+    # Verify stage was added to pipeline
+    ck_info = calkit.load_calkit_info()
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    assert "process" in stages
+    stage = stages["process"]
+    assert stage["kind"] == "python-script"
+    assert stage["script_path"] == "process.py"
+    assert stage["environment"] == "py-env"
+    # Verify I/O detection
+    assert "input.txt" in stage["inputs"]
+    # Check output was created
+    assert os.path.exists("output.txt")
+    with open("output.txt", "r") as f:
+        assert f.read() == "HELLO WORLD"
+    # Verify output was detected
+    outputs = stage.get("outputs", [])
+    output_paths = [
+        out["path"] if isinstance(out, dict) else out for out in outputs
+    ]
+    assert "output.txt" in output_paths
+
+
+def test_execute_and_record_shell_command(tmp_dir):
+    """Test xr command with shell command."""
+    subprocess.check_call(["calkit", "init"])
+    # Create a simple docker environment for shell commands
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "docker-env",
+            "-n",
+            "shell-env",
+            "--image",
+            "shell-env",
+            "--from",
+            "ubuntu",
+        ]
+    )
+    # Execute shell command
+    result = subprocess.run(
+        [
+            "calkit",
+            "xr",
+            "echo",
+            "Hello World",
+            "--stage",
+            "greet",
+            "-e",
+            "shell-env",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    print("stdout:", result.stdout)
+    print("stderr:", result.stderr)
+    assert result.returncode == 0
+    assert "Hello World" in result.stdout
+    # Verify stage was added
+    ck_info = calkit.load_calkit_info()
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    assert "greet" in stages
+    stage = stages["greet"]
+    assert stage["kind"] == "shell-command"
+    assert stage["command"] == "echo Hello World"
+    assert stage["environment"] == "shell-env"
+
+
+def test_execute_and_record_julia_script(tmp_dir):
+    """Test xr command with Julia script."""
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        ["calkit", "new", "julia-env", "-n", "jl-env", "CSV"]
+    )
+    # Create a simple Julia script that doesn't need CSV
+    with open("analyze.jl", "w") as f:
+        f.write("""
+println("Analysis complete")
+""")
+    # Execute and record
+    result = subprocess.run(
+        ["calkit", "xr", "analyze.jl", "-e", "jl-env"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    # Verify stage was added
+    ck_info = calkit.load_calkit_info()
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    assert "analyze" in stages
+    stage = stages["analyze"]
+    assert stage["kind"] == "julia-script"
+    assert stage["script_path"] == "analyze.jl"
+    assert stage["environment"] == "jl-env"
+
+
+@pytest.mark.skipif(
+    shutil.which("matlab") is None, reason="MATLAB not installed"
+)
+def test_execute_and_record_matlab_script(tmp_dir):
+    """Test xr command with MATLAB script."""
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "docker-env",
+            "-n",
+            "matlab-env",
+            "--image",
+            "mathworks/matlab:latest",
+        ]
+    )
+    # Create a MATLAB script
+    with open("compute.m", "w") as f:
+        f.write("""
+data = load('input.mat');
+result = data.value * 2;
+save('output.mat', 'result');
+disp('Computation complete');
+""")
+    # Create input file (simplified - would need actual MAT file)
+    with open("input.mat", "w") as f:
+        f.write("dummy")
+    # Execute and record
+    result = subprocess.run(
+        ["calkit", "xr", "compute.m", "-e", "matlab-env"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    # Verify stage was added
+    ck_info = calkit.load_calkit_info()
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    assert "compute" in stages
+    stage = stages["compute"]
+    assert stage["kind"] == "matlab-script"
+    assert stage["script_path"] == "compute.m"
+
+
+def test_execute_and_record_with_user_inputs_outputs(tmp_dir):
+    """Test xr command with user-specified inputs and outputs."""
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-venv",
+            "-n",
+            "py-env",
+            "--python",
+            "3.12",
+            "numpy",
+        ]
+    )
+    # Create a script
+    with open("calc.py", "w") as f:
+        f.write("""
+import numpy as np
+
+# This won't be detected automatically
+arr = np.array([1, 2, 3])
+np.save('data.npy', arr)
+""")
+    # Create the input file that we'll reference
+    with open("config.txt", "w") as f:
+        f.write("test config")
+    # Execute with explicit inputs/outputs
+    result = subprocess.run(
+        [
+            "calkit",
+            "xr",
+            "calc.py",
+            "-e",
+            "py-env",
+            "--input",
+            "config.txt",
+            "--output",
+            "data.npy",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    print("stdout:", result.stdout)
+    print("stderr:", result.stderr)
+    assert result.returncode == 0
+    # Verify inputs/outputs
+    ck_info = calkit.load_calkit_info()
+    stage = ck_info["pipeline"]["stages"]["calc"]
+    assert "config.txt" in stage["inputs"]
+    # Find the data.npy output
+    outputs = stage["outputs"]
+    assert any(
+        out["path"] == "data.npy"
+        if isinstance(out, dict)
+        else out == "data.npy"
+        for out in outputs
+    )
+
+
+def test_execute_and_record_failure_rollback(tmp_dir):
+    """Test that xr rolls back pipeline changes if execution fails."""
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-venv",
+            "-n",
+            "py-env",
+            "--python",
+            "3.12",
+            "setuptools",
+        ]
+    )
+    # Create a failing script
+    with open("fail.py", "w") as f:
+        f.write("""
+raise RuntimeError("Intentional failure")
+""")
+    # Execute and expect failure
+    result = subprocess.run(
+        ["calkit", "xr", "fail.py", "-e", "py-env"],
+        capture_output=True,
+        text=True,
+    )
+    print("stdout:", result.stdout)
+    print("stderr:", result.stderr)
+    assert result.returncode != 0
+    # Verify stage was NOT added to pipeline
+    ck_info = calkit.load_calkit_info()
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    assert "fail" not in stages
+
+
+def test_execute_and_record_no_io_detect(tmp_dir):
+    """Test xr command with I/O detection disabled."""
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-venv",
+            "-n",
+            "py-env",
+            "--python",
+            "3.12",
+            "setuptools",
+        ]
+    )
+    # Create a script with I/O
+    with open("script.py", "w") as f:
+        f.write("""
+with open('input.txt', 'r') as f:
+    data = f.read()
+with open('output.txt', 'w') as f:
+    f.write(data)
+""")
+    with open("input.txt", "w") as f:
+        f.write("test")
+    # Execute with detection disabled
+    result = subprocess.run(
+        ["calkit", "xr", "script.py", "-e", "py-env", "--no-detect-io"],
+        capture_output=True,
+        text=True,
+    )
+    print("stdout:", result.stdout)
+    print("stderr:", result.stderr)
+    assert result.returncode == 0
+    # Verify no automatic I/O was detected (inputs will be empty)
+    ck_info = calkit.load_calkit_info()
+    stage = ck_info["pipeline"]["stages"]["script"]
+    # With --no-detect-io, no inputs should be detected (not even the script)
+    assert len(stage.get("inputs", [])) == 0

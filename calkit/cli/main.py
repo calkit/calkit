@@ -1830,6 +1830,8 @@ def execute_and_record(
         JuliaScriptStage,
         JupyterNotebookStage,
         LatexStage,
+        MatlabCommandStage,
+        MatlabScriptStage,
         PythonScriptStage,
         ShellCommandStage,
         ShellScriptStage,
@@ -1932,7 +1934,21 @@ def execute_and_record(
     elif first_arg == "julia" and len(cmd) > 1:
         cls = JuliaCommandStage
         stage["kind"] = "julia-command"
-        stage["julia_command"] = " ".join(cmd[1:])
+        stage["command"] = " ".join(cmd[1:])
+    elif first_arg == "matlab" and len(cmd) > 1 and cmd[1].endswith(".m"):
+        cls = MatlabScriptStage
+        stage["kind"] = "matlab-script"
+        stage["script_path"] = cmd[1]
+        script_path = cmd[1]
+    elif first_arg.endswith(".m"):
+        cls = MatlabScriptStage
+        stage["kind"] = "matlab-script"
+        stage["script_path"] = first_arg
+        script_path = first_arg
+    elif first_arg == "matlab" and len(cmd) > 1:
+        cls = MatlabCommandStage
+        stage["kind"] = "matlab-command"
+        stage["command"] = " ".join(cmd[1:])
     elif first_arg.endswith((".sh", ".bash", ".zsh")):
         cls = ShellScriptStage
         stage["kind"] = "shell-script"
@@ -1979,6 +1995,7 @@ def execute_and_record(
             "jupyter-notebook",
             "python-script",
             "julia-script",
+            "matlab-script",
             "shell-script",
             "latex",
         ]:

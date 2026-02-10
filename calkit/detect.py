@@ -555,3 +555,44 @@ def _detect_r_code_io(code: str) -> dict[str, list[str]]:
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     outputs = [p for p in outputs if _is_valid_project_path(p)]
     return {"inputs": inputs, "outputs": outputs}
+
+
+def generate_stage_name(
+    stage_kind: str, first_arg: str, cmd: list[str]
+) -> str | None:
+    """Generate a stage name from the stage kind and command.
+
+    Parameters
+    ----------
+    stage_kind : str
+        The kind of stage (e.g., "python-script", "shell-command").
+    first_arg : str
+        The first argument of the command.
+    cmd : list[str]
+        The full command as a list of strings.
+
+    Returns
+    -------
+    str | None
+        The generated stage name, or None if it cannot be determined.
+    """
+    # Only auto-generate names for script/notebook stages
+    if stage_kind not in [
+        "jupyter-notebook",
+        "python-script",
+        "julia-script",
+        "matlab-script",
+        "shell-script",
+        "latex",
+    ]:
+        return None
+    # Extract base name from the script/notebook path
+    base_name = os.path.splitext(os.path.basename(first_arg))[0]
+    stage_name = base_name
+    # Append args if present (skip first arg which is the script itself)
+    if len(cmd) > 1:
+        args_part = "-".join(cmd[1:])
+        stage_name += "-" + args_part
+    # Convert to kebab-case
+    stage_name = stage_name.replace("_", "-").lower()
+    return stage_name

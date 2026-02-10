@@ -1821,6 +1821,7 @@ def execute_and_record(
         detect_python_script_io,
         detect_shell_command_io,
         detect_shell_script_io,
+        generate_stage_name,
     )
     from calkit.environments import detect_default_env, env_from_name_or_path
     from calkit.matlab import detect_matlab_command_io, detect_matlab_script_io
@@ -1989,24 +1990,7 @@ def execute_and_record(
         ck_info = calkit.load_calkit_info()
     # Create a stage name if one isn't provided
     if stage_name is None:
-        # If this is a script or notebook stage, use the script/notebook name
-        # as the stage name, appending args and making kebab-case
-        if stage["kind"] in [
-            "jupyter-notebook",
-            "python-script",
-            "julia-script",
-            "matlab-script",
-            "shell-script",
-            "latex",
-        ]:
-            base_name = os.path.splitext(os.path.basename(first_arg))[0]
-            stage_name = base_name
-            if len(cmd) > 1:
-                args_part = "-".join(
-                    cmd[1:]
-                )  # This is a naive way to include args in the name
-                stage_name += "-" + args_part
-            stage_name = stage_name.replace("_", "-").lower()
+        stage_name = generate_stage_name(stage["kind"], first_arg, cmd)
     if stage_name is None:
         raise_error(
             "Could not determine stage name; Please specify with --stage"

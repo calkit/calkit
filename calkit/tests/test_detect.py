@@ -10,6 +10,7 @@ from calkit.detect import (
     detect_python_script_io,
     detect_shell_command_io,
     detect_shell_script_io,
+    generate_stage_name,
 )
 
 
@@ -402,3 +403,56 @@ def test_detect_latex_io_with_docker_env(tmp_dir):
     assert "references.bib" in result["inputs"]
     # Check that outputs are empty (handled by LatexStage)
     assert result["outputs"] == []
+
+
+def test_generate_stage_name():
+    """Test stage name generation from commands."""
+    # Test Python script without args
+    name = generate_stage_name("python-script", "process.py", ["process.py"])
+    assert name == "process"
+    # Test Python script with args
+    name = generate_stage_name(
+        "python-script", "process.py", ["process.py", "--verbose", "input.txt"]
+    )
+    assert name == "process---verbose-input.txt"
+    # Test Julia script
+    name = generate_stage_name("julia-script", "analyze.jl", ["analyze.jl"])
+    assert name == "analyze"
+    # Test MATLAB script
+    name = generate_stage_name(
+        "matlab-script", "run_simulation.m", ["run_simulation.m"]
+    )
+    assert name == "run-simulation"
+    # Test notebook
+    name = generate_stage_name(
+        "jupyter-notebook", "analysis.ipynb", ["analysis.ipynb"]
+    )
+    assert name == "analysis"
+    # Test shell script
+    name = generate_stage_name(
+        "shell-script", "build.sh", ["build.sh", "production"]
+    )
+    assert name == "build-production"
+    # Test LaTeX document
+    name = generate_stage_name("latex", "paper.tex", ["paper.tex"])
+    assert name == "paper"
+    # Test with path (should use basename)
+    name = generate_stage_name(
+        "python-script", "scripts/process_data.py", ["scripts/process_data.py"]
+    )
+    assert name == "process-data"
+    # Test underscore to dash conversion
+    name = generate_stage_name(
+        "python-script", "my_script.py", ["my_script.py"]
+    )
+    assert name == "my-script"
+    # Test shell command (should return None)
+    name = generate_stage_name(
+        "shell-command", "echo", ["echo", "Hello World"]
+    )
+    assert name is None
+    # Test matlab command (should return None)
+    name = generate_stage_name(
+        "matlab-command", "matlab", ["matlab", "disp('test')"]
+    )
+    assert name is None

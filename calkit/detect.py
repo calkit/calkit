@@ -281,6 +281,8 @@ def detect_latex_io(tex_path: str) -> dict[str, list[str]]:
     outputs = []
     if not os.path.exists(tex_path):
         return {"inputs": inputs, "outputs": outputs}
+    # Get the directory of the LaTeX file for resolving relative references
+    tex_dir = os.path.dirname(tex_path)
     try:
         with open(tex_path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -304,14 +306,21 @@ def detect_latex_io(tex_path: str) -> dict[str, list[str]]:
                 for f in files:
                     if not f.endswith(".bib"):
                         f += ".bib"
-                    inputs.append(f)
+                    # Resolve relative to the document directory
+                    resolved = os.path.normpath(os.path.join(tex_dir, f))
+                    inputs.append(resolved)
             elif pattern_type == "tex":
-                if not match.endswith(".tex"):
-                    inputs.append(match + ".tex")
-                else:
-                    inputs.append(match)
+                filename = match
+                if not filename.endswith(".tex"):
+                    filename += ".tex"
+                # Resolve relative to the document directory
+                resolved = os.path.normpath(os.path.join(tex_dir, filename))
+                inputs.append(resolved)
             else:
-                inputs.append(match)
+                # Include graphics or other files
+                # Resolve relative to the document directory
+                resolved = os.path.normpath(os.path.join(tex_dir, match))
+                inputs.append(resolved)
     # Filter and deduplicate inputs
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     inputs = list(dict.fromkeys(inputs))

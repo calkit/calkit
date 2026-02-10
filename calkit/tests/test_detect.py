@@ -1,6 +1,7 @@
 """Tests for the ``calkit.detect`` module."""
 
 import json
+import os
 
 from calkit.detect import (
     detect_julia_script_io,
@@ -259,6 +260,43 @@ def test_detect_latex_io_fallback(tmp_dir):
     assert "figure.png" in result["inputs"]
     assert "plot.pdf" in result["inputs"]
     assert "refs.bib" in result["inputs"]
+    # Check that outputs are empty (handled by LatexStage)
+    assert result["outputs"] == []
+
+
+def test_detect_latex_io_in_subfolder(tmp_dir):
+    """Test detection of LaTeX inputs when document is in a subfolder."""
+    # Create a subfolder structure
+    os.makedirs("paper", exist_ok=True)
+    # Create LaTeX document in subfolder
+    latex_content = r"""
+\documentclass{article}
+\input{preamble}
+\input{chapters/intro}
+\includegraphics{figures/diagram.png}
+\bibliography{refs}
+\end{document}
+"""
+    with open("paper/main.tex", "w") as f:
+        f.write(latex_content)
+    # Create the referenced files
+    with open("paper/preamble.tex", "w") as f:
+        f.write(r"\usepackage{graphicx}" + "\n")
+    os.makedirs("paper/chapters", exist_ok=True)
+    with open("paper/chapters/intro.tex", "w") as f:
+        f.write(r"\section{Introduction}" + "\n")
+    os.makedirs("paper/figures", exist_ok=True)
+    with open("paper/figures/diagram.png", "w") as f:
+        f.write("PNG content")
+    with open("paper/refs.bib", "w") as f:
+        f.write("@article{test, title={Test}}\n")
+    # Test detection - paths should be relative to project root
+    result = detect_latex_io("paper/main.tex")
+    # Check detected inputs
+    assert "paper/preamble.tex" in result["inputs"]
+    assert "paper/chapters/intro.tex" in result["inputs"]
+    assert "paper/figures/diagram.png" in result["inputs"]
+    assert "paper/refs.bib" in result["inputs"]
     # Check that outputs are empty (handled by LatexStage)
     assert result["outputs"] == []
 

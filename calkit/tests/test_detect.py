@@ -408,51 +408,50 @@ def test_detect_latex_io_with_docker_env(tmp_dir):
 def test_generate_stage_name():
     """Test stage name generation from commands."""
     # Test Python script without args
-    name = generate_stage_name("python-script", "process.py", ["process.py"])
+    name = generate_stage_name(["process.py"])
     assert name == "process"
     # Test Python script with args
-    name = generate_stage_name(
-        "python-script", "process.py", ["process.py", "--verbose", "input.txt"]
-    )
-    assert name == "process---verbose-input.txt"
+    name = generate_stage_name(["process.py", "--verbose", "input.txt"])
+    assert name == "process-verbose-input-txt"
     # Test Julia script
-    name = generate_stage_name("julia-script", "analyze.jl", ["analyze.jl"])
+    name = generate_stage_name(["analyze.jl"])
     assert name == "analyze"
     # Test MATLAB script
-    name = generate_stage_name(
-        "matlab-script", "run_simulation.m", ["run_simulation.m"]
-    )
+    name = generate_stage_name(["run_simulation.m"])
     assert name == "run-simulation"
     # Test notebook
-    name = generate_stage_name(
-        "jupyter-notebook", "analysis.ipynb", ["analysis.ipynb"]
-    )
+    name = generate_stage_name(["analysis.ipynb"])
     assert name == "analysis"
     # Test shell script
-    name = generate_stage_name(
-        "shell-script", "build.sh", ["build.sh", "production"]
-    )
+    name = generate_stage_name(["build.sh", "production"])
     assert name == "build-production"
     # Test LaTeX document
-    name = generate_stage_name("latex", "paper.tex", ["paper.tex"])
+    name = generate_stage_name(["paper.tex"])
     assert name == "paper"
     # Test with path (should use basename)
-    name = generate_stage_name(
-        "python-script", "scripts/process_data.py", ["scripts/process_data.py"]
-    )
+    name = generate_stage_name(["scripts/process_data.py"])
     assert name == "process-data"
     # Test underscore to dash conversion
-    name = generate_stage_name(
-        "python-script", "my_script.py", ["my_script.py"]
-    )
+    name = generate_stage_name(["my_script.py"])
     assert name == "my-script"
-    # Test shell command (should return None)
-    name = generate_stage_name(
-        "shell-command", "echo", ["echo", "Hello World"]
-    )
-    assert name is None
-    # Test matlab command (should return None)
-    name = generate_stage_name(
-        "matlab-command", "matlab", ["matlab", "disp('test')"]
-    )
-    assert name is None
+    # Test shell command (returns command name)
+    name = generate_stage_name(["echo", "Hello", "World"])
+    assert name == "echo-hello-world"
+    # Test matlab command with parentheses (should be removed) and -batch (should be removed)
+    name = generate_stage_name(["matlab", "-batch", "disp('test')"])
+    assert name == "matlab-disptest"
+    # Test matlab command with -batch and other flags
+    name = generate_stage_name(["matlab", "-batch", "run_script"])
+    assert name == "matlab-run-script"
+    # Test empty command
+    name = generate_stage_name([])
+    assert name == "stage"
+    # Test with options that have multiple dashes (should consolidate)
+    name = generate_stage_name(["script.py", "--flag1", "--flag2"])
+    assert name == "script-flag1-flag2"
+    # Test with dots in filename (should be converted to dashes)
+    name = generate_stage_name(["data.process.py"])
+    assert name == "data-process"
+    # Test with dots and underscores
+    name = generate_stage_name(["my_data.processor.py"])
+    assert name == "my-data-processor"

@@ -557,42 +557,65 @@ def _detect_r_code_io(code: str) -> dict[str, list[str]]:
     return {"inputs": inputs, "outputs": outputs}
 
 
-def generate_stage_name(
-    stage_kind: str, first_arg: str, cmd: list[str]
-) -> str | None:
-    """Generate a stage name from the stage kind and command.
+def generate_stage_name(cmd: list[str]) -> str:
+    """Generate a stage name from a command.
 
     Parameters
     ----------
-    stage_kind : str
-        The kind of stage (e.g., "python-script", "shell-command").
-    first_arg : str
-        The first argument of the command.
     cmd : list[str]
         The full command as a list of strings.
 
     Returns
     -------
-    str | None
-        The generated stage name, or None if it cannot be determined.
+    str
+        The generated stage name.
     """
-    # Only auto-generate names for script/notebook stages
-    if stage_kind not in [
-        "jupyter-notebook",
-        "python-script",
-        "julia-script",
-        "matlab-script",
-        "shell-script",
-        "latex",
-    ]:
-        return None
-    # Extract base name from the script/notebook path
-    base_name = os.path.splitext(os.path.basename(first_arg))[0]
-    stage_name = base_name
-    # Append args if present (skip first arg which is the script itself)
-    if len(cmd) > 1:
-        args_part = "-".join(cmd[1:])
-        stage_name += "-" + args_part
+    if not cmd:
+        return "stage"
+    first_arg = cmd[0]
+    # Check if first arg is a script/notebook file
+    script_extensions = [
+        ".py",
+        ".jl",
+        ".m",
+        ".ipynb",
+        ".tex",
+        ".sh",
+        ".bash",
+        ".zsh",
+    ]
+    if any(first_arg.endswith(ext) for ext in script_extensions):
+        # Extract base name from the script/notebook path
+        base_name = os.path.splitext(os.path.basename(first_arg))[0]
+        stage_name = base_name
+        # Append args if present (skip first arg which is the script itself)
+        if len(cmd) > 1:
+            args_part = "-".join(cmd[1:])
+            stage_name += "-" + args_part
+    else:
+        # For commands (like "echo", "matlab", "julia", etc.)
+        # Use the command name as the base
+        stage_name = first_arg
+        if len(cmd) > 1:
+            # For MATLAB commands, filter out -batch flag
+            remaining_args = cmd[1:]
+            if first_arg == "matlab" and "-batch" in remaining_args:
+                remaining_args = [
+                    arg for arg in remaining_args if arg != "-batch"
+                ]
+
+            if remaining_args:
+                args_part = "-".join(remaining_args)
+                stage_name += "-" + args_part
+
     # Convert to kebab-case
     stage_name = stage_name.replace("_", "-").lower()
+    # Replace dots with dashes (except file extensions which are already stripped)
+    stage_name = stage_name.replace(".", "-")
+    # Remove parentheses and other special characters
+    stage_name = re.sub(r"[(){}\[\]'\"]", "", stage_name)
+    # Consolidate multiple dashes into single dashes
+    stage_name = re.sub(r"-+", "-", stage_name)
+    # Remove leading/trailing dashes
+    stage_name = stage_name.strip("-")
     return stage_name

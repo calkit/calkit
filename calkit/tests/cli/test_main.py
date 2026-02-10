@@ -1048,3 +1048,67 @@ with open('output.txt', 'w') as f:
     stage = ck_info["pipeline"]["stages"]["script"]
     # With --no-detect-io, no inputs should be detected (not even the script)
     assert len(stage.get("inputs", [])) == 0
+
+
+def test_execute_and_record_stage_name_conflict(tmp_dir):
+    """Test that xr detects and reports stage name conflicts."""
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-venv",
+            "-n",
+            "py-env",
+            "--python",
+            "3.12",
+            "setuptools",
+        ]
+    )
+    # Create two different scripts with the same base name
+    with open("process.py", "w") as f:
+        f.write("print('Version 1')")
+    # Execute and record the first version
+    result = subprocess.run(
+        ["calkit", "xr", "process.py", "-e", "py-env"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    # Now create a different script with a different path but same name
+    os.mkdir("scripts")
+    with open("scripts/process.py", "w") as f:
+        f.write("print('Version 2')")
+    # Try to execute the second version without specifying a stage name
+    result = subprocess.run(
+        ["calkit", "xr", "scripts/process.py", "-e", "py-env"],
+        capture_output=True,
+        text=True,
+    )
+    print("stdout:", result.stdout)
+    print("stderr:", result.stderr)
+    # Should fail because stage name conflicts
+    assert result.returncode != 0
+    assert "already exists with different configuration" in result.stderr
+    # Verify we can add it with an explicit stage name
+    result = subprocess.run(
+        [
+            "calkit",
+            "xr",
+            "scripts/process.py",
+            "-e",
+            "py-env",
+            "--stage",
+            "process-v2",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    # Verify both stages exist
+    ck_info = calkit.load_calkit_info()
+    stages = ck_info["pipeline"]["stages"]
+    assert "process" in stages
+    assert "process-v2" in stages
+    assert stages["process"]["script_path"] == "process.py"
+    assert stages["process-v2"]["script_path"] == "scripts/process.py"

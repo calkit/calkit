@@ -1814,6 +1814,14 @@ def execute_and_record(
     ] = None,
 ):
     """Execute a command and if successful, record in the pipeline."""
+    from calkit.detect import (
+        detect_julia_script_io,
+        detect_jupyter_notebook_io,
+        detect_latex_io,
+        detect_python_script_io,
+        detect_shell_command_io,
+        detect_shell_script_io,
+    )
     from calkit.environments import detect_default_env, env_from_name_or_path
     from calkit.models.pipeline import (
         JuliaCommandStage,
@@ -1822,6 +1830,7 @@ def execute_and_record(
         LatexStage,
         PythonScriptStage,
         ShellCommandStage,
+        ShellScriptStage,
     )
 
     # First, read the pipeline before running so we can revert if the stage
@@ -1837,37 +1846,68 @@ def execute_and_record(
     # If the first argument ends with .tex, we'll treat this as a LaTeX stage
     first_arg = cmd[0]
     stage = {}
+    script_path = None  # Track script path for I/O detection
+
     if first_arg.endswith(".ipynb"):
         cls = JupyterNotebookStage
         stage["kind"] = "jupyter-notebook"
         stage["notebook_path"] = first_arg
+        script_path = first_arg
     elif first_arg.endswith(".tex"):
         cls = LatexStage
         stage["kind"] = "latex"
         stage["target_path"] = first_arg
+        script_path = first_arg
     elif first_arg == "python" and len(cmd) > 1 and cmd[1].endswith(".py"):
         cls = PythonScriptStage
         stage["kind"] = "python-script"
         stage["script_path"] = cmd[1]
+        script_path = cmd[1]
+        if len(cmd) > 2:
+            stage["args"] = cmd[2:]
     elif first_arg.endswith(".py"):
         cls = PythonScriptStage
         stage["kind"] = "python-script"
         stage["script_path"] = first_arg
+        script_path = first_arg
+        if len(cmd) > 1:
+            stage["args"] = cmd[1:]
     elif first_arg == "julia" and len(cmd) > 1 and cmd[1].endswith(".jl"):
         cls = JuliaScriptStage
         stage["kind"] = "julia-script"
         stage["script_path"] = cmd[1]
+        script_path = cmd[1]
+        if len(cmd) > 2:
+            stage["args"] = cmd[2:]
     elif first_arg.endswith(".jl"):
         cls = JuliaScriptStage
         stage["kind"] = "julia-script"
         stage["script_path"] = first_arg
+        script_path = first_arg
+        if len(cmd) > 1:
+            stage["args"] = cmd[1:]
     elif first_arg == "julia" and len(cmd) > 1:
         cls = JuliaCommandStage
         stage["kind"] = "julia-command"
         stage["julia_command"] = " ".join(cmd[1:])
+    elif first_arg.endswith((".sh", ".bash", ".zsh")):
+        cls = ShellScriptStage
+        stage["kind"] = "shell-script"
+        stage["script_path"] = first_arg
+        script_path = first_arg
+        if len(cmd) > 1:
+            stage["args"] = cmd[1:]
+        # Detect shell type from extension
+        if first_arg.endswith(".bash"):
+            stage["shell"] = "bash"
+        elif first_arg.endswith(".zsh"):
+            stage["shell"] = "zsh"
+        else:
+            stage["shell"] = "sh"
     else:
         cls = ShellCommandStage
         stage["kind"] = "shell-command"
+        stage["command"] = " ".join(cmd)
     # Next, try to detect the environment
     if environment is None:
         res = detect_default_env(ck_info=ck_info)
@@ -1896,6 +1936,7 @@ def execute_and_record(
             "jupyter-notebook",
             "python-script",
             "julia-script",
+            "shell-script",
             "latex",
         ]:
             base_name = os.path.splitext(os.path.basename(first_arg))[0]
@@ -1913,12 +1954,65 @@ def execute_and_record(
         return
     env_name = res.name
     stage["environment"] = env_name
-    # TODO: Next, try to determine inputs and outputs
-    # Some of these could be in the command itself, and some can be detected
-    # with static analysis of the script or notebook
-    # If this is a LaTeX stage, we can look for \include and \input statements
-    # to detect, or use latexmk's
-
+    # Detect inputs and outputs if not disabled
+    detected_inputs = []
+    detected_outputs = []
+    if not no_detect_io:
+        try:
+            if stage["kind"] == "python-script" and script_path:
+                io_info = detect_python_script_io(script_path)
+                detected_inputs = io_info["inputs"]
+                detected_outputs = io_info["outputs"]
+            elif stage["kind"] == "julia-script" and script_path:
+                io_info = detect_julia_script_io(script_path)
+                detected_inputs = io_info["inputs"]
+                detected_outputs = io_info["outputs"]
+            elif stage["kind"] == "shell-script" and script_path:
+                io_info = detect_shell_script_io(script_path)
+                detected_inputs = io_info["inputs"]
+                detected_outputs = io_info["outputs"]
+            elif stage["kind"] == "jupyter-notebook" and script_path:
+                io_info = detect_jupyter_notebook_io(script_path)
+                detected_inputs = io_info["inputs"]
+                detected_outputs = io_info["outputs"]
+            elif stage["kind"] == "latex" and script_path:
+                io_info = detect_latex_io(script_path, environment=env_name)
+                detected_inputs = io_info["inputs"]
+                detected_outputs = io_info["outputs"]
+            elif stage["kind"] == "shell-command":
+                command = stage.get("command", "")
+                io_info = detect_shell_command_io(command)
+                detected_inputs = io_info["inputs"]
+                detected_outputs = io_info["outputs"]
+        except Exception as e:
+            typer.echo(
+                f"Warning: Failed to detect inputs/outputs: {e}",
+                err=True,
+            )
+    # Merge user-specified inputs/outputs with detected ones
+    # User-specified take precedence and detected ones are added if not already
+    # present
+    all_inputs = list(inputs)  # Start with user-specified
+    for detected in detected_inputs:
+        if detected not in all_inputs:
+            all_inputs.append(detected)
+    all_outputs = list(outputs)  # Start with user-specified
+    for detected in detected_outputs:
+        if detected not in all_outputs:
+            all_outputs.append(detected)
+    # Add inputs and outputs to stage
+    if all_inputs:
+        stage["inputs"] = all_inputs
+    if all_outputs:
+        stage["outputs"] = all_outputs
+    # Print detected I/O for user confirmation
+    if not no_detect_io and (detected_inputs or detected_outputs):
+        typer.echo("\nDetected I/O:")
+        if detected_inputs:
+            typer.echo(f"  Inputs: {', '.join(detected_inputs)}")
+        if detected_outputs:
+            typer.echo(f"  Outputs: {', '.join(detected_outputs)}")
+        typer.echo()
     # Create the stage, write to calkit.yaml, and run it to see if it's
     # successful
     try:

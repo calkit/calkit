@@ -485,6 +485,13 @@ def env_from_name_or_path(
                 },
                 exists=False,
             )
+        # For shell language, use _system environment
+        if language.lower() == "shell":
+            return EnvDetectResult(
+                name="_system",
+                env={"kind": "system"},
+                exists=True,
+            )
         # For other languages, try to detect a default environment
         default_env = detect_default_env(ck_info=ck_info, language=language)
         if default_env:
@@ -680,14 +687,42 @@ def detect_default_env(
         return
     # Look for typical env spec files in order
     # There must only be one, however, otherwise the default is ambiguous
-    env_spec_paths = [
-        "pyproject.toml",
-        "requirements.txt",
-        "environment.yml",
-        "Dockerfile",
-        "Project.toml",
-        "pixi.toml",
-    ]
+    # Filter by language if provided
+    if language:
+        language_lower = language.lower()
+        if language_lower == "python":
+            env_spec_paths = [
+                "pyproject.toml",
+                "requirements.txt",
+                "environment.yml",
+                "pixi.toml",
+            ]
+        elif language_lower == "julia":
+            env_spec_paths = ["Project.toml"]
+        elif language_lower == "shell":
+            env_spec_paths = ["Dockerfile"]
+        elif language_lower == "matlab":
+            env_spec_paths = ["Dockerfile"]
+        else:
+            # For other languages, use generic list
+            env_spec_paths = [
+                "pyproject.toml",
+                "requirements.txt",
+                "environment.yml",
+                "Dockerfile",
+                "Project.toml",
+                "pixi.toml",
+            ]
+    else:
+        # No language specified, use generic list
+        env_spec_paths = [
+            "pyproject.toml",
+            "requirements.txt",
+            "environment.yml",
+            "Dockerfile",
+            "Project.toml",
+            "pixi.toml",
+        ]
     present = os.listdir(".")
     present_env_specs = [p for p in env_spec_paths if p in present]
     if len(present_env_specs) == 1:

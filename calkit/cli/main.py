@@ -1960,10 +1960,12 @@ def execute_and_record(
             stage["shell"] = "zsh"
         else:
             stage["shell"] = "sh"
+        language = "shell"
     else:
         cls = ShellCommandStage
         stage["kind"] = "shell-command"
         stage["command"] = " ".join(shlex.quote(arg) for arg in cmd)
+        language = "shell"
     # Next, try to detect the environment
     try:
         res = env_from_name_or_path(

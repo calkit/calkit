@@ -411,13 +411,32 @@ class EnvDetectResult(BaseModel):
 
 
 def env_from_name_or_path(
-    name_or_path: str,
+    name_or_path: str | None = None,
     ck_info: dict | None = None,
     path_only: bool = False,
+    language: str | None = None,
 ) -> EnvDetectResult:
     """Get an environment from its name or path.
 
     Names take precedence.
+
+    Parameters
+    ----------
+    name_or_path : str | None
+        Name or path of the environment. If None and language is provided,
+        will search for or create a docker environment for that language.
+    ck_info : dict | None
+        Calkit info dict. If None, will be loaded from calkit.yaml.
+    path_only : bool
+        Only match on path, not name.
+    language : str | None
+        Language/tool to detect docker environment for (e.g., "latex").
+        Only used if name_or_path is None.
+
+    Returns
+    -------
+    EnvDetectResult
+        Environment detection result.
     """
 
     def make_name(path: str, all_env_names: list[str], kind: str) -> str:
@@ -441,15 +460,48 @@ def env_from_name_or_path(
             name = f"{kind}{n}"
         return name
 
+    # Load config and environment list
     if ck_info is None:
         ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
     all_env_names = list(envs.keys())
+    # Handle language-based environment detection
+    if name_or_path is None and language is not None:
+        # Look for a docker environment matching the language
+        for env_name, env in envs.items():
+            if env.get("kind") == "docker":
+                image = env.get("image", "").lower()
+                # Check if this looks like a language environment
+                if language.lower() in image or f"{language}mk" in image:
+                    return EnvDetectResult(name=env_name, env=env, exists=True)
+        # Only create default docker environment for latex
+        if language.lower() == "latex":
+            env_name = "latex"
+            return EnvDetectResult(
+                name=env_name,
+                env={
+                    "kind": "docker",
+                    "image": "texlive/texlive:latest-full",
+                },
+                exists=False,
+            )
+        # For other languages, try to detect a default environment
+        default_env = detect_default_env(ck_info=ck_info, language=language)
+        if default_env:
+            return default_env
+        raise ValueError(
+            f"Could not find or create environment for language: {language}"
+        )
+    # Require either name_or_path or language
+    if name_or_path is None:
+        raise ValueError("Either name_or_path or language must be provided")
+    # Check if environment exists by name or path
     for env_name, env in envs.items():
         if (not path_only and env_name == name_or_path) or env.get(
             "path"
         ) == name_or_path:
             return EnvDetectResult(name=env_name, env=env, exists=True)
+    # Check if name_or_path is a file and detect environment type
     env_path = name_or_path
     if os.path.isfile(env_path):
         if env_path.endswith("requirements.txt"):
@@ -596,11 +648,20 @@ def env_from_notebook_path(
     )
 
 
-def detect_default_env(ck_info: dict | None = None) -> EnvDetectResult | None:
+def detect_default_env(
+    ck_info: dict | None = None, language: str | None = None
+) -> EnvDetectResult | None:
     """Detect a default environment for the project.
 
     First, if the project has a single environment, we use that. Otherwise,
     we look for a single typical env spec file.
+
+    Parameters
+    ----------
+    ck_info : dict | None
+        Calkit info dict. If None, will be loaded from calkit.yaml.
+    language : str | None
+        Language to filter environments by when multiple environments exist.
     """
     if ck_info is None:
         ck_info = calkit.load_calkit_info()

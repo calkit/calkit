@@ -1825,7 +1825,7 @@ def execute_and_record(
         detect_shell_script_io,
         generate_stage_name,
     )
-    from calkit.environments import detect_default_env, env_from_name_or_path
+    from calkit.environments import env_from_name_or_path
     from calkit.matlab import detect_matlab_command_io, detect_matlab_script_io
     from calkit.models.io import PathOutput
     from calkit.models.pipeline import (
@@ -1972,7 +1972,9 @@ def execute_and_record(
         stage["command"] = " ".join(cmd)
     # Next, try to detect the environment
     if environment is None:
-        res = detect_default_env(ck_info=ck_info)
+        # For LaTeX stages, auto-detect a LaTeX environment
+        language = "latex" if stage["kind"] == "latex" else None
+        res = env_from_name_or_path(ck_info=ck_info, language=language)
         if res is None:
             raise_error(
                 "No environment specified and could not detect a default "
@@ -1980,7 +1982,7 @@ def execute_and_record(
             )
             return
     else:
-        res = env_from_name_or_path(environment, ck_info=ck_info)
+        res = env_from_name_or_path(name_or_path=environment, ck_info=ck_info)
     if res is not None and not res.exists:
         # Create the environment if it doesn't exist,
         # since we will need it to run

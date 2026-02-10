@@ -6,7 +6,6 @@ import ast
 import json
 import os
 import re
-import subprocess
 from typing import Literal
 
 
@@ -276,84 +275,43 @@ def detect_jupyter_notebook_io(
     return {"inputs": inputs, "outputs": outputs}
 
 
-def detect_latex_io(
-    tex_path: str, environment: str | None = None
-) -> dict[str, list[str]]:
-    """Detect inputs and outputs from a LaTeX file using latexmk -deps."""
+def detect_latex_io(tex_path: str) -> dict[str, list[str]]:
+    """Detect inputs and outputs from a LaTeX file using static analysis."""
     inputs = []
     outputs = []
     if not os.path.exists(tex_path):
         return {"inputs": inputs, "outputs": outputs}
-    # Try to detect dependencies using latexmk -deps
     try:
-        # Build the command to run latexmk -deps
-        cmd = []
-        if environment and environment != "_system":
-            # Run in the specified environment
-            cmd = ["calkit", "xenv", "-n", environment, "--no-check", "--"]
-        cmd.extend(["latexmk", "-deps", tex_path])
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode == 0:
-            # Parse the latexmk -deps output
-            # Format is typically: target: dep1 dep2 dep3
-            for line in result.stdout.splitlines():
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                # Parse Makefile-style dependency lines
-                if ":" in line:
-                    parts = line.split(":", 1)
-                    if len(parts) == 2:
-                        deps = parts[1].strip().split()
-                        for dep in deps:
-                            # Clean up the dependency path
-                            dep = dep.strip()
-                            if dep and _is_valid_project_path(dep):
-                                # Filter out the main tex file itself
-                                if dep != tex_path:
-                                    inputs.append(dep)
-    except (
-        subprocess.TimeoutExpired,
-        subprocess.CalledProcessError,
-        FileNotFoundError,
-    ):
-        # If latexmk fails, fall back to regex-based detection
-        try:
-            with open(tex_path, "r", encoding="utf-8") as f:
-                content = f.read()
-        except UnicodeDecodeError:
-            return {"inputs": inputs, "outputs": outputs}
-        # Remove comments
-        content = re.sub(r"(?<!\\)%.*$", "", content, flags=re.MULTILINE)
-        # Define patterns with their handling types
-        patterns = [
-            (r"\\input\{([^}]+)\}", "tex"),
-            (r"\\include\{([^}]+)\}", "tex"),
-            (r"\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}", "file"),
-            (r"\\bibliography\{([^}]+)\}", "bib"),
-            (r"\\addbibresource\{([^}]+)\}", "bib"),
-        ]
-        for pattern, pattern_type in patterns:
-            matches = re.findall(pattern, content)
-            for match in matches:
-                if pattern_type == "bib":
-                    files = [f.strip() for f in match.split(",")]
-                    for f in files:
-                        if not f.endswith(".bib"):
-                            f += ".bib"
-                        inputs.append(f)
-                elif pattern_type == "tex":
-                    if not match.endswith(".tex"):
-                        inputs.append(match + ".tex")
-                    else:
-                        inputs.append(match)
+        with open(tex_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except UnicodeDecodeError:
+        return {"inputs": inputs, "outputs": outputs}
+    # Remove comments
+    content = re.sub(r"(?<!\\)%.*$", "", content, flags=re.MULTILINE)
+    # Define patterns with their handling types
+    patterns = [
+        (r"\\input\{([^}]+)\}", "tex"),
+        (r"\\include\{([^}]+)\}", "tex"),
+        (r"\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}", "file"),
+        (r"\\bibliography\{([^}]+)\}", "bib"),
+        (r"\\addbibresource\{([^}]+)\}", "bib"),
+    ]
+    for pattern, pattern_type in patterns:
+        matches = re.findall(pattern, content)
+        for match in matches:
+            if pattern_type == "bib":
+                files = [f.strip() for f in match.split(",")]
+                for f in files:
+                    if not f.endswith(".bib"):
+                        f += ".bib"
+                    inputs.append(f)
+            elif pattern_type == "tex":
+                if not match.endswith(".tex"):
+                    inputs.append(match + ".tex")
                 else:
                     inputs.append(match)
+            else:
+                inputs.append(match)
     # Filter and deduplicate inputs
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     inputs = list(dict.fromkeys(inputs))

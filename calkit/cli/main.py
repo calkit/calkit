@@ -2067,7 +2067,7 @@ def execute_and_record(
                 detected_inputs = io_info["inputs"]
                 detected_outputs = io_info["outputs"]
             elif stage["kind"] == "latex" and script_path:
-                io_info = detect_latex_io(script_path, environment=env_name)
+                io_info = detect_latex_io(script_path)
                 detected_inputs = io_info["inputs"]
                 detected_outputs = io_info["outputs"]
             elif stage["kind"] == "matlab-script" and script_path:

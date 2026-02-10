@@ -1814,6 +1814,8 @@ def execute_and_record(
     ] = None,
 ):
     """Execute a command and if successful, record in the pipeline."""
+    import io
+
     from calkit.detect import (
         detect_julia_script_io,
         detect_jupyter_notebook_io,
@@ -2181,9 +2183,17 @@ def execute_and_record(
         calkit.ryaml.dump(ck_info, f)
     try:
         run(targets=[stage_name])
+        # Format stage as YAML for display
+        yaml_output = io.StringIO()
+        calkit.ryaml.dump({stage_name: stage}, yaml_output)
+        # Indent YAML by 2 spaces
+        indented_yaml = "\n".join(
+            "  " + line if line.strip() else line
+            for line in yaml_output.getvalue().rstrip().split("\n")
+        )
         typer.echo(
             f"Stage '{stage_name}' executed successfully and added to the "
-            f"pipeline:\n{json.dumps(stage)}"
+            f"pipeline:\n{indented_yaml}"
         )
     except Exception as e:
         # If the stage failed, write the old ck_info back to calkit.yaml to

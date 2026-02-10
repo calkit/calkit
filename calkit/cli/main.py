@@ -1831,6 +1831,7 @@ def execute_and_record(
         MatlabCommandStage,
         MatlabScriptStage,
         PythonScriptStage,
+        RScriptStage,
         ShellCommandStage,
         ShellScriptStage,
     )
@@ -1949,6 +1950,20 @@ def execute_and_record(
         stage["kind"] = "matlab-command"
         stage["command"] = " ".join(cmd[1:])
         language = "matlab"
+    elif first_arg == "Rscript" and len(cmd) > 1 and cmd[1].endswith(".R"):
+        cls = RScriptStage
+        stage["kind"] = "r-script"
+        stage["script_path"] = cmd[1]
+        if len(cmd) > 2:
+            stage["args"] = cmd[2:]
+        language = "r"
+    elif first_arg.endswith(".R"):
+        cls = RScriptStage
+        stage["kind"] = "r-script"
+        stage["script_path"] = first_arg
+        if len(cmd) > 1:
+            stage["args"] = cmd[1:]
+        language = "r"
     elif first_arg.endswith((".sh", ".bash", ".zsh")):
         cls = ShellScriptStage
         stage["kind"] = "shell-script"

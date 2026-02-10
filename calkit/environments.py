@@ -575,6 +575,13 @@ def env_from_name_or_path(
                 env={"kind": "julia", "path": env_path, "julia": "1.11"},
                 exists=False,
             )
+        elif env_path.endswith("renv.lock"):
+            # This is an R renv environment
+            return EnvDetectResult(
+                name=make_name(env_path, all_env_names, kind="renv"),
+                env={"kind": "renv", "path": env_path},
+                exists=False,
+            )
         elif "dockerfile" in env_path.lower():
             # This is a Docker env
             project_name = calkit.detect_project_name(prepend_owner=False)
@@ -699,6 +706,8 @@ def detect_default_env(
             ]
         elif language_lower == "julia":
             env_spec_paths = ["Project.toml"]
+        elif language_lower == "r":
+            env_spec_paths = ["renv.lock"]
         elif language_lower == "shell":
             env_spec_paths = ["Dockerfile"]
         elif language_lower == "matlab":
@@ -711,6 +720,7 @@ def detect_default_env(
                 "environment.yml",
                 "Dockerfile",
                 "Project.toml",
+                "renv.lock",
                 "pixi.toml",
             ]
     else:
@@ -721,6 +731,7 @@ def detect_default_env(
             "environment.yml",
             "Dockerfile",
             "Project.toml",
+            "renv.lock",
             "pixi.toml",
         ]
     present = os.listdir(".")

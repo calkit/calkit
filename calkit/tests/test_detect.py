@@ -9,6 +9,7 @@ from calkit.detect import (
     detect_jupyter_notebook_io,
     detect_latex_io,
     detect_python_script_io,
+    detect_r_script_io,
     detect_shell_command_io,
     detect_shell_script_io,
     generate_stage_name,
@@ -116,6 +117,49 @@ end
     assert "output.csv" in result["outputs"]
     assert "result.txt" in result["outputs"]
     assert "log.txt" in result["outputs"]
+
+
+def test_detect_r_script_io(tmp_dir):
+    """Test detection of inputs and outputs from R scripts."""
+    script_content = """
+source("utils.R")
+
+library(readr)
+library(ggplot2)
+
+# Read operations
+data <- read.csv("input.csv")
+rds_data <- readRDS("data.rds")
+load("workspace.RData")
+excel_data <- read_excel("data.xlsx")
+
+# Write operations
+write.csv(result, "output.csv")
+saveRDS(model, "model.rds")
+save(data, result, file="output.RData")
+ggsave("plot.png")
+write_csv(data, "clean_data.csv")
+pdf("figure.pdf")
+"""
+    with open("script.R", "w") as f:
+        f.write(script_content)
+    # Create the sourced file
+    with open("utils.R", "w") as f:
+        f.write("# utilities")
+    result = detect_r_script_io("script.R")
+    # Check detected inputs
+    assert "utils.R" in result["inputs"]
+    assert "input.csv" in result["inputs"]
+    assert "data.rds" in result["inputs"]
+    assert "workspace.RData" in result["inputs"]
+    assert "data.xlsx" in result["inputs"]
+    # Check detected outputs
+    assert "output.csv" in result["outputs"]
+    assert "model.rds" in result["outputs"]
+    assert "output.RData" in result["outputs"]
+    assert "plot.png" in result["outputs"]
+    assert "clean_data.csv" in result["outputs"]
+    assert "figure.pdf" in result["outputs"]
 
 
 def test_detect_shell_script_io(tmp_dir):

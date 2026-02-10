@@ -24,6 +24,21 @@ def detect_python_script_io(script_path: str) -> dict[str, list[str]]:
     return _detect_python_code_io(content, script_dir=script_dir)
 
 
+def detect_r_script_io(script_path: str) -> dict[str, list[str]]:
+    """Detect inputs and outputs from an R script using regex patterns."""
+    inputs = []
+    outputs = []
+    if not os.path.exists(script_path):
+        return {"inputs": inputs, "outputs": outputs}
+    try:
+        with open(script_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except UnicodeDecodeError:
+        return {"inputs": inputs, "outputs": outputs}
+    script_dir = os.path.dirname(script_path) if script_path else "."
+    return _detect_r_code_io(content, script_dir=script_dir)
+
+
 def detect_julia_script_io(script_path: str) -> dict[str, list[str]]:
     """Detect inputs and outputs from a Julia script using regex patterns."""
     inputs = []
@@ -172,7 +187,7 @@ def detect_jupyter_notebook_io(
         elif language == "julia":
             cell_io = _detect_julia_code_io(code, script_dir=notebook_dir)
         elif language == "r":
-            cell_io = _detect_r_code_io(code)
+            cell_io = _detect_r_code_io(code, script_dir=notebook_dir)
         else:
             cell_io = {"inputs": [], "outputs": []}
         inputs.extend(cell_io["inputs"])
@@ -448,22 +463,40 @@ def _resolve_python_import(
     return None
 
 
-def _detect_r_code_io(code: str) -> dict[str, list[str]]:
-    """Detect I/O from R code string (used for notebook cells)."""
+def _detect_r_code_io(
+    code: str, script_dir: str = "."
+) -> dict[str, list[str]]:
+    """Detect I/O from R code string (used for scripts and notebook cells)."""
     inputs = []
     outputs = []
     code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
+    # Detect source() calls for R script includes
+    source_pattern = r'source\s*\(\s*["\']([^"\']+\.R)["\']'
+    source_matches = re.findall(source_pattern, code, flags=re.IGNORECASE)
+    for match in source_matches:
+        if not os.path.isabs(match):
+            full_path = os.path.join(script_dir, match)
+            if os.path.exists(full_path):
+                inputs.append(os.path.relpath(full_path))
+            elif _is_valid_project_path(match):
+                inputs.append(match)
     read_patterns = [
         r'read\.(?:csv|table|delim|tsv)\s*\(\s*["\']([^"\']+)["\']',
         r'readRDS\s*\(\s*["\']([^"\']+)["\']',
         r'load\s*\(\s*["\']([^"\']+)["\']',
         r'read_csv\s*\(\s*["\']([^"\']+)["\']',
+        r'read_excel\s*\(\s*["\']([^"\']+)["\']',
+        r'fread\s*\(\s*["\']([^"\']+)["\']',
     ]
     write_patterns = [
         r'write\.(?:csv|table)\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
         r'saveRDS\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
-        r'save\s*\([^,]+,\s*file\s*=\s*["\']([^"\']+)["\']',
+        r'save\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
         r'ggsave\s*\(\s*["\']([^"\']+)["\']',
+        r'write_csv\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
+        r'write_excel\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
+        r'pdf\s*\(\s*["\']([^"\']+)["\']',
+        r'png\s*\(\s*["\']([^"\']+)["\']',
     ]
     for pattern in read_patterns:
         inputs.extend(re.findall(pattern, code))
@@ -471,6 +504,8 @@ def _detect_r_code_io(code: str) -> dict[str, list[str]]:
         outputs.extend(re.findall(pattern, code))
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     outputs = [p for p in outputs if _is_valid_project_path(p)]
+    inputs = list(dict.fromkeys(inputs))
+    outputs = list(dict.fromkeys(outputs))
     return {"inputs": inputs, "outputs": outputs}
 
 
@@ -567,6 +602,8 @@ def detect_io(stage: dict) -> dict[str, list[str]]:
     environment = stage.get("environment", "_system")
     if stage_kind == "python-script" and script_path:
         return detect_python_script_io(script_path)
+    elif stage_kind == "r-script" and script_path:
+        return detect_r_script_io(script_path)
     elif stage_kind == "julia-script" and script_path:
         return detect_julia_script_io(script_path)
     elif stage_kind == "shell-script" and script_path:

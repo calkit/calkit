@@ -563,7 +563,9 @@ def generate_stage_name(cmd: list[str]) -> str:
         # For commands (like "echo", "matlab", "julia", etc.)
         # Use the command name as the base
         stage_name = first_arg
-        if len(cmd) > 1:
+        # Shell interpreters should not include their arguments in the name
+        # (as those often contain inline scripts with special characters)
+        if first_arg not in ["bash", "sh", "zsh"] and len(cmd) > 1:
             # For MATLAB commands, filter out -batch flag
             remaining_args = cmd[1:]
             if first_arg == "matlab" and "-batch" in remaining_args:
@@ -579,8 +581,10 @@ def generate_stage_name(cmd: list[str]) -> str:
     stage_name = stage_name.replace("_", "-").lower()
     # Replace dots with dashes (except file extensions which are already stripped)
     stage_name = stage_name.replace(".", "-")
-    # Remove parentheses and other special characters
-    stage_name = re.sub(r"[(){}\[\]'\"]", "", stage_name)
+    # Replace spaces with dashes
+    stage_name = stage_name.replace(" ", "-")
+    # Remove parentheses and other special characters (including shell redirects)
+    stage_name = re.sub(r"[(){}\[\]'\"><|&;]", "", stage_name)
     # Consolidate multiple dashes into single dashes
     stage_name = re.sub(r"-+", "-", stage_name)
     # Remove leading/trailing dashes

@@ -838,7 +838,7 @@ def test_execute_and_record_shell_command(tmp_dir):
     assert "greet" in stages
     stage = stages["greet"]
     assert stage["kind"] == "shell-command"
-    assert stage["command"] == "echo Hello World"
+    assert stage["command"] == "echo 'Hello World'"
     assert stage["environment"] == "shell-env"
 
 

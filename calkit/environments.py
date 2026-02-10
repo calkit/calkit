@@ -501,6 +501,13 @@ def env_from_name_or_path(
             "path"
         ) == name_or_path:
             return EnvDetectResult(name=env_name, env=env, exists=True)
+    # Handle special _system environment
+    if name_or_path == "_system":
+        return EnvDetectResult(
+            name="_system",
+            env={"kind": "system"},
+            exists=True,
+        )
     # Check if name_or_path is a file and detect environment type
     env_path = name_or_path
     if os.path.isfile(env_path):

@@ -1815,6 +1815,7 @@ def execute_and_record(
 ):
     """Execute a command and if successful, record in the pipeline."""
     import io
+    import shlex
 
     from calkit.detect import (
         detect_julia_script_io,
@@ -1969,18 +1970,26 @@ def execute_and_record(
     else:
         cls = ShellCommandStage
         stage["kind"] = "shell-command"
-        stage["command"] = " ".join(cmd)
+        stage["command"] = " ".join(shlex.quote(arg) for arg in cmd)
     # Next, try to detect the environment
     if environment is None:
         # For LaTeX stages, auto-detect a LaTeX environment
-        language = "latex" if stage["kind"] == "latex" else None
-        res = env_from_name_or_path(ck_info=ck_info, language=language)
+        if stage["kind"] == "latex":
+            res = env_from_name_or_path(ck_info=ck_info, language="latex")
+        else:
+            res = None
         if res is None:
-            raise_error(
-                "No environment specified and could not detect a default "
-                "environment; Please specify with --environment/-e"
-            )
-            return
+            # For shell commands and scripts, fall back to _system environment
+            if stage["kind"] in ["shell-command", "shell-script"]:
+                res = env_from_name_or_path(
+                    name_or_path="_system", ck_info=ck_info
+                )
+            else:
+                raise_error(
+                    "No environment specified and could not detect a default "
+                    "environment; Please specify with --environment/-e"
+                )
+                return
     else:
         res = env_from_name_or_path(name_or_path=environment, ck_info=ck_info)
     if res is not None and not res.exists:

@@ -182,43 +182,44 @@ def detect_shell_script_io(script_path: str) -> dict[str, list[str]]:
     except UnicodeDecodeError:
         return {"inputs": inputs, "outputs": outputs}
     content = re.sub(r"#.*$", "", content, flags=re.MULTILINE)
-    input_patterns = [
-        r"<\s+(\S+)",
-        r"\bcat\s+(\S+)",
-        r"\bhead\s+(\S+)",
-        r"\btail\s+(\S+)",
-        r"\bgrep\s+[^\s]+\s+(\S+)",
-        r"\bawk\s+[^\s]+\s+(\S+)",
-        r"\bsed\s+[^\s]+\s+(\S+)",
-        r"\bcut\s+[^\s]+\s+(\S+)",
-        r"\bsort\s+(\S+)",
-    ]
+    # Output patterns
     output_patterns = [
         r">\s*(\S+)",
         r">>\s*(\S+)",
         r"\bcp\s+\S+\s+(\S+)",
         r"\bmv\s+\S+\s+(\S+)",
     ]
-    for pattern in input_patterns:
-        matches = re.findall(pattern, content)
-        for match in matches:
-            match = match.strip("\"'")
-            inputs.append(match)
     for pattern in output_patterns:
         matches = re.findall(pattern, content)
         for match in matches:
             match = match.strip("\"'")
             outputs.append(match)
-    inputs = [
-        p
-        for p in inputs
-        if _is_valid_project_path(p) and not p.startswith("/dev/")
+    # For input patterns, look for files with extensions after commands
+    input_patterns = [
+        r"<\s+(\S+)",
+        r"\bcat\s+([\S\.]+)",
+        r"\bhead\s+.*?([\S\.]+\.[\w]+)",
+        r"\btail\s+.*?([\S\.]+\.[\w]+)",
+        r"\bgrep\s+[^\s]+\s+([\S\.]+)",
+        r"\bawk\s+[^\s]+\s+([\S\.]+)",
+        r"\bsed\s+[^\s]+\s+([\S\.]+)",
+        r"\bcut\s+[^\s]+\s+([\S\.]+)",
+        r"\bsort\s+([\S\.]+)",
     ]
-    outputs = [
-        p
-        for p in outputs
-        if _is_valid_project_path(p) and not p.startswith("/dev/")
-    ]
+    for pattern in input_patterns:
+        matches = re.findall(pattern, content)
+        for match in matches:
+            # Handle multiple files
+            for file in match.split():
+                file = file.strip("\"'").strip()
+                if (
+                    file
+                    and not file.startswith("-")
+                    and not file.startswith("/dev/")
+                ):
+                    inputs.append(file)
+    inputs = [p for p in inputs if _is_valid_project_path(p)]
+    outputs = [p for p in outputs if _is_valid_project_path(p)]
     inputs = list(dict.fromkeys(inputs))
     outputs = list(dict.fromkeys(outputs))
     return {"inputs": inputs, "outputs": outputs}
@@ -283,9 +284,6 @@ def detect_latex_io(
     outputs = []
     if not os.path.exists(tex_path):
         return {"inputs": inputs, "outputs": outputs}
-    # The output is always the PDF
-    pdf_path = tex_path.removesuffix(".tex") + ".pdf"
-    outputs.append(pdf_path)
     # Try to detect dependencies using latexmk -deps
     try:
         # Build the command to run latexmk -deps
@@ -332,34 +330,33 @@ def detect_latex_io(
             return {"inputs": inputs, "outputs": outputs}
         # Remove comments
         content = re.sub(r"(?<!\\)%.*$", "", content, flags=re.MULTILINE)
-        # Look for \input and \include commands
+        # Define patterns with their handling types
         patterns = [
-            r"\\input\{([^}]+)\}",
-            r"\\include\{([^}]+)\}",
-            r"\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}",
-            r"\\bibliography\{([^}]+)\}",
-            r"\\addbibresource\{([^}]+)\}",
+            (r"\\input\{([^}]+)\}", "tex"),
+            (r"\\include\{([^}]+)\}", "tex"),
+            (r"\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}", "file"),
+            (r"\\bibliography\{([^}]+)\}", "bib"),
+            (r"\\addbibresource\{([^}]+)\}", "bib"),
         ]
-        for pattern in patterns:
+        for pattern, pattern_type in patterns:
             matches = re.findall(pattern, content)
             for match in matches:
-                if "bibliography" in pattern:
+                if pattern_type == "bib":
                     files = [f.strip() for f in match.split(",")]
                     for f in files:
                         if not f.endswith(".bib"):
                             f += ".bib"
                         inputs.append(f)
-                elif "include" in pattern or "input" in pattern:
+                elif pattern_type == "tex":
                     if not match.endswith(".tex"):
                         inputs.append(match + ".tex")
                     else:
                         inputs.append(match)
                 else:
                     inputs.append(match)
-    # Filter and deduplicate
+    # Filter and deduplicate inputs
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     inputs = list(dict.fromkeys(inputs))
-    outputs = list(dict.fromkeys(outputs))
     return {"inputs": inputs, "outputs": outputs}
 
 

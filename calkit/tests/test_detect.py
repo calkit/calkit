@@ -1,6 +1,7 @@
 """Tests for the ``calkit.detect`` module."""
 
 import json
+import subprocess
 
 from calkit.detect import (
     detect_julia_script_io,
@@ -236,7 +237,7 @@ def test_detect_jupyter_notebook_io_julia(tmp_dir):
 
 
 def test_detect_latex_io_fallback(tmp_dir):
-    """Test detection of inputs and outputs from LaTeX files (fallback mode)."""
+    """Test detection of inputs from LaTeX files (fallback mode)."""
     latex_content = r"""
 \documentclass{article}
 \input{preamble}
@@ -258,8 +259,8 @@ def test_detect_latex_io_fallback(tmp_dir):
     assert "figure.png" in result["inputs"]
     assert "plot.pdf" in result["inputs"]
     assert "refs.bib" in result["inputs"]
-    # Check detected output
-    assert "paper.pdf" in result["outputs"]
+    # Check that outputs are empty (handled by LatexStage)
+    assert result["outputs"] == []
 
 
 def test_detect_shell_command_io(tmp_dir):
@@ -325,4 +326,77 @@ def test_detect_notebook_nonexistent_file(tmp_dir):
     """Test that notebook detection handles nonexistent files gracefully."""
     result = detect_jupyter_notebook_io("nonexistent.ipynb")
     assert result["inputs"] == []
+    assert result["outputs"] == []
+
+
+def test_detect_latex_io_with_docker_env(tmp_dir):
+    """Test detection of LaTeX inputs using actual latexmk in Docker environment."""
+    # Initialize a calkit project
+    subprocess.run(
+        ["calkit", "init"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    # Create a docker environment with texlive
+    subprocess.run(
+        [
+            "calkit",
+            "new",
+            "docker-env",
+            "--name",
+            "latex",
+            "--image",
+            "texlive/texlive:latest-full",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=True,
+    )
+    # Create a LaTeX file with various dependencies
+    preamble_content = r"""
+\usepackage{graphicx}
+\usepackage{amssymb}
+"""
+    latex_content = r"""
+\documentclass{article}
+\input{preamble}
+\usepackage{graphicx}
+
+\begin{document}
+
+\section{Introduction}
+\input{introduction}
+\include{methodology}
+
+\begin{figure}
+\includegraphics[width=0.5\textwidth]{results.pdf}
+\end{figure}
+
+\bibliography{references}
+
+\end{document}
+"""
+    with open("paper.tex", "w") as f:
+        f.write(latex_content)
+    with open("preamble.tex", "w") as f:
+        f.write(preamble_content)
+    with open("introduction.tex", "w") as f:
+        f.write(r"\subsection{Background}" + "\n")
+    with open("methodology.tex", "w") as f:
+        f.write(r"\section{Methods}" + "\n")
+    with open("results.pdf", "w") as f:
+        f.write("PDF content")
+    with open("references.bib", "w") as f:
+        f.write("@article{test, title={Test}, author={Author}}\n")
+    # Test detect_latex_io with the docker environment
+    result = detect_latex_io("paper.tex", environment="latex")
+    # Check that dependencies are detected
+    assert "preamble.tex" in result["inputs"]
+    assert "introduction.tex" in result["inputs"]
+    assert "methodology.tex" in result["inputs"]
+    assert "results.pdf" in result["inputs"]
+    assert "references.bib" in result["inputs"]
+    # Check that outputs are empty (handled by LatexStage)
     assert result["outputs"] == []

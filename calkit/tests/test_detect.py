@@ -4,6 +4,7 @@ import json
 import os
 
 from calkit.detect import (
+    detect_io,
     detect_julia_script_io,
     detect_jupyter_notebook_io,
     detect_latex_io,
@@ -417,3 +418,99 @@ def test_generate_stage_name():
     # Test with dots and underscores
     name = generate_stage_name(["my_data.processor.py"])
     assert name == "my-data-processor"
+
+
+def test_detect_io(tmp_dir):
+    """Test the detect_io function with different stage types."""
+    # Test Python script stage
+    python_script = """
+with open('input.txt', 'r') as f:
+    data = f.read()
+with open('output.txt', 'w') as f:
+    f.write(data)
+"""
+    with open("process.py", "w") as f:
+        f.write(python_script)
+    stage = {
+        "kind": "python-script",
+        "script_path": "process.py",
+        "environment": "py",
+    }
+    result = detect_io(stage)
+    assert "input.txt" in result["inputs"]
+    assert "output.txt" in result["outputs"]
+    # Test shell command stage
+    stage = {
+        "kind": "shell-command",
+        "command": "cat input.dat > output.dat",
+        "environment": "_system",
+    }
+    result = detect_io(stage)
+    assert "input.dat" in result["inputs"]
+    assert "output.dat" in result["outputs"]
+    # Test LaTeX stage
+    latex_content = r"""
+\documentclass{article}
+\input{preamble}
+\includegraphics{figure.png}
+\end{document}
+"""
+    with open("paper.tex", "w") as f:
+        f.write(latex_content)
+    stage = {
+        "kind": "latex",
+        "target_path": "paper.tex",
+        "environment": "latex",
+    }
+    result = detect_io(stage)
+    assert "preamble.tex" in result["inputs"]
+    assert "figure.png" in result["inputs"]
+    # Test Julia script stage
+    julia_script = """
+data = readdlm("data.csv")
+writedlm("result.csv", data)
+"""
+    with open("analyze.jl", "w") as f:
+        f.write(julia_script)
+    stage = {
+        "kind": "julia-script",
+        "script_path": "analyze.jl",
+        "environment": "julia",
+    }
+    result = detect_io(stage)
+    assert "data.csv" in result["inputs"]
+    assert "result.csv" in result["outputs"]
+    # Test unsupported stage kind (should return empty)
+    stage = {
+        "kind": "unknown-stage-type",
+        "environment": "test",
+    }
+    result = detect_io(stage)
+    assert result["inputs"] == []
+    assert result["outputs"] == []
+    # Test notebook stage
+    notebook_content = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "source": [
+                    "import pandas as pd\n",
+                    "df = pd.read_csv('data.csv')\n",
+                    "df.to_csv('output.csv')",
+                ],
+            }
+        ],
+        "metadata": {},
+        "nbformat": 4,
+        "nbformat_minor": 4,
+    }
+    with open("analysis.ipynb", "w") as f:
+        json.dump(notebook_content, f)
+    stage = {
+        "kind": "jupyter-notebook",
+        "notebook_path": "analysis.ipynb",
+        "environment": "py",
+    }
+    result = detect_io(stage)
+    assert "data.csv" in result["inputs"]
+    assert "output.csv" in result["outputs"]

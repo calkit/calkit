@@ -590,3 +590,50 @@ def generate_stage_name(cmd: list[str]) -> str:
     # Remove leading/trailing dashes
     stage_name = stage_name.strip("-")
     return stage_name
+
+
+def detect_io(stage: dict) -> dict[str, list[str]]:
+    """Detect inputs and outputs for a stage based on its kind.
+
+    Parameters
+    ----------
+    stage : dict
+        Stage configuration dictionary with 'kind', 'environment', and other
+        stage-specific fields.
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Dictionary with 'inputs' and 'outputs' keys containing detected paths.
+    """
+    from calkit.matlab import detect_matlab_command_io, detect_matlab_script_io
+
+    stage_kind = stage.get("kind")
+    script_path = (
+        stage.get("script_path")
+        or stage.get("notebook_path")
+        or stage.get("target_path")
+    )
+    environment = stage.get("environment")
+
+    if stage_kind == "python-script" and script_path:
+        return detect_python_script_io(script_path)
+    elif stage_kind == "julia-script" and script_path:
+        return detect_julia_script_io(script_path)
+    elif stage_kind == "shell-script" and script_path:
+        return detect_shell_script_io(script_path)
+    elif stage_kind == "jupyter-notebook" and script_path:
+        return detect_jupyter_notebook_io(script_path)
+    elif stage_kind == "latex" and script_path:
+        return detect_latex_io(script_path)
+    elif stage_kind == "matlab-script" and script_path:
+        return detect_matlab_script_io(script_path, environment=environment)
+    elif stage_kind == "matlab-command":
+        command = stage.get("command", "")
+        return detect_matlab_command_io(command, environment=environment)
+    elif stage_kind == "shell-command":
+        command = stage.get("command", "")
+        return detect_shell_command_io(command)
+
+    # Return empty results for unsupported or unrecognized stage kinds
+    return {"inputs": [], "outputs": []}

@@ -1818,16 +1818,10 @@ def execute_and_record(
     import shlex
 
     from calkit.detect import (
-        detect_julia_script_io,
-        detect_jupyter_notebook_io,
-        detect_latex_io,
-        detect_python_script_io,
-        detect_shell_command_io,
-        detect_shell_script_io,
+        detect_io,
         generate_stage_name,
     )
     from calkit.environments import env_from_name_or_path
-    from calkit.matlab import detect_matlab_command_io, detect_matlab_script_io
     from calkit.models.io import PathOutput
     from calkit.models.pipeline import (
         JuliaCommandStage,
@@ -1897,24 +1891,20 @@ def execute_and_record(
     # If the first argument ends with .tex, we'll treat this as a LaTeX stage
     first_arg = cmd[0]
     stage = {}
-    script_path = None  # Track script path for I/O detection
     language = None
     if first_arg.endswith(".ipynb"):
         cls = JupyterNotebookStage
         stage["kind"] = "jupyter-notebook"
         stage["notebook_path"] = first_arg
-        script_path = first_arg
     elif first_arg.endswith(".tex"):
         cls = LatexStage
         stage["kind"] = "latex"
         stage["target_path"] = first_arg
-        script_path = first_arg
         language = "latex"
     elif first_arg == "python" and len(cmd) > 1 and cmd[1].endswith(".py"):
         cls = PythonScriptStage
         stage["kind"] = "python-script"
         stage["script_path"] = cmd[1]
-        script_path = cmd[1]
         if len(cmd) > 2:
             stage["args"] = cmd[2:]
         language = "python"
@@ -1922,7 +1912,6 @@ def execute_and_record(
         cls = PythonScriptStage
         stage["kind"] = "python-script"
         stage["script_path"] = first_arg
-        script_path = first_arg
         if len(cmd) > 1:
             stage["args"] = cmd[1:]
         language = "python"
@@ -1930,7 +1919,6 @@ def execute_and_record(
         cls = JuliaScriptStage
         stage["kind"] = "julia-script"
         stage["script_path"] = cmd[1]
-        script_path = cmd[1]
         if len(cmd) > 2:
             stage["args"] = cmd[2:]
         language = "julia"
@@ -1938,7 +1926,6 @@ def execute_and_record(
         cls = JuliaScriptStage
         stage["kind"] = "julia-script"
         stage["script_path"] = first_arg
-        script_path = first_arg
         if len(cmd) > 1:
             stage["args"] = cmd[1:]
         language = "julia"
@@ -1951,12 +1938,10 @@ def execute_and_record(
         cls = MatlabScriptStage
         stage["kind"] = "matlab-script"
         stage["script_path"] = cmd[1]
-        script_path = cmd[1]
     elif first_arg.endswith(".m"):
         cls = MatlabScriptStage
         stage["kind"] = "matlab-script"
         stage["script_path"] = first_arg
-        script_path = first_arg
     elif first_arg == "matlab" and len(cmd) > 1:
         cls = MatlabCommandStage
         stage["kind"] = "matlab-command"
@@ -1966,7 +1951,6 @@ def execute_and_record(
         cls = ShellScriptStage
         stage["kind"] = "shell-script"
         stage["script_path"] = first_arg
-        script_path = first_arg
         if len(cmd) > 1:
             stage["args"] = cmd[1:]
         # Detect shell type from extension
@@ -2020,44 +2004,9 @@ def execute_and_record(
     detected_outputs = []
     if not no_detect_io:
         try:
-            if stage["kind"] == "python-script" and script_path:
-                io_info = detect_python_script_io(script_path)
-                detected_inputs = io_info["inputs"]
-                detected_outputs = io_info["outputs"]
-            elif stage["kind"] == "julia-script" and script_path:
-                io_info = detect_julia_script_io(script_path)
-                detected_inputs = io_info["inputs"]
-                detected_outputs = io_info["outputs"]
-            elif stage["kind"] == "shell-script" and script_path:
-                io_info = detect_shell_script_io(script_path)
-                detected_inputs = io_info["inputs"]
-                detected_outputs = io_info["outputs"]
-            elif stage["kind"] == "jupyter-notebook" and script_path:
-                io_info = detect_jupyter_notebook_io(script_path)
-                detected_inputs = io_info["inputs"]
-                detected_outputs = io_info["outputs"]
-            elif stage["kind"] == "latex" and script_path:
-                io_info = detect_latex_io(script_path)
-                detected_inputs = io_info["inputs"]
-                detected_outputs = io_info["outputs"]
-            elif stage["kind"] == "matlab-script" and script_path:
-                io_info = detect_matlab_script_io(
-                    script_path, environment=env_name
-                )
-                detected_inputs = io_info["inputs"]
-                detected_outputs = io_info["outputs"]
-            elif stage["kind"] == "matlab-command":
-                command = stage.get("command", "")
-                io_info = detect_matlab_command_io(
-                    command, environment=env_name
-                )
-                detected_inputs = io_info["inputs"]
-                detected_outputs = io_info["outputs"]
-            elif stage["kind"] == "shell-command":
-                command = stage.get("command", "")
-                io_info = detect_shell_command_io(command)
-                detected_inputs = io_info["inputs"]
-                detected_outputs = io_info["outputs"]
+            io_info = detect_io(stage)
+            detected_inputs = io_info["inputs"]
+            detected_outputs = io_info["outputs"]
         except Exception as e:
             typer.echo(
                 f"Warning: Failed to detect inputs/outputs: {e}",
@@ -2125,11 +2074,7 @@ def execute_and_record(
             else:
                 serialized_outputs.append(output)
         stage["outputs"] = serialized_outputs
-    # Print detected I/O for user confirmation
     if not no_detect_io and (detected_inputs or detected_outputs):
-        typer.echo("\nDetected I/O:")
-        if detected_inputs:
-            typer.echo(f"  Inputs: {', '.join(detected_inputs)}")
         if detected_outputs:
             # Format output display to show storage type
             output_strs = []
@@ -2140,8 +2085,6 @@ def execute_and_record(
                     )
                 else:
                     output_strs.append(out_model)
-            typer.echo(f"  Outputs: {', '.join(output_strs)}")
-        typer.echo()
     # Create the stage, write to calkit.yaml, and run it to see if it's
     # successful
     try:

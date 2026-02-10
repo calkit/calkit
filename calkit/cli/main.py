@@ -1823,6 +1823,7 @@ def execute_and_record(
         detect_shell_script_io,
     )
     from calkit.environments import detect_default_env, env_from_name_or_path
+    from calkit.models.io import PathOutput
     from calkit.models.pipeline import (
         JuliaCommandStage,
         JuliaScriptStage,
@@ -1832,6 +1833,48 @@ def execute_and_record(
         ShellCommandStage,
         ShellScriptStage,
     )
+
+    def _determine_output_storage(
+        path: str,
+        repo: git.Repo | None = None,
+        dvc_paths: list[str] | None = None,
+    ) -> str:
+        """Determine storage type (git or dvc) for an output path.
+
+        Parameters
+        ----------
+        path : str
+            Path to check.
+        repo : git.Repo | None
+            Git repository. If None, only extension and size are checked.
+        dvc_paths : list[str] | None
+            List of paths tracked by DVC.
+
+        Returns
+        -------
+        str
+            "git" or "dvc".
+        """
+        if dvc_paths is None:
+            dvc_paths = []
+        # If already tracked by git, use git
+        if repo is not None and repo.git.ls_files(path):
+            return "git"
+        # If already tracked by dvc, use dvc
+        if path in dvc_paths:
+            return "dvc"
+        # Check extension
+        if os.path.splitext(path)[-1] in DVC_EXTENSIONS:
+            return "dvc"
+        # Check size if file exists
+        if os.path.exists(path):
+            try:
+                if calkit.get_size(path) > DVC_SIZE_THRESH_BYTES:
+                    return "dvc"
+            except (OSError, IOError):
+                pass
+        # Default to git for small/unknown files
+        return "git"
 
     # First, read the pipeline before running so we can revert if the stage
     # fails
@@ -1847,7 +1890,6 @@ def execute_and_record(
     first_arg = cmd[0]
     stage = {}
     script_path = None  # Track script path for I/O detection
-
     if first_arg.endswith(".ipynb"):
         cls = JupyterNotebookStage
         stage["kind"] = "jupyter-notebook"
@@ -1989,6 +2031,18 @@ def execute_and_record(
                 f"Warning: Failed to detect inputs/outputs: {e}",
                 err=True,
             )
+    # Initialize git repo and get DVC paths for storage determination
+    try:
+        repo = git.Repo(".")
+    except InvalidGitRepositoryError:
+        repo = None
+    dvc_paths = []
+    if repo is not None:
+        try:
+            dvc_paths = calkit.dvc.list_paths()
+        except Exception:
+            # DVC might not be initialized
+            pass
     # Merge user-specified inputs/outputs with detected ones
     # User-specified take precedence and detected ones are added if not already
     # present
@@ -1996,9 +2050,34 @@ def execute_and_record(
     for detected in detected_inputs:
         if detected not in all_inputs:
             all_inputs.append(detected)
-    all_outputs = list(outputs)  # Start with user-specified
+    # Convert detected outputs to PathOutput models with storage determination
+    detected_output_models: list[str | PathOutput] = []
     for detected in detected_outputs:
-        if detected not in all_outputs:
+        storage = _determine_output_storage(detected, repo, dvc_paths)
+        detected_output_models.append(
+            PathOutput(
+                path=detected,
+                storage=storage,  # type: ignore[arg-type]
+            )
+        )
+    # Merge outputs
+    all_outputs: list[str | PathOutput] = list(
+        outputs
+    )  # Start with user-specified
+    for detected in detected_output_models:
+        # Check if this output path is already present
+        detected_path = (
+            detected.path if isinstance(detected, PathOutput) else detected
+        )
+        already_present = False
+        for existing in all_outputs:
+            existing_path = (
+                existing.path if isinstance(existing, PathOutput) else existing
+            )
+            if existing_path == detected_path:
+                already_present = True
+                break
+        if not already_present:
             all_outputs.append(detected)
     # Add inputs and outputs to stage
     if all_inputs:
@@ -2011,7 +2090,16 @@ def execute_and_record(
         if detected_inputs:
             typer.echo(f"  Inputs: {', '.join(detected_inputs)}")
         if detected_outputs:
-            typer.echo(f"  Outputs: {', '.join(detected_outputs)}")
+            # Format output display to show storage type
+            output_strs = []
+            for out_model in detected_output_models:
+                if isinstance(out_model, PathOutput):
+                    output_strs.append(
+                        f"{out_model.path} ({out_model.storage})"
+                    )
+                else:
+                    output_strs.append(out_model)
+            typer.echo(f"  Outputs: {', '.join(output_strs)}")
         typer.echo()
     # Create the stage, write to calkit.yaml, and run it to see if it's
     # successful

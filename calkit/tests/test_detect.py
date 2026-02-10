@@ -330,7 +330,9 @@ def test_detect_notebook_nonexistent_file(tmp_dir):
 
 
 def test_detect_latex_io_with_docker_env(tmp_dir):
-    """Test detection of LaTeX inputs using actual latexmk in Docker environment."""
+    """Test detection of LaTeX inputs using actual latexmk in Docker
+    environment.
+    """
     # Initialize a calkit project
     subprocess.run(
         ["calkit", "init"],

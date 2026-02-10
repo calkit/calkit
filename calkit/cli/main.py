@@ -1757,6 +1757,193 @@ def run_in_env(
         raise_error("Environment kind not supported")
 
 
+@app.command(name="xr")
+def execute_and_record(
+    cmd: Annotated[
+        list[str],
+        typer.Argument(
+            help="Command to execute and record. "
+            "If the first argument is a script or notebook, "
+            "it will be treated as a stage with that script/notebook as "
+            "the target."
+        ),
+    ],
+    environment: Annotated[
+        str | None,
+        typer.Option(
+            "--environment",
+            "-e",
+            help="Name of or path the spec file for the environment to use.",
+        ),
+    ] = None,
+    inputs: Annotated[
+        list[str],
+        typer.Option(
+            "--input",
+            "-i",
+            help="Input paths to record.",
+        ),
+    ] = [],
+    outputs: Annotated[
+        list[str],
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output paths to record.",
+        ),
+    ] = [],
+    no_detect_io: Annotated[
+        bool,
+        typer.Option(
+            "--no-detect-io",
+            help=(
+                "Don't attempt to detect inputs and outputs from the command, "
+                "script, or notebook."
+            ),
+        ),
+    ] = False,
+    stage_name: Annotated[
+        str | None,
+        typer.Option(
+            "--stage",
+            help=(
+                "Name of the DVC stage to create for this command. If not "
+                "provided, a name will be generated automatically."
+            ),
+        ),
+    ] = None,
+):
+    """Execute a command and if successful, record in the pipeline."""
+    from calkit.environments import detect_default_env, env_from_name_or_path
+    from calkit.models.pipeline import (
+        JuliaCommandStage,
+        JuliaScriptStage,
+        JupyterNotebookStage,
+        LatexStage,
+        PythonScriptStage,
+        ShellCommandStage,
+    )
+
+    # First, read the pipeline before running so we can revert if the stage
+    # fails
+    ck_info = calkit.load_calkit_info()
+    ck_info_orig = deepcopy(ck_info)
+    pipeline = ck_info.get("pipeline", {})
+    stages = pipeline.get("stages", {})
+    # Detect what kind of stage this is based on the command
+    # If the first argument is a notebook, we'll treat this as a notebook stage
+    # If the first argument is `python`, check that the second argument is a
+    # script, otherwise it's a shell-command stage
+    # If the first argument ends with .tex, we'll treat this as a LaTeX stage
+    first_arg = cmd[0]
+    stage = {}
+    if first_arg.endswith(".ipynb"):
+        cls = JupyterNotebookStage
+        stage["kind"] = "jupyter-notebook"
+        stage["notebook_path"] = first_arg
+    elif first_arg.endswith(".tex"):
+        cls = LatexStage
+        stage["kind"] = "latex"
+        stage["target_path"] = first_arg
+    elif first_arg == "python" and len(cmd) > 1 and cmd[1].endswith(".py"):
+        cls = PythonScriptStage
+        stage["kind"] = "python-script"
+        stage["script_path"] = cmd[1]
+    elif first_arg.endswith(".py"):
+        cls = PythonScriptStage
+        stage["kind"] = "python-script"
+        stage["script_path"] = first_arg
+    elif first_arg == "julia" and len(cmd) > 1 and cmd[1].endswith(".jl"):
+        cls = JuliaScriptStage
+        stage["kind"] = "julia-script"
+        stage["script_path"] = cmd[1]
+    elif first_arg.endswith(".jl"):
+        cls = JuliaScriptStage
+        stage["kind"] = "julia-script"
+        stage["script_path"] = first_arg
+    elif first_arg == "julia" and len(cmd) > 1:
+        cls = JuliaCommandStage
+        stage["kind"] = "julia-command"
+        stage["julia_command"] = " ".join(cmd[1:])
+    else:
+        cls = ShellCommandStage
+        stage["kind"] = "shell-command"
+    # Next, try to detect the environment
+    if environment is None:
+        res = detect_default_env(ck_info=ck_info)
+        if res is None:
+            raise_error(
+                "No environment specified and could not detect a default "
+                "environment; Please specify with --environment/-e"
+            )
+            return
+    else:
+        res = env_from_name_or_path(environment, ck_info=ck_info)
+    if res is not None and not res.exists:
+        # Create the environment if it doesn't exist,
+        # since we will need it to run
+        envs = ck_info.get("environments", {})
+        envs[res.name] = res.env
+        ck_info["environments"] = envs
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        ck_info = calkit.load_calkit_info()
+    # Create a stage name if one isn't provided
+    if stage_name is None:
+        # If this is a script or notebook stage, use the script/notebook name
+        # as the stage name, appending args and making kebab-case
+        if stage["kind"] in [
+            "jupyter-notebook",
+            "python-script",
+            "julia-script",
+            "latex",
+        ]:
+            base_name = os.path.splitext(os.path.basename(first_arg))[0]
+            stage_name = base_name
+            if len(cmd) > 1:
+                args_part = "-".join(
+                    cmd[1:]
+                )  # This is a naive way to include args in the name
+                stage_name += "-" + args_part
+            stage_name = stage_name.replace("_", "-").lower()
+    if stage_name is None:
+        raise_error(
+            "Could not determine stage name; Please specify with --stage"
+        )
+        return
+    env_name = res.name
+    stage["environment"] = env_name
+    # TODO: Next, try to determine inputs and outputs
+    # Some of these could be in the command itself, and some can be detected
+    # with static analysis of the script or notebook
+    # If this is a LaTeX stage, we can look for \include and \input statements
+    # to detect, or use latexmk's
+
+    # Create the stage, write to calkit.yaml, and run it to see if it's
+    # successful
+    try:
+        stage_obj = cls.model_validate(stage)
+    except Exception as e:
+        raise_error(f"Failed to create stage: {e}")
+    stages[stage_name] = stage_obj.model_dump()
+    pipeline["stages"] = stages
+    ck_info["pipeline"] = pipeline
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    try:
+        run(targets=[stage_name])
+        typer.echo(
+            f"Stage '{stage_name}' executed successfully and added to the "
+            f"pipeline:\n{json.dumps(stage)}"
+        )
+    except Exception as e:
+        # If the stage failed, write the old ck_info back to calkit.yaml to
+        # remove the stage that we added
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info_orig, f)
+        raise_error(f"Failed to execute stage: {e}")
+
+
 @app.command(name="runproc", help="Execute a procedure (alias for 'xproc').")
 @app.command(name="xproc", help="Execute a procedure.")
 def run_procedure(

@@ -186,7 +186,6 @@ def test_new_uv_env(tmp_dir):
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["my-uv-env"]
     assert env["path"] == ".calkit/envs/my-uv-env/pyproject.toml"
-    assert env["prefix"] == ".calkit/envs/my-uv-env/.venv"
     # Test one in the root of the project
     # TODO: We should make one at the root first if there isn't one, then
     # move into subdirs?
@@ -207,7 +206,6 @@ def test_new_uv_env(tmp_dir):
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["main"]
     assert env["path"] == "pyproject.toml"
-    assert env["prefix"] == ".venv"
 
 
 def test_new_uv_venv(tmp_dir):

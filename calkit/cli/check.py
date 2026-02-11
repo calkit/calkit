@@ -255,8 +255,11 @@ def check_renv(
     This function follows the proper renv workflow:
     1. Ensure renv is installed
     2. Check if renv.lock exists
-    3. If not, but DESCRIPTION exists, initialize renv to create the lock
-    4. Call renv::restore() to install packages
+    3. If not, but DESCRIPTION exists, initialize renv and create lock
+    4. If lockfile exists, check if it's in sync with DESCRIPTION
+    5. Only update lockfile if DESCRIPTION has changed
+    6. Check if library is in sync with lockfile
+    7. Only restore packages if library is out of sync
 
     Parameters
     ----------
@@ -340,41 +343,106 @@ def check_renv(
         except subprocess.CalledProcessError:
             raise_error(f"Failed to snapshot renv in {env_dir}")
     else:
-        # Lock file exists, but update it if DESCRIPTION changed
+        # Lock file exists, check if it's in sync with DESCRIPTION
         if verbose:
-            typer.echo("Updating environment if DESCRIPTION has changed")
-        # Use hydrate to update from DESCRIPTION
-        hydrate_cmd = ["Rscript", "-e", "renv::hydrate()"]
-        if verbose:
-            typer.echo(f"Running: {' '.join(hydrate_cmd)}")
-        try:
-            subprocess.check_call(hydrate_cmd, cwd=env_dir)
-        except subprocess.CalledProcessError:
-            if verbose:
-                typer.echo(
-                    "Warning: hydrate had issues, continuing to snapshot"
-                )
-        # Always snapshot to update lock if DESCRIPTION changed
-        snapshot_cmd = [
+            typer.echo("Checking if lockfile is in sync with DESCRIPTION")
+        # Check status to see if lockfile needs updating
+        status_cmd = [
             "Rscript",
             "-e",
-            "renv::snapshot(type='explicit', prompt=FALSE)",
+            "status <- renv::status(); cat(status$synchronized)",
         ]
-        if verbose:
-            typer.echo(f"Running: {' '.join(snapshot_cmd)}")
         try:
-            subprocess.check_call(snapshot_cmd, cwd=env_dir)
+            result = subprocess.run(
+                status_cmd,
+                cwd=env_dir,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            lockfile_synced = "TRUE" in result.stdout
         except subprocess.CalledProcessError:
+            # If status fails, assume we need to update
+            lockfile_synced = False
             if verbose:
-                typer.echo("Warning: snapshot failed, using existing lock")
-    # Now restore the environment
-    restore_cmd = ["Rscript", "-e", "renv::restore(prompt=FALSE)"]
+                typer.echo("Warning: status check failed, will update lock")
+
+        if not lockfile_synced:
+            if verbose:
+                typer.echo("Lockfile out of sync, updating from DESCRIPTION")
+            # Use hydrate to update from DESCRIPTION
+            hydrate_cmd = ["Rscript", "-e", "renv::hydrate()"]
+            if verbose:
+                typer.echo(f"Running: {' '.join(hydrate_cmd)}")
+            try:
+                subprocess.check_call(hydrate_cmd, cwd=env_dir)
+            except subprocess.CalledProcessError:
+                if verbose:
+                    typer.echo(
+                        "Warning: hydrate had issues, continuing to snapshot"
+                    )
+            # Snapshot to update lock
+            snapshot_cmd = [
+                "Rscript",
+                "-e",
+                "renv::snapshot(type='explicit', prompt=FALSE)",
+            ]
+            if verbose:
+                typer.echo(f"Running: {' '.join(snapshot_cmd)}")
+            try:
+                subprocess.check_call(snapshot_cmd, cwd=env_dir)
+            except subprocess.CalledProcessError:
+                if verbose:
+                    typer.echo("Warning: snapshot failed, using existing lock")
+        else:
+            if verbose:
+                typer.echo("Lockfile is already in sync with DESCRIPTION")
+
+    # Check if library needs restoring
     if verbose:
-        typer.echo(f"Running: {' '.join(restore_cmd)}")
+        typer.echo("Checking if library is in sync with lockfile")
+    lib_status_cmd = [
+        "Rscript",
+        "-e",
+        (
+            "status <- tryCatch({"
+            "  renv::status();"
+            "  cat('synchronized');"
+            "}, error = function(e) {"
+            "  cat('needs_restore');"
+            "})"
+        ),
+    ]
     try:
-        subprocess.check_call(restore_cmd, cwd=env_dir)
+        result = subprocess.run(
+            lib_status_cmd,
+            cwd=env_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        needs_restore = "needs_restore" in result.stdout or (
+            "synchronized" not in result.stdout
+        )
     except subprocess.CalledProcessError:
-        raise_error(f"Failed to restore renv in {env_dir}")
+        # If check fails, restore to be safe
+        needs_restore = True
+        if verbose:
+            typer.echo("Warning: library status check failed, will restore")
+
+    if needs_restore:
+        if verbose:
+            typer.echo("Restoring library from lockfile")
+        restore_cmd = ["Rscript", "-e", "renv::restore(prompt=FALSE)"]
+        if verbose:
+            typer.echo(f"Running: {' '.join(restore_cmd)}")
+        try:
+            subprocess.check_call(restore_cmd, cwd=env_dir)
+        except subprocess.CalledProcessError:
+            raise_error(f"Failed to restore renv in {env_dir}")
+    else:
+        if verbose:
+            typer.echo("Library is already in sync with lockfile")
 
 
 @check_app.command(name="docker-env")

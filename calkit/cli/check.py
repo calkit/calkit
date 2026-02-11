@@ -117,6 +117,9 @@ def check_environment(
         )
     elif env["kind"] in ["pixi", "uv"]:
         cmd = [env["kind"], "lock"]
+        env_dir = os.path.dirname(env["path"])
+        if env_dir and env["kind"] == "uv":
+            cmd += ["--directory", env_dir]
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:

@@ -290,21 +290,20 @@ def check_renv(
         subprocess.check_call(install_cmd, cwd=env_dir)
     except subprocess.CalledProcessError:
         raise_error("Failed to install renv package")
-    # Check if renv.lock exists
+    # Check if DESCRIPTION and renv.lock exist
     lock_path = os.path.join(env_dir, "renv.lock")
     description_path = os.path.join(env_dir, "DESCRIPTION")
+    # Verify DESCRIPTION exists
+    if not os.path.isfile(description_path):
+        raise_error(
+            f"DESCRIPTION file not found at {description_path}. "
+            "Cannot initialize renv environment."
+        )
+    # If renv.lock doesn't exist, initialize renv and create lock from DESCRIPTION
     if not os.path.isfile(lock_path):
-        # Lock file doesn't exist - check if DESCRIPTION exists
-        if not os.path.isfile(description_path):
-            raise_error(
-                f"DESCRIPTION file not found at {description_path}. "
-                "Cannot initialize renv environment."
-            )
         if verbose:
-            typer.echo(f"Initializing renv from {description_path}")
-        # Initialize renv using the DESCRIPTION file
-        # Use renv::init() with bare=TRUE to create lock without modifying
-        # project
+            typer.echo("Initializing renv environment")
+        # Initialize renv with bare=TRUE to set up directory structure
         init_cmd = ["Rscript", "-e", "renv::init(bare=TRUE)"]
         if verbose:
             typer.echo(f"Running: {' '.join(init_cmd)}")
@@ -312,13 +311,27 @@ def check_renv(
             subprocess.check_call(init_cmd, cwd=env_dir)
         except subprocess.CalledProcessError:
             raise_error(f"Failed to initialize renv in {env_dir}")
-        # Now snapshot the environment to create the lock file from DESCRIPTION
+        # Use hydrate to install packages from DESCRIPTION and snapshot
+        if verbose:
+            typer.echo("Setting up environment from DESCRIPTION")
+        hydrate_cmd = ["Rscript", "-e", "renv::hydrate()"]
+        if verbose:
+            typer.echo(f"Running: {' '.join(hydrate_cmd)}")
+        try:
+            subprocess.check_call(hydrate_cmd, cwd=env_dir)
+        except subprocess.CalledProcessError:
+            # Hydrate might fail if packages aren't available, continue anyway
+            if verbose:
+                typer.echo(
+                    "Warning: hydrate had issues, continuing to snapshot"
+                )
+        # Always snapshot after hydrate to create lock file from DESCRIPTION
         if verbose:
             typer.echo("Creating lock file from DESCRIPTION")
         snapshot_cmd = [
             "Rscript",
             "-e",
-            "renv::snapshot(prompt=FALSE, type='all')",
+            "renv::snapshot(type='explicit', prompt=FALSE)",
         ]
         if verbose:
             typer.echo(f"Running: {' '.join(snapshot_cmd)}")
@@ -326,6 +339,34 @@ def check_renv(
             subprocess.check_call(snapshot_cmd, cwd=env_dir)
         except subprocess.CalledProcessError:
             raise_error(f"Failed to snapshot renv in {env_dir}")
+    else:
+        # Lock file exists, but update it if DESCRIPTION changed
+        if verbose:
+            typer.echo("Updating environment if DESCRIPTION has changed")
+        # Use hydrate to update from DESCRIPTION
+        hydrate_cmd = ["Rscript", "-e", "renv::hydrate()"]
+        if verbose:
+            typer.echo(f"Running: {' '.join(hydrate_cmd)}")
+        try:
+            subprocess.check_call(hydrate_cmd, cwd=env_dir)
+        except subprocess.CalledProcessError:
+            if verbose:
+                typer.echo(
+                    "Warning: hydrate had issues, continuing to snapshot"
+                )
+        # Always snapshot to update lock if DESCRIPTION changed
+        snapshot_cmd = [
+            "Rscript",
+            "-e",
+            "renv::snapshot(type='explicit', prompt=FALSE)",
+        ]
+        if verbose:
+            typer.echo(f"Running: {' '.join(snapshot_cmd)}")
+        try:
+            subprocess.check_call(snapshot_cmd, cwd=env_dir)
+        except subprocess.CalledProcessError:
+            if verbose:
+                typer.echo("Warning: snapshot failed, using existing lock")
     # Now restore the environment
     restore_cmd = ["Rscript", "-e", "renv::restore(prompt=FALSE)"]
     if verbose:

@@ -1708,8 +1708,32 @@ def run_in_env(
         assert isinstance(env_path, str)
         if not no_check:
             check_renv(env_path=env_path, wdir=wdir, verbose=verbose)
+        # For renv, we need to run from the renv project directory so renv
+        # properly initializes the library, but the script needs to run
+        # from its original working directory
+        # We set RENV_PROJECT to tell renv where to find its configuration,
+        # then create a wrapper command that changes directory before sourcing
+        # the script
+        env_dir = os.path.dirname(os.path.abspath(env_path))
+        if not env_dir:
+            env_dir = "."
+        abs_wdir = os.path.abspath(wdir) if wdir else os.getcwd()
+        env_vars = os.environ.copy()
+        env_vars["RENV_PROJECT"] = env_dir
+        # Check if the first argument is an R script
+        if cmd and cmd[0] == "Rscript" and len(cmd) > 1:
+            script_path = cmd[1]
+            script_abspath = os.path.abspath(
+                os.path.join(abs_wdir, script_path)
+            )
+            # Use -e to inline the setwd + source command instead of a temp
+            # file
+            wrapper_cmd = f'setwd("{abs_wdir}"); source("{script_abspath}")'
+            cmd = ["Rscript", "-e", wrapper_cmd] + cmd[2:]
+        if verbose:
+            typer.echo(f"Setting RENV_PROJECT={env_dir}")
         try:
-            subprocess.check_call(cmd, cwd=wdir)
+            subprocess.check_call(cmd, cwd=env_dir, env=env_vars)
         except subprocess.CalledProcessError:
             raise_error("Failed to run in renv")
     elif env["kind"] == "matlab":

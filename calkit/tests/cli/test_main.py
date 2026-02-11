@@ -870,6 +870,79 @@ println("Analysis complete")
     assert stage["environment"] == "jl-env"
 
 
+def test_execute_and_record_r_script(tmp_dir):
+    """Test xr command with R script using automated environment detection."""
+    subprocess.check_call(["calkit", "init"])
+    # Create an R script with library dependencies for auto-detection
+    with open("analyze.R", "w") as f:
+        f.write("""
+library(readr)
+library(dplyr)
+
+# Read input
+data <- read_csv("input.csv")
+
+# Process data
+result <- data %>%
+  summarise(mean_value = mean(value))
+
+# Write output
+write_csv(result, "output.csv")
+
+cat("Analysis complete\\n")
+""")
+    # Create input file
+    with open("input.csv", "w") as f:
+        f.write("value\n1\n2\n3\n")
+    # Execute and record
+    # (no environment specified; should auto-detect dependencies)
+    result = subprocess.run(
+        ["calkit", "xr", "analyze.R"],
+        capture_output=True,
+        text=True,
+    )
+    print("stdout:", result.stdout)
+    print("stderr:", result.stderr)
+    assert result.returncode == 0, f"Command failed: {result.stderr}"
+    # Verify stage was added
+    ck_info = calkit.load_calkit_info()
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    assert "analyze" in stages
+    stage = stages["analyze"]
+    assert stage["kind"] == "r-script"
+    assert stage["script_path"] == "analyze.R"
+    # Verify environment was auto-created
+    assert "environment" in stage
+    env_name = stage["environment"]
+    envs = ck_info.get("environments", {})
+    assert env_name in envs
+    env = envs[env_name]
+    assert env["kind"] == "renv"
+    # Verify DESCRIPTION file was created with detected dependencies
+    env_path = env.get("path")
+    assert env_path is not None
+    assert os.path.isfile(env_path)
+    with open(env_path, "r") as f:
+        desc_content = f.read()
+    # Check that detected packages are in DESCRIPTION
+    assert "readr" in desc_content
+    assert "dplyr" in desc_content
+    # Verify renv.lock was created during environment check
+    env_dir = os.path.dirname(env_path)
+    lock_path = os.path.join(env_dir, "renv.lock")
+    assert os.path.isfile(lock_path), f"renv.lock not found at {lock_path}"
+    # Verify I/O detection
+    assert "input.csv" in stage["inputs"]
+    # Check output was created
+    assert os.path.exists("output.csv")
+    # Verify output was detected
+    outputs = stage.get("outputs", [])
+    output_paths = [
+        out["path"] if isinstance(out, dict) else out for out in outputs
+    ]
+    assert "output.csv" in output_paths
+
+
 @pytest.mark.skipif(
     shutil.which("matlab") is None, reason="MATLAB not installed"
 )

@@ -1274,6 +1274,8 @@ def new_uv_env(
         envdir = os.path.dirname(path)
         if envdir:
             os.makedirs(envdir, exist_ok=True)
+        else:
+            envdir = "."
     if not os.path.isfile(path):
         res = subprocess.run(
             ["uv", "init", "--bare", "--directory", envdir, "--no-workspace"]

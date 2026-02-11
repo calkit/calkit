@@ -209,6 +209,20 @@ def get_env_lock_fpath(
         # Simply replace Project.toml with Manifest.toml
         env_dir = os.path.dirname(env_path)
         lock_fpath = os.path.join(env_dir, "Manifest.toml")
+    elif env_kind == "renv":
+        env_path = env.get("path")
+        if env_path is None:
+            raise ValueError(
+                "renv environments require a path pointing to DESCRIPTION"
+            )
+        env_fname = os.path.basename(env_path)
+        if not env_fname == "DESCRIPTION":
+            raise ValueError(
+                "renv environments require a path pointing to DESCRIPTION"
+            )
+        # Replace DESCRIPTION with renv.lock
+        env_dir = os.path.dirname(env_path)
+        lock_fpath = os.path.join(env_dir, "renv.lock")
     else:
         return
     if as_posix:
@@ -604,7 +618,7 @@ def env_from_name_or_path(
                 env={"kind": "julia", "path": env_path, "julia": "1.11"},
                 exists=False,
             )
-        elif env_path.endswith("renv.lock"):
+        elif env_path.endswith("DESCRIPTION"):
             # This is an R renv environment
             return EnvDetectResult(
                 name=make_env_name(env_path, all_env_names, kind="renv"),
@@ -736,7 +750,7 @@ def detect_default_env(
         elif language_lower == "julia":
             env_spec_paths = ["Project.toml"]
         elif language_lower == "r":
-            env_spec_paths = ["renv.lock"]
+            env_spec_paths = ["DESCRIPTION"]
         elif language_lower == "shell":
             env_spec_paths = ["Dockerfile"]
         elif language_lower == "matlab":
@@ -760,7 +774,7 @@ def detect_default_env(
             "environment.yml",
             "Dockerfile",
             "Project.toml",
-            "renv.lock",
+            "DESCRIPTION",
             "pixi.toml",
         ]
     present = os.listdir(".")
@@ -830,7 +844,7 @@ def create_r_description_content(dependencies: list[str]) -> str:
     str
         The DESCRIPTION file content.
     """
-    content = """Package: CalcitProject
+    content = """Package: CalkitProject
 Version: 0.0.1
 Title: Auto-generated R environment
 """

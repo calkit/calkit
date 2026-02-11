@@ -1700,12 +1700,14 @@ def run_in_env(
         with open(jobs_fpath, "w") as f:
             calkit.ryaml.dump(jobs, f)
     elif env["kind"] == "renv":
-        try:
-            subprocess.check_call(
-                ["Rscript", "-e", "'renv::restore()'"], cwd=wdir
-            )
-        except subprocess.CalledProcessError:
-            raise_error("Failed to check renv")
+        from calkit.cli.check import check_renv
+
+        env_path = env.get("path")
+        if env_path is None:
+            raise_error("renv environments require a path to DESCRIPTION")
+        assert isinstance(env_path, str)
+        if not no_check:
+            check_renv(env_path=env_path, wdir=wdir, verbose=verbose)
         try:
             subprocess.check_call(cmd, cwd=wdir)
         except subprocess.CalledProcessError:

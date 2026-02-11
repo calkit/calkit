@@ -536,6 +536,7 @@ def generate_stage_name(cmd: list[str]) -> str:
         ".sh",
         ".bash",
         ".zsh",
+        ".R",
     ]
     if any(first_arg.endswith(ext) for ext in script_extensions):
         # Extract base name from the script/notebook path
@@ -544,6 +545,15 @@ def generate_stage_name(cmd: list[str]) -> str:
         # Append args if present (skip first arg which is the script itself)
         if len(cmd) > 1:
             args_part = "-".join(cmd[1:])
+            stage_name += "-" + args_part
+    elif first_arg == "Rscript" and len(cmd) > 1 and cmd[1].endswith(".R"):
+        # Special handling for Rscript - use the script filename as base
+        script_path = cmd[1]
+        base_name = os.path.splitext(os.path.basename(script_path))[0]
+        stage_name = base_name
+        # Append remaining args if present
+        if len(cmd) > 2:
+            args_part = "-".join(cmd[2:])
             stage_name += "-" + args_part
     else:
         # For commands (like "echo", "matlab", "julia", etc.)
@@ -569,8 +579,8 @@ def generate_stage_name(cmd: list[str]) -> str:
     stage_name = stage_name.replace(".", "-")
     # Replace spaces with dashes
     stage_name = stage_name.replace(" ", "-")
-    # Remove parentheses and other special characters (including shell redirects)
-    stage_name = re.sub(r"[(){}\[\]'\"><|&;]", "", stage_name)
+    # Remove parentheses, slashes and other special characters (including shell redirects)
+    stage_name = re.sub(r"[(){}\[\]'\"><|&;/]", "", stage_name)
     # Consolidate multiple dashes into single dashes
     stage_name = re.sub(r"-+", "-", stage_name)
     # Remove leading/trailing dashes

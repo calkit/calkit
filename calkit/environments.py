@@ -410,6 +410,18 @@ class EnvDetectResult(BaseModel):
     exists: bool
 
 
+class EnvForStageResult(BaseModel):
+    """Result of detecting or creating an environment for a stage."""
+
+    name: str
+    env: dict
+    exists: bool
+    spec_path: str | None = None
+    spec_content: str | None = None
+    dependencies: list[str] = []
+    created_from_dependencies: bool = False
+
+
 def env_from_name_or_path(
     name_or_path: str | None = None,
     ck_info: dict | None = None,
@@ -740,3 +752,227 @@ def detect_default_env(
         return env_from_name_or_path(
             present_env_specs[0], ck_info=ck_info, path_only=True
         )
+
+
+def create_python_requirements_content(dependencies: list[str]) -> str:
+    """Generate requirements.txt file content from a list of dependencies.
+
+    Parameters
+    ----------
+    dependencies : list[str]
+        List of package names.
+
+    Returns
+    -------
+    str
+        The requirements.txt file content.
+    """
+    return "\n".join(dependencies) if dependencies else ""
+
+
+def create_julia_project_file_content(
+    dependencies: list[str],
+    project_name: str = "environment",
+) -> str:
+    """Generate Julia Project.toml file content from a list of dependencies.
+
+    Parameters
+    ----------
+    dependencies : list[str]
+        List of package names.
+    project_name : str
+        Name of the Julia project.
+
+    Returns
+    -------
+    str
+        The Project.toml file content.
+    """
+    if not dependencies:
+        return ""
+    content = f'name = "{project_name}"\n\n[deps]\n'
+    for dep in dependencies:
+        # Julia's Project.toml just lists package names without versions
+        # UUIDs would normally be added by Julia's package manager
+        content += f'{dep} = "*"\n'
+    return content
+
+
+def create_r_description_content(dependencies: list[str]) -> str:
+    """Generate R DESCRIPTION file content listing dependencies.
+
+    This creates a minimal DESCRIPTION file that renv can work with.
+
+    Parameters
+    ----------
+    dependencies : list[str]
+        List of R package names.
+
+    Returns
+    -------
+    str
+        The DESCRIPTION file content.
+    """
+    content = """Package: CalcitProject
+Version: 0.0.1
+Title: Auto-generated R environment
+"""
+    if dependencies:
+        imports_line = ", ".join(dependencies)
+        content += f"Imports: {imports_line}\n"
+    return content
+
+
+def detect_env_for_stage(
+    stage: dict,
+    environment: str | None = None,
+    ck_info: dict | None = None,
+    language: str | None = None,
+) -> EnvForStageResult:
+    """Detect or create an environment for a pipeline stage.
+
+    This function first attempts to detect an existing environment. If that
+    fails, it detects dependencies from the stage and creates an environment
+    spec file.
+
+    Parameters
+    ----------
+    stage : dict
+        The pipeline stage dict with 'kind' and script/notebook paths.
+    environment : str | None
+        Optional environment name or path to use. If None, will be detected.
+    ck_info : dict | None
+        Calkit info dict. If None, will be loaded from calkit.yaml.
+    language : str | None
+        Language hint for environment detection.
+
+    Returns
+    -------
+    EnvForStageResult
+        Result containing environment info, spec path, content, and dependencies.
+    """
+    from calkit.detect import (
+        detect_dependencies_from_notebook,
+        detect_julia_dependencies,
+        detect_python_dependencies,
+        detect_r_dependencies,
+    )
+
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info()
+    # First, try to detect an existing environment
+    try:
+        res = env_from_name_or_path(
+            name_or_path=environment, ck_info=ck_info, language=language
+        )
+        return EnvForStageResult(
+            name=res.name,
+            env=res.env,
+            exists=res.exists,
+            spec_path=res.env.get("path"),
+            dependencies=[],
+            created_from_dependencies=False,
+        )
+    except Exception:
+        # If we couldn't detect an environment, create one based on
+        # detected dependencies
+        pass
+    dependencies: list[str] = []
+    spec_path: str | None = None
+    spec_content: str | None = None
+    env_name: str | None = None
+    env_dict: dict = {}
+    # Detect dependencies based on stage kind
+    if stage["kind"] == "python-script":
+        dependencies = detect_python_dependencies(
+            script_path=stage["script_path"]
+        )
+        env_name = "python-env"
+        spec_path = ".calkit/envs/python-env/requirements.txt"
+        spec_content = create_python_requirements_content(dependencies)
+        env_dict = {
+            "kind": "uv-venv",
+            "path": spec_path,
+            "python": "3.14",
+            "prefix": os.path.join(os.path.dirname(spec_path), ".venv"),
+        }
+    elif stage["kind"] == "r-script":
+        dependencies = detect_r_dependencies(script_path=stage["script_path"])
+        env_name = "r-env"
+        spec_path = ".calkit/envs/r-env/DESCRIPTION"
+        spec_content = create_r_description_content(dependencies)
+        env_dict = {
+            "kind": "renv",
+            "path": spec_path,
+        }
+    elif stage["kind"] == "julia-script":
+        dependencies = detect_julia_dependencies(
+            script_path=stage["script_path"]
+        )
+        env_name = "julia-env"
+        spec_path = ".calkit/envs/julia-env/Project.toml"
+        spec_content = create_julia_project_file_content(dependencies)
+        env_dict = {
+            "kind": "julia",
+            "path": spec_path,
+        }
+    elif stage["kind"] == "jupyter-notebook":
+        notebook_lang = None
+        # Try to detect language from notebook
+        if stage["notebook_path"].endswith(".ipynb"):
+            try:
+                with open(stage["notebook_path"], "r") as f:
+                    nb = json.load(f)
+                metadata = nb.get("metadata", {})
+                kernel_info = metadata.get("kernelspec", {})
+                kernel_lang = kernel_info.get("language", "").lower()
+                if "python" in kernel_lang:
+                    notebook_lang = "python"
+                elif "julia" in kernel_lang:
+                    notebook_lang = "julia"
+                elif kernel_lang == "r":
+                    notebook_lang = "r"
+            except Exception:
+                pass
+        dependencies = detect_dependencies_from_notebook(
+            stage["notebook_path"], language=notebook_lang
+        )
+        if notebook_lang == "python" or notebook_lang is None:
+            env_name = "python-env"
+            spec_path = ".calkit/envs/python-env/requirements.txt"
+            spec_content = create_python_requirements_content(dependencies)
+            env_dict = {
+                "kind": "uv-venv",
+                "path": spec_path,
+                "python": "3.14",
+                "prefix": os.path.join(os.path.dirname(spec_path), ".venv"),
+            }
+        elif notebook_lang == "r":
+            env_name = "r-env"
+            spec_path = ".calkit/envs/r-env/DESCRIPTION"
+            spec_content = create_r_description_content(dependencies)
+            env_dict = {
+                "kind": "renv",
+                "path": spec_path,
+            }
+        elif notebook_lang == "julia":
+            env_name = "julia-env"
+            spec_path = ".calkit/envs/julia-env/Project.toml"
+            spec_content = create_julia_project_file_content(dependencies)
+            env_dict = {
+                "kind": "julia",
+                "path": spec_path,
+            }
+    if not spec_path or not env_name:
+        raise ValueError(
+            f"Could not create environment for stage kind: {stage.get('kind')}"
+        )
+    return EnvForStageResult(
+        name=env_name,
+        env=env_dict,
+        exists=False,
+        spec_path=spec_path,
+        spec_content=spec_content,
+        dependencies=dependencies,
+        created_from_dependencies=True,
+    )

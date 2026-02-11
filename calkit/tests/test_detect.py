@@ -3,17 +3,33 @@
 import json
 import os
 
+import pytest
+
 from calkit.detect import (
+    create_julia_project_file,
+    create_python_requirements_file,
+    create_r_description_file,
+    detect_dependencies_from_notebook,
     detect_io,
+    detect_julia_dependencies,
     detect_julia_script_io,
     detect_jupyter_notebook_io,
     detect_latex_io,
+    detect_python_dependencies,
     detect_python_script_io,
+    detect_r_dependencies,
     detect_r_script_io,
     detect_shell_command_io,
     detect_shell_script_io,
     generate_stage_name,
 )
+
+
+@pytest.fixture
+def tmp_dir(tmp_path, monkeypatch):
+    """Fixture to change to a temporary directory."""
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
 
 
 def test_detect_python_script_io(tmp_dir):
@@ -602,3 +618,247 @@ writedlm("result.csv", data)
     result = detect_io(stage)
     assert "data.csv" in result["inputs"]
     assert "output.csv" in result["outputs"]
+
+
+# Dependency detection tests
+
+
+def test_detect_python_dependencies_from_script(tmp_dir):
+    """Test detection of Python dependencies from a script."""
+    script_content = """
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
+import os  # stdlib
+import sys  # stdlib
+
+data = pd.read_csv("data.csv")
+"""
+    with open("script.py", "w") as f:
+        f.write(script_content)
+
+    deps = detect_python_dependencies(script_path="script.py")
+
+    assert "numpy" in deps
+    assert "pandas" in deps
+    assert "sklearn" in deps
+    assert "matplotlib" in deps
+    # stdlib modules should not be included
+    assert "os" not in deps
+    assert "sys" not in deps
+
+
+def test_detect_python_dependencies_from_code():
+    """Test detection of Python dependencies from code string."""
+    code = """
+import requests
+from flask import Flask
+import json  # stdlib
+"""
+    deps = detect_python_dependencies(code=code)
+
+    assert "requests" in deps
+    assert "flask" in deps
+    assert "json" not in deps
+
+
+def test_detect_r_dependencies_from_script(tmp_dir):
+    """Test detection of R dependencies from a script."""
+    script_content = """
+library(ggplot2)
+require(dplyr)
+library("tidyr")
+
+# This should not be detected (base package)
+library(base)
+
+data <- read.csv("data.csv")
+"""
+    with open("script.R", "w") as f:
+        f.write(script_content)
+
+    deps = detect_r_dependencies(script_path="script.R")
+
+    assert "ggplot2" in deps
+    assert "dplyr" in deps
+    assert "tidyr" in deps
+    # Base packages should not be included
+    assert "base" not in deps
+
+
+def test_detect_r_dependencies_from_code():
+    """Test detection of R dependencies from code string."""
+    code = """
+library(readr)
+require(data.table)
+"""
+    deps = detect_r_dependencies(code=code)
+
+    assert "readr" in deps
+    assert "data.table" in deps
+
+
+def test_detect_julia_dependencies_from_script(tmp_dir):
+    """Test detection of Julia dependencies from a script."""
+    script_content = """
+using DataFrames
+using CSV
+using Plots
+
+# Read data
+data = CSV.read("data.csv", DataFrame)
+"""
+    with open("script.jl", "w") as f:
+        f.write(script_content)
+
+    deps = detect_julia_dependencies(script_path="script.jl")
+
+    assert "DataFrames" in deps
+    assert "CSV" in deps
+    assert "Plots" in deps
+
+
+def test_detect_julia_dependencies_from_code():
+    """Test detection of Julia dependencies from code string."""
+    code = """
+using LinearAlgebra
+using Statistics
+"""
+    deps = detect_julia_dependencies(code=code)
+
+    assert "LinearAlgebra" in deps
+    assert "Statistics" in deps
+
+
+def test_detect_dependencies_from_python_notebook(tmp_dir):
+    """Test detection of dependencies from a Python Jupyter notebook."""
+    import json
+
+    notebook = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "source": [
+                    "import numpy as np\n",
+                    "import pandas as pd\n",
+                ],
+            },
+            {
+                "cell_type": "code",
+                "source": [
+                    "from sklearn.linear_model import LinearRegression\n",
+                ],
+            },
+        ],
+        "metadata": {
+            "kernelspec": {
+                "language": "python",
+                "name": "python3",
+            }
+        },
+    }
+
+    with open("notebook.ipynb", "w") as f:
+        json.dump(notebook, f)
+
+    deps = detect_dependencies_from_notebook("notebook.ipynb")
+
+    assert "numpy" in deps
+    assert "pandas" in deps
+    assert "sklearn" in deps
+
+
+def test_detect_dependencies_from_r_notebook(tmp_dir):
+    """Test detection of dependencies from an R Jupyter notebook."""
+    import json
+
+    notebook = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "source": [
+                    "library(ggplot2)\n",
+                    "library(dplyr)\n",
+                ],
+            },
+        ],
+        "metadata": {
+            "kernelspec": {
+                "language": "r",
+                "name": "ir",
+            }
+        },
+    }
+
+    with open("notebook.ipynb", "w") as f:
+        json.dump(notebook, f)
+
+    deps = detect_dependencies_from_notebook("notebook.ipynb")
+
+    assert "ggplot2" in deps
+    assert "dplyr" in deps
+
+
+def test_create_python_requirements_file(tmp_dir):
+    """Test creation of requirements.txt file."""
+    deps = ["numpy", "pandas", "scikit-learn"]
+    output_path = "requirements.txt"
+
+    create_python_requirements_file(deps, output_path)
+
+    assert os.path.exists(output_path)
+
+    with open(output_path, "r") as f:
+        content = f.read()
+
+    assert "numpy" in content
+    assert "pandas" in content
+    assert "scikit-learn" in content
+
+
+def test_create_julia_project_file(tmp_dir):
+    """Test creation of Julia Project.toml file."""
+    deps = ["DataFrames", "CSV", "Plots"]
+    output_path = "Project.toml"
+
+    create_julia_project_file(deps, output_path)
+
+    assert os.path.exists(output_path)
+
+    with open(output_path, "r") as f:
+        content = f.read()
+
+    assert "DataFrames" in content
+    assert "CSV" in content
+    assert "Plots" in content
+    assert "[deps]" in content
+
+
+def test_create_r_description_file(tmp_dir):
+    """Test creation of R DESCRIPTION file."""
+    deps = ["ggplot2", "dplyr", "tidyr"]
+    output_path = "DESCRIPTION"
+
+    create_r_description_file(deps, output_path)
+
+    assert os.path.exists(output_path)
+
+    with open(output_path, "r") as f:
+        content = f.read()
+
+    assert "ggplot2" in content
+    assert "dplyr" in content
+    assert "tidyr" in content
+    assert "Imports:" in content
+
+
+def test_create_files_in_subdirectory(tmp_dir):
+    """Test that spec files can be created in subdirectories."""
+    deps = ["numpy"]
+    output_path = ".calkit/envs/test-env/requirements.txt"
+
+    create_python_requirements_file(deps, output_path)
+
+    assert os.path.exists(output_path)
+    assert os.path.exists(".calkit/envs/test-env")

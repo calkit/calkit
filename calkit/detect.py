@@ -6,6 +6,7 @@ import ast
 import json
 import os
 import re
+import sys
 from typing import Literal
 
 
@@ -622,3 +623,385 @@ def detect_io(stage: dict) -> dict[str, list[str]]:
         return detect_shell_command_io(command)
     # Return empty results for unsupported or unrecognized stage kinds
     return {"inputs": [], "outputs": []}
+
+
+def _is_stdlib_module(module_name: str) -> bool:
+    """Check if a module is part of the Python standard library."""
+    # Get the base module name (before any dots)
+    base_module = module_name.split(".")[0]
+
+    # Known stdlib modules that might not be detected by other methods
+    stdlib_modules = (
+        set(sys.stdlib_module_names)
+        if hasattr(sys, "stdlib_module_names")
+        else set()
+    )
+
+    if base_module in stdlib_modules:
+        return True
+
+    # Additional check for common stdlib modules
+    common_stdlib = {
+        "os",
+        "sys",
+        "re",
+        "json",
+        "math",
+        "datetime",
+        "time",
+        "random",
+        "collections",
+        "itertools",
+        "functools",
+        "pathlib",
+        "subprocess",
+        "typing",
+        "io",
+        "copy",
+        "pickle",
+        "csv",
+        "sqlite3",
+        "unittest",
+        "logging",
+        "argparse",
+        "configparser",
+        "email",
+        "urllib",
+        "http",
+        "html",
+        "xml",
+        "hashlib",
+        "base64",
+        "tempfile",
+        "shutil",
+        "glob",
+        "fnmatch",
+        "contextlib",
+        "abc",
+        "dataclasses",
+        "enum",
+        "decimal",
+        "fractions",
+        "statistics",
+        "platform",
+        "socket",
+        "ssl",
+        "asyncio",
+        "concurrent",
+        "multiprocessing",
+        "threading",
+        "queue",
+        "warnings",
+    }
+
+    return base_module in common_stdlib
+
+
+def detect_python_dependencies(
+    script_path: str | None = None,
+    code: str | None = None,
+) -> list[str]:
+    """Detect non-stdlib dependencies from a Python script or code string.
+
+    Parameters
+    ----------
+    script_path : str | None
+        Path to Python script. Either this or code must be provided.
+    code : str | None
+        Python code string. Either this or script_path must be provided.
+
+    Returns
+    -------
+    list[str]
+        List of non-stdlib package names.
+    """
+    if script_path is None and code is None:
+        raise ValueError("Either script_path or code must be provided")
+
+    if code is None:
+        assert script_path is not None  # Type guard
+        if not os.path.exists(script_path):
+            return []
+        try:
+            with open(script_path, "r", encoding="utf-8") as f:
+                code = f.read()
+        except (UnicodeDecodeError, IOError):
+            return []
+
+    assert code is not None  # Type guard
+    dependencies = set()
+
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                module_name = alias.name
+                if not _is_stdlib_module(module_name):
+                    # Get the top-level package name
+                    top_level = module_name.split(".")[0]
+                    dependencies.add(top_level)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module and node.level == 0:
+                module_name = node.module
+                if not _is_stdlib_module(module_name):
+                    top_level = module_name.split(".")[0]
+                    dependencies.add(top_level)
+
+    return sorted(list(dependencies))
+
+
+def detect_r_dependencies(
+    script_path: str | None = None,
+    code: str | None = None,
+) -> list[str]:
+    """Detect package dependencies from an R script or code string.
+
+    Parameters
+    ----------
+    script_path : str | None
+        Path to R script. Either this or code must be provided.
+    code : str | None
+        R code string. Either this or script_path must be provided.
+
+    Returns
+    -------
+    list[str]
+        List of R package names.
+    """
+    if script_path is None and code is None:
+        raise ValueError("Either script_path or code must be provided")
+
+    if code is None:
+        assert script_path is not None  # Type guard
+        if not os.path.exists(script_path):
+            return []
+        try:
+            with open(script_path, "r", encoding="utf-8") as f:
+                code = f.read()
+        except (UnicodeDecodeError, IOError):
+            return []
+
+    assert code is not None  # Type guard
+    dependencies = set()
+
+    # Remove comments
+    code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
+
+    # Patterns for library() and require() calls
+    patterns = [
+        r'library\s*\(\s*["\']?([a-zA-Z0-9._]+)["\']?\s*\)',
+        r'require\s*\(\s*["\']?([a-zA-Z0-9._]+)["\']?\s*\)',
+    ]
+
+    for pattern in patterns:
+        matches = re.findall(pattern, code)
+        dependencies.update(matches)
+
+    # Filter out base R packages
+    base_packages = {
+        "base",
+        "compiler",
+        "datasets",
+        "graphics",
+        "grDevices",
+        "grid",
+        "methods",
+        "parallel",
+        "splines",
+        "stats",
+        "stats4",
+        "tcltk",
+        "tools",
+        "utils",
+    }
+
+    dependencies = {pkg for pkg in dependencies if pkg not in base_packages}
+
+    return sorted(list(dependencies))
+
+
+def detect_julia_dependencies(
+    script_path: str | None = None,
+    code: str | None = None,
+) -> list[str]:
+    """Detect package dependencies from a Julia script or code string.
+
+    Parameters
+    ----------
+    script_path : str | None
+        Path to Julia script. Either this or code must be provided.
+    code : str | None
+        Julia code string. Either this or script_path must be provided.
+
+    Returns
+    -------
+    list[str]
+        List of Julia package names.
+    """
+    if script_path is None and code is None:
+        raise ValueError("Either script_path or code must be provided")
+
+    if code is None:
+        assert script_path is not None  # Type guard
+        if not os.path.exists(script_path):
+            return []
+        try:
+            with open(script_path, "r", encoding="utf-8") as f:
+                code = f.read()
+        except (UnicodeDecodeError, IOError):
+            return []
+
+    assert code is not None  # Type guard
+    dependencies = set()
+
+    # Remove comments
+    code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
+
+    # Pattern for using statements
+    pattern = r"using\s+([a-zA-Z0-9._]+)"
+    matches = re.findall(pattern, code)
+    dependencies.update(matches)
+
+    return sorted(list(dependencies))
+
+
+def detect_dependencies_from_notebook(
+    notebook_path: str,
+    language: Literal["python", "julia", "r"] | None = None,
+) -> list[str]:
+    """Detect dependencies from a Jupyter notebook.
+
+    Parameters
+    ----------
+    notebook_path : str
+        Path to the notebook.
+    language : Literal["python", "julia", "r"] | None
+        Language of the notebook. If None, will be detected from metadata.
+
+    Returns
+    -------
+    list[str]
+        List of package/module names.
+    """
+    if not os.path.exists(notebook_path):
+        return []
+
+    try:
+        with open(notebook_path, "r", encoding="utf-8") as f:
+            nb = json.load(f)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return []
+
+    # Detect language if not provided
+    if language is None:
+        metadata = nb.get("metadata", {})
+        kernel_info = metadata.get("kernelspec", {})
+        kernel_lang = kernel_info.get("language", "").lower()
+        if "python" in kernel_lang:
+            language = "python"
+        elif "julia" in kernel_lang:
+            language = "julia"
+        elif kernel_lang == "r":
+            language = "r"
+        else:
+            language = "python"  # Default to Python
+
+    # Collect all code from cells
+    code_cells = [
+        cell for cell in nb.get("cells", []) if cell.get("cell_type") == "code"
+    ]
+
+    all_code = []
+    for cell in code_cells:
+        source = cell.get("source", [])
+        if isinstance(source, list):
+            all_code.append("".join(source))
+        else:
+            all_code.append(source)
+
+    combined_code = "\n".join(all_code)
+
+    # Detect dependencies based on language
+    if language == "python":
+        return detect_python_dependencies(code=combined_code)
+    elif language == "julia":
+        return detect_julia_dependencies(code=combined_code)
+    elif language == "r":
+        return detect_r_dependencies(code=combined_code)
+
+    return []
+
+
+def create_python_requirements_file(
+    dependencies: list[str],
+    output_path: str,
+) -> None:
+    """Create a requirements.txt file from a list of dependencies.
+
+    Parameters
+    ----------
+    dependencies : list[str]
+        List of package names.
+    output_path : str
+        Path where the requirements.txt should be created.
+    """
+    from calkit.environments import create_python_requirements_content
+
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    with open(output_path, "w") as f:
+        f.write(create_python_requirements_content(dependencies))
+
+
+def create_julia_project_file(
+    dependencies: list[str],
+    output_path: str,
+    project_name: str = "environment",
+) -> None:
+    """Create a Julia Project.toml file from a list of dependencies.
+
+    Parameters
+    ----------
+    dependencies : list[str]
+        List of package names.
+    output_path : str
+        Path where the Project.toml should be created.
+    project_name : str
+        Name of the Julia project.
+    """
+    from calkit.environments import create_julia_project_file_content
+
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    with open(output_path, "w") as f:
+        f.write(create_julia_project_file_content(dependencies, project_name))
+
+
+def create_r_description_file(
+    dependencies: list[str],
+    output_path: str,
+) -> None:
+    """Create a simple R DESCRIPTION file listing dependencies.
+
+    This creates a minimal DESCRIPTION file that renv can work with.
+
+    Parameters
+    ----------
+    dependencies : list[str]
+        List of R package names.
+    output_path : str
+        Path where the DESCRIPTION should be created.
+    """
+    from calkit.environments import create_r_description_content
+
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    with open(output_path, "w") as f:
+        f.write(create_r_description_content(dependencies))

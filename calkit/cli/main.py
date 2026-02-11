@@ -1821,7 +1821,7 @@ def execute_and_record(
         detect_io,
         generate_stage_name,
     )
-    from calkit.environments import env_from_name_or_path
+    from calkit.environments import detect_env_for_stage
     from calkit.models.io import PathOutput
     from calkit.models.pipeline import (
         JuliaCommandStage,
@@ -2006,27 +2006,41 @@ def execute_and_record(
                 f"Reusing environment '{environment}' from existing "
                 f"stage '{stage_name}'"
             )
-    # Next, try to detect the environment
-    try:
-        res = env_from_name_or_path(
-            name_or_path=environment, ck_info=ck_info, language=language
+    # Detect or create environment for this stage
+    env_result = detect_env_for_stage(
+        stage=stage,
+        environment=environment,
+        ck_info=ck_info,
+        language=language,
+    )
+    # If we created an environment from dependencies, write the spec file
+    if env_result.created_from_dependencies:
+        typer.echo(
+            "No existing environment detected. "
+            "Attempting to create one based on detected dependencies..."
         )
-    except Exception:
-        raise_error(
-            "No environment specified and could not detect a default "
-            "environment; Please specify with --environment/-e"
-        )
-        return
-    if res is not None and not res.exists:
-        # Create the environment if it doesn't exist,
-        # since we will need it to run
+        if env_result.dependencies:
+            typer.echo(
+                f"Detected {language or 'code'} dependencies: "
+                f"{', '.join(env_result.dependencies)}"
+            )
+        if env_result.spec_path and env_result.spec_content is not None:
+            # Create the spec file
+            spec_dir = os.path.dirname(env_result.spec_path)
+            if spec_dir:
+                os.makedirs(spec_dir, exist_ok=True)
+            with open(env_result.spec_path, "w") as f:
+                f.write(env_result.spec_content)
+            typer.echo(f"Created environment spec: {env_result.spec_path}")
+    # Add environment to calkit.yaml if it doesn't exist
+    if not env_result.exists:
         envs = ck_info.get("environments", {})
-        envs[res.name] = res.env
+        envs[env_result.name] = env_result.env
         ck_info["environments"] = envs
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)
         ck_info = calkit.load_calkit_info()
-    env_name = res.name
+    env_name = env_result.name
     stage["environment"] = env_name
     # Detect inputs and outputs if not disabled
     detected_inputs = []
@@ -2054,8 +2068,7 @@ def execute_and_record(
             # DVC might not be initialized
             pass
     # Merge user-specified inputs/outputs with detected ones
-    # User-specified take precedence and detected ones are added if not already
-    # present
+    # User-specified take precedence and detected ones are added if not already present
     all_inputs = list(inputs)  # Start with user-specified
     for detected in detected_inputs:
         if detected not in all_inputs:
@@ -2114,8 +2127,7 @@ def execute_and_record(
                     )
                 else:
                     output_strs.append(out_model)
-    # Create the stage, write to calkit.yaml, and run it to see if it's
-    # successful
+    # Create the stage, write to calkit.yaml, and run it to see if it's successful
     try:
         cls.model_validate(stage)
     except Exception as e:

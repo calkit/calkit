@@ -35,6 +35,21 @@ ENV_CHECK_CACHE_TTL_SECONDS = 3600
 KINDS_NO_CHECK = ["_system", "slurm", "ssh"]
 
 
+def language_from_env(env: dict) -> str | None:
+    kind = env.get("kind")
+    if kind == "julia":
+        return "julia"
+    if kind == "renv":
+        return "r"
+    if kind == "matlab":
+        return "matlab"
+    if kind in ["conda", "pixi", "uv", "uv-venv", "venv"]:
+        return "python"
+    if kind == "docker" and "texlive" in env.get("image", "").lower():
+        return "latex"
+    return None
+
+
 def get_env_lock_dir(wdir: str | None = None) -> str:
     env_lock_dir = os.path.join(".calkit", "env-locks")
     if wdir is not None:

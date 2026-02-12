@@ -119,6 +119,7 @@ def check_env_kernel(
     """Check that an environment has a registered Jupyter kernel."""
     from calkit.cli.check import check_environment
     from calkit.cli.main import run_in_env
+    from calkit.environments import language_from_env
 
     def get_env():
         ck_info = calkit.load_calkit_info()
@@ -133,10 +134,7 @@ def check_env_kernel(
     # Detect language from environment
     if language is None:
         env = get_env()
-        if env.get("kind") == "julia":
-            language = "julia"
-        else:
-            language = "python"
+        language = language_from_env(env) or "python"
     project_name = calkit.detect_project_name(prepend_owner=False)
     if not project_name:
         raise_error("Project name cannot be empty")
@@ -155,6 +153,23 @@ def check_env_kernel(
             display_name,
         ]
         res = run_in_env(
+            cmd=cmd,
+            env_name=env_name,
+            no_check=no_check,
+            verbose=verbose,
+            relaxed_check=True,
+        )
+        return kernel_name
+    elif language == "r":
+        cmd = [
+            "Rscript",
+            "-e",
+            (
+                "IRkernel::installspec("
+                f'"{kernel_name}", displayname = "{display_name}", user = TRUE)'
+            ),
+        ]
+        run_in_env(
             cmd=cmd,
             env_name=env_name,
             no_check=no_check,
@@ -288,9 +303,11 @@ def execute_notebook(
     import papermill
 
     from calkit.cli.main import run_in_env
+    from calkit.detect import language_from_notebook
     from calkit.environments import (
         env_from_name_or_path,
         env_from_notebook_path,
+        language_from_env,
     )
 
     if os.path.isabs(path):
@@ -321,28 +338,35 @@ def execute_notebook(
             calkit.ryaml.dump(ck_info, f)
     # Detect language from environment
     if language is None:
-        env = envs[env_name]
-        if env.get("kind") == "julia":
-            language = "julia"
+        detected_language = language_from_notebook(path)
+        if detected_language is not None:
+            language = detected_language
         else:
-            language = "python"
+            env = envs[env_name]
+            language = language_from_env(env) or "python"
         typer.echo(f"Using {language} as notebook language")
-    if language.lower() not in ["python", "matlab", "julia"]:
+    if language.lower() not in ["python", "matlab", "julia", "r"]:
         raise ValueError(
-            "Language must be one of 'python', 'matlab', or 'julia'"
+            "Language must be one of 'python', 'matlab', 'julia', or 'r'"
         )
     # First, ensure the specified environment has a kernel we can use
     # We need to check the environment type and create the kernel if needed
-    if language.lower() in ["python", "julia"]:
+    if language.lower() in ["python", "julia", "r"]:
         kernel_name = check_env_kernel(
-            env_name=env_name, no_check=no_check, verbose=verbose
+            env_name=env_name,
+            no_check=no_check,
+            verbose=verbose,
+            language=language.lower(),
         )
     elif language.lower() == "matlab":
         kernel_name = "jupyter_matlab_kernel"
-    # We can't handle parameters unless language is Python or Julia
-    if language.lower() not in ["python", "julia"]:
+    # We can't handle parameters unless language is Python, Julia, or R
+    if language.lower() not in ["python", "julia", "r"]:
         if params or params_json is not None or params_base64 is not None:
-            raise_error("Parameters can only be passed to Python notebooks")
+            raise_error(
+                "Parameters can only be passed to Python, Julia, or R "
+                "notebooks"
+            )
     # Parse parameters
     if params:
         try:
@@ -377,10 +401,10 @@ def execute_notebook(
         typer.echo(f"Using kernel: {kernel_name}")
         typer.echo(f"Running with cwd: {notebook_dir}")
         typer.echo(f"Output will be saved to: {fpath_out_exec}")
-    # If this is a Python or Julia notebook, we can use Papermill
+    # If this is a Python, Julia, or R notebook, we can use Papermill
     # If it's a MATLAB notebook, we need to use the MATLAB kernel inside the
     # specified environment
-    if language.lower() in ["python", "julia"]:
+    if language.lower() in ["python", "julia", "r"]:
         papermill.execute_notebook(
             input_path=path,
             output_path=fpath_out_exec,

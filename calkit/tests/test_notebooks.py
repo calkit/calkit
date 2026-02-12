@@ -1,5 +1,6 @@
 """Tests for ``calkit.notebooks``."""
 
+import json
 import subprocess
 
 import pytest
@@ -68,3 +69,25 @@ def test_declare_notebook(tmp_dir):
     assert "always_run" not in stage
     assert "outputs" not in stage
     assert stage["html_storage"] is None
+
+
+def test_determine_storage(tmp_dir):
+    notebook_path = "small.ipynb"
+    with open(notebook_path, "w") as f:
+        json.dump(
+            {
+                "cells": [
+                    {
+                        "cell_type": "code",
+                        "metadata": {},
+                        "source": ["print('hello')\n"],
+                    }
+                ],
+                "metadata": {},
+                "nbformat": 4,
+                "nbformat_minor": 5,
+            },
+            f,
+        )
+    assert calkit.notebooks.determine_storage(notebook_path) == "git"
+    assert calkit.notebooks.determine_storage("missing.ipynb") == "dvc"

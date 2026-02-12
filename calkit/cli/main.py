@@ -1932,6 +1932,9 @@ def execute_and_record(
         cls = JupyterNotebookStage
         stage["kind"] = "jupyter-notebook"
         stage["notebook_path"] = first_arg
+        storage = calkit.notebooks.determine_storage(first_arg)
+        stage["html_storage"] = storage
+        stage["executed_ipynb_storage"] = storage
     elif first_arg.endswith(".tex"):
         cls = LatexStage
         stage["kind"] = "latex"

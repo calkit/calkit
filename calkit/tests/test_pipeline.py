@@ -10,7 +10,6 @@ from calkit.pipeline import stages_are_similar
 
 
 def test_stages_are_similar():
-    """Test the stages_are_similar function."""
     # Test identical Python script stages
     stage1 = {
         "kind": "python-script",
@@ -22,48 +21,48 @@ def test_stages_are_similar():
         "script_path": "process.py",
         "args": ["--verbose"],
     }
-    assert stages_are_similar(stage1, stage2) is True
+    assert stages_are_similar(stage1, stage2)
     # Test different script paths
     stage3 = {
         "kind": "python-script",
         "script_path": "other.py",
         "args": ["--verbose"],
     }
-    assert stages_are_similar(stage1, stage3) is False
+    assert not stages_are_similar(stage1, stage3)
     # Test different args
     stage4 = {
         "kind": "python-script",
         "script_path": "process.py",
         "args": ["--quiet"],
     }
-    assert stages_are_similar(stage1, stage4) is False
+    assert not stages_are_similar(stage1, stage4)
     # Test different kinds
     stage5 = {"kind": "julia-script", "script_path": "process.py"}
-    assert stages_are_similar(stage1, stage5) is False
+    assert not stages_are_similar(stage1, stage5)
     # Test shell commands
     cmd1 = {"kind": "shell-command", "command": "echo 'Hello World'"}
     cmd2 = {"kind": "shell-command", "command": "echo 'Hello World'"}
-    assert stages_are_similar(cmd1, cmd2) is True
+    assert stages_are_similar(cmd1, cmd2)
     cmd3 = {"kind": "shell-command", "command": "echo 'Goodbye'"}
-    assert stages_are_similar(cmd1, cmd3) is False
+    assert not stages_are_similar(cmd1, cmd3)
     # Test notebook stages
     nb1 = {"kind": "jupyter-notebook", "notebook_path": "analysis.ipynb"}
     nb2 = {"kind": "jupyter-notebook", "notebook_path": "analysis.ipynb"}
-    assert stages_are_similar(nb1, nb2) is True
+    assert stages_are_similar(nb1, nb2)
     nb3 = {"kind": "jupyter-notebook", "notebook_path": "other.ipynb"}
-    assert stages_are_similar(nb1, nb3) is False
+    assert not stages_are_similar(nb1, nb3)
     # Test LaTeX stages
     tex1 = {"kind": "latex", "target_path": "paper.tex"}
     tex2 = {"kind": "latex", "target_path": "paper.tex"}
-    assert stages_are_similar(tex1, tex2) is True
+    assert stages_are_similar(tex1, tex2)
     tex3 = {"kind": "latex", "target_path": "thesis.tex"}
-    assert stages_are_similar(tex1, tex3) is False
+    assert not stages_are_similar(tex1, tex3)
     # Test MATLAB command
     mat1 = {"kind": "matlab-command", "command": "disp('hello')"}
     mat2 = {"kind": "matlab-command", "command": "disp('hello')"}
-    assert stages_are_similar(mat1, mat2) is True
+    assert stages_are_similar(mat1, mat2)
     mat3 = {"kind": "matlab-command", "command": "disp('goodbye')"}
-    assert stages_are_similar(mat1, mat3) is False
+    assert not stages_are_similar(mat1, mat3)
 
 
 def test_to_dvc():

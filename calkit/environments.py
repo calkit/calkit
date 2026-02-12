@@ -1,5 +1,6 @@
 """Functionality related to environments."""
 
+import glob
 import hashlib
 import json
 import os
@@ -977,6 +978,8 @@ def detect_env_for_stage(
                 "pyproject.toml",
                 "requirements.txt",
                 "environment.yml",
+                "env/*.yml",
+                "envs/*.yml",
                 "pixi.toml",
             ],
             "r": ["DESCRIPTION"],
@@ -984,6 +987,12 @@ def detect_env_for_stage(
             "shell": ["Dockerfile"],
         }
         for spec_path in spec_candidates.get(stage_language, []):
+            if "*" in spec_path:
+                matches = sorted(glob.glob(spec_path))
+                if matches:
+                    spec_path = matches[0]
+                else:
+                    continue
             if os.path.isfile(spec_path):
                 res = env_from_name_or_path(
                     name_or_path=spec_path,

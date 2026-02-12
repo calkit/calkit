@@ -358,22 +358,133 @@ def _extract_string_from_node(node: ast.AST) -> str | None:
     return None
 
 
-def _extract_variable_assignments(tree: ast.AST) -> dict[str, str]:
+def _is_os_path_join(node: ast.Call) -> bool:
+    if isinstance(node.func, ast.Attribute):
+        if node.func.attr == "join":
+            value = node.func.value
+            if isinstance(value, ast.Attribute):
+                return (
+                    value.attr == "path"
+                    and isinstance(value.value, ast.Name)
+                    and value.value.id == "os"
+                )
+    return False
+
+
+def _resolve_join_call(
+    node: ast.Call, variables: dict[str, str]
+) -> str | None:
+    parts: list[str] = []
+    for arg in node.args:
+        part = _resolve_path_expr(arg, variables)
+        if part is None:
+            return None
+        parts.append(part)
+    if not parts:
+        return "."
+    return os.path.join(*parts)
+
+
+def _resolve_path_expr(node: ast.AST, variables: dict[str, str]) -> str | None:
+    # Direct string literal
+    path = _extract_string_from_node(node)
+    if path:
+        return path
+    # Variable reference
+    if isinstance(node, ast.Name) and node.id in variables:
+        return variables[node.id]
+    # Path composition with / or +
+    if isinstance(node, ast.BinOp):
+        if isinstance(node.op, (ast.Div, ast.Add)):
+            left = _resolve_path_expr(node.left, variables)
+            right = _resolve_path_expr(node.right, variables)
+            if left and right:
+                return os.path.join(left, right)
+    # Path attribute access
+    if isinstance(node, ast.Attribute):
+        if node.attr == "parent":
+            base = _resolve_path_expr(node.value, variables)
+            if base:
+                if base in [".", ""]:
+                    return ".."
+                return os.path.dirname(base)
+    # Call expressions
+    if isinstance(node, ast.Call):
+        if _is_os_path_join(node):
+            return _resolve_join_call(node, variables)
+        if isinstance(node.func, ast.Name) and node.func.id == "join":
+            return _resolve_join_call(node, variables)
+        if isinstance(node.func, ast.Name) and node.func.id == "Path":
+            if not node.args:
+                return "."
+            return _resolve_join_call(node, variables)
+        if isinstance(node.func, ast.Attribute):
+            if node.func.attr == "joinpath":
+                base = _resolve_path_expr(node.func.value, variables)
+                if base:
+                    parts = [base]
+                    for arg in node.args:
+                        part = _resolve_path_expr(arg, variables)
+                        if part is None:
+                            return None
+                        parts.append(part)
+                    return os.path.join(*parts)
+            if node.func.attr in ["absolute", "resolve"]:
+                base = _resolve_path_expr(node.func.value, variables)
+                if base:
+                    return os.path.abspath(base)
+            if node.func.attr == "cwd":
+                if (
+                    isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "Path"
+                ):
+                    return "."
+    return None
+
+
+def _extract_variable_assignments(tree: ast.Module) -> dict[str, str]:
     """Extract simple string variable assignments from AST.
 
     Returns a dict mapping variable names to their string values.
     Only tracks direct assignments like: var = "path/to/file"
     """
     variables = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            # Only handle simple single target assignments
-            if len(node.targets) == 1:
-                target = node.targets[0]
-                if isinstance(target, ast.Name):
-                    value = _extract_string_from_node(node.value)
+
+    def visit_statements(statements: list[ast.stmt]) -> None:
+        for stmt in statements:
+            if isinstance(stmt, ast.Assign):
+                # Only handle simple single target assignments
+                if len(stmt.targets) == 1:
+                    target = stmt.targets[0]
+                    if isinstance(target, ast.Name):
+                        value = _resolve_path_expr(stmt.value, variables)
+                        if value:
+                            variables[target.id] = value
+            elif isinstance(stmt, ast.AnnAssign):
+                if (
+                    isinstance(stmt.target, ast.Name)
+                    and stmt.value is not None
+                ):
+                    value = _resolve_path_expr(stmt.value, variables)
                     if value:
-                        variables[target.id] = value
+                        variables[stmt.target.id] = value
+            if isinstance(stmt, ast.If):
+                visit_statements(stmt.body)
+                visit_statements(stmt.orelse)
+            elif isinstance(stmt, (ast.For, ast.While)):
+                visit_statements(stmt.body)
+                visit_statements(stmt.orelse)
+            elif isinstance(stmt, (ast.With, ast.AsyncWith)):
+                visit_statements(stmt.body)
+            elif isinstance(stmt, ast.Try):
+                visit_statements(stmt.body)
+                visit_statements(stmt.orelse)
+                visit_statements(stmt.finalbody)
+                for handler in stmt.handlers:
+                    visit_statements(handler.body)
+
+    if isinstance(tree, ast.Module):
+        visit_statements(tree.body)
     return variables
 
 
@@ -388,13 +499,10 @@ def _resolve_variable_in_call(
     - open("literal_path")
     - path_template.format(...)
     """
-    # Direct string literal
-    path = _extract_string_from_node(node)
+    # Direct path expression
+    path = _resolve_path_expr(node, variables)
     if path:
         return path
-    # Variable reference
-    if isinstance(node, ast.Name) and node.id in variables:
-        return variables[node.id]
     # For format calls: path_template.format(key=value) -> substitute template
     if isinstance(node, ast.Call):
         if isinstance(node.func, ast.Attribute):
@@ -408,7 +516,9 @@ def _resolve_variable_in_call(
                     format_kwargs = {}
                     for keyword in node.keywords:
                         if keyword.arg:
-                            value = _extract_string_from_node(keyword.value)
+                            value = _resolve_path_expr(
+                                keyword.value, variables
+                            )
                             if value:
                                 format_kwargs[keyword.arg] = value
                     if format_kwargs:
@@ -512,6 +622,17 @@ def _detect_python_code_io(
             rel_path = rel_path[3:]
         return rel_path
 
+    # Output methods for pandas-like objects
+    output_methods = {
+        "to_csv",
+        "to_excel",
+        "to_parquet",
+        "to_feather",
+        "to_pickle",
+        "to_json",
+        "to_hdf",
+        "to_stata",
+    }
     # Third pass: extract I/O operations using current_dir
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -562,6 +683,14 @@ def _detect_python_code_io(
                 module = getattr(node.func.value, "id", None)
                 if module and isinstance(module, str):
                     func = node.func.attr
+                    if func in output_methods:
+                        if len(node.args) >= 1:
+                            path = _resolve_variable_in_call(
+                                node.args[0], variables
+                            )
+                            if path:
+                                outputs.append(resolve_to_root(path))
+                        continue
                     if module == "pd" and func.startswith("read_"):
                         if len(node.args) >= 1:
                             path = _resolve_variable_in_call(

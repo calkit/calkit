@@ -745,6 +745,14 @@ def _detect_python_code_io(
                 # where node.func.value is itself a Call node
                 elif isinstance(node.func.value, ast.Call):
                     func = node.func.attr
+                    if func in output_methods:
+                        if len(node.args) >= 1:
+                            path = _resolve_variable_in_call(
+                                node.args[0], variables
+                            )
+                            if path:
+                                outputs.append(resolve_to_root(path))
+                        continue
                     if func == "savefig":
                         if len(node.args) >= 1:
                             path = _resolve_variable_in_call(

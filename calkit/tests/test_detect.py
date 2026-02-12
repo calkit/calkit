@@ -335,6 +335,54 @@ def test_detect_jupyter_notebook_io_python(tmp_dir):
     assert "output/result.csv" in result_cd["outputs"]
 
 
+def test_detect_jupyter_notebook_io_with_variables(tmp_dir):
+    """Test detection of I/O when file paths are stored in variables."""
+    notebook = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "source": [
+                    "import os\n",
+                    "import pandas as pd\n",
+                ],
+            },
+            {
+                "cell_type": "code",
+                "source": [
+                    "log_path_template = '../.calkit/slurm/logs/amip-{case}.out'\n",
+                    "data_file = 'input_data.csv'\n",
+                    "output_dir = 'results'\n",
+                ],
+            },
+            {
+                "cell_type": "code",
+                "source": [
+                    "# Reading from variable\n",
+                    "with open(log_path_template.format(case='baseline')) as f:\n",
+                    "    log_data = f.read()\n",
+                    "# Reading with direct variable\n",
+                    "df = pd.read_csv(data_file)\n",
+                    "# Writing with variable\n",
+                    "df.to_csv(output_dir + '/results.csv')\n",
+                ],
+            },
+        ],
+        "metadata": {
+            "kernelspec": {
+                "language": "python",
+                "name": "python3",
+            }
+        },
+    }
+    with open("notebook_vars.ipynb", "w") as f:
+        json.dump(notebook, f)
+    result = detect_jupyter_notebook_io("notebook_vars.ipynb")
+    # Variable references should be resolved
+    assert "input_data.csv" in result["inputs"]
+    # Template string from format should be detected
+    assert ".calkit/slurm/logs/amip-baseline.out" in result["inputs"]
+
+
 def test_detect_jupyter_notebook_io_julia(tmp_dir):
     """Test detection of inputs and outputs from Julia Jupyter notebooks."""
     notebook = {

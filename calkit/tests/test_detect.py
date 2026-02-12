@@ -205,7 +205,13 @@ cp source.txt dest.txt
 
 
 def test_detect_jupyter_notebook_io_python(tmp_dir):
-    """Test detection of inputs and outputs from Python Jupyter notebooks."""
+    """Test detection of inputs and outputs from Python Jupyter notebooks.
+
+    Covers basic file I/O, chained method calls like ax.get_figure().savefig(),
+    and relative path resolution with directory changes.
+    """
+    # Create a subdirectory for the notebook so that .. paths resolve correctly
+    os.makedirs("notebooks", exist_ok=True)
     notebook = {
         "cells": [
             {
@@ -213,6 +219,9 @@ def test_detect_jupyter_notebook_io_python(tmp_dir):
                 "source": [
                     "import pandas as pd\n",
                     "from helper import process\n",
+                    "import matplotlib.pyplot as plt\n",
+                    "import seaborn as sns\n",
+                    "import os\n",
                 ],
             },
             {
@@ -231,6 +240,68 @@ def test_detect_jupyter_notebook_io_python(tmp_dir):
                     "    f.write(text)\n",
                 ],
             },
+            {
+                "cell_type": "code",
+                "source": [
+                    "sns.set_theme()\n",
+                    "ax = df.plot()\n",
+                    "ax.get_figure().savefig('../figures/plot.png')\n",
+                ],
+            },
+        ],
+        "metadata": {
+            "kernelspec": {
+                "language": "python",
+                "name": "python3",
+            }
+        },
+    }
+    with open("notebooks/notebook.ipynb", "w") as f:
+        json.dump(notebook, f)
+    # Create the helper module in the notebooks directory
+    with open("notebooks/helper.py", "w") as f:
+        f.write("def process(): pass")
+    result = detect_jupyter_notebook_io("notebooks/notebook.ipynb")
+    # Check detected inputs
+    # Files referenced from notebooks/ are resolved as notebooks/filename
+    assert "notebooks/data.csv" in result["inputs"]
+    assert "notebooks/input.txt" in result["inputs"]
+    assert "notebooks/helper.py" in result["inputs"]
+    # Check detected outputs
+    assert "notebooks/output.csv" in result["outputs"]
+    assert "notebooks/result.txt" in result["outputs"]
+    # Relative paths going up to figures/ resolve to figures/plot.png at
+    # project root
+    assert "figures/plot.png" in result["outputs"]
+
+
+def test_detect_jupyter_notebook_io_with_cd_magic(tmp_dir):
+    """Test detection of I/O when using Jupyter %cd magic to change
+    directories.
+    """
+    os.makedirs("data", exist_ok=True)
+    os.makedirs("output", exist_ok=True)
+    notebook = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "source": [
+                    "import pandas as pd\n",
+                ],
+            },
+            {
+                "cell_type": "code",
+                "source": [
+                    "%cd data\n",
+                ],
+            },
+            {
+                "cell_type": "code",
+                "source": [
+                    "df = pd.read_csv('input.csv')\n",
+                    "df.to_csv('../output/result.csv')\n",
+                ],
+            },
         ],
         "metadata": {
             "kernelspec": {
@@ -241,17 +312,12 @@ def test_detect_jupyter_notebook_io_python(tmp_dir):
     }
     with open("notebook.ipynb", "w") as f:
         json.dump(notebook, f)
-    # Create the helper module
-    with open("helper.py", "w") as f:
-        f.write("def process(): pass")
     result = detect_jupyter_notebook_io("notebook.ipynb")
-    # Check detected inputs
-    assert "data.csv" in result["inputs"]
-    assert "input.txt" in result["inputs"]
-    assert "helper.py" in result["inputs"]
-    # Check detected outputs
-    assert "output.csv" in result["outputs"]
-    assert "result.txt" in result["outputs"]
+    # File read after %cd data should be detected as data/input.csv
+    assert "data/input.csv" in result["inputs"]
+    # File written after %cd data with ../ path should be detected as
+    # output/result.csv
+    assert "output/result.csv" in result["outputs"]
 
 
 def test_detect_jupyter_notebook_io_matplotlib(tmp_dir):

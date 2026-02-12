@@ -147,11 +147,64 @@ def detect_shell_script_io(script_path: str) -> dict[str, list[str]]:
     return {"inputs": inputs, "outputs": outputs}
 
 
+def _extract_directory_changes(code: str, current_dir: str = ".") -> str:
+    """Extract final working directory after all %cd and os.chdir() calls in
+    code.
+
+    Parameters
+    ----------
+    code : str
+        Python code potentially containing %cd magic or os.chdir() calls.
+    current_dir : str
+        Starting directory for resolution.
+
+    Returns
+    -------
+    str
+        Final working directory after all changes.
+    """
+    working_dir = current_dir
+    # Handle Jupyter %cd magic commands
+    for line in code.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("%cd "):
+            chdir_path = stripped[4:].strip()
+            chdir_path = chdir_path.strip("'\"")
+            if chdir_path:
+                working_dir = os.path.normpath(
+                    os.path.join(working_dir, chdir_path)
+                )
+    # Handle os.chdir() calls
+    try:
+        tree = ast.parse(code)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Attribute):
+                    if (
+                        isinstance(node.func.value, ast.Name)
+                        and node.func.value.id == "os"
+                        and node.func.attr == "chdir"
+                        and len(node.args) >= 1
+                    ):
+                        chdir_path = _extract_string_from_node(node.args[0])
+                        if chdir_path:
+                            working_dir = os.path.normpath(
+                                os.path.join(working_dir, chdir_path)
+                            )
+    except SyntaxError:
+        pass
+    return working_dir
+
+
 def detect_jupyter_notebook_io(
     notebook_path: str,
     language: Literal["python", "julia", "r"] | None = None,
 ) -> dict[str, list[str]]:
-    """Detect inputs and outputs from a Jupyter notebook."""
+    """Detect inputs and outputs from a Jupyter notebook.
+
+    Tracks directory changes (%cd magic and os.chdir) across cells to properly
+    resolve relative file paths.
+    """
     inputs = []
     outputs = []
     if not os.path.exists(notebook_path):
@@ -176,19 +229,30 @@ def detect_jupyter_notebook_io(
     code_cells = [
         cell for cell in nb.get("cells", []) if cell.get("cell_type") == "code"
     ]
+    notebook_dir = os.path.dirname(notebook_path) if notebook_path else "."
+    current_working_dir = notebook_dir
     for cell in code_cells:
         source = cell.get("source", [])
         if isinstance(source, list):
             code = "".join(source)
         else:
             code = source
-        notebook_dir = os.path.dirname(notebook_path) if notebook_path else "."
+
         if language == "python":
-            cell_io = _detect_python_code_io(code, script_dir=notebook_dir)
+            cell_io = _detect_python_code_io(
+                code, script_dir=current_working_dir
+            )
+            # Update working directory for next cell based on %cd or os.chdir
+            # in this cell
+            current_working_dir = _extract_directory_changes(
+                code, current_working_dir
+            )
         elif language == "julia":
-            cell_io = _detect_julia_code_io(code, script_dir=notebook_dir)
+            cell_io = _detect_julia_code_io(
+                code, script_dir=current_working_dir
+            )
         elif language == "r":
-            cell_io = _detect_r_code_io(code, script_dir=notebook_dir)
+            cell_io = _detect_r_code_io(code, script_dir=current_working_dir)
         else:
             cell_io = {"inputs": [], "outputs": []}
         inputs.extend(cell_io["inputs"])
@@ -298,8 +362,6 @@ def _is_valid_project_path(path: str) -> bool:
         return False
     if os.path.isabs(path):
         return False
-    if ".." in path:
-        return False
     if path.startswith(("/dev/", "/proc/", "/sys/", "~")):
         return False
     return True
@@ -308,26 +370,70 @@ def _is_valid_project_path(path: str) -> bool:
 def _detect_python_code_io(
     code: str, script_dir: str = "."
 ) -> dict[str, list[str]]:
-    """Detect I/O from Python code string (used for notebook cells)."""
+    """Detect I/O from Python code string (used for notebook cells).
+
+    Tracks os.chdir() calls and Jupyter %cd magic commands to maintain the
+    effective working directory for resolving relative file paths. All paths
+    are normalized relative to the project root (current working directory).
+    """
     inputs = []
     outputs = []
+    current_dir = script_dir
+
+    # First pass: detect directory changes from %cd magic commands and os.chdir()
+    for line in code.split("\n"):
+        stripped = line.strip()
+        # Handle Jupyter %cd magic
+        if stripped.startswith("%cd "):
+            chdir_path = stripped[4:].strip()
+            # Remove quotes if present
+            chdir_path = chdir_path.strip("'\"")
+            if chdir_path:
+                current_dir = os.path.normpath(
+                    os.path.join(current_dir, chdir_path)
+                )
+
     try:
         tree = ast.parse(code)
     except SyntaxError:
         return {"inputs": inputs, "outputs": outputs}
+
+    # Second pass: identify all os.chdir() calls to track directory changes
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Attribute):
+                if (
+                    isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "os"
+                    and node.func.attr == "chdir"
+                    and len(node.args) >= 1
+                ):
+                    chdir_path = _extract_string_from_node(node.args[0])
+                    if chdir_path:
+                        current_dir = os.path.normpath(
+                            os.path.join(current_dir, chdir_path)
+                        )
+
+    # Helper to resolve a relative path back to project root
+    def resolve_to_root(path: str) -> str:
+        """Resolve a path from current_dir to project root."""
+        full_path = os.path.normpath(os.path.join(current_dir, path))
+        return os.path.relpath(full_path, ".")
+
+    # Third pass: extract I/O operations using current_dir
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                local_file = _resolve_python_import(alias.name, script_dir)
+                local_file = _resolve_python_import(alias.name, current_dir)
                 if local_file:
                     inputs.append(local_file)
         elif isinstance(node, ast.ImportFrom):
             if node.module and node.level == 0:
-                local_file = _resolve_python_import(node.module, script_dir)
+                local_file = _resolve_python_import(node.module, current_dir)
                 if local_file:
                     inputs.append(local_file)
             elif node.level > 0:
-                parent_dir = script_dir
+                parent_dir = current_dir
                 for _ in range(node.level - 1):
                     parent_dir = os.path.dirname(parent_dir)
                 if node.module:
@@ -355,10 +461,11 @@ def _detect_python_code_io(
                                 )
                                 if mode_str:
                                     mode = mode_str
+                        rel_path = resolve_to_root(path)
                         if "w" in mode or "a" in mode or "x" in mode:
-                            outputs.append(path)
+                            outputs.append(rel_path)
                         else:
-                            inputs.append(path)
+                            inputs.append(rel_path)
             elif isinstance(node.func, ast.Attribute):
                 module = getattr(node.func.value, "id", None)
                 if module and isinstance(module, str):
@@ -367,7 +474,7 @@ def _detect_python_code_io(
                         if len(node.args) >= 1:
                             path = _extract_string_from_node(node.args[0])
                             if path:
-                                inputs.append(path)
+                                inputs.append(resolve_to_root(path))
                     elif module in [
                         "df",
                         "data",
@@ -377,7 +484,7 @@ def _detect_python_code_io(
                         if len(node.args) >= 1:
                             path = _extract_string_from_node(node.args[0])
                             if path:
-                                outputs.append(path)
+                                outputs.append(resolve_to_root(path))
                     elif module == "np" and func in [
                         "load",
                         "loadtxt",
@@ -387,7 +494,7 @@ def _detect_python_code_io(
                         if len(node.args) >= 1:
                             path = _extract_string_from_node(node.args[0])
                             if path:
-                                inputs.append(path)
+                                inputs.append(resolve_to_root(path))
                     elif module == "np" and func in [
                         "save",
                         "savetxt",
@@ -397,12 +504,22 @@ def _detect_python_code_io(
                         if len(node.args) >= 1:
                             path = _extract_string_from_node(node.args[0])
                             if path:
-                                outputs.append(path)
+                                outputs.append(resolve_to_root(path))
                     elif func == "savefig":
                         if len(node.args) >= 1:
                             path = _extract_string_from_node(node.args[0])
                             if path:
-                                outputs.append(path)
+                                outputs.append(resolve_to_root(path))
+                # Handle chained method calls like ax.get_figure().savefig()
+                # where node.func.value is itself a Call node
+                elif isinstance(node.func.value, ast.Call):
+                    func = node.func.attr
+                    if func == "savefig":
+                        if len(node.args) >= 1:
+                            path = _extract_string_from_node(node.args[0])
+                            if path:
+                                outputs.append(resolve_to_root(path))
+
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     outputs = [p for p in outputs if _is_valid_project_path(p)]
     inputs = list(dict.fromkeys(inputs))

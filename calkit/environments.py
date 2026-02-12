@@ -752,7 +752,7 @@ def detect_default_env(
         elif language_lower == "julia":
             env_spec_paths = ["Project.toml"]
         elif language_lower == "r":
-            env_spec_paths = ["DESCRIPTION"]
+            env_spec_paths = ["DESCRIPTION", "environment.yml", "pixi.toml"]
         elif language_lower == "shell":
             env_spec_paths = ["Dockerfile"]
         elif language_lower == "matlab":
@@ -934,7 +934,7 @@ def detect_env_for_stage(
     if stage_language:
         language_kinds = {
             "python": ["uv-venv", "uv", "venv", "conda", "pixi"],
-            "r": ["renv"],
+            "r": ["renv", "conda", "pixi"],
             "julia": ["julia"],
             "matlab": ["matlab"],
             "latex": ["docker"],
@@ -982,7 +982,13 @@ def detect_env_for_stage(
                 "envs/*.yml",
                 "pixi.toml",
             ],
-            "r": ["DESCRIPTION"],
+            "r": [
+                "DESCRIPTION",
+                "environment.yml",
+                "env/*.yml",
+                "envs/*.yml",
+                "pixi.toml",
+            ],
             "julia": ["Project.toml"],
             "shell": ["Dockerfile"],
         }

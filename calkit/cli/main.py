@@ -1911,6 +1911,15 @@ def execute_and_record(
     ck_info_orig = deepcopy(ck_info)
     pipeline = ck_info.get("pipeline", {})
     stages = pipeline.get("stages", {})
+    # Strip and detect uv/pixi run prefix
+    if len(cmd) >= 2 and cmd[0] == "uv" and cmd[1] == "run":
+        if environment is None and os.path.isfile("pyproject.toml"):
+            environment = "pyproject.toml"
+        cmd = cmd[2:]
+    elif len(cmd) >= 2 and cmd[0] == "pixi" and cmd[1] == "run":
+        if environment is None and os.path.isfile("pixi.toml"):
+            environment = "pixi.toml"
+        cmd = cmd[2:]
     # Detect what kind of stage this is based on the command
     # If the first argument is a notebook, we'll treat this as a notebook stage
     # If the first argument is `python`, check that the second argument is a

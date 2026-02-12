@@ -207,12 +207,16 @@ cp source.txt dest.txt
 def test_detect_jupyter_notebook_io_python(tmp_dir):
     """Test detection of inputs and outputs from Python Jupyter notebooks.
 
-    Covers basic file I/O, chained method calls like ax.get_figure().savefig(),
-    and relative path resolution with directory changes.
+    Covers:
+    - Basic file I/O operations (open, pandas read/write)
+    - Chained method calls like ax.get_figure().savefig()
+    - Relative path resolution with directory changes
+    - Matplotlib savefig detection (both plt.savefig and fig.savefig)
+    - Jupyter %cd magic command for changing directories
     """
-    # Create a subdirectory for the notebook so that .. paths resolve correctly
+    # Test 1: Basic I/O with subdirectory and chained methods
     os.makedirs("notebooks", exist_ok=True)
-    notebook = {
+    notebook_basic = {
         "cells": [
             {
                 "cell_type": "code",
@@ -248,6 +252,23 @@ def test_detect_jupyter_notebook_io_python(tmp_dir):
                     "ax.get_figure().savefig('../figures/plot.png')\n",
                 ],
             },
+            {
+                "cell_type": "code",
+                "source": [
+                    "x = [1, 2, 3]\n",
+                    "y = [1, 4, 9]\n",
+                    "plt.plot(x, y)\n",
+                    "plt.savefig('basic_plot.png')\n",
+                ],
+            },
+            {
+                "cell_type": "code",
+                "source": [
+                    "fig, ax = plt.subplots()\n",
+                    "ax.plot(x, y)\n",
+                    "fig.savefig('figure_plot.pdf')\n",
+                ],
+            },
         ],
         "metadata": {
             "kernelspec": {
@@ -257,31 +278,25 @@ def test_detect_jupyter_notebook_io_python(tmp_dir):
         },
     }
     with open("notebooks/notebook.ipynb", "w") as f:
-        json.dump(notebook, f)
-    # Create the helper module in the notebooks directory
+        json.dump(notebook_basic, f)
     with open("notebooks/helper.py", "w") as f:
         f.write("def process(): pass")
     result = detect_jupyter_notebook_io("notebooks/notebook.ipynb")
-    # Check detected inputs
-    # Files referenced from notebooks/ are resolved as notebooks/filename
+    # Basic file I/O
     assert "notebooks/data.csv" in result["inputs"]
     assert "notebooks/input.txt" in result["inputs"]
     assert "notebooks/helper.py" in result["inputs"]
-    # Check detected outputs
     assert "notebooks/output.csv" in result["outputs"]
     assert "notebooks/result.txt" in result["outputs"]
-    # Relative paths going up to figures/ resolve to figures/plot.png at
-    # project root
+    # Chained method calls and relative paths
     assert "figures/plot.png" in result["outputs"]
-
-
-def test_detect_jupyter_notebook_io_with_cd_magic(tmp_dir):
-    """Test detection of I/O when using Jupyter %cd magic to change
-    directories.
-    """
+    # Matplotlib savefig
+    assert "notebooks/basic_plot.png" in result["outputs"]
+    assert "notebooks/figure_plot.pdf" in result["outputs"]
+    # Test 2: %cd magic command for changing directories
     os.makedirs("data", exist_ok=True)
     os.makedirs("output", exist_ok=True)
-    notebook = {
+    notebook_cd = {
         "cells": [
             {
                 "cell_type": "code",
@@ -310,58 +325,14 @@ def test_detect_jupyter_notebook_io_with_cd_magic(tmp_dir):
             }
         },
     }
-    with open("notebook.ipynb", "w") as f:
-        json.dump(notebook, f)
-    result = detect_jupyter_notebook_io("notebook.ipynb")
+    with open("notebook_cd.ipynb", "w") as f:
+        json.dump(notebook_cd, f)
+    result_cd = detect_jupyter_notebook_io("notebook_cd.ipynb")
     # File read after %cd data should be detected as data/input.csv
-    assert "data/input.csv" in result["inputs"]
+    assert "data/input.csv" in result_cd["inputs"]
     # File written after %cd data with ../ path should be detected as
     # output/result.csv
-    assert "output/result.csv" in result["outputs"]
-
-
-def test_detect_jupyter_notebook_io_matplotlib(tmp_dir):
-    """Test detection of matplotlib savefig in Python Jupyter notebooks."""
-    notebook = {
-        "cells": [
-            {
-                "cell_type": "code",
-                "source": [
-                    "import matplotlib.pyplot as plt\n",
-                    "import numpy as np\n",
-                ],
-            },
-            {
-                "cell_type": "code",
-                "source": [
-                    "x = np.linspace(0, 10, 100)\n",
-                    "y = np.sin(x)\n",
-                    "plt.plot(x, y)\n",
-                    "plt.savefig('plot.png')\n",
-                ],
-            },
-            {
-                "cell_type": "code",
-                "source": [
-                    "fig, ax = plt.subplots()\n",
-                    "ax.plot(x, y)\n",
-                    "fig.savefig('result.pdf')\n",
-                ],
-            },
-        ],
-        "metadata": {
-            "kernelspec": {
-                "language": "python",
-                "name": "python3",
-            }
-        },
-    }
-    with open("notebook.ipynb", "w") as f:
-        json.dump(notebook, f)
-    result = detect_jupyter_notebook_io("notebook.ipynb")
-    # Check detected outputs
-    assert "plot.png" in result["outputs"]
-    assert "result.pdf" in result["outputs"]
+    assert "output/result.csv" in result_cd["outputs"]
 
 
 def test_detect_jupyter_notebook_io_julia(tmp_dir):

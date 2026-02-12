@@ -353,8 +353,6 @@ def _extract_string_from_node(node: ast.AST) -> str | None:
     """Extract a string value from an AST node if it's a constant string."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
-    if isinstance(node, ast.Str) and isinstance(node.s, str):
-        return node.s
     return None
 
 

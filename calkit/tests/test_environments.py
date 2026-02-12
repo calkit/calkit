@@ -1,5 +1,6 @@
 """Tests for ``calkit.environments``."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -219,34 +220,95 @@ def test_detect_default_env(tmp_dir):
         calkit.ryaml.dump({"name": "myenv", "dependencies": ["pandas"]}, f)
     res = calkit.environments.detect_default_env()
     assert res is None
-    # Now add a single environment to calkit.yaml--should detect that as the
-    # default env
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(
-            {
-                "environments": {
-                    "main": {"kind": "venv", "path": "requirements.txt"}
-                }
-            },
-            f,
-        )
-    res = calkit.environments.detect_default_env()
-    assert res is not None
+
+
+def test_detect_env_for_stage(tmp_dir):
+    stage = {"kind": "python-script", "script_path": "script.py"}
+    with open("script.py", "w") as f:
+        f.write("import requests\n")
+    with open("requirements.txt", "w") as f:
+        f.write("requests\n")
+    ck_info = {
+        "environments": {
+            "explicit": {
+                "kind": "uv-venv",
+                "path": "requirements.txt",
+                "python": "3.14",
+                "prefix": ".venv",
+            }
+        }
+    }
+    res = calkit.environments.detect_env_for_stage(
+        stage, environment="explicit", ck_info=ck_info
+    )
+    assert res.name == "explicit"
+    assert res.exists
+    ck_info = {
+        "environments": {
+            "pyenv": {
+                "kind": "uv-venv",
+                "path": "requirements.txt",
+                "python": "3.14",
+                "prefix": ".venv",
+            }
+        }
+    }
+    res = calkit.environments.detect_env_for_stage(
+        stage, environment=None, ck_info=ck_info
+    )
+    assert res.name == "pyenv"
+    assert res.exists
+    ck_info = {"environments": {}}
+    res = calkit.environments.detect_env_for_stage(
+        stage, environment=None, ck_info=ck_info
+    )
     assert res.name == "main"
     assert res.env["path"] == "requirements.txt"
-    # Test that with two environments we return None
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(
+    assert not res.created_from_dependencies
+    os.remove("requirements.txt")
+    res = calkit.environments.detect_env_for_stage(
+        stage, environment=None, ck_info=ck_info
+    )
+    assert res.created_from_dependencies
+    assert res.spec_path is not None
+    assert res.spec_path.endswith("requirements.txt")
+    notebook = {
+        "cells": [
             {
-                "environments": {
-                    "main": {"kind": "venv", "path": "requirements.txt"},
-                    "other": {"kind": "uv", "path": "pyproject.toml"},
-                }
-            },
-            f,
-        )
-    res = calkit.environments.detect_default_env()
-    assert res is None
+                "cell_type": "code",
+                "source": ["using DataFrames\n"],
+            }
+        ],
+        "metadata": {
+            "kernelspec": {
+                "language": "julia",
+                "name": "julia-1.9",
+            }
+        },
+    }
+    with open("notebook.ipynb", "w") as f:
+        json.dump(notebook, f)
+    ck_info = {
+        "environments": {
+            "juliaenv": {
+                "kind": "julia",
+                "path": "Project.toml",
+                "julia": "1.11",
+            }
+        }
+    }
+    stage_nb = {"kind": "jupyter-notebook", "notebook_path": "notebook.ipynb"}
+    res = calkit.environments.detect_env_for_stage(
+        stage_nb, environment=None, ck_info=ck_info
+    )
+    assert res.name == "juliaenv"
+    assert res.exists
+    stage_latex = {"kind": "latex", "script_path": "paper.tex"}
+    res = calkit.environments.detect_env_for_stage(
+        stage_latex, environment=None, ck_info={"environments": {}}
+    )
+    assert res.env["kind"] == "docker"
+    assert res.env["image"] == "texlive/texlive:latest-full"
 
 
 def test_env_from_notebook_path(tmp_dir):

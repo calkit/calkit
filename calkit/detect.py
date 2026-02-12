@@ -9,6 +9,8 @@ import re
 import sys
 from typing import Literal
 
+NotebookLanguage = Literal["python", "julia", "r"]
+
 
 def detect_python_script_io(script_path: str) -> dict[str, list[str]]:
     """Detect inputs and outputs from a Python script using static analysis."""
@@ -196,9 +198,34 @@ def _extract_directory_changes(code: str, current_dir: str = ".") -> str:
     return working_dir
 
 
+def language_from_notebook(
+    notebook_path: str, notebook: dict | None = None
+) -> NotebookLanguage | None:
+    """Detect notebook language from kernelspec metadata."""
+    if notebook is None:
+        if not os.path.exists(notebook_path):
+            return
+        try:
+            with open(notebook_path, "r", encoding="utf-8") as f:
+                notebook = json.load(f)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return
+    assert notebook is not None
+    metadata = notebook.get("metadata", {})
+    kernel_info = metadata.get("kernelspec", {})
+    kernel_lang = kernel_info.get("language", "").lower()
+    if "python" in kernel_lang:
+        return "python"
+    if "julia" in kernel_lang:
+        return "julia"
+    if kernel_lang == "r":
+        return "r"
+    return
+
+
 def detect_jupyter_notebook_io(
     notebook_path: str,
-    language: Literal["python", "julia", "r"] | None = None,
+    language: NotebookLanguage | None = None,
 ) -> dict[str, list[str]]:
     """Detect inputs and outputs from a Jupyter notebook.
 
@@ -216,17 +243,8 @@ def detect_jupyter_notebook_io(
     except (json.JSONDecodeError, UnicodeDecodeError):
         return {"inputs": inputs, "outputs": outputs}
     if language is None:
-        metadata = nb.get("metadata", {})
-        kernel_info = metadata.get("kernelspec", {})
-        kernel_lang = kernel_info.get("language", "").lower()
-        if "python" in kernel_lang:
-            language = "python"
-        elif "julia" in kernel_lang:
-            language = "julia"
-        elif kernel_lang == "r":
-            language = "r"
-        else:
-            language = "python"
+        detected = language_from_notebook(notebook_path, notebook=nb)
+        language = detected if detected is not None else "python"
     code_cells = [
         cell for cell in nb.get("cells", []) if cell.get("cell_type") == "code"
     ]
@@ -1083,7 +1101,7 @@ def detect_julia_dependencies(
 
 def detect_dependencies_from_notebook(
     notebook_path: str,
-    language: Literal["python", "julia", "r"] | None = None,
+    language: NotebookLanguage | None = None,
 ) -> list[str]:
     """Detect dependencies from a Jupyter notebook.
 
@@ -1101,32 +1119,19 @@ def detect_dependencies_from_notebook(
     """
     if not os.path.exists(notebook_path):
         return []
-
     try:
         with open(notebook_path, "r", encoding="utf-8") as f:
             nb = json.load(f)
     except (json.JSONDecodeError, UnicodeDecodeError):
         return []
-
     # Detect language if not provided
     if language is None:
-        metadata = nb.get("metadata", {})
-        kernel_info = metadata.get("kernelspec", {})
-        kernel_lang = kernel_info.get("language", "").lower()
-        if "python" in kernel_lang:
-            language = "python"
-        elif "julia" in kernel_lang:
-            language = "julia"
-        elif kernel_lang == "r":
-            language = "r"
-        else:
-            language = "python"  # Default to Python
-
+        detected = language_from_notebook(notebook_path, notebook=nb)
+        language = detected if detected is not None else "python"
     # Collect all code from cells
     code_cells = [
         cell for cell in nb.get("cells", []) if cell.get("cell_type") == "code"
     ]
-
     all_code = []
     for cell in code_cells:
         source = cell.get("source", [])
@@ -1134,9 +1139,7 @@ def detect_dependencies_from_notebook(
             all_code.append("".join(source))
         else:
             all_code.append(source)
-
     combined_code = "\n".join(all_code)
-
     # Detect dependencies based on language
     if language == "python":
         return detect_python_dependencies(code=combined_code)
@@ -1144,7 +1147,6 @@ def detect_dependencies_from_notebook(
         return detect_julia_dependencies(code=combined_code)
     elif language == "r":
         return detect_r_dependencies(code=combined_code)
-
     return []
 
 

@@ -5,6 +5,7 @@ import json
 import os
 import platform
 from pathlib import Path
+from typing import cast
 
 from pydantic import BaseModel
 from sqlitedict import SqliteDict
@@ -887,6 +888,7 @@ def detect_env_for_stage(
         detect_julia_dependencies,
         detect_python_dependencies,
         detect_r_dependencies,
+        language_from_notebook,
     )
 
     if ck_info is None:
@@ -894,8 +896,8 @@ def detect_env_for_stage(
     # Get existing environment names
     envs = ck_info.get("environments", {})
     all_env_names = list(envs.keys())
-    # First, try to detect an existing environment
-    try:
+    # 1) If stage has an environment, use that
+    if environment is not None:
         res = env_from_name_or_path(
             name_or_path=environment, ck_info=ck_info, language=language
         )
@@ -907,10 +909,95 @@ def detect_env_for_stage(
             dependencies=[],
             created_from_dependencies=False,
         )
-    except Exception:
-        # If we couldn't detect an environment, create one based on
-        # detected dependencies
-        pass
+    # Infer stage language if not provided
+    stage_kind = stage.get("kind")
+    stage_language = language
+    if stage_language is None:
+        if stage_kind == "jupyter-notebook":
+            stage_language = (
+                language_from_notebook(stage["notebook_path"]) or "python"
+            )
+        elif stage_kind == "python-script":
+            stage_language = "python"
+        elif stage_kind == "r-script":
+            stage_language = "r"
+        elif stage_kind == "julia-script":
+            stage_language = "julia"
+        elif stage_kind == "latex":
+            stage_language = "latex"
+        elif stage_kind in ["matlab-script", "matlab-command"]:
+            stage_language = "matlab"
+        elif stage_kind in ["shell-script", "shell-command"]:
+            stage_language = "shell"
+    # 2) If there is already an environment for the stage language, use that
+    if stage_language:
+        language_kinds = {
+            "python": ["uv-venv", "uv", "venv", "conda", "pixi"],
+            "r": ["renv"],
+            "julia": ["julia"],
+            "matlab": ["matlab"],
+            "latex": ["docker"],
+            "shell": ["system"],
+        }
+        preferred_kinds = language_kinds.get(stage_language, [])
+        matching_envs = [
+            (name, env)
+            for name, env in envs.items()
+            if env.get("kind") in preferred_kinds
+        ]
+        if matching_envs:
+            env_name, env = sorted(matching_envs, key=lambda item: item[0])[0]
+            env_name = cast(str, env_name)
+            return EnvForStageResult(
+                name=env_name,
+                env=env,
+                exists=True,
+                spec_path=env.get("path"),
+                dependencies=[],
+                created_from_dependencies=False,
+            )
+    # 3) If a typical env spec exists for the stage language, use that
+    if stage_language:
+        if stage_language == "latex":
+            res = env_from_name_or_path(
+                name_or_path=None,
+                ck_info=ck_info,
+                language=stage_language,
+            )
+            return EnvForStageResult(
+                name=res.name,
+                env=res.env,
+                exists=res.exists,
+                spec_path=res.env.get("path"),
+                dependencies=[],
+                created_from_dependencies=False,
+            )
+        spec_candidates = {
+            "python": [
+                "pyproject.toml",
+                "requirements.txt",
+                "environment.yml",
+                "pixi.toml",
+            ],
+            "r": ["DESCRIPTION"],
+            "julia": ["Project.toml"],
+            "shell": ["Dockerfile"],
+        }
+        for spec_path in spec_candidates.get(stage_language, []):
+            if os.path.isfile(spec_path):
+                res = env_from_name_or_path(
+                    name_or_path=spec_path,
+                    ck_info=ck_info,
+                    language=stage_language,
+                )
+                return EnvForStageResult(
+                    name=res.name,
+                    env=res.env,
+                    exists=res.exists,
+                    spec_path=res.env.get("path"),
+                    dependencies=[],
+                    created_from_dependencies=False,
+                )
     dependencies: list[str] = []
     spec_path: str | None = None
     spec_content: str | None = None
@@ -957,23 +1044,7 @@ def detect_env_for_stage(
             "path": spec_path,
         }
     elif stage["kind"] == "jupyter-notebook":
-        notebook_lang = None
-        # Try to detect language from notebook
-        if stage["notebook_path"].endswith(".ipynb"):
-            try:
-                with open(stage["notebook_path"], "r") as f:
-                    nb = json.load(f)
-                metadata = nb.get("metadata", {})
-                kernel_info = metadata.get("kernelspec", {})
-                kernel_lang = kernel_info.get("language", "").lower()
-                if "python" in kernel_lang:
-                    notebook_lang = "python"
-                elif "julia" in kernel_lang:
-                    notebook_lang = "julia"
-                elif kernel_lang == "r":
-                    notebook_lang = "r"
-            except Exception:
-                pass
+        notebook_lang = language_from_notebook(stage["notebook_path"])
         dependencies = detect_dependencies_from_notebook(
             stage["notebook_path"], language=notebook_lang
         )

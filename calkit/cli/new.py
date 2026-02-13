@@ -1268,9 +1268,13 @@ def new_uv_env(
     if name in envs:
         raise_error(f"Environment with name {name} already exists")
     if path is None:
-        envdir = f".calkit/envs/{name}"
-        os.makedirs(envdir, exist_ok=True)
-        path = os.path.join(envdir, "pyproject.toml")
+        if not envs:
+            envdir = "."
+            path = "pyproject.toml"
+        else:
+            envdir = f".calkit/envs/{name}"
+            os.makedirs(envdir, exist_ok=True)
+            path = os.path.join(envdir, "pyproject.toml")
     else:
         envdir = os.path.dirname(path)
         if envdir:

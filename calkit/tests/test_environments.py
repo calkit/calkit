@@ -223,7 +223,7 @@ def test_detect_default_env(tmp_dir):
 
 
 def test_detect_env_for_stage(tmp_dir):
-    stage = {"kind": "python-script", "script_path": "script.py"}
+    stage_py = {"kind": "python-script", "script_path": "script.py"}
     with open("script.py", "w") as f:
         f.write("import requests\n")
     with open("requirements.txt", "w") as f:
@@ -239,7 +239,7 @@ def test_detect_env_for_stage(tmp_dir):
         }
     }
     res = calkit.environments.detect_env_for_stage(
-        stage, environment="explicit", ck_info=ck_info
+        stage_py, environment="explicit", ck_info=ck_info
     )
     assert res.name == "explicit"
     assert res.exists
@@ -254,24 +254,193 @@ def test_detect_env_for_stage(tmp_dir):
         }
     }
     res = calkit.environments.detect_env_for_stage(
-        stage, environment=None, ck_info=ck_info
+        stage_py, environment=None, ck_info=ck_info
     )
     assert res.name == "pyenv"
     assert res.exists
     ck_info = {"environments": {}}
     res = calkit.environments.detect_env_for_stage(
-        stage, environment=None, ck_info=ck_info
+        stage_py, environment=None, ck_info=ck_info
     )
     assert res.name == "main"
     assert res.env["path"] == "requirements.txt"
     assert not res.created_from_dependencies
     os.remove("requirements.txt")
     res = calkit.environments.detect_env_for_stage(
-        stage, environment=None, ck_info=ck_info
+        stage_py, environment=None, ck_info=ck_info
+    )
+    assert res.created_from_dependencies
+    assert res.spec_path == "requirements.txt"
+    ck_info = {
+        "environments": {
+            "jl": {"kind": "julia", "path": "Project.toml", "julia": "1.11"}
+        }
+    }
+    res = calkit.environments.detect_env_for_stage(
+        stage_py, environment=None, ck_info=ck_info
     )
     assert res.created_from_dependencies
     assert res.spec_path is not None
+    assert res.spec_path.startswith(".calkit/envs/")
     assert res.spec_path.endswith("requirements.txt")
+    stage_r = {"kind": "r-script", "script_path": "analysis.R"}
+    with open("analysis.R", "w") as f:
+        f.write("library(dplyr)\n")
+    ck_info = {"environments": {}}
+    res = calkit.environments.detect_env_for_stage(
+        stage_r, environment=None, ck_info=ck_info
+    )
+    assert res.created_from_dependencies
+    assert res.spec_path == "DESCRIPTION"
+    ck_info = {
+        "environments": {
+            "py": {
+                "kind": "uv-venv",
+                "path": "requirements.txt",
+                "python": "3.14",
+                "prefix": ".venv",
+            }
+        }
+    }
+    res = calkit.environments.detect_env_for_stage(
+        stage_r, environment=None, ck_info=ck_info
+    )
+    assert res.created_from_dependencies
+    assert res.spec_path is not None
+    assert res.spec_path.startswith(".calkit/envs/")
+    assert res.spec_path.endswith("DESCRIPTION")
+    stage_jl = {"kind": "julia-script", "script_path": "analysis.jl"}
+    with open("analysis.jl", "w") as f:
+        f.write("using DataFrames\n")
+    ck_info = {"environments": {}}
+    res = calkit.environments.detect_env_for_stage(
+        stage_jl, environment=None, ck_info=ck_info
+    )
+    assert res.created_from_dependencies
+    assert res.spec_path == "Project.toml"
+    ck_info = {
+        "environments": {
+            "py": {
+                "kind": "uv-venv",
+                "path": "requirements.txt",
+                "python": "3.14",
+                "prefix": ".venv",
+            }
+        }
+    }
+    res = calkit.environments.detect_env_for_stage(
+        stage_jl, environment=None, ck_info=ck_info
+    )
+    assert res.created_from_dependencies
+    assert res.spec_path is not None
+    assert res.spec_path.startswith(".calkit/envs/")
+    assert res.spec_path.endswith("Project.toml")
+    notebook_py = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "source": ["import pandas\n"],
+            }
+        ],
+        "metadata": {
+            "kernelspec": {
+                "language": "python",
+                "name": "python3",
+            }
+        },
+    }
+    with open("notebook-py.ipynb", "w") as f:
+        json.dump(notebook_py, f)
+    stage_nb = {
+        "kind": "jupyter-notebook",
+        "notebook_path": "notebook-py.ipynb",
+    }
+    ck_info = {"environments": {}}
+    res = calkit.environments.detect_env_for_stage(
+        stage_nb, environment=None, ck_info=ck_info
+    )
+    assert res.created_from_dependencies
+    assert res.spec_path == "requirements.txt"
+    assert res.spec_content is not None
+    assert "ipykernel" in res.spec_content
+    notebook_r = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "source": ["library(ggplot2)\n"],
+            }
+        ],
+        "metadata": {
+            "kernelspec": {
+                "language": "R",
+                "name": "ir",
+            }
+        },
+    }
+    with open("notebook-r.ipynb", "w") as f:
+        json.dump(notebook_r, f)
+    stage_nb_r = {
+        "kind": "jupyter-notebook",
+        "notebook_path": "notebook-r.ipynb",
+    }
+    ck_info = {
+        "environments": {
+            "py": {
+                "kind": "uv-venv",
+                "path": "requirements.txt",
+                "python": "3.14",
+                "prefix": ".venv",
+            }
+        }
+    }
+    res = calkit.environments.detect_env_for_stage(
+        stage_nb_r, environment=None, ck_info=ck_info
+    )
+    assert res.created_from_dependencies
+    assert res.spec_path is not None
+    assert res.spec_path.startswith(".calkit/envs/")
+    assert res.spec_path.endswith("DESCRIPTION")
+    assert res.spec_content is not None
+    assert "IRkernel" in res.spec_content
+    notebook_jl = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "source": ["using DataFrames\n"],
+            }
+        ],
+        "metadata": {
+            "kernelspec": {
+                "language": "julia",
+                "name": "julia-1.9",
+            }
+        },
+    }
+    with open("notebook-jl.ipynb", "w") as f:
+        json.dump(notebook_jl, f)
+    stage_nb_jl = {
+        "kind": "jupyter-notebook",
+        "notebook_path": "notebook-jl.ipynb",
+    }
+    ck_info = {
+        "environments": {
+            "py": {
+                "kind": "uv-venv",
+                "path": "requirements.txt",
+                "python": "3.14",
+                "prefix": ".venv",
+            }
+        }
+    }
+    res = calkit.environments.detect_env_for_stage(
+        stage_nb_jl, environment=None, ck_info=ck_info
+    )
+    assert res.created_from_dependencies
+    assert res.spec_path is not None
+    assert res.spec_path.startswith(".calkit/envs/")
+    assert res.spec_path.endswith("Project.toml")
+    assert res.spec_content is not None
+    assert "IJulia" in res.spec_content
     notebook = {
         "cells": [
             {
@@ -297,9 +466,12 @@ def test_detect_env_for_stage(tmp_dir):
             }
         }
     }
-    stage_nb = {"kind": "jupyter-notebook", "notebook_path": "notebook.ipynb"}
+    stage_nb_exist = {
+        "kind": "jupyter-notebook",
+        "notebook_path": "notebook.ipynb",
+    }
     res = calkit.environments.detect_env_for_stage(
-        stage_nb, environment=None, ck_info=ck_info
+        stage_nb_exist, environment=None, ck_info=ck_info
     )
     assert res.name == "juliaenv"
     assert res.exists

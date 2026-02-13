@@ -913,6 +913,7 @@ def detect_env_for_stage(
     # Get existing environment names
     envs = ck_info.get("environments", {})
     all_env_names = list(envs.keys())
+    is_first_env = not all_env_names
     # 1) If stage has an environment, use that
     if environment is not None:
         res = env_from_name_or_path(
@@ -1049,9 +1050,14 @@ def detect_env_for_stage(
             script_path=stage["script_path"]
         )
         # Generate unique environment name
-        temp_path = ".calkit/envs/py/requirements.txt"
-        env_name = make_env_name(temp_path, all_env_names, kind="uv-venv")
-        spec_path = f".calkit/envs/{env_name}/requirements.txt"
+        if is_first_env:
+            temp_path = "requirements.txt"
+            env_name = make_env_name(temp_path, all_env_names, kind="uv-venv")
+            spec_path = "requirements.txt"
+        else:
+            temp_path = ".calkit/envs/py/requirements.txt"
+            env_name = make_env_name(temp_path, all_env_names, kind="uv-venv")
+            spec_path = f".calkit/envs/{env_name}/requirements.txt"
         spec_content = create_python_requirements_content(dependencies)
         env_dict = {
             "kind": "uv-venv",
@@ -1062,9 +1068,14 @@ def detect_env_for_stage(
     elif stage["kind"] == "r-script":
         dependencies = detect_r_dependencies(script_path=stage["script_path"])
         # Generate unique environment name
-        temp_path = ".calkit/envs/r/DESCRIPTION"
-        env_name = make_env_name(temp_path, all_env_names, kind="renv")
-        spec_path = f".calkit/envs/{env_name}/DESCRIPTION"
+        if is_first_env:
+            temp_path = "DESCRIPTION"
+            env_name = make_env_name(temp_path, all_env_names, kind="renv")
+            spec_path = "DESCRIPTION"
+        else:
+            temp_path = ".calkit/envs/r/DESCRIPTION"
+            env_name = make_env_name(temp_path, all_env_names, kind="renv")
+            spec_path = f".calkit/envs/{env_name}/DESCRIPTION"
         spec_content = create_r_description_content(dependencies)
         env_dict = {
             "kind": "renv",
@@ -1075,9 +1086,14 @@ def detect_env_for_stage(
             script_path=stage["script_path"]
         )
         # Generate unique environment name
-        temp_path = ".calkit/envs/julia/Project.toml"
-        env_name = make_env_name(temp_path, all_env_names, kind="julia")
-        spec_path = f".calkit/envs/{env_name}/Project.toml"
+        if is_first_env:
+            temp_path = "Project.toml"
+            env_name = make_env_name(temp_path, all_env_names, kind="julia")
+            spec_path = "Project.toml"
+        else:
+            temp_path = ".calkit/envs/julia/Project.toml"
+            env_name = make_env_name(temp_path, all_env_names, kind="julia")
+            spec_path = f".calkit/envs/{env_name}/Project.toml"
         spec_content = create_julia_project_file_content(dependencies)
         env_dict = {
             "kind": "julia",
@@ -1093,9 +1109,18 @@ def detect_env_for_stage(
             if "ipykernel" not in dependencies:
                 dependencies.append("ipykernel")
             # Generate unique environment name
-            temp_path = ".calkit/envs/py/requirements.txt"
-            env_name = make_env_name(temp_path, all_env_names, kind="uv-venv")
-            spec_path = f".calkit/envs/{env_name}/requirements.txt"
+            if is_first_env:
+                temp_path = "requirements.txt"
+                env_name = make_env_name(
+                    temp_path, all_env_names, kind="uv-venv"
+                )
+                spec_path = "requirements.txt"
+            else:
+                temp_path = ".calkit/envs/py/requirements.txt"
+                env_name = make_env_name(
+                    temp_path, all_env_names, kind="uv-venv"
+                )
+                spec_path = f".calkit/envs/{env_name}/requirements.txt"
             spec_content = create_python_requirements_content(dependencies)
             env_dict = {
                 "kind": "uv-venv",
@@ -1108,9 +1133,14 @@ def detect_env_for_stage(
             if "IRkernel" not in dependencies:
                 dependencies.append("IRkernel")
             # Generate unique environment name
-            temp_path = ".calkit/envs/r/DESCRIPTION"
-            env_name = make_env_name(temp_path, all_env_names, kind="renv")
-            spec_path = f".calkit/envs/{env_name}/DESCRIPTION"
+            if is_first_env:
+                temp_path = "DESCRIPTION"
+                env_name = make_env_name(temp_path, all_env_names, kind="renv")
+                spec_path = "DESCRIPTION"
+            else:
+                temp_path = ".calkit/envs/r/DESCRIPTION"
+                env_name = make_env_name(temp_path, all_env_names, kind="renv")
+                spec_path = f".calkit/envs/{env_name}/DESCRIPTION"
             spec_content = create_r_description_content(dependencies)
             env_dict = {
                 "kind": "renv",
@@ -1121,9 +1151,18 @@ def detect_env_for_stage(
             if "IJulia" not in dependencies:
                 dependencies.append("IJulia")
             # Generate unique environment name
-            temp_path = ".calkit/envs/julia/Project.toml"
-            env_name = make_env_name(temp_path, all_env_names, kind="julia")
-            spec_path = f".calkit/envs/{env_name}/Project.toml"
+            if is_first_env:
+                temp_path = "Project.toml"
+                env_name = make_env_name(
+                    temp_path, all_env_names, kind="julia"
+                )
+                spec_path = "Project.toml"
+            else:
+                temp_path = ".calkit/envs/julia/Project.toml"
+                env_name = make_env_name(
+                    temp_path, all_env_names, kind="julia"
+                )
+                spec_path = f".calkit/envs/{env_name}/Project.toml"
             spec_content = create_julia_project_file_content(dependencies)
             env_dict = {
                 "kind": "julia",

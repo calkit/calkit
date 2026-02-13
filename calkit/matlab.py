@@ -236,7 +236,7 @@ def get_deps_from_matlab(
     Returns
     -------
     list[str]
-        List of dependency file paths in POSIX format, with filepath included.
+        List of dependency file paths in POSIX format.
     """
     get_deps_cmd = ""
     if environment != "_system":
@@ -282,11 +282,9 @@ def get_deps_from_matlab(
         rel_posix = PurePosixPath(rel).as_posix()
         if rel_posix not in rel_paths:
             rel_paths.append(rel_posix)
-    # Ensure the requested filepath is included and prefer it first
+    # Remove the target file itself from dependencies
     fp_posix = PurePosixPath(filepath).as_posix()
-    if fp_posix not in rel_paths:
-        rel_paths.insert(0, fp_posix)
-    return rel_paths
+    return [p for p in rel_paths if p != fp_posix]
 
 
 def _get_deps_from_matlab_static(filepath: str) -> list[str]:
@@ -300,24 +298,19 @@ def _get_deps_from_matlab_static(filepath: str) -> list[str]:
     Returns
     -------
     list[str]
-        List of dependency file paths, with filepath included
+        List of dependency file paths
     """
     if not os.path.exists(filepath):
-        return [PurePosixPath(filepath).as_posix()]
+        return []
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             content = f.read()
     except (UnicodeDecodeError, IOError):
-        return [PurePosixPath(filepath).as_posix()]
+        return []
     script_dir = os.path.dirname(filepath) if filepath else "."
     io_info = _detect_matlab_io_static(content, script_dir)
     # Dependencies are the inputs detected by static analysis
-    deps = io_info["inputs"].copy()
-    # Always include the script itself
-    fp_posix = PurePosixPath(filepath).as_posix()
-    if fp_posix not in deps:
-        deps.insert(0, fp_posix)
-    return deps
+    return io_info["inputs"].copy()
 
 
 def detect_matlab_script_io(

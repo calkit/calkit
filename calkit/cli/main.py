@@ -2137,7 +2137,8 @@ def execute_and_record(
             # DVC might not be initialized
             pass
     # Merge user-specified inputs/outputs with detected ones
-    # User-specified take precedence and detected ones are added if not already present
+    # User-specified take precedence and detected ones are added if not already
+    # present
     all_inputs = list(inputs)  # Start with user-specified
     for detected in detected_inputs:
         if detected not in all_inputs:

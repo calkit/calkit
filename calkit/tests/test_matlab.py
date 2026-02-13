@@ -31,8 +31,8 @@ end
         f.write(parent_content)
     # Get dependencies for the parent script
     deps = get_deps_from_matlab("matlab_parent.m")
-    # Should include both parent and child
-    assert "matlab_parent.m" in deps
+    # Should include only the child (not the script itself)
+    assert "matlab_parent.m" not in deps
     assert "matlab_child.m" in deps
 
 
@@ -55,7 +55,7 @@ end
     # Detect I/O for the parent script
     result = detect_matlab_script_io("matlab_parent.m")
     # Check detected inputs
-    assert "matlab_parent.m" in result["inputs"]
+    assert "matlab_parent.m" not in result["inputs"]
     assert "matlab_child.m" in result["inputs"]
     # MATLAB cannot detect outputs automatically
     assert result["outputs"] == []
@@ -94,8 +94,8 @@ def test_get_deps_from_matlab_fallback(tmp_dir):
     # Try to get deps with a non-existent environment
     # This should fail and fall back to static analysis
     deps = get_deps_from_matlab("script.m", environment="nonexistent-env")
-    # Should fall back to static analysis (just the script path)
-    assert deps == ["script.m"]
+    # Should fall back to static analysis (no dependencies)
+    assert deps == []
 
 
 def test_detect_matlab_script_io_fallback(tmp_dir):
@@ -105,8 +105,8 @@ def test_detect_matlab_script_io_fallback(tmp_dir):
         f.write("disp('hello');")
     # Try to detect with a non-existent environment
     result = detect_matlab_script_io("script.m", environment="nonexistent-env")
-    # Should fall back to just the script path
-    assert result["inputs"] == ["script.m"]
+    # Should fall back to no dependencies
+    assert result["inputs"] == []
     assert result["outputs"] == []
 
 
@@ -213,7 +213,7 @@ def test_detect_matlab_script_io_static_fallback(tmp_dir):
         f.write(script_content)
     # Detect with non-existent environment (forces static analysis)
     result = detect_matlab_script_io("script.m", environment="nonexistent-env")
-    # Should include the script itself and detected I/O
-    assert "script.m" in result["inputs"]
+    # Should include detected I/O but not the script itself
+    assert "script.m" not in result["inputs"]
     assert "input.mat" in result["inputs"]
     assert "output.mat" in result["outputs"]

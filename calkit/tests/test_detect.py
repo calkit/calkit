@@ -514,8 +514,6 @@ def test_detect_shell_command_io(tmp_dir):
 def test_detect_python_script_io_relative_imports(tmp_dir):
     """Test detection of relative imports in Python scripts."""
     # Create a package structure
-    import os
-
     os.makedirs("mypackage")
     with open("mypackage/__init__.py", "w") as f:
         f.write("")

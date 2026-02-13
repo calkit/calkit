@@ -826,6 +826,8 @@ def _detect_r_code_io(
     inputs = []
     outputs = []
     code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
+    r_vars = _extract_r_string_assignments(code)
+    fig_dir = r_vars.get("fig_dir")
     # Detect source() calls for R script includes
     source_pattern = r'source\s*\(\s*["\']([^"\']+\.R)["\']'
     source_matches = re.findall(source_pattern, code, flags=re.IGNORECASE)
@@ -854,16 +856,85 @@ def _detect_r_code_io(
         r'write_excel\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
         r'pdf\s*\(\s*["\']([^"\']+)["\']',
         r'png\s*\(\s*["\']([^"\']+)["\']',
+        r'pdf\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
+        r'png\s*\([^)]*filename\s*=\s*["\']([^"\']+)["\']',
+        r'svg\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
+        r'svg\s*\([^)]*filename\s*=\s*["\']([^"\']+)["\']',
+        r'jpeg\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
+        r'jpeg\s*\([^)]*filename\s*=\s*["\']([^"\']+)["\']',
+        r'tiff\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
+        r'tiff\s*\([^)]*filename\s*=\s*["\']([^"\']+)["\']',
+        r'bmp\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
+        r'bmp\s*\([^)]*filename\s*=\s*["\']([^"\']+)["\']',
+        r'CairoPNG\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
+        r'CairoPDF\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
+        r'svglite\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
     ]
     for pattern in read_patterns:
         inputs.extend(re.findall(pattern, code))
     for pattern in write_patterns:
         outputs.extend(re.findall(pattern, code))
+    save_fig_patterns = [
+        r"save_fig\s*\(\s*[^,]+,\s*(file\.path\([^\)]*\)|\"[^\"]+\"|'[^']+'|[A-Za-z_][A-Za-z0-9_]*)",
+        r"save_fig\s*\([^\)]*filename\s*=\s*(file\.path\([^\)]*\)|\"[^\"]+\"|'[^']+'|[A-Za-z_][A-Za-z0-9_]*)",
+    ]
+    for pattern in save_fig_patterns:
+        matches = re.findall(pattern, code)
+        for match in matches:
+            resolved = _resolve_r_path_expr(match, r_vars)
+            if resolved:
+                if fig_dir and not os.path.isabs(resolved):
+                    fig_dir_norm = fig_dir.rstrip("/\\")
+                    if not resolved.startswith(
+                        (fig_dir_norm + os.sep, fig_dir_norm + "/")
+                    ):
+                        resolved = os.path.join(fig_dir, resolved)
+                outputs.append(resolved)
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     outputs = [p for p in outputs if _is_valid_project_path(p)]
     inputs = list(dict.fromkeys(inputs))
     outputs = list(dict.fromkeys(outputs))
     return {"inputs": inputs, "outputs": outputs}
+
+
+def _extract_r_string_assignments(code: str) -> dict[str, str]:
+    """Extract simple string assignments in R code."""
+    assignments = {}
+    pattern = re.compile(
+        r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:<-|=)\s*[\"']([^\"']+)[\"']",
+        flags=re.MULTILINE,
+    )
+    for name, value in pattern.findall(code):
+        assignments[name] = value
+    return assignments
+
+
+def _resolve_r_path_expr(expr: str, variables: dict[str, str]) -> str | None:
+    """Resolve simple R path expressions like "x", var, or file.path(...)."""
+    expr = expr.strip()
+    if not expr:
+        return None
+    if expr[0] in ['"', "'"] and expr[-1] == expr[0]:
+        return expr[1:-1]
+    if expr in variables:
+        return variables[expr]
+    if expr.startswith("file.path"):
+        match = re.match(r"file\.path\((.*)\)", expr)
+        if not match:
+            return None
+        args = [a.strip() for a in match.group(1).split(",") if a.strip()]
+        if not args:
+            return None
+        parts = []
+        for arg in args:
+            if arg[0] in ['"', "'"] and arg[-1] == arg[0]:
+                parts.append(arg[1:-1])
+            elif arg in variables:
+                parts.append(variables[arg])
+            else:
+                return None
+        return os.path.join(*parts)
+    return None
 
 
 def generate_stage_name(cmd: list[str]) -> str:

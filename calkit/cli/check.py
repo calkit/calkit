@@ -956,7 +956,7 @@ def check_matlab_env(
         raise_error("A MATLAB version must be specified")
     typer.echo(f"Checking MATLAB environment '{env_name}'")
     # First generate a Dockerfile for this environment
-    out_dir = os.path.join(".calkit", "environments", env_name)
+    out_dir = os.path.join(".calkit", "envs", env_name)
     os.makedirs(out_dir, exist_ok=True)
     dockerfile_fpath = os.path.join(out_dir, "Dockerfile")
     calkit.matlab.create_dockerfile(

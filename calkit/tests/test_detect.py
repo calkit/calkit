@@ -832,8 +832,6 @@ using Statistics
 
 def test_detect_dependencies_from_python_notebook(tmp_dir):
     """Test detection of dependencies from a Python Jupyter notebook."""
-    import json
-
     notebook = {
         "cells": [
             {
@@ -870,8 +868,6 @@ def test_detect_dependencies_from_python_notebook(tmp_dir):
 
 def test_detect_dependencies_from_r_notebook(tmp_dir):
     """Test detection of dependencies from an R Jupyter notebook."""
-    import json
-
     notebook = {
         "cells": [
             {
@@ -889,12 +885,9 @@ def test_detect_dependencies_from_r_notebook(tmp_dir):
             }
         },
     }
-
     with open("notebook.ipynb", "w") as f:
         json.dump(notebook, f)
-
     deps = detect_dependencies_from_notebook("notebook.ipynb")
-
     assert "ggplot2" in deps
     assert "dplyr" in deps
 

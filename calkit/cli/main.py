@@ -1015,6 +1015,16 @@ def run(
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info()
+    # Ensure Git is initialized so DVC can be used
+    try:
+        git.Repo()
+    except InvalidGitRepositoryError:
+        if not quiet:
+            typer.echo("Initializing Git repo")
+        try:
+            subprocess.check_call(["git", "init"])
+        except subprocess.CalledProcessError:
+            raise_error("Failed to initialize Git repo")
     # Set env vars
     calkit.set_env_vars(ck_info=ck_info)
     # Clean all notebooks in the pipeline

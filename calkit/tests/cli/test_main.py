@@ -949,7 +949,6 @@ cat("Analysis complete\\n")
 def test_execute_and_record_matlab_script(tmp_dir):
     from scipy.io import savemat
 
-    subprocess.check_call(["calkit", "init"])
     # Create a dependency MATLAB function
     os.makedirs("src", exist_ok=True)
     with open("src/myfunction.m", "w") as f:

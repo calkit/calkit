@@ -5,7 +5,7 @@ import os
 import re
 import subprocess
 import tempfile
-from pathlib import PurePosixPath
+from pathlib import Path
 from typing import Literal
 
 DOCKERFILE_TEMPLATE = r"""
@@ -169,7 +169,9 @@ def _detect_matlab_io_static(
         if not os.path.isabs(match):
             full_path = os.path.join(script_dir, match)
             if os.path.exists(full_path):
-                inputs.append(os.path.relpath(full_path))
+                rel_path = os.path.relpath(full_path)
+                # Convert to POSIX format for cross-platform compatibility
+                inputs.append(Path(rel_path).as_posix())
             elif _is_valid_project_path(match):
                 inputs.append(match)
     # Detect input file operations
@@ -184,6 +186,7 @@ def _detect_matlab_io_static(
         r"imread\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
         r"audioread\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
         r"VideoReader\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
+        r"parquetread\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
     ]
     # Detect output file operations
     write_patterns = [
@@ -197,6 +200,7 @@ def _detect_matlab_io_static(
         r"imwrite\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]\s*[,)]",  # imwrite(img, 'file.png', ...)
         r"audiowrite\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
         r"VideoWriter\s*\(\s*['\"]([^'\"]+)['\"]\s*[,)]",  # VideoWriter('file.avi', ...)
+        r"parquetwrite\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
     ]
     # Graphics output patterns
     graphics_patterns = [
@@ -211,10 +215,38 @@ def _detect_matlab_io_static(
     for pattern in write_patterns + graphics_patterns:
         matches = re.findall(pattern, content)
         outputs.extend(matches)
-    inputs = [p for p in inputs if _is_valid_project_path(p)]
-    outputs = [p for p in outputs if _is_valid_project_path(p)]
-    inputs = list(dict.fromkeys(inputs))
-    outputs = list(dict.fromkeys(outputs))
+    # Filter out invalid paths and normalize relative paths
+    normalized_inputs = []
+    for p in inputs:
+        if _is_valid_project_path(p):
+            # Normalize path to resolve .. and .
+            normalized = os.path.normpath(os.path.join(script_dir, p))
+            # Make it relative to current working directory
+            try:
+                normalized = os.path.relpath(normalized)
+            except ValueError:
+                # On Windows, relpath can fail if paths are on different drives
+                pass
+            # Convert to POSIX format for cross-platform compatibility
+            normalized = Path(normalized).as_posix()
+            normalized_inputs.append(normalized)
+    normalized_outputs = []
+    for p in outputs:
+        if _is_valid_project_path(p):
+            # Normalize path to resolve .. and .
+            normalized = os.path.normpath(os.path.join(script_dir, p))
+            # Make it relative to current working directory
+            try:
+                normalized = os.path.relpath(normalized)
+            except ValueError:
+                # On Windows, relpath can fail if paths are on different drives
+                pass
+            # Convert to POSIX format for cross-platform compatibility
+            normalized = Path(normalized).as_posix()
+            normalized_outputs.append(normalized)
+    # Remove duplicates while preserving order
+    inputs = list(dict.fromkeys(normalized_inputs))
+    outputs = list(dict.fromkeys(normalized_outputs))
     return {"inputs": inputs, "outputs": outputs}
 
 
@@ -279,11 +311,11 @@ def get_deps_from_matlab(
             # If any issue, skip this path
             continue
         # Convert to POSIX-style path for DVC compatibility
-        rel_posix = PurePosixPath(rel).as_posix()
+        rel_posix = Path(rel).as_posix()
         if rel_posix not in rel_paths:
             rel_paths.append(rel_posix)
     # Remove the target file itself from dependencies
-    fp_posix = PurePosixPath(filepath).as_posix()
+    fp_posix = Path(filepath).as_posix()
     return [p for p in rel_paths if p != fp_posix]
 
 
@@ -333,10 +365,12 @@ def detect_matlab_script_io(
     dict
         Dictionary with 'inputs' and 'outputs' keys containing detected file paths.
     """
-    # Get dependencies (MATLAB or static analysis fallback)
-    inputs = get_deps_from_matlab(script_path, environment)
-    # Try to detect outputs using static analysis
+    # Get .m file dependencies from MATLAB's requiredFilesAndProducts
+    matlab_deps = get_deps_from_matlab(script_path, environment)
+    # Also use static analysis to detect data file I/O
+    # (requiredFilesAndProducts only detects .m files, not data files)
     if not os.path.exists(script_path):
+        static_inputs = []
         outputs = []
     else:
         try:
@@ -344,9 +378,16 @@ def detect_matlab_script_io(
                 content = f.read()
             script_dir = os.path.dirname(script_path) if script_path else "."
             io_info = _detect_matlab_io_static(content, script_dir)
+            static_inputs = io_info["inputs"]
             outputs = io_info["outputs"]
         except (UnicodeDecodeError, IOError):
+            static_inputs = []
             outputs = []
+    # Combine MATLAB dependencies with static inputs and remove duplicates
+    all_inputs = matlab_deps + static_inputs
+    inputs = list(
+        dict.fromkeys(all_inputs)
+    )  # Remove duplicates, preserve order
     return {"inputs": inputs, "outputs": outputs}
 
 
@@ -384,14 +425,18 @@ def detect_matlab_command_io(
         ) as f:
             f.write(command)
             temp_path = f.name
-        deps = get_deps_from_matlab(temp_path, environment)
+        matlab_deps = get_deps_from_matlab(temp_path, environment)
         # Remove the temporary file from the dependencies list
-        temp_posix = PurePosixPath(temp_path).as_posix()
-        if temp_posix in deps:
-            deps.remove(temp_posix)
-        # Try to detect outputs using static analysis
+        temp_posix = Path(temp_path).as_posix()
+        if temp_posix in matlab_deps:
+            matlab_deps.remove(temp_posix)
+        # Use static analysis to detect data file I/O
         io_info = _detect_matlab_io_static(command, wdir)
+        static_inputs = io_info["inputs"]
         outputs = io_info["outputs"]
+        # Combine MATLAB dependencies with static inputs
+        all_inputs = matlab_deps + static_inputs
+        deps = list(dict.fromkeys(all_inputs))  # Remove duplicates
         return {"inputs": deps, "outputs": outputs}
     finally:
         # Clean up the temporary file

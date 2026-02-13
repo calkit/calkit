@@ -947,19 +947,9 @@ cat("Analysis complete\\n")
     shutil.which("matlab") is None, reason="MATLAB not installed"
 )
 def test_execute_and_record_matlab_script(tmp_dir):
-    """Test xr command with MATLAB script."""
+    from scipy.io import savemat
+
     subprocess.check_call(["calkit", "init"])
-    subprocess.check_call(
-        [
-            "calkit",
-            "new",
-            "docker-env",
-            "-n",
-            "matlab-env",
-            "--image",
-            "mathworks/matlab:latest",
-        ]
-    )
     # Create a MATLAB script
     with open("compute.m", "w") as f:
         f.write("""
@@ -968,15 +958,16 @@ result = data.value * 2;
 save('output.mat', 'result');
 disp('Computation complete');
 """)
-    # Create input file (simplified - would need actual MAT file)
-    with open("input.mat", "w") as f:
-        f.write("dummy")
+    # Create input file
+    savemat("input.mat", {"value": 42})
     # Execute and record
     result = subprocess.run(
-        ["calkit", "xr", "compute.m", "-e", "matlab-env"],
+        ["calkit", "xr", "compute.m"],
         capture_output=True,
         text=True,
     )
+    print("stdout:", result.stdout)
+    print("stderr:", result.stderr)
     assert result.returncode == 0
     # Verify stage was added
     ck_info = calkit.load_calkit_info()
@@ -985,6 +976,8 @@ disp('Computation complete');
     stage = stages["compute"]
     assert stage["kind"] == "matlab-script"
     assert stage["script_path"] == "compute.m"
+    assert stage["environment"] == "_system"
+    assert stage["inputs"] == ["input.mat"]
 
 
 def test_execute_and_record_with_user_inputs_outputs(tmp_dir):

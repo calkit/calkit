@@ -973,6 +973,15 @@ def detect_env_for_stage(
                 dependencies=[],
                 created_from_dependencies=False,
             )
+        if stage_language == "matlab":
+            return EnvForStageResult(
+                name="_system",
+                env={"kind": "system"},
+                exists=True,
+                spec_path=None,
+                dependencies=[],
+                created_from_dependencies=False,
+            )
     # 3) If a typical env spec exists for the stage language, use that
     if stage_language:
         if stage_language == "latex":

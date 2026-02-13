@@ -23,6 +23,7 @@ from calkit.cli.check import check_environment
 from calkit.cli.update import update_devcontainer
 from calkit.core import ryaml
 from calkit.docker import LAYERS
+from calkit.environments import DEFAULT_PYTHON_VERSION
 from calkit.models.pipeline import LatexStage, StageIteration
 
 new_app = typer.Typer(no_args_is_help=True)
@@ -1318,7 +1319,7 @@ def new_uv_venv(
     ] = ".venv",
     python_version: Annotated[
         str | None, typer.Option("--python", "-p", help="Python version.")
-    ] = "3.14",
+    ] = DEFAULT_PYTHON_VERSION,
     description: Annotated[
         str | None, typer.Option("--description", help="Description.")
     ] = None,

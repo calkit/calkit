@@ -23,6 +23,7 @@ DOCKER_ARCHS = [
     "386",
     "riscv64",
 ]
+DEFAULT_PYTHON_VERSION = "3.14"
 CONDA_VENV_ARCHS = [
     "osx-arm64",
     "osx-64",
@@ -584,7 +585,7 @@ def env_from_name_or_path(
                 env={
                     "kind": "uv-venv",
                     "path": env_path,
-                    "python": "3.14",
+                    "python": DEFAULT_PYTHON_VERSION,
                     "prefix": os.path.join(
                         os.path.split(env_path)[0], ".venv"
                     ),
@@ -1046,7 +1047,7 @@ def detect_env_for_stage(
         env_dict = {
             "kind": "uv-venv",
             "path": spec_path,
-            "python": "3.14",
+            "python": DEFAULT_PYTHON_VERSION,
             "prefix": os.path.join(os.path.dirname(spec_path), ".venv"),
         }
     elif stage["kind"] == "r-script":
@@ -1090,7 +1091,7 @@ def detect_env_for_stage(
             env_dict = {
                 "kind": "uv-venv",
                 "path": spec_path,
-                "python": "3.14",
+                "python": DEFAULT_PYTHON_VERSION,
                 "prefix": os.path.join(os.path.dirname(spec_path), ".venv"),
             }
         elif notebook_lang == "r":

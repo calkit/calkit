@@ -1838,6 +1838,16 @@ def execute_and_record(
             ),
         ),
     ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help=(
+                "Print the environment and stage that would be created "
+                "without modifying calkit.yaml or executing the command."
+            ),
+        ),
+    ] = False,
 ):
     """Execute a command and if successful, record in the pipeline."""
     import io
@@ -2024,7 +2034,28 @@ def execute_and_record(
     # Create a stage name if one isn't provided and check for existing similar
     # stages
     if stage_name is None:
-        stage_name = generate_stage_name(cmd)
+        base_stage_name = generate_stage_name(cmd)
+        stage_name = base_stage_name
+        # If a stage with this name exists and is different, auto-increment
+        if stage_name in stages:
+            existing_stage = stages[stage_name]
+            if not stages_are_similar(existing_stage, stage):
+                # Find the next available increment
+                counter = 2
+                while f"{base_stage_name}-{counter}" in stages:
+                    candidate_stage = stages[f"{base_stage_name}-{counter}"]
+                    if stages_are_similar(candidate_stage, stage):
+                        # Found a matching stage with this incremented name
+                        stage_name = f"{base_stage_name}-{counter}"
+                        break
+                    counter += 1
+                else:
+                    # No matching stage found, use the next available number
+                    stage_name = f"{base_stage_name}-{counter}"
+                typer.echo(
+                    f"Stage '{base_stage_name}' already exists with different "
+                    f"configuration; using '{stage_name}' instead"
+                )
     # Check if a similar stage already exists and reuse its environment if not
     # specified
     if stage_name in stages:
@@ -2170,6 +2201,31 @@ def execute_and_record(
         cls.model_validate(stage)
     except Exception as e:
         raise_error(f"Failed to create stage: {e}")
+    # If dry-run, print environment and stage then return
+    if dry_run:
+        # Print environment info
+        if env_result.created_from_dependencies:
+            typer.echo("Environment (would be created):")
+            if env_result.spec_path and env_result.spec_content is not None:
+                typer.echo(f"  Spec file: {env_result.spec_path}")
+                typer.echo("  Content:")
+                for line in env_result.spec_content.split("\n"):
+                    typer.echo(f"    {line}")
+        elif not env_result.exists:
+            typer.echo("Environment (would be added to calkit.yaml):")
+            yaml_output = io.StringIO()
+            calkit.ryaml.dump({env_result.name: env_result.env}, yaml_output)
+            for line in yaml_output.getvalue().rstrip().split("\n"):
+                typer.echo(f"  {line}")
+        else:
+            typer.echo(f"Environment: {env_name} (already exists)")
+        # Print stage
+        typer.echo("\nStage (would be added to pipeline):")
+        yaml_output = io.StringIO()
+        calkit.ryaml.dump({stage_name: stage}, yaml_output)
+        for line in yaml_output.getvalue().rstrip().split("\n"):
+            typer.echo(f"  {line}")
+        return
     stages[stage_name] = stage
     pipeline["stages"] = stages
     ck_info["pipeline"] = pipeline

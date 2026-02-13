@@ -562,21 +562,35 @@ def test_generate_stage_name():
     # Test Python script without args
     name = generate_stage_name(["process.py"])
     assert name == "process"
-    # Test Python script with args
+    # Test Python script with args - args are no longer included
     name = generate_stage_name(["process.py", "--verbose", "input.txt"])
-    assert name == "process-verbose-input-txt"
+    assert name == "process"
+    # Test python interpreter with script
+    name = generate_stage_name(["python", "process.py"])
+    assert name == "process"
+    # Test python interpreter with script and args
+    name = generate_stage_name(
+        ["python", "scripts/process_data.py", "--verbose"]
+    )
+    assert name == "process-data"
     # Test Julia script
     name = generate_stage_name(["analyze.jl"])
+    assert name == "analyze"
+    # Test julia interpreter with script
+    name = generate_stage_name(["julia", "analyze.jl"])
     assert name == "analyze"
     # Test MATLAB script
     name = generate_stage_name(["run_simulation.m"])
     assert name == "run-simulation"
+    # Test matlab interpreter with script
+    name = generate_stage_name(["matlab", "run_simulation.m"])
+    assert name == "run-simulation"
     # Test notebook
     name = generate_stage_name(["analysis.ipynb"])
     assert name == "analysis"
-    # Test shell script
+    # Test shell script - args are no longer included
     name = generate_stage_name(["build.sh", "production"])
-    assert name == "build-production"
+    assert name == "build"
     # Test LaTeX document
     name = generate_stage_name(["paper.tex"])
     assert name == "paper"
@@ -586,7 +600,7 @@ def test_generate_stage_name():
     # Test underscore to dash conversion
     name = generate_stage_name(["my_script.py"])
     assert name == "my-script"
-    # Test shell command (returns command name)
+    # Test shell command (returns command name with args)
     name = generate_stage_name(["echo", "Hello", "World"])
     assert name == "echo-hello-world"
     # Test matlab command with parentheses (should be removed) and -batch (should be removed)
@@ -598,9 +612,9 @@ def test_generate_stage_name():
     # Test empty command
     name = generate_stage_name([])
     assert name == "stage"
-    # Test with options that have multiple dashes (should consolidate)
+    # Test script with options - args are no longer included
     name = generate_stage_name(["script.py", "--flag1", "--flag2"])
-    assert name == "script-flag1-flag2"
+    assert name == "script"
     # Test with dots in filename (should be converted to dashes)
     name = generate_stage_name(["data.process.py"])
     assert name == "data-process"

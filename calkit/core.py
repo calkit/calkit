@@ -50,7 +50,8 @@ logger.setLevel(logging.INFO)
 ryaml = ruamel.yaml.YAML()
 ryaml.indent(mapping=2, sequence=4, offset=2)
 ryaml.preserve_quotes = True
-ryaml.width = 70
+ryaml.width = 120
+ryaml.default_flow_style = False
 
 # Constants for version control auto-ignore
 AUTO_IGNORE_SUFFIXES = [

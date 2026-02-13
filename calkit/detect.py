@@ -898,19 +898,26 @@ def generate_stage_name(cmd: list[str]) -> str:
         # Extract base name from the script/notebook path
         base_name = os.path.splitext(os.path.basename(first_arg))[0]
         stage_name = base_name
-        # Append args if present (skip first arg which is the script itself)
-        if len(cmd) > 1:
-            args_part = "-".join(cmd[1:])
-            stage_name += "-" + args_part
+    elif first_arg == "python" and len(cmd) > 1 and cmd[1].endswith(".py"):
+        # Special handling for python script.py - use the script filename as base
+        script_path = cmd[1]
+        base_name = os.path.splitext(os.path.basename(script_path))[0]
+        stage_name = base_name
+    elif first_arg == "julia" and len(cmd) > 1 and cmd[1].endswith(".jl"):
+        # Special handling for julia script.jl - use the script filename as base
+        script_path = cmd[1]
+        base_name = os.path.splitext(os.path.basename(script_path))[0]
+        stage_name = base_name
+    elif first_arg == "matlab" and len(cmd) > 1 and cmd[1].endswith(".m"):
+        # Special handling for matlab script.m - use the script filename as base
+        script_path = cmd[1]
+        base_name = os.path.splitext(os.path.basename(script_path))[0]
+        stage_name = base_name
     elif first_arg == "Rscript" and len(cmd) > 1 and cmd[1].endswith(".R"):
         # Special handling for Rscript - use the script filename as base
         script_path = cmd[1]
         base_name = os.path.splitext(os.path.basename(script_path))[0]
         stage_name = base_name
-        # Append remaining args if present
-        if len(cmd) > 2:
-            args_part = "-".join(cmd[2:])
-            stage_name += "-" + args_part
     else:
         # For commands (like "echo", "matlab", "julia", etc.)
         # Use the command name as the base

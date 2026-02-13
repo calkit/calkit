@@ -950,11 +950,23 @@ def test_execute_and_record_matlab_script(tmp_dir):
     from scipy.io import savemat
 
     subprocess.check_call(["calkit", "init"])
+    # Create a dependency MATLAB function
+    os.makedirs("src", exist_ok=True)
+    with open("src/myfunction.m", "w") as f:
+        f.write(
+            """
+function out = myfunction(x)
+out = x * 2;
+end
+"""
+        )
     # Create a MATLAB script
     with open("compute.m", "w") as f:
         f.write("""
+addpath(genpath('src'));
+result = myfunction(1);
 data = load('input.mat');
-result = data.value * 2;
+result = data.value * 2 + result;
 save('output.mat', 'result');
 disp('Computation complete');
 """)
@@ -977,7 +989,9 @@ disp('Computation complete');
     assert stage["kind"] == "matlab-script"
     assert stage["script_path"] == "compute.m"
     assert stage["environment"] == "_system"
-    assert stage["inputs"] == ["input.mat"]
+    assert "input.mat" in stage["inputs"]
+    assert "src/myfunction.m" in stage["inputs"]
+    assert "compute.m" not in stage["inputs"]
 
 
 def test_execute_and_record_with_user_inputs_outputs(tmp_dir):

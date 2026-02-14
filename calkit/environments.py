@@ -867,8 +867,16 @@ Version: 0.0.1
 Title: Auto-generated R environment
 """
     if dependencies:
-        imports_line = ", ".join(dependencies)
-        content += f"Imports: {imports_line}\n"
+        if len(dependencies) == 1:
+            content += f"Imports: {dependencies[0]}\n"
+        else:
+            # Format with first package on same line, rest indented
+            content += f"Imports: {dependencies[0]},\n"
+            for i, dep in enumerate(dependencies[1:], 1):
+                if i < len(dependencies) - 1:
+                    content += f"    {dep},\n"
+                else:
+                    content += f"    {dep}\n"
     return content
 
 

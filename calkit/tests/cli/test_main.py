@@ -843,24 +843,43 @@ def test_execute_and_record_shell_command(tmp_dir):
 
 
 def test_execute_and_record_julia_script(tmp_dir):
-    """Test xr command with Julia script."""
+    """Test xr command with Julia script.
+
+    Tests both with explicit environment and with auto-detection of
+    dependencies and Project.toml creation.
+    """
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
-        ["calkit", "new", "julia-env", "-n", "jl-env", "CSV"]
+        ["calkit", "new", "julia-env", "-n", "jl-env", "CSV", "DataFrames"]
     )
-    # Create a simple Julia script that doesn't need CSV
+    # Create a Julia script that uses CSV to read/write
     with open("analyze.jl", "w") as f:
         f.write("""
+using CSV
+using DataFrames
+
+# Read input CSV
+data = CSV.read("input.csv", DataFrame)
+
+# Process: add a new column with doubled values
+data.doubled = data.value .* 2
+
+# Write output CSV
+CSV.write("output.csv", data)
+
 println("Analysis complete")
 """)
-    # Execute and record
+    # Create input CSV file
+    with open("input.csv", "w") as f:
+        f.write("id,value\n1,10\n2,20\n3,30\n")
+    # Execute and record with explicit environment
     result = subprocess.run(
         ["calkit", "xr", "analyze.jl", "-e", "jl-env"],
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0
-    # Verify stage was added
+    assert result.returncode == 0, f"Command failed: {result.stderr}"
+    # Verify stage was added with inputs/outputs detected
     ck_info = calkit.load_calkit_info()
     stages = ck_info.get("pipeline", {}).get("stages", {})
     assert "analyze" in stages
@@ -868,6 +887,42 @@ println("Analysis complete")
     assert stage["kind"] == "julia-script"
     assert stage["script_path"] == "analyze.jl"
     assert stage["environment"] == "jl-env"
+    # Verify inputs and outputs were detected
+    assert "input.csv" in stage.get("inputs", [])
+    assert {"path": "output.csv", "storage": "git"} in stage.get("outputs", [])
+    # Verify output file was created
+    assert os.path.exists("output.csv")
+    # Test auto-detection of dependencies and Project.toml creation
+    # First, clean up the previous environment and files
+    shutil.rmtree(".calkit", ignore_errors=True)
+    os.remove("calkit.yaml")
+    os.remove("Project.toml")
+    os.remove("Manifest.toml")
+    # Run xr without specifying environment
+    # This should auto-detect CSV dependency and create Project.toml
+    result = subprocess.run(
+        ["calkit", "xr", "analyze.jl"],
+        capture_output=True,
+        text=True,
+    )
+    assert (
+        result.returncode == 0
+    ), f"Auto-detect command failed: {result.stderr}"
+    # Verify Project.toml was created with CSV as dependency
+    assert os.path.exists("Project.toml")
+    with open("Project.toml") as f:
+        project_content = f.read()
+    # Check that CSV is listed as a dependency (either in [deps] or
+    # in comments)
+    assert "CSV" in project_content
+    # Verify stage was added
+    ck_info = calkit.load_calkit_info()
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    assert "analyze" in stages
+    stage = stages["analyze"]
+    assert stage["kind"] == "julia-script"
+    assert "input.csv" in stage.get("inputs", [])
+    assert {"path": "output.csv", "storage": "git"} in stage.get("outputs", [])
 
 
 def test_execute_and_record_r_script(tmp_dir):

@@ -820,6 +820,94 @@ def create_python_requirements_content(dependencies: list[str]) -> str:
     return "\n".join(dependencies) if dependencies else ""
 
 
+def _resolve_julia_package_uuids(
+    package_names: list[str],
+) -> dict[str, str]:
+    """Resolve Julia package names to their UUIDs using Pkg registry.
+
+    Parameters
+    ----------
+    package_names : list[str]
+        List of Julia package names to resolve.
+
+    Returns
+    -------
+    dict[str, str]
+        Dictionary mapping package names to their UUIDs.
+        If a package UUID cannot be resolved, it is omitted.
+    """
+    if not package_names:
+        return {}
+
+    # Create Julia script to query Pkg registry for UUIDs
+    # This safely handles packages that don't exist
+    julia_code = """
+using Pkg
+using Pkg.Registry
+
+packages = split(ARGS[1], ",")
+registry = Pkg.Registry.reachable_registries()[1]
+
+for pkg in packages
+    entry = Pkg.Registry.find(registry, pkg)
+    if entry !== nothing
+        println(pkg * "=" * string(entry.uuid))
+    end
+end
+"""
+
+    import subprocess
+    import tempfile
+
+    try:
+        # Write Julia script to temp file since passing long code via
+        # command line can be problematic
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".jl",
+            delete=False,
+        ) as f:
+            f.write(julia_code)
+            script_path = f.name
+
+        # Run Julia with the script
+        result = subprocess.run(
+            [
+                "julia",
+                script_path,
+                ",".join(package_names),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        # Clean up temp file
+        try:
+            os.unlink(script_path)
+        except FileNotFoundError:
+            pass
+
+        if result.returncode != 0:
+            # If Julia fails, return empty dict to fall back
+            return {}
+
+        # Parse output: each line is "package=uuid"
+        uuids = {}
+        for line in result.stdout.strip().split("\n"):
+            if "=" in line:
+                parts = line.strip().split("=", 1)
+                if len(parts) == 2:
+                    pkg, uuid = parts
+                    uuids[pkg.strip()] = uuid.strip()
+
+        return uuids
+
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+        # If Julia is not available or times out, return empty dict
+        return {}
+
+
 def create_julia_project_file_content(
     dependencies: list[str],
     project_name: str = "environment",
@@ -836,20 +924,33 @@ def create_julia_project_file_content(
     Returns
     -------
     str
-        The Project.toml file content.
+        The Project.toml file content with [deps] section populated
+        with UUIDs if Julia is available. Otherwise, includes package
+        names in comments.
     """
-    # Generate a minimal, syntactically valid Project.toml.
-    # We avoid writing a [deps] section with invalid entries
-    # (e.g., `PkgName = "*"`)
-    # because Julia's Project.toml requires UUIDs there, not
-    # wildcards.
-    # Instead, we record dependencies in comments and let
-    # users/tools add them separately.
-    content = f'name = "{project_name}"\n\n'
-    if dependencies:
-        content += "# Dependencies (to be added with Julia's Pkg):\n"
+    content = f'name = "{project_name}"\n'
+    version = "0.1.0"
+    content += f'version = "{version}"\n\n'
+
+    if not dependencies:
+        return content
+
+    # Try to resolve UUIDs using Julia's Pkg registry
+    uuids = _resolve_julia_package_uuids(dependencies)
+
+    if uuids:
+        # We have UUIDs, create proper [deps] section
+        content += "[deps]\n"
+        for pkg in sorted(dependencies):
+            if pkg in uuids:
+                content += f'{pkg} = "{uuids[pkg]}"\n'
+        return content
+    else:
+        # Fallback: Julia not available or registry lookup failed
+        # Include package names in comments for manual addition
+        content += "# Dependencies (add with Julia's Pkg.add):\n"
         content += "# " + ", ".join(sorted(dependencies)) + "\n"
-    return content
+        return content
 
 
 def create_r_description_content(dependencies: list[str]) -> str:

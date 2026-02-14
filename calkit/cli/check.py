@@ -291,7 +291,11 @@ def check_renv(
         "Rscript",
         "--vanilla",
         "-e",
-        "if (!requireNamespace('renv', quietly=TRUE)) install.packages('renv')",
+        (
+            "options(repos = c(CRAN = 'https://cloud.r-project.org')); "
+            "if (!requireNamespace('renv', quietly=TRUE)) "
+            "install.packages('renv')"
+        ),
     ]
     try:
         subprocess.check_call(install_cmd)
@@ -306,7 +310,8 @@ def check_renv(
             f"DESCRIPTION file not found at {description_path}. "
             "Cannot initialize renv environment."
         )
-    # If renv.lock doesn't exist, initialize renv and create lock from DESCRIPTION
+    # If renv.lock doesn't exist, initialize renv and create lock from
+    # DESCRIPTION
     if not os.path.isfile(lock_path):
         if verbose:
             typer.echo("Initializing renv environment")

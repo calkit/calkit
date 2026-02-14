@@ -1764,6 +1764,21 @@ def new_renv(
     renv_already_initialized = os.path.isfile(lock_path)
     # Initialize renv if not already initialized
     if not renv_already_initialized:
+        # First ensure renv is installed with CRAN mirror configured
+        install_cmd = [
+            "Rscript",
+            "--vanilla",
+            "-e",
+            (
+                "options(repos = c(CRAN = 'https://cloud.r-project.org')); "
+                "if (!requireNamespace('renv', quietly=TRUE)) "
+                "install.packages('renv')"
+            ),
+        ]
+        res = subprocess.run(install_cmd, cwd=envdir)
+        if res.returncode != 0:
+            raise_error("Failed to install renv package")
+        # Now initialize renv
         init_cmd = ["Rscript", "-e", "renv::init(bare=TRUE)"]
         res = subprocess.run(init_cmd, cwd=envdir)
         if res.returncode != 0:

@@ -894,14 +894,10 @@ def test_create_python_requirements_file(tmp_dir):
     """Test creation of requirements.txt file."""
     deps = ["numpy", "pandas", "scikit-learn"]
     output_path = "requirements.txt"
-
     create_python_requirements_file(deps, output_path)
-
     assert os.path.exists(output_path)
-
     with open(output_path, "r") as f:
         content = f.read()
-
     assert "numpy" in content
     assert "pandas" in content
     assert "scikit-learn" in content
@@ -911,14 +907,10 @@ def test_create_julia_project_file(tmp_dir):
     """Test creation of Julia Project.toml file."""
     deps = ["DataFrames", "CSV", "Plots"]
     output_path = "Project.toml"
-
     create_julia_project_file(deps, output_path)
-
     assert os.path.exists(output_path)
-
     with open(output_path, "r") as f:
         content = f.read()
-
     assert "DataFrames" in content
     assert "CSV" in content
     assert "Plots" in content

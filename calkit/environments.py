@@ -981,6 +981,7 @@ def create_julia_project_file_content(
     else:
         # Fallback: Julia not available or registry lookup failed
         # Include package names in comments for manual addition
+        content += "[deps]\n"
         content += "# Dependencies (add with Julia's Pkg.add):\n"
         content += "# " + ", ".join(sorted(dependencies)) + "\n"
         return content

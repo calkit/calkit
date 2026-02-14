@@ -5,6 +5,8 @@ import hashlib
 import json
 import os
 import platform
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import cast
 
@@ -49,6 +51,40 @@ def language_from_env(env: dict) -> str | None:
     if kind == "docker" and "texlive" in env.get("image", "").lower():
         return "latex"
     return None
+
+
+def _get_julia_version() -> str:
+    """Detect the active Julia version.
+
+    Returns
+    -------
+    str
+        Julia version string (e.g., "1.10.1"). Defaults to "1.10" if
+        detection fails.
+    """
+    try:
+        result = subprocess.run(
+            ["julia", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            # Parse output like "julia version 1.10.1"
+            output = result.stdout.strip()
+            # Extract version number
+            parts = output.split()
+            for part in parts:
+                # Check if this part looks like a version
+                if part and part[0].isdigit():
+                    # Return major.minor version
+                    version_parts = part.split(".")
+                    if len(version_parts) >= 2:
+                        return f"{version_parts[0]}.{version_parts[1]}"
+        return "1.10"
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+        # If Julia is not available or detection fails, default to 1.10
+        return "1.10"
 
 
 def get_env_lock_dir(wdir: str | None = None) -> str:
@@ -631,10 +667,13 @@ def env_from_name_or_path(
             )
         elif env_path.endswith("Project.toml"):
             # This is a Julia env
-            # TODO: Detect Julia version
             return EnvDetectResult(
                 name=make_env_name(env_path, all_env_names, kind="julia"),
-                env={"kind": "julia", "path": env_path, "julia": "1.11"},
+                env={
+                    "kind": "julia",
+                    "path": env_path,
+                    "julia": _get_julia_version(),
+                },
                 exists=False,
             )
         elif env_path.endswith("DESCRIPTION"):
@@ -838,7 +877,6 @@ def _resolve_julia_package_uuids(
     """
     if not package_names:
         return {}
-
     # Create Julia script to query Pkg registry for UUIDs
     # This safely handles packages that don't exist
     julia_code = """
@@ -846,19 +884,23 @@ using Pkg
 using Pkg.Registry
 
 packages = split(ARGS[1], ",")
-registry = Pkg.Registry.reachable_registries()[1]
+registries = Pkg.Registry.reachable_registries()
+if isempty(registries)
+    Pkg.Registry.add("General")
+    registries = Pkg.Registry.reachable_registries()
+end
 
 for pkg in packages
-    entry = Pkg.Registry.find(registry, pkg)
-    if entry !== nothing
-        println(pkg * "=" * string(entry.uuid))
+    entry = nothing
+    for reg in registries
+        entry = Pkg.Registry.find(reg, pkg)
+        if entry !== nothing
+            println(pkg * "=" * string(entry.uuid))
+            break
+        end
     end
 end
 """
-
-    import subprocess
-    import tempfile
-
     try:
         # Write Julia script to temp file since passing long code via
         # command line can be problematic
@@ -869,7 +911,6 @@ end
         ) as f:
             f.write(julia_code)
             script_path = f.name
-
         # Run Julia with the script
         result = subprocess.run(
             [
@@ -881,17 +922,14 @@ end
             text=True,
             timeout=60,
         )
-
         # Clean up temp file
         try:
             os.unlink(script_path)
         except FileNotFoundError:
             pass
-
         if result.returncode != 0:
             # If Julia fails, return empty dict to fall back
             return {}
-
         # Parse output: each line is "package=uuid"
         uuids = {}
         for line in result.stdout.strip().split("\n"):
@@ -900,9 +938,7 @@ end
                 if len(parts) == 2:
                     pkg, uuid = parts
                     uuids[pkg.strip()] = uuid.strip()
-
         return uuids
-
     except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
         # If Julia is not available or times out, return empty dict
         return {}
@@ -931,13 +967,10 @@ def create_julia_project_file_content(
     content = f'name = "{project_name}"\n'
     version = "0.1.0"
     content += f'version = "{version}"\n\n'
-
     if not dependencies:
         return content
-
     # Try to resolve UUIDs using Julia's Pkg registry
     uuids = _resolve_julia_package_uuids(dependencies)
-
     if uuids:
         # We have UUIDs, create proper [deps] section
         content += "[deps]\n"
@@ -1213,6 +1246,7 @@ def detect_env_for_stage(
         env_dict = {
             "kind": "julia",
             "path": spec_path,
+            "julia": _get_julia_version(),
         }
     elif stage["kind"] == "jupyter-notebook":
         notebook_lang = language_from_notebook(stage["notebook_path"])

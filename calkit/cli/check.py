@@ -195,6 +195,60 @@ def check_environment(
         env_dir = os.path.dirname(env_path)
         if not env_dir:
             env_dir = "."
+        # If auto-detection couldn't resolve UUIDs, Project.toml includes a
+        # commented dependency list
+        # In that case, add those packages with
+        # Pkg.add before instantiating so the env is usable at run time
+        deps_to_add: list[str] = []
+        try:
+            with open(env_path, "r") as f:
+                content = f.read()
+            lines = [line.rstrip() for line in content.splitlines()]
+            deps_section = False
+            deps_found = False
+            for line in lines:
+                stripped = line.strip()
+                if stripped == "[deps]":
+                    deps_section = True
+                    continue
+                if deps_section:
+                    if stripped.startswith("[") and stripped.endswith("]"):
+                        break
+                    if stripped and not stripped.startswith("#"):
+                        if "=" in stripped:
+                            deps_found = True
+                            break
+            if not deps_found:
+                for idx, line in enumerate(lines):
+                    marker = "# Dependencies (add with Julia's Pkg.add):"
+                    if line.strip() == marker and idx + 1 < len(lines):
+                        dep_line = lines[idx + 1].strip()
+                        if dep_line.startswith("#"):
+                            dep_line = dep_line.lstrip("#").strip()
+                        deps_to_add = [
+                            dep.strip()
+                            for dep in dep_line.split(",")
+                            if dep.strip()
+                        ]
+                        break
+        except OSError:
+            deps_to_add = []
+        if deps_to_add:
+            pkg_list = ", ".join(f'"{dep}"' for dep in deps_to_add)
+            cmd = [
+                "julia",
+                f"+{julia_version}",
+                f"--project={env_dir}",
+                "-e",
+                f"using Pkg; Pkg.add([{pkg_list}]);",
+            ]
+            try:
+                subprocess.check_call(
+                    cmd,
+                    env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"},
+                )
+            except subprocess.CalledProcessError:
+                raise_error("Failed to add Julia dependencies")
         cmd = [
             "julia",
             f"+{julia_version}",

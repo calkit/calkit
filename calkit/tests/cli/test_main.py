@@ -921,6 +921,10 @@ println("Analysis complete")
     assert "analyze" in stages
     stage = stages["analyze"]
     assert stage["kind"] == "julia-script"
+    env = ck_info.get("environments", {}).get(stage.get("environment"))
+    assert env is not None
+    assert env["kind"] == "julia"
+    assert env["path"] == "Project.toml"
     assert "input.csv" in stage.get("inputs", [])
     assert {"path": "output.csv", "storage": "git"} in stage.get("outputs", [])
 

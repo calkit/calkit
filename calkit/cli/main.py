@@ -1738,7 +1738,15 @@ def run_in_env(
             )
             # Use -e to inline the setwd + source command instead of a temp
             # file
-            wrapper_cmd = f'setwd("{abs_wdir}"); source("{script_abspath}")'
+            # Properly escape paths for R string literals (backslash and quote
+            # escaping)
+            escaped_wdir = abs_wdir.replace("\\", "\\\\").replace('"', '\\"')
+            escaped_script = script_abspath.replace("\\", "\\\\").replace(
+                '"', '\\"'
+            )
+            wrapper_cmd = (
+                f'setwd("{escaped_wdir}"); source("{escaped_script}")'
+            )
             cmd = ["Rscript", "-e", wrapper_cmd] + cmd[2:]
         if verbose:
             typer.echo(f"Setting RENV_PROJECT={env_dir}")
@@ -1921,6 +1929,9 @@ def execute_and_record(
                 if calkit.get_size(path) > DVC_SIZE_THRESH_BYTES:
                     return "dvc"
             except (OSError, IOError):
+                # If we cannot determine file size (e.g., permission
+                # or I/O issues), fall back to the default "git"
+                # behavior below.
                 pass
         # Default to git for small/unknown files
         return "git"
@@ -1940,6 +1951,12 @@ def execute_and_record(
         if environment is None and os.path.isfile("pixi.toml"):
             environment = "pixi.toml"
         cmd = cmd[2:]
+    # Guard against empty command after stripping uv/pixi run
+    if not cmd:
+        raise_error(
+            "No command specified after stripping environment prefix. "
+            "Usage: calkit xr [uv|pixi run] <command> [args]"
+        )
     # Detect what kind of stage this is based on the command
     # If the first argument is a notebook, we'll treat this as a notebook stage
     # If the first argument is `python`, check that the second argument is a
@@ -2196,18 +2213,8 @@ def execute_and_record(
             else:
                 serialized_outputs.append(output)
         stage["outputs"] = serialized_outputs
-    if not no_detect_io and (detected_inputs or detected_outputs):
-        if detected_outputs:
-            # Format output display to show storage type
-            output_strs = []
-            for out_model in detected_output_models:
-                if isinstance(out_model, PathOutput):
-                    output_strs.append(
-                        f"{out_model.path} ({out_model.storage})"
-                    )
-                else:
-                    output_strs.append(out_model)
-    # Create the stage, write to calkit.yaml, and run it to see if it's successful
+    # Create the stage, write to calkit.yaml, and run it to see if
+    # it's successful
     try:
         cls.model_validate(stage)
     except Exception as e:

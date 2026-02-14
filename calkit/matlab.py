@@ -128,12 +128,22 @@ def get_docker_image_name(ck_info: dict, env_name: str) -> str:
 
 
 def _is_valid_project_path(path: str) -> bool:
-    """Check if a path is valid for the project (not absolute, not URL)."""
-    if not path:
+    """Check if a path is valid for the project (no traversal,
+    not absolute, not URL)."""
+    # Use the same validation as in calkit.detect to ensure consistency
+    if not path or not path.strip():
         return False
-    if path.startswith(("http://", "https://", "ftp://")):
+    # Reject any URI-like scheme (http, https, ftp, s3, gs, etc.)
+    if path.startswith(("http://", "https://", "ftp://", "s3://", "gs://")):
         return False
+    # Reject absolute filesystem paths
     if os.path.isabs(path):
+        return False
+    # Reject special system paths
+    if path.startswith(("/dev/", "/proc/", "/sys/", "~")):
+        return False
+    # Reject any path traversal via ..
+    if ".." in path:
         return False
     return True
 
@@ -191,15 +201,20 @@ def _detect_matlab_io_static(
     # Detect output file operations
     write_patterns = [
         r"save\s*\(\s*['\"]([^'\"]+)['\"]\s*[,)]",  # save('file.mat', ...)
-        r"writetable\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]\s*[,)]",  # writetable(data, 'file.csv', ...)
-        r"writematrix\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]\s*[,)]",  # writematrix(data, 'file.txt', ...)
-        r"writecell\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]\s*[,)]",  # writecell(data, 'file.txt', ...)
+        r"writetable\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]\s*[,)]",
+        # writetable(data, 'file.csv', ...)
+        r"writematrix\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]\s*[,)]",
+        # writematrix(data, 'file.txt', ...)
+        r"writecell\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]\s*[,)]",
+        # writecell(data, 'file.txt', ...)
         r"csvwrite\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
         r"xlswrite\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
         r"fopen\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]w",
-        r"imwrite\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]\s*[,)]",  # imwrite(img, 'file.png', ...)
+        r"imwrite\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]\s*[,)]",
+        # imwrite(img, 'file.png', ...)
         r"audiowrite\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
-        r"VideoWriter\s*\(\s*['\"]([^'\"]+)['\"]\s*[,)]",  # VideoWriter('file.avi', ...)
+        r"VideoWriter\s*\(\s*['\"]([^'\"]+)['\"]\s*[,)]",
+        # VideoWriter('file.avi', ...)
         r"parquetwrite\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
     ]
     # Graphics output patterns
@@ -256,7 +271,8 @@ def get_deps_from_matlab(
     """Automatically get dependencies from MATLAB.
 
     Uses MATLAB's requiredFilesAndProducts to discover dependencies.
-    If MATLAB cannot be invoked or returns an error, falls back to static analysis.
+    If MATLAB cannot be invoked or returns an error, falls back to
+    static analysis.
 
     Parameters
     ----------
@@ -270,10 +286,15 @@ def get_deps_from_matlab(
     list[str]
         List of dependency file paths in POSIX format.
     """
-    get_deps_cmd = ""
+
+    # Build command as a list to avoid shell injection
+    cmd_list = []
     if environment != "_system":
-        get_deps_cmd = f"calkit xenv -n {environment} --no-check -- "
-    get_deps_cmd += "matlab -batch"
+        cmd_list.extend(
+            ["calkit", "xenv", "-n", environment, "--no-check", "--"]
+        )
+    cmd_list.append("matlab")
+    cmd_list.append("-batch")
     # Quote the filepath for MATLAB and escape single quotes
     quoted = filepath.replace("'", "''")
     # MATLAB code that adds the current folder to path and
@@ -284,14 +305,14 @@ def get_deps_from_matlab(
         f"f = matlab.codetools.requiredFilesAndProducts('{quoted}'); "
         "for i=1:numel(f); disp(f{i}); end"
     )
-    # Wrap in quotes for shell invocation
-    full_cmd = f'{get_deps_cmd} "{matlab_code}"'
+    cmd_list.append(matlab_code)
     try:
         result = subprocess.run(
-            full_cmd, capture_output=True, text=True, shell=True
+            cmd_list, capture_output=True, text=True, timeout=120
         )
-    except Exception:
-        # If subprocess fails to start, fall back to static analysis
+    except (subprocess.TimeoutExpired, Exception):
+        # If subprocess fails to start or times out, fall back to
+        # static analysis
         return _get_deps_from_matlab_static(filepath)
     if result.returncode != 0:
         # MATLAB call failed; fall back to static analysis
@@ -350,8 +371,9 @@ def detect_matlab_script_io(
 ) -> dict[str, list[str]]:
     """Detect inputs and outputs for a MATLAB script.
 
-    Tries to use MATLAB's requiredFilesAndProducts to detect script dependencies.
-    Falls back to static analysis if MATLAB is unavailable or fails.
+    Tries to use MATLAB's requiredFilesAndProducts to detect script
+    dependencies. Falls back to static analysis if MATLAB is
+    unavailable or fails.
 
     Parameters
     ----------
@@ -396,8 +418,9 @@ def detect_matlab_command_io(
 ) -> dict[str, list[str]]:
     """Detect inputs and outputs for a MATLAB command.
 
-    Tries to use MATLAB's requiredFilesAndProducts by creating a temporary file.
-    Falls back to static analysis if MATLAB is unavailable or fails.
+    Tries to use MATLAB's requiredFilesAndProducts by creating a
+    temporary file. Falls back to static analysis if MATLAB is
+    unavailable or fails.
 
     Parameters
     ----------
@@ -426,10 +449,32 @@ def detect_matlab_command_io(
             f.write(command)
             temp_path = f.name
         matlab_deps = get_deps_from_matlab(temp_path, environment)
-        # Remove the temporary file from the dependencies list
-        temp_posix = Path(temp_path).as_posix()
-        if temp_posix in matlab_deps:
-            matlab_deps.remove(temp_posix)
+        # Normalize dependency paths and remove the temporary file entry
+        root_dir = os.path.realpath(wdir)
+        temp_real = os.path.realpath(temp_path)
+        temp_norm = Path(temp_real).as_posix()
+        normalized_deps: list[str] = []
+        for dep in matlab_deps:
+            if not dep:
+                continue
+            # Resolve relative and absolute paths
+            if os.path.isabs(dep):
+                dep_full = os.path.realpath(dep)
+            else:
+                dep_full = os.path.realpath(os.path.join(root_dir, dep))
+            # Filter out dependencies outside the working directory
+            try:
+                common = os.path.commonpath([root_dir, dep_full])
+            except ValueError:
+                # Different drives or invalid paths; treat as out-of-project
+                continue
+            if common != root_dir:
+                continue
+            dep_norm = Path(dep_full).as_posix()
+            # Exclude the temporary file itself
+            if dep_norm != temp_norm:
+                normalized_deps.append(dep_norm)
+        matlab_deps = normalized_deps
         # Use static analysis to detect data file I/O
         io_info = _detect_matlab_io_static(command, wdir)
         static_inputs = io_info["inputs"]
@@ -440,5 +485,9 @@ def detect_matlab_command_io(
         return {"inputs": deps, "outputs": outputs}
     finally:
         # Clean up the temporary file
-        if temp_path and os.path.exists(temp_path):
-            os.unlink(temp_path)
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except FileNotFoundError:
+                # File may have already been removed; ignore in cleanup
+                pass

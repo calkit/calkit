@@ -1,4 +1,5 @@
-"""Functionality for detecting inputs and outputs from scripts, notebooks, and commands."""
+"""Functionality for detecting inputs and outputs from scripts,
+notebooks, and commands."""
 
 from __future__ import annotations
 
@@ -106,10 +107,11 @@ def detect_shell_script_io(script_path: str) -> dict[str, list[str]]:
     except UnicodeDecodeError:
         return {"inputs": inputs, "outputs": outputs}
     content = re.sub(r"#.*$", "", content, flags=re.MULTILINE)
-    # Output patterns
+    # Output patterns (>> must come before > to avoid matching
+    # the first > in >>)
     output_patterns = [
-        r">\s*(\S+)",
-        r">>\s*(\S+)",
+        r">>\s*(\S+)",  # append redirection
+        r"(?<!>)>\s*(\S+)",  # single redirection, not part of '>>'
         r"\bcp\s+\S+\s+(\S+)",
         r"\bmv\s+\S+\s+(\S+)",
     ]
@@ -229,9 +231,9 @@ def detect_jupyter_notebook_io(
 ) -> dict[str, list[str]]:
     """Detect inputs and outputs from a Jupyter notebook.
 
-    Extracts all code cells and passes them to the appropriate language-specific
-    detection function. Detection functions handle variable tracking and
-    directory changes across cells.
+    Extracts all code cells and passes them to the appropriate
+    language-specific detection function. Detection functions handle
+    variable tracking and directory changes across cells.
     """
     inputs = []
     outputs = []
@@ -545,16 +547,18 @@ def _is_valid_project_path(path: str) -> bool:
 def _detect_python_code_io(
     code: str, script_dir: str = "."
 ) -> dict[str, list[str]]:
-    """Detect I/O from Python code string (used for notebook cells and scripts).
+    """Detect I/O from Python code string (used for notebook cells
+    and scripts).
 
     Tracks os.chdir() calls and Jupyter %cd magic commands to maintain the
     effective working directory for resolving relative file paths. Supports
     variable tracking for paths defined in variables. All paths are normalized
     relative to the project root (current working directory).
 
-    When analyzing notebook code, all cells should be concatenated into a single
-    code string before calling this function. This ensures variable assignments
-    defined in earlier cells are available for resolution in later cells.
+    When analyzing notebook code, all cells should be concatenated
+    into a single code string before calling this function. This
+    ensures variable assignments defined in earlier cells are
+    available for resolution in later cells.
     """
     inputs = []
     outputs = []
@@ -581,6 +585,8 @@ def _detect_python_code_io(
     try:
         tree = ast.parse(code_for_parsing)
     except SyntaxError:
+        # If the code cannot be parsed, we cannot reliably detect directory
+        # changes; keep the current working_dir unchanged.
         return {"inputs": inputs, "outputs": outputs}
     # Extract variable assignments for path tracking
     variables = _extract_variable_assignments(tree)
@@ -970,17 +976,20 @@ def generate_stage_name(cmd: list[str]) -> str:
         base_name = os.path.splitext(os.path.basename(first_arg))[0]
         stage_name = base_name
     elif first_arg == "python" and len(cmd) > 1 and cmd[1].endswith(".py"):
-        # Special handling for python script.py - use the script filename as base
+        # Special handling for python script.py - use the script
+        # filename as base
         script_path = cmd[1]
         base_name = os.path.splitext(os.path.basename(script_path))[0]
         stage_name = base_name
     elif first_arg == "julia" and len(cmd) > 1 and cmd[1].endswith(".jl"):
-        # Special handling for julia script.jl - use the script filename as base
+        # Special handling for julia script.jl - use the script
+        # filename as base
         script_path = cmd[1]
         base_name = os.path.splitext(os.path.basename(script_path))[0]
         stage_name = base_name
     elif first_arg == "matlab" and len(cmd) > 1 and cmd[1].endswith(".m"):
-        # Special handling for matlab script.m - use the script filename as base
+        # Special handling for matlab script.m - use the script
+        # filename as base
         script_path = cmd[1]
         base_name = os.path.splitext(os.path.basename(script_path))[0]
         stage_name = base_name
@@ -1009,11 +1018,13 @@ def generate_stage_name(cmd: list[str]) -> str:
 
     # Convert to kebab-case
     stage_name = stage_name.replace("_", "-").lower()
-    # Replace dots with dashes (except file extensions which are already stripped)
+    # Replace dots with dashes (except file extensions which are
+    # already stripped)
     stage_name = stage_name.replace(".", "-")
     # Replace spaces with dashes
     stage_name = stage_name.replace(" ", "-")
-    # Remove parentheses, slashes and other special characters (including shell redirects)
+    # Remove parentheses, slashes and other special characters
+    # (including shell redirects)
     stage_name = re.sub(r"[(){}\[\]'\"><|&;/]", "", stage_name)
     # Consolidate multiple dashes into single dashes
     stage_name = re.sub(r"-+", "-", stage_name)

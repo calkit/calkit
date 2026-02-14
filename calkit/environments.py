@@ -455,7 +455,8 @@ class EnvForStageResult(BaseModel):
 
 
 def make_env_name(path: str, all_env_names: list[str], kind: str) -> str:
-    """Generate a unique environment name based on path, existing names, and kind.
+    """Generate a unique environment name based on path, existing
+    names, and kind.
 
     Parameters
     ----------
@@ -837,13 +838,17 @@ def create_julia_project_file_content(
     str
         The Project.toml file content.
     """
-    if not dependencies:
-        return ""
-    content = f'name = "{project_name}"\n\n[deps]\n'
-    for dep in dependencies:
-        # Julia's Project.toml just lists package names without versions
-        # UUIDs would normally be added by Julia's package manager
-        content += f'{dep} = "*"\n'
+    # Generate a minimal, syntactically valid Project.toml.
+    # We avoid writing a [deps] section with invalid entries
+    # (e.g., `PkgName = "*"`)
+    # because Julia's Project.toml requires UUIDs there, not
+    # wildcards.
+    # Instead, we record dependencies in comments and let
+    # users/tools add them separately.
+    content = f'name = "{project_name}"\n\n'
+    if dependencies:
+        content += "# Dependencies (to be added with Julia's Pkg):\n"
+        content += "# " + ", ".join(sorted(dependencies)) + "\n"
     return content
 
 
@@ -906,7 +911,8 @@ def detect_env_for_stage(
     Returns
     -------
     EnvForStageResult
-        Result containing environment info, spec path, content, and dependencies.
+        Result containing environment info, spec path, content,
+        and dependencies.
     """
     from calkit.detect import (
         detect_dependencies_from_notebook,

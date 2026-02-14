@@ -250,7 +250,6 @@ def check_environments(
 
 def check_renv(
     env_path: str,
-    wdir: str | None = None,
     verbose: bool = False,
 ) -> None:
     """Check an R renv environment, initializing if needed.
@@ -285,15 +284,17 @@ def check_renv(
     if verbose:
         typer.echo(f"Checking renv environment in: {env_dir}")
     # First, ensure renv is installed in system R
+    # Use --vanilla to avoid loading .Rprofile which would activate renv
     if verbose:
         typer.echo("Ensuring renv is installed")
     install_cmd = [
         "Rscript",
+        "--vanilla",
         "-e",
         "if (!requireNamespace('renv', quietly=TRUE)) install.packages('renv')",
     ]
     try:
-        subprocess.check_call(install_cmd, cwd=env_dir)
+        subprocess.check_call(install_cmd)
     except subprocess.CalledProcessError:
         raise_error("Failed to install renv package")
     # Check if DESCRIPTION and renv.lock exist
@@ -310,7 +311,7 @@ def check_renv(
         if verbose:
             typer.echo("Initializing renv environment")
         # Initialize renv with bare=TRUE to set up directory structure
-        init_cmd = ["Rscript", "-e", "renv::init(bare=TRUE)"]
+        init_cmd = ["Rscript", "--vanilla", "-e", "renv::init(bare=TRUE)"]
         if verbose:
             typer.echo(f"Running: {' '.join(init_cmd)}")
         try:
@@ -320,7 +321,12 @@ def check_renv(
         # Use hydrate to install packages from DESCRIPTION and snapshot
         if verbose:
             typer.echo("Setting up environment from DESCRIPTION")
-        hydrate_cmd = ["Rscript", "-e", "renv::hydrate()"]
+        hydrate_cmd = [
+            "Rscript",
+            "--vanilla",
+            "-e",
+            "renv::load(); renv::hydrate()",
+        ]
         if verbose:
             typer.echo(f"Running: {' '.join(hydrate_cmd)}")
         try:
@@ -336,8 +342,9 @@ def check_renv(
             typer.echo("Creating lock file from DESCRIPTION")
         snapshot_cmd = [
             "Rscript",
+            "--vanilla",
             "-e",
-            "renv::snapshot(type='explicit', prompt=FALSE)",
+            "renv::load(); renv::snapshot(type='explicit', prompt=FALSE)",
         ]
         if verbose:
             typer.echo(f"Running: {' '.join(snapshot_cmd)}")
@@ -352,8 +359,9 @@ def check_renv(
         # Check status to see if lockfile needs updating
         status_cmd = [
             "Rscript",
+            "--vanilla",
             "-e",
-            "status <- renv::status(); cat(status$synchronized)",
+            "renv::load(); status <- renv::status(); cat(status$synchronized)",
         ]
         try:
             result = subprocess.run(
@@ -374,7 +382,12 @@ def check_renv(
             if verbose:
                 typer.echo("Lockfile out of sync, updating from DESCRIPTION")
             # Use hydrate to update from DESCRIPTION
-            hydrate_cmd = ["Rscript", "-e", "renv::hydrate()"]
+            hydrate_cmd = [
+                "Rscript",
+                "--vanilla",
+                "-e",
+                "renv::load(); renv::hydrate()",
+            ]
             if verbose:
                 typer.echo(f"Running: {' '.join(hydrate_cmd)}")
             try:
@@ -387,8 +400,9 @@ def check_renv(
             # Snapshot to update lock
             snapshot_cmd = [
                 "Rscript",
+                "--vanilla",
                 "-e",
-                "renv::snapshot(type='explicit', prompt=FALSE)",
+                "renv::load(); renv::snapshot(type='explicit', prompt=FALSE)",
             ]
             if verbose:
                 typer.echo(f"Running: {' '.join(snapshot_cmd)}")
@@ -406,8 +420,10 @@ def check_renv(
         typer.echo("Checking if library is in sync with lockfile")
     lib_status_cmd = [
         "Rscript",
+        "--vanilla",
         "-e",
         (
+            "renv::load(); "
             "status <- tryCatch({"
             "  renv::status();"
             "  cat('synchronized');"
@@ -436,7 +452,12 @@ def check_renv(
     if needs_restore:
         if verbose:
             typer.echo("Restoring library from lockfile")
-        restore_cmd = ["Rscript", "-e", "renv::restore(prompt=FALSE)"]
+        restore_cmd = [
+            "Rscript",
+            "--vanilla",
+            "-e",
+            "renv::load(); renv::restore(prompt=FALSE)",
+        ]
         if verbose:
             typer.echo(f"Running: {' '.join(restore_cmd)}")
         try:

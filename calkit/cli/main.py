@@ -1717,7 +1717,7 @@ def run_in_env(
             raise_error("renv environments require a path to DESCRIPTION")
         assert isinstance(env_path, str)
         if not no_check:
-            check_renv(env_path=env_path, wdir=wdir, verbose=verbose)
+            check_renv(env_path=env_path, verbose=verbose)
         # For renv, we need to run from the renv project directory so renv
         # properly initializes the library, but the script needs to run
         # from its original working directory

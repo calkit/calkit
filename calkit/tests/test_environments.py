@@ -270,7 +270,7 @@ def test_detect_env_for_stage(tmp_dir):
         stage_py, environment=None, ck_info=ck_info
     )
     assert res.created_from_dependencies
-    assert res.spec_path == "requirements.txt"
+    assert res.spec_path == "pyproject.toml"
     ck_info = {
         "environments": {
             "jl": {"kind": "julia", "path": "Project.toml", "julia": "1.11"}
@@ -281,8 +281,8 @@ def test_detect_env_for_stage(tmp_dir):
     )
     assert res.created_from_dependencies
     assert res.spec_path is not None
-    # Since this is the first Python env, use requirements.txt
-    assert res.spec_path == "requirements.txt"
+    # Since this is the first Python env, use pyproject.toml
+    assert res.spec_path == "pyproject.toml"
     stage_r = {"kind": "r-script", "script_path": "analysis.R"}
     with open("analysis.R", "w") as f:
         f.write("library(dplyr)\n")
@@ -357,7 +357,7 @@ def test_detect_env_for_stage(tmp_dir):
         stage_nb, environment=None, ck_info=ck_info
     )
     assert res.created_from_dependencies
-    assert res.spec_path == "requirements.txt"
+    assert res.spec_path == "pyproject.toml"
     assert res.spec_content is not None
     assert "ipykernel" in res.spec_content
     notebook_r = {

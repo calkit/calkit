@@ -859,6 +859,41 @@ def create_python_requirements_content(dependencies: list[str]) -> str:
     return "\n".join(dependencies) if dependencies else ""
 
 
+def create_uv_pyproject_content(
+    dependencies: list[str],
+    project_name: str | None = None,
+    python_version: str = DEFAULT_PYTHON_VERSION,
+) -> str:
+    """Generate a minimal pyproject.toml for a uv environment.
+
+    Parameters
+    ----------
+    dependencies : list[str]
+        List of package names.
+    project_name : str | None
+        Name of the project. If None, uses the detected project name.
+    python_version : str
+        Python version to include in requires-python.
+
+    Returns
+    -------
+    str
+        The pyproject.toml file content.
+    """
+    if project_name is None:
+        project_name = calkit.detect_project_name(prepend_owner=False)
+    content = "[project]\n"
+    content += f'name = "{project_name}"\n'
+    content += 'version = "0.1.0"\n'
+    content += f'requires-python = ">={python_version}"\n'
+    if dependencies:
+        content += "dependencies = [\n"
+        for dep in sorted(dependencies):
+            content += f'  "{dep}",\n'
+        content += "]\n"
+    return content
+
+
 def _resolve_julia_package_uuids(
     package_names: list[str],
 ) -> dict[str, str]:
@@ -1204,20 +1239,25 @@ def detect_env_for_stage(
         )
         # Generate unique environment name
         if is_first_env_for_language:
-            temp_path = "requirements.txt"
-            env_name = make_env_name(temp_path, all_env_names, kind="uv-venv")
-            spec_path = "requirements.txt"
+            temp_path = "pyproject.toml"
+            env_name = make_env_name(temp_path, all_env_names, kind="uv")
+            spec_path = "pyproject.toml"
+            spec_content = create_uv_pyproject_content(dependencies)
+            env_dict = {
+                "kind": "uv",
+                "path": spec_path,
+            }
         else:
             temp_path = ".calkit/envs/py/requirements.txt"
             env_name = make_env_name(temp_path, all_env_names, kind="uv-venv")
             spec_path = f".calkit/envs/{env_name}/requirements.txt"
-        spec_content = create_python_requirements_content(dependencies)
-        env_dict = {
-            "kind": "uv-venv",
-            "path": spec_path,
-            "python": DEFAULT_PYTHON_VERSION,
-            "prefix": os.path.join(os.path.dirname(spec_path), ".venv"),
-        }
+            spec_content = create_python_requirements_content(dependencies)
+            env_dict = {
+                "kind": "uv-venv",
+                "path": spec_path,
+                "python": DEFAULT_PYTHON_VERSION,
+                "prefix": os.path.join(os.path.dirname(spec_path), ".venv"),
+            }
     elif stage["kind"] == "r-script":
         dependencies = detect_r_dependencies(script_path=stage["script_path"])
         # Generate unique environment name
@@ -1269,24 +1309,29 @@ def detect_env_for_stage(
                 dependencies.append("ipykernel")
             # Generate unique environment name
             if is_first_env_for_language:
-                temp_path = "requirements.txt"
-                env_name = make_env_name(
-                    temp_path, all_env_names, kind="uv-venv"
-                )
-                spec_path = "requirements.txt"
+                temp_path = "pyproject.toml"
+                env_name = make_env_name(temp_path, all_env_names, kind="uv")
+                spec_path = "pyproject.toml"
+                spec_content = create_uv_pyproject_content(dependencies)
+                env_dict = {
+                    "kind": "uv",
+                    "path": spec_path,
+                }
             else:
                 temp_path = ".calkit/envs/py/requirements.txt"
                 env_name = make_env_name(
                     temp_path, all_env_names, kind="uv-venv"
                 )
                 spec_path = f".calkit/envs/{env_name}/requirements.txt"
-            spec_content = create_python_requirements_content(dependencies)
-            env_dict = {
-                "kind": "uv-venv",
-                "path": spec_path,
-                "python": DEFAULT_PYTHON_VERSION,
-                "prefix": os.path.join(os.path.dirname(spec_path), ".venv"),
-            }
+                spec_content = create_python_requirements_content(dependencies)
+                env_dict = {
+                    "kind": "uv-venv",
+                    "path": spec_path,
+                    "python": DEFAULT_PYTHON_VERSION,
+                    "prefix": os.path.join(
+                        os.path.dirname(spec_path), ".venv"
+                    ),
+                }
         elif notebook_lang == "r":
             # Add IRkernel for Jupyter notebook support
             if "IRkernel" not in dependencies:

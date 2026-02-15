@@ -49,7 +49,7 @@ jobs:
           juliaup --version
           Rscript --version
           uv --version
-          uv run pytest -n 5 --durations=10
+          uv run pytest -n 4 --durations=10
   windows:
     runs-on: windows-latest
     timeout-minutes: 20

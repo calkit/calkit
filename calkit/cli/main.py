@@ -1860,6 +1860,7 @@ def execute_and_record(
         bool,
         typer.Option(
             "--dry-run",
+            "-d",
             help=(
                 "Print the environment and stage that would be created "
                 "without modifying calkit.yaml or executing the command."

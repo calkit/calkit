@@ -1062,7 +1062,6 @@ def detect_env_for_stage(
     # Get existing environment names
     envs = ck_info.get("environments", {})
     all_env_names = list(envs.keys())
-    is_first_env = not all_env_names
     # 1) If stage has an environment, use that
     if environment is not None:
         res = env_from_name_or_path(
@@ -1096,17 +1095,22 @@ def detect_env_for_stage(
             stage_language = "matlab"
         elif stage_kind in ["shell-script", "shell-command"]:
             stage_language = "shell"
+    language_kinds = {
+        "python": ["uv", "uv-venv", "venv", "conda", "pixi"],
+        "r": ["renv", "conda", "pixi"],
+        "julia": ["julia"],
+        "matlab": ["matlab"],
+        "latex": ["docker"],
+        "shell": ["system"],
+    }
+    preferred_kinds = (
+        language_kinds.get(stage_language, []) if stage_language else []
+    )
+    is_first_env_for_language = not any(
+        env.get("kind") in preferred_kinds for env in envs.values()
+    )
     # 2) If there is already an environment for the stage language, use that
     if stage_language:
-        language_kinds = {
-            "python": ["uv-venv", "uv", "venv", "conda", "pixi"],
-            "r": ["renv", "conda", "pixi"],
-            "julia": ["julia"],
-            "matlab": ["matlab"],
-            "latex": ["docker"],
-            "shell": ["system"],
-        }
-        preferred_kinds = language_kinds.get(stage_language, [])
         matching_envs = [
             (name, env)
             for name, env in envs.items()
@@ -1199,7 +1203,7 @@ def detect_env_for_stage(
             script_path=stage["script_path"]
         )
         # Generate unique environment name
-        if is_first_env:
+        if is_first_env_for_language:
             temp_path = "requirements.txt"
             env_name = make_env_name(temp_path, all_env_names, kind="uv-venv")
             spec_path = "requirements.txt"
@@ -1217,7 +1221,7 @@ def detect_env_for_stage(
     elif stage["kind"] == "r-script":
         dependencies = detect_r_dependencies(script_path=stage["script_path"])
         # Generate unique environment name
-        if is_first_env:
+        if is_first_env_for_language:
             temp_path = "DESCRIPTION"
             env_name = make_env_name(temp_path, all_env_names, kind="renv")
             spec_path = "DESCRIPTION"
@@ -1234,16 +1238,21 @@ def detect_env_for_stage(
         dependencies = detect_julia_dependencies(
             script_path=stage["script_path"]
         )
+        project_name = calkit.detect_project_name(prepend_owner=False)
         # Generate unique environment name
-        if is_first_env:
+        if is_first_env_for_language:
             temp_path = "Project.toml"
             env_name = make_env_name(temp_path, all_env_names, kind="julia")
             spec_path = "Project.toml"
+            julia_env_name = project_name
         else:
             temp_path = ".calkit/envs/julia/Project.toml"
             env_name = make_env_name(temp_path, all_env_names, kind="julia")
             spec_path = f".calkit/envs/{env_name}/Project.toml"
-        spec_content = create_julia_project_file_content(dependencies)
+            julia_env_name = f"{project_name}-{env_name}"
+        spec_content = create_julia_project_file_content(
+            dependencies, project_name=julia_env_name
+        )
         env_dict = {
             "kind": "julia",
             "path": spec_path,
@@ -1259,7 +1268,7 @@ def detect_env_for_stage(
             if "ipykernel" not in dependencies:
                 dependencies.append("ipykernel")
             # Generate unique environment name
-            if is_first_env:
+            if is_first_env_for_language:
                 temp_path = "requirements.txt"
                 env_name = make_env_name(
                     temp_path, all_env_names, kind="uv-venv"
@@ -1283,7 +1292,7 @@ def detect_env_for_stage(
             if "IRkernel" not in dependencies:
                 dependencies.append("IRkernel")
             # Generate unique environment name
-            if is_first_env:
+            if is_first_env_for_language:
                 temp_path = "DESCRIPTION"
                 env_name = make_env_name(temp_path, all_env_names, kind="renv")
                 spec_path = "DESCRIPTION"
@@ -1301,7 +1310,7 @@ def detect_env_for_stage(
             if "IJulia" not in dependencies:
                 dependencies.append("IJulia")
             # Generate unique environment name
-            if is_first_env:
+            if is_first_env_for_language:
                 temp_path = "Project.toml"
                 env_name = make_env_name(
                     temp_path, all_env_names, kind="julia"

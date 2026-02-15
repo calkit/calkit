@@ -2111,7 +2111,7 @@ def execute_and_record(
         language=language,
     )
     # If we created an environment from dependencies, write the spec file
-    if env_result.created_from_dependencies:
+    if env_result.created_from_dependencies and not dry_run:
         typer.echo(
             "No existing environment detected. "
             "Attempting to create one based on detected dependencies..."
@@ -2130,7 +2130,7 @@ def execute_and_record(
                 f.write(env_result.spec_content)
             typer.echo(f"Created environment spec: {env_result.spec_path}")
     # Add environment to calkit.yaml if it doesn't exist
-    if not env_result.exists:
+    if not env_result.exists and not dry_run:
         envs = ck_info.get("environments", {})
         envs[env_result.name] = env_result.env
         ck_info["environments"] = envs

@@ -281,8 +281,8 @@ def test_detect_env_for_stage(tmp_dir):
     )
     assert res.created_from_dependencies
     assert res.spec_path is not None
-    assert res.spec_path.startswith(".calkit/envs/")
-    assert res.spec_path.endswith("requirements.txt")
+    # Since this is the first Python env, use requirements.txt
+    assert res.spec_path == "requirements.txt"
     stage_r = {"kind": "r-script", "script_path": "analysis.R"}
     with open("analysis.R", "w") as f:
         f.write("library(dplyr)\n")
@@ -307,8 +307,7 @@ def test_detect_env_for_stage(tmp_dir):
     )
     assert res.created_from_dependencies
     assert res.spec_path is not None
-    assert res.spec_path.startswith(".calkit/envs/")
-    assert res.spec_path.endswith("DESCRIPTION")
+    assert res.spec_path == "DESCRIPTION"
     stage_jl = {"kind": "julia-script", "script_path": "analysis.jl"}
     with open("analysis.jl", "w") as f:
         f.write("using DataFrames\n")
@@ -332,9 +331,7 @@ def test_detect_env_for_stage(tmp_dir):
         stage_jl, environment=None, ck_info=ck_info
     )
     assert res.created_from_dependencies
-    assert res.spec_path is not None
-    assert res.spec_path.startswith(".calkit/envs/")
-    assert res.spec_path.endswith("Project.toml")
+    assert res.spec_path == "Project.toml"
     notebook_py = {
         "cells": [
             {
@@ -397,9 +394,7 @@ def test_detect_env_for_stage(tmp_dir):
         stage_nb_r, environment=None, ck_info=ck_info
     )
     assert res.created_from_dependencies
-    assert res.spec_path is not None
-    assert res.spec_path.startswith(".calkit/envs/")
-    assert res.spec_path.endswith("DESCRIPTION")
+    assert res.spec_path == "DESCRIPTION"
     assert res.spec_content is not None
     assert "IRkernel" in res.spec_content
     notebook_jl = {
@@ -436,9 +431,7 @@ def test_detect_env_for_stage(tmp_dir):
         stage_nb_jl, environment=None, ck_info=ck_info
     )
     assert res.created_from_dependencies
-    assert res.spec_path is not None
-    assert res.spec_path.startswith(".calkit/envs/")
-    assert res.spec_path.endswith("Project.toml")
+    assert res.spec_path == "Project.toml"
     assert res.spec_content is not None
     assert "IJulia" in res.spec_content
     notebook = {

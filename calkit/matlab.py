@@ -197,6 +197,7 @@ def _detect_matlab_io_static(
         r"audioread\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
         r"VideoReader\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
         r"parquetread\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
+        r"h5read\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
     ]
     # Detect output file operations
     write_patterns = [
@@ -217,6 +218,8 @@ def _detect_matlab_io_static(
         # VideoWriter('file.avi', ...)
         r"parquetwrite\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
         r"parquetwrite\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]\s*[,)]",
+        r"h5write\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
+        r"h5create\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
     ]
     # Graphics output patterns
     graphics_patterns = [
@@ -232,33 +235,42 @@ def _detect_matlab_io_static(
         matches = re.findall(pattern, content)
         outputs.extend(matches)
     # Filter out invalid paths and normalize relative paths
+    cwd = os.path.abspath(".")
+
+    def normalize_project_path(path: str) -> str | None:
+        if not path or not path.strip():
+            return None
+        if path.startswith(
+            ("http://", "https://", "ftp://", "s3://", "gs://")
+        ):
+            return None
+        if os.path.isabs(path) or path.startswith(
+            ("/dev/", "/proc/", "/sys/", "~")
+        ):
+            return None
+        normalized = os.path.normpath(os.path.join(script_dir, path))
+        normalized_abs = os.path.abspath(normalized)
+        try:
+            common = os.path.commonpath([cwd, normalized_abs])
+        except ValueError:
+            return None
+        if common != cwd:
+            return None
+        try:
+            normalized_rel = os.path.relpath(normalized_abs, cwd)
+        except ValueError:
+            normalized_rel = normalized
+        return Path(normalized_rel).as_posix()
+
     normalized_inputs = []
     for p in inputs:
-        if _is_valid_project_path(p):
-            # Normalize path to resolve .. and .
-            normalized = os.path.normpath(os.path.join(script_dir, p))
-            # Make it relative to current working directory
-            try:
-                normalized = os.path.relpath(normalized)
-            except ValueError:
-                # On Windows, relpath can fail if paths are on different drives
-                pass
-            # Convert to POSIX format for cross-platform compatibility
-            normalized = Path(normalized).as_posix()
+        normalized = normalize_project_path(p)
+        if normalized is not None:
             normalized_inputs.append(normalized)
     normalized_outputs = []
     for p in outputs:
-        if _is_valid_project_path(p):
-            # Normalize path to resolve .. and .
-            normalized = os.path.normpath(os.path.join(script_dir, p))
-            # Make it relative to current working directory
-            try:
-                normalized = os.path.relpath(normalized)
-            except ValueError:
-                # On Windows, relpath can fail if paths are on different drives
-                pass
-            # Convert to POSIX format for cross-platform compatibility
-            normalized = Path(normalized).as_posix()
+        normalized = normalize_project_path(p)
+        if normalized is not None:
             normalized_outputs.append(normalized)
     # Remove duplicates while preserving order
     inputs = list(dict.fromkeys(normalized_inputs))

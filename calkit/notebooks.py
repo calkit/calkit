@@ -108,6 +108,32 @@ def clean_all_in_pipeline(ck_info: dict | None = None) -> list[str]:
     return cleaned
 
 
+def determine_storage(
+    notebook_path: str,
+    size_multiplier: float = 3.0,
+) -> Literal["git", "dvc"]:
+    if not os.path.exists(notebook_path):
+        return "dvc"
+    try:
+        file_size = os.path.getsize(notebook_path)
+    except OSError:
+        return "dvc"
+    source_bytes = 0
+    try:
+        with open(notebook_path, "r", encoding="utf-8") as f:
+            nb = json.load(f)
+        for cell in nb.get("cells", []):
+            source = cell.get("source", [])
+            if isinstance(source, list):
+                source_bytes += len("".join(source).encode("utf-8"))
+            else:
+                source_bytes += len(str(source).encode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+        source_bytes = file_size
+    estimated_bytes = max(file_size, source_bytes) * size_multiplier
+    return "git" if estimated_bytes <= calkit.DVC_SIZE_THRESH_BYTES else "dvc"
+
+
 def declare_notebook(
     path: str,
     stage_name: str,

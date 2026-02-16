@@ -23,6 +23,7 @@ from calkit.cli.check import check_environment
 from calkit.cli.update import update_devcontainer
 from calkit.core import ryaml
 from calkit.docker import LAYERS
+from calkit.environments import DEFAULT_PYTHON_VERSION
 from calkit.models.pipeline import LatexStage, StageIteration
 
 new_app = typer.Typer(no_args_is_help=True)
@@ -1267,13 +1268,19 @@ def new_uv_env(
     if name in envs:
         raise_error(f"Environment with name {name} already exists")
     if path is None:
-        envdir = f".calkit/envs/{name}"
-        os.makedirs(envdir, exist_ok=True)
-        path = os.path.join(envdir, "pyproject.toml")
+        if not envs:
+            envdir = "."
+            path = "pyproject.toml"
+        else:
+            envdir = f".calkit/envs/{name}"
+            os.makedirs(envdir, exist_ok=True)
+            path = os.path.join(envdir, "pyproject.toml")
     else:
         envdir = os.path.dirname(path)
         if envdir:
             os.makedirs(envdir, exist_ok=True)
+        else:
+            envdir = "."
     if not os.path.isfile(path):
         res = subprocess.run(
             ["uv", "init", "--bare", "--directory", envdir, "--no-workspace"]
@@ -1316,7 +1323,7 @@ def new_uv_venv(
     ] = ".venv",
     python_version: Annotated[
         str | None, typer.Option("--python", "-p", help="Python version.")
-    ] = "3.14",
+    ] = DEFAULT_PYTHON_VERSION,
     description: Annotated[
         str | None, typer.Option("--description", help="Description.")
     ] = None,
@@ -1665,6 +1672,159 @@ def new_julia_env(
     repo.git.add("calkit.yaml")
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add Julia env {name}"])
+
+
+@new_app.command("renv")
+def new_renv(
+    name: Annotated[
+        str, typer.Option("--name", "-n", help="Environment name.")
+    ] = "main",
+    packages: Annotated[
+        list[str] | None,
+        typer.Argument(help="Packages to include in the environment."),
+    ] = None,
+    path: Annotated[
+        str | None,
+        typer.Option(
+            "--path",
+            help="Environment file path. Must end with 'DESCRIPTION'.",
+        ),
+    ] = None,
+    r_version: Annotated[
+        str | None, typer.Option("--r-version", "-r", help="R version.")
+    ] = None,
+    description: Annotated[
+        str | None, typer.Option("--description", help="Description.")
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite any existing environment with this name.",
+        ),
+    ] = False,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Do not check environment is up-to-date after creation.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
+):
+    """Create a new R environment with renv."""
+    from calkit.environments import create_r_description_content
+
+    if path is not None and not path.endswith("DESCRIPTION"):
+        raise_error("Environment path must end with 'DESCRIPTION'")
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if name in envs and not overwrite:
+        raise_error(
+            f"Environment with name {name} already exists "
+            "(use -f to overwrite)"
+        )
+    if path is None:
+        if not envs:
+            envdir = "."
+            path = "DESCRIPTION"
+        else:
+            envdir = f".calkit/envs/{name}"
+            os.makedirs(envdir, exist_ok=True)
+            path = os.path.join(envdir, "DESCRIPTION")
+    else:
+        envdir = os.path.dirname(path)
+        if envdir:
+            os.makedirs(envdir, exist_ok=True)
+        else:
+            envdir = "."
+    # Check if DESCRIPTION file exists and handle accordingly
+    if os.path.isfile(path):
+        if packages and not overwrite:
+            raise_error(
+                "DESCRIPTION file already exists (use -f to overwrite)"
+            )
+    else:
+        # Create DESCRIPTION file
+        if packages is None:
+            packages = []
+        desc_content = create_r_description_content(packages)
+        with open(path, "w") as f:
+            f.write(desc_content)
+    # If packages provided and overwrite, update DESCRIPTION
+    if packages and overwrite and os.path.isfile(path):
+        desc_content = create_r_description_content(packages)
+        with open(path, "w") as f:
+            f.write(desc_content)
+    # Check if renv is already initialized
+    lock_path = os.path.join(envdir, "renv.lock")
+    renv_already_initialized = os.path.isfile(lock_path)
+    # Initialize renv if not already initialized
+    if not renv_already_initialized:
+        # First ensure renv is installed with CRAN mirror configured
+        install_cmd = [
+            "Rscript",
+            "--vanilla",
+            "-e",
+            (
+                "options(repos = c(CRAN = 'https://cloud.r-project.org')); "
+                "if (!requireNamespace('renv', quietly=TRUE)) "
+                "install.packages('renv')"
+            ),
+        ]
+        res = subprocess.run(install_cmd, cwd=envdir)
+        if res.returncode != 0:
+            raise_error("Failed to install renv package")
+        # Now initialize renv
+        init_cmd = ["Rscript", "-e", "renv::init(bare=TRUE)"]
+        res = subprocess.run(init_cmd, cwd=envdir)
+        if res.returncode != 0:
+            raise_error("Failed to initialize renv environment")
+        # Set R version if specified (renv will store it in renv.lock)
+        if r_version:
+            version_cmd = ["Rscript", "-e", f'renv::use(r = "{r_version}")']
+            res = subprocess.run(version_cmd, cwd=envdir)
+            if res.returncode != 0:
+                warn(f"Failed to set R version to {r_version}")
+    # Install packages from DESCRIPTION and create lockfile
+    if packages and not no_check and not renv_already_initialized:
+        # Use hydrate to install packages from DESCRIPTION
+        hydrate_cmd = ["Rscript", "-e", "renv::hydrate()"]
+        res = subprocess.run(hydrate_cmd, cwd=envdir)
+        if res.returncode != 0:
+            warn("Failed to hydrate environment from DESCRIPTION")
+        # Create lockfile from DESCRIPTION
+        snapshot_cmd = [
+            "Rscript",
+            "-e",
+            "renv::snapshot(type='explicit', prompt=FALSE)",
+        ]
+        res = subprocess.run(snapshot_cmd, cwd=envdir)
+        if res.returncode != 0:
+            raise_error("Failed to create renv lockfile")
+    # Add to calkit.yaml
+    env_info = dict(kind="renv", path=path)
+    if description:
+        env_info["description"] = description
+    envs[name] = env_info
+    ck_info["environments"] = envs
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    if not no_commit:
+        repo = git.Repo()
+        repo.git.add(path)
+        if os.path.exists(lock_path):
+            repo.git.add(lock_path)
+        # Also add .Rprofile if it exists
+        rprofile_path = os.path.join(envdir, ".Rprofile")
+        if os.path.exists(rprofile_path):
+            repo.git.add(rprofile_path)
+        repo.git.add("calkit.yaml")
+        if repo.git.diff("--staged"):
+            repo.git.commit(["-m", f"Add renv environment {name}"])
 
 
 class Status(str, Enum):

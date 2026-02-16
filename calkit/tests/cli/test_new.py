@@ -185,7 +185,25 @@ def test_new_uv_env(tmp_dir):
     )
     ck_info = calkit.load_calkit_info()
     env = ck_info["environments"]["my-uv-env"]
-    assert env["path"] == ".calkit/envs/my-uv-env/pyproject.toml"
+    assert env["path"] == "pyproject.toml"
+    # Test one in a subdirectory when another env already exists
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-env",
+            "--name",
+            "main",
+            "--path",
+            ".calkit/envs/main/pyproject.toml",
+            "--python",
+            "3.13",
+            "requests",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    env = ck_info["environments"]["main"]
+    assert env["path"] == ".calkit/envs/main/pyproject.toml"
 
 
 def test_new_uv_venv(tmp_dir):

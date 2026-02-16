@@ -216,6 +216,7 @@ def _detect_matlab_io_static(
         r"VideoWriter\s*\(\s*['\"]([^'\"]+)['\"]\s*[,)]",
         # VideoWriter('file.avi', ...)
         r"parquetwrite\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
+        r"parquetwrite\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]\s*[,)]",
     ]
     # Graphics output patterns
     graphics_patterns = [

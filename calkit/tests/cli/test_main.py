@@ -1027,6 +1027,7 @@ data = load('input.mat');
 result = data.value * 2 + result;
 save('output.mat', 'result');
 disp('Computation complete');
+parquetwrite("data.parquet", table(rand(1000, 1)));
 """)
     # Create input file
     savemat("input.mat", {"value": 42})
@@ -1048,6 +1049,7 @@ disp('Computation complete');
     assert stage["script_path"] == "compute.m"
     assert stage["environment"] == "_system"
     assert "input.mat" in stage["inputs"]
+    assert {"path": "data.parquet", "storage": "dvc"} in stage["outputs"]
     assert "src/myfunction.m" in stage["inputs"]
     assert "compute.m" not in stage["inputs"]
 

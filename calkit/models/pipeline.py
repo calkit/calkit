@@ -418,7 +418,7 @@ class MatlabScriptStage(Stage):
         cmd = self.xenv_cmd
         if self.environment == "_system":
             cmd += "matlab -batch"
-        matlab_cmd = ""
+        matlab_cmd = "restoredefaultpath; "
         if self.matlab_path is not None:
             matlab_cmd += f"addpath(genpath('{self.matlab_path}')); "
         matlab_cmd += f"run('{self.script_path}');"
@@ -433,7 +433,7 @@ class MatlabCommandStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         # We need to escape quotes in the command
-        matlab_cmd = self.command.replace('"', '\\"')
+        matlab_cmd = "restoredefaultpath; " + self.command.replace('"', '\\"')
         cmd = self.xenv_cmd
         if self.environment == "_system":
             cmd += "matlab -batch"

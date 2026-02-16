@@ -666,7 +666,8 @@ def test_new_matlab_script_stage(tmp_dir):
     subprocess.check_call(["calkit", "check", "pipeline", "--compile"])
     pipeline = calkit.dvc.read_pipeline()
     assert pipeline["stages"]["run-script1"]["cmd"] == (
-        "calkit xenv -n matlab1 --no-check -- \"run('scripts/script.m');\""
+        "calkit xenv -n matlab1 --no-check -- "
+        "\"restoredefaultpath; run('scripts/script.m');\""
     )
     env_lock_fpath = get_env_lock_fpath(
         calkit.load_calkit_info()["environments"]["matlab1"],

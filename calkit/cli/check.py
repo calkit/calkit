@@ -117,6 +117,9 @@ def check_environment(
         )
     elif env["kind"] in ["pixi", "uv"]:
         cmd = [env["kind"], "lock"]
+        env_dir = os.path.dirname(env["path"])
+        if env_dir and env["kind"] == "uv":
+            cmd += ["--directory", env_dir]
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
@@ -156,10 +159,10 @@ def check_environment(
             "Environment checking not implemented for SSH environments"
         )
     elif env["kind"] == "renv":
-        try:
-            subprocess.check_call(["Rscript", "-e", "'renv::restore()'"])
-        except subprocess.CalledProcessError:
-            raise_error("Failed to check renv")
+        env_path = env.get("path")
+        if env_path is None:
+            raise_error("renv environments require a path to DESCRIPTION")
+        check_renv(env_path=env_path, verbose=verbose)
     elif env["kind"] == "matlab":
         check_matlab_env(
             env_name=env_name,
@@ -192,6 +195,60 @@ def check_environment(
         env_dir = os.path.dirname(env_path)
         if not env_dir:
             env_dir = "."
+        # If auto-detection couldn't resolve UUIDs, Project.toml includes a
+        # commented dependency list
+        # In that case, add those packages with
+        # Pkg.add before instantiating so the env is usable at run time
+        deps_to_add: list[str] = []
+        try:
+            with open(env_path, "r") as f:
+                content = f.read()
+            lines = [line.rstrip() for line in content.splitlines()]
+            deps_section = False
+            deps_found = False
+            for line in lines:
+                stripped = line.strip()
+                if stripped == "[deps]":
+                    deps_section = True
+                    continue
+                if deps_section:
+                    if stripped.startswith("[") and stripped.endswith("]"):
+                        break
+                    if stripped and not stripped.startswith("#"):
+                        if "=" in stripped:
+                            deps_found = True
+                            break
+            if not deps_found:
+                for idx, line in enumerate(lines):
+                    marker = "# Dependencies (add with Julia's Pkg.add):"
+                    if line.strip() == marker and idx + 1 < len(lines):
+                        dep_line = lines[idx + 1].strip()
+                        if dep_line.startswith("#"):
+                            dep_line = dep_line.lstrip("#").strip()
+                        deps_to_add = [
+                            dep.strip()
+                            for dep in dep_line.split(",")
+                            if dep.strip()
+                        ]
+                        break
+        except OSError:
+            deps_to_add = []
+        if deps_to_add:
+            pkg_list = ", ".join(f'"{dep}"' for dep in deps_to_add)
+            cmd = [
+                "julia",
+                f"+{julia_version}",
+                f"--project={env_dir}",
+                "-e",
+                f"using Pkg; Pkg.add([{pkg_list}]);",
+            ]
+            try:
+                subprocess.check_call(
+                    cmd,
+                    env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"},
+                )
+            except subprocess.CalledProcessError:
+                raise_error("Failed to add Julia dependencies")
         cmd = [
             "julia",
             f"+{julia_version}",
@@ -243,6 +300,232 @@ def check_environments(
         raise_error(
             f"Failed to check the following environments: {', '.join(failures)}"
         )
+
+
+def check_renv(
+    env_path: str,
+    verbose: bool = False,
+) -> None:
+    """Check an R renv environment, initializing if needed.
+
+    This function follows the proper renv workflow:
+    1. Ensure renv is installed
+    2. Check if renv.lock exists
+    3. If not, but DESCRIPTION exists, initialize renv and create lock
+    4. If lockfile exists, check if it's in sync with DESCRIPTION
+    5. Only update lockfile if DESCRIPTION has changed
+    6. Check if library is in sync with lockfile
+    7. Only restore packages if library is out of sync
+
+    Parameters
+    ----------
+    env_path : str
+        Path to the DESCRIPTION file for the environment.
+    wdir : str | None
+        Working directory for execution. If not provided, uses the directory
+        containing the DESCRIPTION file.
+    verbose : bool
+        Print verbose output.
+    """
+    # Get the directory containing the DESCRIPTION file
+    if env_path.endswith("DESCRIPTION"):
+        env_dir = os.path.dirname(env_path)
+    else:
+        # Assume it's already a directory
+        env_dir = env_path
+    if not env_dir:
+        env_dir = "."
+    if verbose:
+        typer.echo(f"Checking renv environment in: {env_dir}")
+    # First, ensure renv is installed in system R
+    # Use --vanilla to avoid loading .Rprofile which would activate renv
+    if verbose:
+        typer.echo("Ensuring renv is installed")
+    install_cmd = [
+        "Rscript",
+        "--vanilla",
+        "-e",
+        (
+            "options(repos = c(CRAN = 'https://cloud.r-project.org')); "
+            "if (!requireNamespace('renv', quietly=TRUE)) "
+            "install.packages('renv')"
+        ),
+    ]
+    try:
+        subprocess.check_call(install_cmd)
+    except subprocess.CalledProcessError:
+        raise_error("Failed to install renv package")
+    # Check if DESCRIPTION and renv.lock exist
+    lock_path = os.path.join(env_dir, "renv.lock")
+    description_path = os.path.join(env_dir, "DESCRIPTION")
+    # Verify DESCRIPTION exists
+    if not os.path.isfile(description_path):
+        raise_error(
+            f"DESCRIPTION file not found at {description_path}. "
+            "Cannot initialize renv environment."
+        )
+    # If renv.lock doesn't exist, initialize renv and create lock from
+    # DESCRIPTION
+    if not os.path.isfile(lock_path):
+        if verbose:
+            typer.echo("Initializing renv environment")
+        # Initialize renv with bare=TRUE to set up directory structure
+        init_cmd = ["Rscript", "--vanilla", "-e", "renv::init(bare=TRUE)"]
+        if verbose:
+            typer.echo(f"Running: {' '.join(init_cmd)}")
+        try:
+            subprocess.check_call(init_cmd, cwd=env_dir)
+        except subprocess.CalledProcessError:
+            raise_error(f"Failed to initialize renv in {env_dir}")
+        # Use hydrate to install packages from DESCRIPTION and snapshot
+        if verbose:
+            typer.echo("Setting up environment from DESCRIPTION")
+        hydrate_cmd = [
+            "Rscript",
+            "--vanilla",
+            "-e",
+            "renv::load(); renv::hydrate()",
+        ]
+        if verbose:
+            typer.echo(f"Running: {' '.join(hydrate_cmd)}")
+        try:
+            subprocess.check_call(hydrate_cmd, cwd=env_dir)
+        except subprocess.CalledProcessError:
+            # Hydrate might fail if packages aren't available, continue anyway
+            if verbose:
+                typer.echo(
+                    "Warning: hydrate had issues, continuing to snapshot"
+                )
+        # Always snapshot after hydrate to create lock file from DESCRIPTION
+        if verbose:
+            typer.echo("Creating lock file from DESCRIPTION")
+        snapshot_cmd = [
+            "Rscript",
+            "--vanilla",
+            "-e",
+            "renv::load(); renv::snapshot(type='explicit', prompt=FALSE)",
+        ]
+        if verbose:
+            typer.echo(f"Running: {' '.join(snapshot_cmd)}")
+        try:
+            subprocess.check_call(snapshot_cmd, cwd=env_dir)
+        except subprocess.CalledProcessError:
+            raise_error(f"Failed to snapshot renv in {env_dir}")
+    else:
+        # Lock file exists, check if it's in sync with DESCRIPTION
+        if verbose:
+            typer.echo("Checking if lockfile is in sync with DESCRIPTION")
+        # Check status to see if lockfile needs updating
+        status_cmd = [
+            "Rscript",
+            "--vanilla",
+            "-e",
+            "renv::load(); status <- renv::status(); cat(status$synchronized)",
+        ]
+        try:
+            result = subprocess.run(
+                status_cmd,
+                cwd=env_dir,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            lockfile_synced = "TRUE" in result.stdout
+        except subprocess.CalledProcessError:
+            # If status fails, assume we need to update
+            lockfile_synced = False
+            if verbose:
+                typer.echo("Warning: status check failed, will update lock")
+
+        if not lockfile_synced:
+            if verbose:
+                typer.echo("Lockfile out of sync, updating from DESCRIPTION")
+            # Use hydrate to update from DESCRIPTION
+            hydrate_cmd = [
+                "Rscript",
+                "--vanilla",
+                "-e",
+                "renv::load(); renv::hydrate()",
+            ]
+            if verbose:
+                typer.echo(f"Running: {' '.join(hydrate_cmd)}")
+            try:
+                subprocess.check_call(hydrate_cmd, cwd=env_dir)
+            except subprocess.CalledProcessError:
+                if verbose:
+                    typer.echo(
+                        "Warning: hydrate had issues, continuing to snapshot"
+                    )
+            # Snapshot to update lock
+            snapshot_cmd = [
+                "Rscript",
+                "--vanilla",
+                "-e",
+                "renv::load(); renv::snapshot(type='explicit', prompt=FALSE)",
+            ]
+            if verbose:
+                typer.echo(f"Running: {' '.join(snapshot_cmd)}")
+            try:
+                subprocess.check_call(snapshot_cmd, cwd=env_dir)
+            except subprocess.CalledProcessError:
+                if verbose:
+                    typer.echo("Warning: snapshot failed, using existing lock")
+        else:
+            if verbose:
+                typer.echo("Lockfile is already in sync with DESCRIPTION")
+
+    # Check if library needs restoring
+    if verbose:
+        typer.echo("Checking if library is in sync with lockfile")
+    lib_status_cmd = [
+        "Rscript",
+        "--vanilla",
+        "-e",
+        (
+            "renv::load(); "
+            "status <- tryCatch({"
+            "  renv::status();"
+            "  cat('synchronized');"
+            "}, error = function(e) {"
+            "  cat('needs_restore');"
+            "})"
+        ),
+    ]
+    try:
+        result = subprocess.run(
+            lib_status_cmd,
+            cwd=env_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        needs_restore = "needs_restore" in result.stdout or (
+            "synchronized" not in result.stdout
+        )
+    except subprocess.CalledProcessError:
+        # If check fails, restore to be safe
+        needs_restore = True
+        if verbose:
+            typer.echo("Warning: library status check failed, will restore")
+
+    if needs_restore:
+        if verbose:
+            typer.echo("Restoring library from lockfile")
+        restore_cmd = [
+            "Rscript",
+            "--vanilla",
+            "-e",
+            "renv::load(); renv::restore(prompt=FALSE)",
+        ]
+        if verbose:
+            typer.echo(f"Running: {' '.join(restore_cmd)}")
+        try:
+            subprocess.check_call(restore_cmd, cwd=env_dir)
+        except subprocess.CalledProcessError:
+            raise_error(f"Failed to restore renv in {env_dir}")
+    else:
+        if verbose:
+            typer.echo("Library is already in sync with lockfile")
 
 
 @check_app.command(name="docker-env")
@@ -753,7 +1036,7 @@ def check_matlab_env(
         raise_error("A MATLAB version must be specified")
     typer.echo(f"Checking MATLAB environment '{env_name}'")
     # First generate a Dockerfile for this environment
-    out_dir = os.path.join(".calkit", "environments", env_name)
+    out_dir = os.path.join(".calkit", "envs", env_name)
     os.makedirs(out_dir, exist_ok=True)
     dockerfile_fpath = os.path.join(out_dir, "Dockerfile")
     calkit.matlab.create_dockerfile(

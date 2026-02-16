@@ -1,10 +1,14 @@
 """Functionality related to environments."""
 
+import glob
 import hashlib
 import json
 import os
 import platform
+import subprocess
+import tempfile
 from pathlib import Path
+from typing import cast
 
 from pydantic import BaseModel
 from sqlitedict import SqliteDict
@@ -21,6 +25,7 @@ DOCKER_ARCHS = [
     "386",
     "riscv64",
 ]
+DEFAULT_PYTHON_VERSION = "3.14"
 CONDA_VENV_ARCHS = [
     "osx-arm64",
     "osx-64",
@@ -31,6 +36,55 @@ CONDA_VENV_ARCHS = [
 ]
 ENV_CHECK_CACHE_TTL_SECONDS = 3600
 KINDS_NO_CHECK = ["_system", "slurm", "ssh"]
+
+
+def language_from_env(env: dict) -> str | None:
+    kind = env.get("kind")
+    if kind == "julia":
+        return "julia"
+    if kind == "renv":
+        return "r"
+    if kind == "matlab":
+        return "matlab"
+    if kind in ["conda", "pixi", "uv", "uv-venv", "venv"]:
+        return "python"
+    if kind == "docker" and "texlive" in env.get("image", "").lower():
+        return "latex"
+    return None
+
+
+def _get_julia_version() -> str:
+    """Detect the active Julia version.
+
+    Returns
+    -------
+    str
+        Julia version string (e.g., "1.10.1"). Defaults to "1.10" if
+        detection fails.
+    """
+    try:
+        result = subprocess.run(
+            ["julia", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            # Parse output like "julia version 1.10.1"
+            output = result.stdout.strip()
+            # Extract version number
+            parts = output.split()
+            for part in parts:
+                # Check if this part looks like a version
+                if part and part[0].isdigit():
+                    # Return major.minor version
+                    version_parts = part.split(".")
+                    if len(version_parts) >= 2:
+                        return f"{version_parts[0]}.{version_parts[1]}"
+        return "1.10"
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+        # If Julia is not available or detection fails, default to 1.10
+        return "1.10"
 
 
 def get_env_lock_dir(wdir: str | None = None) -> str:
@@ -209,6 +263,20 @@ def get_env_lock_fpath(
         # Simply replace Project.toml with Manifest.toml
         env_dir = os.path.dirname(env_path)
         lock_fpath = os.path.join(env_dir, "Manifest.toml")
+    elif env_kind == "renv":
+        env_path = env.get("path")
+        if env_path is None:
+            raise ValueError(
+                "renv environments require a path pointing to DESCRIPTION"
+            )
+        env_fname = os.path.basename(env_path)
+        if not env_fname == "DESCRIPTION":
+            raise ValueError(
+                "renv environments require a path pointing to DESCRIPTION"
+            )
+        # Replace DESCRIPTION with renv.lock
+        env_dir = os.path.dirname(env_path)
+        lock_fpath = os.path.join(env_dir, "renv.lock")
     else:
         return
     if as_posix:
@@ -410,56 +478,151 @@ class EnvDetectResult(BaseModel):
     exists: bool
 
 
+class EnvForStageResult(BaseModel):
+    """Result of detecting or creating an environment for a stage."""
+
+    name: str
+    env: dict
+    exists: bool
+    spec_path: str | None = None
+    spec_content: str | None = None
+    dependencies: list[str] = []
+    created_from_dependencies: bool = False
+
+
+def make_env_name(path: str, all_env_names: list[str], kind: str) -> str:
+    """Generate a unique environment name based on path, existing
+    names, and kind.
+
+    Parameters
+    ----------
+    path : str
+        Path to the environment spec file.
+    all_env_names : list[str]
+        List of existing environment names.
+    kind : str
+        Environment kind (e.g., "uv-venv", "conda", "renv", "julia").
+
+    Returns
+    -------
+    str
+        A unique environment name.
+    """
+    dirname = os.path.basename(os.path.dirname(path))
+    # If this is the first env in the project, call it main
+    if not all_env_names:
+        return dirname or "main"
+    # Name based on dirname if possible
+    if dirname and dirname not in all_env_names:
+        return dirname
+    # Try a name based on the dirname and kind
+    if dirname and dirname in all_env_names:
+        name = f"{dirname}-{kind}"
+        if name not in all_env_names:
+            return name
+    # Otherwise increment a number after the kind
+    n = 1
+    name = f"{kind}{n}"
+    while name in all_env_names:
+        n += 1
+        name = f"{kind}{n}"
+    return name
+
+
 def env_from_name_or_path(
-    name_or_path: str,
+    name_or_path: str | None = None,
     ck_info: dict | None = None,
     path_only: bool = False,
+    language: str | None = None,
 ) -> EnvDetectResult:
     """Get an environment from its name or path.
 
     Names take precedence.
+
+    Parameters
+    ----------
+    name_or_path : str | None
+        Name or path of the environment. If None and language is provided,
+        will search for or create a docker environment for that language.
+    ck_info : dict | None
+        Calkit info dict. If None, will be loaded from calkit.yaml.
+    path_only : bool
+        Only match on path, not name.
+    language : str | None
+        Language/tool to detect docker environment for (e.g., "latex").
+        Only used if name_or_path is None.
+
+    Returns
+    -------
+    EnvDetectResult
+        Environment detection result.
     """
-
-    def make_name(path: str, all_env_names: list[str], kind: str) -> str:
-        dirname = os.path.basename(os.path.dirname(env_path))
-        # If this is the first env in the project, call it main
-        if not all_env_names:
-            return dirname or "main"
-        # Name based on dirname if possible
-        if dirname and dirname not in all_env_names:
-            return dirname
-        # Try a name based on the dirname and kind
-        if dirname and dirname in all_env_names:
-            name = f"{dirname}-{kind}"
-            if name not in all_env_names:
-                return name
-        # Otherwise increment a number after the kind
-        n = 1
-        name = f"{kind}{n}"
-        while name in all_env_names:
-            n += 1
-            name = f"{kind}{n}"
-        return name
-
+    # Load config and environment list
     if ck_info is None:
         ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
     all_env_names = list(envs.keys())
+    # Handle language-based environment detection
+    if name_or_path is None and language is not None:
+        # Look for a docker environment matching the language
+        for env_name, env in envs.items():
+            if env.get("kind") == "docker":
+                image = env.get("image", "").lower()
+                # Check if this looks like a language environment
+                if language.lower() in image or f"{language}mk" in image:
+                    return EnvDetectResult(name=env_name, env=env, exists=True)
+        # Only create default docker environment for latex
+        if language.lower() == "latex":
+            env_name = "latex"
+            return EnvDetectResult(
+                name=env_name,
+                env={
+                    "kind": "docker",
+                    "image": "texlive/texlive:latest-full",
+                },
+                exists=False,
+            )
+        # For shell language, use _system environment
+        if language.lower() == "shell":
+            return EnvDetectResult(
+                name="_system",
+                env={"kind": "system"},
+                exists=True,
+            )
+        # For other languages, try to detect a default environment
+        default_env = detect_default_env(ck_info=ck_info, language=language)
+        if default_env:
+            return default_env
+        raise ValueError(
+            f"Could not find or create environment for language: {language}"
+        )
+    # Require either name_or_path or language
+    if name_or_path is None:
+        raise ValueError("Either name_or_path or language must be provided")
+    # Check if environment exists by name or path
     for env_name, env in envs.items():
         if (not path_only and env_name == name_or_path) or env.get(
             "path"
         ) == name_or_path:
             return EnvDetectResult(name=env_name, env=env, exists=True)
+    # Handle special _system environment
+    if name_or_path == "_system":
+        return EnvDetectResult(
+            name="_system",
+            env={"kind": "system"},
+            exists=True,
+        )
+    # Check if name_or_path is a file and detect environment type
     env_path = name_or_path
     if os.path.isfile(env_path):
         if env_path.endswith("requirements.txt"):
             # TODO: Detect if uv is installed, and use a plain venv if not
             return EnvDetectResult(
-                name=make_name(env_path, all_env_names, kind="uv-venv"),
+                name=make_env_name(env_path, all_env_names, kind="uv-venv"),
                 env={
                     "kind": "uv-venv",
                     "path": env_path,
-                    "python": "3.14",
+                    "python": DEFAULT_PYTHON_VERSION,
                     "prefix": os.path.join(
                         os.path.split(env_path)[0], ".venv"
                     ),
@@ -476,7 +639,8 @@ def env_from_name_or_path(
                 )
             return EnvDetectResult(
                 name=env_spec.get(
-                    "name", make_name(env_path, all_env_names, kind="conda")
+                    "name",
+                    make_env_name(env_path, all_env_names, kind="conda"),
                 ),
                 env={"kind": "conda", "path": env_path},
                 exists=False,
@@ -484,7 +648,7 @@ def env_from_name_or_path(
         elif env_path.endswith("pyproject.toml"):
             # This is a uv project env
             return EnvDetectResult(
-                name=make_name(env_path, all_env_names, kind="uv"),
+                name=make_env_name(env_path, all_env_names, kind="uv"),
                 env={
                     "kind": "uv",
                     "path": env_path,
@@ -494,7 +658,7 @@ def env_from_name_or_path(
         elif env_path.endswith("pixi.toml"):
             # This is a pixi env
             return EnvDetectResult(
-                name=make_name(env_path, all_env_names, kind="pixi"),
+                name=make_env_name(env_path, all_env_names, kind="pixi"),
                 env={
                     "kind": "pixi",
                     "path": env_path,
@@ -503,16 +667,26 @@ def env_from_name_or_path(
             )
         elif env_path.endswith("Project.toml"):
             # This is a Julia env
-            # TODO: Detect Julia version
             return EnvDetectResult(
-                name=make_name(env_path, all_env_names, kind="julia"),
-                env={"kind": "julia", "path": env_path, "julia": "1.11"},
+                name=make_env_name(env_path, all_env_names, kind="julia"),
+                env={
+                    "kind": "julia",
+                    "path": env_path,
+                    "julia": _get_julia_version(),
+                },
+                exists=False,
+            )
+        elif env_path.endswith("DESCRIPTION"):
+            # This is an R renv environment
+            return EnvDetectResult(
+                name=make_env_name(env_path, all_env_names, kind="renv"),
+                env={"kind": "renv", "path": env_path},
                 exists=False,
             )
         elif "dockerfile" in env_path.lower():
             # This is a Docker env
             project_name = calkit.detect_project_name(prepend_owner=False)
-            env_name = make_name(env_path, all_env_names, kind="docker")
+            env_name = make_env_name(env_path, all_env_names, kind="docker")
             image_name = f"{project_name}-{env_name}"
             return EnvDetectResult(
                 name=env_name,
@@ -596,11 +770,20 @@ def env_from_notebook_path(
     )
 
 
-def detect_default_env(ck_info: dict | None = None) -> EnvDetectResult | None:
+def detect_default_env(
+    ck_info: dict | None = None, language: str | None = None
+) -> EnvDetectResult | None:
     """Detect a default environment for the project.
 
     First, if the project has a single environment, we use that. Otherwise,
     we look for a single typical env spec file.
+
+    Parameters
+    ----------
+    ck_info : dict | None
+        Calkit info dict. If None, will be loaded from calkit.yaml.
+    language : str | None
+        Language to filter environments by when multiple environments exist.
     """
     if ck_info is None:
         ck_info = calkit.load_calkit_info()
@@ -612,17 +795,593 @@ def detect_default_env(ck_info: dict | None = None) -> EnvDetectResult | None:
         return
     # Look for typical env spec files in order
     # There must only be one, however, otherwise the default is ambiguous
-    env_spec_paths = [
-        "pyproject.toml",
-        "requirements.txt",
-        "environment.yml",
-        "Dockerfile",
-        "Project.toml",
-        "pixi.toml",
-    ]
+    # Filter by language if provided
+    if language:
+        language_lower = language.lower()
+        if language_lower == "python":
+            env_spec_paths = [
+                "pyproject.toml",
+                "requirements.txt",
+                "environment.yml",
+                "pixi.toml",
+            ]
+        elif language_lower == "julia":
+            env_spec_paths = ["Project.toml"]
+        elif language_lower == "r":
+            env_spec_paths = ["DESCRIPTION", "environment.yml", "pixi.toml"]
+        elif language_lower == "shell":
+            env_spec_paths = ["Dockerfile"]
+        elif language_lower == "matlab":
+            env_spec_paths = ["Dockerfile"]
+        else:
+            # For other languages, use generic list
+            env_spec_paths = [
+                "pyproject.toml",
+                "requirements.txt",
+                "environment.yml",
+                "Dockerfile",
+                "Project.toml",
+                "renv.lock",
+                "pixi.toml",
+            ]
+    else:
+        # No language specified, use generic list
+        env_spec_paths = [
+            "pyproject.toml",
+            "requirements.txt",
+            "environment.yml",
+            "Dockerfile",
+            "Project.toml",
+            "DESCRIPTION",
+            "pixi.toml",
+        ]
     present = os.listdir(".")
     present_env_specs = [p for p in env_spec_paths if p in present]
     if len(present_env_specs) == 1:
         return env_from_name_or_path(
             present_env_specs[0], ck_info=ck_info, path_only=True
         )
+
+
+def create_python_requirements_content(dependencies: list[str]) -> str:
+    """Generate requirements.txt file content from a list of dependencies.
+
+    Parameters
+    ----------
+    dependencies : list[str]
+        List of package names.
+
+    Returns
+    -------
+    str
+        The requirements.txt file content.
+    """
+    return "\n".join(dependencies) if dependencies else ""
+
+
+def create_uv_pyproject_content(
+    dependencies: list[str],
+    project_name: str | None = None,
+    python_version: str = DEFAULT_PYTHON_VERSION,
+) -> str:
+    """Generate a minimal pyproject.toml for a uv environment.
+
+    Parameters
+    ----------
+    dependencies : list[str]
+        List of package names.
+    project_name : str | None
+        Name of the project. If None, uses the detected project name.
+    python_version : str
+        Python version to include in requires-python.
+
+    Returns
+    -------
+    str
+        The pyproject.toml file content.
+    """
+    if project_name is None:
+        project_name = calkit.detect_project_name(prepend_owner=False)
+    content = "[project]\n"
+    content += f'name = "{project_name}"\n'
+    content += 'version = "0.1.0"\n'
+    content += f'requires-python = ">={python_version}"\n'
+    if dependencies:
+        content += "dependencies = [\n"
+        for dep in sorted(dependencies):
+            content += f'  "{dep}",\n'
+        content += "]\n"
+    return content
+
+
+def _resolve_julia_package_uuids(
+    package_names: list[str],
+) -> dict[str, str]:
+    """Resolve Julia package names to their UUIDs using Pkg registry.
+
+    Parameters
+    ----------
+    package_names : list[str]
+        List of Julia package names to resolve.
+
+    Returns
+    -------
+    dict[str, str]
+        Dictionary mapping package names to their UUIDs.
+        If a package UUID cannot be resolved, it is omitted.
+    """
+    if not package_names:
+        return {}
+    # Create Julia script to query Pkg registry for UUIDs
+    # This safely handles packages that don't exist
+    julia_code = """
+using Pkg
+using Pkg.Registry
+
+packages = split(ARGS[1], ",")
+registries = Pkg.Registry.reachable_registries()
+if isempty(registries)
+    Pkg.Registry.add("General")
+    registries = Pkg.Registry.reachable_registries()
+end
+
+for pkg in packages
+    entry = nothing
+    for reg in registries
+        entry = Pkg.Registry.find(reg, pkg)
+        if entry !== nothing
+            println(pkg * "=" * string(entry.uuid))
+            break
+        end
+    end
+end
+"""
+    try:
+        # Write Julia script to temp file since passing long code via
+        # command line can be problematic
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".jl",
+            delete=False,
+        ) as f:
+            f.write(julia_code)
+            script_path = f.name
+        # Run Julia with the script
+        result = subprocess.run(
+            [
+                "julia",
+                script_path,
+                ",".join(package_names),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        # Clean up temp file
+        try:
+            os.unlink(script_path)
+        except FileNotFoundError:
+            pass
+        if result.returncode != 0:
+            # If Julia fails, return empty dict to fall back
+            return {}
+        # Parse output: each line is "package=uuid"
+        uuids = {}
+        for line in result.stdout.strip().split("\n"):
+            if "=" in line:
+                parts = line.strip().split("=", 1)
+                if len(parts) == 2:
+                    pkg, uuid = parts
+                    uuids[pkg.strip()] = uuid.strip()
+        return uuids
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+        # If Julia is not available or times out, return empty dict
+        return {}
+
+
+def create_julia_project_file_content(
+    dependencies: list[str],
+    project_name: str = "environment",
+) -> str:
+    """Generate Julia Project.toml file content from a list of dependencies.
+
+    Parameters
+    ----------
+    dependencies : list[str]
+        List of package names.
+    project_name : str
+        Name of the Julia project.
+
+    Returns
+    -------
+    str
+        The Project.toml file content with [deps] section populated
+        with UUIDs if Julia is available. Otherwise, includes package
+        names in comments.
+    """
+    content = f'name = "{project_name}"\n'
+    version = "0.1.0"
+    content += f'version = "{version}"\n\n'
+    if not dependencies:
+        return content
+    # Try to resolve UUIDs using Julia's Pkg registry
+    uuids = _resolve_julia_package_uuids(dependencies)
+    if uuids:
+        # We have UUIDs, create proper [deps] section
+        content += "[deps]\n"
+        for pkg in sorted(dependencies):
+            if pkg in uuids:
+                content += f'{pkg} = "{uuids[pkg]}"\n'
+        return content
+    else:
+        # Fallback: Julia not available or registry lookup failed
+        # Include package names in comments for manual addition
+        content += "[deps]\n"
+        content += "# Dependencies (add with Julia's Pkg.add):\n"
+        content += "# " + ", ".join(sorted(dependencies)) + "\n"
+        return content
+
+
+def create_r_description_content(dependencies: list[str]) -> str:
+    """Generate R DESCRIPTION file content listing dependencies.
+
+    This creates a minimal DESCRIPTION file that renv can work with.
+
+    Parameters
+    ----------
+    dependencies : list[str]
+        List of R package names.
+
+    Returns
+    -------
+    str
+        The DESCRIPTION file content.
+    """
+    content = """Package: CalkitProject
+Version: 0.0.1
+Title: Auto-generated R environment
+"""
+    if dependencies:
+        if len(dependencies) == 1:
+            content += f"Imports: {dependencies[0]}\n"
+        else:
+            # Format with first package on same line, rest indented
+            content += f"Imports: {dependencies[0]},\n"
+            for i, dep in enumerate(dependencies[1:], 1):
+                if i < len(dependencies) - 1:
+                    content += f"    {dep},\n"
+                else:
+                    content += f"    {dep}\n"
+    return content
+
+
+def detect_env_for_stage(
+    stage: dict,
+    environment: str | None = None,
+    ck_info: dict | None = None,
+    language: str | None = None,
+) -> EnvForStageResult:
+    """Detect or create an environment for a pipeline stage.
+
+    This function first attempts to detect an existing environment. If that
+    fails, it detects dependencies from the stage and creates an environment
+    spec file.
+
+    Parameters
+    ----------
+    stage : dict
+        The pipeline stage dict with 'kind' and script/notebook paths.
+    environment : str | None
+        Optional environment name or path to use. If None, will be detected.
+    ck_info : dict | None
+        Calkit info dict. If None, will be loaded from calkit.yaml.
+    language : str | None
+        Language hint for environment detection.
+
+    Returns
+    -------
+    EnvForStageResult
+        Result containing environment info, spec path, content,
+        and dependencies.
+    """
+    from calkit.detect import (
+        detect_dependencies_from_notebook,
+        detect_julia_dependencies,
+        detect_python_dependencies,
+        detect_r_dependencies,
+        language_from_notebook,
+    )
+
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info()
+    # Get existing environment names
+    envs = ck_info.get("environments", {})
+    all_env_names = list(envs.keys())
+    # 1) If stage has an environment, use that
+    if environment is not None:
+        res = env_from_name_or_path(
+            name_or_path=environment, ck_info=ck_info, language=language
+        )
+        return EnvForStageResult(
+            name=res.name,
+            env=res.env,
+            exists=res.exists,
+            spec_path=res.env.get("path"),
+            dependencies=[],
+            created_from_dependencies=False,
+        )
+    # Infer stage language if not provided
+    stage_kind = stage.get("kind")
+    stage_language = language
+    if stage_language is None:
+        if stage_kind == "jupyter-notebook":
+            stage_language = (
+                language_from_notebook(stage["notebook_path"]) or "python"
+            )
+        elif stage_kind == "python-script":
+            stage_language = "python"
+        elif stage_kind == "r-script":
+            stage_language = "r"
+        elif stage_kind == "julia-script":
+            stage_language = "julia"
+        elif stage_kind == "latex":
+            stage_language = "latex"
+        elif stage_kind in ["matlab-script", "matlab-command"]:
+            stage_language = "matlab"
+        elif stage_kind in ["shell-script", "shell-command"]:
+            stage_language = "shell"
+    language_kinds = {
+        "python": ["uv", "uv-venv", "venv", "conda", "pixi"],
+        "r": ["renv", "conda", "pixi"],
+        "julia": ["julia"],
+        "matlab": ["matlab"],
+        "latex": ["docker"],
+        "shell": ["system"],
+    }
+    preferred_kinds = (
+        language_kinds.get(stage_language, []) if stage_language else []
+    )
+    is_first_env_for_language = not any(
+        env.get("kind") in preferred_kinds for env in envs.values()
+    )
+    # 2) If there is already an environment for the stage language, use that
+    if stage_language:
+        matching_envs = [
+            (name, env)
+            for name, env in envs.items()
+            if env.get("kind") in preferred_kinds
+        ]
+        if matching_envs:
+            env_name, env = sorted(matching_envs, key=lambda item: item[0])[0]
+            env_name = cast(str, env_name)
+            return EnvForStageResult(
+                name=env_name,
+                env=env,
+                exists=True,
+                spec_path=env.get("path"),
+                dependencies=[],
+                created_from_dependencies=False,
+            )
+        if stage_language == "matlab":
+            return EnvForStageResult(
+                name="_system",
+                env={"kind": "system"},
+                exists=True,
+                spec_path=None,
+                dependencies=[],
+                created_from_dependencies=False,
+            )
+    # 3) If a typical env spec exists for the stage language, use that
+    if stage_language:
+        if stage_language == "latex":
+            res = env_from_name_or_path(
+                name_or_path=None,
+                ck_info=ck_info,
+                language=stage_language,
+            )
+            return EnvForStageResult(
+                name=res.name,
+                env=res.env,
+                exists=res.exists,
+                spec_path=res.env.get("path"),
+                dependencies=[],
+                created_from_dependencies=False,
+            )
+        spec_candidates = {
+            "python": [
+                "pyproject.toml",
+                "requirements.txt",
+                "environment.yml",
+                "env/*.yml",
+                "envs/*.yml",
+                "pixi.toml",
+            ],
+            "r": [
+                "DESCRIPTION",
+                "environment.yml",
+                "env/*.yml",
+                "envs/*.yml",
+                "pixi.toml",
+            ],
+            "julia": ["Project.toml"],
+            "shell": ["Dockerfile"],
+        }
+        for spec_path in spec_candidates.get(stage_language, []):
+            if "*" in spec_path:
+                matches = sorted(glob.glob(spec_path))
+                if matches:
+                    spec_path = matches[0]
+                else:
+                    continue
+            if os.path.isfile(spec_path):
+                res = env_from_name_or_path(
+                    name_or_path=spec_path,
+                    ck_info=ck_info,
+                    language=stage_language,
+                )
+                return EnvForStageResult(
+                    name=res.name,
+                    env=res.env,
+                    exists=res.exists,
+                    spec_path=res.env.get("path"),
+                    dependencies=[],
+                    created_from_dependencies=False,
+                )
+    dependencies: list[str] = []
+    spec_path: str | None = None
+    spec_content: str | None = None
+    env_name: str | None = None
+    env_dict: dict = {}
+    # Detect dependencies based on stage kind
+    if stage["kind"] == "python-script":
+        dependencies = detect_python_dependencies(
+            script_path=stage["script_path"]
+        )
+        # Generate unique environment name
+        if is_first_env_for_language:
+            temp_path = "pyproject.toml"
+            env_name = make_env_name(temp_path, all_env_names, kind="uv")
+            spec_path = "pyproject.toml"
+            spec_content = create_uv_pyproject_content(dependencies)
+            env_dict = {
+                "kind": "uv",
+                "path": spec_path,
+            }
+        else:
+            temp_path = ".calkit/envs/py/requirements.txt"
+            env_name = make_env_name(temp_path, all_env_names, kind="uv-venv")
+            spec_path = f".calkit/envs/{env_name}/requirements.txt"
+            spec_content = create_python_requirements_content(dependencies)
+            env_dict = {
+                "kind": "uv-venv",
+                "path": spec_path,
+                "python": DEFAULT_PYTHON_VERSION,
+                "prefix": os.path.join(os.path.dirname(spec_path), ".venv"),
+            }
+    elif stage["kind"] == "r-script":
+        dependencies = detect_r_dependencies(script_path=stage["script_path"])
+        # Generate unique environment name
+        if is_first_env_for_language:
+            temp_path = "DESCRIPTION"
+            env_name = make_env_name(temp_path, all_env_names, kind="renv")
+            spec_path = "DESCRIPTION"
+        else:
+            temp_path = ".calkit/envs/r/DESCRIPTION"
+            env_name = make_env_name(temp_path, all_env_names, kind="renv")
+            spec_path = f".calkit/envs/{env_name}/DESCRIPTION"
+        spec_content = create_r_description_content(dependencies)
+        env_dict = {
+            "kind": "renv",
+            "path": spec_path,
+        }
+    elif stage["kind"] == "julia-script":
+        dependencies = detect_julia_dependencies(
+            script_path=stage["script_path"]
+        )
+        project_name = calkit.detect_project_name(prepend_owner=False)
+        # Generate unique environment name
+        if is_first_env_for_language:
+            temp_path = "Project.toml"
+            env_name = make_env_name(temp_path, all_env_names, kind="julia")
+            spec_path = "Project.toml"
+            julia_env_name = project_name
+        else:
+            temp_path = ".calkit/envs/julia/Project.toml"
+            env_name = make_env_name(temp_path, all_env_names, kind="julia")
+            spec_path = f".calkit/envs/{env_name}/Project.toml"
+            julia_env_name = f"{project_name}-{env_name}"
+        spec_content = create_julia_project_file_content(
+            dependencies, project_name=julia_env_name
+        )
+        env_dict = {
+            "kind": "julia",
+            "path": spec_path,
+            "julia": _get_julia_version(),
+        }
+    elif stage["kind"] == "jupyter-notebook":
+        notebook_lang = language_from_notebook(stage["notebook_path"])
+        dependencies = detect_dependencies_from_notebook(
+            stage["notebook_path"], language=notebook_lang
+        )
+        if notebook_lang == "python" or notebook_lang is None:
+            # Add ipykernel for Jupyter notebook support
+            if "ipykernel" not in dependencies:
+                dependencies.append("ipykernel")
+            # Generate unique environment name
+            if is_first_env_for_language:
+                temp_path = "pyproject.toml"
+                env_name = make_env_name(temp_path, all_env_names, kind="uv")
+                spec_path = "pyproject.toml"
+                spec_content = create_uv_pyproject_content(dependencies)
+                env_dict = {
+                    "kind": "uv",
+                    "path": spec_path,
+                }
+            else:
+                temp_path = ".calkit/envs/py/requirements.txt"
+                env_name = make_env_name(
+                    temp_path, all_env_names, kind="uv-venv"
+                )
+                spec_path = f".calkit/envs/{env_name}/requirements.txt"
+                spec_content = create_python_requirements_content(dependencies)
+                env_dict = {
+                    "kind": "uv-venv",
+                    "path": spec_path,
+                    "python": DEFAULT_PYTHON_VERSION,
+                    "prefix": os.path.join(
+                        os.path.dirname(spec_path), ".venv"
+                    ),
+                }
+        elif notebook_lang == "r":
+            # Add IRkernel for Jupyter notebook support
+            if "IRkernel" not in dependencies:
+                dependencies.append("IRkernel")
+            # Generate unique environment name
+            if is_first_env_for_language:
+                temp_path = "DESCRIPTION"
+                env_name = make_env_name(temp_path, all_env_names, kind="renv")
+                spec_path = "DESCRIPTION"
+            else:
+                temp_path = ".calkit/envs/r/DESCRIPTION"
+                env_name = make_env_name(temp_path, all_env_names, kind="renv")
+                spec_path = f".calkit/envs/{env_name}/DESCRIPTION"
+            spec_content = create_r_description_content(dependencies)
+            env_dict = {
+                "kind": "renv",
+                "path": spec_path,
+            }
+        elif notebook_lang == "julia":
+            # Add IJulia for Jupyter notebook support
+            if "IJulia" not in dependencies:
+                dependencies.append("IJulia")
+            # Generate unique environment name
+            if is_first_env_for_language:
+                temp_path = "Project.toml"
+                env_name = make_env_name(
+                    temp_path, all_env_names, kind="julia"
+                )
+                spec_path = "Project.toml"
+            else:
+                temp_path = ".calkit/envs/julia/Project.toml"
+                env_name = make_env_name(
+                    temp_path, all_env_names, kind="julia"
+                )
+                spec_path = f".calkit/envs/{env_name}/Project.toml"
+            spec_content = create_julia_project_file_content(dependencies)
+            env_dict = {
+                "kind": "julia",
+                "path": spec_path,
+            }
+    if not spec_path or not env_name:
+        raise ValueError(
+            f"Could not create environment for stage kind: {stage.get('kind')}"
+        )
+    return EnvForStageResult(
+        name=env_name,
+        env=env_dict,
+        exists=False,
+        spec_path=spec_path,
+        spec_content=spec_content,
+        dependencies=dependencies,
+        created_from_dependencies=True,
+    )

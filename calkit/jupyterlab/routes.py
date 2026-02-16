@@ -31,6 +31,7 @@ from calkit.cli.new import (
     new_venv,
 )
 from calkit.cli.notebooks import check_env_kernel
+from calkit.environments import DEFAULT_PYTHON_VERSION
 from calkit.git import ensure_path_is_ignored
 from calkit.models.pipeline import JupyterNotebookStage
 
@@ -1213,8 +1214,8 @@ class EnvironmentsRouteHandler(APIHandler):
             return self.error(400, "Environment 'prefix' is required")
         updated_name = updated_env.get("name")
         existing_name = existing_env.get("name")
-        updated_python = updated_env.get("python", "3.14")
-        existing_python = existing_env.get("python", "3.14")
+        updated_python = updated_env.get("python", DEFAULT_PYTHON_VERSION)
+        existing_python = existing_env.get("python", DEFAULT_PYTHON_VERSION)
         if updated_path != existing_path:
             if os.path.isfile(existing_path):
                 os.remove(existing_path)

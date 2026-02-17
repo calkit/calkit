@@ -1291,7 +1291,6 @@ def detect_julia_dependencies(
     """
     if script_path is None and code is None:
         raise ValueError("Either script_path or code must be provided")
-
     if code is None:
         assert script_path is not None  # Type guard
         if not os.path.exists(script_path):
@@ -1301,18 +1300,14 @@ def detect_julia_dependencies(
                 code = f.read()
         except (UnicodeDecodeError, IOError):
             return []
-
     assert code is not None  # Type guard
     dependencies = set()
-
     # Remove comments
     code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
-
     # Pattern for using statements
     pattern = r"using\s+([a-zA-Z0-9._]+)"
     matches = re.findall(pattern, code)
     dependencies.update(matches)
-
     return sorted(list(dependencies))
 
 

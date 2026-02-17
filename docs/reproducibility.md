@@ -21,8 +21,11 @@ They may include, but are not limited to:
 - Source code
 - Configuration files
 - Text files, e.g., for a manuscript
-- Diagrams created by drawing
+- Diagrams created with drawing tools like Inkscape
 - Computational environment specifications
+- Word documents
+- CAD files
+- Computational meshes, if created manually/interactively
 
 In other words, the inputs are _primary artifacts_.
 They were created from nothing or acquired from elsewhere,

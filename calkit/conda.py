@@ -5,16 +5,108 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import warnings
 from pathlib import Path
 
+import toml
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel
 
 import calkit
 from calkit import ryaml
+
+# Typical conda/mamba installation directories to search
+POSSIBLE_CONDA_DIRS = [
+    # User home installations
+    "~/miniconda3",
+    "~/miniforge3",
+    "~/mambaforge",
+    "~/anaconda3",
+    "~/conda",
+    "~/Miniconda3",
+    "~/Miniforge3",
+    "~/Mambaforge",
+    "~/Anaconda3",
+    # Windows AppData installations
+    "~/AppData/Local/miniconda3",
+    "~/AppData/Local/miniforge3",
+    "~/AppData/Local/mambaforge",
+    "~/AppData/Local/anaconda3",
+    "~/AppData/Local/conda",
+    "~/AppData/Local/Continuum/miniconda3",
+    "~/AppData/Local/Continuum/anaconda3",
+    # System-wide installations (Unix)
+    "/opt/miniconda3",
+    "/opt/miniforge3",
+    "/opt/mambaforge",
+    "/opt/anaconda3",
+    "/opt/conda",
+    "/usr/local/miniconda3",
+    "/usr/local/miniforge3",
+    "/usr/local/mambaforge",
+    "/usr/local/anaconda3",
+    "/usr/local/conda",
+    # System-wide installations (Windows)
+    "C:/ProgramData/miniconda3",
+    "C:/ProgramData/miniforge3",
+    "C:/ProgramData/mambaforge",
+    "C:/ProgramData/anaconda3",
+    "C:/tools/miniconda3",
+    "C:/tools/miniforge3",
+    "C:/tools/mambaforge",
+    "C:/tools/anaconda3",
+    "C:/Miniconda3",
+    "C:/Miniforge3",
+    "C:/Mambaforge",
+    "C:/Anaconda3",
+]
+
+
+def _find_exe(exe_name: str) -> str | None:
+    """Find the absolute path to a conda or mamba executable."""
+    # First check if it's on the PATH
+    exe = shutil.which(exe_name)
+    if exe is not None:
+        return exe
+    # If not on the path, search typical locations
+    possible_locations = []
+    for base_dir in POSSIBLE_CONDA_DIRS:
+        expanded_dir = os.path.expanduser(base_dir)
+        # Windows locations (Library/bin for .BAT files, Scripts for .exe)
+        possible_locations.append(
+            os.path.join(expanded_dir, "Library", "bin", f"{exe_name}.BAT")
+        )
+        possible_locations.append(
+            os.path.join(expanded_dir, "Library", "bin", f"{exe_name}.exe")
+        )
+        possible_locations.append(
+            os.path.join(expanded_dir, "Scripts", f"{exe_name}.exe")
+        )
+        possible_locations.append(
+            os.path.join(expanded_dir, "Scripts", f"{exe_name}.BAT")
+        )
+        # Unix locations
+        possible_locations.append(os.path.join(expanded_dir, "bin", exe_name))
+        possible_locations.append(
+            os.path.join(expanded_dir, "condabin", exe_name)
+        )
+    for loc in possible_locations:
+        if os.path.isfile(loc) and os.access(loc, os.X_OK):
+            return loc
+    return None
+
+
+def find_conda_exe() -> str | None:
+    """Find the absolute path to the Conda executable."""
+    return _find_exe("conda")
+
+
+def find_mamba_exe() -> str | None:
+    """Find the absolute path to the Mamba executable."""
+    return _find_exe("mamba")
 
 
 def _editable_package_name_from_dir(dir_path: str) -> str:
@@ -31,26 +123,29 @@ def _editable_package_name_from_dir(dir_path: str) -> str:
     elif os.path.isfile(os.path.join(dir_path, "pyproject.toml")):
         # Read pyproject.toml to get the package name
         with open(os.path.join(dir_path, "pyproject.toml")) as f:
-            pyproject_contents = f.read()
-        match = re.search(
-            r'name\s*=\s*["\']([^"\']+)["\']', pyproject_contents
-        )
-        if match:
-            return match.group(1)
+            pyproject = toml.load(f)
+        if "project" in pyproject:
+            if "name" in pyproject["project"]:
+                return pyproject["project"]["name"]
     raise ValueError(f"Could not determine package name from {dir_path}")
 
 
-def _check_single(req: str, actual: str, conda: bool = False) -> bool:
+def _check_single(
+    req: str, actual: str, env_spec_dir: str, conda: bool = False
+) -> bool:
     """Helper function for checking actual versions against requirements.
 
     Note that this also doesn't check optional dependencies.
     """
     # If this is an editable install it needs to be handled specially
+    # It also needs to be relative to the env spec dir
     if req.startswith("-e ") or req.startswith("--editable "):
         req = req.split(" ", 1)[1]
         if "#" in req:
             req = req.split("#", 1)[0]
         req = req.strip()
+        # Create path relative to env spec dir
+        req = os.path.join(env_spec_dir, req)
         req = _editable_package_name_from_dir(req)
     # If this is a Git version, we can't check it
     # TODO: Clone Git repos to check?
@@ -90,10 +185,17 @@ def _check_single(req: str, actual: str, conda: bool = False) -> bool:
     return spec.contains(version)
 
 
-def _check_list(req: str, actual: list[str], conda: bool = False) -> bool:
+def _check_list(
+    req: str, actual: list[str], env_spec_dir: str, conda: bool = False
+) -> bool:
     """Check a requirement against a list of installed packages."""
+    # If req has a channel prefix, we can strip that off
+    if "::" in req:
+        req = req.split("::", 1)[1]
     for installed in actual:
-        if _check_single(req, installed, conda=conda):
+        if _check_single(
+            req, installed, env_spec_dir=env_spec_dir, conda=conda
+        ):
             return True
     return False
 
@@ -111,6 +213,7 @@ def check_env(
     alt_lock_fpaths: list[str] = [],
     alt_lock_fpaths_delete: list[str] = [],
     relaxed: bool = False,
+    verbose: bool = True,
 ) -> EnvCheckResult:
     """Check that a conda environment matches its spec.
 
@@ -150,14 +253,22 @@ def check_env(
         lock_to_use_for_creation = output_fpath
         log_func(f"Using existing lock file for creation: {output_fpath}")
     res = EnvCheckResult()
-    info = json.loads(subprocess.check_output(["conda", "info", "--json"]))
+    if verbose:
+        log_func("Getting conda info")
+    conda_exe = find_conda_exe()
+    if conda_exe is None:
+        raise RuntimeError("Cannot find Conda executable")
+    info = json.loads(subprocess.check_output([conda_exe, "info", "--json"]))
     root_prefix = info["root_prefix"]
     envs_dir = os.path.join(root_prefix, "envs")
-    if calkit.check_dep_exists("mamba"):
+    mamba_exe = find_mamba_exe()
+    if mamba_exe is not None:
         # Use mamba by default because it's faster and produces less output
-        conda_name = "mamba"
+        conda_name = mamba_exe
     else:
-        conda_name = "conda"
+        conda_name = conda_exe
+    if verbose:
+        log_func(f"Getting env list from {conda_name}")
     envs = json.loads(
         subprocess.check_output([conda_name, "env", "list", "--json"]).decode()
     )["envs"]
@@ -184,9 +295,10 @@ def check_env(
         )
     env_check_dir = os.path.dirname(env_check_fpath)
     os.makedirs(env_check_dir, exist_ok=True)
+    env_spec_dir = os.path.dirname(os.path.abspath(env_fpath))
     # Create env export command, which will be used later
     export_cmd = [
-        "conda",  # Mamba output is slightly different
+        conda_exe,  # Mamba output is slightly different
         "env",
         "export",
         "--no-builds",
@@ -198,7 +310,7 @@ def check_env(
     create_file = (
         lock_to_use_for_creation if lock_to_use_for_creation else env_fpath
     )
-    create_cmd = ["conda", "env", "create", "-y", "-f", create_file]
+    create_cmd = [conda_exe, "env", "create", "-y", "-f", create_file]
     if prefix is not None:
         export_cmd += ["--prefix", prefix]
         create_cmd += ["--prefix", prefix]
@@ -231,7 +343,14 @@ def check_env(
                 log_func(
                     "Failed to create from lock file, trying from env spec"
                 )
-                create_cmd = ["conda", "env", "create", "-y", "-f", env_fpath]
+                create_cmd = [
+                    conda_exe,
+                    "env",
+                    "create",
+                    "-y",
+                    "-f",
+                    env_fpath,
+                ]
                 if prefix is not None:
                     create_cmd += ["--prefix", prefix]
                 subprocess.check_call(create_cmd)
@@ -295,7 +414,10 @@ def check_env(
         log_func("Checking conda dependencies")
         for dep in required_conda_deps:
             is_okay = _check_list(
-                req=dep, actual=existing_conda_deps, conda=True
+                req=dep,
+                actual=existing_conda_deps,
+                env_spec_dir=env_spec_dir,
+                conda=True,
             )
             if not is_okay:
                 log_func(f"Found missing dependency: {dep}")
@@ -305,7 +427,10 @@ def check_env(
             log_func("Checking pip dependencies")
             for dep in required_pip_deps:
                 is_okay = _check_list(
-                    req=dep, actual=existing_pip_deps, conda=False
+                    req=dep,
+                    actual=existing_pip_deps,
+                    env_spec_dir=env_spec_dir,
+                    conda=False,
                 )
                 if not is_okay:
                     env_needs_rebuild = True
@@ -316,7 +441,7 @@ def check_env(
         log_func(f"Rebuilding {env_name} since it does not match spec")
         # Always rebuild from env spec file, not lock file
         rebuild_cmd = [
-            "conda",
+            conda_exe,
             "env",
             "create",
             "-y",
@@ -400,6 +525,7 @@ def check_env(
                     if "#" in dir_path:
                         dir_path = dir_path.split("#", 1)[0]
                     dir_path = dir_path.strip()
+                    dir_path = os.path.join(env_spec_dir, dir_path)
                     pkg_name = _editable_package_name_from_dir(dir_path)
                     editable_pip_deps[pkg_name] = dir_path
         if isinstance(env_export["dependencies"][-1], dict):

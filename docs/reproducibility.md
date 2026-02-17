@@ -35,7 +35,7 @@ outputs or _secondary artifacts_
 like figures, tables, and numerical results.
 
 Process definitions describe how to turn the inputs into the outputs.
-For example,
+For example:
 
 > Run the analysis script with these arguments.
 
@@ -50,22 +50,26 @@ A more measurable definition of reproducibility would be:
 > The inverse of the time it takes to verify the outputs
 > truly reflect the inputs and process definitions.
 
-This definition opens up the possibility of not needing to rerun expensive
+One way to verify a project's reproducibility is to rerun all the processes
+and compare the outputs to those published.
+However, this can take a long time for projects with computationally
+expensive steps.
+
+Thankfully,
+this definition leaves open the possibility of not needing to rerun expensive
 processes by having some sort of traceability on the outputs,
-e.g., a `dvc.lock` file.
+e.g., a `dvc.lock` file in a Calkit project.
+If we can trace through through the entire path,
+we can know the exact _provenance_.
 
-In other words,
-to verify the output truly reflects the inputs and process definitions,
-we need to be able to trace through the entire path.
-We need to know the exact _provenance_.
-
-From this perspective,
+With this measurement methodology,
 a study that shares no code and data will be very hard to reproduce,
 if not impossible.
 One that shares data but no code will be a little better.
-However, sharing code, environment lock files, and a fully-automated
+
+Sharing code, environment lock files, and a fully-automated
 pipeline with file content-based tracking
-is the gold standard.
+is the gold standard, however.
 Barring misconduct,
 provenance can be verified with a single command
 (`calkit status` for a Calkit project).
@@ -90,3 +94,8 @@ it's more likely that they will be skipped,
 especially if they are expensive.
 The project may therefore end up in an inconsistent state,
 which may lead to publication of incorrect results.
+When iteration is slow and/or painful,
+fewer iterations will be done,
+and more iterations typically results in higher quality.
+It is therefore important to automate research projects,
+i.e., to keep them highly reproducible throughout their life cycles.

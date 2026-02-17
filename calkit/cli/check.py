@@ -836,6 +836,7 @@ def check_conda_env(
             alt_lock_fpaths_delete=alt_lock_fpaths_delete,
             log_func=log_func,
             relaxed=relaxed,
+            verbose=not quiet,
         )
     except Exception as e:
         raise_error(f"Failed to check conda environment: {e}")

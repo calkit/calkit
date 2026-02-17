@@ -1229,7 +1229,6 @@ def detect_r_dependencies(
     """
     if script_path is None and code is None:
         raise ValueError("Either script_path or code must be provided")
-
     if code is None:
         assert script_path is not None  # Type guard
         if not os.path.exists(script_path):
@@ -1239,23 +1238,18 @@ def detect_r_dependencies(
                 code = f.read()
         except (UnicodeDecodeError, IOError):
             return []
-
     assert code is not None  # Type guard
     dependencies = set()
-
     # Remove comments
     code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
-
     # Patterns for library() and require() calls
     patterns = [
         r'library\s*\(\s*["\']?([a-zA-Z0-9._]+)["\']?\s*\)',
         r'require\s*\(\s*["\']?([a-zA-Z0-9._]+)["\']?\s*\)',
     ]
-
     for pattern in patterns:
         matches = re.findall(pattern, code)
         dependencies.update(matches)
-
     # Filter out base R packages
     base_packages = {
         "base",
@@ -1273,9 +1267,7 @@ def detect_r_dependencies(
         "tools",
         "utils",
     }
-
     dependencies = {pkg for pkg in dependencies if pkg not in base_packages}
-
     return sorted(list(dependencies))
 
 

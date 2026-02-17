@@ -12,21 +12,29 @@ ENV_NAME = "main"
 
 
 def test_check_single():
-    assert _check_single("python=3.12", "python=3.12.18", conda=True)
-    assert _check_single("python=3", "python=3.12.18", conda=True)
-    assert _check_single("python=3.12.18", "python=3.12.18", conda=True)
-    assert _check_single("python>=3.12,<3.13", "python==3.12.18", conda=False)
+    assert _check_single(
+        "python=3.12", "python=3.12.18", env_spec_dir=".", conda=True
+    )
+    assert _check_single(
+        "python=3", "python=3.12.18", env_spec_dir=".", conda=True
+    )
+    assert _check_single(
+        "python=3.12.18", "python=3.12.18", env_spec_dir=".", conda=True
+    )
+    assert _check_single(
+        "python>=3.12,<3.13", "python==3.12.18", env_spec_dir=".", conda=False
+    )
 
 
 def test_check_list():
     installed = ["python=3.12.1", "numpy=1.0.11"]
-    assert _check_list("python=3", installed, conda=True)
-    assert _check_list("numpy", installed, conda=True)
-    assert not _check_list("pandas", installed, conda=True)
+    assert _check_list("python=3", installed, env_spec_dir=".", conda=True)
+    assert _check_list("numpy", installed, env_spec_dir=".", conda=True)
+    assert not _check_list("pandas", installed, env_spec_dir=".", conda=True)
     installed = ["python==3.12.1", "numpy==1.0.11"]
-    assert _check_list("python>=3", installed, conda=False)
-    assert _check_list("numpy", installed, conda=False)
-    assert not _check_list("pandas", installed, conda=False)
+    assert _check_list("python>=3", installed, env_spec_dir=".", conda=False)
+    assert _check_list("numpy", installed, env_spec_dir=".", conda=False)
+    assert not _check_list("pandas", installed, env_spec_dir=".", conda=False)
 
 
 def delete_env(name: str):
@@ -298,3 +306,17 @@ setup(
         lock = calkit.ryaml.load(f)
     pip_deps = lock["dependencies"][-1]["pip"]
     assert "-e ." in pip_deps
+
+
+def test_find_conda_exe():
+    conda_exe = calkit.conda.find_conda_exe()
+    assert conda_exe is not None
+    assert os.path.isfile(conda_exe)
+
+
+def test_find_mamba_exe():
+    mamba_exe = calkit.conda.find_mamba_exe()
+    # Mamba may not be installed, so we just check that it returns None or a
+    # valid path
+    if mamba_exe is not None:
+        assert os.path.isfile(mamba_exe)

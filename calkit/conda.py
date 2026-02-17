@@ -18,47 +18,95 @@ from pydantic import BaseModel
 import calkit
 from calkit import ryaml
 
+# Typical conda/mamba installation directories to search
+POSSIBLE_CONDA_DIRS = [
+    # User home installations
+    "~/miniconda3",
+    "~/miniforge3",
+    "~/mambaforge",
+    "~/anaconda3",
+    "~/conda",
+    "~/Miniconda3",
+    "~/Miniforge3",
+    "~/Mambaforge",
+    "~/Anaconda3",
+    # Windows AppData installations
+    "~/AppData/Local/miniconda3",
+    "~/AppData/Local/miniforge3",
+    "~/AppData/Local/mambaforge",
+    "~/AppData/Local/anaconda3",
+    "~/AppData/Local/conda",
+    "~/AppData/Local/Continuum/miniconda3",
+    "~/AppData/Local/Continuum/anaconda3",
+    # System-wide installations (Unix)
+    "/opt/miniconda3",
+    "/opt/miniforge3",
+    "/opt/mambaforge",
+    "/opt/anaconda3",
+    "/opt/conda",
+    "/usr/local/miniconda3",
+    "/usr/local/miniforge3",
+    "/usr/local/mambaforge",
+    "/usr/local/anaconda3",
+    "/usr/local/conda",
+    # System-wide installations (Windows)
+    "C:/ProgramData/miniconda3",
+    "C:/ProgramData/miniforge3",
+    "C:/ProgramData/mambaforge",
+    "C:/ProgramData/anaconda3",
+    "C:/tools/miniconda3",
+    "C:/tools/miniforge3",
+    "C:/tools/mambaforge",
+    "C:/tools/anaconda3",
+    "C:/Miniconda3",
+    "C:/Miniforge3",
+    "C:/Mambaforge",
+    "C:/Anaconda3",
+]
 
-def find_conda_exe() -> str | None:
-    """Find the absolute path to the Conda executable."""
-    exe = shutil.which("conda")
+
+def _find_exe(exe_name: str) -> str | None:
+    """Find the absolute path to a conda or mamba executable."""
+    # First check if it's on the PATH
+    exe = shutil.which(exe_name)
     if exe is not None:
         return exe
-    # If it's not on the path, search typical locations
-    possible_locations = [
-        os.path.expanduser("~/miniforge3/Library/bin/conda.BAT"),
-        os.path.expanduser("~/anaconda3/Library/bin/conda.BAT"),
-        os.path.expanduser("~/miniconda3/bin/conda"),
-        os.path.expanduser("~/miniforge3/bin/conda"),
-        os.path.expanduser("~/anaconda3/bin/conda"),
-        "/opt/miniconda3/bin/conda",
-        "/opt/miniforge3/bin/conda",
-        "/opt/anaconda3/bin/conda",
-    ]
+    # If not on the path, search typical locations
+    possible_locations = []
+    for base_dir in POSSIBLE_CONDA_DIRS:
+        expanded_dir = os.path.expanduser(base_dir)
+        # Windows locations (Library/bin for .BAT files, Scripts for .exe)
+        possible_locations.append(
+            os.path.join(expanded_dir, "Library", "bin", f"{exe_name}.BAT")
+        )
+        possible_locations.append(
+            os.path.join(expanded_dir, "Library", "bin", f"{exe_name}.exe")
+        )
+        possible_locations.append(
+            os.path.join(expanded_dir, "Scripts", f"{exe_name}.exe")
+        )
+        possible_locations.append(
+            os.path.join(expanded_dir, "Scripts", f"{exe_name}.BAT")
+        )
+        # Unix locations
+        possible_locations.append(os.path.join(expanded_dir, "bin", exe_name))
+        possible_locations.append(
+            os.path.join(expanded_dir, "condabin", exe_name)
+        )
     for loc in possible_locations:
         if os.path.isfile(loc) and os.access(loc, os.X_OK):
             return loc
+    return None
+
+
+def find_conda_exe() -> str | None:
+    """Find the absolute path to the Conda executable."""
+    return _find_exe("conda")
 
 
 def find_mamba_exe() -> str | None:
     """Find the absolute path to the Mamba executable."""
-    exe = shutil.which("mamba")
-    if exe is not None:
-        return exe
-    # If it's not on the path, search typical locations
-    possible_locations = [
-        os.path.expanduser("~/miniforge3/Library/bin/mamba.BAT"),
-        os.path.expanduser("~/anaconda3/Library/bin/mamba.BAT"),
-        os.path.expanduser("~/miniconda3/bin/mamba"),
-        os.path.expanduser("~/miniforge3/bin/mamba"),
-        os.path.expanduser("~/anaconda3/bin/mamba"),
-        "/opt/miniconda3/bin/mamba",
-        "/opt/miniforge3/bin/mamba",
-        "/opt/anaconda3/bin/mamba",
-    ]
-    for loc in possible_locations:
-        if os.path.isfile(loc) and os.access(loc, os.X_OK):
-            return loc
+    return _find_exe("mamba")
 
 
 def _editable_package_name_from_dir(dir_path: str) -> str:
@@ -248,7 +296,6 @@ def check_env(
     env_check_dir = os.path.dirname(env_check_fpath)
     os.makedirs(env_check_dir, exist_ok=True)
     env_spec_dir = os.path.dirname(os.path.abspath(env_fpath))
-    print("ENVSsdfsdfkjdh", env_spec_dir)
     # Create env export command, which will be used later
     export_cmd = [
         conda_exe,  # Mamba output is slightly different

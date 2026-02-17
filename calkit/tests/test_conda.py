@@ -306,3 +306,17 @@ setup(
         lock = calkit.ryaml.load(f)
     pip_deps = lock["dependencies"][-1]["pip"]
     assert "-e ." in pip_deps
+
+
+def test_find_conda_exe():
+    conda_exe = calkit.conda.find_conda_exe()
+    assert conda_exe is not None
+    assert os.path.isfile(conda_exe)
+
+
+def test_find_mamba_exe():
+    mamba_exe = calkit.conda.find_mamba_exe()
+    # Mamba may not be installed, so we just check that it returns None or a
+    # valid path
+    if mamba_exe is not None:
+        assert os.path.isfile(mamba_exe)

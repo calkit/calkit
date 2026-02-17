@@ -12,7 +12,8 @@ A pipeline is composed of stages,
 each of which has a specific type or "kind."
 Each stage must specify the environment in which it runs to ensure it's
 reproducible.
-Calkit will automatically generate a "lock file" at the start of running
+Calkit will automatically generate an "environment lock file"
+at the start of a run
 and can therefore automatically detect if an environment has changed,
 and the affected stages need to be rerun.
 Stages can also define `inputs` and `outputs`,
@@ -196,3 +197,26 @@ pipeline:
       outputs:
         - results/{thresh}.csv
 ```
+
+## Automatic stage and environment detection
+
+The `calkit xr` command, which stands for "execute and record,"
+can be used to automatically generate pipeline stages and environments from
+scripts (Python, MATLAB, Julia, R, and shell),
+notebooks, LaTeX source files, or shell commands.
+
+For example, if you have a Python script in `scripts/run.py`, you can
+call:
+
+```sh
+calkit xr scripts/run.py
+```
+
+Calkit will attempt to detect which environment in which this script should run,
+creating one if necessary (it can also be specified with the `-e` flag.)
+Calkit will then try to detect inputs and outputs
+and attempt to run the stage it created.
+If successful, it will be added to the pipeline and kept reproducible from
+that point onwards.
+That is, calling `calkit run` again will detect if the script, environment,
+or any input files have changed, and rerun if so.

@@ -1,26 +1,21 @@
 # Reproducibility
 
-Reproducibility is commonly defined as:
-
-> Given the inputs and process definitions, it's possible to reproduce the
-> same outputs.
-
-A more measurable definition would be:
-
-> Reproducibility is measured by the time it takes to verify the outputs
-> truly reflect the inputs and process definitions.
-
 ```mermaid
 graph LR
     A[Inputs] --> B[Processes]
     B --> C[Outputs]
 ```
 
-What do we mean by inputs?
+Reproducibility can be defined as:
 
-Inputs are essentially primary artifacts--ones created from nothing or
-acquired from elsewhere.
-Examples include:
+> Given the inputs and process definitions, it's possible to generate the
+> same outputs.
+
+Basically this means that if you have the code and data and run them,
+you get the same figures, tables, numerical results, etc.
+
+Inputs are not limited to code and data, however.
+They may include, but are not limited to:
 
 - Raw data files
 - Source code
@@ -29,51 +24,69 @@ Examples include:
 - Diagrams created by drawing
 - Computational environment specifications
 
+In other words, the inputs are _primary artifacts_.
+They were created from nothing or acquired from elsewhere,
+either by humans or AI agents.
+
 The main output of a research project is the article itself,
 which is typically in PDF form.
 This output is typically composed of the text input and some intermediate
-outputs like figures, tables, and numerical results.
-
-So, to verify the output truly reflects the inputs and process definitions,
-we need to be able to trace through the entire path.
-We need to know the exact _provenance_.
+outputs or _secondary artifacts_
+like figures, tables, and numerical results.
 
 Process definitions describe how to turn the inputs into the outputs.
 For example,
 
-> Run the script with these arguments.
+> Run the analysis script with these arguments.
 
 > Create the computational environment from the requirements.txt file.
 
-Let's go through some example studies and measure reproducibility.
+> Compile the LaTeX source file to generate the PDF.
 
-This paper does not provide any of its inputs.
-We only have a single output, the PDF,
-and the process definitions are described in prose,
-which is fairly imprecise.
+## Measuring reproducibility
 
-To test its reproducibility, we will therefore need to recreate
-the inputs from how they are described in the paper.
-We will need to either carry out the processes manually or write
-our own new computations to execute.
+A more measurable definition of reproducibility would be:
 
-In short, this way of doing research is highly irreproducible,
-since it would take a very long time to verify.
+> The inverse of the time it takes to verify the outputs
+> truly reflect the inputs and process definitions.
 
-On the other hand,
-what if we just trust the authors?
-Can we call the study reproducible if everything sounds logical and plausible?
-This is of course subjective,
-but we believe prose descriptions of how the inputs were generated and
-processed are insufficient.
+This definition opens up the possibility of not needing to rerun expensive
+processes by having some sort of traceability on the outputs,
+e.g., a `dvc.lock` file.
+
+In other words,
+to verify the output truly reflects the inputs and process definitions,
+we need to be able to trace through the entire path.
+We need to know the exact _provenance_.
+
+From this perspective,
+a study that shares no code and data will be very hard to reproduce,
+if not impossible.
+One that shares data but no code will be a little better.
+However, sharing code, environment lock files, and a fully-automated
+pipeline with file content-based tracking
+is the gold standard.
+Barring misconduct,
+provenance can be verified with a single command
+(`calkit status` for a Calkit project).
 
 ## Consequences of poor reproducibility
 
-- It may not be trustworthy.
-  The steps claimed to have been taken to produce evidence to back up a
-  conclusion may not have actually been taken as described.
-  This could simply be due to a lack of knowledge, memory,
-  or they may be described imprecisely.
-  Peer review is supposed to catch these sorts of instances in theory,
-  but doing a reproducibility check is often a large undertaking.
-- It indicates inefficient and error-prone project management practices.
+On obvious consequence of poor reproducibility is that
+the research may not be trustworthy.
+The steps claimed to have been taken to produce evidence to back up a
+conclusion may not have actually been taken as described.
+This could simply be due to a lack of knowledge, memory,
+or they may be described imprecisely.
+Peer review is supposed to catch these sorts of instances in theory,
+but doing a reproducibility check is often a large undertaking.
+
+Furthermore,
+poor reproducibility indicates inefficient and error-prone project management
+practices.
+If multiple scripts/notebooks/commands need to be rerun to verify all outputs
+are up-to-date,
+it's more likely that they will be skipped,
+especially if they are expensive.
+The project may therefore end up in an inconsistent state,
+which may lead to publication of incorrect results.

@@ -738,8 +738,12 @@ def test_map_paths(tmp_dir):
 def test_execute_and_record_python_script(tmp_dir):
     """Test xr command with Python script."""
     # Create a simple Python script with I/O
-    with open("process.py", "w") as f:
-        f.write("""
+    script_path = "process_data.py"
+    stage_name = "process-data"
+    with open(script_path, "w") as f:
+        f.write("""#!/usr/bin/env python
+
+import sys, time
 import numpy as np
 
 # Read input
@@ -757,7 +761,7 @@ print("Processing complete")
         f.write("hello world")
     # Execute and record
     result = subprocess.run(
-        ["calkit", "xr", "process.py"],
+        ["calkit", "xr", script_path],
         capture_output=True,
         text=True,
     )
@@ -768,10 +772,10 @@ print("Processing complete")
     # Verify stage was added to pipeline
     ck_info = calkit.load_calkit_info()
     stages = ck_info.get("pipeline", {}).get("stages", {})
-    assert "process" in stages
-    stage = stages["process"]
+    assert stage_name in stages
+    stage = stages[stage_name]
     assert stage["kind"] == "python-script"
-    assert stage["script_path"] == "process.py"
+    assert stage["script_path"] == script_path
     assert stage["environment"] == "main"
     env = ck_info["environments"]["main"]
     assert env["kind"] == "uv"

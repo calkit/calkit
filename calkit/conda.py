@@ -10,6 +10,7 @@ import subprocess
 import warnings
 from pathlib import Path
 
+import toml
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel
@@ -74,26 +75,29 @@ def _editable_package_name_from_dir(dir_path: str) -> str:
     elif os.path.isfile(os.path.join(dir_path, "pyproject.toml")):
         # Read pyproject.toml to get the package name
         with open(os.path.join(dir_path, "pyproject.toml")) as f:
-            pyproject_contents = f.read()
-        match = re.search(
-            r'name\s*=\s*["\']([^"\']+)["\']', pyproject_contents
-        )
-        if match:
-            return match.group(1)
+            pyproject = toml.load(f)
+        if "project" in pyproject:
+            if "name" in pyproject["project"]:
+                return pyproject["project"]["name"]
     raise ValueError(f"Could not determine package name from {dir_path}")
 
 
-def _check_single(req: str, actual: str, conda: bool = False) -> bool:
+def _check_single(
+    req: str, actual: str, env_spec_dir: str, conda: bool = False
+) -> bool:
     """Helper function for checking actual versions against requirements.
 
     Note that this also doesn't check optional dependencies.
     """
     # If this is an editable install it needs to be handled specially
+    # It also needs to be relative to the env spec dir
     if req.startswith("-e ") or req.startswith("--editable "):
         req = req.split(" ", 1)[1]
         if "#" in req:
             req = req.split("#", 1)[0]
         req = req.strip()
+        # Create path relative to env spec dir
+        req = os.path.join(env_spec_dir, req)
         req = _editable_package_name_from_dir(req)
     # If this is a Git version, we can't check it
     # TODO: Clone Git repos to check?
@@ -133,13 +137,17 @@ def _check_single(req: str, actual: str, conda: bool = False) -> bool:
     return spec.contains(version)
 
 
-def _check_list(req: str, actual: list[str], conda: bool = False) -> bool:
+def _check_list(
+    req: str, actual: list[str], env_spec_dir: str, conda: bool = False
+) -> bool:
     """Check a requirement against a list of installed packages."""
     # If req has a channel prefix, we can strip that off
     if "::" in req:
         req = req.split("::", 1)[1]
     for installed in actual:
-        if _check_single(req, installed, conda=conda):
+        if _check_single(
+            req, installed, env_spec_dir=env_spec_dir, conda=conda
+        ):
             return True
     return False
 
@@ -239,6 +247,8 @@ def check_env(
         )
     env_check_dir = os.path.dirname(env_check_fpath)
     os.makedirs(env_check_dir, exist_ok=True)
+    env_spec_dir = os.path.dirname(os.path.abspath(env_fpath))
+    print("ENVSsdfsdfkjdh", env_spec_dir)
     # Create env export command, which will be used later
     export_cmd = [
         conda_exe,  # Mamba output is slightly different
@@ -357,7 +367,10 @@ def check_env(
         log_func("Checking conda dependencies")
         for dep in required_conda_deps:
             is_okay = _check_list(
-                req=dep, actual=existing_conda_deps, conda=True
+                req=dep,
+                actual=existing_conda_deps,
+                env_spec_dir=env_spec_dir,
+                conda=True,
             )
             if not is_okay:
                 log_func(f"Found missing dependency: {dep}")
@@ -367,7 +380,10 @@ def check_env(
             log_func("Checking pip dependencies")
             for dep in required_pip_deps:
                 is_okay = _check_list(
-                    req=dep, actual=existing_pip_deps, conda=False
+                    req=dep,
+                    actual=existing_pip_deps,
+                    env_spec_dir=env_spec_dir,
+                    conda=False,
                 )
                 if not is_okay:
                     env_needs_rebuild = True
@@ -462,6 +478,7 @@ def check_env(
                     if "#" in dir_path:
                         dir_path = dir_path.split("#", 1)[0]
                     dir_path = dir_path.strip()
+                    dir_path = os.path.join(env_spec_dir, dir_path)
                     pkg_name = _editable_package_name_from_dir(dir_path)
                     editable_pip_deps[pkg_name] = dir_path
         if isinstance(env_export["dependencies"][-1], dict):

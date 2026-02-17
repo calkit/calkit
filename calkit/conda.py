@@ -257,7 +257,7 @@ def check_env(
         log_func("Getting conda info")
     conda_exe = find_conda_exe()
     if conda_exe is None:
-        raise RuntimeError("Cannot find Conda executable on path")
+        raise RuntimeError("Cannot find Conda executable")
     info = json.loads(subprocess.check_output([conda_exe, "info", "--json"]))
     root_prefix = info["root_prefix"]
     envs_dir = os.path.join(root_prefix, "envs")

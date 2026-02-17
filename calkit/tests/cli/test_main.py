@@ -1,6 +1,7 @@
 """Tests for ``cli.main``."""
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -10,6 +11,7 @@ from pprint import pprint
 import dvc.repo
 import git
 import pytest
+import toml
 from dvc.exceptions import NotDvcRepoError
 from git.exc import InvalidGitRepositoryError
 
@@ -735,22 +737,11 @@ def test_map_paths(tmp_dir):
 
 def test_execute_and_record_python_script(tmp_dir):
     """Test xr command with Python script."""
-    subprocess.check_call(["calkit", "init"])
-    subprocess.check_call(
-        [
-            "calkit",
-            "new",
-            "uv-venv",
-            "-n",
-            "py-env",
-            "--python",
-            "3.12",
-            "setuptools",
-        ]
-    )
     # Create a simple Python script with I/O
     with open("process.py", "w") as f:
         f.write("""
+import numpy as np
+
 # Read input
 with open('input.txt', 'r') as f:
     data = f.read()
@@ -766,7 +757,7 @@ print("Processing complete")
         f.write("hello world")
     # Execute and record
     result = subprocess.run(
-        ["calkit", "xr", "process.py", "-e", "py-env"],
+        ["calkit", "xr", "process.py"],
         capture_output=True,
         text=True,
     )
@@ -781,7 +772,16 @@ print("Processing complete")
     stage = stages["process"]
     assert stage["kind"] == "python-script"
     assert stage["script_path"] == "process.py"
-    assert stage["environment"] == "py-env"
+    assert stage["environment"] == "main"
+    env = ck_info["environments"]["main"]
+    assert env["kind"] == "uv"
+    assert env["path"] == "pyproject.toml"
+    # Read pyproject.toml to check that numpy is listed as a dependency
+    with open("pyproject.toml", "r") as f:
+        pyproject = toml.load(f)
+        deps = pyproject["project"]["dependencies"]
+        deps = [re.split("[><=]", dep.strip())[0] for dep in deps]
+        assert "numpy" in deps
     # Verify I/O detection
     assert "input.txt" in stage["inputs"]
     # Check output was created

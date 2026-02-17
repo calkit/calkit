@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import warnings
 from pathlib import Path
@@ -15,6 +16,48 @@ from pydantic import BaseModel
 
 import calkit
 from calkit import ryaml
+
+
+def find_conda_exe() -> str | None:
+    """Find the absolute path to the Conda executable."""
+    exe = shutil.which("conda")
+    if exe is not None:
+        return exe
+    # If it's not on the path, search typical locations
+    possible_locations = [
+        os.path.expanduser("~/miniforge3/Library/bin/conda.BAT"),
+        os.path.expanduser("~/anaconda3/Library/bin/conda.BAT"),
+        os.path.expanduser("~/miniconda3/bin/conda"),
+        os.path.expanduser("~/miniforge3/bin/conda"),
+        os.path.expanduser("~/anaconda3/bin/conda"),
+        "/opt/miniconda3/bin/conda",
+        "/opt/miniforge3/bin/conda",
+        "/opt/anaconda3/bin/conda",
+    ]
+    for loc in possible_locations:
+        if os.path.isfile(loc) and os.access(loc, os.X_OK):
+            return loc
+
+
+def find_mamba_exe() -> str | None:
+    """Find the absolute path to the Mamba executable."""
+    exe = shutil.which("mamba")
+    if exe is not None:
+        return exe
+    # If it's not on the path, search typical locations
+    possible_locations = [
+        os.path.expanduser("~/miniforge3/Library/bin/mamba.BAT"),
+        os.path.expanduser("~/anaconda3/Library/bin/mamba.BAT"),
+        os.path.expanduser("~/miniconda3/bin/mamba"),
+        os.path.expanduser("~/miniforge3/bin/mamba"),
+        os.path.expanduser("~/anaconda3/bin/mamba"),
+        "/opt/miniconda3/bin/mamba",
+        "/opt/miniforge3/bin/mamba",
+        "/opt/anaconda3/bin/mamba",
+    ]
+    for loc in possible_locations:
+        if os.path.isfile(loc) and os.access(loc, os.X_OK):
+            return loc
 
 
 def _editable_package_name_from_dir(dir_path: str) -> str:
@@ -111,6 +154,7 @@ def check_env(
     alt_lock_fpaths: list[str] = [],
     alt_lock_fpaths_delete: list[str] = [],
     relaxed: bool = False,
+    verbose: bool = True,
 ) -> EnvCheckResult:
     """Check that a conda environment matches its spec.
 
@@ -150,14 +194,22 @@ def check_env(
         lock_to_use_for_creation = output_fpath
         log_func(f"Using existing lock file for creation: {output_fpath}")
     res = EnvCheckResult()
-    info = json.loads(subprocess.check_output(["conda", "info", "--json"]))
+    if verbose:
+        log_func("Getting conda info")
+    conda_exe = find_conda_exe()
+    if conda_exe is None:
+        raise RuntimeError("Cannot find Conda executable on path")
+    info = json.loads(subprocess.check_output([conda_exe, "info", "--json"]))
     root_prefix = info["root_prefix"]
     envs_dir = os.path.join(root_prefix, "envs")
-    if calkit.check_dep_exists("mamba"):
+    mamba_exe = find_mamba_exe()
+    if mamba_exe is not None:
         # Use mamba by default because it's faster and produces less output
-        conda_name = "mamba"
+        conda_name = mamba_exe
     else:
-        conda_name = "conda"
+        conda_name = conda_exe
+    if verbose:
+        log_func(f"Getting env list from {conda_name}")
     envs = json.loads(
         subprocess.check_output([conda_name, "env", "list", "--json"]).decode()
     )["envs"]
@@ -186,7 +238,7 @@ def check_env(
     os.makedirs(env_check_dir, exist_ok=True)
     # Create env export command, which will be used later
     export_cmd = [
-        "conda",  # Mamba output is slightly different
+        conda_exe,  # Mamba output is slightly different
         "env",
         "export",
         "--no-builds",
@@ -198,7 +250,7 @@ def check_env(
     create_file = (
         lock_to_use_for_creation if lock_to_use_for_creation else env_fpath
     )
-    create_cmd = ["conda", "env", "create", "-y", "-f", create_file]
+    create_cmd = [conda_exe, "env", "create", "-y", "-f", create_file]
     if prefix is not None:
         export_cmd += ["--prefix", prefix]
         create_cmd += ["--prefix", prefix]
@@ -231,7 +283,14 @@ def check_env(
                 log_func(
                     "Failed to create from lock file, trying from env spec"
                 )
-                create_cmd = ["conda", "env", "create", "-y", "-f", env_fpath]
+                create_cmd = [
+                    conda_exe,
+                    "env",
+                    "create",
+                    "-y",
+                    "-f",
+                    env_fpath,
+                ]
                 if prefix is not None:
                     create_cmd += ["--prefix", prefix]
                 subprocess.check_call(create_cmd)
@@ -316,7 +375,7 @@ def check_env(
         log_func(f"Rebuilding {env_name} since it does not match spec")
         # Always rebuild from env spec file, not lock file
         rebuild_cmd = [
-            "conda",
+            conda_exe,
             "env",
             "create",
             "-y",

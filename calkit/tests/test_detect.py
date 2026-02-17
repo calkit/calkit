@@ -734,9 +734,7 @@ data = pd.read_csv("data.csv")
 """
     with open("script.py", "w") as f:
         f.write(script_content)
-
     deps = detect_python_dependencies(script_path="script.py")
-
     assert "numpy" in deps
     assert "pandas" in deps
     assert "sklearn" in deps
@@ -754,7 +752,6 @@ from flask import Flask
 import json  # stdlib
 """
     deps = detect_python_dependencies(code=code)
-
     assert "requests" in deps
     assert "flask" in deps
     assert "json" not in deps
@@ -829,7 +826,10 @@ using Statistics
 
 
 def test_detect_dependencies_from_python_notebook(tmp_dir):
-    """Test detection of dependencies from a Python Jupyter notebook."""
+    """Test detection of dependencies from a Python Jupyter notebook.
+
+    Tests both basic imports and IPython magic commands (line and cell magics).
+    """
     notebook = {
         "cells": [
             {
@@ -845,6 +845,54 @@ def test_detect_dependencies_from_python_notebook(tmp_dir):
                     "from sklearn.linear_model import LinearRegression\n",
                 ],
             },
+            {
+                "cell_type": "code",
+                "source": [
+                    "import matplotlib.pyplot as plt\n",
+                    "\n",
+                    "%matplotlib inline\n",
+                    "\n",
+                    "class Constants():\n",
+                    "    def __init__(self):\n",
+                    "        self.msun = 1.989e33\n",
+                    "        self.rsun = 6.955e10\n",
+                    "        self.G  = 6.674e-8\n",
+                    "        self.yr = 3.1536e7\n",
+                    "        self.h  = 6.6260755e-27\n",
+                    "        self.kB = 1.380658e-16\n",
+                    "        self.mp = 1.6726219e-24\n",
+                    "        self.me = 9.10938356e-28\n",
+                    "        self.c  = 2.99792458e10\n",
+                    "        self.pc = 3.085677581e18\n",
+                    "        self.au = 1.496e13\n",
+                    "        self.q = 4.8032068e-10\n",
+                    "        self.eV = 1.6021772e-12\n",
+                    "        self.sigmaSB = 5.67051e-5\n",
+                    "        self.sigmaT = 6.6524e-25\n",
+                    "        self.Rg = 8.3145e7\n",
+                    "        self.a0 = 5.29177e-9\n",
+                    "        self.arad = 7.5646e-15\n",
+                    "        \n",
+                    '        print( "Constants defined...")\n',
+                    "        return None\n",
+                    "    \n",
+                    "    \n",
+                    "c = Constants()\n",
+                ],
+            },
+            {
+                "cell_type": "code",
+                "source": [
+                    "import requests\n",
+                    "\n",
+                    "%%timeit\n",
+                    "for i in range(100):\n",
+                    "    x = i * 2\n",
+                    "\n",
+                    "%load_ext autoreload\n",
+                    "%autoreload 2\n",
+                ],
+            },
         ],
         "metadata": {
             "kernelspec": {
@@ -853,15 +901,14 @@ def test_detect_dependencies_from_python_notebook(tmp_dir):
             }
         },
     }
-
     with open("notebook.ipynb", "w") as f:
         json.dump(notebook, f)
-
     deps = detect_dependencies_from_notebook("notebook.ipynb")
-
     assert "numpy" in deps
     assert "pandas" in deps
     assert "sklearn" in deps
+    assert "matplotlib" in deps
+    assert "requests" in deps
 
 
 def test_detect_dependencies_from_r_notebook(tmp_dir):

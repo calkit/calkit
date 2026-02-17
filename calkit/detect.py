@@ -1172,7 +1172,6 @@ def detect_python_dependencies(
     """
     if script_path is None and code is None:
         raise ValueError("Either script_path or code must be provided")
-
     if code is None:
         assert script_path is not None  # Type guard
         if not os.path.exists(script_path):
@@ -1182,15 +1181,35 @@ def detect_python_dependencies(
                 code = f.read()
         except (UnicodeDecodeError, IOError):
             return []
-
     assert code is not None  # Type guard
     dependencies = set()
-
+    # Strip IPython magic commands (line magics like %matplotlib and
+    # cell magics like %%timeit) as they are not valid Python syntax
+    lines = code.split("\n")
+    cleaned_lines = []
+    in_cell_magic = False
+    for line in lines:
+        stripped = line.strip()
+        # Check for cell magic start (%%...)
+        if stripped.startswith("%%"):
+            in_cell_magic = True
+            continue
+        # If we're in a cell magic block, skip until we hit a blank line
+        # or a line that doesn't look like it's part of the magic
+        if in_cell_magic:
+            if stripped == "" or not line.startswith((" ", "\t")):
+                in_cell_magic = False
+            else:
+                continue
+        # Skip line magics (%...)
+        if stripped.startswith("%"):
+            continue
+        cleaned_lines.append(line)
+    cleaned_code = "\n".join(cleaned_lines)
     try:
-        tree = ast.parse(code)
+        tree = ast.parse(cleaned_code)
     except SyntaxError:
         return []
-
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -1205,7 +1224,6 @@ def detect_python_dependencies(
                 if not _is_stdlib_module(module_name):
                     top_level = module_name.split(".")[0]
                     dependencies.add(top_level)
-
     return sorted(list(dependencies))
 
 
@@ -1229,7 +1247,6 @@ def detect_r_dependencies(
     """
     if script_path is None and code is None:
         raise ValueError("Either script_path or code must be provided")
-
     if code is None:
         assert script_path is not None  # Type guard
         if not os.path.exists(script_path):
@@ -1239,23 +1256,18 @@ def detect_r_dependencies(
                 code = f.read()
         except (UnicodeDecodeError, IOError):
             return []
-
     assert code is not None  # Type guard
     dependencies = set()
-
     # Remove comments
     code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
-
     # Patterns for library() and require() calls
     patterns = [
         r'library\s*\(\s*["\']?([a-zA-Z0-9._]+)["\']?\s*\)',
         r'require\s*\(\s*["\']?([a-zA-Z0-9._]+)["\']?\s*\)',
     ]
-
     for pattern in patterns:
         matches = re.findall(pattern, code)
         dependencies.update(matches)
-
     # Filter out base R packages
     base_packages = {
         "base",
@@ -1273,9 +1285,7 @@ def detect_r_dependencies(
         "tools",
         "utils",
     }
-
     dependencies = {pkg for pkg in dependencies if pkg not in base_packages}
-
     return sorted(list(dependencies))
 
 
@@ -1299,7 +1309,6 @@ def detect_julia_dependencies(
     """
     if script_path is None and code is None:
         raise ValueError("Either script_path or code must be provided")
-
     if code is None:
         assert script_path is not None  # Type guard
         if not os.path.exists(script_path):
@@ -1309,18 +1318,14 @@ def detect_julia_dependencies(
                 code = f.read()
         except (UnicodeDecodeError, IOError):
             return []
-
     assert code is not None  # Type guard
     dependencies = set()
-
     # Remove comments
     code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
-
     # Pattern for using statements
     pattern = r"using\s+([a-zA-Z0-9._]+)"
     matches = re.findall(pattern, code)
     dependencies.update(matches)
-
     return sorted(list(dependencies))
 
 

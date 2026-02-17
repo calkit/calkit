@@ -135,6 +135,9 @@ def _check_single(req: str, actual: str, conda: bool = False) -> bool:
 
 def _check_list(req: str, actual: list[str], conda: bool = False) -> bool:
     """Check a requirement against a list of installed packages."""
+    # If req has a channel prefix, we can strip that off
+    if "::" in req:
+        req = req.split("::", 1)[1]
     for installed in actual:
         if _check_single(req, installed, conda=conda):
             return True

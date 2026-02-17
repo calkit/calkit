@@ -12,21 +12,29 @@ ENV_NAME = "main"
 
 
 def test_check_single():
-    assert _check_single("python=3.12", "python=3.12.18", conda=True)
-    assert _check_single("python=3", "python=3.12.18", conda=True)
-    assert _check_single("python=3.12.18", "python=3.12.18", conda=True)
-    assert _check_single("python>=3.12,<3.13", "python==3.12.18", conda=False)
+    assert _check_single(
+        "python=3.12", "python=3.12.18", env_spec_dir=".", conda=True
+    )
+    assert _check_single(
+        "python=3", "python=3.12.18", env_spec_dir=".", conda=True
+    )
+    assert _check_single(
+        "python=3.12.18", "python=3.12.18", env_spec_dir=".", conda=True
+    )
+    assert _check_single(
+        "python>=3.12,<3.13", "python==3.12.18", env_spec_dir=".", conda=False
+    )
 
 
 def test_check_list():
     installed = ["python=3.12.1", "numpy=1.0.11"]
-    assert _check_list("python=3", installed, conda=True)
-    assert _check_list("numpy", installed, conda=True)
-    assert not _check_list("pandas", installed, conda=True)
+    assert _check_list("python=3", installed, env_spec_dir=".", conda=True)
+    assert _check_list("numpy", installed, env_spec_dir=".", conda=True)
+    assert not _check_list("pandas", installed, env_spec_dir=".", conda=True)
     installed = ["python==3.12.1", "numpy==1.0.11"]
-    assert _check_list("python>=3", installed, conda=False)
-    assert _check_list("numpy", installed, conda=False)
-    assert not _check_list("pandas", installed, conda=False)
+    assert _check_list("python>=3", installed, env_spec_dir=".", conda=False)
+    assert _check_list("numpy", installed, env_spec_dir=".", conda=False)
+    assert not _check_list("pandas", installed, env_spec_dir=".", conda=False)
 
 
 def delete_env(name: str):

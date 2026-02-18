@@ -13,7 +13,7 @@ Note that the `--public` and `--cloud` options can be omitted,
 but then you'll need to configure your own DVC remote or use Git to store
 pipeline outputs.
 
-Next, create your [environment(s)](https://docs.calkit.org/environments).
+Next, create your [environment(s)](environments.md).
 In this example, imagine we have a `requirements.txt` file we want to use to
 define a uv virtual environment, or venv:
 
@@ -25,7 +25,7 @@ If you're using Conda for environment management,
 e.g., with an `environment.yml` file,
 you can use the `calkit new conda-env` command.
 
-Next, we can start building our [pipeline](https://docs.calkit.org/pipeline/).
+Next, we can start building our [pipeline](pipeline/index.md).
 Let's say we have a Jupyter notebook called `collect-data.ipynb`
 that produces raw data at `data/raw.h5`.
 We can add a pipeline stage to run this notebook in the `main` environment
@@ -53,8 +53,8 @@ calkit save -am "Run pipeline"
 
 After that,
 you can add more environments, pipeline stages,
-[start a publication with LaTeX](https://docs.calkit.org/tutorials/adding-latex-pub-docker/),
-or [link a publication with Overleaf](https://docs.calkit.org/overleaf/).
+[start a publication with LaTeX](tutorials/adding-latex-pub-docker.md),
+or [link a publication with Overleaf](overleaf.md).
 
 ## Fresh from a Calkit project template
 

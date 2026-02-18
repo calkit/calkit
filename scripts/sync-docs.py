@@ -36,6 +36,40 @@ def get_content_without_title(doc_path: Path) -> str:
     return content.strip()
 
 
+def convert_relative_links(content: str) -> str:
+    """Convert relative markdown links to absolute URLs for docs.calkit.org.
+
+    Converts links like [text](relative-path.md) to [text](https://docs.calkit.org/relative-path)
+    but only if they're not already absolute URLs or anchor links.
+
+    Parameters
+    ----------
+    content : str
+        Markdown content
+
+    Returns
+    -------
+    str
+        Content with converted links
+    """
+    # Match markdown links [text](url) where url doesn't start with http, https, #, or /
+    pattern = r"\[([^\]]+)\]\((?!https?:|#|/)([^\)]+)\)"
+
+    def replace_link(match):
+        text = match.group(1)
+        rel_url = match.group(2)
+        # Remove trailing .md and /index.md for absolute URLs
+        if rel_url.endswith("/index.md"):
+            abs_url = f"https://docs.calkit.org/{rel_url[:-9]}"
+        elif rel_url.endswith(".md"):
+            abs_url = f"https://docs.calkit.org/{rel_url[:-3]}"
+        else:
+            abs_url = f"https://docs.calkit.org/{rel_url}"
+        return f"[{text}]({abs_url})"
+
+    return re.sub(pattern, replace_link, content)
+
+
 def adjust_heading_levels(content: str, shift: int) -> str:
     """Adjust markdown heading levels by the specified amount.
 
@@ -102,6 +136,8 @@ def process_readme(readme_path: Path, docs_dir: Path) -> str:
             doc_content = get_content_without_title(doc_path)
             if shift != 0:
                 doc_content = adjust_heading_levels(doc_content, shift)
+            # Convert relative links to absolute URLs
+            doc_content = convert_relative_links(doc_content)
             # Return just the content, preserving the markers
             return f"<!-- INCLUDE: docs/{doc_file}{' +' + str(shift) if shift else ''} -->\n\n{doc_content}\n\n<!-- END INCLUDE -->"
         except FileNotFoundError as e:

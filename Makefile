@@ -9,7 +9,7 @@ install: ## Create the project's virtual environment.
 	@uv sync
 
 .PHONY: format
-format: ## Automatically format files.
+format: sync-docs ## Automatically format files.
 	@echo "🚀 Linting code with pre-commit"
 	@uv run pre-commit run -a
 

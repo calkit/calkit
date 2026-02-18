@@ -102,9 +102,9 @@ To effectively use Calkit, you'll want to ensure [Git](https://git-scm.com)
 is installed and properly configured.
 You may also want to install [Docker](https://docker.com),
 since that is the default method by which LaTeX environments are created.
-If you want to use the [Calkit Cloud](https://calkit/io)
+If you want to use the [Calkit Cloud](https://calkit.io)
 for collaboration and backup as a DVC remote,
-you can [set up cloud integration](cloud-integration).
+you can [set up cloud integration](https://docs.calkit.org/cloud-integration).
 
 ### Use without installing
 
@@ -156,7 +156,7 @@ If you're using Conda for environment management,
 e.g., with an `environment.yml` file,
 you can use the `calkit new conda-env` command.
 
-Next, we can start building our [pipeline](https://docs.calkit.org/pipeline/).
+Next, we can start building our [pipeline](https://docs.calkit.org/pipeline).
 Let's say we have a Jupyter notebook called `collect-data.ipynb`
 that produces raw data at `data/raw.h5`.
 We can add a pipeline stage to run this notebook in the `main` environment
@@ -184,8 +184,8 @@ calkit save -am "Run pipeline"
 
 After that,
 you can add more environments, pipeline stages,
-[start a publication with LaTeX](https://docs.calkit.org/tutorials/adding-latex-pub-docker/),
-or [link a publication with Overleaf](https://docs.calkit.org/overleaf/).
+[start a publication with LaTeX](https://docs.calkit.org/tutorials/adding-latex-pub-docker),
+or [link a publication with Overleaf](https://docs.calkit.org/overleaf).
 
 ### Fresh from a Calkit project template
 

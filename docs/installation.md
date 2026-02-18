@@ -30,9 +30,9 @@ To effectively use Calkit, you'll want to ensure [Git](https://git-scm.com)
 is installed and properly configured.
 You may also want to install [Docker](https://docker.com),
 since that is the default method by which LaTeX environments are created.
-If you want to use the [Calkit Cloud](https://calkit/io)
+If you want to use the [Calkit Cloud](https://calkit.io)
 for collaboration and backup as a DVC remote,
-you can [set up cloud integration](cloud-integration).
+you can [set up cloud integration](cloud-integration.md).
 
 ## Use without installing
 

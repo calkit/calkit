@@ -34,7 +34,7 @@ If you want to use the [Calkit Cloud](https://calkit/io)
 for collaboration and backup as a DVC remote,
 you can [set up cloud integration](cloud-integration).
 
-### Use without installing
+## Use without installing
 
 If you want to use Calkit without installing it,
 you can use uv's `uvx` command to run it directly:

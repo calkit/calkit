@@ -33,8 +33,13 @@ test-cov: ## Test the code coverage with pytest.
 	@uv run pytest --cov --cov-config=pyproject.toml
 
 .PHONY: test-docs
-test-docs: ## Test if documentation can be built without warnings or errors.
+test-docs: sync-docs ## Test if documentation can be built without warnings or errors.
 	@uv run mkdocs build -s
+
+.PHONY: sync-docs
+sync-docs: ## Sync documentation content from docs/*.md into README.md.
+	@echo "🚀 Syncing documentation"
+	@uv run python scripts/sync-docs.py
 
 .PHONY: docs
 docs: ## Build and serve the documentation.

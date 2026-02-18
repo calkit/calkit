@@ -70,6 +70,8 @@ while guiding users away from common reproducibility pitfalls.
 
 ## Installation
 
+<!-- INCLUDE: docs/installation.md +1 -->
+
 On Linux, macOS, or Windows Git Bash,
 install Calkit and [uv](https://docs.astral.sh/uv/)
 (if not already installed) with:
@@ -123,7 +125,11 @@ all scientific or analytical computing projects.
 
 ![Calkit Assistant](https://github.com/calkit/calkit-assistant/blob/main/resources/screenshot.png?raw=true)
 
+<!-- END INCLUDE -->
+
 ## Quickstart
+
+<!-- INCLUDE: docs/quickstart.md +1 -->
 
 ### From an existing project
 
@@ -135,7 +141,7 @@ calkit new project --public --cloud .
 ```
 
 Note that the `--public` and `--cloud` options can be omitted,
-but you'll need to configure your own DVC remote or use Git to store
+but then you'll need to configure your own DVC remote or use Git to store
 pipeline outputs.
 
 Next, create your [environment(s)](https://docs.calkit.org/environments).
@@ -150,7 +156,7 @@ If you're using Conda for environment management,
 e.g., with an `environment.yml` file,
 you can use the `calkit new conda-env` command.
 
-Next, we can start building our [pipeline](https://docs.calkit.org/pipeline).
+Next, we can start building our [pipeline](https://docs.calkit.org/pipeline/).
 Let's say we have a Jupyter notebook called `collect-data.ipynb`
 that produces raw data at `data/raw.h5`.
 We can add a pipeline stage to run this notebook in the `main` environment
@@ -218,38 +224,9 @@ calkit save -am "Run pipeline"
 
 This will commit and push to both GitHub and the Calkit Cloud.
 
+<!-- END INCLUDE -->
+
 ## Get involved
 
 We welcome all kinds of contributions!
 See [CONTRIBUTING.md](CONTRIBUTING.md) to learn how to get involved.
-
-## Design/UX principles
-
-1. Be opinionated. Users should not be forced to make unimportant decisions.
-   However, if they disagree, they should have the ability to change the
-   default behavior. The most common use case should be default.
-   Commands that are commonly executed as groups should be combined, but
-   still available to be run individually if desired.
-1. Commits should ideally be made automatically as part of actions that make
-   changes to the project repo. For
-   example, if a new object is added via the CLI, a commit should be made
-   right then unless otherwise specified. This saves the trouble of running
-   multiple commands and encourages atomic commits.
-1. Pushes should require explicit input from the user.
-   It is still TBD whether or not a pull should automatically be
-   made, though in general we want to encourage trunk-based development, i.e.,
-   only working on a single branch. One exception might be for local
-   experimentation that has a high likelihood of failure, in which case a
-   branch can be a nice way to throw those changes away.
-   Multiple branches should probably not live in the cloud, however, except
-   for small, quickly merged pull requests.
-1. Idempotency is always a good thing. Unnecessary state is bad. For example,
-   we should not encourage caching pipeline outputs for operations that are
-   cheap. Caching should happen either for state that is valuable on its
-   own, like a figure, or for an intermediate result that is expensive to
-   generate.
-1. There should be the smallest number of
-   frequently used commands as possible, and they should require as little
-   memorization as possible to know how to execute, e.g., a user should be
-   able to keep running `calkit run` and that's all they really need to do
-   to make sure the project is up-to-date.

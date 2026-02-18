@@ -6,14 +6,16 @@ repos:
       - id: check-merge-conflict
       - id: end-of-file-fixer
       - id: trailing-whitespace
+      - id: check-yaml
+        args: ["--unsafe"]
+      - id: check-json
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: "v0.6.3"
     hooks:
       - id: ruff
-        args: [--exit-non-zero-on-fix, --config=pyproject.toml]
+        args: [--exit-non-zero-on-fix]
       - id: ruff-format
-        args: [--config=pyproject.toml]
 
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: "v3.0.3"

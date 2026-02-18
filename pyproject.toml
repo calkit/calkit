@@ -159,7 +159,9 @@ show_error_codes = true
 target-version = "py310"
 line-length = 79
 fix = true
-lint.extend-select = ["I"]
+
+[tool.ruff.lint]
+extend-select = ["I"]  # Import sorting (isort compatibility)
 
 [tool.pytest.ini_options]
 env = ["CALKIT_ENV=test", "CALKIT_TEST_OVERLEAF_TOKEN=none"]

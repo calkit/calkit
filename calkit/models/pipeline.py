@@ -708,9 +708,7 @@ class JupyterNotebookStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = (
-            f"calkit nb execute --environment {self.environment} " "--no-check"
-        )
+        cmd = f"calkit nb execute --environment {self.environment} --no-check"
         if self.language is not None:
             cmd += f" --language {self.language}"
         if self.html_storage:

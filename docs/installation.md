@@ -1,21 +1,17 @@
 # Installation
 
-To install Calkit, [Git](https://git-scm.com) and Python must be installed.
-If you want to use [Docker](https://docker.com) containers,
-which is typically a good idea,
-that should also be installed.
-For Python, we recommend
-[uv](https://docs.astral.sh/uv/).
-On Linux, macOS, or Windows Git Bash, you can install Calkit and uv with:
+On Linux, macOS, or Windows Git Bash,
+install Calkit and [uv](https://docs.astral.sh/uv/)
+(if not already installed) with:
 
 ```sh
-curl -LsSf https://github.com/calkit/calkit/raw/refs/heads/main/scripts/install.sh | sh
+curl -LsSf install.calkit.org | sh
 ```
 
 Or with Windows Command Prompt or PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/calkit/calkit/raw/refs/heads/main/scripts/install.ps1 | iex"
+powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"
 ```
 
 If you already have uv installed, install Calkit with:
@@ -24,15 +20,19 @@ If you already have uv installed, install Calkit with:
 uv tool install calkit-python
 ```
 
-Alternatively, but less ideally, you can install with your system Python:
+You can also install with your system Python:
 
 ```sh
 pip install calkit-python
 ```
 
-Next,
-[connect to a Calkit Hub](cloud-integration.md)
-for collaboration and backup.
+To effectively use Calkit, you'll want to ensure [Git](https://git-scm.com)
+is installed and properly configured.
+You may also want to install [Docker](https://docker.com),
+since that is the default method by which LaTeX environments are created.
+If you want to use the [Calkit Cloud](https://calkit/io)
+for collaboration and backup as a DVC remote,
+you can [set up cloud integration](cloud-integration).
 
 ### Use without installing
 

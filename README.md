@@ -70,22 +70,18 @@ while guiding users away from common reproducibility pitfalls.
 
 ## Installation
 
-To install Calkit, [Git](https://git-scm.com) and Python must be installed.
-If you want to use [Docker](https://docker.com) containers,
-which is typically a good idea,
-that should also be installed.
-For Python, we recommend
-[uv](https://docs.astral.sh/uv/).
-On Linux, macOS, or Windows Git Bash, you can install Calkit and uv with:
+On Linux, macOS, or Windows Git Bash,
+install Calkit and [uv](https://docs.astral.sh/uv/)
+(if not already installed) with:
 
 ```sh
-curl -LsSf https://github.com/calkit/calkit/raw/refs/heads/main/scripts/install.sh | sh
+curl -LsSf install.calkit.org | sh
 ```
 
 Or with Windows Command Prompt or PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/calkit/calkit/raw/refs/heads/main/scripts/install.ps1 | iex"
+powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"
 ```
 
 If you already have uv installed, install Calkit with:
@@ -94,17 +90,19 @@ If you already have uv installed, install Calkit with:
 uv tool install calkit-python
 ```
 
-Alternatively, but less ideally, you can install with your system Python:
+You can also install with your system Python:
 
 ```sh
 pip install calkit-python
 ```
 
-For Windows users, the
-[Calkit Assistant](https://github.com/calkit/calkit-assistant)
-app is the easiest way to get everything set up and ready to work in
-VS Code, which can then be used as the primary app for working on
-all scientific or analytical computing projects.
+To effectively use Calkit, you'll want to ensure [Git](https://git-scm.com)
+is installed and properly configured.
+You may also want to install [Docker](https://docker.com),
+since that is the default method by which LaTeX environments are created.
+If you want to use the [Calkit Cloud](https://calkit/io)
+for collaboration and backup as a DVC remote,
+you can [set up cloud integration](cloud-integration).
 
 ### Use without installing
 
@@ -115,21 +113,15 @@ you can use uv's `uvx` command to run it directly:
 uvx calk9 --help
 ```
 
-## Cloud integration
+### Calkit Assistant
 
-The Calkit Cloud ([calkit.io](https://calkit.io)) serves as a project
-management interface and a DVC remote for easily storing all versions of your
-data/code/figures/publications, interacting with your collaborators,
-reusing others' research artifacts, etc.
+For Windows users, the
+[Calkit Assistant](https://github.com/calkit/calkit-assistant)
+app is the easiest way to get everything set up and ready to work in
+VS Code, which can then be used as the primary app for working on
+all scientific or analytical computing projects.
 
-After signing up, visit the
-[settings](https://calkit.io/settings?tab=tokens)
-page and create a token for use with the API.
-Then run
-
-```sh
-calkit config set token ${YOUR_TOKEN_HERE}
-```
+![Calkit Assistant](https://github.com/calkit/calkit-assistant/blob/main/resources/screenshot.png?raw=true)
 
 ## Quickstart
 

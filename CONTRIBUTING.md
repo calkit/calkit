@@ -49,6 +49,12 @@ This guide will help you get started.
    ```sh
    uv run jupyter lab
    ```
+1. **Set up pre-commit hooks** to auto-enforce code style standards:
+   ```bash
+   uv tool install prek
+   prek install
+   ```
+   This will run automated checks before each commit.
 
 ### 3. Make your changes
 
@@ -56,10 +62,14 @@ This guide will help you get started.
   ```bash
   git checkout -b your-feature-name
   ```
-- Check and fix code formatting:
+- Fix automatically-checked formatting issues:
   ```bash
   make format
   ```
+- Follow style guidelines not automatically checked:
+  - No blank lines inside functions/methods
+  - Type hints required for all functions
+  - NumPy-style docstrings
 - Commit your changes
   (use the imperative mood and capitalize the first letter,
   but don't use punctuation):

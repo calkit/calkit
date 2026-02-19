@@ -70,22 +70,20 @@ while guiding users away from common reproducibility pitfalls.
 
 ## Installation
 
-To install Calkit, [Git](https://git-scm.com) and Python must be installed.
-If you want to use [Docker](https://docker.com) containers,
-which is typically a good idea,
-that should also be installed.
-For Python, we recommend
-[uv](https://docs.astral.sh/uv/).
-On Linux, macOS, or Windows Git Bash, you can install Calkit and uv with:
+<!-- INCLUDE: docs/installation.md +1 -->
+
+On Linux, macOS, or Windows Git Bash,
+install Calkit and [uv](https://docs.astral.sh/uv/)
+(if not already installed) with:
 
 ```sh
-curl -LsSf https://github.com/calkit/calkit/raw/refs/heads/main/scripts/install.sh | sh
+curl -LsSf install.calkit.org | sh
 ```
 
 Or with Windows Command Prompt or PowerShell:
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/calkit/calkit/raw/refs/heads/main/scripts/install.ps1 | iex"
+powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"
 ```
 
 If you already have uv installed, install Calkit with:
@@ -94,17 +92,19 @@ If you already have uv installed, install Calkit with:
 uv tool install calkit-python
 ```
 
-Alternatively, but less ideally, you can install with your system Python:
+You can also install with your system Python:
 
 ```sh
 pip install calkit-python
 ```
 
-For Windows users, the
-[Calkit Assistant](https://github.com/calkit/calkit-assistant)
-app is the easiest way to get everything set up and ready to work in
-VS Code, which can then be used as the primary app for working on
-all scientific or analytical computing projects.
+To effectively use Calkit, you'll want to ensure [Git](https://git-scm.com)
+is installed and properly configured.
+You may also want to install [Docker](https://docker.com),
+since that is the default method by which LaTeX environments are created.
+If you want to use the [Calkit Cloud](https://calkit.io)
+for collaboration and backup as a DVC remote,
+you can [set up cloud integration](https://docs.calkit.org/cloud-integration).
 
 ### Use without installing
 
@@ -115,149 +115,116 @@ you can use uv's `uvx` command to run it directly:
 uvx calk9 --help
 ```
 
-## Cloud integration
+### Calkit Assistant
 
-The Calkit Cloud ([calkit.io](https://calkit.io)) serves as a project
-management interface and a DVC remote for easily storing all versions of your
-data/code/figures/publications, interacting with your collaborators,
-reusing others' research artifacts, etc.
+For Windows users, the
+[Calkit Assistant](https://github.com/calkit/calkit-assistant)
+app is the easiest way to get everything set up and ready to work in
+VS Code, which can then be used as the primary app for working on
+all scientific or analytical computing projects.
 
-After signing up, visit the
-[settings](https://calkit.io/settings?tab=tokens)
-page and create a token for use with the API.
-Then run
+![Calkit Assistant](https://github.com/calkit/calkit-assistant/blob/main/resources/screenshot.png?raw=true)
 
-```sh
-calkit config set token ${YOUR_TOKEN_HERE}
-```
+<!-- END INCLUDE -->
 
 ## Quickstart
+
+<!-- INCLUDE: docs/quickstart.md +1 -->
 
 ### From an existing project
 
 If you want to use Calkit with an existing project,
-navigate into its working directory and run:
+navigate into its working directory and use the `xr` command to start
+executing and recording your scripts, notebooks, LaTeX files, etc.,
+as reproducible pipeline stages.
+For example:
 
 ```sh
-calkit new project --public --cloud .
+calkit xr scripts/analyze.py
+
+calkit xr notebooks/plot.ipynb
+
+calkit xr paper/main.tex
 ```
 
-Note that the `--public` and `--cloud` options can be omitted,
-but you'll need to configure your own DVC remote or use Git to store
-pipeline outputs.
-
-Next, create your [environment(s)](https://docs.calkit.org/environments).
-In this example, imagine we have a `requirements.txt` file we want to use to
-define a uv virtual environment, or venv:
-
-```sh
-calkit new uv-venv --name main --path requirements.txt --python 3.13
-```
-
-If you're using Conda for environment management,
-e.g., with an `environment.yml` file,
-you can use the `calkit new conda-env` command.
-
-Next, we can start building our [pipeline](https://docs.calkit.org/pipeline).
-Let's say we have a Jupyter notebook called `collect-data.ipynb`
-that produces raw data at `data/raw.h5`.
-We can add a pipeline stage to run this notebook in the `main` environment
-we just created with:
-
-```sh
-calkit new jupyter-notebook-stage \
-    --name collect-data \
-    --environment main \
-    --notebook-path collect-data.ipynb \
-    --output data/raw.h5
-```
-
-We can then run the pipeline with:
+Calkit will attempt to detect environments, inputs, and outputs and
+save them in `calkit.yaml`.
+If successful,
+you'll be able to run the full pipeline with:
 
 ```sh
 calkit run
 ```
 
-and save and back up our results with:
+Next, make a change to e.g., a script and look at the output of
+`calkit status`.
+You'll see that the pipeline has a stage that is out-of-date:
 
 ```sh
-calkit save -am "Run pipeline"
+---------------------------- Pipeline ----------------------------
+analyze:
+        changed deps:
+                modified:           scripts/analyze.py
 ```
 
-After that,
-you can add more environments, pipeline stages,
-[start a publication with LaTeX](https://docs.calkit.org/tutorials/adding-latex-pub-docker/),
-or [link a publication with Overleaf](https://docs.calkit.org/overleaf/).
+This can be fixed with another call to `calkit run`.
+
+You can save (add and commit) all changes with:
+
+```sh
+calkit save -am "Add to pipeline"
+```
 
 ### Fresh from a Calkit project template
 
-After installing Calkit and setting your token as described above, run:
+Create a new project from the
+[`calkit/example-basic`](https://github.com/calkit/example-basic)
+template with:
 
 ```sh
-calkit new project calkit-project-1 \
-    --title "My first Calkit project" \
+calkit new project my-research \
+    --title "My research" \
     --template calkit/example-basic \
-    --cloud \
-    --public
+    --cloud
 ```
 
-This will create a new project from the
-[`calkit/example-basic`](https://github.com/calkit/example-basic)
-template,
-creating it in the cloud and cloning to `calkit-project-1`.
-You should now be able to run:
+Note the `--cloud` flag requires [cloud integration](https://docs.calkit.org/cloud-integration)
+to be set up, but can be omitted if the project doesn't need to be backed up to
+the cloud or shared with collaborators.
+Cloud integration can also be set up later.
+
+Next, move into the project folder and run the pipeline,
+which consists of several stages defined in `calkit.yaml`:
+
+<!-- TODO: This takes a long time to pull the image -->
 
 ```sh
-cd calkit-project-1
+cd my-research
 calkit run
 ```
 
-This will run the project's pipeline.
-Next, you can start adding stages to the pipeline,
-modifying the Python environments and scripts,
-and editing the paper.
-All will be kept in sync with the `calkit run` command.
+Next, make some edits to a script or LaTeX file and run `calkit status` to
+see what stages are out-of-date.
+For example:
 
-To back up all of your work, execute:
+```sh
+---------------------------- Pipeline ----------------------------
+build-paper:
+	changed deps:
+		modified:           paper/paper.tex
+```
+
+Execute `calkit run` again to bring everything up-to-date.
+
+To back up or save the project, call:
 
 ```sh
 calkit save -am "Run pipeline"
 ```
 
-This will commit and push to both GitHub and the Calkit Cloud.
+<!-- END INCLUDE -->
 
 ## Get involved
 
 We welcome all kinds of contributions!
 See [CONTRIBUTING.md](CONTRIBUTING.md) to learn how to get involved.
-
-## Design/UX principles
-
-1. Be opinionated. Users should not be forced to make unimportant decisions.
-   However, if they disagree, they should have the ability to change the
-   default behavior. The most common use case should be default.
-   Commands that are commonly executed as groups should be combined, but
-   still available to be run individually if desired.
-1. Commits should ideally be made automatically as part of actions that make
-   changes to the project repo. For
-   example, if a new object is added via the CLI, a commit should be made
-   right then unless otherwise specified. This saves the trouble of running
-   multiple commands and encourages atomic commits.
-1. Pushes should require explicit input from the user.
-   It is still TBD whether or not a pull should automatically be
-   made, though in general we want to encourage trunk-based development, i.e.,
-   only working on a single branch. One exception might be for local
-   experimentation that has a high likelihood of failure, in which case a
-   branch can be a nice way to throw those changes away.
-   Multiple branches should probably not live in the cloud, however, except
-   for small, quickly merged pull requests.
-1. Idempotency is always a good thing. Unnecessary state is bad. For example,
-   we should not encourage caching pipeline outputs for operations that are
-   cheap. Caching should happen either for state that is valuable on its
-   own, like a figure, or for an intermediate result that is expensive to
-   generate.
-1. There should be the smallest number of
-   frequently used commands as possible, and they should require as little
-   memorization as possible to know how to execute, e.g., a user should be
-   able to keep running `calkit run` and that's all they really need to do
-   to make sure the project is up-to-date.

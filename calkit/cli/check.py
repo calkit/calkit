@@ -313,31 +313,19 @@ def check_environments(
         )
 
 
+@check_app.command(name="renv")
 def check_renv(
-    env_path: str,
-    verbose: bool = False,
+    env_path: Annotated[
+        str,
+        typer.Argument(
+            help="Path to DESCRIPTION file or renv environment directory."
+        ),
+    ],
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Print verbose output.")
+    ] = False,
 ) -> None:
-    """Check an R renv environment, initializing if needed.
-
-    This function follows the proper renv workflow:
-    1. Ensure renv is installed
-    2. Check if renv.lock exists
-    3. If not, but DESCRIPTION exists, initialize renv and create lock
-    4. If lockfile exists, check if it's in sync with DESCRIPTION
-    5. Only update lockfile if DESCRIPTION has changed
-    6. Check if library is in sync with lockfile
-    7. Only restore packages if library is out of sync
-
-    Parameters
-    ----------
-    env_path : str
-        Path to the DESCRIPTION file for the environment.
-    wdir : str | None
-        Working directory for execution. If not provided, uses the directory
-        containing the DESCRIPTION file.
-    verbose : bool
-        Print verbose output.
-    """
+    """Check an renv R environment, initializing if needed."""
     # Get the directory containing the DESCRIPTION file
     if env_path.endswith("DESCRIPTION"):
         env_dir = os.path.dirname(env_path)

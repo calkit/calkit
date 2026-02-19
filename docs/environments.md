@@ -80,8 +80,10 @@ An environment can be checked that it matches its specification with:
 calkit check env --name {env-name}
 ```
 
-This will produce a "lock file" inside the project's `.calkit/env-locks`
-directory, which uniquely identifies the actual environment that was
+This will produce a "lock file"
+(inside the project's `.calkit/env-locks`
+directory if the environment manager doesn't export lock files by default),
+which uniquely identifies the actual environment that was
 created to help diagnose reproducibility issues down the road.
 
 A command can be executed in an environment with:
@@ -456,4 +458,36 @@ pipeline:
         - config/my-sim-config.json
       outputs:
         - results/sim-results.h5
+```
+
+### Pixi
+
+Pixi environments typically have the path `pixi.toml`:
+
+```yaml
+environments:
+  my-pixi:
+    kind: pixi
+    path: pixi.toml
+```
+
+### R
+
+R environments can be managed with Conda, Pixi, or `renv` (recommended).
+The env spec path for an renv environment is typically a `DESCRIPTION` file.
+
+```yaml
+environments:
+  r:
+    kind: renv
+    path: DESCRIPTION
+```
+
+The imports inside `DESCRIPTION` are used to create and sync the environment:
+
+```
+Package: CalkitProject
+Version: 0.0.1
+Title: Auto-generated R environment
+Imports: tidyverse
 ```

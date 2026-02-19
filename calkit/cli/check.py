@@ -435,7 +435,6 @@ def check_renv(
             lockfile_synced = False
             if verbose:
                 typer.echo("Warning: status check failed, will update lock")
-
         if not lockfile_synced:
             if verbose:
                 typer.echo("Lockfile out of sync, updating from DESCRIPTION")
@@ -472,7 +471,6 @@ def check_renv(
         else:
             if verbose:
                 typer.echo("Lockfile is already in sync with DESCRIPTION")
-
     # Check if library needs restoring
     if verbose:
         typer.echo("Checking if library is in sync with lockfile")

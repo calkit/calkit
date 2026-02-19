@@ -169,20 +169,32 @@ analyze:
 
 This can be fixed with another call to `calkit run`.
 
+You can save (add and commit) all changes with:
+
+```sh
+calkit save -am "Add to pipeline"
+```
+
 ### Fresh from a Calkit project template
 
-After installing Calkit and setting your token, run:
+Create a new project from the
+[`calkit/example-basic`](https://github.com/calkit/example-basic)
+template with:
 
 ```sh
 calkit new project my-research \
     --title "My research" \
-    --template calkit/example-basic
+    --template calkit/example-basic \
+    --cloud
 ```
 
-This will create a new project from the
-[`calkit/example-basic`](https://github.com/calkit/example-basic)
-template.
-You should now be able to run:
+Note the `--cloud` flag requires [cloud integration](https://docs.calkit.org/cloud-integration)
+to be set up, but can be omitted if the project doesn't need to be backed up to
+the cloud or shared with collaborators.
+Cloud integration can also be set up later.
+
+Next, move into the project folder and run the pipeline,
+which consists of several stages defined in `calkit.yaml`:
 
 <!-- TODO: This takes a long time to pull the image -->
 
@@ -191,20 +203,23 @@ cd my-research
 calkit run
 ```
 
-This will run check all of the project's environments and
-run the pipeline.
-Next, you can start adding stages to the pipeline,
-modifying the Python environments and scripts,
-and editing the paper.
-All will be kept in sync with the `calkit run` command.
+Next, make some edits to a script or LaTeX file and run `calkit status` to see what stages are out-of-date.
+For example:
 
-To back up all of your work, execute:
+```sh
+---------------------------- Pipeline ----------------------------
+build-paper:
+	changed deps:
+		modified:           paper/paper.tex
+```
+
+Execute `calkit run` again to bring everything up-to-date.
+
+To back up or save the project, call:
 
 ```sh
 calkit save -am "Run pipeline"
 ```
-
-This will commit and push to both GitHub and the Calkit Cloud.
 
 <!-- END INCLUDE -->
 

@@ -8,6 +8,7 @@ into README.md, excluding the top heading of each doc file.
 import re
 import sys
 from pathlib import Path
+from typing import Match
 
 
 def get_content_without_title(doc_path: Path) -> str:
@@ -55,7 +56,7 @@ def convert_relative_links(content: str) -> str:
     # Match markdown links [text](url) where url doesn't start with http, https, #, or /
     pattern = r"\[([^\]]+)\]\((?!https?:|#|/)([^\)]+)\)"
 
-    def replace_link(match):
+    def replace_link(match: Match[str]) -> str:
         text = match.group(1)
         rel_url = match.group(2)
         # Remove trailing .md and /index.md for absolute URLs
@@ -128,7 +129,7 @@ def process_readme(readme_path: Path, docs_dir: Path) -> str:
     # Find include blocks - format: <!-- INCLUDE: docs/file.md [+shift] -->...<!-- END INCLUDE -->
     pattern = r"<!-- INCLUDE: docs/([^\s\]]+)(?:\s\+(\d+))? -->(.*?)<!-- END INCLUDE -->"
 
-    def replace_include(match):
+    def replace_include(match: Match[str]) -> str:
         doc_file = match.group(1).strip()
         shift = int(match.group(2)) if match.group(2) else 0
         doc_path = docs_dir / doc_file
@@ -147,16 +148,13 @@ def process_readme(readme_path: Path, docs_dir: Path) -> str:
     return re.sub(pattern, replace_include, content, flags=re.DOTALL)
 
 
-def main():
+def main() -> None:
     """Main entry point."""
     repo_root = Path(__file__).parent.parent
     readme_path = repo_root / "README.md"
     docs_dir = repo_root / "docs"
-    print(f"  README: {readme_path}")
-    print(f"  Docs dir: {docs_dir}")
     processed = process_readme(readme_path, docs_dir)
     readme_path.write_text(processed, encoding="utf-8")
-    print("✓ README.md updated successfully")
 
 
 if __name__ == "__main__":

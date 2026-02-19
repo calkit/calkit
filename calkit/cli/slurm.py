@@ -167,7 +167,7 @@ def run_sbatch(
         should_wait = True
         if running_or_queued:
             typer.echo(
-                f"Job '{name}' with is already running or queued with ID "
+                f"Job '{name}' is already running or queued with ID "
                 f"{job_id}"
             )
             # Check if args have changed

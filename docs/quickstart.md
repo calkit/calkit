@@ -79,8 +79,8 @@ For example:
 ```sh
 ---------------------------- Pipeline ----------------------------
 build-paper:
-	changed deps:
-		modified:           paper/paper.tex
+        changed deps:
+                modified:           paper/paper.tex
 ```
 
 Execute `calkit run` again to bring everything up-to-date.

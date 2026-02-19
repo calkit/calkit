@@ -292,7 +292,7 @@ def check_environments(
     envs = ck_info.get("environments", {})
     if not envs:
         typer.echo("No environments defined in calkit.yaml")
-        return None
+        return
     failures = []
     for env_name, env in envs.items():
         if env.get("kind") in calkit.environments.KINDS_NO_CHECK:

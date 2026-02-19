@@ -203,7 +203,8 @@ cd my-research
 calkit run
 ```
 
-Next, make some edits to a script or LaTeX file and run `calkit status` to see what stages are out-of-date.
+Next, make some edits to a script or LaTeX file and run `calkit status` to
+see what stages are out-of-date.
 For example:
 
 ```sh

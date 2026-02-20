@@ -8,7 +8,7 @@ import os
 import platform as _platform
 import shutil
 import subprocess
-from typing import Annotated
+from typing import Annotated, Callable
 
 import dotenv
 import git
@@ -36,7 +36,7 @@ def check_repro(
     wdir: Annotated[
         str, typer.Option("--wdir", help="Project working directory.")
     ] = ".",
-):
+) -> None:
     """Check the reproducibility of a project."""
     res = check_reproducibility(wdir=wdir, log_func=typer.echo)
     typer.echo(res.to_pretty().encode("utf-8", errors="replace"))
@@ -115,17 +115,28 @@ def check_environment(
             relaxed=True,  # TODO: Add option?
             quiet=not verbose,
         )
-    elif env["kind"] in ["pixi", "uv"]:
-        cmd = [env["kind"], "lock"]
+    elif env["kind"] == "pixi":
+        cmd = ["pixi", "lock"]
         env_dir = os.path.dirname(env["path"])
-        if env_dir and env["kind"] == "uv":
+        if env_dir:
+            cmd += ["--manifest-path", env["path"]]
+        if verbose:
+            typer.echo(f"Running command: {cmd}")
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to check pixi environment")
+    elif env["kind"] == "uv":
+        cmd = ["uv", "sync"]
+        env_dir = os.path.dirname(env["path"])
+        if env_dir:
             cmd += ["--directory", env_dir]
         if verbose:
             typer.echo(f"Running command: {cmd}")
         try:
             subprocess.check_call(cmd)
         except subprocess.CalledProcessError:
-            raise_error(f"Failed to check {env['kind']} environment")
+            raise_error("Failed to check uv environment")
     elif (kind := env["kind"]) in ["uv-venv", "venv"]:
         if "prefix" not in env:
             raise_error("venv environments require a prefix")
@@ -276,7 +287,7 @@ def check_environments(
     verbose: Annotated[
         bool, typer.Option("--verbose", help="Print verbose output.")
     ] = False,
-) -> str | None:
+) -> None:
     ck_info = calkit.load_calkit_info(process_includes="environments")
     envs = ck_info.get("environments", {})
     if not envs:
@@ -302,31 +313,19 @@ def check_environments(
         )
 
 
+@check_app.command(name="renv")
 def check_renv(
-    env_path: str,
-    verbose: bool = False,
+    env_path: Annotated[
+        str,
+        typer.Argument(
+            help="Path to DESCRIPTION file or renv environment directory."
+        ),
+    ],
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Print verbose output.")
+    ] = False,
 ) -> None:
-    """Check an R renv environment, initializing if needed.
-
-    This function follows the proper renv workflow:
-    1. Ensure renv is installed
-    2. Check if renv.lock exists
-    3. If not, but DESCRIPTION exists, initialize renv and create lock
-    4. If lockfile exists, check if it's in sync with DESCRIPTION
-    5. Only update lockfile if DESCRIPTION has changed
-    6. Check if library is in sync with lockfile
-    7. Only restore packages if library is out of sync
-
-    Parameters
-    ----------
-    env_path : str
-        Path to the DESCRIPTION file for the environment.
-    wdir : str | None
-        Working directory for execution. If not provided, uses the directory
-        containing the DESCRIPTION file.
-    verbose : bool
-        Print verbose output.
-    """
+    """Check an renv R environment, initializing if needed."""
     # Get the directory containing the DESCRIPTION file
     if env_path.endswith("DESCRIPTION"):
         env_dir = os.path.dirname(env_path)
@@ -436,7 +435,6 @@ def check_renv(
             lockfile_synced = False
             if verbose:
                 typer.echo("Warning: status check failed, will update lock")
-
         if not lockfile_synced:
             if verbose:
                 typer.echo("Lockfile out of sync, updating from DESCRIPTION")
@@ -473,7 +471,6 @@ def check_renv(
         else:
             if verbose:
                 typer.echo("Lockfile is already in sync with DESCRIPTION")
-
     # Check if library needs restoring
     if verbose:
         typer.echo("Checking if library is in sync with lockfile")
@@ -620,7 +617,7 @@ def check_docker_env(
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Be quiet.")
     ] = False,
-):
+) -> None:
     """Check that Docker environment is up-to-date."""
     if fpath is None and lock_fpath is None:
         raise_error(
@@ -823,7 +820,8 @@ def check_conda_env(
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Be quiet.")
     ] = False,
-):
+) -> None:
+    log_func: Callable[..., None]
     if quiet:
         log_func = functools.partial(typer.echo, file=open(os.devnull, "w"))
     else:
@@ -891,7 +889,7 @@ def check_venv(
     verbose: Annotated[
         bool, typer.Option("--verbose", help="Print verbose output.")
     ] = False,
-):
+) -> None:
     """Check a Python virtual environment (uv or virtualenv)."""
     kind = "uv-venv" if use_uv else "venv"
     create_cmd = (
@@ -912,7 +910,7 @@ def check_venv(
     # Ensure prefix is natively formatted for the OS
     prefix = os.path.normpath(prefix)
 
-    def create_venv():
+    def create_venv() -> None:
         if verbose:
             typer.echo(f"Creating {kind} at {prefix}")
         try:
@@ -1065,7 +1063,7 @@ def check_dependencies(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output")
     ] = False,
-):
+) -> None:
     """Check that a project's system-level dependencies are set up
     correctly.
     """
@@ -1084,7 +1082,7 @@ def check_env_vars(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output")
     ] = False,
-):
+) -> None:
     """Check that the project's required environmental variables exist."""
     typer.echo("Checking project environmental variables")
     dotenv.load_dotenv(dotenv_path=".env")
@@ -1134,7 +1132,7 @@ def check_pipeline(
             help="Compile the pipeline to DVC stages and merge into dvc.yaml.",
         ),
     ] = False,
-):
+) -> None:
     """Check that the project pipeline is defined correctly."""
     from calkit.models.pipeline import Pipeline
 
@@ -1171,7 +1169,7 @@ def check_call(
             "--if-error", help="Command to run if there is an error."
         ),
     ],
-):
+) -> None:
     """Check that a command succeeds and run an alternate if not."""
     try:
         subprocess.check_call(cmd, shell=True)

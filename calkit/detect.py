@@ -65,6 +65,7 @@ def detect_julia_script_io(script_path: str) -> dict[str, list[str]]:
         return {"inputs": inputs, "outputs": outputs}
     script_dir = os.path.dirname(script_path) if script_path else "."
     content = re.sub(r"#.*$", "", content, flags=re.MULTILINE)
+    julia_vars = _extract_julia_string_assignments(content)
     include_pattern = r'include\s*\(\s*["\']([^"\']+\.jl)["\']\s*\)'
     include_matches = re.findall(include_pattern, content)
     for match in include_matches:
@@ -75,28 +76,34 @@ def detect_julia_script_io(script_path: str) -> dict[str, list[str]]:
             elif _is_valid_project_path(match):
                 inputs.append(match)
     read_patterns = [
-        r'open\s*\(\s*["\']([^"\']+)["\']\s*,\s*["\']r["\']',
-        r'open\s*\(\s*["\']([^"\']+)["\']\s*\)',
-        r'CSV\.(?:read|File)\s*\(\s*["\']([^"\']+)["\']',
-        r'readdlm\s*\(\s*["\']([^"\']+)["\']',
-        r'load\s*\(\s*["\']([^"\']+)["\']',
-        r'JLD2?\.load\s*\(\s*["\']([^"\']+)["\']',
+        r'open\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))\s*,\s*["\']r["\']',
+        r'open\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))\s*\)',
+        r'CSV\.(?:read|File)\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'readdlm\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'load\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'JLD2?\.load\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
     ]
     write_patterns = [
-        r'open\s*\(\s*["\']([^"\']+)["\']\s*,\s*["\']w["\']',
-        r'open\s*\(\s*["\']([^"\']+)["\']\s*,\s*["\']a["\']',
-        r'CSV\.write\s*\(\s*["\']([^"\']+)["\']',
-        r'writedlm\s*\(\s*["\']([^"\']+)["\']',
-        r'save\s*\(\s*["\']([^"\']+)["\']',
-        r'JLD2?\.save\s*\(\s*["\']([^"\']+)["\']',
-        r'savefig\s*\(\s*["\']([^"\']+)["\']',
+        r'open\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))\s*,\s*["\']w["\']',
+        r'open\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))\s*,\s*["\']a["\']',
+        r'CSV\.write\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'writedlm\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'save\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'JLD2?\.save\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'savefig\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
     ]
     for pattern in read_patterns:
         matches = re.findall(pattern, content)
-        inputs.extend(matches)
+        for match in matches:
+            resolved = _resolve_julia_path_expr(match, julia_vars)
+            if resolved:
+                inputs.append(resolved)
     for pattern in write_patterns:
         matches = re.findall(pattern, content)
-        outputs.extend(matches)
+        for match in matches:
+            resolved = _resolve_julia_path_expr(match, julia_vars)
+            if resolved:
+                outputs.append(resolved)
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     outputs = [p for p in outputs if _is_valid_project_path(p)]
     inputs = list(dict.fromkeys(inputs))
@@ -798,6 +805,7 @@ def _detect_julia_code_io(
     inputs = []
     outputs = []
     code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
+    julia_vars = _extract_julia_string_assignments(code)
     include_pattern = r'include\s*\(\s*["\']([^"\']+\.jl)["\']\s*\)'
     include_matches = re.findall(include_pattern, code)
     for match in include_matches:
@@ -808,20 +816,28 @@ def _detect_julia_code_io(
             elif _is_valid_project_path(match):
                 inputs.append(match)
     read_patterns = [
-        r'open\s*\(\s*["\']([^"\']+)["\']\s*,\s*["\']r["\']',
-        r'open\s*\(\s*["\']([^"\']+)["\']\s*\)',
-        r'CSV\.(?:read|File)\s*\(\s*["\']([^"\']+)["\']',
-        r'readdlm\s*\(\s*["\']([^"\']+)["\']',
+        r'open\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))\s*,\s*["\']r["\']',
+        r'open\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))\s*\)',
+        r'CSV\.(?:read|File)\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'readdlm\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
     ]
     write_patterns = [
-        r'open\s*\(\s*["\']([^"\']+)["\']\s*,\s*["\']w["\']',
-        r'CSV\.write\s*\(\s*["\']([^"\']+)["\']',
-        r'writedlm\s*\(\s*["\']([^"\']+)["\']',
+        r'open\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))\s*,\s*["\']w["\']',
+        r'CSV\.write\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'writedlm\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
     ]
     for pattern in read_patterns:
-        inputs.extend(re.findall(pattern, code))
+        matches = re.findall(pattern, code)
+        for match in matches:
+            resolved = _resolve_julia_path_expr(match, julia_vars)
+            if resolved:
+                inputs.append(resolved)
     for pattern in write_patterns:
-        outputs.extend(re.findall(pattern, code))
+        matches = re.findall(pattern, code)
+        for match in matches:
+            resolved = _resolve_julia_path_expr(match, julia_vars)
+            if resolved:
+                outputs.append(resolved)
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     outputs = [p for p in outputs if _is_valid_project_path(p)]
     return {"inputs": inputs, "outputs": outputs}
@@ -933,6 +949,33 @@ def _extract_r_string_assignments(code: str) -> dict[str, str]:
     for name, value in pattern.findall(code):
         assignments[name] = value
     return assignments
+
+
+def _extract_julia_string_assignments(code: str) -> dict[str, str]:
+    """Extract simple string assignments in Julia code."""
+    assignments = {}
+    pattern = re.compile(
+        r"^\s*(?:const\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[\"']([^\"']+)[\"']",
+        flags=re.MULTILINE,
+    )
+    for name, value in pattern.findall(code):
+        assignments[name] = value
+    return assignments
+
+
+def _resolve_julia_path_expr(
+    match: tuple[str, str] | str,
+    variables: dict[str, str],
+) -> str | None:
+    """Resolve a Julia path expression from a regex match."""
+    if isinstance(match, tuple):
+        literal, var = match
+        if literal:
+            return literal
+        if var:
+            return variables.get(var)
+        return None
+    return variables.get(match) or match
 
 
 def _resolve_r_path_expr(expr: str, variables: dict[str, str]) -> str | None:

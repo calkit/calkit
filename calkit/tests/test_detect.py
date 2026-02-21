@@ -149,6 +149,25 @@ end
     assert "log.txt" in result["outputs"]
 
 
+def test_detect_julia_script_io_with_const_paths(tmp_dir):
+    """Test detection when Julia scripts use const path variables."""
+    script_content = """
+using CSV
+using DataFrames
+
+const INPUT_PATH = "data/raw.csv"
+const OUTPUT_PATH = "data/processed.csv"
+
+df = CSV.read(INPUT_PATH, DataFrame)
+CSV.write(OUTPUT_PATH, df)
+"""
+    with open("script.jl", "w") as f:
+        f.write(script_content)
+    result = detect_julia_script_io("script.jl")
+    assert "data/raw.csv" in result["inputs"]
+    assert "data/processed.csv" in result["outputs"]
+
+
 def test_detect_r_script_io(tmp_dir):
     """Test detection of inputs and outputs from R scripts."""
     script_content = """

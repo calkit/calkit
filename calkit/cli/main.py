@@ -226,43 +226,71 @@ def clone(
 
 
 @app.command(name="status")
-def get_status():
-    """Get a unified Git and DVC status."""
+def get_status(
+    categories: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--category",
+            "-c",
+            help=(
+                "Status categories to show. By default, all categories are "
+                "shown. Can be specified multiple times."
+            ),
+        ),
+    ] = None,
+):
+    """View status (project, version control, and/or pipeline)."""
     ck_info = calkit.load_calkit_info()
     try:
         calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     except Exception as e:
         warn(f"Failed to compile pipeline: {e.__class__.__name__}: {e}")
+    valid_categories = ["project", "git", "dvc", "pipeline"]
+    if categories is not None:
+        for category in categories:
+            if category not in valid_categories:
+                raise_error(
+                    f"Invalid category: {category}. Valid categories are: "
+                    f"{valid_categories}"
+                )
+    else:
+        categories = valid_categories
     # Clean all notebooks in the pipeline
     try:
         calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
     except Exception as e:
         warn(f"Failed to clean notebooks: {e.__class__.__name__}: {e}")
-    print_sep("Project")
-    # Print latest status
-    status = calkit.get_latest_project_status()
-    if status is not None:
-        ts = status.timestamp.strftime("%Y-%m-%d %H:%M:%S")
-        colors = {
-            "in-progress": "blue",
-            "on-hold": "yellow",
-            "completed": "green",
-        }
-        status_txt = typer.style(status.status, fg=colors.get(status.status))
-        typer.echo(f"Current status: {status_txt} (updated {ts} UTC)")
-    else:
-        typer.echo(
-            'Project status not set. Use "calkit new status" to update.'
-        )
-    typer.echo()
-    print_sep("Code (Git)")
-    run_cmd(["git", "status"])
-    typer.echo()
-    print_sep("Data (DVC)")
-    run_cmd([sys.executable, "-m", "dvc", "data", "status"])
-    typer.echo()
-    print_sep("Pipeline")
-    run_cmd([sys.executable, "-m", "dvc", "status"])
+    if "project" in categories:
+        print_sep("Project")
+        # Print latest status
+        status = calkit.get_latest_project_status()
+        if status is not None:
+            ts = status.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+            colors = {
+                "in-progress": "blue",
+                "on-hold": "yellow",
+                "completed": "green",
+            }
+            status_txt = typer.style(
+                status.status, fg=colors.get(status.status)
+            )
+            typer.echo(f"Current status: {status_txt} (updated {ts} UTC)")
+        else:
+            typer.echo(
+                'Project status not set. Use "calkit new status" to update.'
+            )
+        typer.echo()
+    if "git" in categories:
+        print_sep("Git files")
+        run_cmd(["git", "status"])
+        typer.echo()
+    if "dvc" in categories:
+        print_sep("DVC files")
+        run_cmd([sys.executable, "-m", "dvc", "data", "status"])
+        typer.echo()
+    if "pipeline" in categories or "dvc" in categories:
+        print_sep("Pipeline")
+        run_cmd([sys.executable, "-m", "dvc", "status"])
 
 
 @app.command(name="diff")

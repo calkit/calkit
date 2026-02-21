@@ -15,7 +15,7 @@ NotebookLanguage = Literal["python", "julia", "r"]
 
 def detect_python_script_io(
     script_path: str,
-    working_dir: str | None = None,
+    wdir: str | None = None,
 ) -> dict[str, list[str]]:
     """Detect inputs and outputs from a Python script using static analysis."""
     inputs = []
@@ -28,17 +28,34 @@ def detect_python_script_io(
     except UnicodeDecodeError:
         return {"inputs": inputs, "outputs": outputs}
     script_dir = os.path.dirname(script_path) if script_path else "."
-    effective_working_dir = working_dir or "."
+    effective_wdir = wdir or "."
     return _detect_python_code_io(
         content,
         script_dir=script_dir,
-        working_dir=effective_working_dir,
-        current_dir=effective_working_dir,
+        working_dir=effective_wdir,
+        current_dir=effective_wdir,
     )
 
 
-def detect_r_script_io(script_path: str) -> dict[str, list[str]]:
-    """Detect inputs and outputs from an R script using regex patterns."""
+def detect_r_script_io(
+    script_path: str,
+    wdir: str | None = None,
+) -> dict[str, list[str]]:
+    """Detect inputs and outputs from an R script using regex patterns.
+
+    Parameters
+    ----------
+    script_path : str
+        Path to the R script file.
+    wdir : str | None
+        Working directory from which the script will be executed.
+        Defaults to current directory.
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Dictionary with 'inputs' and 'outputs' keys.
+    """
     inputs = []
     outputs = []
     if not os.path.exists(script_path):
@@ -49,11 +66,33 @@ def detect_r_script_io(script_path: str) -> dict[str, list[str]]:
     except UnicodeDecodeError:
         return {"inputs": inputs, "outputs": outputs}
     script_dir = os.path.dirname(script_path) if script_path else "."
-    return _detect_r_code_io(content, script_dir=script_dir)
+    effective_wdir = wdir or "."
+    return _detect_r_code_io(
+        content,
+        script_dir=script_dir,
+        wdir=effective_wdir,
+    )
 
 
-def detect_julia_script_io(script_path: str) -> dict[str, list[str]]:
-    """Detect inputs and outputs from a Julia script using regex patterns."""
+def detect_julia_script_io(
+    script_path: str,
+    wdir: str | None = None,
+) -> dict[str, list[str]]:
+    """Detect inputs and outputs from a Julia script using regex patterns.
+
+    Parameters
+    ----------
+    script_path : str
+        Path to the Julia script file.
+    wdir : str | None
+        Working directory from which the script will be executed.
+        Defaults to current directory.
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Dictionary with 'inputs' and 'outputs' keys.
+    """
     inputs = []
     outputs = []
     if not os.path.exists(script_path):
@@ -64,6 +103,7 @@ def detect_julia_script_io(script_path: str) -> dict[str, list[str]]:
     except UnicodeDecodeError:
         return {"inputs": inputs, "outputs": outputs}
     script_dir = os.path.dirname(script_path) if script_path else "."
+    effective_wdir = wdir or "."
     content = re.sub(r"#.*$", "", content, flags=re.MULTILINE)
     julia_vars = _extract_julia_string_assignments(content)
     include_pattern = r'include\s*\(\s*["\']([^"\']+\.jl)["\']\s*\)'
@@ -106,13 +146,33 @@ def detect_julia_script_io(script_path: str) -> dict[str, list[str]]:
                 outputs.append(resolved)
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     outputs = [p for p in outputs if _is_valid_project_path(p)]
+    # Resolve paths relative to working directory
+    inputs = _resolve_paths_to_wdir(inputs, script_dir, effective_wdir)
+    outputs = _resolve_paths_to_wdir(outputs, script_dir, effective_wdir)
     inputs = list(dict.fromkeys(inputs))
     outputs = list(dict.fromkeys(outputs))
     return {"inputs": inputs, "outputs": outputs}
 
 
-def detect_shell_script_io(script_path: str) -> dict[str, list[str]]:
-    """Detect inputs and outputs from a shell script using regex patterns."""
+def detect_shell_script_io(
+    script_path: str,
+    wdir: str | None = None,
+) -> dict[str, list[str]]:
+    """Detect inputs and outputs from a shell script using regex patterns.
+
+    Parameters
+    ----------
+    script_path : str
+        Path to the shell script file.
+    wdir : str | None
+        Working directory from which the script will be executed.
+        Defaults to current directory.
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Dictionary with 'inputs' and 'outputs' keys.
+    """
     inputs = []
     outputs = []
     if not os.path.exists(script_path):
@@ -122,6 +182,8 @@ def detect_shell_script_io(script_path: str) -> dict[str, list[str]]:
             content = f.read()
     except UnicodeDecodeError:
         return {"inputs": inputs, "outputs": outputs}
+    script_dir = os.path.dirname(script_path) if script_path else "."
+    effective_wdir = wdir or "."
     content = re.sub(r"#.*$", "", content, flags=re.MULTILINE)
     # Output patterns (>> must come before > to avoid matching
     # the first > in >>)
@@ -162,9 +224,49 @@ def detect_shell_script_io(script_path: str) -> dict[str, list[str]]:
                     inputs.append(file)
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     outputs = [p for p in outputs if _is_valid_project_path(p)]
+    # Resolve paths relative to working directory
+    inputs = _resolve_paths_to_wdir(inputs, script_dir, effective_wdir)
+    outputs = _resolve_paths_to_wdir(outputs, script_dir, effective_wdir)
     inputs = list(dict.fromkeys(inputs))
     outputs = list(dict.fromkeys(outputs))
     return {"inputs": inputs, "outputs": outputs}
+
+
+def _resolve_paths_to_wdir(
+    paths: list[str], script_dir: str, wdir: str
+) -> list[str]:
+    """Resolve paths from script directory to working directory.
+
+    When a script is in a subdirectory (e.g., scripts/process.R),
+    its relative paths should be resolved from the working directory
+    where the command is executed, not from the script's directory.
+
+    Parameters
+    ----------
+    paths : list[str]
+        List of file paths detected in the script.
+    script_dir : str
+        Directory containing the script.
+    wdir : str
+        Working directory from which the script will be executed.
+
+    Returns
+    -------
+    list[str]
+        Paths resolved relative to wdir.
+    """
+    if script_dir == wdir or script_dir == ".":
+        return paths
+    resolved = []
+    for path in paths:
+        if os.path.isabs(path):
+            # Absolute paths stay as-is (though they should be filtered already)
+            resolved.append(path)
+        else:
+            # Path is relative - assume it's relative to wdir, not script_dir
+            # Just pass it through as-is
+            resolved.append(path)
+    return resolved
 
 
 def _extract_directory_changes(code: str, current_dir: str = ".") -> str:
@@ -244,7 +346,7 @@ def language_from_notebook(
 def detect_jupyter_notebook_io(
     notebook_path: str,
     language: NotebookLanguage | None = None,
-    working_dir: str | None = None,
+    wdir: str | None = None,
 ) -> dict[str, list[str]]:
     """Detect inputs and outputs from a Jupyter notebook.
 
@@ -275,12 +377,12 @@ def detect_jupyter_notebook_io(
         for cell in code_cells
     )
     notebook_dir = os.path.dirname(notebook_path) if notebook_path else "."
-    effective_working_dir = working_dir or "."
+    effective_wdir = wdir or "."
     if language == "python":
         return _detect_python_code_io(
             full_code,
             script_dir=notebook_dir,
-            working_dir=effective_working_dir,
+            working_dir=effective_wdir,
             current_dir=notebook_dir,
         )
     elif language == "julia":
@@ -862,9 +964,24 @@ def _resolve_python_import(
 
 
 def _detect_r_code_io(
-    code: str, script_dir: str = "."
+    code: str, script_dir: str = ".", wdir: str = "."
 ) -> dict[str, list[str]]:
-    """Detect I/O from R code string (used for scripts and notebook cells)."""
+    """Detect I/O from R code string (used for scripts and notebook cells).
+
+    Parameters
+    ----------
+    code : str
+        R code content to analyze.
+    script_dir : str
+        Directory containing the script (for resolving source() includes).
+    wdir : str
+        Working directory from which the script is executed (for data file paths).
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Dictionary with 'inputs' and 'outputs' keys.
+    """
     inputs = []
     outputs = []
     code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
@@ -950,6 +1067,9 @@ def _detect_r_code_io(
                 outputs.append(resolved)
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     outputs = [p for p in outputs if _is_valid_project_path(p)]
+    # Resolve paths relative to working directory
+    inputs = _resolve_paths_to_wdir(inputs, script_dir, wdir)
+    outputs = _resolve_paths_to_wdir(outputs, script_dir, wdir)
     inputs = list(dict.fromkeys(inputs))
     outputs = list(dict.fromkeys(outputs))
     return {"inputs": inputs, "outputs": outputs}
@@ -1135,23 +1255,29 @@ def detect_io(stage: dict) -> dict[str, list[str]]:
         or stage.get("target_path")
     )
     environment = stage.get("environment", "_system")
+    wdir = stage.get("wdir")
     if stage_kind == "python-script" and script_path:
-        return detect_python_script_io(script_path)
+        return detect_python_script_io(script_path, wdir=wdir)
     elif stage_kind == "r-script" and script_path:
-        return detect_r_script_io(script_path)
+        return detect_r_script_io(script_path, wdir=wdir)
     elif stage_kind == "julia-script" and script_path:
-        return detect_julia_script_io(script_path)
+        return detect_julia_script_io(script_path, wdir=wdir)
     elif stage_kind == "shell-script" and script_path:
-        return detect_shell_script_io(script_path)
+        return detect_shell_script_io(script_path, wdir=wdir)
     elif stage_kind == "jupyter-notebook" and script_path:
-        return detect_jupyter_notebook_io(script_path)
+        return detect_jupyter_notebook_io(script_path, wdir=wdir)
     elif stage_kind == "latex" and script_path:
         return detect_latex_io(script_path)
     elif stage_kind == "matlab-script" and script_path:
-        return detect_matlab_script_io(script_path, environment=environment)
+        return detect_matlab_script_io(
+            script_path, environment=environment, wdir=wdir
+        )
     elif stage_kind == "matlab-command":
         command = stage.get("command", "")
-        return detect_matlab_command_io(command, environment=environment)
+        wdir_str = wdir if wdir else "."
+        return detect_matlab_command_io(
+            command, environment=environment, wdir=wdir_str
+        )
     elif stage_kind == "shell-command":
         command = stage.get("command", "")
         return detect_shell_command_io(command)

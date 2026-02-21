@@ -281,11 +281,11 @@ def get_status(
             )
         typer.echo()
     if "git" in categories:
-        print_sep("Git files")
+        print_sep("Git")
         run_cmd(["git", "status"])
         typer.echo()
     if "dvc" in categories:
-        print_sep("DVC files")
+        print_sep("DVC")
         run_cmd([sys.executable, "-m", "dvc", "data", "status"])
         typer.echo()
     if "pipeline" in categories or "dvc" in categories:

@@ -1978,6 +1978,17 @@ def execute_and_record(
         stage["kind"] = "latex"
         stage["target_path"] = first_arg
         language = "latex"
+        # Determine PDF storage based on whether it's already in git
+        pdf_path = first_arg.removesuffix(".tex") + ".pdf"
+        try:
+            repo = git.Repo(".")
+            if repo.git.ls_files(pdf_path):
+                stage["pdf_storage"] = "git"
+            else:
+                stage["pdf_storage"] = "dvc"
+        except InvalidGitRepositoryError:
+            # Not a git repo, default to dvc
+            stage["pdf_storage"] = "dvc"
     elif first_arg == "python" and len(cmd) > 1 and cmd[1].endswith(".py"):
         cls = PythonScriptStage
         stage["kind"] = "python-script"

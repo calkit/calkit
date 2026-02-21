@@ -880,20 +880,27 @@ def _detect_r_code_io(
                 inputs.append(os.path.relpath(full_path))
             elif _is_valid_project_path(match):
                 inputs.append(match)
+    # Read patterns that capture variables, file.path() expressions, or literals
     read_patterns = [
-        r'read\.(?:csv|table|delim|tsv)\s*\(\s*["\']([^"\']+)["\']',
-        r'readRDS\s*\(\s*["\']([^"\']+)["\']',
-        r'load\s*\(\s*["\']([^"\']+)["\']',
-        r'read_csv\s*\(\s*["\']([^"\']+)["\']',
-        r'read_excel\s*\(\s*["\']([^"\']+)["\']',
-        r'fread\s*\(\s*["\']([^"\']+)["\']',
+        r'read\.(?:csv|table|delim|tsv)\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
+        r'readRDS\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
+        r'load\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
+        r'read_csv\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
+        r'read_excel\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
+        r'fread\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
     ]
-    write_patterns = [
+    # Process read patterns with variable resolution
+    for pattern in read_patterns:
+        matches = re.findall(pattern, code)
+        for match in matches:
+            resolved = _resolve_r_path_expr(match, r_vars)
+            if resolved:
+                inputs.append(resolved)
+    # Write patterns for simple cases (literal strings in 2nd argument)
+    simple_write_patterns = [
         r'write\.(?:csv|table)\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
         r'saveRDS\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
         r'save\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'ggsave\s*\(\s*["\']([^"\']+)["\']',
-        r'ggsave\s*\([^)]*filename\s*=\s*["\"]([^"\"]+)["\"]',
         r'write_csv\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
         r'write_excel\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
         r'pdf\s*\(\s*["\']([^"\']+)["\']',
@@ -912,10 +919,19 @@ def _detect_r_code_io(
         r'CairoPDF\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
         r'svglite\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
     ]
-    for pattern in read_patterns:
-        inputs.extend(re.findall(pattern, code))
-    for pattern in write_patterns:
+    for pattern in simple_write_patterns:
         outputs.extend(re.findall(pattern, code))
+    # ggsave patterns that handle file.path(), variables, or literals
+    ggsave_patterns = [
+        r'ggsave\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
+        r'ggsave\s*\([^)]*filename\s*=\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
+    ]
+    for pattern in ggsave_patterns:
+        matches = re.findall(pattern, code)
+        for match in matches:
+            resolved = _resolve_r_path_expr(match, r_vars)
+            if resolved:
+                outputs.append(resolved)
     save_fig_patterns = [
         r"save_fig\s*\(\s*[^,]+,\s*(file\.path\([^\)]*\)|\"[^\"]+\"|'[^']+'|[A-Za-z_][A-Za-z0-9_]*)",
         r"save_fig\s*\([^\)]*filename\s*=\s*(file\.path\([^\)]*\)|\"[^\"]+\"|'[^']+'|[A-Za-z_][A-Za-z0-9_]*)",

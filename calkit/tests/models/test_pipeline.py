@@ -85,6 +85,16 @@ def test_latexstage():
         pdf_storage="git",
     )
     assert s.dvc_outs == [{"my-paper.pdf": {"cache": False}}]
+    # Test we don't change the user's preference if they put the PDF as an
+    # output
+    s = LatexStage(
+        name="something",
+        environment="tex",
+        target_path="my-paper.tex",
+        pdf_storage="git",
+        outputs=["my-paper.pdf"],
+    )
+    assert s.dvc_outs == ["my-paper.pdf"]
 
 
 def test_jupyternotebookstage():

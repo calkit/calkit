@@ -13,7 +13,10 @@ from typing import Literal
 NotebookLanguage = Literal["python", "julia", "r"]
 
 
-def detect_python_script_io(script_path: str) -> dict[str, list[str]]:
+def detect_python_script_io(
+    script_path: str,
+    working_dir: str | None = None,
+) -> dict[str, list[str]]:
     """Detect inputs and outputs from a Python script using static analysis."""
     inputs = []
     outputs = []
@@ -25,7 +28,13 @@ def detect_python_script_io(script_path: str) -> dict[str, list[str]]:
     except UnicodeDecodeError:
         return {"inputs": inputs, "outputs": outputs}
     script_dir = os.path.dirname(script_path) if script_path else "."
-    return _detect_python_code_io(content, script_dir=script_dir)
+    effective_working_dir = working_dir or "."
+    return _detect_python_code_io(
+        content,
+        script_dir=script_dir,
+        working_dir=effective_working_dir,
+        current_dir=effective_working_dir,
+    )
 
 
 def detect_r_script_io(script_path: str) -> dict[str, list[str]]:
@@ -228,6 +237,7 @@ def language_from_notebook(
 def detect_jupyter_notebook_io(
     notebook_path: str,
     language: NotebookLanguage | None = None,
+    working_dir: str | None = None,
 ) -> dict[str, list[str]]:
     """Detect inputs and outputs from a Jupyter notebook.
 
@@ -258,8 +268,14 @@ def detect_jupyter_notebook_io(
         for cell in code_cells
     )
     notebook_dir = os.path.dirname(notebook_path) if notebook_path else "."
+    effective_working_dir = working_dir or "."
     if language == "python":
-        return _detect_python_code_io(full_code, script_dir=notebook_dir)
+        return _detect_python_code_io(
+            full_code,
+            script_dir=notebook_dir,
+            working_dir=effective_working_dir,
+            current_dir=notebook_dir,
+        )
     elif language == "julia":
         return _detect_julia_code_io(full_code, script_dir=notebook_dir)
     elif language == "r":
@@ -545,7 +561,10 @@ def _is_valid_project_path(path: str) -> bool:
 
 
 def _detect_python_code_io(
-    code: str, script_dir: str = "."
+    code: str,
+    script_dir: str = ".",
+    working_dir: str = ".",
+    current_dir: str | None = None,
 ) -> dict[str, list[str]]:
     """Detect I/O from Python code string (used for notebook cells
     and scripts).
@@ -562,7 +581,8 @@ def _detect_python_code_io(
     """
     inputs = []
     outputs = []
-    current_dir = script_dir
+    current_dir = current_dir or working_dir
+    import_dir = script_dir or "."
     # First pass: detect directory changes from %cd magic commands
     for line in code.split("\n"):
         stripped = line.strip()
@@ -615,7 +635,7 @@ def _detect_python_code_io(
         # Handle paths that reference parent directories
         # by computing the real path
         abs_path = os.path.abspath(full_path)
-        project_root = os.path.abspath(".")
+        project_root = os.path.abspath(working_dir)
         try:
             rel_path = os.path.relpath(abs_path, project_root)
         except ValueError:
@@ -641,16 +661,16 @@ def _detect_python_code_io(
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                local_file = _resolve_python_import(alias.name, current_dir)
+                local_file = _resolve_python_import(alias.name, import_dir)
                 if local_file:
                     inputs.append(local_file)
         elif isinstance(node, ast.ImportFrom):
             if node.module and node.level == 0:
-                local_file = _resolve_python_import(node.module, current_dir)
+                local_file = _resolve_python_import(node.module, import_dir)
                 if local_file:
                     inputs.append(local_file)
             elif node.level > 0:
-                parent_dir = current_dir
+                parent_dir = import_dir
                 for _ in range(node.level - 1):
                     parent_dir = os.path.dirname(parent_dir)
                 if node.module:

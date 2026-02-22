@@ -2160,11 +2160,6 @@ def execute_and_record(
         ck_info=ck_info,
         language=language,
     )
-    env_kind = env_result.env.get("kind")
-    if env_kind:
-        typer.echo(f"Using environment '{env_result.name}' (kind: {env_kind})")
-    else:
-        typer.echo(f"Using environment '{env_result.name}'")
     # If we created an environment from dependencies, write the spec file
     if env_result.created_from_dependencies and not dry_run:
         typer.echo(

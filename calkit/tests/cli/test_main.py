@@ -1,5 +1,6 @@
 """Tests for ``cli.main``."""
 
+import json
 import os
 import re
 import shutil
@@ -1273,3 +1274,53 @@ def test_execute_and_record_stage_name_conflict(tmp_dir):
     assert stages["process"]["script_path"] == "process.py"
     assert stages["process-2"]["script_path"] == "scripts/process.py"
     assert stages["process-v3"]["script_path"] == "other/process.py"
+
+
+def test_execute_and_record_jupyter_notebook_conda_env(tmp_dir):
+    # First, create a conda env with matplotlib and jupyter deps
+    os.makedirs("env")
+    env_path = "env/environment.yml"
+    with open(env_path, "w") as f:
+        f.write("name: test-env\n")
+        f.write("channels:\n")
+        f.write("  - conda-forge\n")
+        f.write("dependencies:\n")
+        f.write("  - python=3.11\n")
+        f.write("  - pandas\n")
+        f.write("  - matplotlib\n")
+        f.write("  - jupyter\n")
+    os.makedirs("src")
+    notebook_path = "src/process_data.ipynb"
+    notebook = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "source": [
+                    "import pandas as pd\n",
+                    "import numpy as np\n",
+                    "import matplotlib.pyplot as plt\n",
+                ],
+            }
+        ],
+        "metadata": {
+            "kernelspec": {
+                "language": "python",
+                "name": "python3",
+            }
+        },
+    }
+    with open(notebook_path, "w") as f:
+        json.dump(notebook, f)
+    subprocess.check_call(["calkit", "init"])
+    # Execute in dry run mode and check the output
+    # We should create a "main" environment with kind conda and path `env_path`
+    result = subprocess.run(
+        ["calkit", "xr", notebook_path, "-d"],
+        capture_output=True,
+        text=True,
+    )
+    print("stdout:", result.stdout)
+    print("stderr:", result.stderr)
+    assert result.returncode == 0
+    assert "kind: conda" in result.stdout
+    assert f"path: {env_path}" in result.stdout

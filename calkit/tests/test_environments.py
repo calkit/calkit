@@ -281,7 +281,8 @@ def test_extract_dependencies_and_env_superset(tmp_dir):
         f.write("name: test-env\n")
         f.write("dependencies:\n")
         f.write("  - python=3.11\n")
-        f.write("  - numpy\n")
+        f.write("  - conda-forge::pandas=2.0\n")
+        f.write("  - jupyter\n")
         f.write("  - pip\n")
         f.write("  - pip:\n")
         f.write("    - requests==2.0\n")
@@ -289,9 +290,16 @@ def test_extract_dependencies_and_env_superset(tmp_dir):
     conda_deps = calkit.environments.extract_dependencies_from_spec_file(
         "environment.yml"
     )
-    assert "numpy" in conda_deps
+    assert "pandas" in conda_deps
     assert "requests" in conda_deps
     assert "scipy" in conda_deps
+    conda_env = {"kind": "conda", "path": "environment.yml"}
+    assert calkit.environments.env_has_superset_dependencies(
+        conda_env, ["ipykernel"], strict=True
+    )
+    assert calkit.environments.env_has_superset_dependencies(
+        conda_env, ["numpy"], strict=True
+    )
 
 
 def test_detect_env_for_stage(tmp_dir):

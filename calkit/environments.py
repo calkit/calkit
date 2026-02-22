@@ -1173,6 +1173,8 @@ def extract_dependencies_from_spec_file(
                     # Extract package name (before version spec)
                     pkg = dep.split("==")[0].split(">=")[0].split("<=")[0]
                     pkg = pkg.split("=")[0].strip()
+                    if "::" in pkg:
+                        pkg = pkg.split("::", 1)[1]
                     if pkg:
                         dependencies.append(pkg)
                 elif isinstance(dep, dict):
@@ -1187,6 +1189,8 @@ def extract_dependencies_from_spec_file(
                                 .split("[")[0]
                                 .strip()
                             )
+                            if "::" in pkg:
+                                pkg = pkg.split("::", 1)[1]
                             if pkg:
                                 dependencies.append(pkg)
         except Exception:
@@ -1251,6 +1255,13 @@ def env_has_superset_dependencies(
     # (case-insensitive comparison for package names)
     env_deps_lower = {dep.lower() for dep in env_deps}
     required_deps_lower = {dep.lower() for dep in required_deps}
+    transitive = {
+        "jupyter": {"ipykernel"},
+        "pandas": {"numpy"},
+    }
+    for base, provides in transitive.items():
+        if base in env_deps_lower:
+            env_deps_lower.update(provides)
     return required_deps_lower.issubset(env_deps_lower)
 
 

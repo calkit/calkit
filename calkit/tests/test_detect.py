@@ -617,8 +617,8 @@ def test_generate_stage_name():
     name = generate_stage_name(["matlab", "run_simulation.m"])
     assert name == "run-simulation"
     # Test notebook
-    name = generate_stage_name(["analysis.ipynb"])
-    assert name == "analysis"
+    name = generate_stage_name(["notebooks/analysis.ipynb"])
+    assert name == "analysis-notebook"
     # Test shell script - args are no longer included
     name = generate_stage_name(["build.sh", "production"])
     assert name == "build"
@@ -634,7 +634,8 @@ def test_generate_stage_name():
     # Test shell command (returns command name with args)
     name = generate_stage_name(["echo", "Hello", "World"])
     assert name == "echo-hello-world"
-    # Test matlab command with parentheses (should be removed) and -batch (should be removed)
+    # Test matlab command with parentheses (should be removed) and -batch
+    # (should be removed)
     name = generate_stage_name(["matlab", "-batch", "disp('test')"])
     assert name == "matlab-disptest"
     # Test matlab command with -batch and other flags

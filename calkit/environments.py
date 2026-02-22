@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 from typing import cast
 
+import toml
+import yaml
 from pydantic import BaseModel
 from sqlitedict import SqliteDict
 
@@ -1055,6 +1057,169 @@ Title: Auto-generated R environment
     return content
 
 
+def extract_dependencies_from_spec_file(
+    spec_path: str, language: str | None = None
+) -> list[str]:
+    """Extract dependencies from an environment spec file.
+
+    Parameters
+    ----------
+    spec_path : str
+        Path to the spec file (requirements.txt, Project.toml, etc.).
+    language : str | None
+        Language hint to help identify the format. If None, will be inferred
+        from the file path.
+
+    Returns
+    -------
+    list[str]
+        List of package/dependency names.
+    """
+    if not os.path.exists(spec_path):
+        return []
+    try:
+        with open(spec_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except (IOError, UnicodeDecodeError):
+        return []
+    # Determine format from filename if not provided
+    if language is None:
+        if spec_path.endswith("requirements.txt"):
+            language = "python-requirements"
+        elif spec_path.endswith("pyproject.toml"):
+            language = "python-pyproject"
+        elif spec_path.endswith("Project.toml"):
+            language = "julia"
+        elif spec_path.endswith("DESCRIPTION"):
+            language = "r"
+        elif spec_path.endswith("environment.yml"):
+            language = "conda"
+    dependencies: list[str] = []
+    if language in ["python-requirements"]:
+        # Parse requirements.txt
+        for line in content.split("\n"):
+            line = line.strip()
+            if line and not line.startswith("#"):
+                # Extract package name (before any version specifiers)
+                pkg = line.split("[")[0].split("==")[0].split(">=")[0]
+                pkg = pkg.split("<=")[0].split(">")[0].split("<")[0]
+                pkg = pkg.split("~=")[0].strip()
+                if pkg:
+                    dependencies.append(pkg)
+    elif language == "python-pyproject":
+        # Parse pyproject.toml to extract dependencies
+        try:
+            data = toml.loads(content)
+            project_deps = data.get("project", {}).get("dependencies", [])
+            for dep in project_deps:
+                # Extract package name (before any version specifiers)
+                pkg = dep.split("[")[0].split("==")[0].split(">=")[0]
+                pkg = pkg.split("<=")[0].split(">")[0].split("<")[0]
+                pkg = pkg.split("~=")[0].strip()
+                if pkg:
+                    dependencies.append(pkg)
+        except Exception:
+            pass
+    elif language == "julia":
+        # Parse Julia Project.toml for [deps] section
+        try:
+            data = toml.loads(content)
+            # Package names are the keys in the [deps] section
+            deps_section = data.get("deps", {})
+            if isinstance(deps_section, dict):
+                dependencies = list(deps_section.keys())
+        except Exception:
+            pass
+    elif language == "r":
+        # Parse R DESCRIPTION file for Imports/Depends fields
+        for line in content.split("\n"):
+            line = line.strip()
+            if line.startswith(("Imports:", "Depends:")):
+                # Extract the package list
+                pkg_str = line.split(":", 1)[1].strip()
+                # Packages may be on multiple lines, so handle that
+                pkgs = [p.strip() for p in pkg_str.split(",")]
+                for pkg in pkgs:
+                    # Remove version specifications if present
+                    pkg = pkg.split("(")[0].strip()
+                    if pkg:
+                        dependencies.append(pkg)
+    elif language == "conda":
+        # Parse conda environment.yml
+        try:
+            data = yaml.safe_load(content)
+            deps = data.get("dependencies", [])
+            for dep in deps:
+                if isinstance(dep, str):
+                    # Extract package name (before version spec)
+                    pkg = dep.split("==")[0].split(">=")[0].split("<=")[0]
+                    pkg = pkg.split("=")[0].strip()
+                    if pkg:
+                        dependencies.append(pkg)
+        except Exception:
+            pass
+    # Remove duplicates and sort
+    return sorted(list(set(dependencies)))
+
+
+def env_has_superset_dependencies(
+    env: dict,
+    required_deps: list[str],
+    env_spec_path: str | None = None,
+    strict: bool = False,
+) -> bool:
+    """Check if an environment has a superset of required dependencies.
+
+    Parameters
+    ----------
+    env : dict
+        Environment dict from calkit.yaml with 'kind' and 'path' keys.
+    required_deps : list[str]
+        List of required dependencies to check for.
+    env_spec_path : str | None
+        Path to the environment spec file. If None, will use env.get("path").
+    strict : bool
+        If True, require the spec file to exist and have extractable
+        dependencies. If False, be optimistic when spec file doesn't exist.
+
+    Returns
+    -------
+    bool
+        True if the environment contains all required dependencies,
+        False otherwise.
+    """
+    if not required_deps:
+        # No dependencies to check, so any environment works
+        return True
+    if env_spec_path is None:
+        env_spec_path = env.get("path")
+    if not env_spec_path:
+        # No path to check
+        if strict:
+            return False
+        return True
+    if not os.path.exists(env_spec_path):
+        # Spec file doesn't exist
+        if strict:
+            # Strict mode: can't verify, so reject
+            return False
+        # Optimistic mode: assume it might work
+        return True
+    # Extract dependencies from the environment's spec file
+    env_deps = extract_dependencies_from_spec_file(env_spec_path)
+    if not env_deps:
+        # Couldn't extract dependencies (or file is empty)
+        if strict:
+            # Strict mode: can't verify, so reject
+            return False
+        # Optimistic mode: assume it might work
+    # Check if env_deps is a superset of required_deps
+    # (case-insensitive comparison for package names)
+    env_deps_lower = {dep.lower() for dep in env_deps}
+    required_deps_lower = {dep.lower() for dep in required_deps}
+    return required_deps_lower.issubset(env_deps_lower)
+
+
 def detect_env_for_stage(
     stage: dict,
     environment: str | None = None,
@@ -1144,8 +1309,75 @@ def detect_env_for_stage(
     is_first_env_for_language = not any(
         env.get("kind") in preferred_kinds for env in envs.values()
     )
-    # 2) If there is already an environment for the stage language, use that
-    if stage_language:
+    # Stages with analyzable content where we should check dependencies before
+    # reusing existing environments
+    analyzable_stages = {
+        "jupyter-notebook",
+        "python-script",
+        "r-script",
+        "julia-script",
+        "matlab-script",
+        "shell-script",
+    }
+    # Initialize detected_dependencies so it's available throughout function
+    detected_dependencies: list[str] = []
+    # For analyzable stages, detect dependencies and check if existing
+    # environments satisfy them
+    if stage_language and stage_kind in analyzable_stages:
+        if stage_kind == "python-script":
+            detected_dependencies = detect_python_dependencies(
+                script_path=stage["script_path"]
+            )
+        elif stage_kind == "r-script":
+            detected_dependencies = detect_r_dependencies(
+                script_path=stage["script_path"]
+            )
+        elif stage_kind == "julia-script":
+            detected_dependencies = detect_julia_dependencies(
+                script_path=stage["script_path"]
+            )
+        elif stage_kind == "jupyter-notebook":
+            notebook_lang = language_from_notebook(stage["notebook_path"])
+            detected_dependencies = detect_dependencies_from_notebook(
+                stage["notebook_path"], language=notebook_lang
+            )
+        elif stage_kind == "matlab-script":
+            # MATLAB detection if needed
+            detected_dependencies = []
+        elif stage_kind == "shell-script":
+            # Shell script detection if needed
+            detected_dependencies = []
+
+        # Check if any existing environment has all these dependencies
+        matching_envs = [
+            (name, env)
+            for name, env in envs.items()
+            if env.get("kind") in preferred_kinds
+        ]
+        if matching_envs and detected_dependencies:
+            # Check if any matching environment has all required dependencies
+            # Use strict mode: only reuse if we can verify the deps are satisfied
+            for env_name, env in sorted(
+                matching_envs, key=lambda item: item[0]
+            ):
+                if env_has_superset_dependencies(
+                    env, detected_dependencies, strict=True
+                ):
+                    env_name = cast(str, env_name)
+                    return EnvForStageResult(
+                        name=env_name,
+                        env=env,
+                        exists=True,
+                        spec_path=env.get("path"),
+                        dependencies=detected_dependencies,
+                        created_from_dependencies=False,
+                    )
+            # No existing environment has verified dependencies, fall through to create
+        # If no matching environment found or no dependencies detected,
+        # fall through to create one from dependencies
+    # 2) If there is already an environment for the stage language (for
+    # non-analyzable stages or analyzable stages with no match), use that
+    if stage_language and stage_kind not in analyzable_stages:
         matching_envs = [
             (name, env)
             for name, env in envs.items()
@@ -1172,6 +1404,7 @@ def detect_env_for_stage(
                 created_from_dependencies=False,
             )
     # 3) If a typical env spec exists for the stage language, use that
+    # (fallback for analyzable stages if no existing environment matched)
     if stage_language:
         if stage_language == "latex":
             res = env_from_name_or_path(
@@ -1219,6 +1452,46 @@ def detect_env_for_stage(
                     ck_info=ck_info,
                     language=stage_language,
                 )
+                # For analyzable stages with detected dependencies, verify the
+                # spec file has all required packages before reusing
+                if stage_kind in analyzable_stages:
+                    # Detect dependencies for this stage if not already done
+                    if not detected_dependencies:
+                        if stage_kind == "python-script":
+                            detected_dependencies = detect_python_dependencies(
+                                script_path=stage["script_path"]
+                            )
+                        elif stage_kind == "r-script":
+                            detected_dependencies = detect_r_dependencies(
+                                script_path=stage["script_path"]
+                            )
+                        elif stage_kind == "julia-script":
+                            detected_dependencies = detect_julia_dependencies(
+                                script_path=stage["script_path"]
+                            )
+                        elif stage_kind == "jupyter-notebook":
+                            notebook_lang = language_from_notebook(
+                                stage["notebook_path"]
+                            )
+                            detected_dependencies = (
+                                detect_dependencies_from_notebook(
+                                    stage["notebook_path"],
+                                    language=notebook_lang,
+                                )
+                            )
+                    # Only reuse if it has all the dependencies (strict mode)
+                    if (
+                        detected_dependencies
+                        and not env_has_superset_dependencies(
+                            res.env,
+                            detected_dependencies,
+                            spec_path,
+                            strict=True,
+                        )
+                    ):
+                        # This spec file doesn't have all deps, try next
+                        # candidate
+                        continue
                 return EnvForStageResult(
                     name=res.name,
                     env=res.env,
@@ -1237,6 +1510,7 @@ def detect_env_for_stage(
         dependencies = detect_python_dependencies(
             script_path=stage["script_path"]
         )
+        project_name = calkit.detect_project_name(prepend_owner=False)
         # Generate unique environment name
         if is_first_env_for_language:
             temp_path = "pyproject.toml"
@@ -1248,15 +1522,16 @@ def detect_env_for_stage(
                 "path": spec_path,
             }
         else:
-            temp_path = ".calkit/envs/py/requirements.txt"
-            env_name = make_env_name(temp_path, all_env_names, kind="uv-venv")
-            spec_path = f".calkit/envs/{env_name}/requirements.txt"
-            spec_content = create_python_requirements_content(dependencies)
+            temp_path = ".calkit/envs/py/pyproject.toml"
+            env_name = make_env_name(temp_path, all_env_names, kind="uv")
+            spec_path = f".calkit/envs/{env_name}/pyproject.toml"
+            spec_content = create_uv_pyproject_content(
+                dependencies,
+                project_name=f"{project_name}-{env_name}",
+            )
             env_dict = {
-                "kind": "uv-venv",
+                "kind": "uv",
                 "path": spec_path,
-                "python": DEFAULT_PYTHON_VERSION,
-                "prefix": os.path.join(os.path.dirname(spec_path), ".venv"),
             }
     elif stage["kind"] == "r-script":
         dependencies = detect_r_dependencies(script_path=stage["script_path"])
@@ -1304,6 +1579,7 @@ def detect_env_for_stage(
             stage["notebook_path"], language=notebook_lang
         )
         if notebook_lang == "python" or notebook_lang is None:
+            project_name = calkit.detect_project_name(prepend_owner=False)
             # Add ipykernel for Jupyter notebook support
             if "ipykernel" not in dependencies:
                 dependencies.append("ipykernel")
@@ -1318,19 +1594,16 @@ def detect_env_for_stage(
                     "path": spec_path,
                 }
             else:
-                temp_path = ".calkit/envs/py/requirements.txt"
-                env_name = make_env_name(
-                    temp_path, all_env_names, kind="uv-venv"
+                temp_path = ".calkit/envs/py/pyproject.toml"
+                env_name = make_env_name(temp_path, all_env_names, kind="uv")
+                spec_path = f".calkit/envs/{env_name}/pyproject.toml"
+                spec_content = create_uv_pyproject_content(
+                    dependencies,
+                    project_name=f"{project_name}-{env_name}",
                 )
-                spec_path = f".calkit/envs/{env_name}/requirements.txt"
-                spec_content = create_python_requirements_content(dependencies)
                 env_dict = {
-                    "kind": "uv-venv",
+                    "kind": "uv",
                     "path": spec_path,
-                    "python": DEFAULT_PYTHON_VERSION,
-                    "prefix": os.path.join(
-                        os.path.dirname(spec_path), ".venv"
-                    ),
                 }
         elif notebook_lang == "r":
             # Add IRkernel for Jupyter notebook support

@@ -450,6 +450,11 @@ def test_detect_env_for_stage(tmp_dir):
     }
     with open("notebook.ipynb", "w") as f:
         json.dump(notebook, f)
+    # Create Project.toml with DataFrames (so strict check passes)
+    with open("Project.toml", "w") as f:
+        f.write(
+            '[deps]\nDataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"\n'
+        )
     ck_info = {
         "environments": {
             "juliaenv": {
@@ -468,6 +473,50 @@ def test_detect_env_for_stage(tmp_dir):
     )
     assert res.name == "juliaenv"
     assert res.exists
+    # Test that a notebook with additional dependencies does NOT reuse an
+    # environment that doesn't have those dependencies
+    notebook_scipy = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "source": [
+                    "import scipy\n",
+                    "import matplotlib.pyplot as plt\n",
+                ],
+            }
+        ],
+        "metadata": {
+            "kernelspec": {
+                "language": "python",
+                "name": "python3",
+            }
+        },
+    }
+    with open("notebook-scipy.ipynb", "w") as f:
+        json.dump(notebook_scipy, f)
+    # Create a pyproject.toml with only numpy (the "main"
+    # environment)
+    with open("pyproject.toml", "w") as f:
+        f.write('[project]\nname = "main"\ndependencies = ["numpy"]\n')
+    ck_info = {
+        "environments": {
+            "main": {
+                "kind": "uv",
+                "path": "pyproject.toml",
+            }
+        }
+    }
+    stage_nb_scipy = {
+        "kind": "jupyter-notebook",
+        "notebook_path": "notebook-scipy.ipynb",
+    }
+    res = calkit.environments.detect_env_for_stage(
+        stage_nb_scipy, environment=None, ck_info=ck_info
+    )
+    # Should NOT reuse "main" since it doesn't have scipy/matplotlib
+    assert res.name != "main"
+    # Should create a new environment with the dependencies
+    assert res.created_from_dependencies
     stage_latex = {"kind": "latex", "script_path": "paper.tex"}
     res = calkit.environments.detect_env_for_stage(
         stage_latex, environment=None, ck_info={"environments": {}}

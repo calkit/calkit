@@ -253,7 +253,8 @@ def new_project(
                         ["calkit.yaml", "-m", "Update calkit.yaml"]
                     )
         try:
-            calkit.dvc.configure_remote(wdir=abs_path)
+            remote_name = calkit.dvc.configure_remote(wdir=abs_path)
+            calkit.dvc.set_remote_auth(remote_name=remote_name, wdir=abs_path)
         except Exception:
             warn("Failed to setup Calkit DVC remote")
         prj = calkit.detect_project_name(wdir=abs_path)

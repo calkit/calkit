@@ -20,7 +20,7 @@ logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
 
 
-def configure_remote(wdir: str | None = None):
+def configure_remote(wdir: str | None = None) -> str:
     try:
         project_name = calkit.detect_project_name(wdir=wdir)
     except ValueError as e:
@@ -42,6 +42,7 @@ def configure_remote(wdir: str | None = None):
         repo.git.remote(["add", "origin", url])
     base_url = calkit.cloud.get_base_url()
     remote_url = f"{base_url}/projects/{project_name}/dvc"
+    remote_name = get_app_name()
     subprocess.check_call(
         [
             sys.executable,
@@ -51,7 +52,7 @@ def configure_remote(wdir: str | None = None):
             "add",
             "-d",
             "-f",
-            get_app_name(),
+            remote_name,
             remote_url,
         ],
         cwd=wdir,
@@ -63,12 +64,13 @@ def configure_remote(wdir: str | None = None):
             "dvc",
             "remote",
             "modify",
-            get_app_name(),
+            remote_name,
             "auth",
             "custom",
         ],
         cwd=wdir,
     )
+    return remote_name
 
 
 def set_remote_auth(

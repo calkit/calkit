@@ -1895,6 +1895,17 @@ def execute_and_record(
             ),
         ),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Force running stage even if it's up-to-date.",
+        ),
+    ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
+    ] = False,
 ):
     """Execute a command and if successful, record in the pipeline."""
     import io
@@ -2302,7 +2313,7 @@ def execute_and_record(
             f"Adding stage to pipeline and attempting to execute:"
             f"\n{indented_yaml}"
         )
-        run(targets=[stage_name])
+        run(targets=[stage_name], force=force, verbose=verbose)
     except Exception as e:
         # If the stage failed, write the old ck_info back to calkit.yaml to
         # remove the stage that we added

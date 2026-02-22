@@ -129,7 +129,8 @@ def get_docker_image_name(ck_info: dict, env_name: str) -> str:
 
 def _is_valid_project_path(path: str) -> bool:
     """Check if a path is valid for the project (no traversal,
-    not absolute, not URL)."""
+    not absolute, not URL).
+    """
     # Use the same validation as in calkit.detect to ensure consistency
     if not path or not path.strip():
         return False
@@ -148,8 +149,131 @@ def _is_valid_project_path(path: str) -> bool:
     return True
 
 
+def _extract_matlab_string_assignments(code: str) -> dict[str, str]:
+    """Extract simple string variable assignments from MATLAB code.
+
+    Returns a dict mapping variable names to their string values.
+    Only tracks direct assignments like: var = 'path/to/file'
+    or var = fullfile('dir', 'file')
+    """
+    assignments = {}
+    # Pattern for simple string assignments
+    # Matches: varname = 'string' or varname = "string"
+    pattern = re.compile(
+        r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*['\"](.*?)['\"]",
+        flags=re.MULTILINE,
+    )
+    for name, value in pattern.findall(code):
+        assignments[name] = value
+    # Also extract fullfile() assignments
+    # Matches: varname = fullfile(...)
+    fullfile_pattern = re.compile(
+        r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(fullfile\s*\([^)]+\))",
+        flags=re.MULTILINE,
+    )
+    for name, fullfile_expr in fullfile_pattern.findall(code):
+        resolved = _resolve_fullfile_expr(fullfile_expr, assignments)
+        if resolved:
+            assignments[name] = resolved
+    return assignments
+
+
+def _resolve_fullfile_expr(expr: str, variables: dict[str, str]) -> str | None:
+    """Resolve a fullfile() expression to a path string.
+
+    Handles: fullfile('dir', 'subdir', 'file.txt')
+    or: fullfile(var, 'file.txt')
+
+    Parameters
+    ----------
+    expr : str
+        The fullfile expression (e.g., "fullfile('data', 'raw.csv')")
+    variables : dict[str, str]
+        Dictionary of known variable assignments
+
+    Returns
+    -------
+    str | None
+        Resolved path or None if unable to resolve
+    """
+    # Extract arguments from fullfile(...)
+    match = re.match(r"fullfile\s*\((.*)\)", expr.strip())
+    if not match:
+        return None
+    args_str = match.group(1)
+    # Split by comma, but need to be careful with nested calls
+    # Simple approach: split by comma and handle string literals
+    parts = []
+    current = ""
+    in_string = False
+    string_char = None
+    paren_depth = 0
+    for char in args_str:
+        if char in ["'", '"'] and not in_string:
+            in_string = True
+            string_char = char
+        elif char == string_char and in_string:
+            in_string = False
+            string_char = None
+        elif char == "(" and not in_string:
+            paren_depth += 1
+        elif char == ")" and not in_string:
+            paren_depth -= 1
+        elif char == "," and not in_string and paren_depth == 0:
+            parts.append(current.strip())
+            current = ""
+            continue
+        current += char
+    if current.strip():
+        parts.append(current.strip())
+    # Resolve each part
+    resolved_parts = []
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        # String literal
+        if (part[0] in ["'", '"']) and (part[-1] == part[0]):
+            resolved_parts.append(part[1:-1])
+        # Variable reference
+        elif part in variables:
+            resolved_parts.append(variables[part])
+        else:
+            # Can't resolve this part, give up
+            return None
+    if not resolved_parts:
+        return None
+    # Join with os.path.join
+    return os.path.join(*resolved_parts)
+
+
+def _resolve_matlab_path_expr(
+    expr: str, variables: dict[str, str]
+) -> str | None:
+    """Resolve a MATLAB path expression from a regex match.
+
+    Handles:
+    - Literal strings: 'file.csv' or "file.csv"
+    - Variable references: raw_path
+    - fullfile() expressions: fullfile('data', 'file.csv')
+    """
+    expr = expr.strip()
+    if not expr:
+        return None
+    # fullfile() expression
+    if expr.startswith("fullfile"):
+        return _resolve_fullfile_expr(expr, variables)
+    # Literal string
+    if (expr[0] in ["'", '"']) and (expr[-1] == expr[0]):
+        return expr[1:-1]
+    # Variable reference
+    if expr in variables:
+        return variables[expr]
+    return None
+
+
 def _detect_matlab_io_static(
-    content: str, script_dir: str = "."
+    content: str, script_dir: str = ".", wdir: str = "."
 ) -> dict[str, list[str]]:
     """Detect inputs and outputs from MATLAB code using static analysis.
 
@@ -159,6 +283,8 @@ def _detect_matlab_io_static(
         MATLAB code content to analyze
     script_dir : str
         Directory containing the script (for resolving relative paths)
+    wdir : str
+        Working directory from which the script will be executed
 
     Returns
     -------
@@ -171,6 +297,8 @@ def _detect_matlab_io_static(
     content = re.sub(r"%\{.*?%\}", "", content, flags=re.DOTALL)
     # Then remove MATLAB line comments (% to end of line)
     content = re.sub(r"%.*$", "", content, flags=re.MULTILINE)
+    # Extract variable assignments for path tracking
+    matlab_vars = _extract_matlab_string_assignments(content)
     # Detect function/script calls (potential dependencies)
     # Look for calls like: functionName(...) or run('script.m')
     run_pattern = r"run\s*\(\s*['\"]([^'\"]+\.m)['\"]\s*\)"
@@ -184,58 +312,69 @@ def _detect_matlab_io_static(
                 inputs.append(Path(rel_path).as_posix())
             elif _is_valid_project_path(match):
                 inputs.append(match)
-    # Detect input file operations
+    # Detect input file operations - now supporting variables and fullfile()
+    # These patterns capture literals, variables, or fullfile() expressions
     read_patterns = [
-        r"load\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
-        r"readtable\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
-        r"readmatrix\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
-        r"readcell\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
-        r"csvread\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
-        r"xlsread\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
-        r"fopen\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]r",
-        r"imread\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
-        r"audioread\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
-        r"VideoReader\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
-        r"parquetread\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
-        r"h5read\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
+        r"load\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"readtable\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"readmatrix\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"readcell\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"csvread\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"xlsread\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"fopen\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*,\s*['\"]r",
+        r"imread\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"audioread\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"VideoReader\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"parquetread\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"h5read\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*,",
     ]
-    # Detect output file operations
-    write_patterns = [
-        r"save\s*\(\s*['\"]([^'\"]+)['\"]\s*[,)]",  # save('file.mat', ...)
-        r"writetable\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]\s*[,)]",
-        # writetable(data, 'file.csv', ...)
-        r"writematrix\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]\s*[,)]",
-        # writematrix(data, 'file.txt', ...)
-        r"writecell\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]\s*[,)]",
-        # writecell(data, 'file.txt', ...)
-        r"csvwrite\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
-        r"xlswrite\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
-        r"fopen\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]w",
-        r"imwrite\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]\s*[,)]",
-        # imwrite(img, 'file.png', ...)
-        r"audiowrite\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
-        r"VideoWriter\s*\(\s*['\"]([^'\"]+)['\"]\s*[,)]",
-        # VideoWriter('file.avi', ...)
-        r"parquetwrite\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
-        r"parquetwrite\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]\s*[,)]",
-        r"h5write\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
-        r"h5create\s*\(\s*['\"]([^'\"]+)['\"]\s*,",
-    ]
-    # Graphics output patterns
-    graphics_patterns = [
-        r"saveas\s*\([^,]+,\s*['\"]([^'\"]+)['\"]\s*\)",
-        r"print\s*\([^,]*,\s*['\"]([^'\"]+)['\"]\s*\)",
-        r"exportgraphics\s*\([^,]+,\s*['\"]([^'\"]+)['\"]\s*\)",
-        r"savefig\s*\([^,]*,\s*['\"]([^'\"]+)['\"]\s*\)",
-    ]
+    # Process read patterns with variable resolution
     for pattern in read_patterns:
         matches = re.findall(pattern, content)
-        inputs.extend(matches)
+        for match in matches:
+            resolved = _resolve_matlab_path_expr(match, matlab_vars)
+            if resolved:
+                inputs.append(resolved)
+    # Detect output file operations, supporting variables and fullfile()
+    write_patterns = [
+        r"save\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"writetable\s*\(\s*[^,]+,\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"writematrix\s*\(\s*[^,]+,\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"writecell\s*\(\s*[^,]+,\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"csvwrite\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*,",
+        r"xlswrite\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*,",
+        r"fopen\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*,\s*['\"]w",
+        r"imwrite\s*\(\s*[^,]+,\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"audiowrite\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*,",
+        r"VideoWriter\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"parquetwrite\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*,",
+        r"parquetwrite\s*\(\s*[^,]+,\s*(['\"]([^'\"]+)['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"h5write\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*,",
+        r"h5create\s*\(\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*,",
+    ]
+    # Graphics output patterns, supporting variables and fullfile()
+    graphics_patterns = [
+        r"saveas\s*\([^,]+,\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"print\s*\([^,]*,\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"exportgraphics\s*\([^,]+,\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+        r"savefig\s*\([^,]*,\s*(['\"][^'\"]+['\"]|fullfile\s*\([^)]+\)|[A-Za-z_][A-Za-z0-9_]*)\s*[,)]",
+    ]
+    # Process write and graphics patterns with variable resolution
     for pattern in write_patterns + graphics_patterns:
         matches = re.findall(pattern, content)
-        outputs.extend(matches)
+        for match in matches:
+            # Handle tuple matches from nested groups
+            if isinstance(match, tuple):
+                match = (
+                    match[0]
+                    if match[0]
+                    else (match[1] if len(match) > 1 else "")
+                )
+            resolved = _resolve_matlab_path_expr(match, matlab_vars)
+            if resolved:
+                outputs.append(resolved)
     # Filter out invalid paths and normalize relative paths
-    cwd = os.path.abspath(".")
+    cwd = os.path.abspath(wdir)
 
     def normalize_project_path(path: str) -> str | None:
         if not path or not path.strip():
@@ -248,6 +387,8 @@ def _detect_matlab_io_static(
             ("/dev/", "/proc/", "/sys/", "~")
         ):
             return None
+        # MATLAB paths are relative to the script directory, not wdir
+        # (since that's where MATLAB interprets relative paths from)
         normalized = os.path.normpath(os.path.join(script_dir, path))
         normalized_abs = os.path.abspath(normalized)
         try:
@@ -299,7 +440,6 @@ def get_deps_from_matlab(
     list[str]
         List of dependency file paths in POSIX format.
     """
-
     # Build command as a list to avoid shell injection
     cmd_list = []
     if environment != "_system":
@@ -374,13 +514,14 @@ def _get_deps_from_matlab_static(filepath: str) -> list[str]:
     except (UnicodeDecodeError, IOError):
         return []
     script_dir = os.path.dirname(filepath) if filepath else "."
-    io_info = _detect_matlab_io_static(content, script_dir)
+    # For static fallback, assume script is run from current directory
+    io_info = _detect_matlab_io_static(content, script_dir, wdir=".")
     # Dependencies are the inputs detected by static analysis
     return io_info["inputs"].copy()
 
 
 def detect_matlab_script_io(
-    script_path: str, environment: str = "_system"
+    script_path: str, environment: str = "_system", wdir: str | None = None
 ) -> dict[str, list[str]]:
     """Detect inputs and outputs for a MATLAB script.
 
@@ -394,6 +535,8 @@ def detect_matlab_script_io(
         Path to the MATLAB script (.m file)
     environment : str
         Environment name to use for running MATLAB. Default is "_system".
+    wdir : str | None
+        Working directory from which the script will be executed.
 
     Returns
     -------
@@ -412,7 +555,10 @@ def detect_matlab_script_io(
             with open(script_path, "r", encoding="utf-8") as f:
                 content = f.read()
             script_dir = os.path.dirname(script_path) if script_path else "."
-            io_info = _detect_matlab_io_static(content, script_dir)
+            effective_wdir = wdir or "."
+            io_info = _detect_matlab_io_static(
+                content, script_dir, wdir=effective_wdir
+            )
             static_inputs = io_info["inputs"]
             outputs = io_info["outputs"]
         except (UnicodeDecodeError, IOError):
@@ -486,10 +632,12 @@ def detect_matlab_command_io(
             dep_norm = Path(dep_full).as_posix()
             # Exclude the temporary file itself
             if dep_norm != temp_norm:
-                normalized_deps.append(dep_norm)
+                # Convert to relative path from working directory
+                dep_rel = os.path.relpath(dep_full, root_dir)
+                normalized_deps.append(Path(dep_rel).as_posix())
         matlab_deps = normalized_deps
         # Use static analysis to detect data file I/O
-        io_info = _detect_matlab_io_static(command, wdir)
+        io_info = _detect_matlab_io_static(command, wdir, wdir=wdir)
         static_inputs = io_info["inputs"]
         outputs = io_info["outputs"]
         # Combine MATLAB dependencies with static inputs

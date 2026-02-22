@@ -68,7 +68,7 @@ def test_latexstage():
     s.verbose = True
     assert " --verbose " in s.dvc_cmd
     assert "my-paper.tex" in s.dvc_deps
-    assert "my-paper.pdf" in s.dvc_outs
+    assert {"my-paper.pdf": {"cache": True}} in s.dvc_outs
     s = LatexStage(
         name="something",
         environment="tex",
@@ -77,6 +77,24 @@ def test_latexstage():
     )
     assert "test/latexmkrc" in s.dvc_deps
     assert "-r test/latexmkrc" in s.dvc_cmd
+    # Test with pdf_storage set to "git"
+    s = LatexStage(
+        name="something",
+        environment="tex",
+        target_path="my-paper.tex",
+        pdf_storage="git",
+    )
+    assert s.dvc_outs == [{"my-paper.pdf": {"cache": False}}]
+    # Test we don't change the user's preference if they put the PDF as an
+    # output
+    s = LatexStage(
+        name="something",
+        environment="tex",
+        target_path="my-paper.tex",
+        pdf_storage="git",
+        outputs=["my-paper.pdf"],
+    )
+    assert s.dvc_outs == ["my-paper.pdf"]
 
 
 def test_jupyternotebookstage():

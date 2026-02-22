@@ -13,7 +13,10 @@ from typing import Literal
 NotebookLanguage = Literal["python", "julia", "r"]
 
 
-def detect_python_script_io(script_path: str) -> dict[str, list[str]]:
+def detect_python_script_io(
+    script_path: str,
+    wdir: str | None = None,
+) -> dict[str, list[str]]:
     """Detect inputs and outputs from a Python script using static analysis."""
     inputs = []
     outputs = []
@@ -25,11 +28,34 @@ def detect_python_script_io(script_path: str) -> dict[str, list[str]]:
     except UnicodeDecodeError:
         return {"inputs": inputs, "outputs": outputs}
     script_dir = os.path.dirname(script_path) if script_path else "."
-    return _detect_python_code_io(content, script_dir=script_dir)
+    effective_wdir = wdir or "."
+    return _detect_python_code_io(
+        content,
+        script_dir=script_dir,
+        working_dir=effective_wdir,
+        current_dir=effective_wdir,
+    )
 
 
-def detect_r_script_io(script_path: str) -> dict[str, list[str]]:
-    """Detect inputs and outputs from an R script using regex patterns."""
+def detect_r_script_io(
+    script_path: str,
+    wdir: str | None = None,
+) -> dict[str, list[str]]:
+    """Detect inputs and outputs from an R script using regex patterns.
+
+    Parameters
+    ----------
+    script_path : str
+        Path to the R script file.
+    wdir : str | None
+        Working directory from which the script will be executed.
+        Defaults to current directory.
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Dictionary with 'inputs' and 'outputs' keys.
+    """
     inputs = []
     outputs = []
     if not os.path.exists(script_path):
@@ -40,11 +66,33 @@ def detect_r_script_io(script_path: str) -> dict[str, list[str]]:
     except UnicodeDecodeError:
         return {"inputs": inputs, "outputs": outputs}
     script_dir = os.path.dirname(script_path) if script_path else "."
-    return _detect_r_code_io(content, script_dir=script_dir)
+    effective_wdir = wdir or "."
+    return _detect_r_code_io(
+        content,
+        script_dir=script_dir,
+        wdir=effective_wdir,
+    )
 
 
-def detect_julia_script_io(script_path: str) -> dict[str, list[str]]:
-    """Detect inputs and outputs from a Julia script using regex patterns."""
+def detect_julia_script_io(
+    script_path: str,
+    wdir: str | None = None,
+) -> dict[str, list[str]]:
+    """Detect inputs and outputs from a Julia script using regex patterns.
+
+    Parameters
+    ----------
+    script_path : str
+        Path to the Julia script file.
+    wdir : str | None
+        Working directory from which the script will be executed.
+        Defaults to current directory.
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Dictionary with 'inputs' and 'outputs' keys.
+    """
     inputs = []
     outputs = []
     if not os.path.exists(script_path):
@@ -55,7 +103,9 @@ def detect_julia_script_io(script_path: str) -> dict[str, list[str]]:
     except UnicodeDecodeError:
         return {"inputs": inputs, "outputs": outputs}
     script_dir = os.path.dirname(script_path) if script_path else "."
+    effective_wdir = wdir or "."
     content = re.sub(r"#.*$", "", content, flags=re.MULTILINE)
+    julia_vars = _extract_julia_string_assignments(content)
     include_pattern = r'include\s*\(\s*["\']([^"\']+\.jl)["\']\s*\)'
     include_matches = re.findall(include_pattern, content)
     for match in include_matches:
@@ -66,37 +116,63 @@ def detect_julia_script_io(script_path: str) -> dict[str, list[str]]:
             elif _is_valid_project_path(match):
                 inputs.append(match)
     read_patterns = [
-        r'open\s*\(\s*["\']([^"\']+)["\']\s*,\s*["\']r["\']',
-        r'open\s*\(\s*["\']([^"\']+)["\']\s*\)',
-        r'CSV\.(?:read|File)\s*\(\s*["\']([^"\']+)["\']',
-        r'readdlm\s*\(\s*["\']([^"\']+)["\']',
-        r'load\s*\(\s*["\']([^"\']+)["\']',
-        r'JLD2?\.load\s*\(\s*["\']([^"\']+)["\']',
+        r'open\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))\s*,\s*["\']r["\']',
+        r'open\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))\s*\)',
+        r'CSV\.(?:read|File)\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'readdlm\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'load\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'JLD2?\.load\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
     ]
     write_patterns = [
-        r'open\s*\(\s*["\']([^"\']+)["\']\s*,\s*["\']w["\']',
-        r'open\s*\(\s*["\']([^"\']+)["\']\s*,\s*["\']a["\']',
-        r'CSV\.write\s*\(\s*["\']([^"\']+)["\']',
-        r'writedlm\s*\(\s*["\']([^"\']+)["\']',
-        r'save\s*\(\s*["\']([^"\']+)["\']',
-        r'JLD2?\.save\s*\(\s*["\']([^"\']+)["\']',
-        r'savefig\s*\(\s*["\']([^"\']+)["\']',
+        r'open\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))\s*,\s*["\']w["\']',
+        r'open\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))\s*,\s*["\']a["\']',
+        r'CSV\.write\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'writedlm\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'save\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'JLD2?\.save\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'savefig\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
     ]
     for pattern in read_patterns:
         matches = re.findall(pattern, content)
-        inputs.extend(matches)
+        for match in matches:
+            resolved = _resolve_julia_path_expr(match, julia_vars)
+            if resolved:
+                inputs.append(resolved)
     for pattern in write_patterns:
         matches = re.findall(pattern, content)
-        outputs.extend(matches)
+        for match in matches:
+            resolved = _resolve_julia_path_expr(match, julia_vars)
+            if resolved:
+                outputs.append(resolved)
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     outputs = [p for p in outputs if _is_valid_project_path(p)]
+    # Resolve paths relative to working directory
+    inputs = _resolve_paths_to_wdir(inputs, script_dir, effective_wdir)
+    outputs = _resolve_paths_to_wdir(outputs, script_dir, effective_wdir)
     inputs = list(dict.fromkeys(inputs))
     outputs = list(dict.fromkeys(outputs))
     return {"inputs": inputs, "outputs": outputs}
 
 
-def detect_shell_script_io(script_path: str) -> dict[str, list[str]]:
-    """Detect inputs and outputs from a shell script using regex patterns."""
+def detect_shell_script_io(
+    script_path: str,
+    wdir: str | None = None,
+) -> dict[str, list[str]]:
+    """Detect inputs and outputs from a shell script using regex patterns.
+
+    Parameters
+    ----------
+    script_path : str
+        Path to the shell script file.
+    wdir : str | None
+        Working directory from which the script will be executed.
+        Defaults to current directory.
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Dictionary with 'inputs' and 'outputs' keys.
+    """
     inputs = []
     outputs = []
     if not os.path.exists(script_path):
@@ -106,6 +182,8 @@ def detect_shell_script_io(script_path: str) -> dict[str, list[str]]:
             content = f.read()
     except UnicodeDecodeError:
         return {"inputs": inputs, "outputs": outputs}
+    script_dir = os.path.dirname(script_path) if script_path else "."
+    effective_wdir = wdir or "."
     content = re.sub(r"#.*$", "", content, flags=re.MULTILINE)
     # Output patterns (>> must come before > to avoid matching
     # the first > in >>)
@@ -146,9 +224,49 @@ def detect_shell_script_io(script_path: str) -> dict[str, list[str]]:
                     inputs.append(file)
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     outputs = [p for p in outputs if _is_valid_project_path(p)]
+    # Resolve paths relative to working directory
+    inputs = _resolve_paths_to_wdir(inputs, script_dir, effective_wdir)
+    outputs = _resolve_paths_to_wdir(outputs, script_dir, effective_wdir)
     inputs = list(dict.fromkeys(inputs))
     outputs = list(dict.fromkeys(outputs))
     return {"inputs": inputs, "outputs": outputs}
+
+
+def _resolve_paths_to_wdir(
+    paths: list[str], script_dir: str, wdir: str
+) -> list[str]:
+    """Resolve paths from script directory to working directory.
+
+    When a script is in a subdirectory (e.g., scripts/process.R),
+    its relative paths should be resolved from the working directory
+    where the command is executed, not from the script's directory.
+
+    Parameters
+    ----------
+    paths : list[str]
+        List of file paths detected in the script.
+    script_dir : str
+        Directory containing the script.
+    wdir : str
+        Working directory from which the script will be executed.
+
+    Returns
+    -------
+    list[str]
+        Paths resolved relative to wdir.
+    """
+    if script_dir == wdir or script_dir == ".":
+        return paths
+    resolved = []
+    for path in paths:
+        if os.path.isabs(path):
+            # Absolute paths stay as-is (though they should be filtered already)
+            resolved.append(path)
+        else:
+            # Path is relative - assume it's relative to wdir, not script_dir
+            # Just pass it through as-is
+            resolved.append(path)
+    return resolved
 
 
 def _extract_directory_changes(code: str, current_dir: str = ".") -> str:
@@ -228,6 +346,7 @@ def language_from_notebook(
 def detect_jupyter_notebook_io(
     notebook_path: str,
     language: NotebookLanguage | None = None,
+    wdir: str | None = None,
 ) -> dict[str, list[str]]:
     """Detect inputs and outputs from a Jupyter notebook.
 
@@ -258,8 +377,14 @@ def detect_jupyter_notebook_io(
         for cell in code_cells
     )
     notebook_dir = os.path.dirname(notebook_path) if notebook_path else "."
+    effective_wdir = wdir or "."
     if language == "python":
-        return _detect_python_code_io(full_code, script_dir=notebook_dir)
+        return _detect_python_code_io(
+            full_code,
+            script_dir=notebook_dir,
+            working_dir=effective_wdir,
+            current_dir=notebook_dir,
+        )
     elif language == "julia":
         return _detect_julia_code_io(full_code, script_dir=notebook_dir)
     elif language == "r":
@@ -545,7 +670,10 @@ def _is_valid_project_path(path: str) -> bool:
 
 
 def _detect_python_code_io(
-    code: str, script_dir: str = "."
+    code: str,
+    script_dir: str = ".",
+    working_dir: str = ".",
+    current_dir: str | None = None,
 ) -> dict[str, list[str]]:
     """Detect I/O from Python code string (used for notebook cells
     and scripts).
@@ -562,7 +690,8 @@ def _detect_python_code_io(
     """
     inputs = []
     outputs = []
-    current_dir = script_dir
+    current_dir = current_dir or working_dir
+    import_dir = script_dir or "."
     # First pass: detect directory changes from %cd magic commands
     for line in code.split("\n"):
         stripped = line.strip()
@@ -615,7 +744,7 @@ def _detect_python_code_io(
         # Handle paths that reference parent directories
         # by computing the real path
         abs_path = os.path.abspath(full_path)
-        project_root = os.path.abspath(".")
+        project_root = os.path.abspath(working_dir)
         try:
             rel_path = os.path.relpath(abs_path, project_root)
         except ValueError:
@@ -641,16 +770,16 @@ def _detect_python_code_io(
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                local_file = _resolve_python_import(alias.name, current_dir)
+                local_file = _resolve_python_import(alias.name, import_dir)
                 if local_file:
                     inputs.append(local_file)
         elif isinstance(node, ast.ImportFrom):
             if node.module and node.level == 0:
-                local_file = _resolve_python_import(node.module, current_dir)
+                local_file = _resolve_python_import(node.module, import_dir)
                 if local_file:
                     inputs.append(local_file)
             elif node.level > 0:
-                parent_dir = current_dir
+                parent_dir = import_dir
                 for _ in range(node.level - 1):
                     parent_dir = os.path.dirname(parent_dir)
                 if node.module:
@@ -778,6 +907,7 @@ def _detect_julia_code_io(
     inputs = []
     outputs = []
     code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
+    julia_vars = _extract_julia_string_assignments(code)
     include_pattern = r'include\s*\(\s*["\']([^"\']+\.jl)["\']\s*\)'
     include_matches = re.findall(include_pattern, code)
     for match in include_matches:
@@ -788,20 +918,28 @@ def _detect_julia_code_io(
             elif _is_valid_project_path(match):
                 inputs.append(match)
     read_patterns = [
-        r'open\s*\(\s*["\']([^"\']+)["\']\s*,\s*["\']r["\']',
-        r'open\s*\(\s*["\']([^"\']+)["\']\s*\)',
-        r'CSV\.(?:read|File)\s*\(\s*["\']([^"\']+)["\']',
-        r'readdlm\s*\(\s*["\']([^"\']+)["\']',
+        r'open\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))\s*,\s*["\']r["\']',
+        r'open\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))\s*\)',
+        r'CSV\.(?:read|File)\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'readdlm\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
     ]
     write_patterns = [
-        r'open\s*\(\s*["\']([^"\']+)["\']\s*,\s*["\']w["\']',
-        r'CSV\.write\s*\(\s*["\']([^"\']+)["\']',
-        r'writedlm\s*\(\s*["\']([^"\']+)["\']',
+        r'open\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))\s*,\s*["\']w["\']',
+        r'CSV\.write\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
+        r'writedlm\s*\(\s*(?:["\']([^"\']+)["\']|([A-Za-z_][A-Za-z0-9_]*))',
     ]
     for pattern in read_patterns:
-        inputs.extend(re.findall(pattern, code))
+        matches = re.findall(pattern, code)
+        for match in matches:
+            resolved = _resolve_julia_path_expr(match, julia_vars)
+            if resolved:
+                inputs.append(resolved)
     for pattern in write_patterns:
-        outputs.extend(re.findall(pattern, code))
+        matches = re.findall(pattern, code)
+        for match in matches:
+            resolved = _resolve_julia_path_expr(match, julia_vars)
+            if resolved:
+                outputs.append(resolved)
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     outputs = [p for p in outputs if _is_valid_project_path(p)]
     return {"inputs": inputs, "outputs": outputs}
@@ -826,9 +964,24 @@ def _resolve_python_import(
 
 
 def _detect_r_code_io(
-    code: str, script_dir: str = "."
+    code: str, script_dir: str = ".", wdir: str = "."
 ) -> dict[str, list[str]]:
-    """Detect I/O from R code string (used for scripts and notebook cells)."""
+    """Detect I/O from R code string (used for scripts and notebook cells).
+
+    Parameters
+    ----------
+    code : str
+        R code content to analyze.
+    script_dir : str
+        Directory containing the script (for resolving source() includes).
+    wdir : str
+        Working directory from which the script is executed (for data file paths).
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Dictionary with 'inputs' and 'outputs' keys.
+    """
     inputs = []
     outputs = []
     code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
@@ -844,20 +997,27 @@ def _detect_r_code_io(
                 inputs.append(os.path.relpath(full_path))
             elif _is_valid_project_path(match):
                 inputs.append(match)
+    # Read patterns that capture variables, file.path() expressions, or literals
     read_patterns = [
-        r'read\.(?:csv|table|delim|tsv)\s*\(\s*["\']([^"\']+)["\']',
-        r'readRDS\s*\(\s*["\']([^"\']+)["\']',
-        r'load\s*\(\s*["\']([^"\']+)["\']',
-        r'read_csv\s*\(\s*["\']([^"\']+)["\']',
-        r'read_excel\s*\(\s*["\']([^"\']+)["\']',
-        r'fread\s*\(\s*["\']([^"\']+)["\']',
+        r'read\.(?:csv|table|delim|tsv)\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
+        r'readRDS\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
+        r'load\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
+        r'read_csv\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
+        r'read_excel\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
+        r'fread\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
     ]
-    write_patterns = [
+    # Process read patterns with variable resolution
+    for pattern in read_patterns:
+        matches = re.findall(pattern, code)
+        for match in matches:
+            resolved = _resolve_r_path_expr(match, r_vars)
+            if resolved:
+                inputs.append(resolved)
+    # Write patterns for simple cases (literal strings in 2nd argument)
+    simple_write_patterns = [
         r'write\.(?:csv|table)\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
         r'saveRDS\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
         r'save\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'ggsave\s*\(\s*["\']([^"\']+)["\']',
-        r'ggsave\s*\([^)]*filename\s*=\s*["\"]([^"\"]+)["\"]',
         r'write_csv\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
         r'write_excel\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
         r'pdf\s*\(\s*["\']([^"\']+)["\']',
@@ -876,10 +1036,19 @@ def _detect_r_code_io(
         r'CairoPDF\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
         r'svglite\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
     ]
-    for pattern in read_patterns:
-        inputs.extend(re.findall(pattern, code))
-    for pattern in write_patterns:
+    for pattern in simple_write_patterns:
         outputs.extend(re.findall(pattern, code))
+    # ggsave patterns that handle file.path(), variables, or literals
+    ggsave_patterns = [
+        r'ggsave\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
+        r'ggsave\s*\([^)]*filename\s*=\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
+    ]
+    for pattern in ggsave_patterns:
+        matches = re.findall(pattern, code)
+        for match in matches:
+            resolved = _resolve_r_path_expr(match, r_vars)
+            if resolved:
+                outputs.append(resolved)
     save_fig_patterns = [
         r"save_fig\s*\(\s*[^,]+,\s*(file\.path\([^\)]*\)|\"[^\"]+\"|'[^']+'|[A-Za-z_][A-Za-z0-9_]*)",
         r"save_fig\s*\([^\)]*filename\s*=\s*(file\.path\([^\)]*\)|\"[^\"]+\"|'[^']+'|[A-Za-z_][A-Za-z0-9_]*)",
@@ -898,6 +1067,9 @@ def _detect_r_code_io(
                 outputs.append(resolved)
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     outputs = [p for p in outputs if _is_valid_project_path(p)]
+    # Resolve paths relative to working directory
+    inputs = _resolve_paths_to_wdir(inputs, script_dir, wdir)
+    outputs = _resolve_paths_to_wdir(outputs, script_dir, wdir)
     inputs = list(dict.fromkeys(inputs))
     outputs = list(dict.fromkeys(outputs))
     return {"inputs": inputs, "outputs": outputs}
@@ -913,6 +1085,33 @@ def _extract_r_string_assignments(code: str) -> dict[str, str]:
     for name, value in pattern.findall(code):
         assignments[name] = value
     return assignments
+
+
+def _extract_julia_string_assignments(code: str) -> dict[str, str]:
+    """Extract simple string assignments in Julia code."""
+    assignments = {}
+    pattern = re.compile(
+        r"^\s*(?:const\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[\"']([^\"']+)[\"']",
+        flags=re.MULTILINE,
+    )
+    for name, value in pattern.findall(code):
+        assignments[name] = value
+    return assignments
+
+
+def _resolve_julia_path_expr(
+    match: tuple[str, str] | str,
+    variables: dict[str, str],
+) -> str | None:
+    """Resolve a Julia path expression from a regex match."""
+    if isinstance(match, tuple):
+        literal, var = match
+        if literal:
+            return literal
+        if var:
+            return variables.get(var)
+        return None
+    return variables.get(match) or match
 
 
 def _resolve_r_path_expr(expr: str, variables: dict[str, str]) -> str | None:
@@ -1056,23 +1255,29 @@ def detect_io(stage: dict) -> dict[str, list[str]]:
         or stage.get("target_path")
     )
     environment = stage.get("environment", "_system")
+    wdir = stage.get("wdir")
     if stage_kind == "python-script" and script_path:
-        return detect_python_script_io(script_path)
+        return detect_python_script_io(script_path, wdir=wdir)
     elif stage_kind == "r-script" and script_path:
-        return detect_r_script_io(script_path)
+        return detect_r_script_io(script_path, wdir=wdir)
     elif stage_kind == "julia-script" and script_path:
-        return detect_julia_script_io(script_path)
+        return detect_julia_script_io(script_path, wdir=wdir)
     elif stage_kind == "shell-script" and script_path:
-        return detect_shell_script_io(script_path)
+        return detect_shell_script_io(script_path, wdir=wdir)
     elif stage_kind == "jupyter-notebook" and script_path:
-        return detect_jupyter_notebook_io(script_path)
+        return detect_jupyter_notebook_io(script_path, wdir=wdir)
     elif stage_kind == "latex" and script_path:
         return detect_latex_io(script_path)
     elif stage_kind == "matlab-script" and script_path:
-        return detect_matlab_script_io(script_path, environment=environment)
+        return detect_matlab_script_io(
+            script_path, environment=environment, wdir=wdir
+        )
     elif stage_kind == "matlab-command":
         command = stage.get("command", "")
-        return detect_matlab_command_io(command, environment=environment)
+        wdir_str = wdir if wdir else "."
+        return detect_matlab_command_io(
+            command, environment=environment, wdir=wdir_str
+        )
     elif stage_kind == "shell-command":
         command = stage.get("command", "")
         return detect_shell_command_io(command)

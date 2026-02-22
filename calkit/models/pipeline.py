@@ -325,6 +325,7 @@ class LatexStage(Stage):
     kind: Literal["latex"] = "latex"
     target_path: str
     latexmkrc_path: str | None = None
+    pdf_storage: Literal["git", "dvc"] | None = "dvc"
     verbose: bool = False
     force: bool = False
     synctex: bool = True
@@ -356,8 +357,21 @@ class LatexStage(Stage):
         out_path = Path(
             self.target_path.removesuffix(".tex") + ".pdf"
         ).as_posix()
-        if out_path not in outs:
-            outs.append(out_path)
+        # If the PDF output is already in outs use that
+        # Otherwise, create a DVC output from pdf_storage and add it to outs
+        out_paths = []
+        for out in outs:
+            if isinstance(out, str):
+                out_paths.append(out)
+            elif isinstance(out, dict):
+                out_paths.append(list(out.keys())[0])
+        if out_path in out_paths:
+            return outs
+        if self.pdf_storage == "dvc":
+            out_dict = {out_path: {"cache": True}}
+        else:
+            out_dict = {out_path: {"cache": False}}
+        outs.append(out_dict)
         return outs
 
 

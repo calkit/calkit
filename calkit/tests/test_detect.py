@@ -98,6 +98,20 @@ with open('data.txt', mode='r') as f:
     assert "data.txt" in result["inputs"]
 
 
+def test_detect_python_script_io_in_subdir_uses_cwd(tmp_dir):
+    """Ensure script I/O is resolved relative to the working directory."""
+    os.makedirs("scripts", exist_ok=True)
+    script_content = """
+with open('output.txt', 'w') as f:
+    f.write('done')
+"""
+    with open("scripts/run.py", "w") as f:
+        f.write(script_content)
+    result = detect_python_script_io("scripts/run.py")
+    assert "output.txt" in result["outputs"]
+    assert "scripts/output.txt" not in result["outputs"]
+
+
 def test_detect_julia_script_io(tmp_dir):
     """Test detection of inputs and outputs from Julia scripts."""
     script_content = """
@@ -133,6 +147,25 @@ end
     assert "output.csv" in result["outputs"]
     assert "result.txt" in result["outputs"]
     assert "log.txt" in result["outputs"]
+
+
+def test_detect_julia_script_io_with_const_paths(tmp_dir):
+    """Test detection when Julia scripts use const path variables."""
+    script_content = """
+using CSV
+using DataFrames
+
+const INPUT_PATH = "data/raw.csv"
+const OUTPUT_PATH = "data/processed.csv"
+
+df = CSV.read(INPUT_PATH, DataFrame)
+CSV.write(OUTPUT_PATH, df)
+"""
+    with open("script.jl", "w") as f:
+        f.write(script_content)
+    result = detect_julia_script_io("script.jl")
+    assert "data/raw.csv" in result["inputs"]
+    assert "data/processed.csv" in result["outputs"]
 
 
 def test_detect_r_script_io(tmp_dir):

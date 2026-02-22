@@ -2168,8 +2168,8 @@ def execute_and_record(
     # If we created an environment from dependencies, write the spec file
     if env_result.created_from_dependencies and not dry_run:
         typer.echo(
-            "No existing environment detected. "
-            "Attempting to create one based on detected dependencies..."
+            "No existing environment detected; "
+            "Attempting to create one based on detected dependencies"
         )
         if env_result.dependencies:
             typer.echo(

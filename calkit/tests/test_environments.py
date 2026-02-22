@@ -222,6 +222,78 @@ def test_detect_default_env(tmp_dir):
     assert res is None
 
 
+def test_extract_dependencies_and_env_superset(tmp_dir):
+    with open("requirements.txt", "w") as f:
+        f.write("requests>=2\n")
+        f.write("numpy\n")
+    deps = calkit.environments.extract_dependencies_from_spec_file(
+        "requirements.txt"
+    )
+    assert "requests" in deps
+    assert "numpy" in deps
+    with open("pyproject.toml", "w") as f:
+        f.write("[project]\n")
+        f.write('name = "demo"\n')
+        f.write('version = "0.1.0"\n')
+        f.write('requires-python = ">=3.11"\n')
+        f.write("dependencies = [\n")
+        f.write('  "pandas>=2",\n')
+        f.write('  "matplotlib",\n')
+        f.write("]\n")
+    pyproject_deps = calkit.environments.extract_dependencies_from_spec_file(
+        "pyproject.toml"
+    )
+    assert "pandas" in pyproject_deps
+    assert "matplotlib" in pyproject_deps
+    env = {"kind": "uv", "path": "requirements.txt"}
+    assert calkit.environments.env_has_superset_dependencies(
+        env, ["requests", "numpy"], strict=True
+    )
+    assert not calkit.environments.env_has_superset_dependencies(
+        env, ["requests", "numpy", "pandas"], strict=True
+    )
+    assert calkit.environments.env_has_superset_dependencies(
+        {"kind": "uv", "path": "missing.txt"}, ["requests"], strict=False
+    )
+    assert not calkit.environments.env_has_superset_dependencies(
+        {"kind": "uv", "path": "missing.txt"}, ["requests"], strict=True
+    )
+    with open("Project.toml", "w") as f:
+        f.write("[deps]\n")
+        f.write('DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"\n')
+        f.write('CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"\n')
+    julia_deps = calkit.environments.extract_dependencies_from_spec_file(
+        "Project.toml"
+    )
+    assert "DataFrames" in julia_deps
+    assert "CSV" in julia_deps
+    with open("DESCRIPTION", "w") as f:
+        f.write("Package: Demo\n")
+        f.write("Version: 0.1.0\n")
+        f.write("Imports: dplyr,\n")
+        f.write("    ggplot2\n")
+    r_deps = calkit.environments.extract_dependencies_from_spec_file(
+        "DESCRIPTION"
+    )
+    assert "dplyr" in r_deps
+    assert "ggplot2" in r_deps
+    with open("environment.yml", "w") as f:
+        f.write("name: test-env\n")
+        f.write("dependencies:\n")
+        f.write("  - python=3.11\n")
+        f.write("  - numpy\n")
+        f.write("  - pip\n")
+        f.write("  - pip:\n")
+        f.write("    - requests==2.0\n")
+        f.write("    - scipy>=1.0\n")
+    conda_deps = calkit.environments.extract_dependencies_from_spec_file(
+        "environment.yml"
+    )
+    assert "numpy" in conda_deps
+    assert "requests" in conda_deps
+    assert "scipy" in conda_deps
+
+
 def test_detect_env_for_stage(tmp_dir):
     stage_py = {"kind": "python-script", "script_path": "script.py"}
     with open("script.py", "w") as f:

@@ -1316,7 +1316,6 @@ def detect_env_for_stage(
         "python-script",
         "r-script",
         "julia-script",
-        "matlab-script",
         "shell-script",
     }
     # Initialize detected_dependencies so it's available throughout function

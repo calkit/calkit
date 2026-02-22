@@ -517,6 +517,13 @@ def test_detect_env_for_stage(tmp_dir):
     assert res.name != "main"
     # Should create a new environment with the dependencies
     assert res.created_from_dependencies
+    stage_matlab = {"kind": "matlab-script", "script_path": "calc.m"}
+    ck_info = {"environments": {}}
+    res = calkit.environments.detect_env_for_stage(
+        stage_matlab, environment=None, ck_info=ck_info
+    )
+    assert res.name == "_system"
+    assert res.env["kind"] == "system"
     stage_latex = {"kind": "latex", "script_path": "paper.tex"}
     res = calkit.environments.detect_env_for_stage(
         stage_latex, environment=None, ck_info={"environments": {}}

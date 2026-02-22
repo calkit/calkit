@@ -1835,9 +1835,9 @@ def execute_and_record(
         list[str],
         typer.Argument(
             help="Command to execute and record. "
-            "If the first argument is a script or notebook, "
-            "it will be treated as a stage with that script/notebook as "
-            "the target."
+            "If the first argument is a script, notebook or LaTeX file, "
+            "it will be treated as a stage with that file as "
+            "the target. Any command, including arguments, is supported."
         ),
     ],
     environment: Annotated[

@@ -1131,19 +1131,38 @@ def extract_dependencies_from_spec_file(
         except Exception:
             pass
     elif language == "r":
-        # Parse R DESCRIPTION file for Imports/Depends fields
-        for line in content.split("\n"):
-            line = line.strip()
-            if line.startswith(("Imports:", "Depends:")):
-                # Extract the package list
-                pkg_str = line.split(":", 1)[1].strip()
-                # Packages may be on multiple lines, so handle that
-                pkgs = [p.strip() for p in pkg_str.split(",")]
+        # Parse R DESCRIPTION file for Imports/Depends fields,
+        # correctly handling multi-line (continued) fields where
+        # continuation lines start with whitespace.
+        lines = content.splitlines()
+        i = 0
+        while i < len(lines):
+            raw_line = lines[i]
+            stripped = raw_line.lstrip()
+            if stripped.startswith(("Imports:", "Depends:")):
+                # Extract the text after the field name and colon
+                _, after_colon = stripped.split(":", 1)
+                pkg_chunks: list[str] = [after_colon.strip()]
+                # Collect continuation lines that start with whitespace
+                j = i + 1
+                while j < len(lines) and (
+                    lines[j].startswith(" ") or lines[j].startswith("\t")
+                ):
+                    pkg_chunks.append(lines[j].strip())
+                    j += 1
+                # Join all chunks into a single dependency string
+                pkg_str = " ".join(pkg_chunks)
+                # Split on commas to get individual package entries
+                pkgs = [p.strip() for p in pkg_str.split(",") if p.strip()]
                 for pkg in pkgs:
                     # Remove version specifications if present
-                    pkg = pkg.split("(")[0].strip()
+                    pkg = pkg.split("(", 1)[0].strip()
                     if pkg:
                         dependencies.append(pkg)
+                # Continue parsing from the first non-continuation line
+                i = j
+                continue
+            i += 1
     elif language == "conda":
         # Parse conda environment.yml
         try:
@@ -1156,6 +1175,20 @@ def extract_dependencies_from_spec_file(
                     pkg = pkg.split("=")[0].strip()
                     if pkg:
                         dependencies.append(pkg)
+                elif isinstance(dep, dict):
+                    # Handle pip dependencies nested as {pip: [...]}
+                    pip_deps = dep.get("pip", [])
+                    for pip_dep in pip_deps:
+                        if isinstance(pip_dep, str):
+                            pkg = (
+                                pip_dep.split("==")[0]
+                                .split(">=")[0]
+                                .split("<=")[0]
+                                .split("[")[0]
+                                .strip()
+                            )
+                            if pkg:
+                                dependencies.append(pkg)
         except Exception:
             pass
     # Remove duplicates and sort
@@ -1213,6 +1246,7 @@ def env_has_superset_dependencies(
             # Strict mode: can't verify, so reject
             return False
         # Optimistic mode: assume it might work
+        return True
     # Check if env_deps is a superset of required_deps
     # (case-insensitive comparison for package names)
     env_deps_lower = {dep.lower() for dep in env_deps}
@@ -1626,6 +1660,7 @@ def detect_env_for_stage(
             # Add IJulia for Jupyter notebook support
             if "IJulia" not in dependencies:
                 dependencies.append("IJulia")
+            project_name = calkit.detect_project_name(prepend_owner=False)
             # Generate unique environment name
             if is_first_env_for_language:
                 temp_path = "Project.toml"
@@ -1633,13 +1668,17 @@ def detect_env_for_stage(
                     temp_path, all_env_names, kind="julia"
                 )
                 spec_path = "Project.toml"
+                julia_env_name = project_name
             else:
                 temp_path = ".calkit/envs/julia/Project.toml"
                 env_name = make_env_name(
                     temp_path, all_env_names, kind="julia"
                 )
                 spec_path = f".calkit/envs/{env_name}/Project.toml"
-            spec_content = create_julia_project_file_content(dependencies)
+                julia_env_name = f"{project_name}-{env_name}"
+            spec_content = create_julia_project_file_content(
+                dependencies, project_name=julia_env_name
+            )
             env_dict = {
                 "kind": "julia",
                 "path": spec_path,

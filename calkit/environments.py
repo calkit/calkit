@@ -1371,6 +1371,7 @@ def detect_env_for_stage(
             env_dict = {
                 "kind": "julia",
                 "path": spec_path,
+                "julia": _get_julia_version(),
             }
     if not spec_path or not env_name:
         raise ValueError(

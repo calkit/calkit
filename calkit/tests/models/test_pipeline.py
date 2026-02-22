@@ -202,7 +202,9 @@ def test_matlabcommandstage():
     )
     sd = s.to_dvc()
     print(sd)
-    assert sd["cmd"] == 'matlab -batch "disp(\\"Hello, MATLAB!\\");"'
+    assert sd["cmd"] == (
+        'matlab -noFigureWindows -batch "disp(\\"Hello, MATLAB!\\");"'
+    )
 
 
 def test_matlabscriptstage():
@@ -215,9 +217,9 @@ def test_matlabscriptstage():
     )
     sd = s.to_dvc()
     print(sd)
-    assert (
-        sd["cmd"]
-        == "matlab -batch \"addpath(genpath('scripts')); run('scripts/my_script.m');\""
+    assert sd["cmd"] == (
+        "matlab -noFigureWindows -batch \"addpath(genpath('scripts')); "
+        "run('scripts/my_script.m');\""
     )
     with pytest.raises(ValidationError):
         s = MatlabScriptStage(

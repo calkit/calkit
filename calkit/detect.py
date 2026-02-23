@@ -1214,7 +1214,6 @@ def generate_stage_name(cmd: list[str]) -> str:
             if remaining_args:
                 args_part = "-".join(remaining_args)
                 stage_name += "-" + args_part
-
     # Convert to kebab-case
     stage_name = stage_name.replace("_", "-").lower()
     # Replace dots with dashes (except file extensions which are
@@ -1229,6 +1228,9 @@ def generate_stage_name(cmd: list[str]) -> str:
     stage_name = re.sub(r"-+", "-", stage_name)
     # Remove leading/trailing dashes
     stage_name = stage_name.strip("-")
+    # If any args include the .ipynb extension, add a -notebook suffix
+    if any(arg.endswith(".ipynb") for arg in cmd):
+        stage_name += "-notebook"
     return stage_name
 
 

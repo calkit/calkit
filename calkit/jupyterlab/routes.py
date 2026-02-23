@@ -389,11 +389,13 @@ class NotebookKernelRouteHandler(APIHandler):
                 400, "Both 'path' and 'environment' are required"
             )
         try:
-            kernel_name = check_env_kernel(env_name=env_name)
+            kernel_name, display_name = check_env_kernel(env_name=env_name)
         except Exception as e:
             self.log.error(f"Failed to check env kernel for {env_name}: {e}")
             return self.error(500, f"Failed to check environment kernel: {e}")
-        self.finish(json.dumps({"name": kernel_name}))
+        self.finish(
+            json.dumps({"name": kernel_name, "display_name": display_name})
+        )
 
 
 class NotebookStageRouteHandler(APIHandler):
@@ -412,7 +414,11 @@ class NotebookStageRouteHandler(APIHandler):
         executed_ipynb_storage = body.get("executed_ipynb_storage", "git")
         if not notebook_path or not stage_name or not env_name:
             return self.error(
-                400, "Request body must include 'path' and 'stage_name'"
+                400,
+                (
+                    "Request body must include 'path', 'stage_name', and "
+                    "'environment'"
+                ),
             )
         ck_info = calkit.load_calkit_info()
         stages = ck_info.get("pipeline", {}).get("stages", {})

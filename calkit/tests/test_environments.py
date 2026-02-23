@@ -222,6 +222,86 @@ def test_detect_default_env(tmp_dir):
     assert res is None
 
 
+def test_extract_dependencies_and_env_superset(tmp_dir):
+    with open("requirements.txt", "w") as f:
+        f.write("requests>=2\n")
+        f.write("numpy\n")
+    deps = calkit.environments.extract_dependencies_from_spec_file(
+        "requirements.txt"
+    )
+    assert "requests" in deps
+    assert "numpy" in deps
+    with open("pyproject.toml", "w") as f:
+        f.write("[project]\n")
+        f.write('name = "demo"\n')
+        f.write('version = "0.1.0"\n')
+        f.write('requires-python = ">=3.11"\n')
+        f.write("dependencies = [\n")
+        f.write('  "pandas>=2",\n')
+        f.write('  "matplotlib",\n')
+        f.write("]\n")
+    pyproject_deps = calkit.environments.extract_dependencies_from_spec_file(
+        "pyproject.toml"
+    )
+    assert "pandas" in pyproject_deps
+    assert "matplotlib" in pyproject_deps
+    env = {"kind": "uv", "path": "requirements.txt"}
+    assert calkit.environments.env_has_superset_dependencies(
+        env, ["requests", "numpy"], strict=True
+    )
+    assert not calkit.environments.env_has_superset_dependencies(
+        env, ["requests", "numpy", "pandas"], strict=True
+    )
+    assert calkit.environments.env_has_superset_dependencies(
+        {"kind": "uv", "path": "missing.txt"}, ["requests"], strict=False
+    )
+    assert not calkit.environments.env_has_superset_dependencies(
+        {"kind": "uv", "path": "missing.txt"}, ["requests"], strict=True
+    )
+    with open("Project.toml", "w") as f:
+        f.write("[deps]\n")
+        f.write('DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"\n')
+        f.write('CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"\n')
+    julia_deps = calkit.environments.extract_dependencies_from_spec_file(
+        "Project.toml"
+    )
+    assert "DataFrames" in julia_deps
+    assert "CSV" in julia_deps
+    with open("DESCRIPTION", "w") as f:
+        f.write("Package: Demo\n")
+        f.write("Version: 0.1.0\n")
+        f.write("Imports: dplyr,\n")
+        f.write("    ggplot2\n")
+    r_deps = calkit.environments.extract_dependencies_from_spec_file(
+        "DESCRIPTION"
+    )
+    assert "dplyr" in r_deps
+    assert "ggplot2" in r_deps
+    with open("environment.yml", "w") as f:
+        f.write("name: test-env\n")
+        f.write("dependencies:\n")
+        f.write("  - python=3.11\n")
+        f.write("  - conda-forge::pandas=2.0\n")
+        f.write("  - jupyter\n")
+        f.write("  - pip\n")
+        f.write("  - pip:\n")
+        f.write("    - requests==2.0\n")
+        f.write("    - scipy>=1.0\n")
+    conda_deps = calkit.environments.extract_dependencies_from_spec_file(
+        "environment.yml"
+    )
+    assert "pandas" in conda_deps
+    assert "requests" in conda_deps
+    assert "scipy" in conda_deps
+    conda_env = {"kind": "conda", "path": "environment.yml"}
+    assert calkit.environments.env_has_superset_dependencies(
+        conda_env, ["ipykernel"], strict=True
+    )
+    assert calkit.environments.env_has_superset_dependencies(
+        conda_env, ["numpy"], strict=True
+    )
+
+
 def test_detect_env_for_stage(tmp_dir):
     stage_py = {"kind": "python-script", "script_path": "script.py"}
     with open("script.py", "w") as f:
@@ -450,6 +530,11 @@ def test_detect_env_for_stage(tmp_dir):
     }
     with open("notebook.ipynb", "w") as f:
         json.dump(notebook, f)
+    # Create Project.toml with DataFrames (so strict check passes)
+    with open("Project.toml", "w") as f:
+        f.write(
+            '[deps]\nDataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"\n'
+        )
     ck_info = {
         "environments": {
             "juliaenv": {
@@ -468,6 +553,57 @@ def test_detect_env_for_stage(tmp_dir):
     )
     assert res.name == "juliaenv"
     assert res.exists
+    # Test that a notebook with additional dependencies does NOT reuse an
+    # environment that doesn't have those dependencies
+    notebook_scipy = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "source": [
+                    "import scipy\n",
+                    "import matplotlib.pyplot as plt\n",
+                ],
+            }
+        ],
+        "metadata": {
+            "kernelspec": {
+                "language": "python",
+                "name": "python3",
+            }
+        },
+    }
+    with open("notebook-scipy.ipynb", "w") as f:
+        json.dump(notebook_scipy, f)
+    # Create a pyproject.toml with only numpy (the "main"
+    # environment)
+    with open("pyproject.toml", "w") as f:
+        f.write('[project]\nname = "main"\ndependencies = ["numpy"]\n')
+    ck_info = {
+        "environments": {
+            "main": {
+                "kind": "uv",
+                "path": "pyproject.toml",
+            }
+        }
+    }
+    stage_nb_scipy = {
+        "kind": "jupyter-notebook",
+        "notebook_path": "notebook-scipy.ipynb",
+    }
+    res = calkit.environments.detect_env_for_stage(
+        stage_nb_scipy, environment=None, ck_info=ck_info
+    )
+    # Should NOT reuse "main" since it doesn't have scipy/matplotlib
+    assert res.name != "main"
+    # Should create a new environment with the dependencies
+    assert res.created_from_dependencies
+    stage_matlab = {"kind": "matlab-script", "script_path": "calc.m"}
+    ck_info = {"environments": {}}
+    res = calkit.environments.detect_env_for_stage(
+        stage_matlab, environment=None, ck_info=ck_info
+    )
+    assert res.name == "_system"
+    assert res.env["kind"] == "system"
     stage_latex = {"kind": "latex", "script_path": "paper.tex"}
     res = calkit.environments.detect_env_for_stage(
         stage_latex, environment=None, ck_info={"environments": {}}

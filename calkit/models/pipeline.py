@@ -431,7 +431,7 @@ class MatlabScriptStage(Stage):
     def dvc_cmd(self) -> str:
         cmd = self.xenv_cmd
         if self.environment == "_system":
-            cmd += "matlab -batch"
+            cmd += "matlab -noFigureWindows -batch"
         matlab_cmd = ""
         if self.matlab_path is not None:
             matlab_cmd += f"addpath(genpath('{self.matlab_path}')); "
@@ -450,7 +450,7 @@ class MatlabCommandStage(Stage):
         matlab_cmd = self.command.replace('"', '\\"')
         cmd = self.xenv_cmd
         if self.environment == "_system":
-            cmd += "matlab -batch"
+            cmd += "matlab -noFigureWindows -batch"
         cmd += f' "{matlab_cmd}"'
         return cmd
 

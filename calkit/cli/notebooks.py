@@ -15,7 +15,7 @@ from typing_extensions import Annotated
 
 import calkit
 import calkit.notebooks
-from calkit.cli.core import raise_error
+from calkit.cli.core import raise_error, warn
 
 notebooks_app = typer.Typer(no_args_is_help=True)
 
@@ -115,7 +115,7 @@ def check_env_kernel(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
-):
+) -> tuple[str, str]:
     """Check that an environment has a registered Jupyter kernel."""
     from calkit.cli.check import check_environment
     from calkit.cli.main import run_in_env
@@ -159,7 +159,7 @@ def check_env_kernel(
             verbose=verbose,
             relaxed_check=True,
         )
-        return kernel_name
+        return kernel_name, display_name
     elif language == "r":
         cmd = [
             "Rscript",
@@ -176,7 +176,7 @@ def check_env_kernel(
             verbose=verbose,
             relaxed_check=True,
         )
-        return kernel_name
+        return kernel_name, display_name
     elif language == "julia":
         if not no_check:
             check_environment(env_name=env_name, verbose=verbose)
@@ -214,9 +214,10 @@ def check_env_kernel(
         kernel_path = res.stdout.strip()
         typer.echo(f"Registered IJulia kernel at: {kernel_path}")
         kernel_name = os.path.basename(kernel_path)
-        return kernel_name
+        return kernel_name, display_name
     else:
         raise_error(f"{language} not supported")
+        return "", ""  # For typing analysis since raise_error exits
 
 
 @notebooks_app.command("exec", help="Alias for 'execute'.")
@@ -345,14 +346,10 @@ def execute_notebook(
             env = envs[env_name]
             language = language_from_env(env) or "python"
         typer.echo(f"Using {language} as notebook language")
-    if language.lower() not in ["python", "matlab", "julia", "r"]:
-        raise ValueError(
-            "Language must be one of 'python', 'matlab', 'julia', or 'r'"
-        )
     # First, ensure the specified environment has a kernel we can use
     # We need to check the environment type and create the kernel if needed
     if language.lower() in ["python", "julia", "r"]:
-        kernel_name = check_env_kernel(
+        kernel_name, display_name = check_env_kernel(
             env_name=env_name,
             no_check=no_check,
             verbose=verbose,
@@ -360,6 +357,25 @@ def execute_notebook(
         )
     elif language.lower() == "matlab":
         kernel_name = "jupyter_matlab_kernel"
+        display_name = "MATLAB"
+    else:
+        raise ValueError(
+            "Language must be one of 'python', 'matlab', 'julia', or 'r'"
+        )
+    # Try to set kernelspec metadata so execution uses the expected kernel
+    try:
+        with open(path, "r") as f:
+            nb_json = json.load(f)
+        metadata = nb_json.setdefault("metadata", {})
+        kernelspec = metadata.setdefault("kernelspec", {})
+        kernelspec["name"] = kernel_name
+        kernelspec["display_name"] = display_name
+        kernelspec.setdefault("language", language.lower())
+        with open(path, "w") as f:
+            json.dump(nb_json, f, indent=1)
+    except Exception as e:
+        if verbose:
+            warn(f"Warning: failed to set kernelspec metadata: {e}")
     # We can't handle parameters unless language is Python, Julia, or R
     if language.lower() not in ["python", "julia", "r"]:
         if params or params_json is not None or params_base64 is not None:

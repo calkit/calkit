@@ -696,9 +696,6 @@ def test_run_downstream(tmp_dir):
     }
     with open("dvc.yaml", "w") as f:
         yaml.dump(dvc_yaml, f)
-    subprocess.check_call(
-        ["calkit", "save", "-am", "Create pipeline", "--no-push"]
-    )
     # Run all stages to prime the cache
     subprocess.check_call(["calkit", "run"])
     assert os.path.exists("a.txt")

@@ -1200,7 +1200,8 @@ def run(
     if pipeline is not None:
         args += ["--pipeline", pipeline]
     if downstream is not None:
-        args += ["--downstream", downstream]
+        args.append("--downstream")
+        args += downstream
     start_time_no_tz = calkit.utcnow(remove_tz=True)
     start_time = calkit.utcnow(remove_tz=False)
     run_id = uuid.uuid4().hex

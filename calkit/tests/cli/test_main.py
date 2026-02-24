@@ -6,7 +6,6 @@ import re
 import shutil
 import subprocess
 import sys
-import yaml
 from datetime import datetime
 from pprint import pprint
 
@@ -14,6 +13,7 @@ import dvc.repo
 import git
 import pytest
 import toml
+import yaml
 from dvc.exceptions import NotDvcRepoError
 from git.exc import InvalidGitRepositoryError
 
@@ -652,7 +652,7 @@ def test_run_ignore_errors(tmp_dir):
     dvc_yaml = {
         "stages": {
             "failing-stage": {
-                "cmd": "python -c \"import sys; sys.exit(1)\"",
+                "cmd": 'python -c "import sys; sys.exit(1)"',
             },
             "independent-stage": {
                 "cmd": "python -c \"open('out.txt', 'w').write('done')\"",
@@ -662,7 +662,9 @@ def test_run_ignore_errors(tmp_dir):
     }
     with open("dvc.yaml", "w") as f:
         yaml.dump(dvc_yaml, f)
-    subprocess.check_call(["calkit", "save", "-am", "Create pipeline", "--no-push"])
+    subprocess.check_call(
+        ["calkit", "save", "-am", "Create pipeline", "--no-push"]
+    )
     # Without --ignore-errors, the pipeline should fail
     result = subprocess.run(["calkit", "run"])
     assert result.returncode != 0
@@ -694,7 +696,9 @@ def test_run_downstream(tmp_dir):
     }
     with open("dvc.yaml", "w") as f:
         yaml.dump(dvc_yaml, f)
-    subprocess.check_call(["calkit", "save", "-am", "Create pipeline", "--no-push"])
+    subprocess.check_call(
+        ["calkit", "save", "-am", "Create pipeline", "--no-push"]
+    )
     # Run all stages to prime the cache
     subprocess.check_call(["calkit", "run"])
     assert os.path.exists("a.txt")
@@ -702,7 +706,9 @@ def test_run_downstream(tmp_dir):
     # Delete outputs and run with --downstream stage-a: both stages should run
     os.remove("a.txt")
     os.remove("b.txt")
-    subprocess.check_call(["calkit", "run", "--downstream", "stage-a", "--force"])
+    subprocess.check_call(
+        ["calkit", "run", "--downstream", "stage-a", "--force"]
+    )
     assert os.path.exists("a.txt")
     assert os.path.exists("b.txt")
 

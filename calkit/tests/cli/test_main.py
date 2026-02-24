@@ -13,6 +13,7 @@ import dvc.repo
 import git
 import pytest
 import toml
+import yaml
 from dvc.exceptions import NotDvcRepoError
 from git.exc import InvalidGitRepositoryError
 
@@ -643,6 +644,70 @@ def test_run(tmp_dir):
     res = calkit.cli.main.run()
     assert "dvc_stages" in res
     assert "stage_run_info" in res
+
+
+def test_run_ignore_errors(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # Create a pipeline with a failing stage and an independent stage
+    dvc_yaml = {
+        "stages": {
+            "failing-stage": {
+                "cmd": 'python -c "import sys; sys.exit(1)"',
+            },
+            "independent-stage": {
+                "cmd": "python -c \"open('out.txt', 'w').write('done')\"",
+                "outs": ["out.txt"],
+            },
+        }
+    }
+    with open("dvc.yaml", "w") as f:
+        yaml.dump(dvc_yaml, f)
+    subprocess.check_call(
+        ["calkit", "save", "-am", "Create pipeline", "--no-push"]
+    )
+    # Without --ignore-errors, the pipeline should fail
+    result = subprocess.run(["calkit", "run"])
+    assert result.returncode != 0
+    # With --ignore-errors, the independent stage should complete
+    if os.path.exists("out.txt"):
+        os.remove("out.txt")
+    subprocess.check_call(["calkit", "run", "--ignore-errors"])
+    assert os.path.exists("out.txt")
+
+
+def test_run_downstream(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # Create a pipeline: stage-a -> stage-b
+    dvc_yaml = {
+        "stages": {
+            "stage-a": {
+                "cmd": "python -c \"open('a.txt', 'w').write('a')\"",
+                "outs": ["a.txt"],
+            },
+            "stage-b": {
+                "cmd": (
+                    "python -c \"open('b.txt', 'w')"
+                    ".write(open('a.txt').read() + 'b')\""
+                ),
+                "deps": ["a.txt"],
+                "outs": ["b.txt"],
+            },
+        }
+    }
+    with open("dvc.yaml", "w") as f:
+        yaml.dump(dvc_yaml, f)
+    # Run all stages to prime the cache
+    subprocess.check_call(["calkit", "run"])
+    assert os.path.exists("a.txt")
+    assert os.path.exists("b.txt")
+    # Delete outputs and run with --downstream stage-a: both stages should run
+    os.remove("a.txt")
+    os.remove("b.txt")
+    subprocess.check_call(
+        ["calkit", "run", "--downstream", "stage-a", "--force"]
+    )
+    assert os.path.exists("a.txt")
+    assert os.path.exists("b.txt")
 
 
 def test_stage_run_info_from_log_content():

@@ -19,23 +19,13 @@ overleaf_app = typer.Typer(no_args_is_help=True)
 
 
 def _extract_title_from_tex(tex_file_path: str) -> str | None:
-    """Extract the title from a LaTeX file.
+    """Extract the title from a LaTeX file."""
+    from TexSoup import TexSoup
 
-    Looks for \\title{...} pattern and extracts the title.
-    Returns None if title cannot be found.
-    """
-    import re
-
-    try:
-        with open(tex_file_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        # Look for \title{...} pattern
-        match = re.search(r"\\title\s*\{([^}]+)\}", content)
-        if match:
-            return match.group(1).strip()
-    except Exception:
-        pass
-    return None
+    with open(tex_file_path) as f:
+        overleaf_target_text = f.read()
+    texsoup = TexSoup(overleaf_target_text)
+    return str(texsoup.title.string) if texsoup.title else None
 
 
 def _get_overleaf_token() -> str:

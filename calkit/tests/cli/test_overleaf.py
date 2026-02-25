@@ -7,6 +7,7 @@ import uuid
 import git
 
 import calkit
+from calkit.cli.overleaf import _extract_title_from_tex
 from calkit.git import ls_files
 
 
@@ -141,3 +142,18 @@ def test_overleaf(tmp_dir):
     assert "main.pdf" not in ol_repo_git_show
     assert "main.log" not in ol_repo_git_show
     assert "main.aux" not in ol_repo_git_show
+
+
+def test_extract_title_from_tex(tmp_dir):
+    # Test that we can extract a title from a simple LaTeX file
+    tex = r"""
+    \documentclass{article}
+    \title{My Cool Paper}
+    \begin{document}
+    Hello world!
+    \end{document}
+    """
+    with open("test.tex", "w") as f:
+        f.write(tex)
+    title = _extract_title_from_tex("test.tex")
+    assert title == "My Cool Paper"

@@ -52,6 +52,7 @@ dependencies = [
   "sqlitedict>=2.1.0",
   "json2latex>=0.0.3",
   "toml>=0.10.2",
+  "texsoup>=0.3.1",
 ]
 description = "Reproducibility simplified."
 dynamic = ["version"]

@@ -18,6 +18,19 @@ from calkit.cli import raise_error, warn
 overleaf_app = typer.Typer(no_args_is_help=True)
 
 
+def _extract_title_from_tex(tex_file_path: str) -> str | None:
+    """Extract the title from a LaTeX file."""
+    from TexSoup import TexSoup
+
+    try:
+        with open(tex_file_path) as f:
+            overleaf_target_text = f.read()
+        texsoup = TexSoup(overleaf_target_text)
+        return str(texsoup.title.string) if texsoup.title else None
+    except Exception:
+        return None
+
+
 def _get_overleaf_token() -> str:
     """Get the user's Overleaf token from config.
 
@@ -78,13 +91,13 @@ def import_publication(
         ),
     ],
     title: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--title",
             "-t",
             help="Title of the publication.",
         ),
-    ],
+    ] = None,
     target_path: Annotated[
         str | None,
         typer.Option(
@@ -143,6 +156,18 @@ def import_publication(
             help="Force adding the publication even if it already exists.",
         ),
     ] = False,
+    push_only: Annotated[
+        bool,
+        typer.Option(
+            "--push-only",
+            "-P",
+            help=(
+                "Push local files to Overleaf without pulling. "
+                "Useful when initializing a new Overleaf project from local "
+                "files."
+            ),
+        ),
+    ] = False,
 ):
     """Import a publication from an Overleaf project."""
     from calkit.cli.main import ignore as git_ignore
@@ -188,7 +213,9 @@ def import_publication(
     git.Repo.clone_from(git_clone_url, overleaf_project_dir)
     # Detect target path if not specified
     if target_path is None:
-        ol_contents = os.listdir(overleaf_project_dir)
+        ol_contents = os.listdir(
+            dest_dir if push_only else overleaf_project_dir
+        )
         for cand in ["main.tex", "report.tex", "paper.tex"]:
             if cand in ol_contents:
                 target_path = cand
@@ -203,10 +230,26 @@ def import_publication(
             "Target TeX file path cannot be detected; "
             "please specify with --target"
         )
+        return
+    # Try to extract title from the target LaTeX file if not provided
+    if not title:
+        target_tex_path = os.path.join(
+            dest_dir if push_only else overleaf_project_dir, target_path
+        )
+        extracted_title = _extract_title_from_tex(target_tex_path)
+        if extracted_title:
+            typer.echo(f"Detected title: {extracted_title}")
+            title = extracted_title
+    if not title:
+        raise_error(
+            "Title could not be detected from the LaTeX file; "
+            "please specify with --title"
+        )
     # Determine the PDF output path
     pdf_path = target_path.removesuffix(".tex") + ".pdf"  # type: ignore
     typer.echo(f"Using PDF path: {pdf_path}")
     tex_path = pdf_path.removesuffix(".pdf") + ".tex"
+    target_tex_path = Path(dest_dir, tex_path).as_posix()
     pub_path = Path(dest_dir, pdf_path).as_posix()
     pub_paths = [pub.get("path") for pub in pubs]
     if not overwrite and pub_path in pub_paths:
@@ -240,20 +283,18 @@ def import_publication(
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)
     # Check that we have a build stage
-    # TODO: Use Calkit pipeline for this
     typer.echo("Checking for a build stage in the pipeline")
+    pipeline = ck_info.get("pipeline", {})
+    stages = pipeline.get("stages", {})
     stage_name = None
-    if os.path.isfile("dvc.yaml"):
-        with open("dvc.yaml", "r") as f:
-            dvc_info = calkit.ryaml.load(f)
-        stages = dvc_info.get("stages", {})
-        for stage_name_i, stage in stages.items():
-            if pub_path in stage.get("outs", []):
-                stage_name = stage_name_i
-                typer.echo(f"Found build stage '{stage_name}' in pipeline")
-                break
-    else:
-        stages = {}
+    for stage_name_i, stage in stages.items():
+        if (
+            stage.get("kind") == "latex"
+            and stage.get("target_path") == target_tex_path
+        ):
+            stage_name = stage_name_i
+            typer.echo(f"Found build stage '{stage_name}' in pipeline")
+            break
     if stage_name is None:
         # Create a new stage
         stage_name = calkit.to_kebab_case("build-" + dest_dir)
@@ -265,7 +306,7 @@ def import_publication(
         new_latex_stage(
             name=stage_name,
             environment=tex_env_name,
-            target_path=Path(dest_dir, tex_path).as_posix(),
+            target_path=target_tex_path,
             inputs=[
                 os.path.join(dest_dir, p) for p in sync_paths + push_paths
             ],
@@ -308,7 +349,7 @@ def import_publication(
             ]
         )
     # Sync the project
-    sync(paths=[dest_dir], no_commit=no_commit)
+    sync(paths=[dest_dir], no_commit=no_commit, push_only=push_only)
 
 
 @overleaf_app.command(name="sync")
@@ -347,7 +388,7 @@ def sync(
         typer.Option(
             "--no-push",
             help=(
-                "Do not push the changes to the project remote. "
+                "Do not push the changes to the main project remote. "
                 "Changes will always be pushed to Overleaf."
             ),
         ),
@@ -365,6 +406,19 @@ def sync(
             "--resolve",
             "-r",
             help="Mark merge conflicts as resolved before committing.",
+        ),
+    ] = False,
+    push_only: Annotated[
+        bool,
+        typer.Option(
+            "--push-only",
+            "-P",
+            help=(
+                "Only push local files to Overleaf without pulling from "
+                "Overleaf. "
+                "Useful when initializing a new Overleaf project from local "
+                "files."
+            ),
         ),
     ] = False,
 ):
@@ -487,6 +541,7 @@ def sync(
                 verbose=verbose,
                 resolving_conflict=resolve,
                 print_info=typer.echo,
+                push_only=push_only,
             )
         except Exception as e:
             raise_error(str(e))

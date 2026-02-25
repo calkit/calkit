@@ -307,6 +307,7 @@ def sync(
     print_info=print,
     verbose: bool = False,
     resolving_conflict: bool = False,
+    push_only: bool = False,
 ) -> dict:
     """Sync between the main project repo and Overleaf repo.
 
@@ -315,6 +316,10 @@ def sync(
     All files in the Overleaf repo are committed to Git, while some in the
     main project can be ignored, e.g., in cases where they are copied in from
     a map-paths stage.
+
+    When push_only is True, only push local files to Overleaf without pulling
+    or applying changes from Overleaf to local. Useful for initializing a new
+    Overleaf project from local files.
     """
     res = {}
     # Normalize ``path_in_project`` as a posix path
@@ -344,7 +349,13 @@ def sync(
     )
     paths_for_overleaf_patch = paths.paths_to_use_for_git_patch
     res["paths_for_overleaf_patch"] = paths_for_overleaf_patch
-    if last_sync_commit:
+    if push_only:
+        # When push_only is True, skip pulling from Overleaf and applying
+        # patches to local
+        # Simply copy files to Overleaf
+        print_info("Push-only sync; skipping pull from Overleaf")
+        res["patch"] = None
+    elif last_sync_commit:
         # Compute a patch in the Overleaf project between HEAD and the last
         # sync
         patch = overleaf_repo.git.format_patch(

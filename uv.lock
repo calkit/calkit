@@ -512,6 +512,7 @@ dependencies = [
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "requests" },
     { name = "sqlitedict" },
+    { name = "texsoup" },
     { name = "toml" },
     { name = "tqdm" },
     { name = "typer" },
@@ -580,6 +581,7 @@ requires-dist = [
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "requests" },
     { name = "sqlitedict", specifier = ">=2.1.0" },
+    { name = "texsoup", specifier = ">=0.3.1" },
     { name = "toml", specifier = ">=0.10.2" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "typer", specifier = "==0.21.1" },
@@ -5063,6 +5065,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/8a/11/965c6fd8e5cc254f1fe142d547387da17a8ebfd75a3455f637c663fb38a0/terminado-0.18.1.tar.gz", hash = "sha256:de09f2c4b85de4765f7714688fff57d3e75bad1f909b589fde880460c753fd2e", size = 32701, upload-time = "2024-03-12T14:34:39.026Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6a/9e/2064975477fdc887e47ad42157e214526dcad8f317a948dee17e1659a62f/terminado-0.18.1-py3-none-any.whl", hash = "sha256:a4468e1b37bb318f8a86514f65814e1afc977cf29b3992a4500d9dd305dcceb0", size = 14154, upload-time = "2024-03-12T14:34:36.569Z" },
+]
+
+[[package]]
+name = "texsoup"
+version = "0.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/84/58/1c503390ed1a81cdcbff811dbf7a54132994acef8dd2194d55cf657a9e97/TexSoup-0.3.1.tar.gz", hash = "sha256:3f6b2ad0abe3688a6656f544c1ba04d0eb25f423f8c377b7369f9ce061ddb70b", size = 26174, upload-time = "2020-08-03T10:14:56.027Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5c/a7/e9eb0e14633710b51b8472a3beccc7d6a44d55a0a3ef4493ebb4b7977253/TexSoup-0.3.1-py3-none-any.whl", hash = "sha256:ae8f08d17f86a905b7c2ce01c9f2da613fbca0bcea78c71d727719e896045bed", size = 27809, upload-time = "2024-02-28T09:15:28.697Z" },
 ]
 
 [[package]]

@@ -245,9 +245,7 @@ def import_publication(
                     local_tex_candidates[0]
                 )
                 if extracted_title:
-                    typer.echo(
-                        f"Detected title from local file: {extracted_title}"
-                    )
+                    typer.echo(f"Detected title: {extracted_title}")
                     title = extracted_title
         if not title:
             # Fall back to extracting from Overleaf's target file

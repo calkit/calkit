@@ -51,10 +51,7 @@ For example:
 ```sh
 calkit overleaf import \
     https://www.overleaf.com/project/68000059d42b134573cb2e35 \
-    paper \
-    --title "My paper title" \
-    --kind journal-article \
-    --push-path figures
+    paper
 ```
 
 This command will link a local project folder, in this case `paper`,

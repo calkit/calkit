@@ -18,6 +18,26 @@ from calkit.cli import raise_error, warn
 overleaf_app = typer.Typer(no_args_is_help=True)
 
 
+def _extract_title_from_tex(tex_file_path: str) -> str | None:
+    """Extract the title from a LaTeX file.
+
+    Looks for \\title{...} pattern and extracts the title.
+    Returns None if title cannot be found.
+    """
+    import re
+
+    try:
+        with open(tex_file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        # Look for \title{...} pattern
+        match = re.search(r"\\title\s*\{([^}]+)\}", content)
+        if match:
+            return match.group(1).strip()
+    except Exception:
+        pass
+    return None
+
+
 def _get_overleaf_token() -> str:
     """Get the user's Overleaf token from config.
 
@@ -78,13 +98,13 @@ def import_publication(
         ),
     ],
     title: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--title",
             "-t",
             help="Title of the publication.",
         ),
-    ],
+    ] = None,
     target_path: Annotated[
         str | None,
         typer.Option(
@@ -203,6 +223,19 @@ def import_publication(
             "Target TeX file path cannot be detected; "
             "please specify with --target"
         )
+        return
+    # Try to extract title from the target LaTeX file if not provided
+    if not title:
+        target_tex_path = os.path.join(overleaf_project_dir, target_path)
+        extracted_title = _extract_title_from_tex(target_tex_path)
+        if extracted_title:
+            typer.echo(f"Detected title: {extracted_title}")
+            title = extracted_title
+        else:
+            raise_error(
+                "Title could not be detected from the LaTeX file; "
+                "please specify with --title"
+            )
     # Determine the PDF output path
     pdf_path = target_path.removesuffix(".tex") + ".pdf"  # type: ignore
     typer.echo(f"Using PDF path: {pdf_path}")

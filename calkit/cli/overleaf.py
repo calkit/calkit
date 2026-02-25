@@ -170,7 +170,6 @@ def import_publication(
     ] = False,
 ):
     """Import a publication from an Overleaf project."""
-    from calkit.cli.main import ignore as git_ignore
     from calkit.cli.new import new_latex_stage
 
     # First check that the user has an Overleaf token set
@@ -200,7 +199,10 @@ def import_publication(
     # otherwise pull
     overleaf_dir = os.path.join(".calkit", "overleaf")
     os.makedirs(overleaf_dir, exist_ok=True)
-    git_ignore(overleaf_dir, no_commit=no_commit)
+    # Write .gitignore in overleaf folder to ignore all contents
+    gitignore_path = os.path.join(overleaf_dir, ".gitignore")
+    with open(gitignore_path, "w") as f:
+        f.write("*\n")
     overleaf_project_dir = os.path.join(overleaf_dir, overleaf_project_id)
     git_clone_url = calkit.overleaf.get_git_remote_url(
         project_id=overleaf_project_id, token=overleaf_token
@@ -687,3 +689,4 @@ def get_status(
             typer.echo("Changed files:")
             for p in status["diff_files"]:
                 print_path(p, "red")
+

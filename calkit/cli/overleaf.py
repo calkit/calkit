@@ -22,10 +22,13 @@ def _extract_title_from_tex(tex_file_path: str) -> str | None:
     """Extract the title from a LaTeX file."""
     from TexSoup import TexSoup
 
-    with open(tex_file_path) as f:
-        overleaf_target_text = f.read()
-    texsoup = TexSoup(overleaf_target_text)
-    return str(texsoup.title.string) if texsoup.title else None
+    try:
+        with open(tex_file_path) as f:
+            overleaf_target_text = f.read()
+        texsoup = TexSoup(overleaf_target_text)
+        return str(texsoup.title.string) if texsoup.title else None
+    except Exception:
+        return None
 
 
 def _get_overleaf_token() -> str:

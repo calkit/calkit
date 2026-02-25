@@ -335,15 +335,33 @@ def import_publication(
     # Add to publications in calkit.yaml
     typer.echo("Adding publication to calkit.yaml")
     ck_info = calkit.load_calkit_info()
-    new_pub = dict(
-        path=pub_path,
-        title=title,
-        description=description,
-        kind=kind,
-        stage=stage_name,
-    )
-    pubs.append(new_pub)
-    ck_info["publications"] = pubs
+    pubs = ck_info.get("publications", [])
+    pub_paths = [pub.get("path") for pub in pubs]
+    if pub_path in pub_paths:
+        if not overwrite:
+            typer.echo(f"Publication already exists at {pub_path}; skipping")
+        else:
+            # Remove the old publication
+            pubs = [p for p in pubs if p.get("path") != pub_path]
+            new_pub = dict(
+                path=pub_path,
+                title=title,
+                description=description,
+                kind=kind,
+                stage=stage_name,
+            )
+            pubs.append(new_pub)
+            ck_info["publications"] = pubs
+    else:
+        new_pub = dict(
+            path=pub_path,
+            title=title,
+            description=description,
+            kind=kind,
+            stage=stage_name,
+        )
+        pubs.append(new_pub)
+        ck_info["publications"] = pubs
     ol_sync = ck_info.get("overleaf_sync", {})
     if dest_dir in ol_sync:
         raise_error(f"'{dest_dir}' is already synced with Overleaf")

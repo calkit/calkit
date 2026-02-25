@@ -292,8 +292,6 @@ def import_publication(
             stage_name = stage_name_i
             typer.echo(f"Found build stage '{stage_name}' in pipeline")
             break
-    else:
-        stages = {}
     if stage_name is None:
         # Create a new stage
         stage_name = calkit.to_kebab_case("build-" + dest_dir)

@@ -351,8 +351,9 @@ def sync(
     res["paths_for_overleaf_patch"] = paths_for_overleaf_patch
     if push_only:
         # When push_only is True, skip pulling from Overleaf and applying
-        # patches to local. Just copy files to Overleaf.
-        print_info("Push-only sync: skipping pull from Overleaf")
+        # patches to local
+        # Simply copy files to Overleaf
+        print_info("Push-only sync; skipping pull from Overleaf")
         res["patch"] = None
     elif last_sync_commit:
         # Compute a patch in the Overleaf project between HEAD and the last
@@ -423,9 +424,6 @@ def sync(
             print_info("Merge conflict resolved")
         else:
             print_info("No changes to apply")
-    elif push_only:
-        # In push_only mode, skip copying from Overleaf
-        print_info("Push-only sync; skipping copy from Overleaf")
     else:
         # Simply copy in all files
         print_info(

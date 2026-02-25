@@ -210,7 +210,9 @@ def import_publication(
     git.Repo.clone_from(git_clone_url, overleaf_project_dir)
     # Detect target path if not specified
     if target_path is None:
-        ol_contents = os.listdir(overleaf_project_dir)
+        ol_contents = os.listdir(
+            dest_dir if push_only else overleaf_project_dir
+        )
         for cand in ["main.tex", "report.tex", "paper.tex"]:
             if cand in ol_contents:
                 target_path = cand
@@ -228,37 +230,18 @@ def import_publication(
         return
     # Try to extract title from the target LaTeX file if not provided
     if not title:
-        if push_only:
-            # When using --push-only, look for title in local files
-            local_tex_candidates = []
-            if os.path.isdir(dest_dir):
-                # Look for .tex files in the destination directory
-                for root, dirs, files in os.walk(dest_dir):
-                    for file in files:
-                        if file.endswith(".tex"):
-                            local_tex_candidates.append(
-                                os.path.join(root, file)
-                            )
-            if local_tex_candidates:
-                # Try the first candidate found
-                extracted_title = _extract_title_from_tex(
-                    local_tex_candidates[0]
-                )
-                if extracted_title:
-                    typer.echo(f"Detected title: {extracted_title}")
-                    title = extracted_title
-        if not title:
-            # Fall back to extracting from Overleaf's target file
-            target_tex_path = os.path.join(overleaf_project_dir, target_path)
-            extracted_title = _extract_title_from_tex(target_tex_path)
-            if extracted_title:
-                typer.echo(f"Detected title: {extracted_title}")
-                title = extracted_title
-        if not title:
-            raise_error(
-                "Title could not be detected from the LaTeX file; "
-                "please specify with --title"
-            )
+        target_tex_path = os.path.join(
+            dest_dir if push_only else overleaf_project_dir, target_path
+        )
+        extracted_title = _extract_title_from_tex(target_tex_path)
+        if extracted_title:
+            typer.echo(f"Detected title: {extracted_title}")
+            title = extracted_title
+    if not title:
+        raise_error(
+            "Title could not be detected from the LaTeX file; "
+            "please specify with --title"
+        )
     # Determine the PDF output path
     pdf_path = target_path.removesuffix(".tex") + ".pdf"  # type: ignore
     typer.echo(f"Using PDF path: {pdf_path}")

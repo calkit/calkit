@@ -153,6 +153,18 @@ def import_publication(
             help="Force adding the publication even if it already exists.",
         ),
     ] = False,
+    push_only: Annotated[
+        bool,
+        typer.Option(
+            "--push-only",
+            "-P",
+            help=(
+                "Push local files to Overleaf without pulling. "
+                "Useful when initializing a new Overleaf project from local "
+                "files."
+            ),
+        ),
+    ] = False,
 ):
     """Import a publication from an Overleaf project."""
     from calkit.cli.main import ignore as git_ignore
@@ -216,12 +228,35 @@ def import_publication(
         return
     # Try to extract title from the target LaTeX file if not provided
     if not title:
-        target_tex_path = os.path.join(overleaf_project_dir, target_path)
-        extracted_title = _extract_title_from_tex(target_tex_path)
-        if extracted_title:
-            typer.echo(f"Detected title: {extracted_title}")
-            title = extracted_title
-        else:
+        if push_only:
+            # When using --push-only, look for title in local files
+            local_tex_candidates = []
+            if os.path.isdir(dest_dir):
+                # Look for .tex files in the destination directory
+                for root, dirs, files in os.walk(dest_dir):
+                    for file in files:
+                        if file.endswith(".tex"):
+                            local_tex_candidates.append(
+                                os.path.join(root, file)
+                            )
+            if local_tex_candidates:
+                # Try the first candidate found
+                extracted_title = _extract_title_from_tex(
+                    local_tex_candidates[0]
+                )
+                if extracted_title:
+                    typer.echo(
+                        f"Detected title from local file: {extracted_title}"
+                    )
+                    title = extracted_title
+        if not title:
+            # Fall back to extracting from Overleaf's target file
+            target_tex_path = os.path.join(overleaf_project_dir, target_path)
+            extracted_title = _extract_title_from_tex(target_tex_path)
+            if extracted_title:
+                typer.echo(f"Detected title: {extracted_title}")
+                title = extracted_title
+        if not title:
             raise_error(
                 "Title could not be detected from the LaTeX file; "
                 "please specify with --title"
@@ -332,7 +367,7 @@ def import_publication(
             ]
         )
     # Sync the project
-    sync(paths=[dest_dir], no_commit=no_commit)
+    sync(paths=[dest_dir], no_commit=no_commit, push_only=push_only)
 
 
 @overleaf_app.command(name="sync")
@@ -371,7 +406,7 @@ def sync(
         typer.Option(
             "--no-push",
             help=(
-                "Do not push the changes to the project remote. "
+                "Do not push the changes to the main project remote. "
                 "Changes will always be pushed to Overleaf."
             ),
         ),
@@ -389,6 +424,19 @@ def sync(
             "--resolve",
             "-r",
             help="Mark merge conflicts as resolved before committing.",
+        ),
+    ] = False,
+    push_only: Annotated[
+        bool,
+        typer.Option(
+            "--push-only",
+            "-P",
+            help=(
+                "Only push local files to Overleaf without pulling from "
+                "Overleaf. "
+                "Useful when initializing a new Overleaf project from local "
+                "files."
+            ),
         ),
     ] = False,
 ):
@@ -511,6 +559,7 @@ def sync(
                 verbose=verbose,
                 resolving_conflict=resolve,
                 print_info=typer.echo,
+                push_only=push_only,
             )
         except Exception as e:
             raise_error(str(e))

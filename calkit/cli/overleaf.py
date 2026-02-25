@@ -274,7 +274,6 @@ def import_publication(
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)
     # Check that we have a build stage
-    # TODO: Use Calkit pipeline for this
     typer.echo("Checking for a build stage in the pipeline")
     pipeline = ck_info.get("pipeline", {})
     stages = pipeline.get("stages", {})

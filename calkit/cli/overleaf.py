@@ -240,6 +240,7 @@ def import_publication(
     pdf_path = target_path.removesuffix(".tex") + ".pdf"  # type: ignore
     typer.echo(f"Using PDF path: {pdf_path}")
     tex_path = pdf_path.removesuffix(".pdf") + ".tex"
+    target_tex_path = Path(dest_dir, tex_path).as_posix()
     pub_path = Path(dest_dir, pdf_path).as_posix()
     pub_paths = [pub.get("path") for pub in pubs]
     if not overwrite and pub_path in pub_paths:
@@ -275,16 +276,17 @@ def import_publication(
     # Check that we have a build stage
     # TODO: Use Calkit pipeline for this
     typer.echo("Checking for a build stage in the pipeline")
+    pipeline = ck_info.get("pipeline", {})
+    stages = pipeline.get("stages", {})
     stage_name = None
-    if os.path.isfile("dvc.yaml"):
-        with open("dvc.yaml", "r") as f:
-            dvc_info = calkit.ryaml.load(f)
-        stages = dvc_info.get("stages", {})
-        for stage_name_i, stage in stages.items():
-            if pub_path in stage.get("outs", []):
-                stage_name = stage_name_i
-                typer.echo(f"Found build stage '{stage_name}' in pipeline")
-                break
+    for stage_name_i, stage in stages.items():
+        if (
+            stage.get("kind") == "latex"
+            and stage.get("target_path") == target_tex_path
+        ):
+            stage_name = stage_name_i
+            typer.echo(f"Found build stage '{stage_name}' in pipeline")
+            break
     else:
         stages = {}
     if stage_name is None:
@@ -298,7 +300,7 @@ def import_publication(
         new_latex_stage(
             name=stage_name,
             environment=tex_env_name,
-            target_path=Path(dest_dir, tex_path).as_posix(),
+            target_path=target_tex_path,
             inputs=[
                 os.path.join(dest_dir, p) for p in sync_paths + push_paths
             ],

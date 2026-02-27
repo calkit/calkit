@@ -2557,10 +2557,17 @@ def upgrade():
             "--upgrade",
             "calkit-python",
         ]
-    res = subprocess.run(cmd)
-    if res.returncode != 0:
-        raise_error("Upgrade failed")
-    typer.echo("Success!")
+    if _platform.system() == 'Windows':
+        subprocess.Popen(
+            cmd,
+            creationflags=subprocess.DETACHED_PROCESS
+        )
+        sys.exit(0)
+    else:
+        res = subprocess.run(cmd)
+        if res.returncode != 0:
+            raise_error("Upgrade failed")
+        typer.echo("Success!")
 
 
 @app.command(name="switch-branch")

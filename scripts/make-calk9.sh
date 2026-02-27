@@ -2,7 +2,7 @@
 set -e
 
 # Get version from VCS via hatch
-VERSION="$(uvx hatch version)"
+VERSION="$(uvx --with 'virtualenv<20.29.0' hatch version)"
 
 # Create calk9 directory structure
 rm -rf calk9

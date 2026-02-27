@@ -1235,6 +1235,9 @@ def run(
     with open(log_fpath, "r") as f:
         log_content = f.read()
         stage_run_info = _stage_run_info_from_log_content(log_content)
+    # Close logger file handler to prevent permissions issues if deleting
+    dvc.log.logger.removeHandler(file_handler)
+    file_handler.close()
     if save_logs:
         # Get Git status after running
         git_changed_files_after = calkit.git.get_changed_files(repo=repo)

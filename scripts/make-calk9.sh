@@ -11,8 +11,8 @@ mkdir -p calk9
 # Create pyproject.toml
 cat > calk9/pyproject.toml <<EOF
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "calk9"

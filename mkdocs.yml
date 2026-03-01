@@ -1,0 +1,102 @@
+site_name: Calkit
+repo_name: calkit/calkit
+repo_url: https://github.com/calkit/calkit.git
+theme:
+  name: material
+  logo: img/c-to-the-k-white.svg
+  features:
+    - content.code.copy
+    - navigation.footer
+    - navigation.indexes
+    - navigation.top
+  palette:
+    # Palette toggle for automatic mode
+    - media: "(prefers-color-scheme)"
+      primary: teal
+      accent: cyan
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      primary: teal
+      accent: cyan
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Quickstart: quickstart.md
+  - Cloud integration: cloud-integration.md
+  - Version control: version-control.md
+  - The calkit.yaml file: calkit-yaml.md
+  - Dependencies, configuration, and secrets: dependencies.md
+  - Environments: environments.md
+  - The pipeline:
+      - pipeline/index.md
+      - pipeline/running-and-logging.md
+      - pipeline/manual-steps.md
+      - pipeline/slurm.md
+  - Notebooks: notebooks.md
+  - JupyterLab: jupyterlab.md
+  - Datasets: datasets.md
+  - References: references.md
+  - Calculations: calculations.md
+  - Apps: apps.md
+  - Releasing/archiving projects and artifacts: releases.md
+  - Local server (GUI interaction): local-server.md
+  - Overleaf integration: overleaf.md
+  - Examples: examples.md
+  - Tutorials:
+      - tutorials/index.md
+      - tutorials/first-project.md
+      - tutorials/jupyterlab.md
+      - tutorials/existing-project.md
+      - tutorials/openfoam.md
+      - tutorials/adding-latex-pub-docker.md
+      - tutorials/latex-codespaces.md
+      - tutorials/notebook-pipeline.md
+      - tutorials/procedures.md
+      - tutorials/conda-envs.md
+      - tutorials/office.md
+      - tutorials/matlab.md
+      - tutorials/github-actions.md
+  - CLI reference: cli-reference.md
+  - Help and support: help.md
+  - Reproducibility: reproducibility.md
+  - Governance: governance.md
+markdown_extensions:
+  - admonition
+  - attr_list
+  - pymdownx.blocks.caption
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      # Make exceptions to highlighting of code:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:mermaid2.fence_mermaid_custom
+plugins:
+  - search
+  - mermaid2
+  - glightbox
+
+extra:
+  analytics:
+    provider: google
+    property: G-B87E6N95DH

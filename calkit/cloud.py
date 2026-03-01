@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import os
+import warnings
 from functools import partial
 from typing import Literal
 
 import requests
+from requests.exceptions import HTTPError
 
 from . import config
 
@@ -35,12 +36,16 @@ def get_token() -> str:
         _tokens[get_base_url()] = token
     # TODO: Check for expiration
     if token is None:
+        warnings.warn("No token found; attempting email+password auth")
         return auth()
     return token
 
 
-def get_headers(headers: dict | None = None) -> dict:
-    base_headers = {"Authorization": f"Bearer {get_token()}"}
+def get_headers(headers: dict | None = None, auth: bool = True) -> dict:
+    if auth:
+        base_headers = {"Authorization": f"Bearer {get_token()}"}
+    else:
+        base_headers = {}
     if headers is not None:
         return base_headers | headers
     else:
@@ -50,10 +55,12 @@ def get_headers(headers: dict | None = None) -> dict:
 def auth() -> str:
     """Authenticate with the server and save a token."""
     cfg = config.read()
+    if cfg.email is None or cfg.password is None:
+        raise ValueError("Config is missing email or password")
     base_url = get_base_url()
     resp = requests.post(
         base_url + "/login/access-token",
-        data=dict(username=cfg.username, password=cfg.password),
+        data=dict(username=cfg.email, password=cfg.password),
     )
     token = resp.json()["access_token"]
     _tokens[base_url] = token
@@ -68,6 +75,7 @@ def _request(
     data: dict | None = None,
     headers: dict | None = None,
     as_json=True,
+    auth: bool = True,
     **kwargs,
 ):
     func = getattr(requests, kind)
@@ -76,10 +84,17 @@ def _request(
         params=params,
         json=json,
         data=data,
-        headers=get_headers(headers),
+        headers=get_headers(headers, auth=auth),
         **kwargs,
     )
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except HTTPError as e:
+        try:
+            detail = resp.json()["detail"]
+        except Exception:
+            raise e
+        raise HTTPError(f"{resp.status_code}: {detail}")
     if as_json:
         return resp.json()
     else:

@@ -1,0 +1,843 @@
+"""Pipeline models."""
+
+from __future__ import annotations
+
+import base64
+import json
+from pathlib import Path
+from typing import Any, Literal
+
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
+from typing_extensions import Annotated
+
+from calkit.models.io import InputsFromStageOutputs, PathOutput
+from calkit.models.iteration import (
+    ExpandedParametersType,
+    ParameterIteration,
+    ParametersType,
+    RangeIteration,
+)
+from calkit.notebooks import (
+    get_cleaned_notebook_path,
+    get_executed_notebook_path,
+)
+
+
+def _check_path_relative_and_child_of_cwd(s: str) -> str:
+    p = Path(s)
+    # Enforce that the path is relative
+    if p.is_absolute():
+        raise ValueError(f"Path must be relative: {p}")
+    # Enforce that the path is a child of the (resolved) CWD
+    cwd = Path.cwd().resolve()
+    # Resolve the path relative to the resolved CWD to get a full path for
+    # comparison
+    absolute_path = p.resolve(strict=False)
+    # Check if the absolute path starts with the resolved CWD, ensuring it's a
+    # child
+    try:
+        absolute_path.relative_to(cwd)
+    except ValueError:
+        raise ValueError(
+            f"Path is not a child of the current working directory: {p}"
+        )
+    return p.as_posix()
+
+
+RelativeChildPathString = Annotated[
+    str, AfterValidator(_check_path_relative_and_child_of_cwd)
+]
+
+
+class StageIteration(BaseModel):
+    """A model for the ``iterate_over`` key in a stage definition.
+
+    If ``arg_name`` is a list, ``values`` also must be a list of lists with
+    each sublist the length of ``arg_name``.
+    """
+
+    arg_name: str | list[str]
+    values: list[
+        int
+        | float
+        | str
+        | RangeIteration
+        | ParameterIteration
+        | list[int | float | str]
+    ]
+
+    @field_validator("values")
+    @classmethod
+    def validate_values_structure(cls, v, info):
+        """Validate that values are structured correctly based on arg_name."""
+        arg_name = info.data.get("arg_name")
+        # If arg_name is a list, check that values contains lists of the
+        # correct length
+        if isinstance(arg_name, list):
+            expected_length = len(arg_name)
+            for i, value in enumerate(v):
+                # TODO: Support RangeIteration and ParameterIteration
+                if isinstance(value, (RangeIteration, ParameterIteration)):
+                    raise ValueError(
+                        "RangeIteration and ParameterIteration are not "
+                        "allowed when arg_name is a list"
+                    )
+                # Check if the value is a list and has the correct length
+                if not isinstance(value, list):
+                    raise ValueError(
+                        f"When arg_name is a list, all values must be lists; "
+                        f"Value at index {i} is {type(value).__name__}"
+                    )
+                if len(value) != expected_length:
+                    raise ValueError(
+                        f"When arg_name has {expected_length} elements, "
+                        f"each value list must have {expected_length} "
+                        f"elements;  Value at index {i} has {len(value)} "
+                        "elements"
+                    )
+        return v
+
+    def expand_values(
+        self, params: ParametersType | ExpandedParametersType
+    ) -> list[int | float | str | dict[str, int | float | str]]:
+        vals = []
+        if isinstance(self.arg_name, list):
+            # Expand into a list of dictionaries, in which case the DVC arg
+            # name must be auto-generated
+            for vals_list in self.values:
+                if not isinstance(vals_list, list):
+                    raise ValueError(
+                        "Expected a list for vals_list, got "
+                        f"{type(vals_list).__name__}"
+                    )
+                v = {}
+                for n, name in enumerate(self.arg_name):
+                    v[name] = vals_list[n]
+                vals.append(v)
+        else:
+            # arg_name is a string
+            for vals_i in self.values:
+                if isinstance(vals_i, ParameterIteration):
+                    vals += vals_i.values_from_params(params)
+                elif isinstance(vals_i, RangeIteration):
+                    vals += vals_i.values
+                else:
+                    vals.append(vals_i)
+        return vals
+
+
+class Stage(BaseModel):
+    """A stage in the pipeline."""
+
+    name: str | None = None
+    kind: Literal[
+        "python-script",
+        "latex",
+        "matlab-script",
+        "matlab-command",
+        "docker-command",
+        "shell-command",
+        "shell-script",
+        "jupyter-notebook",
+        "r-script",
+        "julia-script",
+        "julia-command",
+        "word-to-pdf",
+        "map-paths",
+    ]
+    environment: str
+    wdir: str | None = None
+    # TODO: Support other input types
+    inputs: list[str | InputsFromStageOutputs] = []
+    outputs: list[str | PathOutput] = []  # TODO: Support database outputs
+    always_run: bool = False
+    iterate_over: list[StageIteration] | None = None
+    description: str | None = None
+    # Do not allow extra keys
+    model_config = ConfigDict(extra="forbid")
+
+    @property
+    def dvc_cmd(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        deps = []
+        for i in self.inputs:
+            if isinstance(i, str) and i not in deps:
+                deps.append(i)
+        return deps
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs = []
+        for out in self.outputs:
+            if isinstance(out, str):
+                outs.append(out)
+            elif isinstance(out, PathOutput):
+                outs.append(
+                    {
+                        out.path: dict(
+                            cache=True if out.storage == "dvc" else False,
+                            persist=not out.delete_before_run,
+                        )
+                    }
+                )
+        return outs
+
+    @property
+    def xenv_cmd(self) -> str:
+        if self.environment == "_system":
+            return ""
+        return f"calkit xenv -n {self.environment} --no-check --"
+
+    def to_dvc(self) -> dict:
+        """Convert to a DVC stage.
+
+        Note that this does not handle ``from_stage_outputs`` input types,
+        since that requires the entire pipeline.
+        """
+        cmd = self.dvc_cmd
+        deps = self.dvc_deps
+        for i in self.inputs:
+            if isinstance(i, str) and i not in deps:
+                deps.append(i)
+        outs = self.dvc_outs
+        stage = {"cmd": cmd, "deps": deps, "outs": outs}
+        if self.wdir is not None:
+            stage["wdir"] = self.wdir
+        if self.always_run:
+            stage["always_changed"] = True
+        return stage
+
+
+class PythonScriptStage(Stage):
+    kind: Literal["python-script"] = "python-script"
+    script_path: RelativeChildPathString
+    args: list[str] = []
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f"{self.xenv_cmd} python {self.script_path}"
+        for arg in self.args:
+            cmd += f" {arg}"
+        return cmd
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.script_path] + super().dvc_deps
+
+
+class MapPathsStage(Stage):
+    class CopyFileToFile(BaseModel):
+        kind: Literal["file-to-file"] = "file-to-file"
+        src: str
+        dest: str
+
+        @property
+        def arg(self) -> str:
+            return f"--{self.kind} '{self.src}->{self.dest}'"
+
+        @property
+        def out_path(self) -> str:
+            return self.dest
+
+    class CopyFileToDir(BaseModel):
+        kind: Literal["file-to-dir"] = "file-to-dir"
+        src: str
+        dest: str
+
+        @property
+        def arg(self) -> str:
+            return f"--{self.kind} '{self.src}->{self.dest}'"
+
+        @property
+        def out_path(self) -> str:
+            return Path(self.dest, Path(self.src).name).as_posix()
+
+    class DirToDirMerge(BaseModel):
+        kind: Literal["dir-to-dir-merge"] = "dir-to-dir-merge"
+        src: str
+        dest: str
+
+        @property
+        def arg(self) -> str:
+            return f"--{self.kind} '{self.src}->{self.dest}'"
+
+        @property
+        def out_path(self) -> str:
+            return self.dest
+
+    class DirToDirReplace(BaseModel):
+        kind: Literal["dir-to-dir-replace"] = "dir-to-dir-replace"
+        src: str
+        dest: str
+
+        @property
+        def arg(self) -> str:
+            return f"--{self.kind} '{self.src}->{self.dest}'"
+
+        @property
+        def out_path(self) -> str:
+            return self.dest
+
+    kind: Literal["map-paths"] = "map-paths"
+    environment: str = "_system"
+    paths: list[
+        Annotated[
+            (CopyFileToFile | CopyFileToDir | DirToDirMerge | DirToDirReplace),
+            Discriminator("kind"),
+        ]
+    ]
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = "calkit map-paths"
+        for path in self.paths:
+            cmd += f" {path.arg}"
+        return cmd
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        deps = []
+        for path in self.paths:
+            deps.append(path.src)
+        return deps + super().dvc_deps
+
+    @property
+    def dvc_outs(self) -> list[dict]:
+        """All DVC outs should not be cached, since they are just copies."""
+        outs = []
+        for path in self.paths:
+            outs.append({path.out_path: {"cache": False, "persist": True}})
+        return outs + super().dvc_outs
+
+
+class LatexStage(Stage):
+    kind: Literal["latex"] = "latex"
+    target_path: str
+    latexmkrc_path: str | None = None
+    pdf_storage: Literal["git", "dvc"] | None = "dvc"
+    verbose: bool = False
+    force: bool = False
+    synctex: bool = True
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f"calkit latex build -e {self.environment} --no-check"
+        if self.latexmkrc_path is not None:
+            cmd += f" -r {self.latexmkrc_path}"
+        if self.verbose:
+            cmd += " --verbose"
+        if self.force:
+            cmd += " -f"
+        if not self.synctex:
+            cmd += " --no-synctex"
+        cmd += f" {self.target_path}"
+        return cmd
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        deps = [self.target_path] + super().dvc_deps
+        if self.latexmkrc_path is not None:
+            deps.append(self.latexmkrc_path)
+        return deps
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs = super().dvc_outs
+        out_path = Path(
+            self.target_path.removesuffix(".tex") + ".pdf"
+        ).as_posix()
+        # If the PDF output is already in outs use that
+        # Otherwise, create a DVC output from pdf_storage and add it to outs
+        out_paths = []
+        for out in outs:
+            if isinstance(out, str):
+                out_paths.append(out)
+            elif isinstance(out, dict):
+                out_paths.append(list(out.keys())[0])
+        if out_path in out_paths:
+            return outs
+        if self.pdf_storage == "dvc":
+            out_dict = {out_path: {"cache": True}}
+        else:
+            out_dict = {out_path: {"cache": False}}
+        outs.append(out_dict)
+        return outs
+
+
+class JsonToLatexStage(Stage):
+    kind: Literal["json-to-latex"] = "json-to-latex"
+    environment: str = "_system"
+    command_name: str | None = None
+    format: dict[str, str] | None = None
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = "calkit latex from-json"
+        for input_path in self.inputs:
+            cmd += f" '{input_path}'"
+        for out in self.outputs:
+            if isinstance(out, str):
+                out_path = out
+            elif isinstance(out, PathOutput):
+                out_path = out.path
+            cmd += f" --output '{out_path}'"
+        if self.command_name is not None:
+            cmd += f" --command {self.command_name}"
+        if self.format is not None:
+            fmt_json = json.dumps(self.format)
+            cmd += f" --format-json '{fmt_json}'"
+        return cmd
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        """DVC outs should be stored with Git by default."""
+        outs = []
+        for out in self.outputs:
+            if isinstance(out, str):
+                outs.append({out: dict(cache=False, persist=False)})
+            elif isinstance(out, PathOutput):
+                outs.append(
+                    {
+                        out.path: dict(
+                            cache=True if out.storage == "dvc" else False,
+                            persist=not out.delete_before_run,
+                        )
+                    }
+                )
+        return outs
+
+
+class MatlabScriptStage(Stage):
+    kind: Literal["matlab-script"]
+    script_path: RelativeChildPathString
+    matlab_path: RelativeChildPathString | None = None
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.script_path] + super().dvc_deps
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = self.xenv_cmd
+        if self.environment == "_system":
+            cmd += "matlab -noFigureWindows -batch"
+        matlab_cmd = ""
+        if self.matlab_path is not None:
+            matlab_cmd += f"addpath(genpath('{self.matlab_path}')); "
+        matlab_cmd += f"run('{self.script_path}');"
+        cmd += f' "{matlab_cmd}"'
+        return cmd
+
+
+class MatlabCommandStage(Stage):
+    kind: Literal["matlab-command"] = "matlab-command"
+    command: str
+
+    @property
+    def dvc_cmd(self) -> str:
+        # We need to escape quotes in the command
+        matlab_cmd = self.command.replace('"', '\\"')
+        cmd = self.xenv_cmd
+        if self.environment == "_system":
+            cmd += "matlab -noFigureWindows -batch"
+        cmd += f' "{matlab_cmd}"'
+        return cmd
+
+
+class ShellCommandStage(Stage):
+    kind: Literal["shell-command"]
+    command: str
+    shell: Literal["sh", "bash", "zsh"] = "bash"
+
+    @property
+    def dvc_cmd(self) -> str:
+        shell_cmd = self.command.replace('"', '\\"')
+        cmd = self.xenv_cmd
+        if self.shell == "zsh":
+            norc_args = "-f"
+        else:
+            norc_args = "--noprofile --norc"
+        cmd += f' {self.shell} {norc_args} -c "{shell_cmd}"'
+        return cmd
+
+
+class ShellScriptStage(Stage):
+    kind: Literal["shell-script"]
+    script_path: RelativeChildPathString
+    args: list[str] = []
+    shell: Literal["sh", "bash", "zsh"] = "bash"
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.script_path] + super().dvc_deps
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = self.xenv_cmd
+        if self.shell == "zsh":
+            norc_args = "-f"
+        else:
+            norc_args = "--noprofile --norc"
+        cmd += f" {self.shell} {norc_args} {self.script_path}"
+        for arg in self.args:
+            cmd += f" {arg}"
+        return cmd
+
+
+class DockerCommandStage(Stage):
+    kind: Literal["docker-command"]
+    command: str
+
+    @property
+    def dvc_cmd(self) -> str:
+        return self.command
+
+
+class RScriptStage(Stage):
+    kind: Literal["r-script"]
+    script_path: RelativeChildPathString
+    args: list[str] = []
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.script_path] + super().dvc_deps
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = (
+            f"calkit xenv -n {self.environment} -- Rscript {self.script_path}"
+        )
+        for arg in self.args:
+            cmd += f" {arg}"
+        return cmd
+
+
+class JuliaScriptStage(Stage):
+    kind: Literal["julia-script"] = "julia-script"
+    script_path: RelativeChildPathString
+    args: list[str] = []
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f'{self.xenv_cmd} "{self.script_path}"'
+        for arg in self.args:
+            cmd += f" {arg}"
+        return cmd
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.script_path] + super().dvc_deps
+
+
+class JuliaCommandStage(Stage):
+    kind: Literal["julia-command"] = "julia-command"
+    command: str
+
+    @property
+    def dvc_cmd(self) -> str:
+        # We need to escape quotes in the command
+        julia_cmd = self.command.replace('"', '\\"')
+        cmd = f'{self.xenv_cmd} -e "{julia_cmd}"'
+        return cmd
+
+
+class SBatchStage(Stage):
+    kind: Literal["sbatch"] = "sbatch"
+    script_path: RelativeChildPathString
+    args: list[str] = []
+    sbatch_options: list[str] = []
+    log_path: str | None = None
+    log_storage: Literal["git", "dvc"] | None = "git"
+
+    @property
+    def log_output(self) -> PathOutput:
+        log_path = self.log_path
+        if log_path is None:
+            log_path = f".calkit/slurm/logs/{self.name}"
+            if self.iterate_over is not None:
+                arg_names = []
+                for item in self.iterate_over:
+                    if isinstance(item.arg_name, list):
+                        arg_names += item.arg_name
+                    else:
+                        arg_names.append(item.arg_name)
+                for arg_name in arg_names:
+                    log_path += f"/{{{arg_name}}}"
+            log_path += ".out"
+        return PathOutput(
+            path=log_path,
+            storage=self.log_storage,
+            delete_before_run=False,
+        )
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.script_path] + super().dvc_deps
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        # All outputs must be persistent, since ``calkit slurm batch``
+        # handles deletion
+        outs = super().dvc_outs
+        # Add log file output
+        log_path = self.log_output.path
+        if self.log_storage == "dvc":
+            outs.append({log_path: {"cache": True, "persist": True}})
+        else:
+            outs.append({log_path: {"cache": False, "persist": True}})
+        final_outs = []
+        for out in outs:
+            if isinstance(out, str):
+                final_outs.append({out: {"persist": True}})
+            elif isinstance(out, dict):
+                k = list(out.keys())[0]
+                v = out[k]
+                v["persist"] = True
+                final_outs.append({k: v})
+        return final_outs
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f"calkit slurm batch --name {self.name}"
+        if self.iterate_over is not None:
+            arg_names = []
+            for item in self.iterate_over:
+                if isinstance(item.arg_name, list):
+                    arg_names += item.arg_name
+                else:
+                    arg_names.append(item.arg_name)
+            cmd += "@" + ",".join(
+                [f"{{{arg_name}}}" for arg_name in arg_names]
+            )
+        if self.environment != "_system":
+            cmd += f" --environment {self.environment}"
+        if self.log_path is not None:
+            cmd += f" --log-path '{self.log_path}'"
+        for dep in self.dvc_deps:
+            if dep != self.script_path:
+                cmd += f" --dep {dep}"
+        for out in self.outputs:
+            # Determine if this is a non-persistent output
+            if isinstance(out, str):
+                cmd += f" --out {out}"
+            elif isinstance(out, PathOutput) and out.delete_before_run:
+                cmd += f" --out {out.path}"
+        for opt in self.sbatch_options:
+            cmd += f" -s {opt}"
+        cmd += f" -- {self.script_path}"
+        for arg in self.args:
+            cmd += f" {arg}"
+        return cmd
+
+
+class JupyterNotebookStage(Stage):
+    """A stage that runs a Jupyter notebook.
+
+    Notebooks need to be cleaned of outputs so they can be used as DVC
+    dependencies. This means we will have two DVC stages:
+
+    1. Notebook cleaning.
+    2. Notebook running, depending on the cleaned notebook, and optionally
+       producing HTML output.
+
+    Alternatively, we could force the use of ``nbstripout`` so the cleaned
+    notebook is saved at the notebook path.
+
+    With this paradigm, we want to force users treat their notebooks as
+    needing to be run from top to bottom every time they change.
+    """
+
+    kind: Literal["jupyter-notebook"] = "jupyter-notebook"
+    notebook_path: str
+    cleaned_ipynb_storage: Literal["git", "dvc"] | None = None
+    executed_ipynb_storage: Literal["git", "dvc"] | None = "dvc"
+    html_storage: Literal["git", "dvc"] | None = "dvc"
+    parameters: dict[str, Any] = {}
+    language: Literal["python", "matlab", "julia"] | None = None
+
+    def update_parameters(self, params: dict) -> None:
+        """If we have any templated parameters, update those, e.g., from
+        project-level parameters.
+
+        This needs to happen before writing a DVC stage, so we can properly
+        create JSON for the notebook.
+        """
+        updated_params = {}
+        for k, v in self.parameters.items():
+            # If we have something like {var_name} in v, replace it with the
+            # value from params
+            if isinstance(v, str) and v.startswith("{") and v.endswith("}"):
+                var_name = v[1:-1]
+                if var_name in params:
+                    updated_params[k] = params[var_name]
+                else:
+                    updated_params[k] = v
+            else:
+                updated_params[k] = v
+            # Try parsing as a RangeIteration and expanding
+            try:
+                updated_params[k] = RangeIteration.model_validate(
+                    updated_params[k]
+                ).values
+            except ValidationError:
+                pass
+        self.parameters = updated_params
+
+    @property
+    def cleaned_notebook_path(self) -> str:
+        return get_cleaned_notebook_path(self.notebook_path, as_posix=True)
+
+    @property
+    def executed_notebook_path(self) -> str:
+        return get_executed_notebook_path(
+            self.notebook_path,
+            to="notebook",
+            as_posix=True,
+            parameters=self.parameters,
+        )
+
+    @property
+    def html_path(self) -> str:
+        return get_executed_notebook_path(
+            self.notebook_path,
+            to="html",
+            as_posix=True,
+            parameters=self.parameters,
+        )
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.cleaned_notebook_path] + super().dvc_deps
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f"calkit nb execute --environment {self.environment} --no-check"
+        if self.language is not None:
+            cmd += f" --language {self.language}"
+        if self.html_storage:
+            cmd += " --to html"
+        if self.parameters:
+            # If we have parameters, we need to pass them as JSON, escaping
+            # double quotes
+            params_json = json.dumps(self.parameters)
+            # Now base64 encode
+            params_base64 = base64.b64encode(
+                params_json.encode("utf-8")
+            ).decode("utf-8")
+            cmd += f' --params-base64 "{params_base64}"'
+        cmd += f' "{self.notebook_path}"'
+        return cmd
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs = super().dvc_outs
+        exec_nb_path = self.executed_notebook_path
+        if self.executed_ipynb_storage:
+            outs.append(
+                {exec_nb_path: {"cache": self.executed_ipynb_storage == "dvc"}}
+            )
+        if self.html_storage:
+            html_path = self.html_path
+            outs.append(
+                {html_path: {"cache": self.html_storage == "dvc"}},
+            )
+        return outs
+
+    @property
+    def notebook_outputs(self) -> list[PathOutput]:
+        """Return a list of special notebook outputs so their storage can be
+        respected.
+        """
+        return [
+            PathOutput(
+                path=self.cleaned_notebook_path,
+                storage=self.cleaned_ipynb_storage,
+            ),
+            PathOutput(
+                path=self.executed_notebook_path,
+                storage=self.executed_ipynb_storage,
+            ),
+            PathOutput(path=self.html_path, storage=self.html_storage),
+        ]
+
+
+class WordToPdfStage(Stage):
+    kind: Literal["word-to-pdf"] = "word-to-pdf"
+    word_doc_path: str
+    environment: str = "_system"
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.word_doc_path] + super().dvc_deps
+
+    @property
+    def out_path(self) -> str:
+        return Path(
+            self.word_doc_path.removesuffix(".docx") + ".pdf"
+        ).as_posix()
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs = super().dvc_outs
+        out_path = self.out_path
+        if out_path not in outs:
+            outs.append(out_path)
+        return outs
+
+    @property
+    def dvc_cmd(self) -> str:
+        return (
+            f'calkit office word-to-pdf "{self.word_doc_path}" '
+            f'-o "{self.out_path}"'
+        )
+
+
+class Pipeline(BaseModel):
+    stages: dict[
+        str,
+        Annotated[
+            (
+                PythonScriptStage
+                | LatexStage
+                | JsonToLatexStage
+                | MatlabScriptStage
+                | MatlabCommandStage
+                | ShellCommandStage
+                | ShellScriptStage
+                | DockerCommandStage
+                | RScriptStage
+                | WordToPdfStage
+                | JupyterNotebookStage
+                | JuliaScriptStage
+                | JuliaCommandStage
+                | SBatchStage
+                | MapPathsStage
+            ),
+            Discriminator("kind"),
+        ],
+    ]
+    # Do not allow extra keys
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def set_stage_names(self):
+        """Set the name field of each stage to match its key in the dict."""
+        for stage_name, stage in self.stages.items():
+            if stage.name is not None and stage.name != stage_name:
+                raise ValueError(
+                    f"Stage name '{stage.name}' does not match key "
+                    f"'{stage_name}'"
+                )
+            stage.name = stage_name
+        return self

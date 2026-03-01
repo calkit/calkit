@@ -1,0 +1,123 @@
+name: Run tests
+
+on: pull_request
+
+env:
+  CALKIT_TEST_ZENODO_TOKEN: ${{ secrets.CALKIT_ZENODO_TOKEN }}
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure Git Credentials
+        run: |
+          git config --global user.name github-actions[bot]
+          git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git config --global init.defaultBranch main
+      - name: Configure Git push behavior
+        run: git config --global push.autoSetupRemote true
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+      - name: Setup Miniforge
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          auto-activate-base: true
+          conda-remove-defaults: true
+      - name: Install Pixi
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+      - name: Install Juliaup
+        uses: julia-actions/install-juliaup@v2
+        with:
+          channel: "1" # Installs the latest v1 Julia version via Juliaup
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: latest
+      - name: Run tests
+        run: |
+          source ~/.bashrc
+          pixi --version
+          conda --version
+          docker --version
+          juliaup --version
+          Rscript --version
+          uv --version
+          uv run pytest -n 4 --durations=10
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    # TODO: Get this working!
+    if: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure Git Credentials
+        run: |
+          git config --global user.name github-actions[bot]
+          git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git config --global init.defaultBranch main
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+      - name: Setup Miniforge
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          auto-activate-base: true
+          conda-remove-defaults: true
+      - name: Install Pixi
+        shell: bash
+        run: |
+          curl -fsSL https://pixi.sh/install.sh | bash
+      - name: Install compatible libsqlite
+        shell: bash -el {0}
+        run: |
+          source ~/.bashrc
+          conda activate base
+          conda install -c conda-forge libsqlite=3.48.0
+      - name: Run tests
+        shell: bash -el {0}
+        run: |
+          source ~/.bashrc
+          pixi --version
+          conda --version
+          docker --version
+          conda activate base
+          make test
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install JupyterLab extension dependencies
+        run: uv run jlpm install
+      - name: Build JupyterLab extension
+        run: uv run jlpm build:prod
+      - name: Run JupyterLab extension front end unit tests
+        run: uv run jlpm test
+      - name: Install UI test dependencies
+        run: |
+          cd ui-tests
+          uv run jlpm install
+          uv run jlpm playwright install
+      - name: Run UI tests
+        run: |
+          cd ui-tests
+          uv run jlpm playwright test -u --reporter=list
+      - name: Upload Playwright test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: ui-tests/test-results/
+          retention-days: 7

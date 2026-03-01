@@ -1,0 +1,819 @@
+import React, { useState, useRef, useEffect } from "react";
+import { Dialog } from "@jupyterlab/apputils";
+import { ReactWidget } from "@jupyterlab/apputils";
+import { isFeatureEnabled } from "../feature-flags";
+
+/**
+ * Predefined package groups
+ */
+const PACKAGE_GROUPS: Record<string, string[]> = {
+  PyData: [
+    "numpy",
+    "scipy",
+    "pandas",
+    "polars",
+    "pyarrow",
+    "matplotlib",
+    "statsmodels",
+    "scikit-learn",
+    "seaborn",
+    "duckdb",
+    "plotly",
+    "altair",
+    "bokeh",
+  ],
+};
+
+/**
+ * Props for the environment editor dialog body
+ */
+interface IEnvironmentEditorProps {
+  initialName?: string;
+  initialKind?: string;
+  initialPath?: string;
+  initialPrefix?: string;
+  initialPackages?: string[];
+  initialPython?: string;
+  mode: "create" | "edit";
+  existingEnvironment?: {
+    name: string;
+    kind: string;
+    path: string;
+    prefix?: string;
+    packages: string[];
+    python?: string;
+  };
+}
+
+/**
+ * The body component for the environment editor dialog
+ */
+const EnvironmentEditorBody: React.FC<
+  IEnvironmentEditorProps & {
+    onUpdate: (data: {
+      name: string;
+      kind: string;
+      path: string;
+      prefix?: string;
+      packages: string[];
+      python?: string;
+    }) => void;
+    onValidityChange?: (isValid: boolean) => void;
+  }
+> = ({
+  initialName = "",
+  initialKind = "uv-venv",
+  initialPath = "",
+  initialPrefix = "",
+  initialPackages = [],
+  initialPython = "3.14",
+  mode,
+  onUpdate,
+  onValidityChange,
+}) => {
+  // Default paths based on environment kind
+  const getDefaultPath = React.useCallback(
+    (kind: string, envName: string = "") => {
+      switch (kind) {
+        case "uv-venv":
+        case "venv":
+          return `.calkit/envs/${envName || "{name}"}/requirements.txt`;
+        case "conda":
+          return "environment.yml";
+        case "pixi":
+          return "pixi.toml";
+        case "julia":
+          return "project/Project.toml";
+        default:
+          return "";
+      }
+    },
+    [],
+  );
+
+  // Default prefix for venv-based environments
+  const getDefaultPrefix = React.useCallback(
+    (kind: string, envName: string = "") => {
+      switch (kind) {
+        case "uv-venv":
+        case "venv":
+          return `.calkit/envs/${envName || "{name}"}/.venv`;
+        default:
+          return "";
+      }
+    },
+    [],
+  );
+
+  const [name, setName] = useState(initialName);
+  const [kind, setKind] = useState(initialKind);
+  const [path, setPath] = useState(
+    initialPath || getDefaultPath(initialKind, initialName),
+  );
+  const [prefix, setPrefix] = useState(
+    initialPrefix || getDefaultPrefix(initialKind, initialName),
+  );
+  const [python, setPython] = useState(initialPython);
+  // For uv-venv and venv, ensure ipykernel is included from the start
+  const [packages, setPackages] = useState<string[]>(() => {
+    const pkgs = initialPackages || [];
+    if (
+      (initialKind === "uv-venv" || initialKind === "venv") &&
+      !pkgs.includes("ipykernel")
+    ) {
+      return ["ipykernel", ...pkgs];
+    }
+    return pkgs;
+  });
+  const [newPackage, setNewPackage] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  // Only mark as user-edited in edit mode, not create mode
+  const [userEditedPath, setUserEditedPath] = useState(
+    mode === "edit" && !!initialPath,
+  );
+  const [userEditedPrefix, setUserEditedPrefix] = useState(
+    mode === "edit" && !!initialPrefix,
+  );
+  const packageInputRef = useRef<HTMLInputElement>(null);
+
+  // Handle Enter key on package input to add package instead of closing dialog
+  useEffect(() => {
+    const handlePackageInputKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.key === "Enter" &&
+        packageInputRef.current === document.activeElement
+      ) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        handleAddPackage();
+      }
+    };
+
+    // Use capture phase to intercept before dialog handlers
+    document.addEventListener("keydown", handlePackageInputKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", handlePackageInputKeyDown, true);
+    };
+  }, [newPackage, packages]);
+
+  // Validate kebab-case name
+  const isValidKebabCase = (str: string): boolean => {
+    if (!str.trim()) {
+      return false;
+    }
+    // Must be lowercase letters, numbers, and hyphens only
+    // Cannot start or end with hyphen
+    const kebabCaseRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+    return kebabCaseRegex.test(str);
+  };
+
+  // Check name validity and notify parent (no inline error display)
+  React.useEffect(() => {
+    const isValid = !!name.trim() && isValidKebabCase(name);
+    if (onValidityChange) {
+      onValidityChange(isValid);
+    }
+  }, [name, onValidityChange]);
+
+  React.useEffect(() => {
+    const data: any = { name, kind, path, packages };
+    if (kind === "uv-venv" || kind === "venv") {
+      data.prefix = prefix;
+      data.python = python;
+      // Ensure ipykernel is always in packages for venv-based environments
+      if (!packages.includes("ipykernel")) {
+        data.packages = [...packages, "ipykernel"];
+      }
+    }
+    onUpdate(data);
+  }, [name, kind, path, prefix, packages, python, onUpdate]);
+
+  // Update path and prefix when name changes (in create mode)
+  React.useEffect(() => {
+    if (mode === "create") {
+      if (!userEditedPath) {
+        setPath(getDefaultPath(kind, name));
+      }
+      if (!userEditedPrefix) {
+        setPrefix(getDefaultPrefix(kind, name));
+      }
+    }
+  }, [
+    name,
+    kind,
+    mode,
+    userEditedPath,
+    userEditedPrefix,
+    getDefaultPath,
+    getDefaultPrefix,
+  ]);
+
+  // Update path when kind changes (in create mode)
+  const handleKindChange = (newKind: string) => {
+    setKind(newKind);
+    if (mode === "create") {
+      if (!userEditedPath) {
+        setPath(getDefaultPath(newKind, name));
+      }
+      if (!userEditedPrefix) {
+        setPrefix(getDefaultPrefix(newKind, name));
+      }
+    }
+  };
+
+  const handleAddPackage = () => {
+    if (newPackage.trim() && !packages.includes(newPackage.trim())) {
+      setPackages([...packages, newPackage.trim()]);
+      setNewPackage("");
+    }
+  };
+
+  const handleRemovePackage = (pkg: string) => {
+    setPackages(packages.filter((p) => p !== pkg));
+  };
+
+  const handleSelectPackageGroup = (groupName: string) => {
+    const groupPackages = PACKAGE_GROUPS[groupName] || [];
+    // Merge with existing packages, ensuring no duplicates and ipykernel is included
+    const merged = new Set([
+      ...packages,
+      ...groupPackages,
+      ...(kind === "uv-venv" ||
+      kind === "venv" ||
+      kind === "conda" ||
+      kind === "julia"
+        ? ["ipykernel"]
+        : []),
+    ]);
+    setPackages(Array.from(merged).sort());
+  };
+
+  const showPackages =
+    kind === "uv-venv" ||
+    kind === "venv" ||
+    kind === "julia" ||
+    kind === "conda";
+
+  return (
+    <div className="calkit-env-editor">
+      <div className="calkit-env-editor-field">
+        <label htmlFor="env-name">Name:</label>
+        <input
+          id="env-name"
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          disabled={mode === "edit"}
+          placeholder="ex: analysis"
+          autoFocus={mode === "create"}
+          autoComplete="off"
+        />
+      </div>
+      <div className="calkit-env-editor-field">
+        <label htmlFor="env-kind">Kind:</label>
+        <select
+          id="env-kind"
+          value={kind}
+          onChange={(e) => handleKindChange(e.target.value)}
+        >
+          <option value="uv-venv">uv-venv (Python)</option>
+          <option value="venv">venv (Python)</option>
+          {isFeatureEnabled("advancedEnvironments") && (
+            <>
+              <option value="julia">Julia</option>
+              <option value="conda">Conda</option>
+              <option value="docker">Docker</option>
+            </>
+          )}
+        </select>
+      </div>
+      {showPackages && (
+        <div className="calkit-env-editor-field">
+          <label>Packages:</label>
+          <div className="calkit-env-packages-list">
+            {packages.map((pkg) => (
+              <div key={pkg} className="calkit-env-package-item">
+                <span className="calkit-env-package-name">{pkg}</span>
+                <button
+                  type="button"
+                  className="calkit-env-package-remove"
+                  onClick={() => handleRemovePackage(pkg)}
+                  title="Remove package"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="calkit-env-package-input-container">
+            <input
+              ref={packageInputRef}
+              type="text"
+              value={newPackage}
+              onChange={(e) => setNewPackage(e.target.value)}
+              placeholder="Add package..."
+              className="calkit-env-package-add-input"
+              autoComplete="off"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                handleAddPackage();
+                packageInputRef.current?.focus();
+              }}
+              className="calkit-env-package-add-button"
+              disabled={!newPackage.trim()}
+            >
+              +
+            </button>
+          </div>
+        </div>
+      )}
+      {/* Package groups */}
+      {showPackages && (
+        <div className="calkit-env-editor-field">
+          <label>Package groups:</label>
+          <div className="calkit-env-package-groups">
+            {Object.keys(PACKAGE_GROUPS).map((groupName) => (
+              <button
+                key={groupName}
+                type="button"
+                className="calkit-env-package-group-btn"
+                onClick={() => handleSelectPackageGroup(groupName)}
+                title={`Add packages from ${groupName}: ${PACKAGE_GROUPS[
+                  groupName
+                ].join(", ")}`}
+              >
+                + {groupName}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* Advanced section for venv-based environments */}
+      {(kind === "uv-venv" || kind === "venv") && (
+        <div className="calkit-env-editor-advanced">
+          <div
+            className="calkit-env-editor-advanced-toggle"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+          >
+            <span className="calkit-env-editor-chevron">
+              {showAdvanced ? "▼" : "▶"}
+            </span>
+            <span>Advanced</span>
+          </div>
+          {showAdvanced && (
+            <div className="calkit-env-editor-advanced-fields">
+              <div className="calkit-env-editor-field">
+                <label htmlFor="env-python">Python version:</label>
+                <input
+                  id="env-python"
+                  type="text"
+                  value={python}
+                  onChange={(e) => setPython(e.target.value)}
+                  placeholder="3.14"
+                  title="Python version for the environment"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="calkit-env-editor-field">
+                <label htmlFor="env-path">Path:</label>
+                <input
+                  id="env-path"
+                  type="text"
+                  value={path}
+                  onChange={(e) => {
+                    setPath(e.target.value);
+                    setUserEditedPath(true);
+                  }}
+                  placeholder={getDefaultPath(kind, name)}
+                  title="Path to requirements/environment file"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="calkit-env-editor-field">
+                <label htmlFor="env-prefix">Virtual environment prefix:</label>
+                <input
+                  id="env-prefix"
+                  type="text"
+                  value={prefix}
+                  onChange={(e) => {
+                    setPrefix(e.target.value);
+                    setUserEditedPrefix(true);
+                  }}
+                  placeholder={getDefaultPrefix(kind, name)}
+                  title="Path to virtual environment directory"
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * A ReactWidget that wraps the environment editor dialog body
+ */
+class EnvironmentEditorWidget extends ReactWidget {
+  private data: {
+    name: string;
+    kind: string;
+    path: string;
+    prefix?: string;
+    packages: string[];
+    python?: string;
+  };
+  private initialData: {
+    name: string;
+    kind: string;
+    path: string;
+    prefix?: string;
+    packages: string[];
+    python?: string;
+  };
+  private mode: "create" | "edit";
+  private isValid: boolean = false;
+  public onValidityChange?: (isValid: boolean) => void;
+
+  constructor(options: IEnvironmentEditorProps) {
+    super();
+    this.addClass("calkit-environment-editor-dialog");
+    this.mode = options.mode;
+
+    const getDefaultPath = (kind: string, envName: string = "") => {
+      switch (kind) {
+        case "uv-venv":
+        case "venv":
+          return `.calkit/envs/${envName || "{name}"}/requirements.txt`;
+        case "conda":
+          return "environment.yml";
+        case "pixi":
+          return "pixi.toml";
+        case "julia":
+          return "project/Project.toml";
+        default:
+          return "";
+      }
+    };
+    const getDefaultPrefix = (kind: string, envName: string = "") => {
+      switch (kind) {
+        case "uv-venv":
+        case "venv":
+          return `.calkit/envs/${envName || "{name}"}/.venv`;
+        default:
+          return "";
+      }
+    };
+    const envName = options.initialName || "";
+    const kind = options.initialKind || "uv-venv";
+    const defaultPath = getDefaultPath(kind, envName);
+    const defaultPrefix = getDefaultPrefix(kind, envName);
+    const initPath = options.initialPath || defaultPath;
+    const initPrefix =
+      options.initialPrefix ||
+      (kind === "uv-venv" || kind === "venv" ? defaultPrefix : "");
+    this.initialData = {
+      name: envName,
+      kind,
+      path: initPath,
+      prefix: initPrefix,
+      packages: options.initialPackages || [],
+      python: options.initialPython || "3.14",
+    };
+    this.data = { ...this.initialData };
+  }
+
+  render(): React.ReactElement<any> {
+    return (
+      <EnvironmentEditorBody
+        initialName={this.data.name}
+        initialKind={this.data.kind}
+        initialPath={this.data.path}
+        initialPrefix={this.data.prefix}
+        initialPackages={this.data.packages}
+        initialPython={this.data.python}
+        mode={this.mode}
+        onUpdate={(data) => {
+          this.data = data;
+        }}
+        onValidityChange={(isValid) => {
+          this.isValid = isValid;
+          if (this.onValidityChange) {
+            this.onValidityChange(isValid);
+          }
+        }}
+      />
+    );
+  }
+
+  getData(): {
+    name: string;
+    kind: string;
+    path: string;
+    prefix?: string;
+    packages: string[];
+    python?: string;
+  } {
+    return this.data;
+  }
+
+  getInitialData(): {
+    name: string;
+    kind: string;
+    path: string;
+    prefix?: string;
+    packages: string[];
+    python?: string;
+  } {
+    return this.initialData;
+  }
+
+  getIsValid(): boolean {
+    return this.isValid;
+  }
+}
+
+/**
+ * Show a dialog to create or edit an environment
+ */
+export async function showEnvironmentEditor(
+  options: IEnvironmentEditorProps & {
+    onSubmit: (
+      data: {
+        name: string;
+        kind: string;
+        path: string;
+        prefix?: string;
+        packages: string[];
+        python?: string;
+      },
+      initialData?: {
+        name: string;
+        kind: string;
+        path: string;
+        prefix?: string;
+        packages: string[];
+        python?: string;
+      },
+    ) => Promise<void>;
+  },
+): Promise<void> {
+  const isValidKebabCase = (str: string): boolean => {
+    if (!str.trim()) {
+      return false;
+    }
+    const kebabCaseRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+    return kebabCaseRegex.test(str);
+  };
+
+  const widget = new EnvironmentEditorWidget(options);
+
+  const dialog = new Dialog<{
+    name: string;
+    kind: string;
+    path: string;
+    prefix?: string;
+    packages: string[];
+    python?: string;
+  }>({
+    title:
+      options.mode === "create" ? "Create environment" : "Edit environment",
+    body: widget,
+    buttons: [
+      Dialog.cancelButton(),
+      Dialog.okButton({ label: options.mode === "create" ? "Create" : "Save" }),
+    ],
+  });
+
+  // Set up validity monitoring to enable/disable OK button
+  const updateOkButton = () => {
+    const okButton = dialog.node?.querySelector(
+      ".jp-mod-accept",
+    ) as HTMLButtonElement | null;
+    if (okButton) {
+      okButton.disabled = !widget.getIsValid();
+    }
+  };
+
+  widget.onValidityChange = (isValid: boolean) => {
+    const okButton = dialog.node?.querySelector(
+      ".jp-mod-accept",
+    ) as HTMLButtonElement | null;
+    if (okButton) {
+      okButton.disabled = !isValid;
+    }
+  };
+
+  // Wait for dialog to be attached to DOM, then set initial button state and override button behavior
+  const observer = new MutationObserver(() => {
+    if (dialog.node?.isConnected) {
+      observer.disconnect();
+      updateOkButton();
+
+      // Override the OK button to prevent immediate dialog closure
+      const okButton = dialog.node?.querySelector(
+        ".jp-mod-accept",
+      ) as HTMLButtonElement | null;
+
+      if (okButton) {
+        // Remove the default click handler by cloning the button
+        const newOkButton = okButton.cloneNode(true) as HTMLButtonElement;
+        okButton.parentNode?.replaceChild(newOkButton, okButton);
+
+        // Add our custom click handler
+        newOkButton.addEventListener("click", async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          const data = widget.getData();
+          const initialData = widget.getInitialData();
+
+          // Validate name is kebab-case
+          if (!data.name.trim() || !isValidKebabCase(data.name)) {
+            return;
+          }
+
+          // For uv-venv and venv, require at least one package (ipykernel)
+          if (
+            (data.kind === "uv-venv" || data.kind === "venv") &&
+            data.packages.length === 0
+          ) {
+            return;
+          }
+
+          // Mark dialog as non-closable while submitting
+          const okButton = dialog.node?.querySelector(
+            ".jp-mod-accept",
+          ) as HTMLButtonElement | null;
+          const cancelButton = dialog.node?.querySelector(
+            ".jp-mod-reject",
+          ) as HTMLButtonElement | null;
+
+          // Disable both buttons and add spinner to OK button
+          if (okButton) {
+            okButton.disabled = true;
+            const spinner = document.createElement("span");
+            spinner.className = "jp-Spinner";
+            spinner.setAttribute("role", "progressbar");
+            okButton.textContent = "";
+            okButton.appendChild(spinner);
+          }
+          if (cancelButton) {
+            cancelButton.disabled = true;
+          }
+
+          try {
+            // For edit mode, pass both existing and updated data
+            if (options.mode === "edit") {
+              await options.onSubmit(data, initialData);
+            } else {
+              await options.onSubmit(data);
+            }
+
+            // Close the dialog only after successful submission
+            dialog.resolve(0);
+          } catch (error) {
+            // Re-enable both buttons and restore OK button text
+            if (okButton) {
+              okButton.disabled = false;
+              const spinner = okButton.querySelector(".jp-Spinner");
+              if (spinner) {
+                spinner.remove();
+              }
+              okButton.textContent =
+                options.mode === "create" ? "Create" : "Save";
+            }
+            if (cancelButton) {
+              cancelButton.disabled = false;
+            }
+
+            // Generic error message
+            const errorMessage = "See the server console for details.";
+            const actionText = options.mode === "create" ? "create" : "update";
+
+            // Create a custom error overlay instead of using Dialog
+            const errorOverlay = document.createElement("div");
+            errorOverlay.className = "calkit-error-overlay";
+            errorOverlay.style.cssText = `
+              position: absolute;
+              top: 0;
+              left: 0;
+              right: 0;
+              bottom: 0;
+              background: rgba(0, 0, 0, 0.5);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              z-index: 10000;
+            `;
+
+            const errorBox = document.createElement("div");
+            errorBox.style.cssText = `
+              background: var(--jp-layout-color1);
+              border: 1px solid var(--jp-border-color1);
+              border-radius: 4px;
+              padding: 20px;
+              min-width: 300px;
+              box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            `;
+
+            const errorTitle = document.createElement("h3");
+            errorTitle.textContent = `Failed to ${actionText} environment`;
+            errorTitle.style.cssText = `
+              margin: 0 0 12px 0;
+              color: var(--jp-ui-font-color1);
+              font-size: 16px;
+              font-weight: 600;
+            `;
+
+            const errorText = document.createElement("p");
+            errorText.textContent = errorMessage;
+            errorText.style.cssText = `
+              margin: 0 0 16px 0;
+              color: var(--jp-ui-font-color1);
+            `;
+
+            const buttonContainer = document.createElement("div");
+            buttonContainer.style.cssText = `
+              display: flex;
+              justify-content: flex-end;
+            `;
+
+            const okBtn = document.createElement("button");
+            okBtn.textContent = "OK";
+            okBtn.type = "button";
+            okBtn.className = "jp-Dialog-button jp-mod-styled jp-mod-accept";
+            okBtn.style.cssText = `
+              background: var(--jp-brand-color1);
+              color: var(--jp-ui-inverse-font-color1);
+              border: none;
+              border-radius: 3px;
+              padding: 6px 16px;
+              cursor: pointer;
+              font-size: 14px;
+              font-weight: 500;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              min-width: 60px;
+            `;
+
+            okBtn.addEventListener(
+              "click",
+              (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                errorOverlay.remove();
+                return false;
+              },
+              false,
+            );
+
+            buttonContainer.appendChild(okBtn);
+            errorBox.appendChild(errorTitle);
+            errorBox.appendChild(errorText);
+            errorBox.appendChild(buttonContainer);
+            errorOverlay.appendChild(errorBox);
+
+            // Stop clicks on the backdrop itself from bubbling, but allow child clicks
+            errorOverlay.addEventListener(
+              "click",
+              (e) => {
+                if (e.target === errorOverlay) {
+                  e.stopPropagation();
+                }
+              },
+              false,
+            );
+
+            if (dialog.node && dialog.node.parentNode) {
+              // Position error overlay relative to the dialog node
+              const dialogParent = dialog.node.parentNode;
+              const dialogRect = dialog.node.getBoundingClientRect();
+
+              // Make error overlay positioned relative to dialog parent
+              errorOverlay.style.position = "fixed";
+              errorOverlay.style.top = dialogRect.top + "px";
+              errorOverlay.style.left = dialogRect.left + "px";
+              errorOverlay.style.width = dialogRect.width + "px";
+              errorOverlay.style.height = dialogRect.height + "px";
+
+              // Add to dialog parent so it's a sibling, not a child
+              dialogParent.appendChild(errorOverlay);
+            } else if (dialog.node) {
+              dialog.node.appendChild(errorOverlay);
+            }
+            // Don't close the main dialog, let user fix the issue
+          }
+        });
+      }
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  await dialog.launch();
+}

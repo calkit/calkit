@@ -1,8 +1,108 @@
 """Tests for the ``core`` module."""
 
+import os
+import subprocess
+
+import git
+import pytest
+
 import calkit
 
 
 def test_find_project_dirs():
+    # TODO: We should setup a dummy project for this test so it doesn't depend
+    # on the state of the dev's machine
     calkit.find_project_dirs()
-    assert calkit.find_project_dirs(relative=False)
+    if os.path.isdir(os.path.join(os.path.expanduser("~"), "calkit")):
+        assert calkit.find_project_dirs(relative=False)
+
+
+def test_to_kebab_case():
+    assert calkit.to_kebab_case("THIS IS") == "this-is"
+    assert calkit.to_kebab_case("this_is_my-Project") == "this-is-my-project"
+    assert calkit.to_kebab_case("this is my project") == "this-is-my-project"
+    assert calkit.to_kebab_case("thisIs/myProject") == "thisis-myproject"
+
+
+def test_detect_project_name(tmp_dir):
+    # First check we can detect with no git remote and no calkit.yaml
+    # In this case the project name should be the current directory name
+    cwd = os.getcwd()
+    dir_name = os.path.basename(cwd)
+    assert calkit.detect_project_name(prepend_owner=False) == dir_name
+    # If prepend_owner is True, this should raise an error
+    with pytest.raises(ValueError):
+        calkit.detect_project_name(prepend_owner=True)
+    # Now create an actual project
+    subprocess.check_output(["calkit", "init"])
+    repo = git.Repo()
+    repo.create_remote("origin", "https://github.com/someone/some-repo.git")
+    assert calkit.detect_project_name() == "someone/some-repo"
+    with open("calkit.yaml", "w") as f:
+        f.write("owner: someone-else\nname: some-project\n")
+    assert calkit.detect_project_name() == "someone-else/some-project"
+
+
+def test_load_calkit_info(tmp_dir, monkeypatch):
+    subpath = "some/project"
+    os.makedirs(subpath)
+    os.makedirs(subpath + "/.calkit/environments")
+    with open(subpath + "/.calkit/environments/env2.yaml", "w") as f:
+        calkit.ryaml.dump({"kind": "docker", "image": "openfoam"}, f)
+    with open(subpath + "/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "name": "some-project",
+                "owner": "someone",
+                "environments": {
+                    "env1": {"kind": "docker", "image": "ubuntu"},
+                    "env2": {"_include": ".calkit/environments/env2.yaml"},
+                },
+            },
+            f,
+        )
+    ck_info = calkit.load_calkit_info(wdir=subpath)
+    assert ck_info["environments"]["env1"]["image"] == "ubuntu"
+    assert ck_info["environments"]["env2"] == {
+        "_include": ".calkit/environments/env2.yaml"
+    }
+    ck_info = calkit.load_calkit_info(wdir=subpath, process_includes=True)
+    assert ck_info["environments"]["env1"]["image"] == "ubuntu"
+    assert ck_info["environments"]["env2"]["image"] == "openfoam"
+    monkeypatch.chdir(subpath)
+    ck_info = calkit.load_calkit_info(process_includes=True)
+    assert ck_info["environments"]["env1"]["image"] == "ubuntu"
+    assert ck_info["environments"]["env2"]["image"] == "openfoam"
+
+
+def test_get_env_var_dep_names():
+    ck_info = {
+        "dependencies": [
+            {"name": "MY_ENV_VAR", "kind": "env-var"},
+            {"name": "MY_APP", "kind": "app"},
+            "something-else",
+            {"MY_OTHER_ENV_VAR": {"kind": "env-var"}},
+        ]
+    }
+    assert calkit.get_env_var_dep_names(ck_info) == [
+        "MY_ENV_VAR",
+        "MY_OTHER_ENV_VAR",
+    ]
+
+
+def test_check_system_deps(tmp_dir):
+    ck_info = {
+        "dependencies": [
+            "uv",
+            {"kind": "env-var", "name": "MY_ENV_VAR"},
+            {"MY_ENV_VAR2": {"kind": "env-var"}},
+        ]
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(
+        ["calkit", "check", "dependencies"],
+        env=os.environ.copy() | {"MY_ENV_VAR": "5", "MY_ENV_VAR2": "55"},
+    )
+    with pytest.raises(ValueError):
+        calkit.check_system_deps()

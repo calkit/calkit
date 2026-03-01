@@ -1,0 +1,294 @@
+"""Pipeline-related functionality."""
+
+import itertools
+import os
+
+import git
+import typer
+
+import calkit
+from calkit.environments import get_env_lock_fpath
+from calkit.models.iteration import expand_project_parameters
+from calkit.models.pipeline import (
+    InputsFromStageOutputs,
+    PathOutput,
+    Pipeline,
+)
+
+
+def stages_are_similar(stage1: dict, stage2: dict) -> bool:
+    """Check if two stage configurations are fundamentally the same.
+
+    Compares stage kind and key parameters to determine if stages represent
+    the same operation.
+
+    Parameters
+    ----------
+    stage1 : dict
+        First stage configuration.
+    stage2 : dict
+        Second stage configuration.
+
+    Returns
+    -------
+    bool
+        True if stages are similar, False otherwise.
+    """
+    # Different kind means different stage
+    if stage1.get("kind") != stage2.get("kind"):
+        return False
+    kind = stage1.get("kind")
+    # For script stages, check script path and args
+    if kind in [
+        "python-script",
+        "julia-script",
+        "matlab-script",
+        "shell-script",
+    ]:
+        if stage1.get("script_path") != stage2.get("script_path"):
+            return False
+        if stage1.get("args", []) != stage2.get("args", []):
+            return False
+    # For notebook stages
+    elif kind == "jupyter-notebook":
+        if stage1.get("notebook_path") != stage2.get("notebook_path"):
+            return False
+    # For latex
+    elif kind == "latex":
+        if stage1.get("target_path") != stage2.get("target_path"):
+            return False
+    # For command stages, check the command
+    elif kind in [
+        "shell-command",
+        "matlab-command",
+        "julia-command",
+    ]:
+        if stage1.get("command") != stage2.get("command"):
+            return False
+    return True
+
+
+def _expand_matrix(input_dict: dict[str, list]) -> list[dict]:
+    """Restructure a dictionary with list values into a list of dictionaries,
+    where each dictionary represents a permutation of the input dictionary's
+    values.
+    """
+    keys = list(input_dict.keys())
+    values = list(input_dict.values())
+    # Create all combinations of values using itertools.product
+    combinations = itertools.product(*values)
+    # Create a list of dictionaries
+    list_of_dicts = []
+    for combination in combinations:
+        list_of_dicts.append(dict(zip(keys, combination)))
+    # After expanding the matrix, flatten any nested dictionaries in the result
+    # This handles cases where list-of-lists iterations produce dictionaries as
+    # values, by concatenating parent and child keys (e.g., "parent.child")
+    # so all permutations are represented as flat dictionaries
+    final_list = []
+    for item in list_of_dicts:
+        keys = list(item.keys())
+        vals = list(item.values())
+        vd = {}
+        for key, val in zip(keys, vals):
+            if isinstance(val, dict):
+                for k, v in val.items():
+                    vd[f"{key}.{k}"] = v
+            else:
+                vd[key] = val
+        final_list.append(vd)
+    return final_list
+
+
+def to_dvc(
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    write: bool = False,
+    verbose: bool = False,
+) -> dict:
+    """Compile a Calkit pipeline to a DVC pipeline."""
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    if "pipeline" not in ck_info:
+        raise ValueError("No pipeline found in calkit.yaml")
+    try:
+        pipeline = Pipeline.model_validate(ck_info["pipeline"])
+    except Exception as e:
+        raise ValueError(f"Pipeline is not defined properly: {e}")
+    dvc_stages = {}
+    # First, gather up any env lock paths we might need for DVC deps
+    used_envs = set([stage.environment for stage in pipeline.stages.values()])
+    env_lock_fpaths = {}
+    for env_name, env in ck_info.get("environments", {}).items():
+        if env_name not in used_envs:
+            continue
+        lock_fpath = get_env_lock_fpath(
+            env=env, env_name=env_name, as_posix=True, for_dvc=True
+        )
+        if lock_fpath is None:
+            continue
+        env_lock_fpaths[env_name] = lock_fpath
+    project_params = expand_project_parameters(ck_info.get("parameters", {}))
+    # Now convert Calkit stages into DVC stages
+    for stage_name, stage in pipeline.stages.items():
+        # If this stage is a Jupyter notebook stage, we need to update its
+        # parameters if any reference project-level parameters
+        if stage.kind == "jupyter-notebook":
+            stage.update_parameters(params=project_params)
+        dvc_stage = stage.to_dvc()
+        # Add environment lock file to deps
+        env_lock_fpath = env_lock_fpaths.get(stage.environment)
+        if (
+            env_lock_fpath is not None
+            and env_lock_fpath not in dvc_stage["deps"]
+        ):
+            dvc_stage["deps"].append(env_lock_fpath)
+        # Check if this stage iterates, which means we should create a matrix
+        # stage
+        if stage.iterate_over is not None:
+            # Process a list of iterations into a DVC matrix stage
+            # Initialize a DVC matrix
+            dvc_matrix = {}
+            # Initialize a dict for doing string formatting on the DVC stage
+            format_dict = {}
+            for n, iteration in enumerate(stage.iterate_over):
+                arg_name = iteration.arg_name
+                exp_vals = iteration.expand_values(params=project_params)
+                if isinstance(arg_name, list):
+                    dvc_arg_name = f"_arg{n}"
+                    for arg_name_i in arg_name:
+                        item_string = f"${{item.{dvc_arg_name}.{arg_name_i}}}"
+                        format_dict[arg_name_i] = item_string
+                else:
+                    dvc_arg_name = arg_name
+                    format_dict[arg_name] = f"${{item.{arg_name}}}"
+                dvc_matrix[dvc_arg_name] = exp_vals
+            try:
+                cmd = dvc_stage["cmd"]
+                cmd = cmd.format(**format_dict)
+                dvc_stage["cmd"] = cmd
+            except Exception as e:
+                raise ValueError(
+                    (
+                        f"Failed to format cmd '{cmd}': "
+                        f"{e.__class__.__name__}: {e}"
+                    )
+                )
+            formatted_deps = []
+            formatted_outs = []
+            for dep in dvc_stage.get("deps", []):
+                try:
+                    formatted_deps.append(dep.format(**format_dict))
+                except Exception as e:
+                    raise ValueError(
+                        (
+                            f"Failed to format dep '{dep}' with "
+                            f"'{format_dict}': "
+                            f"{e.__class__.__name__}: {e}"
+                        )
+                    )
+            for out in dvc_stage.get("outs", []):
+                try:
+                    if isinstance(out, dict):
+                        formatted_outs.append(
+                            {
+                                str(list(out.keys())[0]).format(
+                                    **format_dict
+                                ): dict(list(out.values())[0])
+                            }
+                        )
+                    else:
+                        formatted_outs.append(out.format(**format_dict))
+                except Exception as e:
+                    raise ValueError(
+                        (
+                            f"Failed to format out '{out}' with "
+                            f"'{format_dict}': "
+                            f"{e.__class__.__name__}: {e}"
+                        )
+                    )
+            dvc_stage["deps"] = formatted_deps
+            dvc_stage["outs"] = formatted_outs
+            dvc_stage["matrix"] = dvc_matrix
+        # Add a description to the DVC stage
+        desc = (
+            f"Automatically generated from the '{stage_name}' stage "
+            "in calkit.yaml. Changes made here will be overwritten."
+        )
+        dvc_stage["desc"] = desc
+        dvc_stages[stage_name] = dvc_stage
+        # Check for any outputs that should be ignored/unignored
+        if write:
+            repo = git.Repo(wdir)
+            # Ensure we catch any Jupyter Notebook outputs
+            outputs = stage.outputs.copy()
+            if stage.kind == "jupyter-notebook":
+                outputs += stage.notebook_outputs
+            elif stage.kind == "sbatch":
+                outputs.append(stage.log_output)
+            # Deal with any gitignore changes necessary
+            for out in outputs:
+                if isinstance(out, PathOutput) and out.storage is None:
+                    calkit.git.ensure_path_is_ignored(repo, path=out.path)
+                # Unignore path if necessary
+                elif isinstance(out, PathOutput) and out.storage == "git":
+                    calkit.git.ensure_path_is_not_ignored(repo, path=out.path)
+    # Now process any inputs from stage outputs
+    for stage_name, stage in pipeline.stages.items():
+        for i in stage.inputs:
+            if isinstance(i, InputsFromStageOutputs):
+                dvc_outs = dvc_stages[i.from_stage_outputs]["outs"]
+                for out in dvc_outs:
+                    if out not in dvc_stages[stage_name]["deps"]:
+                        # Handle cases where outs are from a matrix,
+                        # in which case this output could become a list of
+                        # outputs
+                        if isinstance(out, dict):
+                            out = list(out.keys())[0]
+                        if "${item." in out:
+                            extra_outs = []
+                            dvc_matrix = dvc_stages[i.from_stage_outputs][
+                                "matrix"
+                            ]
+                            replacements = _expand_matrix(dvc_matrix)
+                            for r in replacements:
+                                out_i = out
+                                for var_name, var_val in r.items():
+                                    out_i = out_i.replace(
+                                        f"${{item.{var_name}}}",
+                                        str(var_val),
+                                    )
+                                extra_outs.append(out_i)
+                            for out_i in extra_outs:
+                                if out_i not in dvc_stages[stage_name]["deps"]:
+                                    dvc_stages[stage_name]["deps"].append(
+                                        out_i
+                                    )
+                        else:
+                            dvc_stages[stage_name]["deps"].append(out)
+    if write:
+        if os.path.isfile("dvc.yaml"):
+            with open("dvc.yaml") as f:
+                dvc_yaml = calkit.ryaml.load(f)
+        else:
+            dvc_yaml = {}
+        if dvc_yaml is None:
+            dvc_yaml = {}
+        existing_stages = dvc_yaml.get("stages", {})
+        for stage_name, stage in existing_stages.items():
+            # Skip private stages (ones whose names start with an underscore)
+            # and stages that are automatically generated
+            if (
+                not stage_name.startswith("_")
+                and stage_name not in dvc_stages
+                and not stage.get("desc", "").startswith(
+                    "Automatically generated"
+                )
+            ):
+                dvc_stages[stage_name] = stage
+        dvc_yaml["stages"] = dvc_stages
+        with open("dvc.yaml", "w") as f:
+            if verbose:
+                typer.echo("Writing to dvc.yaml")
+            calkit.ryaml.dump(dvc_yaml, f)
+    return dvc_stages

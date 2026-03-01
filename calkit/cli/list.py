@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 import typer
 
@@ -125,3 +125,18 @@ def list_releases():
             typer.echo(f"    published: {published}")
         for k, v in obj.items():
             typer.echo(f"    {k}: {v}")
+
+
+@list_app.command(name="stages")
+def list_stages(
+    kinds: Annotated[
+        list[str] | None,
+        typer.Option("--kind", "-k", help="Filter stages by kind."),
+    ] = None,
+):
+    """List stages."""
+    stages = calkit.load_calkit_info().get("pipeline", {}).get("stages", {})
+    for name, stage in stages.items():
+        if kinds is not None and stage.get("kind") not in kinds:
+            continue
+        typer.echo(name)

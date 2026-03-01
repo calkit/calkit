@@ -62,6 +62,7 @@ requires-python = ">=3.10"
 
 [project.optional-dependencies]
 data = ["pandas>=2.2.3", "polars>=1.18.0"]
+xet = ["xet>=0.0.1"]  # For fast large file transfers with XeT protocol
 
 [dependency-groups]
 dev = [
@@ -93,6 +94,9 @@ dev = [
 Homepage = "https://calkit.org"
 Issues = "https://github.com/calkit/calkit/issues"
 Repository = "https://github.com/calkit/calkit"
+
+[project.entry-points."fsspec.specs"]
+calkit = "calkit.fs:CalkitFileSystem"
 
 [project.scripts]
 calkit = "calkit.cli:run"

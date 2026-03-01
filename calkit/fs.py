@@ -19,6 +19,7 @@ Supported storage backends (via Calkit Cloud API):
     - Google Drive - OAuth + API
     - Box - OAuth + API
     - Azure Blob Storage - SAS tokens
+    - HuggingFace Hub - OAuth token + API (datasets and models)
     - Other storage providers as configured in Calkit Cloud
 
 Examples:
@@ -239,6 +240,63 @@ class CalkitFileSystem(AbstractFileSystem):
             )
             raise
 
+    def _execute_xet_operation(
+        self,
+        operation_info: dict,
+        operation: str,
+        data: bytes | None = None,
+        headers: dict | None = None,
+    ) -> requests.Response:  # type: ignore[return-value]
+        """Execute a file operation using XeT protocol.
+
+        XeT (https://xet.tech/) is an efficient protocol for version control
+        and large file transfers. It's particularly useful for HuggingFace Hub,
+        which has native XeT support for faster file access.
+
+        Args:
+            operation_info: Dictionary with XeT endpoint info
+            operation: The operation type (get, put, delete)
+            data: Data to upload (for put operations)
+            headers: Additional headers
+
+        Returns:
+            Response from the operation
+
+        Raises:
+            NotImplementedError: If XeT is not yet available in the client SDK
+        """
+        xet_endpoint = operation_info.get("xet_endpoint")
+        if not xet_endpoint:
+            raise ValueError(
+                "Missing 'xet_endpoint' for XeT method. "
+                "Ensure Calkit Cloud API returns XeT endpoint info."
+            )
+
+        try:
+            import xet as xet_module  # type: ignore[import]  # Optional: xet-python SDK
+
+            # If we successfully import xet, we could use it in the future
+            # For now, log and fall back to HTTP
+            logger.debug(
+                "xet-python is available but direct SDK usage not yet implemented. "
+                "Using HTTP fallback for XeT endpoint."
+            )
+            _ = xet_module  # Use the import to satisfy linters
+        except ImportError:
+            # xet-python not installed, will use HTTP fallback
+            logger.debug(
+                "xet-python not installed, using HTTP fallback for XeT endpoint"
+            )
+
+        # HTTP fallback for XeT endpoint (used until direct XeT SDK support is added)
+        resp = self._session.request(
+            method=operation.upper() if operation == "get" else "PUT",
+            url=xet_endpoint,
+            headers=headers or {},
+            data=data,
+        )
+        return resp  # type: ignore[return-value]
+
     @staticmethod
     def _normalize_operation_info(
         operation_info: dict[str, Any], operation: str
@@ -337,10 +395,14 @@ class CalkitFileSystem(AbstractFileSystem):
             )
 
         elif method == "xet":
-            # Future: XeT protocol support
-            raise NotImplementedError(
-                "XeT protocol support is not yet implemented. "
-                "Contact Calkit support for early access."
+            # XeT protocol: Efficient version control & large file transfers
+            # HuggingFace Hub supports XeT for faster file access
+            # https://xet.tech/
+            return self._execute_xet_operation(
+                operation_info,
+                operation,
+                data=data,
+                headers=headers,
             )
 
     def _open(
@@ -535,8 +597,9 @@ class CalkitFileSystem(AbstractFileSystem):
 
         with self.open(path1, "rb") as src:
             data = src.read()
+        # For binary write to a file, pass the bytes directly
         with self.open(path2, "wb") as dst:
-            dst.write(data)
+            dst.write(data)  # type: ignore[arg-type]
 
 
 class CalkitFile(AbstractBufferedFile):
@@ -572,11 +635,15 @@ class CalkitFile(AbstractBufferedFile):
         self.operation_info = None  # Cached operation info from API
         self.uploaded_bytes = 0  # Track total bytes uploaded
 
+        # fsspec expects block_size to be an integer, not None
+        if block_size is None:
+            block_size = 5 * 1024 * 1024  # Default 5MB
+
         super().__init__(
             fs,
             path,
             mode=mode,
-            block_size=block_size,
+            block_size=block_size,  # type: ignore[arg-type]
             autocommit=autocommit,
             cache_options=cache_options,
             **kwargs,

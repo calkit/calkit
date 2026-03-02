@@ -55,7 +55,7 @@ from calkit.cli.office import office_app
 from calkit.cli.overleaf import overleaf_app
 from calkit.cli.slurm import slurm_app
 from calkit.cli.update import update_app
-from calkit.dvc import run_dvc_command
+from calkit.dvc import register_ck_scheme, run_dvc_command
 from calkit.environments import get_env_lock_fpath
 from calkit.models import Procedure
 
@@ -1111,12 +1111,16 @@ def run(
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Pipeline compilation failed: {e}")
     # Initialize DVC repo if necessary
+    # Register the ck:// scheme before accessing DVC repo
+    register_ck_scheme()
     try:
         dvc.repo.Repo()
     except Exception:
         if not quiet:
             typer.echo("Initializing DVC repo")
-        dvc.repo.Repo.init()
+        result = run_dvc_command(["init"])
+        if result != 0:
+            raise_error("Failed to initialize DVC repo")
     # Convert deps into target stage names
     # TODO: This could probably be merged back upstream into DVC
     if dvc_stages is None:

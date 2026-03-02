@@ -192,7 +192,8 @@ class CalkitFileSystem(AbstractFileSystem):
         project: str,
         file_path: str,
         operation: str = "get",
-        protocol_hint: str = "http",
+        content_length: int | None = None,
+        content_type: str | None = None,
     ) -> dict:
         """Get file operation information from Calkit API.
 
@@ -211,23 +212,27 @@ class CalkitFileSystem(AbstractFileSystem):
             The path within the project
         operation : str, default="get"
             Operation type: 'get', 'put', 'delete', 'list', 'exists'
-        protocol_hint : str, default="http"
-            Protocol preference - 'http', 'xet', etc.
+        content_length : int | None, optional
+            Content length for put operations (enables chunked uploads)
+        content_type : str | None, optional
+            Content type for put operations
 
         Returns
         -------
         dict
             A dictionary containing:
-            - backend: Storage backend type (gcs, s3, google_drive, box, etc.)
-            - result: Optional dict with direct answer (for list/exists operations)
-            - access_method: How to perform operation (presigned_url, api, request, xet)
-            - url: URL for the operation (if method=presigned_url)
-            - token: OAuth token (if method=oauth)
-            - api_endpoint: API endpoint (if method=api)
-            - http_method: Optional HTTP verb override for API-style methods
-            - headers: Additional headers to use
-            - params: Optional query parameters for the final backend call
-            - Additional backend-specific fields
+            - backend: Storage backend type (gcs, s3, google-drive, box, hf)
+            - result: Optional dict with direct answer
+              (for list/exists operations with files or exists keys)
+            - access: Optional dict with access details:
+              - kind: Access type (presigned-url, presigned-multipart-init,
+                presigned-chunked-init, http-request, sftp)
+              - url/init_url: URL for the operation
+              - http_method: HTTP method to use
+              - headers: Optional headers to include
+              - params: Optional query parameters
+              - For chunked: part_size_bytes/chunk_size_bytes,
+                estimated_part_count/estimated_chunk_count
 
         Raises
         ------
@@ -257,44 +262,49 @@ class CalkitFileSystem(AbstractFileSystem):
         ...     }
         ... }
 
-        Metadata operation with instructions (Google Drive list):
+        Chunked upload operation:
 
         >>> {
-        ...     "backend": "google_drive",
-        ...     "access_method": "api",
-        ...     "operation": "list",
-        ...     "api_endpoint": "https://www.googleapis.com/drive/v3/files",
-        ...     "token": "ya29...",
-        ...     "params": {"q": "..."}
+        ...     "backend": "gcs",
+        ...     "access": {
+        ...         "kind": "presigned-chunked-init",
+        ...         "init_url": "https://storage.googleapis.com/...",
+        ...         "http_method": "POST",
+        ...         "chunk_size_bytes": 5242880,
+        ...         "estimated_chunk_count": 10,
+        ...         "upload_size_bytes": 52428800,
+        ...         "headers": {"x-goog-resumable": "start"}
+        ...     }
         ... }
         """
-        endpoint = f"/projects/{owner}/{project}/fs/{operation}/{file_path}"
+        endpoint = f"/projects/{owner}/{project}/fs-ops"
+        request_body: dict[str, Any] = {
+            "operation": operation,
+            "file_path": file_path,
+        }
+        if content_length is not None:
+            request_body["content_length"] = content_length
+        if content_type is not None:
+            request_body["content_type"] = content_type
         try:
             logger.debug(
                 f"Requesting {operation} instructions for "
-                f"{owner}/{project}/{file_path} "
-                f"[protocol_hint={protocol_hint}]"
+                f"{owner}/{project}/{file_path}"
             )
-            resp = cloud.get(endpoint, params={"protocol": protocol_hint})
+            resp = cloud.post(endpoint, json=request_body)
             # Validate response has required fields
             if "backend" not in resp:
-                # For backward compatibility, assume presigned URL if just 'url' field
-                if "url" in resp:
-                    logger.debug(
-                        "Legacy response format detected, assuming GCS backend"
-                    )
-                    return {
-                        "backend": "gcs",
-                        "method": "presigned_url",
-                        "url": resp["url"],
-                    }
-                else:
-                    raise ValueError(
-                        f"Invalid API response: {resp}. "
-                        f"Expected 'backend' and access method fields."
-                    )
+                raise ValueError(
+                    f"Invalid API response: {resp}; Expected 'backend' field"
+                )
+            access_kind = (
+                resp.get("access", {}).get("kind")
+                if resp.get("access")
+                else None
+            )
             logger.debug(
-                f"Storage backend: {resp['backend']}, method: {resp.get('method')}"
+                f"Storage backend: {resp['backend']}, "
+                f"access kind: {access_kind}"
             )
             return resp
         except Exception as e:
@@ -331,37 +341,38 @@ class CalkitFileSystem(AbstractFileSystem):
         ValueError
             If required fields are missing or method is unsupported
         """
-        # Determine the access method
-        method = operation_info.get("access_method", "presigned_url")
-        # Extract common fields
-        url = None
-        http_method = operation_info.get("http_method", "GET")
-        headers = operation_info.get("headers", {})
-        params = operation_info.get("params")
-        token = operation_info.get("token")
-        timeout = operation_info.get("timeout", 120)
-        # Validate and extract URL based on method
-        if method == "presigned_url":
-            url = operation_info.get("url")
-            if not url:
-                raise ValueError("Missing 'url' for presigned_url method")
-        elif method == "api":
-            url = operation_info.get("api_endpoint")
-            if not url:
-                raise ValueError("Missing 'api_endpoint' for api method")
-        elif method == "request":
-            url = operation_info.get("url")
-            if not url:
-                raise ValueError("Missing 'url' for request method")
-        else:
-            raise ValueError(f"Unsupported backend method: {method}")
+        # Extract access info from the new structure
+        access = operation_info.get("access")
+        if not access:
+            raise ValueError("Missing 'access' field in operation info")
+        kind = access.get("kind")
+        if not kind:
+            raise ValueError("Missing 'kind' field in access info")
+        # Extract URL - can be 'url' or 'init_url' depending on access type
+        url = access.get("url") or access.get("init_url")
+        if not url:
+            raise ValueError(f"Missing URL field for access kind: {kind}")
+        # Extract other fields with defaults
+        http_method = access.get("http_method", "GET")
+        headers = access.get("headers", {})
+        params = access.get("params")
+        timeout = 120  # Default timeout
+        # Map the new 'kind' to legacy 'method' for backward compatibility
+        method_map = {
+            "presigned-url": "presigned_url",
+            "presigned-multipart-init": "presigned_url",  # Treat as presigned
+            "presigned-chunked-init": "presigned_url",  # Treat as presigned
+            "http-request": "request",
+            "sftp": "sftp",
+        }
+        method = method_map.get(kind, "presigned_url")
         return NormalizedOperationInfo(
             method=method,
             url=url,
             http_method=http_method,
             headers=headers,
             params=params,
-            token=token,
+            token=None,  # Token not used in new structure
             timeout=timeout,
         )
 

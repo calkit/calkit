@@ -7,7 +7,6 @@ import os
 import pathlib
 import shutil
 import subprocess
-import sys
 import zipfile
 from enum import Enum
 
@@ -330,18 +329,12 @@ def new_project(
                 "You will need to manually run `git remote add origin` "
                 "and `calkit config remote`"
             )
-            subprocess.call(
-                [
-                    sys.executable,
-                    "-m",
-                    "dvc",
-                    "remote",
-                    "remove",
-                    "calkit",
-                    "-q",
-                ],
+            result = run_dvc_command(
+                ["remote", "remove", "calkit", "-q"],
                 cwd=abs_path,
             )
+            if result != 0:
+                warn("Failed to remove DVC remote")
         try:
             calkit.dvc.set_remote_auth(wdir=abs_path)
         except Exception:

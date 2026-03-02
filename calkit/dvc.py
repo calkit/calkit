@@ -6,7 +6,6 @@ import hashlib
 import json
 import logging
 import os
-import sys
 from pathlib import Path
 
 import git
@@ -308,7 +307,3 @@ def hash_path(path: str) -> dict:
         return hash_file(path)
     else:
         raise ValueError(f"Path does not exist: {path}")
-
-
-if __name__ == "__main__":
-    raise SystemExit(run_dvc_cli(sys.argv[1:]))

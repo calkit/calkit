@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import io
 import logging
+import xml.etree.ElementTree as ET
 from typing import Any
 from urllib.parse import urlparse
 
@@ -364,55 +365,85 @@ class CalkitFileSystem(AbstractFileSystem):
                 timeout=120,
             )
         elif kind == "presigned-multipart-init":
-            # S3 multipart upload - requires multiple requests
-            if not data:
+            # S3 multipart upload using server-provided part URLs
+            if data is None:
                 raise ValueError("Data required for multipart upload")
-            init_url = access.get("init_url")
-            if not init_url:
+            upload_id = access.get("upload_id")
+            part_urls = access.get("part_urls")
+            complete_url = access.get("complete_url")
+            part_size = access.get("part_size_bytes")
+            if not upload_id:
                 raise ValueError(
-                    "Missing 'init_url' field for presigned-multipart-init"
+                    "Missing 'upload_id' field for presigned-multipart-init"
+                )
+            if not isinstance(part_urls, list) or len(part_urls) == 0:
+                raise ValueError(
+                    "Missing or invalid 'part_urls' for "
+                    "presigned-multipart-init"
+                )
+            if not complete_url:
+                raise ValueError(
+                    "Missing 'complete_url' for presigned-multipart-init"
+                )
+            if not isinstance(part_size, int) or part_size <= 0:
+                raise ValueError(
+                    "Missing or invalid 'part_size_bytes' for "
+                    "presigned-multipart-init"
                 )
             content_type = access.get(
                 "content_type", "application/octet-stream"
             )
-            # Step 1: Initiate multipart upload
-            logger.debug(f"Initiating S3 multipart upload to {init_url}")
-            init_headers = dict(access.get("headers", {}))
-            init_headers["Content-Type"] = content_type
-            init_resp = self._session.post(
-                init_url,
-                headers=init_headers,
-                timeout=30,
-            )
-            init_resp.raise_for_status()
-            # Parse the response to get upload ID
-            # S3 returns XML with UploadId
-            import xml.etree.ElementTree as ET
-
-            root = ET.fromstring(init_resp.content)
-            upload_id = root.find(
-                ".//{http://s3.amazonaws.com/doc/2006-03-01/}UploadId"
-            )
-            if upload_id is None:
+            total_parts_needed = (len(data) + part_size - 1) // part_size
+            if total_parts_needed > len(part_urls):
                 raise ValueError(
-                    "Failed to get UploadId from multipart init response"
+                    "Insufficient part URLs for multipart upload "
+                    f"(need {total_parts_needed}, got {len(part_urls)})"
                 )
-            upload_id = upload_id.text
-            logger.debug(f"Got upload ID: {upload_id}")
-            # Step 2: Upload parts
-            # Note: We need presigned URLs for each part, which requires
-            # additional server API calls. The server should provide a way
-            # to get part URLs for each part number.
-            # This is a placeholder - the actual implementation depends on
-            # how the server provides part upload URLs
-            raise NotImplementedError(
-                "S3 multipart upload requires additional server API support "
-                "to provide presigned URLs for each part. "
-                "Please contact the server administrator or use GCS resumable uploads."
+            uploaded_parts: list[tuple[int, str]] = []
+            for part_num in range(1, total_parts_needed + 1):
+                start = (part_num - 1) * part_size
+                end = min(start + part_size, len(data))
+                part_data = data[start:end]
+                part_url = part_urls[part_num - 1]
+                logger.debug(
+                    f"Uploading multipart part {part_num}/{total_parts_needed} "
+                    f"({len(part_data)} bytes)"
+                )
+                part_resp = self._session.put(
+                    part_url,
+                    headers={"Content-Type": content_type},
+                    data=part_data,
+                    timeout=120,
+                )
+                part_resp.raise_for_status()
+                etag = part_resp.headers.get("ETag")
+                if not etag:
+                    raise ValueError(
+                        f"Missing ETag for uploaded multipart part {part_num}"
+                    )
+                uploaded_parts.append((part_num, etag.strip()))
+            complete_root = ET.Element("CompleteMultipartUpload")
+            for part_num, etag in uploaded_parts:
+                part_el = ET.SubElement(complete_root, "Part")
+                ET.SubElement(part_el, "PartNumber").text = str(part_num)
+                ET.SubElement(part_el, "ETag").text = etag
+            complete_body = ET.tostring(
+                complete_root, encoding="utf-8", xml_declaration=True
             )
+            complete_resp = self._session.post(
+                complete_url,
+                headers={"Content-Type": "application/xml"},
+                data=complete_body,
+                timeout=120,
+            )
+            complete_resp.raise_for_status()
+            logger.debug(
+                f"Completed multipart upload with upload_id={upload_id}"
+            )
+            return complete_resp
         elif kind == "presigned-chunked-init":
             # GCS resumable upload - requires multiple requests
-            if not data:
+            if data is None:
                 raise ValueError("Data required for chunked upload")
             init_url = access.get("init_url")
             if not init_url:
@@ -423,14 +454,18 @@ class CalkitFileSystem(AbstractFileSystem):
             content_type = access.get(
                 "content_type", "application/octet-stream"
             )
+            init_method = access.get("http_method", "POST")
+            init_params = access.get("params")
             # Step 1: Initiate resumable upload
             logger.debug(f"Initiating GCS resumable upload to {init_url}")
             init_headers = dict(access.get("headers", {}))
             init_headers["Content-Type"] = content_type
             init_headers["Content-Length"] = "0"  # Init request has no body
-            init_resp = self._session.post(
-                init_url,
+            init_resp = self._session.request(
+                method=init_method.upper(),
+                url=init_url,
                 headers=init_headers,
+                params=init_params,
                 timeout=30,
             )
             init_resp.raise_for_status()
@@ -880,6 +915,14 @@ class CalkitFile(AbstractBufferedFile):
             logger.debug(
                 f"Uploading {ndata} bytes to "
                 f"{self.owner}/{self.project}/{self.file_path}"
+            )
+            self.operation_info = self.fs._get_file_operation_info(
+                self.owner,
+                self.project,
+                self.file_path,
+                "put",
+                content_length=ndata,
+                content_type="application/octet-stream",
             )
             # Execute the put operation
             headers = {"Content-Type": "application/octet-stream"}

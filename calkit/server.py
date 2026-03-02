@@ -22,7 +22,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 import calkit
 import calkit.jupyter
-from calkit.dvc import run_dvc_cli, run_dvc_command
+from calkit.dvc import run_dvc_command
 
 logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
@@ -508,7 +508,7 @@ def get_pipeline(owner_name: str, project_name: str) -> Pipeline:
 
         mermaid_output = io.StringIO()
         with redirect_stdout(mermaid_output):
-            result = run_dvc_cli(["--cd", project.wdir, "dag", "--mermaid"])
+            result = run_dvc_command(["dag", "--mermaid"], cwd=project.wdir)
         if result != 0:
             raise HTTPException(500, "Failed to get DVC DAG")
         mermaid = mermaid_output.getvalue()

@@ -51,9 +51,43 @@ from fsspec import AbstractFileSystem
 from fsspec.spec import AbstractBufferedFile
 from fsspec.utils import stringify_path
 
-from . import cloud
+from . import cloud, config
 
 logger = logging.getLogger(__name__)
+
+
+def _get_default_domain() -> str:
+    """Get the default domain based on CALKIT_ENV.
+
+    Returns
+    -------
+    str
+        The domain name (e.g., 'calkit.io', 'staging.calkit.io', 'objects.localhost')
+    """
+    domains = {
+        "local": "objects.localhost",
+        "staging": "staging.calkit.io",
+        "production": "calkit.io",
+        "test": "objects.localhost",  # Use local for tests
+    }
+    return domains[config.get_env()]
+
+
+def _get_default_domain_url() -> str:
+    """Get the default domain URL (with protocol) based on CALKIT_ENV.
+
+    Returns
+    -------
+    str
+        The full domain URL (e.g., 'https://calkit.io', 'http://objects.localhost')
+    """
+    urls = {
+        "local": "http://objects.localhost",
+        "staging": "https://staging.calkit.io",
+        "production": "https://calkit.io",
+        "test": "http://objects.localhost",  # Use local for tests
+    }
+    return urls[config.get_env()]
 
 
 def _parse_path(path: str) -> tuple[str, str, str]:
@@ -62,7 +96,13 @@ def _parse_path(path: str) -> tuple[str, str, str]:
     Parameters
     ----------
     path : str
-        A path like "ck://calkit.io/owner/project/file.txt"
+        A path in one of these formats:
+        - "ck://owner/project/file.txt" (domain inferred from CALKIT_ENV)
+        - "ck://calkit.io/owner/project/file.txt" (explicit domain)
+        - "ck://staging.calkit.io/owner/project/file.txt"
+
+    The function automatically inserts the default domain (based on CALKIT_ENV)
+    when parsing paths with only owner and project components.
 
     Returns
     -------
@@ -76,37 +116,66 @@ def _parse_path(path: str) -> tuple[str, str, str]:
 
     Examples
     --------
-    >>> _parse_path("ck://calkit.io/user/proj/file.txt")
-    ('user', 'proj', 'file.txt')
+    >>> _parse_path("ck://owner/proj/file.txt")
+    ('owner', 'proj', 'file.txt')
 
-    >>> _parse_path("ck://calkit.io/user/proj/data/nested/file.txt")
-    ('user', 'proj', 'data/nested/file.txt')
+    >>> _parse_path("ck://calkit.io/owner/proj/file.txt")
+    ('owner', 'proj', 'file.txt')
 
-    >>> _parse_path("ck://calkit.io/user/proj")
-    ('user', 'proj', '')
+    >>> _parse_path("ck://owner/proj")
+    ('owner', 'proj', '')
     """
     path = stringify_path(path)
     parsed = urlparse(path)
+
     if parsed.scheme == "ck":
-        raw_path = parsed.path.lstrip("/")
+        # Check if netloc looks like a domain (has dots or is localhost-based)
+        netloc = parsed.netloc
+        path_str = parsed.path.lstrip("/")
+
+        if netloc and (
+            "." in netloc
+            or netloc == "localhost"
+            or netloc.startswith("localhost:")
+        ):
+            # netloc is an explicit domain, use the path as-is
+            raw_path = path_str
+        elif netloc:
+            # netloc is not a domain (e.g., it's an owner name).
+            # Treat it as owner/project..., implicitly using default domain.
+            raw_path = f"{netloc}/{path_str}" if path_str else netloc
+        else:
+            # No netloc, use path as-is
+            raw_path = path_str
     else:
-        # fsspec may pass protocol-stripped paths into _open, e.g.
-        # "localhost:8000/owner/project/file" or "owner/project/file".
+        # fsspec may pass protocol-stripped paths, e.g.
+        # "localhost:8000/owner/project/file" or just "owner/project/file"
         raw_path = path.lstrip("/")
+
     path_parts = [part for part in raw_path.split("/") if part]
-    # Drop leading host component when present in protocol-stripped forms.
-    if len(path_parts) >= 3 and (
-        path_parts[0] == "localhost"
-        or ":" in path_parts[0]
-        or "." in path_parts[0]
-    ):
-        path_parts = path_parts[1:]
+
+    # For protocol-stripped forms like "localhost:8000/owner/project/file",
+    # drop the leading host component if present
+    if len(path_parts) >= 3:
+        first_part = path_parts[0]
+        # Check if this looks like a host (localhost:port or domain with dots)
+        if (
+            first_part == "localhost"
+            or (
+                first_part.startswith("localhost:")
+                and first_part[10:].isdigit()
+            )
+            or ("." in first_part and not first_part.startswith("."))
+        ):
+            path_parts = path_parts[1:]
+
     # Need at least owner/project
     if len(path_parts) < 2:
         raise ValueError(
             f"Invalid path format: {path}. "
-            "Expected ck://calkit.io/owner/project/path/to/file"
+            "Expected ck://owner/project or ck://domain/owner/project"
         )
+
     owner = path_parts[0]
     project = path_parts[1]
     file_path = "/".join(path_parts[2:]) if len(path_parts) > 2 else ""
@@ -705,30 +774,50 @@ class CalkitFileSystem(AbstractFileSystem):
 
         Raises
         ------
+        FileNotFoundError
+            If the file does not exist
         ValueError
             If path format is invalid
         """
         owner, project, file_path = _parse_path(path)
         try:
             logger.debug(f"Getting info for {path}")
-            # Get operation info from API - use exists operation for metadata
+            # Get operation info from API - use dedicated info operation
             operation_info = self._get_file_operation_info(
-                owner, project, file_path, operation="exists"
+                owner, project, file_path, operation="info"
             )
             # Check if server provided the result directly
             if "result" in operation_info:
                 result = operation_info["result"]
+                return {
+                    "name": result.get("name", file_path),
+                    "size": result.get("size", 0),
+                    "type": result.get("type", "file"),
+                    "time_modified": result.get("time_modified"),
+                }
             else:
-                # Server returned instructions - execute the operation
-                resp = self._execute_operation(operation_info, "exists")
+                # Fallback for servers that don't support info operation
+                logger.debug(
+                    "Server returned instructions instead of result for info"
+                )
+                resp = self._execute_operation(operation_info, "info")
                 resp.raise_for_status()
                 result = resp.json()
-            return {
-                "name": file_path,
-                "size": result.get("size", 0),
-                "type": "file" if result.get("is_file") else "directory",
-                "time_modified": result.get("modified_time"),
-            }
+                return {
+                    "name": result.get("name", file_path),
+                    "size": result.get("size", 0),
+                    "type": result.get("type", "file"),
+                    "time_modified": result.get("time_modified"),
+                }
+        except FileNotFoundError:
+            raise
+        except requests.exceptions.HTTPError as e:
+            status_code = getattr(
+                getattr(e, "response", None), "status_code", None
+            )
+            if status_code == 404:
+                raise FileNotFoundError(f"File not found: {path}") from e
+            raise
         except Exception as e:
             logger.error(f"Failed to get info for {path}: {e}")
             raise

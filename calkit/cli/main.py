@@ -385,6 +385,7 @@ def add(
             raise_error("Not currently in a Git repo; run `calkit init` first")
         repo = git.Repo()
     try:
+        register_ck_scheme()
         dvc_repo = dvc.repo.Repo()
     except NotDvcRepoError:
         warn("DVC not initialized yet; initializing")
@@ -1175,6 +1176,7 @@ def run(
         git_staged_files_before = calkit.git.get_staged_files(repo=repo)
         git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
         # Get status of DVC repo before running
+        register_ck_scheme()
         dvc_repo = dvc.repo.Repo()
         dvc_status_before = dvc_repo.status()
         dvc_data_status_before = dvc_repo.data_status()

@@ -19,7 +19,6 @@ Supported storage backends (via Calkit Cloud API):
     - Google Drive - OAuth + API
     - Box - OAuth + API
     - Azure Blob Storage - SAS tokens
-    - HuggingFace Hub - OAuth token + API (datasets and models)
     - Other storage providers as configured in Calkit Cloud
 
 Examples:
@@ -35,8 +34,8 @@ Examples:
     >>> with fs.open("ck://calkit.io/owner/project/file.txt", "rb") as f:
     ...     content = f.read()
 
-The design supports future integration with XeT protocol (https://xet.tech/)
-for efficient large file transfers without breaking API compatibility.
+The design supports transparent interaction with multiple cloud storage providers
+through a unified API.
 """
 
 from __future__ import annotations
@@ -271,71 +270,6 @@ class CalkitFileSystem(AbstractFileSystem):
             )
             raise
 
-    def _execute_xet_operation(
-        self,
-        operation_info: dict,
-        operation: str,
-        data: bytes | None = None,
-        headers: dict | None = None,
-    ) -> requests.Response:  # type: ignore[return-value]
-        """Execute a file operation using XeT protocol.
-
-        XeT (https://xet.tech/) is an efficient protocol for version control
-        and large file transfers. It's particularly useful for HuggingFace Hub,
-        which has native XeT support for faster file access.
-
-        Parameters
-        ----------
-        operation_info : dict
-            Dictionary with XeT endpoint info
-        operation : str
-            The operation type (get, put, delete)
-        data : bytes | None, optional
-            Data to upload (for put operations)
-        headers : dict | None, optional
-            Additional headers
-
-        Returns
-        -------
-        requests.Response
-            Response from the operation
-
-        Raises
-        ------
-        NotImplementedError
-            If XeT is not yet available in the client SDK
-        """
-        xet_endpoint = operation_info.get("xet_endpoint")
-        if not xet_endpoint:
-            raise ValueError(
-                "Missing 'xet_endpoint' for XeT method. "
-                "Ensure Calkit Cloud API returns XeT endpoint info."
-            )
-        try:
-            import xet as xet_module  # type: ignore[import]
-
-            # If we successfully import xet, we could use it in the future
-            # For now, log and fall back to HTTP
-            logger.debug(
-                "xet-python is available but direct SDK usage not yet implemented. "
-                "Using HTTP fallback for XeT endpoint."
-            )
-            _ = xet_module  # Use the import to satisfy linters
-        except ImportError:
-            # xet-python not installed, will use HTTP fallback
-            logger.debug(
-                "xet-python not installed, using HTTP fallback for XeT endpoint"
-            )
-        # HTTP fallback for XeT endpoint
-        # (used until direct XeT SDK support is added)
-        resp = self._session.request(
-            method=operation.upper() if operation == "get" else "PUT",
-            url=xet_endpoint,
-            headers=headers or {},
-            data=data,
-        )
-        return resp  # type: ignore[return-value]
-
     @staticmethod
     def _normalize_operation_info(
         operation_info: dict[str, Any], operation: str
@@ -349,7 +283,6 @@ class CalkitFileSystem(AbstractFileSystem):
         - presigned_url: Direct HTTP with signed URL
         - api: API endpoint with credentials
         - request: Generic HTTP request
-        - xet: XeT protocol for HuggingFace
 
         Parameters
         ----------
@@ -395,8 +328,6 @@ class CalkitFileSystem(AbstractFileSystem):
             normalized.setdefault(
                 "http_method", normalized.get("http_method", "GET")
             )
-            return normalized
-        if method == "xet":
             return normalized
         raise ValueError(f"Unsupported backend method: {method}")
 
@@ -456,16 +387,6 @@ class CalkitFileSystem(AbstractFileSystem):
                 params=request_params,
                 data=data,
                 timeout=request_timeout,
-            )
-        elif method == "xet":
-            # XeT protocol: Efficient version control & large file transfers
-            # HuggingFace Hub supports XeT for faster file access
-            # https://xet.tech/
-            return self._execute_xet_operation(
-                operation_info,
-                operation,
-                data=data,
-                headers=headers,
             )
         else:
             raise ValueError(f"Unsupported backend method: {method}")

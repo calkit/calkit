@@ -87,9 +87,20 @@ def _parse_path(path: str) -> tuple[str, str, str]:
     """
     path = stringify_path(path)
     parsed = urlparse(path)
-    if parsed.scheme != "ck":
-        raise ValueError(f"Invalid scheme: {parsed.scheme}. Expected 'ck'")
-    path_parts = parsed.path.lstrip("/").split("/")
+    if parsed.scheme == "ck":
+        raw_path = parsed.path.lstrip("/")
+    else:
+        # fsspec may pass protocol-stripped paths into _open, e.g.
+        # "localhost:8000/owner/project/file" or "owner/project/file".
+        raw_path = path.lstrip("/")
+    path_parts = [part for part in raw_path.split("/") if part]
+    # Drop leading host component when present in protocol-stripped forms.
+    if len(path_parts) >= 3 and (
+        path_parts[0] == "localhost"
+        or ":" in path_parts[0]
+        or "." in path_parts[0]
+    ):
+        path_parts = path_parts[1:]
     # Need at least owner/project
     if len(path_parts) < 2:
         raise ValueError(
@@ -349,7 +360,7 @@ class CalkitFileSystem(AbstractFileSystem):
             if not url:
                 raise ValueError("Missing 'url' field for presigned-url")
             http_method = access.get("http_method", "GET")
-            request_headers = dict(access.get("headers", {}))
+            request_headers = dict(access.get("headers") or {})
             if headers:
                 request_headers.update(headers)
             params = access.get("params")
@@ -367,7 +378,7 @@ class CalkitFileSystem(AbstractFileSystem):
             if not url:
                 raise ValueError("Missing 'url' field for http-request")
             http_method = access.get("http_method", "GET")
-            request_headers = dict(access.get("headers", {}))
+            request_headers = dict(access.get("headers") or {})
             if headers:
                 request_headers.update(headers)
             params = access.get("params")
@@ -472,7 +483,7 @@ class CalkitFileSystem(AbstractFileSystem):
             init_params = access.get("params")
             # Step 1: Initiate resumable upload
             logger.debug(f"Initiating GCS resumable upload to {init_url}")
-            init_headers = dict(access.get("headers", {}))
+            init_headers = dict(access.get("headers") or {})
             init_headers["Content-Type"] = content_type
             init_headers["Content-Length"] = "0"  # Init request has no body
             init_resp = self._session.request(

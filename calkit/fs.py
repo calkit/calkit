@@ -127,12 +127,10 @@ def _parse_path(path: str) -> tuple[str, str, str]:
     """
     path = stringify_path(path)
     parsed = urlparse(path)
-
     if parsed.scheme == "ck":
         # Check if netloc looks like a domain (has dots or is localhost-based)
         netloc = parsed.netloc
         path_str = parsed.path.lstrip("/")
-
         if netloc and (
             "." in netloc
             or netloc == "localhost"
@@ -151,9 +149,7 @@ def _parse_path(path: str) -> tuple[str, str, str]:
         # fsspec may pass protocol-stripped paths, e.g.
         # "localhost:8000/owner/project/file" or just "owner/project/file"
         raw_path = path.lstrip("/")
-
     path_parts = [part for part in raw_path.split("/") if part]
-
     # For protocol-stripped forms like "localhost:8000/owner/project/file",
     # drop the leading host component if present
     if len(path_parts) >= 3:
@@ -168,14 +164,12 @@ def _parse_path(path: str) -> tuple[str, str, str]:
             or ("." in first_part and not first_part.startswith("."))
         ):
             path_parts = path_parts[1:]
-
     # Need at least owner/project
     if len(path_parts) < 2:
         raise ValueError(
             f"Invalid path format: {path}. "
             "Expected ck://owner/project or ck://domain/owner/project"
         )
-
     owner = path_parts[0]
     project = path_parts[1]
     file_path = "/".join(path_parts[2:]) if len(path_parts) > 2 else ""

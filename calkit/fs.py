@@ -49,10 +49,44 @@ import requests
 from fsspec import AbstractFileSystem
 from fsspec.spec import AbstractBufferedFile
 from fsspec.utils import stringify_path
+from pydantic import BaseModel
 
 from . import cloud
 
 logger = logging.getLogger(__name__)
+
+
+class NormalizedOperationInfo(BaseModel):
+    """Normalized file operation information from Calkit Cloud API.
+
+    All operation responses are normalized into this consistent format
+    for uniform handling across different backends.
+
+    Attributes
+    ----------
+    method : str
+        Access method: "presigned_url", "api", or "request"
+    url : str
+        The URL to access (presigned URL, API endpoint, or request URL)
+    http_method : str, default="GET"
+        HTTP verb to use (GET, PUT, POST, etc.)
+    headers : dict[str, str], default={}
+        Additional HTTP headers to include
+    params : dict[str, Any] | None, default=None
+        Query parameters for the request
+    token : str | None, default=None
+        Bearer token for Authorization header (if needed)
+    timeout : int, default=120
+        Request timeout in seconds
+    """
+
+    method: str
+    url: str
+    http_method: str = "GET"
+    headers: dict[str, str] = {}
+    params: dict[str, Any] | None = None
+    token: str | None = None
+    timeout: int = 120
 
 
 def _parse_path(path: str) -> tuple[str, str, str]:
@@ -273,16 +307,12 @@ class CalkitFileSystem(AbstractFileSystem):
     @staticmethod
     def _normalize_operation_info(
         operation_info: dict[str, Any], operation: str
-    ) -> dict[str, Any]:
+    ) -> NormalizedOperationInfo:
         """Normalize operation info for consistent execution.
 
-        The Calkit Cloud API is the source of truth and may return provider-specific
-        details. This method normalizes legacy and current response shapes.
-
-        The API returns access_method which tells us how to access the file:
-        - presigned_url: Direct HTTP with signed URL
-        - api: API endpoint with credentials
-        - request: Generic HTTP request
+        The Calkit Cloud API returns provider-specific details. This method
+        normalizes those into a standard NormalizedOperationInfo format
+        for uniform handling across all backends.
 
         Parameters
         ----------
@@ -293,47 +323,51 @@ class CalkitFileSystem(AbstractFileSystem):
 
         Returns
         -------
-        dict[str, Any]
-            Normalized operation information
+        NormalizedOperationInfo
+            Normalized operation information with consistent field names
 
         Raises
         ------
         ValueError
             If required fields are missing or method is unsupported
         """
-        normalized = dict(operation_info)
-        # Support both "access_method" (new) and "method" (legacy)
-        method = normalized.get("access_method") or normalized.get(
-            "method", "presigned_url"
-        )
-        normalized["method"] = method
+        # Determine the access method
+        method = operation_info.get("access_method", "presigned_url")
+        # Extract common fields
+        url = None
+        http_method = operation_info.get("http_method", "GET")
+        headers = operation_info.get("headers", {})
+        params = operation_info.get("params")
+        token = operation_info.get("token")
+        timeout = operation_info.get("timeout", 120)
+        # Validate and extract URL based on method
         if method == "presigned_url":
-            if "url" not in normalized:
+            url = operation_info.get("url")
+            if not url:
                 raise ValueError("Missing 'url' for presigned_url method")
-            normalized.setdefault(
-                "http_method", normalized.get("http_method", "GET")
-            )
-            return normalized
-        if method == "api":
-            if "api_endpoint" not in normalized:
+        elif method == "api":
+            url = operation_info.get("api_endpoint")
+            if not url:
                 raise ValueError("Missing 'api_endpoint' for api method")
-            normalized.setdefault(
-                "http_method", normalized.get("http_method", "GET")
-            )
-            normalized.setdefault("url", normalized["api_endpoint"])
-            return normalized
-        if method == "request":
-            if "url" not in normalized:
+        elif method == "request":
+            url = operation_info.get("url")
+            if not url:
                 raise ValueError("Missing 'url' for request method")
-            normalized.setdefault(
-                "http_method", normalized.get("http_method", "GET")
-            )
-            return normalized
-        raise ValueError(f"Unsupported backend method: {method}")
+        else:
+            raise ValueError(f"Unsupported backend method: {method}")
+        return NormalizedOperationInfo(
+            method=method,
+            url=url,
+            http_method=http_method,
+            headers=headers,
+            params=params,
+            token=token,
+            timeout=timeout,
+        )
 
     def _execute_operation(
         self,
-        operation_info: dict,
+        operation_info: dict[str, Any],
         operation: str,
         data: bytes | None = None,
         headers: dict | None = None,
@@ -342,7 +376,7 @@ class CalkitFileSystem(AbstractFileSystem):
 
         Parameters
         ----------
-        operation_info : dict
+        operation_info : dict[str, Any]
             Dictionary from _get_file_operation_info
         operation : str
             The operation type (get, put, delete)
@@ -364,32 +398,21 @@ class CalkitFileSystem(AbstractFileSystem):
             If operation fails
         """
         normalized = self._normalize_operation_info(operation_info, operation)
-        method = normalized["method"]
-        request_method = normalized.get("http_method", "GET").upper()
-        # Merge headers
-        request_headers = {}
-        if "headers" in normalized:
-            request_headers.update(normalized["headers"])
+        # Merge headers: normalized headers + call-specific headers
+        request_headers = dict(normalized.headers)
         if headers:
             request_headers.update(headers)
-        request_params = normalized.get("params")
-        request_timeout = normalized.get("timeout", 120)
-        # Handle different backend methods
-        if method in ("presigned_url", "api", "request"):
-            url = normalized["url"]
-            token = normalized.get("token")
-            if token and "Authorization" not in request_headers:
-                request_headers["Authorization"] = f"Bearer {token}"
-            return self._session.request(
-                method=request_method,
-                url=url,
-                headers=request_headers,
-                params=request_params,
-                data=data,
-                timeout=request_timeout,
-            )
-        else:
-            raise ValueError(f"Unsupported backend method: {method}")
+        # Add bearer token if present
+        if normalized.token and "Authorization" not in request_headers:
+            request_headers["Authorization"] = f"Bearer {normalized.token}"
+        return self._session.request(
+            method=normalized.http_method.upper(),
+            url=normalized.url,
+            headers=request_headers,
+            params=normalized.params,
+            data=data,
+            timeout=normalized.timeout,
+        )
 
     def _open(
         self,

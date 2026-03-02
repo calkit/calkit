@@ -87,30 +87,18 @@ def _parse_path(path: str) -> tuple[str, str, str]:
     """
     path = stringify_path(path)
     parsed = urlparse(path)
-
     if parsed.scheme != "ck":
         raise ValueError(f"Invalid scheme: {parsed.scheme}. Expected 'ck'")
-
-    # netloc should be calkit.io (or other domain)
-    if parsed.netloc != "calkit.io":
-        raise ValueError(
-            f"Invalid domain: {parsed.netloc}. Expected 'calkit.io'. "
-            "Future support for custom domains may be added."
-        )
-
     path_parts = parsed.path.lstrip("/").split("/")
-
     # Need at least owner/project
     if len(path_parts) < 2:
         raise ValueError(
             f"Invalid path format: {path}. "
             "Expected ck://calkit.io/owner/project/path/to/file"
         )
-
     owner = path_parts[0]
     project = path_parts[1]
     file_path = "/".join(path_parts[2:]) if len(path_parts) > 2 else ""
-
     return owner, project, file_path
 
 
@@ -274,6 +262,31 @@ class CalkitFileSystem(AbstractFileSystem):
                 f"access kind: {access_kind}"
             )
             return resp
+        except requests.exceptions.HTTPError as e:
+            status_code = getattr(
+                getattr(e, "response", None), "status_code", None
+            )
+            message = str(e)
+            is_not_found = status_code == 404 or message.startswith("404:")
+            if is_not_found:
+                target = (
+                    f"{owner}/{project}/{file_path}"
+                    if file_path
+                    else f"{owner}/{project}"
+                )
+                logger.debug(
+                    f"File operation target not found for {operation} "
+                    f"{target}: {message}"
+                )
+                raise FileNotFoundError(
+                    f"Not found while requesting '{operation}' operation "
+                    f"info for {target}"
+                ) from e
+            logger.error(
+                f"HTTP error getting file operation info for {operation} "
+                f"{owner}/{project}/{file_path}: {e}"
+            )
+            raise
         except Exception as e:
             logger.error(
                 f"Failed to get file operation info for {operation} "
@@ -378,7 +391,7 @@ class CalkitFileSystem(AbstractFileSystem):
                 )
             if not isinstance(part_urls, list) or len(part_urls) == 0:
                 raise ValueError(
-                    "Missing or invalid 'part_urls' for " "presigned-multipart"
+                    "Missing or invalid 'part_urls' for presigned-multipart"
                 )
             if not complete_url:
                 raise ValueError(

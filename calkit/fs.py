@@ -236,15 +236,13 @@ class CalkitFileSystem(AbstractFileSystem):
         ... }
         """
         endpoint = f"/projects/{owner}/{project}/fs/{operation}/{file_path}"
-
         try:
             logger.debug(
-                f"Requesting {operation} instructions for {owner}/{project}/{file_path} "
+                f"Requesting {operation} instructions for "
+                f"{owner}/{project}/{file_path} "
                 f"[protocol_hint={protocol_hint}]"
             )
-
             resp = cloud.get(endpoint, params={"protocol": protocol_hint})
-
             # Validate response has required fields
             if "backend" not in resp:
                 # For backward compatibility, assume presigned URL if just 'url' field
@@ -262,12 +260,10 @@ class CalkitFileSystem(AbstractFileSystem):
                         f"Invalid API response: {resp}. "
                         f"Expected 'backend' and access method fields."
                     )
-
             logger.debug(
                 f"Storage backend: {resp['backend']}, method: {resp.get('method')}"
             )
             return resp
-
         except Exception as e:
             logger.error(
                 f"Failed to get file operation info for {operation} "
@@ -315,9 +311,8 @@ class CalkitFileSystem(AbstractFileSystem):
                 "Missing 'xet_endpoint' for XeT method. "
                 "Ensure Calkit Cloud API returns XeT endpoint info."
             )
-
         try:
-            import xet as xet_module  # type: ignore[import]  # Optional: xet-python SDK
+            import xet as xet_module  # type: ignore[import]
 
             # If we successfully import xet, we could use it in the future
             # For now, log and fall back to HTTP
@@ -331,8 +326,8 @@ class CalkitFileSystem(AbstractFileSystem):
             logger.debug(
                 "xet-python not installed, using HTTP fallback for XeT endpoint"
             )
-
-        # HTTP fallback for XeT endpoint (used until direct XeT SDK support is added)
+        # HTTP fallback for XeT endpoint
+        # (used until direct XeT SDK support is added)
         resp = self._session.request(
             method=operation.upper() if operation == "get" else "PUT",
             url=xet_endpoint,
@@ -379,7 +374,6 @@ class CalkitFileSystem(AbstractFileSystem):
             "method", "presigned_url"
         )
         normalized["method"] = method
-
         if method == "presigned_url":
             if "url" not in normalized:
                 raise ValueError("Missing 'url' for presigned_url method")
@@ -387,7 +381,6 @@ class CalkitFileSystem(AbstractFileSystem):
                 "http_method", normalized.get("http_method", "GET")
             )
             return normalized
-
         if method == "api":
             if "api_endpoint" not in normalized:
                 raise ValueError("Missing 'api_endpoint' for api method")
@@ -396,7 +389,6 @@ class CalkitFileSystem(AbstractFileSystem):
             )
             normalized.setdefault("url", normalized["api_endpoint"])
             return normalized
-
         if method == "request":
             if "url" not in normalized:
                 raise ValueError("Missing 'url' for request method")
@@ -404,14 +396,9 @@ class CalkitFileSystem(AbstractFileSystem):
                 "http_method", normalized.get("http_method", "GET")
             )
             return normalized
-
         if method == "xet":
             return normalized
-
-        raise ValueError(
-            f"Unsupported backend method: {method}. "
-            "Supported methods: presigned_url, api, request, xet"
-        )
+        raise ValueError(f"Unsupported backend method: {method}")
 
     def _execute_operation(
         self,
@@ -448,7 +435,6 @@ class CalkitFileSystem(AbstractFileSystem):
         normalized = self._normalize_operation_info(operation_info, operation)
         method = normalized["method"]
         request_method = normalized.get("http_method", "GET").upper()
-
         # Merge headers
         request_headers = {}
         if "headers" in normalized:
@@ -457,14 +443,12 @@ class CalkitFileSystem(AbstractFileSystem):
             request_headers.update(headers)
         request_params = normalized.get("params")
         request_timeout = normalized.get("timeout", 120)
-
         # Handle different backend methods
         if method in ("presigned_url", "api", "request"):
             url = normalized["url"]
             token = normalized.get("token")
             if token and "Authorization" not in request_headers:
                 request_headers["Authorization"] = f"Bearer {token}"
-
             return self._session.request(
                 method=request_method,
                 url=url,
@@ -473,7 +457,6 @@ class CalkitFileSystem(AbstractFileSystem):
                 data=data,
                 timeout=request_timeout,
             )
-
         elif method == "xet":
             # XeT protocol: Efficient version control & large file transfers
             # HuggingFace Hub supports XeT for faster file access
@@ -484,6 +467,8 @@ class CalkitFileSystem(AbstractFileSystem):
                 data=data,
                 headers=headers,
             )
+        else:
+            raise ValueError(f"Unsupported backend method: {method}")
 
     def _open(
         self,
@@ -522,7 +507,6 @@ class CalkitFileSystem(AbstractFileSystem):
             If path format is invalid
         """
         owner, project, file_path = _parse_path(path)
-
         return CalkitFile(
             self,
             path,
@@ -563,15 +547,12 @@ class CalkitFileSystem(AbstractFileSystem):
             If path format is invalid
         """
         owner, project, file_path = _parse_path(path)
-
         try:
             logger.debug(f"Listing files in {owner}/{project}/{file_path}")
-
             # Get operation info from API
             operation_info = self._get_file_operation_info(
                 owner, project, file_path, operation="list"
             )
-
             # Check if server provided the result directly
             if "result" in operation_info:
                 files = operation_info["result"].get("files", [])
@@ -581,12 +562,10 @@ class CalkitFileSystem(AbstractFileSystem):
                 resp.raise_for_status()
                 result = resp.json()
                 files = result.get("files", [])
-
             if detail:
                 return files
             else:
                 return [f["name"] for f in files]
-
         except Exception as e:
             logger.error(f"Failed to list files in {path}: {e}")
             raise
@@ -608,14 +587,11 @@ class CalkitFileSystem(AbstractFileSystem):
         """
         try:
             owner, project, file_path = _parse_path(path)
-
             logger.debug(f"Checking existence of {path}")
-
             # Get operation info from API
             operation_info = self._get_file_operation_info(
                 owner, project, file_path, operation="exists"
             )
-
             # Check if server provided the result directly
             if "result" in operation_info:
                 return operation_info["result"].get("exists", False)
@@ -625,7 +601,6 @@ class CalkitFileSystem(AbstractFileSystem):
                 resp.raise_for_status()
                 result = resp.json()
                 return result.get("exists", False)
-
         except Exception as e:
             logger.debug(f"Path {path} does not exist: {e}")
             return False
@@ -651,15 +626,12 @@ class CalkitFileSystem(AbstractFileSystem):
             If path format is invalid
         """
         owner, project, file_path = _parse_path(path)
-
         try:
             logger.debug(f"Getting info for {path}")
-
             # Get operation info from API - use exists operation for metadata
             operation_info = self._get_file_operation_info(
                 owner, project, file_path, operation="exists"
             )
-
             # Check if server provided the result directly
             if "result" in operation_info:
                 result = operation_info["result"]
@@ -668,14 +640,12 @@ class CalkitFileSystem(AbstractFileSystem):
                 resp = self._execute_operation(operation_info, "exists")
                 resp.raise_for_status()
                 result = resp.json()
-
             return {
                 "name": file_path,
                 "size": result.get("size", 0),
                 "type": "file" if result.get("is_file") else "directory",
                 "time_modified": result.get("modified_time"),
             }
-
         except Exception as e:
             logger.error(f"Failed to get info for {path}: {e}")
             raise
@@ -698,21 +668,16 @@ class CalkitFileSystem(AbstractFileSystem):
             If deletion fails
         """
         owner, project, file_path = _parse_path(path)
-
         try:
             logger.debug(f"Deleting file {path}")
-
             # Get file operation info from API
             operation_info = self._get_file_operation_info(
                 owner, project, file_path, "delete"
             )
-
             # Execute the delete operation
             resp = self._execute_operation(operation_info, "delete")
             resp.raise_for_status()
-
             logger.debug(f"Successfully deleted {path}")
-
         except Exception as e:
             logger.error(f"Failed to delete {path}: {e}")
             raise
@@ -751,7 +716,6 @@ class CalkitFileSystem(AbstractFileSystem):
             Additional arguments
         """
         logger.debug(f"Copying {path1} to {path2}")
-
         with self.open(path1, "rb") as src:
             data = src.read()
         # For binary write to a file, pass the bytes directly
@@ -797,11 +761,9 @@ class CalkitFile(AbstractBufferedFile):
         self.file_path = file_path
         self.operation_info = None  # Cached operation info from API
         self.uploaded_bytes = 0  # Track total bytes uploaded
-
         # fsspec expects block_size to be an integer, not None
         if block_size is None:
             block_size = 5 * 1024 * 1024  # Default 5MB
-
         super().__init__(
             fs,
             path,
@@ -837,23 +799,18 @@ class CalkitFile(AbstractBufferedFile):
             self.operation_info = self.fs._get_file_operation_info(
                 self.owner, self.project, self.file_path, "get"
             )
-
         try:
             logger.debug(f"Fetching bytes {start}-{end - 1} from {self.path}")
-
             # Add Range header for partial content. For backends where range is
             # unsupported, the Calkit Cloud API can choose to ignore this header
             # or return a backend-specific request configuration.
             headers = {"Range": f"bytes={start}-{end - 1}"}
-
             # Execute the get operation with range header
             resp = self.fs._execute_operation(
                 self.operation_info, "get", headers=headers
             )
             resp.raise_for_status()
-
             return resp.content
-
         except requests.exceptions.RequestException as e:
             logger.error(
                 f"Failed to fetch range {start}-{end} from {self.path}: {e}"
@@ -886,27 +843,22 @@ class CalkitFile(AbstractBufferedFile):
         if not final:
             # For non-final chunks, we don't upload yet (buffer accumulates)
             return 0
-
         # Get the data to upload from the buffer
         if self.buffer is None:
             return 0
-
         data = self.buffer.getvalue()
         ndata = len(data)
-
         if ndata == 0:
             return 0
-
         if self.operation_info is None:
             raise RuntimeError(
                 "Upload not initiated. Call _initiate_upload first."
             )
-
         try:
             logger.debug(
-                f"Uploading {ndata} bytes to {self.owner}/{self.project}/{self.file_path}"
+                f"Uploading {ndata} bytes to "
+                f"{self.owner}/{self.project}/{self.file_path}"
             )
-
             # Execute the put operation
             headers = {"Content-Type": "application/octet-stream"}
             resp = self.fs._execute_operation(
@@ -916,15 +868,11 @@ class CalkitFile(AbstractBufferedFile):
                 headers=headers,
             )
             resp.raise_for_status()
-
             self.uploaded_bytes += ndata
             logger.debug(f"Successfully uploaded {ndata} bytes")
-
             # Clear the buffer after successful upload
             self.buffer = io.BytesIO()
-
             return ndata
-
         except requests.exceptions.RequestException as e:
             logger.error(f"Upload failed for {self.path}: {e}")
             raise
@@ -932,8 +880,10 @@ class CalkitFile(AbstractBufferedFile):
     def _initiate_upload(self):
         """Initiate a file upload.
 
-        This method is called by AbstractBufferedFile when opening a file for writing.
-        It obtains the operation info (including access credentials) from the Calkit API.
+        This method is called by AbstractBufferedFile when opening a file for
+        writing.
+        It obtains the operation info (including access credentials) from the
+        Calkit Cloud API.
 
         Raises
         ------
@@ -942,15 +892,16 @@ class CalkitFile(AbstractBufferedFile):
         """
         try:
             logger.debug(
-                f"Initiating upload for {self.owner}/{self.project}/{self.file_path}"
+                f"Initiating upload for "
+                f"{self.owner}/{self.project}/{self.file_path}"
             )
             self.operation_info = self.fs._get_file_operation_info(
                 self.owner, self.project, self.file_path, "put"
             )
             logger.debug(
-                f"Got operation info for upload (backend: {self.operation_info.get('backend')})"
+                f"Got operation info for upload "
+                f"(backend: {self.operation_info.get('backend')})"
             )
-
         except Exception:
             logger.error("Failed to initiate upload")
             raise

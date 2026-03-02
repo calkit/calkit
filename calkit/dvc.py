@@ -6,11 +6,12 @@ import hashlib
 import json
 import logging
 import os
-import subprocess
 import sys
 from pathlib import Path
 
 import git
+from dvc.utils.objects import cached_property
+from dvc_objects.fs.base import ObjectFileSystem
 
 import calkit
 from calkit.cli import warn
@@ -18,6 +19,56 @@ from calkit.config import get_app_name
 
 logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
+
+
+class CalkitDVCFileSystem(ObjectFileSystem):
+    """DVC-facing filesystem wrapper for the ``ck://`` scheme."""
+
+    protocol = "ck"
+
+    @classmethod
+    def _strip_protocol(cls, path: str) -> str:
+        prefix = f"{cls.protocol}://"
+        if path.startswith(prefix):
+            return path[len(prefix) :]
+        return path
+
+    @cached_property
+    def fs(self):
+        from calkit.fs import CalkitFileSystem
+
+        return CalkitFileSystem()
+
+
+def register_ck_scheme() -> None:
+    """Register ``ck://`` support in DVC runtime schema and FS registry."""
+    from dvc.config_schema import REMOTE_COMMON, REMOTE_SCHEMAS, SCHEMA, ByUrl
+    from dvc_objects.fs import known_implementations
+
+    REMOTE_SCHEMAS.setdefault("ck", {**REMOTE_COMMON})
+    SCHEMA["remote"] = {str: ByUrl(REMOTE_SCHEMAS)}
+    known_implementations["ck"] = {
+        "class": "calkit.dvc.CalkitDVCFileSystem",
+        "err": "ck is supported, but requires calkit-python to be installed",
+    }
+
+
+def run_dvc_cli(argv: list[str] | None = None) -> int:
+    """Run DVC CLI with ``ck://`` scheme pre-registered."""
+    from dvc.cli import main as dvc_main
+
+    register_ck_scheme()
+    return dvc_main(argv)
+
+
+def run_dvc_command(argv: list[str], cwd: str | None = None) -> int:
+    """Run a DVC command, optionally in a specific working directory.
+
+    Uses DVC's --cd flag to handle directory changes.
+    """
+    if cwd:
+        argv = ["--cd", cwd] + argv
+    return run_dvc_cli(argv)
 
 
 def configure_remote(wdir: str | None = None) -> str:
@@ -43,33 +94,20 @@ def configure_remote(wdir: str | None = None) -> str:
     base_url = calkit.cloud.get_base_url()
     remote_url = f"{base_url}/projects/{project_name}/dvc"
     remote_name = get_app_name()
-    subprocess.check_call(
-        [
-            sys.executable,
-            "-m",
-            "dvc",
-            "remote",
-            "add",
-            "-d",
-            "-f",
-            remote_name,
-            remote_url,
-        ],
+    result = run_dvc_command(
+        ["remote", "add", "-d", "-f", remote_name, remote_url],
         cwd=wdir,
     )
-    subprocess.check_call(
-        [
-            sys.executable,
-            "-m",
-            "dvc",
-            "remote",
-            "modify",
-            remote_name,
-            "auth",
-            "custom",
-        ],
+    if result != 0:
+        raise RuntimeError(f"Failed to add DVC remote {remote_name}")
+    result = run_dvc_command(
+        ["remote", "modify", remote_name, "auth", "custom"],
         cwd=wdir,
     )
+    if result != 0:
+        raise RuntimeError(
+            f"Failed to configure auth for DVC remote {remote_name}"
+        )
     return remote_name
 
 
@@ -91,11 +129,8 @@ def set_remote_auth(
         )["access_token"]
         settings.dvc_token = token
         settings.write()
-    p1 = subprocess.run(
+    r1 = run_dvc_command(
         [
-            sys.executable,
-            "-m",
-            "dvc",
             "remote",
             "modify",
             "--local",
@@ -105,11 +140,8 @@ def set_remote_auth(
         ],
         cwd=wdir,
     )
-    p2 = subprocess.run(
+    r2 = run_dvc_command(
         [
-            sys.executable,
-            "-m",
-            "dvc",
             "remote",
             "modify",
             "--local",
@@ -119,7 +151,7 @@ def set_remote_auth(
         ],
         cwd=wdir,
     )
-    if p1.returncode != 0 or p2.returncode != 0:
+    if r1 != 0 or r2 != 0:
         raise RuntimeError(
             f"Failed to set DVC remote authentication for {remote_name}"
         )
@@ -129,30 +161,8 @@ def add_external_remote(owner_name: str, project_name: str) -> dict:
     base_url = calkit.cloud.get_base_url()
     remote_url = f"{base_url}/projects/{owner_name}/{project_name}/dvc"
     remote_name = f"{get_app_name()}:{owner_name}/{project_name}"
-    subprocess.call(
-        [
-            sys.executable,
-            "-m",
-            "dvc",
-            "remote",
-            "add",
-            "-f",
-            remote_name,
-            remote_url,
-        ]
-    )
-    subprocess.call(
-        [
-            sys.executable,
-            "-m",
-            "dvc",
-            "remote",
-            "modify",
-            remote_name,
-            "auth",
-            "custom",
-        ]
-    )
+    run_dvc_command(["remote", "add", "-f", remote_name, remote_url])
+    run_dvc_command(["remote", "modify", remote_name, "auth", "custom"])
     set_remote_auth(remote_name)
     return {"name": remote_name, "url": remote_url}
 
@@ -169,15 +179,16 @@ def get_remotes(wdir: str | None = None) -> dict[str, str]:
     """Get a dictionary of DVC remotes, keyed by name, with URL as the
     value.
     """
-    p = subprocess.run(
-        [sys.executable, "-m", "dvc", "remote", "list"],
-        cwd=wdir,
-        capture_output=True,
-        text=True,
-    )
-    if p.returncode != 0:
-        raise RuntimeError(f"Error getting DVC remotes: {p.stderr.strip()}")
-    out = p.stdout.strip()
+    import io
+    from contextlib import redirect_stdout
+
+    # Capture stdout from DVC CLI
+    output = io.StringIO()
+    with redirect_stdout(output):
+        result = run_dvc_command(["remote", "list"], cwd=wdir)
+    if result != 0:
+        raise RuntimeError("Error getting DVC remotes")
+    out = output.getvalue().strip()
     if not out:
         return {}
     resp = {}
@@ -297,3 +308,7 @@ def hash_path(path: str) -> dict:
         return hash_file(path)
     else:
         raise ValueError(f"Path does not exist: {path}")
+
+
+if __name__ == "__main__":
+    raise SystemExit(run_dvc_cli(sys.argv[1:]))

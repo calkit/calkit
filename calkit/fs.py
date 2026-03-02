@@ -678,6 +678,9 @@ class CalkitFileSystem(AbstractFileSystem):
                 resp.raise_for_status()
                 result = resp.json()
                 return result.get("files", empty)
+        except FileNotFoundError:
+            logger.debug(f"Listing path not found (treating as empty): {path}")
+            return []
         except Exception as e:
             logger.error(f"Failed to list files in {path}: {e}")
             raise

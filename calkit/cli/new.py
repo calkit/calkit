@@ -23,6 +23,7 @@ from calkit.cli.check import check_environment
 from calkit.cli.update import update_devcontainer
 from calkit.core import ryaml
 from calkit.docker import LAYERS
+from calkit.dvc import run_dvc_command
 from calkit.environments import DEFAULT_PYTHON_VERSION
 from calkit.models.pipeline import LatexStage, StageIteration
 
@@ -141,15 +142,14 @@ def new_project(
         if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
             typer.echo("Initializing DVC repository")
             try:
-                subprocess.run(
-                    [sys.executable, "-m", "dvc", "init", "-q"],
+                result = run_dvc_command(
+                    ["init", "-q"],
                     cwd=abs_path,
-                    capture_output=True,
-                    check=True,
-                    text=True,
                 )
+                if result != 0:
+                    raise subprocess.CalledProcessError(result, "dvc init")
             except subprocess.CalledProcessError as e:
-                raise_error(f"Failed to initialize DVC repository: {e.stderr}")
+                raise_error(f"Failed to initialize DVC repository: {e}")
             # Commit the DVC init changes
             if not no_commit:
                 repo.git.add(".dvc")
@@ -361,9 +361,12 @@ def new_project(
     repo = git.Repo(abs_path)
     if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
         typer.echo("Initializing DVC repository")
-        subprocess.run(
-            [sys.executable, "-m", "dvc", "init", "-q"], cwd=abs_path
+        result = run_dvc_command(
+            ["init", "-q"],
+            cwd=abs_path,
         )
+        if result != 0:
+            raise_error("Failed to initialize DVC repository")
     # Create calkit.yaml file
     ck_info = calkit.load_calkit_info(wdir=abs_path)
     ck_info = dict(name=name, title=title, description=description) | ck_info
@@ -493,13 +496,20 @@ def new_figure(
         outs_cmd = []
         for out in outs:
             outs_cmd += ["-o", out]
-        subprocess.check_call(
-            [sys.executable, "-m", "dvc", "stage", "add", "-n", stage_name]
+        result = run_dvc_command(
+            [
+                "stage",
+                "add",
+                "-n",
+                stage_name,
+            ]
             + (["-f"] if overwrite else [])
             + deps_cmd
             + outs_cmd
             + [cmd]
         )
+        if result != 0:
+            raise_error(f"Failed to add figure {obj}")
     figures.append(obj)
     ck_info["figures"] = figures
     with open("calkit.yaml", "w") as f:
@@ -910,13 +920,20 @@ def new_dataset(
         outs_cmd = []
         for out in outs:
             outs_cmd += ["-o", out]
-        subprocess.check_call(
-            [sys.executable, "-m", "dvc", "stage", "add", "-n", stage_name]
+        result = run_dvc_command(
+            [
+                "stage",
+                "add",
+                "-n",
+                stage_name,
+            ]
             + (["-f"] if overwrite else [])
             + deps_cmd
             + outs_cmd
             + [cmd]
         )
+        if result != 0:
+            raise_error(f"Failed to add dataset {obj}")
     datasets.append(obj)
     ck_info["datasets"] = datasets
     with open("calkit.yaml", "w") as f:
@@ -3088,7 +3105,12 @@ def new_stage(
         cmd += f"zsh {target}"
     elif kind.value == "r-script":
         cmd += f"Rscript {target}"
-    add_cmd = [sys.executable, "-m", "dvc", "stage", "add", "-n", name]
+    add_cmd = [
+        "stage",
+        "add",
+        "-n",
+        name,
+    ]
     if target not in deps:
         deps = [target] + deps
     for dep in deps:

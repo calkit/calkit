@@ -7,7 +7,6 @@ import os
 import platform
 import re
 import subprocess
-import sys
 from typing import Literal
 
 import dvc
@@ -23,6 +22,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 import calkit
 import calkit.jupyter
+from calkit.dvc import run_dvc_cli, run_dvc_command
 
 logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
@@ -219,9 +219,9 @@ def dvc_pull(owner_name: str, project_name: str) -> Message:
     logger.info(f"Looking for project {owner_name}/{project_name}")
     project = get_local_project(owner_name, project_name)
     logger.info(f"Found project at {project.wdir}")
-    subprocess.check_call(
-        [sys.executable, "-m", "dvc", "pull"], cwd=project.wdir
-    )
+    result = run_dvc_command(["pull"], cwd=project.wdir)
+    if result != 0:
+        raise HTTPException(500, "DVC pull failed")
     return Message(message="Success!")
 
 
@@ -230,9 +230,9 @@ def dvc_push(owner_name: str, project_name: str) -> Message:
     logger.info(f"Looking for project {owner_name}/{project_name}")
     project = get_local_project(owner_name, project_name)
     logger.info(f"Found project at {project.wdir}")
-    subprocess.check_call(
-        [sys.executable, "-m", "dvc", "push"], cwd=project.wdir
-    )
+    result = run_dvc_command(["push"], cwd=project.wdir)
+    if result != 0:
+        raise HTTPException(500, "DVC push failed")
     return Message(message="Success!")
 
 
@@ -457,10 +457,12 @@ def discard_changes(owner_name: str, project_name: str) -> Message:
         changed = dvc_data_status.get("uncommitted", {}).get("modified", [])
         for path in changed:
             logger.info(f"Checking out {path} with DVC")
-            subprocess.check_call(
-                [sys.executable, "-m", "dvc", "checkout", path, "--force"],
+            result = run_dvc_command(
+                ["checkout", path, "--force"],
                 cwd=project.wdir,
             )
+            if result != 0:
+                raise HTTPException(500, f"Failed to checkout {path} with DVC")
     except dvc.config.ConfigError:
         pass
     return Message(message="Changes successfully discarded")
@@ -501,9 +503,15 @@ def get_pipeline(owner_name: str, project_name: str) -> Pipeline:
         with open(fpath) as f:
             raw_yaml = f.read()
         pipeline = calkit.ryaml.load(raw_yaml)
-        mermaid = subprocess.check_output(
-            [sys.executable, "-m", "dvc", "dag", "--mermaid"], cwd=project.wdir
-        ).decode()
+        import io
+        from contextlib import redirect_stdout
+
+        mermaid_output = io.StringIO()
+        with redirect_stdout(mermaid_output):
+            result = run_dvc_cli(["--cd", project.wdir, "dag", "--mermaid"])
+        if result != 0:
+            raise HTTPException(500, "Failed to get DVC DAG")
+        mermaid = mermaid_output.getvalue()
         return Pipeline(
             raw_yaml=raw_yaml,
             stages=pipeline.get("stages", {}),

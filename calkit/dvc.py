@@ -71,6 +71,10 @@ def run_dvc_command(argv: list[str], cwd: str | None = None) -> int:
 
 
 def configure_remote(wdir: str | None = None) -> str:
+    """Configure a DVC remote for the current project.
+
+    TODO: Use the ck:// scheme.
+    """
     try:
         project_name = calkit.detect_project_name(wdir=wdir)
     except ValueError as e:
@@ -117,9 +121,20 @@ def set_remote_auth(
 ):
     """Get a token and set it in the local DVC config so we can interact with
     the cloud as an HTTP remote.
+
+    Note: This only applies to HTTP remotes. The ck:// scheme doesn't need
+    HTTP auth configuration.
     """
     if remote_name is None:
         remote_name = get_app_name()
+    # Check if this is a ck:// remote (doesn't need HTTP auth)
+    remotes = get_remotes(wdir=wdir)
+    remote_url = remotes.get(remote_name, "")
+    if remote_url.startswith("ck://"):
+        logger.info(
+            f"Remote {remote_name} uses ck:// scheme; skipping HTTP auth setup"
+        )
+        return
     settings = calkit.config.read()
     if settings.dvc_token is None or always_auth:
         logger.info("Creating token for DVC scope")

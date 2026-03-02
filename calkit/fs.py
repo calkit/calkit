@@ -192,8 +192,8 @@ class CalkitFileSystem(AbstractFileSystem):
             - result: Optional dict with direct answer
               (for list/exists operations with files or exists keys)
             - access: Optional dict with access details:
-              - kind: Access type (presigned-url, presigned-multipart-init,
-                presigned-chunked-init, http-request, sftp)
+              - kind: Access type (presigned-url, presigned-multipart,
+                presigned-chunked, http-request, sftp)
               - url/init_url: URL for the operation
               - http_method: HTTP method to use
               - headers: Optional headers to include
@@ -234,7 +234,7 @@ class CalkitFileSystem(AbstractFileSystem):
         >>> {
         ...     "backend": "gcs",
         ...     "access": {
-        ...         "kind": "presigned-chunked-init",
+        ...         "kind": "presigned-chunked",
         ...         "init_url": "https://storage.googleapis.com/...",
         ...         "http_method": "POST",
         ...         "chunk_size_bytes": 5242880,
@@ -292,8 +292,8 @@ class CalkitFileSystem(AbstractFileSystem):
 
         Handles different access types:
         - presigned-url: Simple HTTP request to presigned URL
-        - presigned-multipart-init: S3 multipart upload (TODO)
-        - presigned-chunked-init: GCS resumable upload (TODO)
+        - presigned-multipart: S3 multipart upload (TODO)
+        - presigned-chunked: GCS resumable upload (TODO)
         - http-request: Generic HTTP request with custom headers
         - sftp: SFTP access (TODO)
 
@@ -364,7 +364,7 @@ class CalkitFileSystem(AbstractFileSystem):
                 data=data,
                 timeout=120,
             )
-        elif kind == "presigned-multipart-init":
+        elif kind == "presigned-multipart":
             # S3 multipart upload using server-provided part URLs
             if data is None:
                 raise ValueError("Data required for multipart upload")
@@ -374,21 +374,20 @@ class CalkitFileSystem(AbstractFileSystem):
             part_size = access.get("part_size_bytes")
             if not upload_id:
                 raise ValueError(
-                    "Missing 'upload_id' field for presigned-multipart-init"
+                    "Missing 'upload_id' field for presigned-multipart"
                 )
             if not isinstance(part_urls, list) or len(part_urls) == 0:
                 raise ValueError(
-                    "Missing or invalid 'part_urls' for "
-                    "presigned-multipart-init"
+                    "Missing or invalid 'part_urls' for " "presigned-multipart"
                 )
             if not complete_url:
                 raise ValueError(
-                    "Missing 'complete_url' for presigned-multipart-init"
+                    "Missing 'complete_url' for presigned-multipart"
                 )
             if not isinstance(part_size, int) or part_size <= 0:
                 raise ValueError(
                     "Missing or invalid 'part_size_bytes' for "
-                    "presigned-multipart-init"
+                    "presigned-multipart"
                 )
             content_type = access.get(
                 "content_type", "application/octet-stream"
@@ -441,14 +440,14 @@ class CalkitFileSystem(AbstractFileSystem):
                 f"Completed multipart upload with upload_id={upload_id}"
             )
             return complete_resp
-        elif kind == "presigned-chunked-init":
+        elif kind == "presigned-chunked":
             # GCS resumable upload - requires multiple requests
             if data is None:
                 raise ValueError("Data required for chunked upload")
             init_url = access.get("init_url")
             if not init_url:
                 raise ValueError(
-                    "Missing 'init_url' field for presigned-chunked-init"
+                    "Missing 'init_url' field for presigned-chunked"
                 )
             chunk_size = access.get("chunk_size_bytes", 5 * 1024 * 1024)
             content_type = access.get(

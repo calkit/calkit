@@ -359,7 +359,9 @@ class CalkitFileSystem(AbstractFileSystem):
             url = access.get("url")
             if not url:
                 raise ValueError("Missing 'url' field for presigned-url")
-            http_method = access.get("http_method", "GET")
+            http_method = access.get("http_method") or (
+                "PUT" if operation == "put" else "GET"
+            )
             request_headers = dict(access.get("headers") or {})
             if headers:
                 request_headers.update(headers)
@@ -377,7 +379,9 @@ class CalkitFileSystem(AbstractFileSystem):
             url = access.get("url")
             if not url:
                 raise ValueError("Missing 'url' field for http-request")
-            http_method = access.get("http_method", "GET")
+            http_method = access.get("http_method") or (
+                "PUT" if operation == "put" else "GET"
+            )
             request_headers = dict(access.get("headers") or {})
             if headers:
                 request_headers.update(headers)
@@ -947,12 +951,10 @@ class CalkitFile(AbstractBufferedFile):
                 content_type="application/octet-stream",
             )
             # Execute the put operation
-            headers = {"Content-Type": "application/octet-stream"}
             resp = self.fs._execute_operation(
                 self.operation_info,
                 "put",
                 data=data,
-                headers=headers,
             )
             resp.raise_for_status()
             self.uploaded_bytes += ndata

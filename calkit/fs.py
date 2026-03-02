@@ -49,44 +49,10 @@ import requests
 from fsspec import AbstractFileSystem
 from fsspec.spec import AbstractBufferedFile
 from fsspec.utils import stringify_path
-from pydantic import BaseModel
 
 from . import cloud
 
 logger = logging.getLogger(__name__)
-
-
-class NormalizedOperationInfo(BaseModel):
-    """Normalized file operation information from Calkit Cloud API.
-
-    All operation responses are normalized into this consistent format
-    for uniform handling across different backends.
-
-    Attributes
-    ----------
-    method : str
-        Access method: "presigned_url", "api", or "request"
-    url : str
-        The URL to access (presigned URL, API endpoint, or request URL)
-    http_method : str, default="GET"
-        HTTP verb to use (GET, PUT, POST, etc.)
-    headers : dict[str, str], default={}
-        Additional HTTP headers to include
-    params : dict[str, Any] | None, default=None
-        Query parameters for the request
-    token : str | None, default=None
-        Bearer token for Authorization header (if needed)
-    timeout : int, default=120
-        Request timeout in seconds
-    """
-
-    method: str
-    url: str
-    http_method: str = "GET"
-    headers: dict[str, str] = {}
-    params: dict[str, Any] | None = None
-    token: str | None = None
-    timeout: int = 120
 
 
 def _parse_path(path: str) -> tuple[str, str, str]:
@@ -314,68 +280,6 @@ class CalkitFileSystem(AbstractFileSystem):
             )
             raise
 
-    @staticmethod
-    def _normalize_operation_info(
-        operation_info: dict[str, Any], operation: str
-    ) -> NormalizedOperationInfo:
-        """Normalize operation info for consistent execution.
-
-        The Calkit Cloud API returns provider-specific details. This method
-        normalizes those into a standard NormalizedOperationInfo format
-        for uniform handling across all backends.
-
-        Parameters
-        ----------
-        operation_info : dict[str, Any]
-            Operation information from the API
-        operation : str
-            The operation type (get, put, delete)
-
-        Returns
-        -------
-        NormalizedOperationInfo
-            Normalized operation information with consistent field names
-
-        Raises
-        ------
-        ValueError
-            If required fields are missing or method is unsupported
-        """
-        # Extract access info from the new structure
-        access = operation_info.get("access")
-        if not access:
-            raise ValueError("Missing 'access' field in operation info")
-        kind = access.get("kind")
-        if not kind:
-            raise ValueError("Missing 'kind' field in access info")
-        # Extract URL - can be 'url' or 'init_url' depending on access type
-        url = access.get("url") or access.get("init_url")
-        if not url:
-            raise ValueError(f"Missing URL field for access kind: {kind}")
-        # Extract other fields with defaults
-        http_method = access.get("http_method", "GET")
-        headers = access.get("headers", {})
-        params = access.get("params")
-        timeout = 120  # Default timeout
-        # Map the new 'kind' to legacy 'method' for backward compatibility
-        method_map = {
-            "presigned-url": "presigned_url",
-            "presigned-multipart-init": "presigned_url",  # Treat as presigned
-            "presigned-chunked-init": "presigned_url",  # Treat as presigned
-            "http-request": "request",
-            "sftp": "sftp",
-        }
-        method = method_map.get(kind, "presigned_url")
-        return NormalizedOperationInfo(
-            method=method,
-            url=url,
-            http_method=http_method,
-            headers=headers,
-            params=params,
-            token=None,  # Token not used in new structure
-            timeout=timeout,
-        )
-
     def _execute_operation(
         self,
         operation_info: dict[str, Any],
@@ -384,6 +288,13 @@ class CalkitFileSystem(AbstractFileSystem):
         headers: dict | None = None,
     ) -> requests.Response:
         """Execute a file operation based on the operation info from the API.
+
+        Handles different access types:
+        - presigned-url: Simple HTTP request to presigned URL
+        - presigned-multipart-init: S3 multipart upload (TODO)
+        - presigned-chunked-init: GCS resumable upload (TODO)
+        - http-request: Generic HTTP request with custom headers
+        - sftp: SFTP access (TODO)
 
         Parameters
         ----------
@@ -404,26 +315,75 @@ class CalkitFileSystem(AbstractFileSystem):
         Raises
         ------
         ValueError
-            If backend method is not supported
+            If access type is not supported or required fields are missing
         requests.HTTPError
             If operation fails
         """
-        normalized = self._normalize_operation_info(operation_info, operation)
-        # Merge headers: normalized headers + call-specific headers
-        request_headers = dict(normalized.headers)
-        if headers:
-            request_headers.update(headers)
-        # Add bearer token if present
-        if normalized.token and "Authorization" not in request_headers:
-            request_headers["Authorization"] = f"Bearer {normalized.token}"
-        return self._session.request(
-            method=normalized.http_method.upper(),
-            url=normalized.url,
-            headers=request_headers,
-            params=normalized.params,
-            data=data,
-            timeout=normalized.timeout,
-        )
+        # Extract access info from the operation info
+        access = operation_info.get("access")
+        if not access:
+            raise ValueError("Missing 'access' field in operation info")
+        kind = access.get("kind")
+        if not kind:
+            raise ValueError("Missing 'kind' field in access info")
+        # Handle different access types
+        if kind == "presigned-url":
+            # Simple presigned URL - just make the HTTP request
+            url = access.get("url")
+            if not url:
+                raise ValueError("Missing 'url' field for presigned-url")
+
+            http_method = access.get("http_method", "GET")
+            request_headers = dict(access.get("headers", {}))
+            if headers:
+                request_headers.update(headers)
+            params = access.get("params")
+
+            return self._session.request(
+                method=http_method.upper(),
+                url=url,
+                headers=request_headers,
+                params=params,
+                data=data,
+                timeout=120,
+            )
+        elif kind == "http-request":
+            # Generic HTTP request with custom headers
+            url = access.get("url")
+            if not url:
+                raise ValueError("Missing 'url' field for http-request")
+            http_method = access.get("http_method", "GET")
+            request_headers = dict(access.get("headers", {}))
+            if headers:
+                request_headers.update(headers)
+            params = access.get("params")
+            return self._session.request(
+                method=http_method.upper(),
+                url=url,
+                headers=request_headers,
+                params=params,
+                data=data,
+                timeout=120,
+            )
+        elif kind == "presigned-multipart-init":
+            # S3 multipart upload - requires multiple requests
+            # TODO: Implement multipart upload flow
+            raise NotImplementedError(
+                "Multipart uploads not yet implemented. "
+                "For large files, use chunked upload or reduce file size."
+            )
+        elif kind == "presigned-chunked-init":
+            # GCS resumable upload - requires multiple requests
+            # TODO: Implement resumable upload flow
+            raise NotImplementedError(
+                "Chunked/resumable uploads not yet implemented. "
+                "For large files, use multipart upload or reduce file size."
+            )
+        elif kind == "sftp":
+            # SFTP access
+            raise NotImplementedError("SFTP access not yet implemented")
+        else:
+            raise ValueError(f"Unsupported access kind: {kind}")
 
     def _open(
         self,

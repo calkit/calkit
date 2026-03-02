@@ -59,24 +59,31 @@ logger = logging.getLogger(__name__)
 def _parse_path(path: str) -> tuple[str, str, str]:
     """Parse a Calkit path into components.
 
-    Args:
-        path: A path like "ck://calkit.io/owner/project/file.txt"
+    Parameters
+    ----------
+    path : str
+        A path like "ck://calkit.io/owner/project/file.txt"
 
-    Returns:
+    Returns
+    -------
+    tuple[str, str, str]
         A tuple of (owner, project, file_path)
 
-    Raises:
-        ValueError: If the path format is invalid
+    Raises
+    ------
+    ValueError
+        If the path format is invalid
 
-    Examples:
-        >>> _parse_path("ck://calkit.io/user/proj/file.txt")
-        ('user', 'proj', 'file.txt')
+    Examples
+    --------
+    >>> _parse_path("ck://calkit.io/user/proj/file.txt")
+    ('user', 'proj', 'file.txt')
 
-        >>> _parse_path("ck://calkit.io/user/proj/data/nested/file.txt")
-        ('user', 'proj', 'data/nested/file.txt')
+    >>> _parse_path("ck://calkit.io/user/proj/data/nested/file.txt")
+    ('user', 'proj', 'data/nested/file.txt')
 
-        >>> _parse_path("ck://calkit.io/user/proj")
-        ('user', 'proj', '')
+    >>> _parse_path("ck://calkit.io/user/proj")
+    ('user', 'proj', '')
     """
     path = stringify_path(path)
     parsed = urlparse(path)
@@ -115,22 +122,29 @@ class CalkitFileSystem(AbstractFileSystem):
     underlying storage backend.
 
     The Calkit Cloud API acts as a compatibility layer that:
+
     - Determines which storage backend is configured for each project
     - Returns appropriate access credentials (presigned URLs, OAuth tokens, etc.)
     - Supports GCS, S3, Google Drive, Box, Azure, and other providers
 
-    Path format:
-        ck://calkit.io/owner/project/path/to/file
+    Path format: ck://calkit.io/owner/project/path/to/file
 
     Users can organize their files however they want. For example:
-        - DVC will automatically organize by MD5 hashes
-        - Users can create subdirectories for organization (data/, models/, etc.)
-        - Files can be stored at the project root
+
+    - DVC will automatically organize by MD5 hashes
+    - Users can create subdirectories for organization (data/, models/, etc.)
+    - Files can be stored at the project root
 
     This design allows for:
+
     - Multiple storage backend support without client-side changes
     - Future protocol upgrades (e.g., XeT) without breaking API compatibility
     - Unified interface regardless of underlying storage provider
+
+    Attributes
+    ----------
+    protocol : str
+        The protocol scheme for this filesystem ("ck")
     """
 
     protocol = "ck"
@@ -150,62 +164,83 @@ class CalkitFileSystem(AbstractFileSystem):
         """Get file operation information from Calkit API.
 
         The API determines what storage backend is configured for this project
-        and returns the appropriate access method.
+        and returns either:
+        1. Direct result (for metadata operations like list/exists)
+        2. Instructions on how to perform the operation (for content operations)
 
-        Args:
-            owner: Calkit owner/username
-            project: Calkit project name
-            file_path: The path within the project
-            operation: Either 'get', 'put', or 'delete'
-            protocol_hint: Protocol preference - 'http', 'xet', etc.
+        Parameters
+        ----------
+        owner : str
+            Calkit owner/username
+        project : str
+            Calkit project name
+        file_path : str
+            The path within the project
+        operation : str, default="get"
+            Operation type: 'get', 'put', 'delete', 'list', 'exists'
+        protocol_hint : str, default="http"
+            Protocol preference - 'http', 'xet', etc.
 
-        Returns:
+        Returns
+        -------
+        dict
             A dictionary containing:
-                - backend: Storage backend type (gcs, s3, google_drive, box, etc.)
-                - method: Access method (presigned_url, api, request, etc.)
-                - url: URL for the operation (if method=presigned_url)
-                - token: OAuth token (if method=oauth)
-                - api_endpoint: API endpoint (if method=api)
-                - http_method: Optional HTTP verb override for API-style methods
-                - headers: Additional headers to use
-                - params: Optional query parameters for the final backend call
-                - Additional backend-specific fields
+            - backend: Storage backend type (gcs, s3, google_drive, box, etc.)
+            - result: Optional dict with direct answer (for list/exists operations)
+            - access_method: How to perform operation (presigned_url, api, request, xet)
+            - url: URL for the operation (if method=presigned_url)
+            - token: OAuth token (if method=oauth)
+            - api_endpoint: API endpoint (if method=api)
+            - http_method: Optional HTTP verb override for API-style methods
+            - headers: Additional headers to use
+            - params: Optional query parameters for the final backend call
+            - Additional backend-specific fields
 
-        Raises:
-            ValueError: If API response is invalid
-            requests.HTTPError: If API request fails
+        Raises
+        ------
+        ValueError
+            If API response is invalid
+        requests.HTTPError
+            If API request fails
 
-        Example responses:
-            # GCS/S3 with presigned URLs
-            {
-                "backend": "gcs",
-                "method": "presigned_url",
-                "url": "https://storage.googleapis.com/..."
-            }
+        Examples
+        --------
+        Content operation (get file):
 
-            # Google Drive
-            {
-                "backend": "google_drive",
-                "method": "api",
-                "api_endpoint": "https://www.googleapis.com/drive/v3/files/...",
-                "token": "ya29...",
-                "file_id": "1abc..."
-            }
+        >>> {
+        ...     "backend": "gcs",
+        ...     "access_method": "presigned_url",
+        ...     "url": "https://storage.googleapis.com/...",
+        ...     "http_method": "GET"
+        ... }
 
-            # Box
-            {
-                "backend": "box",
-                "method": "api",
-                "api_endpoint": "https://api.box.com/2.0/files/...",
-                "token": "xyz..."
-            }
+        Metadata operation with direct result (list):
+
+        >>> {
+        ...     "backend": "gcs",
+        ...     "operation": "list",
+        ...     "result": {
+        ...         "files": [{"name": "file.txt", "size": 1234}]
+        ...     }
+        ... }
+
+        Metadata operation with instructions (Google Drive list):
+
+        >>> {
+        ...     "backend": "google_drive",
+        ...     "access_method": "api",
+        ...     "operation": "list",
+        ...     "api_endpoint": "https://www.googleapis.com/drive/v3/files",
+        ...     "token": "ya29...",
+        ...     "params": {"q": "..."}
+        ... }
         """
-        endpoint = f"/projects/{owner}/{project}/files/{file_path}/{operation}"
+        endpoint = f"/projects/{owner}/{project}/fs/{operation}/{file_path}"
 
         try:
             logger.debug(
-                f"Requesting file operation info for {operation}: "
-                f"{owner}/{project}/{file_path} [protocol_hint={protocol_hint}]"
+                f"Requesting {operation} instructions for {owner}/{project}/{file_path} "
+                f"[protocol_hint={protocol_hint}]"
             )
 
             resp = cloud.get(endpoint, params={"protocol": protocol_hint})
@@ -253,17 +288,26 @@ class CalkitFileSystem(AbstractFileSystem):
         and large file transfers. It's particularly useful for HuggingFace Hub,
         which has native XeT support for faster file access.
 
-        Args:
-            operation_info: Dictionary with XeT endpoint info
-            operation: The operation type (get, put, delete)
-            data: Data to upload (for put operations)
-            headers: Additional headers
+        Parameters
+        ----------
+        operation_info : dict
+            Dictionary with XeT endpoint info
+        operation : str
+            The operation type (get, put, delete)
+        data : bytes | None, optional
+            Data to upload (for put operations)
+        headers : dict | None, optional
+            Additional headers
 
-        Returns:
+        Returns
+        -------
+        requests.Response
             Response from the operation
 
-        Raises:
-            NotImplementedError: If XeT is not yet available in the client SDK
+        Raises
+        ------
+        NotImplementedError
+            If XeT is not yet available in the client SDK
         """
         xet_endpoint = operation_info.get("xet_endpoint")
         if not xet_endpoint:
@@ -305,17 +349,42 @@ class CalkitFileSystem(AbstractFileSystem):
 
         The Calkit Cloud API is the source of truth and may return provider-specific
         details. This method normalizes legacy and current response shapes.
+
+        The API returns access_method which tells us how to access the file:
+        - presigned_url: Direct HTTP with signed URL
+        - api: API endpoint with credentials
+        - request: Generic HTTP request
+        - xet: XeT protocol for HuggingFace
+
+        Parameters
+        ----------
+        operation_info : dict[str, Any]
+            Operation information from the API
+        operation : str
+            The operation type (get, put, delete)
+
+        Returns
+        -------
+        dict[str, Any]
+            Normalized operation information
+
+        Raises
+        ------
+        ValueError
+            If required fields are missing or method is unsupported
         """
         normalized = dict(operation_info)
-        method = normalized.get("method", "presigned_url")
+        # Support both "access_method" (new) and "method" (legacy)
+        method = normalized.get("access_method") or normalized.get(
+            "method", "presigned_url"
+        )
         normalized["method"] = method
 
         if method == "presigned_url":
             if "url" not in normalized:
                 raise ValueError("Missing 'url' for presigned_url method")
             normalized.setdefault(
-                "http_method",
-                {"get": "GET", "put": "PUT", "delete": "DELETE"}[operation],
+                "http_method", normalized.get("http_method", "GET")
             )
             return normalized
 
@@ -323,8 +392,7 @@ class CalkitFileSystem(AbstractFileSystem):
             if "api_endpoint" not in normalized:
                 raise ValueError("Missing 'api_endpoint' for api method")
             normalized.setdefault(
-                "http_method",
-                {"get": "GET", "put": "PUT", "delete": "DELETE"}[operation],
+                "http_method", normalized.get("http_method", "GET")
             )
             normalized.setdefault("url", normalized["api_endpoint"])
             return normalized
@@ -332,7 +400,9 @@ class CalkitFileSystem(AbstractFileSystem):
         if method == "request":
             if "url" not in normalized:
                 raise ValueError("Missing 'url' for request method")
-            normalized.setdefault("http_method", "GET")
+            normalized.setdefault(
+                "http_method", normalized.get("http_method", "GET")
+            )
             return normalized
 
         if method == "xet":
@@ -340,7 +410,7 @@ class CalkitFileSystem(AbstractFileSystem):
 
         raise ValueError(
             f"Unsupported backend method: {method}. "
-            "Supported methods: presigned_url, api, request, xet (future)"
+            "Supported methods: presigned_url, api, request, xet"
         )
 
     def _execute_operation(
@@ -352,18 +422,28 @@ class CalkitFileSystem(AbstractFileSystem):
     ) -> requests.Response:
         """Execute a file operation based on the operation info from the API.
 
-        Args:
-            operation_info: Dictionary from _get_file_operation_info
-            operation: The operation type (get, put, delete)
-            data: Data to upload (for put operations)
-            headers: Additional headers
+        Parameters
+        ----------
+        operation_info : dict
+            Dictionary from _get_file_operation_info
+        operation : str
+            The operation type (get, put, delete)
+        data : bytes | None, optional
+            Data to upload (for put operations)
+        headers : dict | None, optional
+            Additional headers
 
-        Returns:
+        Returns
+        -------
+        requests.Response
             Response from the operation
 
-        Raises:
-            ValueError: If backend method is not supported
-            requests.HTTPError: If operation fails
+        Raises
+        ------
+        ValueError
+            If backend method is not supported
+        requests.HTTPError
+            If operation fails
         """
         normalized = self._normalize_operation_info(operation_info, operation)
         method = normalized["method"]
@@ -416,19 +496,30 @@ class CalkitFileSystem(AbstractFileSystem):
     ) -> CalkitFile:
         """Open a file from Calkit cloud storage.
 
-        Args:
-            path: Path like "ck://calkit.io/owner/project/file.txt"
-            mode: File mode ('rb', 'wb', 'ab')
-            block_size: Block size for buffering
-            autocommit: Whether to commit uploads automatically
-            cache_options: Cache options
-            **kwargs: Additional arguments
+        Parameters
+        ----------
+        path : str
+            Path like "ck://calkit.io/owner/project/file.txt"
+        mode : str, default="rb"
+            File mode ('rb', 'wb', 'ab')
+        block_size : int | None, optional
+            Block size for buffering
+        autocommit : bool, default=True
+            Whether to commit uploads automatically
+        cache_options : dict | None, optional
+            Cache options
+        **kwargs
+            Additional arguments
 
-        Returns:
+        Returns
+        -------
+        CalkitFile
             A CalkitFile object
 
-        Raises:
-            ValueError: If path format is invalid
+        Raises
+        ------
+        ValueError
+            If path format is invalid
         """
         owner, project, file_path = _parse_path(path)
 
@@ -450,31 +541,46 @@ class CalkitFileSystem(AbstractFileSystem):
     ) -> list[str] | list[dict]:
         """List files in a directory.
 
-        Args:
-            path: Directory path (ck://calkit.io/owner/project or with subdirectory)
-            detail: Whether to include file details
-            refresh: Whether to refresh the cache
-            **kwargs: Additional arguments
+        Parameters
+        ----------
+        path : str
+            Directory path (ck://calkit.io/owner/project or with subdirectory)
+        detail : bool, default=False
+            Whether to include file details
+        refresh : bool, default=False
+            Whether to refresh the cache
+        **kwargs
+            Additional arguments
 
-        Returns:
+        Returns
+        -------
+        list[str] | list[dict]
             List of file names (if detail=False) or list of dicts with info
 
-        Raises:
-            ValueError: If path format is invalid
+        Raises
+        ------
+        ValueError
+            If path format is invalid
         """
         owner, project, file_path = _parse_path(path)
-        endpoint = f"/projects/{owner}/{project}/files"
-
-        # Add file_path as a query parameter if specified
-        params = {}
-        if file_path:
-            params["prefix"] = file_path
 
         try:
             logger.debug(f"Listing files in {owner}/{project}/{file_path}")
 
-            resp = cloud.get(endpoint, params=params)
-            files = resp.get("files", [])
+            # Get operation info from API
+            operation_info = self._get_file_operation_info(
+                owner, project, file_path, operation="list"
+            )
+
+            # Check if server provided the result directly
+            if "result" in operation_info:
+                files = operation_info["result"].get("files", [])
+            else:
+                # Server returned instructions - execute the operation
+                resp = self._execute_operation(operation_info, "list")
+                resp.raise_for_status()
+                result = resp.json()
+                files = result.get("files", [])
 
             if detail:
                 return files
@@ -488,20 +594,37 @@ class CalkitFileSystem(AbstractFileSystem):
     def exists(self, path: str, **kwargs) -> bool:
         """Check if a file or directory exists.
 
-        Args:
-            path: Path to check (ck://calkit.io/owner/project/file)
-            **kwargs: Additional arguments
+        Parameters
+        ----------
+        path : str
+            Path to check (ck://calkit.io/owner/project/file)
+        **kwargs
+            Additional arguments
 
-        Returns:
+        Returns
+        -------
+        bool
             True if the path exists, False otherwise
         """
         try:
             owner, project, file_path = _parse_path(path)
-            endpoint = f"/projects/{owner}/{project}/files/{file_path}"
 
             logger.debug(f"Checking existence of {path}")
-            resp = cloud.get(endpoint)
-            return resp.get("exists", False)
+
+            # Get operation info from API
+            operation_info = self._get_file_operation_info(
+                owner, project, file_path, operation="exists"
+            )
+
+            # Check if server provided the result directly
+            if "result" in operation_info:
+                return operation_info["result"].get("exists", False)
+            else:
+                # Server returned instructions - execute the operation
+                resp = self._execute_operation(operation_info, "exists")
+                resp.raise_for_status()
+                result = resp.json()
+                return result.get("exists", False)
 
         except Exception as e:
             logger.debug(f"Path {path} does not exist: {e}")
@@ -510,28 +633,47 @@ class CalkitFileSystem(AbstractFileSystem):
     def info(self, path: str, **kwargs) -> dict:
         """Get information about a file.
 
-        Args:
-            path: Path to file (ck://calkit.io/owner/project/file)
-            **kwargs: Additional arguments
+        Parameters
+        ----------
+        path : str
+            Path to file (ck://calkit.io/owner/project/file)
+        **kwargs
+            Additional arguments
 
-        Returns:
+        Returns
+        -------
+        dict
             Dictionary with file information including name, size, type, etc.
 
-        Raises:
-            ValueError: If path format is invalid
+        Raises
+        ------
+        ValueError
+            If path format is invalid
         """
         owner, project, file_path = _parse_path(path)
-        endpoint = f"/projects/{owner}/{project}/files/{file_path}"
 
         try:
             logger.debug(f"Getting info for {path}")
-            resp = cloud.get(endpoint)
+
+            # Get operation info from API - use exists operation for metadata
+            operation_info = self._get_file_operation_info(
+                owner, project, file_path, operation="exists"
+            )
+
+            # Check if server provided the result directly
+            if "result" in operation_info:
+                result = operation_info["result"]
+            else:
+                # Server returned instructions - execute the operation
+                resp = self._execute_operation(operation_info, "exists")
+                resp.raise_for_status()
+                result = resp.json()
 
             return {
                 "name": file_path,
-                "size": resp.get("size", 0),
-                "type": "file" if resp.get("is_file") else "directory",
-                "time_modified": resp.get("modified_time"),
+                "size": result.get("size", 0),
+                "type": "file" if result.get("is_file") else "directory",
+                "time_modified": result.get("modified_time"),
             }
 
         except Exception as e:
@@ -541,13 +683,19 @@ class CalkitFileSystem(AbstractFileSystem):
     def rm_file(self, path: str, **kwargs):
         """Remove a single file.
 
-        Args:
-            path: Path to file (ck://calkit.io/owner/project/file)
-            **kwargs: Additional arguments
+        Parameters
+        ----------
+        path : str
+            Path to file (ck://calkit.io/owner/project/file)
+        **kwargs
+            Additional arguments
 
-        Raises:
-            ValueError: If path format is invalid
-            requests.HTTPError: If deletion fails
+        Raises
+        ------
+        ValueError
+            If path format is invalid
+        requests.HTTPError
+            If deletion fails
         """
         owner, project, file_path = _parse_path(path)
 
@@ -572,14 +720,19 @@ class CalkitFileSystem(AbstractFileSystem):
     def mv(self, path1: str, path2: str, **kwargs):
         """Move or rename a file.
 
-        Args:
-            path1: Source path
-            path2: Destination path
-            **kwargs: Additional arguments
+        Parameters
+        ----------
+        path1 : str
+            Source path
+        path2 : str
+            Destination path
+        **kwargs
+            Additional arguments
 
-        Note:
-            Currently implemented as copy + delete. In the future, this could
-            be optimized with a direct move operation in the API.
+        Notes
+        -----
+        Currently implemented as copy + delete. In the future, this could
+        be optimized with a direct move operation in the API.
         """
         logger.debug(f"Moving {path1} to {path2}")
         self.copy(path1, path2, **kwargs)
@@ -588,10 +741,14 @@ class CalkitFileSystem(AbstractFileSystem):
     def cp_file(self, path1: str, path2: str, **kwargs):
         """Copy a file.
 
-        Args:
-            path1: Source path
-            path2: Destination path
-            **kwargs: Additional arguments
+        Parameters
+        ----------
+        path1 : str
+            Source path
+        path2 : str
+            Destination path
+        **kwargs
+            Additional arguments
         """
         logger.debug(f"Copying {path1} to {path2}")
 
@@ -608,12 +765,18 @@ class CalkitFile(AbstractBufferedFile):
     This class handles buffering and delegates actual I/O to the underlying
     storage backend (GCS, S3, Google Drive, Box, etc.) via the Calkit API.
 
-    Attributes:
-        owner: Calkit owner/username
-        project: Calkit project name
-        file_path: Path within the project
-        operation_info: Cached operation info from API (contains backend details)
-        uploaded_bytes: Total bytes uploaded (for tracking)
+    Attributes
+    ----------
+    owner : str
+        Calkit owner/username
+    project : str
+        Calkit project name
+    file_path : str
+        Path within the project
+    operation_info : dict | None
+        Cached operation info from API (contains backend details)
+    uploaded_bytes : int
+        Total bytes uploaded (for tracking)
     """
 
     def __init__(
@@ -652,15 +815,22 @@ class CalkitFile(AbstractBufferedFile):
     def _fetch_range(self, start: int, end: int) -> bytes:
         """Fetch a range of bytes from the file.
 
-        Args:
-            start: Start byte position
-            end: End byte position (exclusive)
+        Parameters
+        ----------
+        start : int
+            Start byte position
+        end : int
+            End byte position (exclusive)
 
-        Returns:
+        Returns
+        -------
+        bytes
             Bytes in the range [start, end)
 
-        Raises:
-            requests.HTTPError: If the fetch fails
+        Raises
+        ------
+        requests.HTTPError
+            If the fetch fails
         """
         if self.operation_info is None:
             # Get file operation info from API
@@ -669,12 +839,12 @@ class CalkitFile(AbstractBufferedFile):
             )
 
         try:
-            logger.debug(f"Fetching bytes {start}-{end-1} from {self.path}")
+            logger.debug(f"Fetching bytes {start}-{end - 1} from {self.path}")
 
             # Add Range header for partial content. For backends where range is
             # unsupported, the Calkit Cloud API can choose to ignore this header
             # or return a backend-specific request configuration.
-            headers = {"Range": f"bytes={start}-{end-1}"}
+            headers = {"Range": f"bytes={start}-{end - 1}"}
 
             # Execute the get operation with range header
             resp = self.fs._execute_operation(
@@ -696,15 +866,22 @@ class CalkitFile(AbstractBufferedFile):
         This method is called by AbstractBufferedFile to upload buffered data.
         For DVC operations, we typically upload the entire file in one go.
 
-        Args:
-            final: Whether this is the final chunk (file is being closed)
+        Parameters
+        ----------
+        final : bool, default=False
+            Whether this is the final chunk (file is being closed)
 
-        Returns:
+        Returns
+        -------
+        int
             Number of bytes uploaded from this chunk
 
-        Raises:
-            RuntimeError: If upload hasn't been initiated
-            requests.HTTPError: If upload fails
+        Raises
+        ------
+        RuntimeError
+            If upload hasn't been initiated
+        requests.HTTPError
+            If upload fails
         """
         if not final:
             # For non-final chunks, we don't upload yet (buffer accumulates)
@@ -758,8 +935,10 @@ class CalkitFile(AbstractBufferedFile):
         This method is called by AbstractBufferedFile when opening a file for writing.
         It obtains the operation info (including access credentials) from the Calkit API.
 
-        Raises:
-            RuntimeError: If unable to get operation info
+        Raises
+        ------
+        RuntimeError
+            If unable to get operation info
         """
         try:
             logger.debug(

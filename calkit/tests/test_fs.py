@@ -1,10 +1,8 @@
 """Tests for the Calkit filesystem implementation."""
 
-import importlib
-
 import pytest
 
-from calkit import config, fs
+from calkit import fs
 
 
 def test_parse_path_simple():
@@ -91,37 +89,3 @@ def test_parse_path_invalid_empty():
     """Test that empty path raises ValueError."""
     with pytest.raises(ValueError, match="Invalid path format"):
         fs._parse_path("ck://")
-
-
-def test_default_domain_production(monkeypatch):
-    """Test production domain."""
-    monkeypatch.setenv("CALKIT_ENV", "production")
-    # Reload config to pick up new env
-    importlib.reload(config)
-    assert fs._get_default_domain() == "calkit.io"
-    assert fs._get_default_domain_url() == "https://calkit.io"
-
-
-def test_default_domain_staging(monkeypatch):
-    """Test staging domain."""
-    monkeypatch.setenv("CALKIT_ENV", "staging")
-    importlib.reload(config)
-    assert fs._get_default_domain() == "staging.calkit.io"
-    assert fs._get_default_domain_url() == "https://staging.calkit.io"
-
-
-def test_default_domain_local(monkeypatch):
-    """Test local domain uses HTTP."""
-    monkeypatch.setenv("CALKIT_ENV", "local")
-    importlib.reload(config)
-    assert fs._get_default_domain() == "objects.localhost"
-    # Local should use HTTP, not HTTPS
-    assert fs._get_default_domain_url() == "http://objects.localhost"
-
-
-def test_default_domain_test(monkeypatch):
-    """Test test environment domain."""
-    monkeypatch.setenv("CALKIT_ENV", "test")
-    importlib.reload(config)
-    assert fs._get_default_domain() == "objects.localhost"
-    assert fs._get_default_domain_url() == "http://objects.localhost"

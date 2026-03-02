@@ -51,43 +51,9 @@ from fsspec import AbstractFileSystem
 from fsspec.spec import AbstractBufferedFile
 from fsspec.utils import stringify_path
 
-from . import cloud, config
+from . import cloud
 
 logger = logging.getLogger(__name__)
-
-
-def _get_default_domain() -> str:
-    """Get the default domain based on CALKIT_ENV.
-
-    Returns
-    -------
-    str
-        The domain name (e.g., 'calkit.io', 'staging.calkit.io', 'objects.localhost')
-    """
-    domains = {
-        "local": "objects.localhost",
-        "staging": "staging.calkit.io",
-        "production": "calkit.io",
-        "test": "objects.localhost",  # Use local for tests
-    }
-    return domains[config.get_env()]
-
-
-def _get_default_domain_url() -> str:
-    """Get the default domain URL (with protocol) based on CALKIT_ENV.
-
-    Returns
-    -------
-    str
-        The full domain URL (e.g., 'https://calkit.io', 'http://objects.localhost')
-    """
-    urls = {
-        "local": "http://objects.localhost",
-        "staging": "https://staging.calkit.io",
-        "production": "https://calkit.io",
-        "test": "http://objects.localhost",  # Use local for tests
-    }
-    return urls[config.get_env()]
 
 
 def _parse_path(path: str) -> tuple[str, str, str]:

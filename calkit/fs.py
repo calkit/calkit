@@ -149,6 +149,7 @@ class CalkitFileSystem(AbstractFileSystem):
         operation: str = "get",
         content_length: int | None = None,
         content_type: str | None = None,
+        detail: bool = False,
     ) -> dict:
         """Get file operation information from Calkit API.
 
@@ -236,6 +237,7 @@ class CalkitFileSystem(AbstractFileSystem):
         request_body: dict[str, Any] = {
             "operation": operation,
             "file_path": file_path,
+            "detail": detail,
         }
         if content_length is not None:
             request_body["content_length"] = content_length
@@ -620,21 +622,18 @@ class CalkitFileSystem(AbstractFileSystem):
             logger.debug(f"Listing files in {owner}/{project}/{file_path}")
             # Get operation info from API
             operation_info = self._get_file_operation_info(
-                owner, project, file_path, operation="list"
+                owner, project, file_path, operation="list", detail=detail
             )
+            empty = {} if detail else []
             # Check if server provided the result directly
             if "result" in operation_info:
-                files = operation_info["result"].get("files", [])
+                return operation_info["result"].get("files", empty)
             else:
-                # Server returned instructions - execute the operation
+                # Server returned instructions; execute the operation
                 resp = self._execute_operation(operation_info, "list")
                 resp.raise_for_status()
                 result = resp.json()
-                files = result.get("files", [])
-            if detail:
-                return files
-            else:
-                return [f["name"] for f in files]
+                return result.get("files", empty)
         except Exception as e:
             logger.error(f"Failed to list files in {path}: {e}")
             raise

@@ -332,13 +332,11 @@ class CalkitFileSystem(AbstractFileSystem):
             url = access.get("url")
             if not url:
                 raise ValueError("Missing 'url' field for presigned-url")
-
             http_method = access.get("http_method", "GET")
             request_headers = dict(access.get("headers", {}))
             if headers:
                 request_headers.update(headers)
             params = access.get("params")
-
             return self._session.request(
                 method=http_method.upper(),
                 url=url,
@@ -367,17 +365,126 @@ class CalkitFileSystem(AbstractFileSystem):
             )
         elif kind == "presigned-multipart-init":
             # S3 multipart upload - requires multiple requests
-            # TODO: Implement multipart upload flow
+            if not data:
+                raise ValueError("Data required for multipart upload")
+            init_url = access.get("init_url")
+            if not init_url:
+                raise ValueError(
+                    "Missing 'init_url' field for presigned-multipart-init"
+                )
+            content_type = access.get(
+                "content_type", "application/octet-stream"
+            )
+            # Step 1: Initiate multipart upload
+            logger.debug(f"Initiating S3 multipart upload to {init_url}")
+            init_headers = dict(access.get("headers", {}))
+            init_headers["Content-Type"] = content_type
+            init_resp = self._session.post(
+                init_url,
+                headers=init_headers,
+                timeout=30,
+            )
+            init_resp.raise_for_status()
+            # Parse the response to get upload ID
+            # S3 returns XML with UploadId
+            import xml.etree.ElementTree as ET
+
+            root = ET.fromstring(init_resp.content)
+            upload_id = root.find(
+                ".//{http://s3.amazonaws.com/doc/2006-03-01/}UploadId"
+            )
+            if upload_id is None:
+                raise ValueError(
+                    "Failed to get UploadId from multipart init response"
+                )
+            upload_id = upload_id.text
+            logger.debug(f"Got upload ID: {upload_id}")
+            # Step 2: Upload parts
+            # Note: We need presigned URLs for each part, which requires
+            # additional server API calls. The server should provide a way
+            # to get part URLs for each part number.
+            # This is a placeholder - the actual implementation depends on
+            # how the server provides part upload URLs
             raise NotImplementedError(
-                "Multipart uploads not yet implemented. "
-                "For large files, use chunked upload or reduce file size."
+                "S3 multipart upload requires additional server API support "
+                "to provide presigned URLs for each part. "
+                "Please contact the server administrator or use GCS resumable uploads."
             )
         elif kind == "presigned-chunked-init":
             # GCS resumable upload - requires multiple requests
-            # TODO: Implement resumable upload flow
-            raise NotImplementedError(
-                "Chunked/resumable uploads not yet implemented. "
-                "For large files, use multipart upload or reduce file size."
+            if not data:
+                raise ValueError("Data required for chunked upload")
+            init_url = access.get("init_url")
+            if not init_url:
+                raise ValueError(
+                    "Missing 'init_url' field for presigned-chunked-init"
+                )
+            chunk_size = access.get("chunk_size_bytes", 5 * 1024 * 1024)
+            content_type = access.get(
+                "content_type", "application/octet-stream"
+            )
+            # Step 1: Initiate resumable upload
+            logger.debug(f"Initiating GCS resumable upload to {init_url}")
+            init_headers = dict(access.get("headers", {}))
+            init_headers["Content-Type"] = content_type
+            init_headers["Content-Length"] = "0"  # Init request has no body
+            init_resp = self._session.post(
+                init_url,
+                headers=init_headers,
+                timeout=30,
+            )
+            init_resp.raise_for_status()
+            # Get the session URI from the Location header
+            session_uri = init_resp.headers.get("Location")
+            if not session_uri:
+                raise ValueError(
+                    "Failed to get session URI from resumable upload init response. "
+                    "Expected 'Location' header."
+                )
+            logger.debug(f"Got session URI: {session_uri}")
+            # Step 2: Upload data in chunks
+            total_size = len(data)
+            offset = 0
+            while offset < total_size:
+                chunk_end = min(offset + chunk_size, total_size)
+                chunk_data = data[offset:chunk_end]
+                logger.debug(
+                    f"Uploading chunk: bytes {offset}-{chunk_end - 1}/{total_size - 1}"
+                )
+                # Set Content-Range header for the chunk
+                chunk_headers = {
+                    "Content-Length": str(len(chunk_data)),
+                    "Content-Range": f"bytes {offset}-{chunk_end - 1}/{total_size}",
+                }
+                chunk_resp = self._session.put(
+                    session_uri,
+                    headers=chunk_headers,
+                    data=chunk_data,
+                    timeout=120,
+                )
+                # Check response
+                if chunk_resp.status_code == 308:
+                    # Resume Incomplete - continue uploading
+                    # Server returns Range header with bytes received
+                    range_header = chunk_resp.headers.get("Range")
+                    if range_header:
+                        # Parse range like "bytes=0-524287"
+                        logger.debug(f"Server confirmed: {range_header}")
+                    offset = chunk_end
+                elif chunk_resp.status_code in (200, 201):
+                    # Upload complete
+                    logger.debug("Upload completed successfully")
+                    return chunk_resp
+                else:
+                    # Unexpected status
+                    chunk_resp.raise_for_status()
+                    raise ValueError(
+                        f"Unexpected status code during chunked upload: {chunk_resp.status_code}"
+                    )
+            # If we reach here, the upload completed without getting a 200/201
+            # This shouldn't happen, but handle it gracefully
+            raise ValueError(
+                "Chunked upload completed but no success response received"
             )
         elif kind == "sftp":
             # SFTP access

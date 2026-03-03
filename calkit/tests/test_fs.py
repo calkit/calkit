@@ -129,7 +129,7 @@ def test_calkitfilesystem():
     not _calkit_cloud_available(), reason="Calkit Cloud not available"
 )
 def test_calkitfilesystem_dvc(tmp_dir):
-    """Test basic CalkitFileSystem functionality as a DVC remote."""
+    """Test CalkitFileSystem as a DVC remote."""
     subprocess.run(["calkit", "init"])
     subprocess.run(
         ["calkit", "dvc", "remote", "add", "ck://calkit/example-basic/"]

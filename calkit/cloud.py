@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import warnings
 from functools import partial
 from typing import Literal
@@ -80,25 +81,32 @@ def _request(
     base_url: str | None = None,
     **kwargs,
 ):
+    max_retries = 4
+    base_delay_seconds = 0.25
     func = getattr(requests, kind)
     if base_url is None:
         base_url = get_base_url()
-    resp = func(
-        base_url + path,
-        params=params,
-        json=json,
-        data=data,
-        headers=get_headers(headers, auth=auth),
-        **kwargs,
-    )
-    try:
-        resp.raise_for_status()
-    except HTTPError as e:
+    for retry_num in range(max_retries + 1):
+        resp = func(
+            base_url + path,
+            params=params,
+            json=json,
+            data=data,
+            headers=get_headers(headers, auth=auth),
+            **kwargs,
+        )
+        if resp.status_code == 502 and retry_num < max_retries:
+            time.sleep(base_delay_seconds * (2**retry_num))
+            continue
         try:
-            detail = resp.json()["detail"]
-        except Exception:
-            raise e
-        raise HTTPError(f"{resp.status_code}: {detail}")
+            resp.raise_for_status()
+        except HTTPError as e:
+            try:
+                detail = resp.json()["detail"]
+            except Exception:
+                raise e
+            raise HTTPError(f"{resp.status_code}: {detail}")
+        break
     if as_json:
         return resp.json()
     else:

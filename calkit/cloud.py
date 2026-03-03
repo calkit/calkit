@@ -21,6 +21,7 @@ def get_base_url() -> str:
         "local": "http://api.localhost",
         "staging": "https://api.staging.calkit.io",
         "production": "https://api.calkit.io",
+        "test": "http://api.localhost",
     }
     return urls[config.get_env()]
 

@@ -24,7 +24,6 @@ Multi-cloud support:
     By default, the filesystem routes to the Calkit Cloud API endpoint
     configured by CALKIT_ENV (production, staging, etc.). To use a different
     Calkit Cloud instance:
-
     - DVC config: dvc remote modify myremote endpointurl https://api.other.com
     - URI query: ck://owner/project/file?endpoint_url=https://api.other.com
 
@@ -61,60 +60,6 @@ from fsspec.utils import stringify_path
 from . import cloud
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_path(path: str) -> tuple[str, str, str]:
-    """Parse a Calkit path into components.
-
-    Parameters
-    ----------
-    path : str
-        A path in the format "ck://owner/project/file.txt"
-        Optionally with query parameter:
-        "ck://owner/project/file?endpoint_url=..."
-        The Calkit API endpoint is configured via endpointurl (DVC config),
-        endpoint_url (URI query), or CALKIT_ENV environment variable.
-
-    Returns
-    -------
-    tuple[str, str, str]
-        A tuple of (owner, project, file_path)
-
-    Raises
-    ------
-    ValueError
-        If the path format is invalid
-
-    Examples
-    --------
-    >>> _parse_path("ck://owner/proj/file.txt")
-    ('owner', 'proj', 'file.txt')
-
-    >>> _parse_path("ck://owner/proj")
-    ('owner', 'proj', '')
-    """
-    path = stringify_path(path)
-    parsed = urlparse(path)
-    if parsed.scheme == "ck":
-        # Standard format: ck://owner/project/file
-        # netloc is the owner, path contains /project/file
-        if parsed.netloc:
-            raw_path = f"{parsed.netloc}{parsed.path}"
-        else:
-            raw_path = parsed.path.lstrip("/")
-    else:
-        # fsspec may pass protocol-stripped paths
-        raw_path = path.lstrip("/")
-    path_parts = [part for part in raw_path.split("/") if part]
-    # Need at least owner/project
-    if len(path_parts) < 2:
-        raise ValueError(
-            f"Invalid path format: {path}; Expected ck://owner/project/path"
-        )
-    owner = path_parts[0]
-    project = path_parts[1]
-    file_path = "/".join(path_parts[2:]) if len(path_parts) > 2 else ""
-    return owner, project, file_path
 
 
 class CalkitFileSystem(AbstractFileSystem):
@@ -174,6 +119,65 @@ class CalkitFileSystem(AbstractFileSystem):
         # Also support endpoint_url for direct URI usage (fsspec convention)
         # Defaults to calkit.cloud.get_base_url() if not specified
         self.base_url = kwargs.get("endpoint_url") or cloud.get_base_url()
+        # Define prefixes to strip from paths
+        # This is useful for DVC since it puts files in files/md5, but we may
+        # want to put them elsewhere in the backend organization
+        self.strip_path_prefix = kwargs.get("strip_path_prefix", "")
+
+    def _parse_path(self, path: str) -> tuple[str, str, str]:
+        """Parse a Calkit path into components.
+
+        Parameters
+        ----------
+        path : str
+            A path in the format "ck://owner/project/file.txt"
+            Optionally with query parameter:
+            "ck://owner/project/file?endpoint_url=..."
+            The Calkit API endpoint is configured via endpointurl (DVC config),
+            endpoint_url (URI query), or CALKIT_ENV environment variable.
+
+        Returns
+        -------
+        tuple[str, str, str]
+            A tuple of (owner, project, file_path)
+
+        Raises
+        ------
+        ValueError
+            If the path format is invalid
+
+        Examples
+        --------
+        >>> _parse_path("ck://owner/proj/file.txt")
+        ('owner', 'proj', 'file.txt')
+
+        >>> _parse_path("ck://owner/proj")
+        ('owner', 'proj', '')
+        """
+        path = stringify_path(path)
+        parsed = urlparse(path)
+        if parsed.scheme == "ck":
+            # Standard format: ck://owner/project/file
+            # netloc is the owner, path contains /project/file
+            if parsed.netloc:
+                raw_path = f"{parsed.netloc}{parsed.path}"
+            else:
+                raw_path = parsed.path.lstrip("/")
+        else:
+            # fsspec may pass protocol-stripped paths
+            raw_path = path.lstrip("/")
+        path_parts = [part for part in raw_path.split("/") if part]
+        # Need at least owner/project
+        if len(path_parts) < 2:
+            raise ValueError(
+                f"Invalid path format: {path}; Expected ck://owner/project/path"
+            )
+        owner = path_parts[0]
+        project = path_parts[1]
+        file_path = "/".join(path_parts[2:]) if len(path_parts) > 2 else ""
+        if self.strip_path_prefix:
+            file_path = file_path.removeprefix(self.strip_path_prefix)
+        return owner, project, file_path
 
     def _get_fs_op_info(
         self,
@@ -617,7 +621,7 @@ class CalkitFileSystem(AbstractFileSystem):
         ValueError
             If path format is invalid
         """
-        owner, project, file_path = _parse_path(path)
+        owner, project, file_path = self._parse_path(path)
         return CalkitFile(
             self,
             path,
@@ -657,7 +661,7 @@ class CalkitFileSystem(AbstractFileSystem):
         ValueError
             If path format is invalid
         """
-        owner, project, file_path = _parse_path(path)
+        owner, project, file_path = self._parse_path(path)
         try:
             logger.debug(f"Listing items in {owner}/{project}/{file_path}")
             # Get operation info from API
@@ -697,7 +701,7 @@ class CalkitFileSystem(AbstractFileSystem):
             True if the path exists, False otherwise
         """
         try:
-            owner, project, file_path = _parse_path(path)
+            owner, project, file_path = self._parse_path(path)
             logger.debug(f"Checking existence of {path}")
             # Get operation info from API
             operation_info = self._get_fs_op_info(
@@ -738,7 +742,7 @@ class CalkitFileSystem(AbstractFileSystem):
         ValueError
             If path format is invalid
         """
-        owner, project, file_path = _parse_path(path)
+        owner, project, file_path = self._parse_path(path)
         try:
             logger.debug(f"Getting info for {path}")
             # Get operation info from API - use dedicated info operation
@@ -798,7 +802,7 @@ class CalkitFileSystem(AbstractFileSystem):
         requests.HTTPError
             If deletion fails
         """
-        owner, project, file_path = _parse_path(path)
+        owner, project, file_path = self._parse_path(path)
         try:
             logger.debug(f"Deleting file {path}")
             # Get file operation info from API

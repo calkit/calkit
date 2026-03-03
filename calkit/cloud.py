@@ -77,11 +77,14 @@ def _request(
     headers: dict | None = None,
     as_json=True,
     auth: bool = True,
+    base_url: str | None = None,
     **kwargs,
 ):
     func = getattr(requests, kind)
+    if base_url is None:
+        base_url = get_base_url()
     resp = func(
-        get_base_url() + path,
+        base_url + path,
         params=params,
         json=json,
         data=data,

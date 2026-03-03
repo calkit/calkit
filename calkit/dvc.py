@@ -36,11 +36,8 @@ class CalkitDVCFileSystem(ObjectFileSystem):
     def fs(self):
         from calkit.fs import CalkitFileSystem
 
-        # Strip path prefix so files are stored flat in the bucket root
-        # This is mainly to deal with the Calkit Cloud's lack of prefix, i.e.,
-        # paths start directly with the first two characters of the MD5
-        kwargs = {"strip_path_prefix": "files/md5/"}
-        # Pass endpointurl from DVC config to CalkitFileSystem endpoint_url
+        # Pass endpointurl from DVC config to CalkitFileSystem
+        kwargs = {}
         if "endpointurl" in self.config:
             kwargs["endpoint_url"] = self.config["endpointurl"]
         return CalkitFileSystem(**kwargs)

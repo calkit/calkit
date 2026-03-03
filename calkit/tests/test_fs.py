@@ -10,37 +10,28 @@ from calkit import fs as ckfs
 
 
 def test_parse_path():
-    fs = ckfs.CalkitFileSystem()
-    owner, project, file_path = fs._parse_path("ck://owner/project/file.txt")
+    owner, project, file_path = ckfs._parse_path("ck://owner/project/file.txt")
     assert owner == "owner"
     assert project == "project"
     assert file_path == "file.txt"
-    owner, project, file_path = fs._parse_path("ck://owner/project")
+    owner, project, file_path = ckfs._parse_path("ck://owner/project")
     assert owner == "owner"
     assert project == "project"
     assert file_path == ""
-    owner, project, file_path = fs._parse_path(
+    owner, project, file_path = ckfs._parse_path(
         "ck://owner/project/data/nested/file.txt"
     )
     assert owner == "owner"
     assert project == "project"
     assert file_path == "data/nested/file.txt"
-    owner, project, file_path = fs._parse_path("owner/project/file.txt")
+    owner, project, file_path = ckfs._parse_path("owner/project/file.txt")
     assert owner == "owner"
     assert project == "project"
     assert file_path == "file.txt"
     with pytest.raises(ValueError, match="Invalid path format"):
-        fs._parse_path("ck://owner")
+        ckfs._parse_path("ck://owner")
     with pytest.raises(ValueError, match="Invalid path format"):
-        fs._parse_path("ck://")
-    # Now test with strip_path_prefix
-    fs = ckfs.CalkitFileSystem(strip_path_prefix="files/md5/")
-    owner, project, file_path = fs._parse_path(
-        "ck://owner/project/files/md5/abc123/file.txt"
-    )
-    assert owner == "owner"
-    assert project == "project"
-    assert file_path == "abc123/file.txt"
+        ckfs._parse_path("ck://")
 
 
 def _calkit_cloud_available() -> bool:

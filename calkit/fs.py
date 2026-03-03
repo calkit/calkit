@@ -70,7 +70,8 @@ def _parse_path(path: str) -> tuple[str, str, str]:
     ----------
     path : str
         A path in the format "ck://owner/project/file.txt"
-        Optionally with query parameter: "ck://owner/project/file?endpoint_url=..."
+        Optionally with query parameter:
+        "ck://owner/project/file?endpoint_url=..."
         The Calkit API endpoint is configured via endpointurl (DVC config),
         endpoint_url (URI query), or CALKIT_ENV environment variable.
 
@@ -95,42 +96,16 @@ def _parse_path(path: str) -> tuple[str, str, str]:
     path = stringify_path(path)
     parsed = urlparse(path)
     if parsed.scheme == "ck":
-        # Check if netloc looks like a domain (has dots or is localhost-based)
-        netloc = parsed.netloc
-        path_str = parsed.path.lstrip("/")
-        if netloc and (
-            "." in netloc
-            or netloc == "localhost"
-            or netloc.startswith("localhost:")
-        ):
-            # netloc is an explicit domain, use the path as-is
-            raw_path = path_str
-        elif netloc:
-            # netloc is not a domain (e.g., it's an owner name).
-            # Treat it as owner/project..., implicitly using default domain.
-            raw_path = f"{netloc}/{path_str}" if path_str else netloc
+        # Standard format: ck://owner/project/file
+        # netloc is the owner, path contains /project/file
+        if parsed.netloc:
+            raw_path = f"{parsed.netloc}{parsed.path}"
         else:
-            # No netloc, use path as-is
-            raw_path = path_str
+            raw_path = parsed.path.lstrip("/")
     else:
-        # fsspec may pass protocol-stripped paths, e.g.
-        # "localhost:8000/owner/project/file" or just "owner/project/file"
+        # fsspec may pass protocol-stripped paths
         raw_path = path.lstrip("/")
     path_parts = [part for part in raw_path.split("/") if part]
-    # For protocol-stripped forms like "localhost:8000/owner/project/file",
-    # drop the leading host component if present
-    if len(path_parts) >= 3:
-        first_part = path_parts[0]
-        # Check if this looks like a host (localhost:port or domain with dots)
-        if (
-            first_part == "localhost"
-            or (
-                first_part.startswith("localhost:")
-                and first_part[10:].isdigit()
-            )
-            or ("." in first_part and not first_part.startswith("."))
-        ):
-            path_parts = path_parts[1:]
     # Need at least owner/project
     if len(path_parts) < 2:
         raise ValueError(

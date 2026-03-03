@@ -81,7 +81,7 @@ def _request(
     base_url: str | None = None,
     **kwargs,
 ):
-    max_retries = 4
+    max_retries = 10
     base_delay_seconds = 0.25
     func = getattr(requests, kind)
     if base_url is None:

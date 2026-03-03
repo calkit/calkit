@@ -781,6 +781,65 @@ class CalkitFileSystem(AbstractFileSystem):
             logger.error(f"Failed to get info for {path}: {e}")
             raise
 
+    def cat_file(
+        self,
+        path: str,
+        start: int | None = None,
+        end: int | None = None,
+        **kwargs,
+    ) -> bytes:
+        """Read the contents of a file.
+
+        Parameters
+        ----------
+        path : str
+            Path to file (ck://owner/project/file)
+        start : int | None, optional
+            Start byte position (for range reads)
+        end : int | None, optional
+            End byte position (for range reads, exclusive)
+        **kwargs
+            Additional arguments
+
+        Returns
+        -------
+        bytes
+            File contents
+
+        Raises
+        ------
+        FileNotFoundError
+            If the file does not exist
+        ValueError
+            If path format is invalid
+        """
+        owner, project, file_path = _parse_path(path)
+        try:
+            logger.debug(f"Reading file {path}")
+            # Get file operation info from API (one API call per file)
+            operation_info = self._get_fs_op_info(
+                owner, project, file_path, operation="get"
+            )
+            # Add Range header if reading a specific byte range
+            headers = {}
+            if start is not None and end is not None:
+                headers["Range"] = f"bytes={start}-{end - 1}"
+            elif start is not None:
+                headers["Range"] = f"bytes={start}-"
+            elif end is not None:
+                headers["Range"] = f"bytes=0-{end - 1}"
+            # Execute the get operation
+            resp = self._execute_operation(
+                operation_info, "get", headers=headers
+            )
+            resp.raise_for_status()
+            return resp.content
+        except FileNotFoundError:
+            raise
+        except Exception:
+            logger.exception(f"Failed to read file {path}")
+            raise
+
     def rm_file(self, path: str, **kwargs):
         """Remove a single file.
 

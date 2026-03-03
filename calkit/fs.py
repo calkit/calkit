@@ -351,7 +351,7 @@ class CalkitFileSystem(AbstractFileSystem):
         Parameters
         ----------
         operation_info : dict[str, Any]
-            Dictionary from _get_file_operation_info
+            Dictionary from _get_fs_op_info
         operation : str
             The operation type (get, put, delete)
         data : bytes | None, optional
@@ -927,7 +927,7 @@ class CalkitFile(AbstractBufferedFile):
         """
         if self.operation_info is None:
             # Get file operation info from API
-            self.operation_info = self.fs._get_file_operation_info(
+            self.operation_info = self.fs._get_fs_op_info(
                 self.owner, self.project, self.file_path, "get"
             )
         try:
@@ -990,7 +990,7 @@ class CalkitFile(AbstractBufferedFile):
                 f"Uploading {ndata} bytes to "
                 f"{self.owner}/{self.project}/{self.file_path}"
             )
-            self.operation_info = self.fs._get_file_operation_info(
+            self.operation_info = self.fs._get_fs_op_info(
                 self.owner,
                 self.project,
                 self.file_path,
@@ -1032,7 +1032,7 @@ class CalkitFile(AbstractBufferedFile):
                 f"Initiating upload for "
                 f"{self.owner}/{self.project}/{self.file_path}"
             )
-            self.operation_info = self.fs._get_file_operation_info(
+            self.operation_info = self.fs._get_fs_op_info(
                 self.owner, self.project, self.file_path, "put"
             )
             logger.debug(

@@ -36,7 +36,11 @@ class CalkitDVCFileSystem(ObjectFileSystem):
     def fs(self):
         from calkit.fs import CalkitFileSystem
 
-        return CalkitFileSystem()
+        # Pass endpointurl from DVC config to CalkitFileSystem
+        kwargs = {}
+        if "endpointurl" in self.config:
+            kwargs["endpoint_url"] = self.config["endpointurl"]
+        return CalkitFileSystem(**kwargs)
 
 
 def register_ck_scheme() -> None:
@@ -44,7 +48,9 @@ def register_ck_scheme() -> None:
     from dvc.config_schema import REMOTE_COMMON, REMOTE_SCHEMAS, SCHEMA, ByUrl
     from dvc_objects.fs import known_implementations
 
-    REMOTE_SCHEMAS.setdefault("ck", {**REMOTE_COMMON})
+    # Include endpointurl for multi-cloud support
+    ck_schema = {**REMOTE_COMMON, "endpointurl": str}
+    REMOTE_SCHEMAS.setdefault("ck", ck_schema)
     SCHEMA["remote"] = {str: ByUrl(REMOTE_SCHEMAS)}
     known_implementations["ck"] = {
         "class": "calkit.dvc.CalkitDVCFileSystem",

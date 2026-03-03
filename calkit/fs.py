@@ -7,7 +7,7 @@ The basic operation is as follows:
 3. Use the access details (presigned URL, OAuth, etc.) to perform the operation.
 
 Path format:
-    ck://calkit.io/owner/project/path/to/file
+    ck://owner/project/path/to/file
 
     - owner: Calkit username/organization
     - project: Project name
@@ -18,20 +18,27 @@ Supported storage backends (via Calkit Cloud API):
     - Amazon S3 - presigned URLs
     - Google Drive - OAuth + API
     - Box - OAuth + API
-    - Azure Blob Storage - SAS tokens
     - Other storage providers as configured in Calkit Cloud
+
+Multi-cloud support:
+    By default, the filesystem routes to the Calkit Cloud API endpoint
+    configured by CALKIT_ENV (production, staging, etc.). To use a different
+    Calkit Cloud instance:
+
+    - DVC config: dvc remote modify myremote endpointurl https://api.other.com
+    - URI query: ck://owner/project/file?endpoint_url=https://api.other.com
 
 Examples:
     # DVC remote (DVC will organize by MD5 hashes automatically)
-    ck://calkit.io/petebachant/my-project
+    ck://owner/project
 
     # Subdirectory for organization
-    ck://calkit.io/petebachant/my-project/data
+    ck://owner/project/data
 
     # Direct filesystem usage
     >>> from calkit.fs import CalkitFileSystem
     >>> fs = CalkitFileSystem()
-    >>> with fs.open("ck://calkit.io/owner/project/file.txt", "rb") as f:
+    >>> with fs.open("ck://owner/project/file.txt", "rb") as f:
     ...     content = f.read()
 
 The design supports transparent interaction with multiple cloud storage providers
@@ -62,13 +69,10 @@ def _parse_path(path: str) -> tuple[str, str, str]:
     Parameters
     ----------
     path : str
-        A path in one of these formats:
-        - "ck://owner/project/file.txt" (domain inferred from CALKIT_ENV)
-        - "ck://calkit.io/owner/project/file.txt" (explicit domain)
-        - "ck://staging.calkit.io/owner/project/file.txt"
-
-    The function automatically inserts the default domain (based on CALKIT_ENV)
-    when parsing paths with only owner and project components.
+        A path in the format "ck://owner/project/file.txt"
+        Optionally with query parameter: "ck://owner/project/file?endpoint_url=..."
+        The Calkit API endpoint is configured via endpointurl (DVC config),
+        endpoint_url (URI query), or CALKIT_ENV environment variable.
 
     Returns
     -------
@@ -83,9 +87,6 @@ def _parse_path(path: str) -> tuple[str, str, str]:
     Examples
     --------
     >>> _parse_path("ck://owner/proj/file.txt")
-    ('owner', 'proj', 'file.txt')
-
-    >>> _parse_path("ck://calkit.io/owner/proj/file.txt")
     ('owner', 'proj', 'file.txt')
 
     >>> _parse_path("ck://owner/proj")
@@ -133,8 +134,7 @@ def _parse_path(path: str) -> tuple[str, str, str]:
     # Need at least owner/project
     if len(path_parts) < 2:
         raise ValueError(
-            f"Invalid path format: {path}. "
-            "Expected ck://owner/project or ck://domain/owner/project"
+            f"Invalid path format: {path}; Expected ck://owner/project/path"
         )
     owner = path_parts[0]
     project = path_parts[1]
@@ -152,10 +152,11 @@ class CalkitFileSystem(AbstractFileSystem):
     The Calkit Cloud API acts as a compatibility layer that:
 
     - Determines which storage backend is configured for each project
-    - Returns appropriate access credentials (presigned URLs, OAuth tokens, etc.)
+    - Returns appropriate access credentials (presigned URLs, OAuth tokens,
+      etc.)
     - Supports GCS, S3, Google Drive, Box, Azure, and other providers
 
-    Path format: ck://calkit.io/owner/project/path/to/file
+    Path format: ck://owner/project/path/to/file
 
     Users can organize their files however they want. For example:
 
@@ -163,16 +164,30 @@ class CalkitFileSystem(AbstractFileSystem):
     - Users can create subdirectories for organization (data/, models/, etc.)
     - Files can be stored at the project root
 
+    Cloud endpoints are configured via:
+
+    - endpointurl parameter (for DVC remotes): Route to different Calkit
+      instances
+    - endpoint_url query parameter (for URIs): Ad-hoc endpoint specification
+    - CALKIT_ENV environment variable: Select production, staging, local, or
+      test
+    - Defaults to production when unspecified
+
     This design allows for:
 
     - Multiple storage backend support without client-side changes
-    - Future protocol upgrades (e.g., XeT) without breaking API compatibility
+    - Multi-cloud support with configurable endpoints
+    - Future protocol upgrades (e.g., SFTP) without breaking API compatibility
     - Unified interface regardless of underlying storage provider
 
     Attributes
     ----------
     protocol : str
         The protocol scheme for this filesystem ("ck")
+    base_url : str
+        The Calkit Cloud API endpoint URL, configured via endpointurl in DVC
+        config, endpoint_url in URI query, or CALKIT_ENV environment variable.
+        Defaults to production (https://api.calkit.io) when unspecified.
     """
 
     protocol = "ck"
@@ -180,12 +195,16 @@ class CalkitFileSystem(AbstractFileSystem):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._session = requests.Session()
+        # Extract endpoint_url from kwargs (passed by DVC config)
+        # Also support endpoint_url for direct URI usage (fsspec convention)
+        # Defaults to calkit.cloud.get_base_url() if not specified
+        self.base_url = kwargs.get("endpoint_url") or cloud.get_base_url()
 
-    def _get_file_operation_info(
+    def _get_fs_op_info(
         self,
         owner: str,
         project: str,
-        file_path: str,
+        path: str,
         operation: str = "get",
         content_length: int | None = None,
         content_type: str | None = None,
@@ -204,7 +223,7 @@ class CalkitFileSystem(AbstractFileSystem):
             Calkit owner/username
         project : str
             Calkit project name
-        file_path : str
+        path : str
             The path within the project
         operation : str, default="get"
             Operation type: 'get', 'put', 'delete', 'list', 'exists'
@@ -276,7 +295,7 @@ class CalkitFileSystem(AbstractFileSystem):
         endpoint = f"/projects/{owner}/{project}/fs-ops"
         request_body: dict[str, Any] = {
             "operation": operation,
-            "file_path": file_path,
+            "path": path,
             "detail": detail,
         }
         if content_length is not None:
@@ -286,9 +305,11 @@ class CalkitFileSystem(AbstractFileSystem):
         try:
             logger.debug(
                 f"Requesting {operation} instructions for "
-                f"{owner}/{project}/{file_path}"
+                f"{owner}/{project}/{path}"
             )
-            resp = cloud.post(endpoint, json=request_body)
+            resp = cloud.post(
+                endpoint, json=request_body, base_url=self.base_url
+            )
             # Validate response has required fields
             if "backend" not in resp:
                 raise ValueError(
@@ -312,8 +333,8 @@ class CalkitFileSystem(AbstractFileSystem):
             is_not_found = status_code == 404 or message.startswith("404:")
             if is_not_found:
                 target = (
-                    f"{owner}/{project}/{file_path}"
-                    if file_path
+                    f"{owner}/{project}/{path}"
+                    if path
                     else f"{owner}/{project}"
                 )
                 logger.debug(
@@ -326,13 +347,13 @@ class CalkitFileSystem(AbstractFileSystem):
                 ) from e
             logger.error(
                 f"HTTP error getting file operation info for {operation} "
-                f"{owner}/{project}/{file_path}: {e}"
+                f"{owner}/{project}/{path}: {e}"
             )
             raise
         except Exception as e:
             logger.error(
                 f"Failed to get file operation info for {operation} "
-                f"{owner}/{project}/{file_path}: {e}"
+                f"{owner}/{project}/{path}: {e}"
             )
             raise
 
@@ -638,12 +659,12 @@ class CalkitFileSystem(AbstractFileSystem):
     def ls(
         self, path: str, detail: bool = False, refresh: bool = False, **kwargs
     ) -> list[str] | list[dict]:
-        """List files in a directory.
+        """List paths in a directory.
 
         Parameters
         ----------
         path : str
-            Directory path (ck://calkit.io/owner/project or with subdirectory)
+            Directory path (ck://owner/project or with subdirectory)
         detail : bool, default=False
             Whether to include file details
         refresh : bool, default=False
@@ -654,7 +675,7 @@ class CalkitFileSystem(AbstractFileSystem):
         Returns
         -------
         list[str] | list[dict]
-            List of file names (if detail=False) or list of dicts with info
+            List of path strings (if detail=False) or list of dicts with info
 
         Raises
         ------
@@ -663,26 +684,26 @@ class CalkitFileSystem(AbstractFileSystem):
         """
         owner, project, file_path = _parse_path(path)
         try:
-            logger.debug(f"Listing files in {owner}/{project}/{file_path}")
+            logger.debug(f"Listing items in {owner}/{project}/{file_path}")
             # Get operation info from API
-            operation_info = self._get_file_operation_info(
+            operation_info = self._get_fs_op_info(
                 owner, project, file_path, operation="list", detail=detail
             )
             empty = {} if detail else []
             # Check if server provided the result directly
             if "result" in operation_info:
-                return operation_info["result"].get("files", empty)
+                return operation_info["result"].get("paths", empty)
             else:
                 # Server returned instructions; execute the operation
                 resp = self._execute_operation(operation_info, "list")
                 resp.raise_for_status()
                 result = resp.json()
-                return result.get("files", empty)
+                return result.get("paths", empty)
         except FileNotFoundError:
             logger.debug(f"Listing path not found (treating as empty): {path}")
             return []
         except Exception as e:
-            logger.error(f"Failed to list files in {path}: {e}")
+            logger.error(f"Failed to list items at {path}: {e}")
             raise
 
     def exists(self, path: str, **kwargs) -> bool:
@@ -704,7 +725,7 @@ class CalkitFileSystem(AbstractFileSystem):
             owner, project, file_path = _parse_path(path)
             logger.debug(f"Checking existence of {path}")
             # Get operation info from API
-            operation_info = self._get_file_operation_info(
+            operation_info = self._get_fs_op_info(
                 owner, project, file_path, operation="exists"
             )
             # Check if server provided the result directly
@@ -721,12 +742,12 @@ class CalkitFileSystem(AbstractFileSystem):
             return False
 
     def info(self, path: str, **kwargs) -> dict:
-        """Get information about a file.
+        """Get information about a path.
 
         Parameters
         ----------
         path : str
-            Path to file (ck://calkit.io/owner/project/file)
+            Path to file (ck://owner/project/file)
         **kwargs
             Additional arguments
 
@@ -746,7 +767,7 @@ class CalkitFileSystem(AbstractFileSystem):
         try:
             logger.debug(f"Getting info for {path}")
             # Get operation info from API - use dedicated info operation
-            operation_info = self._get_file_operation_info(
+            operation_info = self._get_fs_op_info(
                 owner, project, file_path, operation="info"
             )
             # Check if server provided the result directly
@@ -806,7 +827,7 @@ class CalkitFileSystem(AbstractFileSystem):
         try:
             logger.debug(f"Deleting file {path}")
             # Get file operation info from API
-            operation_info = self._get_file_operation_info(
+            operation_info = self._get_fs_op_info(
                 owner, project, file_path, "delete"
             )
             # Execute the delete operation

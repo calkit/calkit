@@ -681,6 +681,84 @@ class CalkitFileSystem(AbstractFileSystem):
             logger.error(f"Failed to list items at {path}: {e}")
             raise
 
+    def find(
+        self, path, maxdepth=None, withdirs=False, detail=False, **kwargs
+    ):
+        """Find all files below path recursively.
+
+        Makes a single API call to recursively list all files under the path,
+        which is much more efficient than the default walk-based implementation
+        for backends with many directories.
+
+        Parameters
+        ----------
+        path : str
+            Root path to search (ck://owner/project or with subdirectory)
+        maxdepth : int | None, optional
+            Maximum recursion depth (None for unlimited)
+        withdirs : bool, default=False
+            Whether to include directories in results
+        detail : bool, default=False
+            Whether to include file details
+        **kwargs
+            Additional arguments
+
+        Returns
+        -------
+        dict | list
+            Mapping of paths to info dicts (if detail=True), else list of paths
+        """
+        owner, project, file_path = _parse_path(path)
+        try:
+            logger.debug(
+                f"Finding all files recursively under "
+                f"{owner}/{project}/{file_path}"
+            )
+            operation_info = self._get_fs_op_info(
+                owner, project, file_path, operation="find", detail=detail
+            )
+            empty = {} if detail else []
+            # Check if server provided the result directly
+            if "result" in operation_info:
+                paths = operation_info["result"].get("paths", empty)
+            else:
+                # Server returned instructions; execute the operation
+                resp = self._execute_operation(operation_info, "find")
+                resp.raise_for_status()
+                result = resp.json()
+                paths = result.get("paths", empty)
+            # Apply maxdepth filtering if needed
+            if maxdepth is not None:
+                base_depth = file_path.count("/") if file_path else 0
+                if detail:
+                    paths = {
+                        p: info
+                        for p, info in paths.items()
+                        if p.count("/") - base_depth <= maxdepth
+                    }
+                else:
+                    paths = [
+                        p
+                        for p in paths
+                        if p.count("/") - base_depth <= maxdepth
+                    ]
+            # Filter out directories if not requested
+            if not withdirs:
+                if detail and isinstance(paths, dict):
+                    paths = {
+                        p: info
+                        for p, info in paths.items()
+                        if info.get("type") == "file"
+                    }
+                else:
+                    # When detail=False, we don't have type info in the list
+                    # The backend should handle this by only returning files
+                    pass
+            return paths
+        except Exception as e:
+            logger.error(f"Failed to find items at {path}: {e}")
+            raise
+
     def exists(self, path: str, **kwargs) -> bool:
         """Check if a file or directory exists.
 

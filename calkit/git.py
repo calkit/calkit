@@ -136,18 +136,24 @@ def ensure_path_is_not_ignored(
     repo: git.Repo, path: str | PathLike
 ) -> None | bool:
     """Ensure a path is not ignored by Git."""
-    if not repo.ignored(path):
+    # Resolve whether the unignore rule belongs to this repo or a submodule.
+    target_repo, target_path = _resolve_repo_and_ignore_path(repo, path)
+    # No-op if Git does not ignore this path.
+    if not target_repo.ignored(target_path):
         return
-    gitignore_path = os.path.join(repo.working_dir, ".gitignore")
+    gitignore_path = os.path.join(target_repo.working_dir, ".gitignore")
+    if not os.path.isfile(gitignore_path):
+        with open(gitignore_path, "w") as f:
+            f.write(f"!{target_path}\n")
+        return True
     with open(gitignore_path) as f:
         gitignore_txt = f.read()
     lines = gitignore_txt.splitlines()
-    path = Path(path).as_posix()
-    no_ignore_line = f"!{path}"
-    if path in lines:
-        lines.remove(path)
+    no_ignore_line = f"!{target_path}"
+    if target_path in lines:
+        lines.remove(target_path)
     elif no_ignore_line not in lines:
-        lines.append(f"!{path}")
+        lines.append(no_ignore_line)
     with open(gitignore_path, "w") as f:
         f.write(os.linesep.join(lines))
     return True

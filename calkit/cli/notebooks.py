@@ -208,6 +208,10 @@ def check_env_kernel(
             "-e",
             julia_cmd,
         ]
+        try:
+            cmd = calkit.julia.check_version_in_command(cmd)
+        except Exception as e:
+            raise_error(f"Failed to check Julia version: {e}")
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:
             raise_error(f"Failed to create kernel:\n{res.stdout}")

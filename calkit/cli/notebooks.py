@@ -192,11 +192,12 @@ def check_env_kernel(
         env_dir = os.path.dirname(env_path)
         if not env_dir:
             env_dir = "."
+        env_dir_abs = os.path.abspath(env_dir)
         julia_cmd = (
             "import IJulia;"
             "kp=IJulia.installkernel("
             f'"{display_name}",'
-            '"--project=@.",'
+            f'"--project={env_dir_abs}",'
             'env=Dict("JULIA_LOAD_PATH" => "@:@stdlib")'
             ");"
             "println(kp);"
@@ -216,8 +217,10 @@ def check_env_kernel(
         if res.returncode != 0:
             raise_error(f"Failed to create kernel:\n{res.stdout}")
         kernel_path = res.stdout.strip()
-        typer.echo(f"Registered IJulia kernel at: {kernel_path}")
         kernel_name = os.path.basename(kernel_path)
+        typer.echo(
+            f"Registered IJulia kernel '{kernel_name}' at: {kernel_path}"
+        )
         return kernel_name, display_name
     else:
         raise_error(f"{language} not supported")

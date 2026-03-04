@@ -53,6 +53,7 @@ dependencies = [
   "json2latex>=0.0.3",
   "toml>=0.10.2",
   "texsoup>=0.3.1",
+  "fsspec>=2026.2.0",
 ]
 description = "Reproducibility simplified."
 dynamic = ["version"]
@@ -71,7 +72,7 @@ dev = [
   "kaleido==0.2.1",
   "numpy",
   "pandas>=2.2.3",
-  "polars>=1.36.1",
+  "polars[all]>=1.36.1",
   "plotly",
   "pre-commit",
   "pyarrow",
@@ -96,7 +97,7 @@ Issues = "https://github.com/calkit/calkit/issues"
 Repository = "https://github.com/calkit/calkit"
 
 [project.entry-points."fsspec.specs"]
-calkit = "calkit.fs:CalkitFileSystem"
+ck = "calkit.fs:CalkitFileSystem"
 
 [project.scripts]
 calkit = "calkit.cli:run"

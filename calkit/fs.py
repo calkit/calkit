@@ -41,8 +41,30 @@ Examples:
     >>> with fs.open("ck://owner/project/file.txt", "rb") as f:
     ...     content = f.read()
 
-The design supports transparent interaction with multiple cloud storage providers
-through a unified API.
+    # Using with pandas (automatic fsspec integration)
+    >>> import pandas as pd
+    >>> import calkit  # Import to register the filesystem
+    >>> df = pd.read_parquet("ck://owner/project/data.parquet")
+    >>> df.to_parquet("ck://owner/project/output.parquet")
+
+    # Using with polars (requires explicit fsspec.open)
+    >>> import polars as pl
+    >>> import fsspec
+    >>> import calkit  # Import to register the filesystem
+    >>> # Reading
+    >>> with fsspec.open("ck://owner/project/data.parquet", "rb") as f:
+    ...     df = pl.read_parquet(f)
+    >>> # Writing
+    >>> with fsspec.open("ck://owner/project/output.parquet", "wb") as f:
+    ...     df.write_parquet(f)
+
+Note:
+    Pandas automatically uses fsspec for custom protocols, but Polars uses
+    Rust's object_store crate which doesn't support fsspec. For Polars, use
+    fsspec.open() explicitly to get a file-like object.
+
+The design supports transparent interaction with multiple storage backends
+or providers through a unified API.
 """
 
 from __future__ import annotations
@@ -61,6 +83,17 @@ from fsspec.utils import stringify_path
 from . import cloud
 
 logger = logging.getLogger(__name__)
+
+
+def register_filesystem():
+    """Register the Calkit filesystem with fsspec's registry.
+
+    This function is called automatically when the module is imported,
+    but can also be called manually if needed.
+    """
+    from fsspec.registry import register_implementation
+
+    register_implementation("ck", "calkit.fs.CalkitFileSystem")
 
 
 def _parse_path(path: str) -> tuple[str, str, str]:
@@ -664,16 +697,36 @@ class CalkitFileSystem(AbstractFileSystem):
             operation_info = self._get_fs_op_info(
                 owner, project, file_path, operation="list", detail=detail
             )
-            empty = {} if detail else []
             # Check if server provided the result directly
             if "result" in operation_info:
-                return operation_info["result"].get("paths", empty)
+                paths = operation_info["result"].get("paths", [])
             else:
                 # Server returned instructions; execute the operation
                 resp = self._execute_operation(operation_info, "list")
                 resp.raise_for_status()
                 result = resp.json()
-                return result.get("paths", empty)
+                paths = result.get("paths", [])
+            # Ensure paths have the protocol-stripped format expected by fsspec
+            # Format depends on detail flag:
+            # - detail=False: list of strings (paths without protocol)
+            # - detail=True: list of dicts with 'name', 'size', 'type' keys
+            if detail:
+                # If paths is already a list of dicts, return as-is
+                # Otherwise, convert strings to minimal dict format
+                if paths and isinstance(paths[0], dict):
+                    return paths
+                else:
+                    # Convert list of strings to list of dicts
+                    return [
+                        {"name": p, "size": None, "type": "file"}
+                        for p in paths
+                    ]
+            else:
+                # Return list of strings
+                if paths and isinstance(paths[0], dict):
+                    return [p["name"] for p in paths]
+                else:
+                    return paths
         except FileNotFoundError:
             logger.debug(f"Listing path not found (treating as empty): {path}")
             return []
@@ -717,25 +770,52 @@ class CalkitFileSystem(AbstractFileSystem):
             operation_info = self._get_fs_op_info(
                 owner, project, file_path, operation="find", detail=detail
             )
-            empty = {} if detail else []
             # Check if server provided the result directly
             if "result" in operation_info:
-                paths = operation_info["result"].get("paths", empty)
+                paths = operation_info["result"].get(
+                    "paths", [] if not detail else {}
+                )
             else:
                 # Server returned instructions; execute the operation
                 resp = self._execute_operation(operation_info, "find")
                 resp.raise_for_status()
                 result = resp.json()
-                paths = result.get("paths", empty)
+                paths = result.get("paths", [] if not detail else {})
+
+            # Normalize the paths format:
+            # - detail=False: list of strings
+            # - detail=True: dict mapping path -> info dict
+            if detail:
+                # Convert to dict format if it's a list
+                if isinstance(paths, list):
+                    if paths and isinstance(paths[0], dict):
+                        # List of dicts - convert to dict mapping name -> info
+                        paths = {p["name"]: p for p in paths}
+                    else:
+                        # List of strings - convert to dict with minimal info
+                        paths = {
+                            p: {"name": p, "size": None, "type": "file"}
+                            for p in paths
+                        }
+            else:
+                # Convert to list format if it's a dict
+                if isinstance(paths, dict):
+                    paths = list(paths.keys())
+                # Ensure it's a list of strings
+                elif paths and isinstance(paths[0], dict):
+                    paths = [p["name"] for p in paths]
+
             # Apply maxdepth filtering if needed
             if maxdepth is not None:
                 base_depth = file_path.count("/") if file_path else 0
-                if detail:
+                if detail and isinstance(paths, dict):
                     paths = {
                         p: info
                         for p, info in paths.items()
                         if p.count("/") - base_depth <= maxdepth
                     }
+                elif detail:
+                    paths = {}
                 else:
                     paths = [
                         p
@@ -1179,3 +1259,7 @@ class CalkitFile(AbstractBufferedFile):
         except Exception:
             logger.error("Failed to initiate upload")
             raise
+
+
+# Register the filesystem when the module is imported
+register_filesystem()

@@ -196,10 +196,7 @@ def check_environment(
                 "Julia environments require a path pointing to Project.toml"
             )
         # First ensure the Julia version exists
-        current_version_compatible = (
-            calkit.julia.current_version_is_compatible(julia_version)
-        )
-        if not current_version_compatible:
+        if shutil.which("juliaup") is not None:
             cmd = ["juliaup", "add", julia_version]
             if verbose:
                 typer.echo(f"Running command: {cmd}")
@@ -207,6 +204,12 @@ def check_environment(
                 subprocess.run(cmd, check=True)
             except subprocess.CalledProcessError:
                 raise_error(f"Failed to install Julia version {julia_version}")
+        elif not calkit.julia.current_version_is_compatible(julia_version):
+            raise_error(
+                f"Current Julia version is not compatible with required "
+                f"version ({julia_version}), and juliaup is not available to "
+                "install it"
+            )
         env_dir = os.path.dirname(env_path)
         if not env_dir:
             env_dir = "."

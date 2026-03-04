@@ -703,7 +703,9 @@ def pull(
         remotes = calkit.dvc.get_remotes()
         ck_remote_name = calkit.config.get_app_name()
         for name, url in remotes.items():
-            if name == ck_remote_name or name.startswith(f"{ck_remote_name}:"):
+            if (
+                name == ck_remote_name or name.startswith(f"{ck_remote_name}:")
+            ) and url.startswith("http"):
                 typer.echo(f"Checking authentication for DVC remote: {name}")
                 calkit.dvc.set_remote_auth(remote_name=name)
     result = run_dvc_command(["pull"] + dvc_args)
@@ -741,8 +743,12 @@ def push(
         if not no_check_auth:
             # Check that our dvc remotes all have our DVC token set for them
             remotes = calkit.dvc.get_remotes()
+            ck_remote_name = calkit.config.get_app_name()
             for name, url in remotes.items():
-                if name == "calkit" or name.startswith("calkit:"):
+                if (
+                    name == ck_remote_name
+                    or name.startswith(f"{ck_remote_name}:")
+                ) and url.startswith("http"):
                     typer.echo(
                         f"Checking authentication for DVC remote: {name}"
                     )

@@ -20,12 +20,24 @@ def check_version_in_command(cmd: list[str]) -> list[str]:
         # install on the fly for us
         return cmd
     # Find the version in the command
-    current_version = (
+    target_version = cmd[1][1:]
+    if not current_version_is_compatible(target_version):
+        raise ValueError("Current Julia version doesn't match")
+    return cmd[0:1] + cmd[2:]
+
+
+def get_version() -> str:
+    """Get the current Julia version."""
+    return (
         subprocess.run(["julia", "--version"], capture_output=True, text=True)
         .stdout.strip()
         .split()[-1]
     )
-    target_version = cmd[1][1:]
-    if current_version[: len(target_version)] != target_version:
-        raise ValueError("Current Julia version doesn't match")
-    return cmd[0:1] + cmd[2:]
+
+
+def current_version_is_compatible(target_version: str) -> bool:
+    """Check if the current Julia version is compatible with the target
+    version.
+    """
+    current_version = get_version()
+    return current_version[: len(target_version)] == target_version

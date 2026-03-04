@@ -19,6 +19,7 @@ from . import invenio  # noqa: F401
 from . import releases  # noqa: F401
 from . import licenses  # noqa: F401
 from . import overleaf  # noqa: F401
+from . import julia  # noqa: F401
 from .notebooks import declare_notebook  # noqa: F401
 from .jupyterlab.routes import setup_route_handlers
 

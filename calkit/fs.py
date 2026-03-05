@@ -80,7 +80,7 @@ from fsspec import AbstractFileSystem
 from fsspec.spec import AbstractBufferedFile
 from fsspec.utils import stringify_path
 
-from . import cloud
+import calkit
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +210,9 @@ class CalkitFileSystem(AbstractFileSystem):
         # Extract endpoint_url from kwargs (passed by DVC config)
         # Also support endpoint_url for direct URI usage (fsspec convention)
         # Defaults to calkit.cloud.get_base_url() if not specified
-        self.base_url = kwargs.get("endpoint_url") or cloud.get_base_url()
+        self.base_url = (
+            kwargs.get("endpoint_url") or calkit.cloud.get_base_url()
+        )
 
     def _get_fs_op_info(
         self,
@@ -319,7 +321,7 @@ class CalkitFileSystem(AbstractFileSystem):
                 f"Requesting {operation} instructions for "
                 f"{owner}/{project}/{path}"
             )
-            resp = cloud.post(
+            resp = calkit.cloud.post(
                 endpoint, json=request_body, base_url=self.base_url
             )
             # Validate response has required fields

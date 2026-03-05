@@ -11,6 +11,8 @@ from pathlib import Path
 import git
 from dvc.utils.objects import cached_property
 from dvc_objects.fs.base import ObjectFileSystem
+from fsspec import Callback
+from fsspec.callbacks import DEFAULT_CALLBACK
 
 import calkit
 from calkit.cli import warn
@@ -41,6 +43,36 @@ class CalkitDVCFileSystem(ObjectFileSystem):
         if "endpointurl" in self.config:
             kwargs["endpoint_url"] = self.config["endpointurl"]
         return CalkitFileSystem(**kwargs)
+
+    def info(
+        self,
+        path,
+        callback: Callback = DEFAULT_CALLBACK,
+        batch_size=None,
+        return_exceptions=False,
+        **kwargs,
+    ):
+        if isinstance(path, list) and hasattr(self.fs, "info_many"):
+            infos = self.fs.info_many(path, **kwargs)
+            return [infos[p] for p in path]
+        return super().info(
+            path,
+            callback=callback,
+            batch_size=batch_size,
+            return_exceptions=return_exceptions,
+            **kwargs,
+        )
+
+    def exists(
+        self,
+        path,
+        callback: Callback = DEFAULT_CALLBACK,
+        batch_size=None,
+        **kwargs,
+    ):
+        if isinstance(path, list) and hasattr(self.fs, "exists_many"):
+            return self.fs.exists_many(path, **kwargs)
+        return super().exists(path, callback=callback, batch_size=batch_size)
 
 
 def register_ck_scheme() -> None:

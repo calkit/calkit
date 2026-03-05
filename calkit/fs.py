@@ -581,7 +581,6 @@ class CalkitFileSystem(AbstractFileSystem):
             resp.raise_for_status()
             result = resp.json()
             paths = result.get("paths", [] if not detail else {})
-
         # Normalize the paths format:
         # - detail=False: list of strings
         # - detail=True: dict mapping path -> info dict
@@ -604,7 +603,6 @@ class CalkitFileSystem(AbstractFileSystem):
             # Ensure it's a list of strings
             elif paths and isinstance(paths[0], dict):
                 paths = [p["name"] for p in paths]
-
         # Apply maxdepth filtering if needed
         if maxdepth is not None:
             base_depth = file_path.count("/") if file_path else 0

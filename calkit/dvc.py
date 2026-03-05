@@ -37,7 +37,7 @@ class CalkitDVCFileSystem(ObjectFileSystem):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Cache for batch operation results (info, content)
+        # Cache for batch operation results in the DVC wrapper
         # Format: {path: {'info': {...}, 'content': bytes, 'exists': bool}}
         self._cache: dict[str, dict[str, Any]] = {}
 
@@ -49,7 +49,24 @@ class CalkitDVCFileSystem(ObjectFileSystem):
         kwargs = {}
         if "endpointurl" in self.config:
             kwargs["endpoint_url"] = self.config["endpointurl"]
-        return CalkitFileSystem(**kwargs)
+        fs = CalkitFileSystem(**kwargs)
+
+        # DVC may call `self.fs.info(...)` directly, bypassing this wrapper's
+        # `info()` method. Wrap low-level info calls so cache ownership stays
+        # in CalkitDVCFileSystem.
+        orig_info = fs.info
+
+        def cached_info(path: str, **inner_kwargs):
+            if path in self._cache and "info" in self._cache[path]:
+                return self._cache[path]["info"]
+            info = orig_info(path, **inner_kwargs)
+            if path not in self._cache:
+                self._cache[path] = {}
+            self._cache[path]["info"] = info
+            return info
+
+        fs.info = cached_info  # type: ignore[method-assign]
+        return fs
 
     def _extract_owner_project(self) -> tuple[str, str] | None:
         """Extract owner and project from the path_info."""
@@ -105,23 +122,43 @@ class CalkitDVCFileSystem(ObjectFileSystem):
     ):
         if isinstance(path, list) and hasattr(self.fs, "info_many"):
             infos = self.fs.info_many(path, **kwargs)
-            # Cache the info results
+            # Cache the info results and existence status
             for p in path:
-                if p in infos:
-                    if p not in self._cache:
-                        self._cache[p] = {}
+                exists = p in infos and isinstance(infos[p], dict)
+                if p not in self._cache:
+                    self._cache[p] = {}
+                self._cache[p]["exists"] = exists
+                if exists:
                     self._cache[p]["info"] = infos[p]
-            return [infos[p] for p in path]
+            # Build result list, raising FileNotFoundError for missing paths
+            result = []
+            for p in path:
+                if p not in infos:
+                    error = FileNotFoundError(p)
+                    if return_exceptions:
+                        result.append(error)
+                    else:
+                        raise error
+                else:
+                    result.append(infos[p])
+            return result
+        if not isinstance(path, str):
+            return super().info(
+                path,
+                callback=callback,
+                batch_size=batch_size,
+                return_exceptions=return_exceptions,
+                **kwargs,
+            )
         # Check cache for single path
         if path in self._cache and "info" in self._cache[path]:
             return self._cache[path]["info"]
-        return super().info(
-            path,
-            callback=callback,
-            batch_size=batch_size,
-            return_exceptions=return_exceptions,
-            **kwargs,
-        )
+        # Call underlying fs.info and cache the result
+        info = self.fs.info(path, **kwargs)
+        if path not in self._cache:
+            self._cache[path] = {}
+        self._cache[path]["info"] = info
+        return info
 
     def exists(
         self,
@@ -130,13 +167,24 @@ class CalkitDVCFileSystem(ObjectFileSystem):
         batch_size=None,
         **kwargs,
     ):
-        if isinstance(path, list) and hasattr(self.fs, "exists_many"):
-            results = self.fs.exists_many(path, **kwargs)
-            # Cache the existence results
-            for p, exists in zip(path, results):
+        if isinstance(path, list) and hasattr(self.fs, "info_many"):
+            # Use info_many instead of exists_many to get and cache file info
+            # This preemptively populates the cache for subsequent info() calls
+            # Note: info_many only returns keys for paths that exist and have
+            # valid info dicts. Non-existent paths are not included in the
+            # returned dict.
+            infos = self.fs.info_many(path, **kwargs)
+            results = []
+            for p in path:
+                # Key presence indicates existence
+                # Defensively verify the value is a dict (should always be true)
+                exists = p in infos and isinstance(infos[p], dict)
                 if p not in self._cache:
                     self._cache[p] = {}
                 self._cache[p]["exists"] = exists
+                if exists:
+                    self._cache[p]["info"] = infos[p]
+                results.append(exists)
             return results
         # Check cache for single path
         if path in self._cache and "exists" in self._cache[path]:

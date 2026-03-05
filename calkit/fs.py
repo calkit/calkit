@@ -69,6 +69,7 @@ or providers through a unified API.
 
 from __future__ import annotations
 
+import base64
 import io
 import xml.etree.ElementTree as ET
 from typing import Any
@@ -661,7 +662,7 @@ class CalkitFileSystem(AbstractFileSystem):
                     project=project,
                     paths=file_paths,
                     operation="exists",
-                    include=["exists", "info", "content"],
+                    include=["exists"],
                 )
                 batch_results = resp.get("results")
                 if isinstance(batch_results, dict):
@@ -721,23 +722,26 @@ class CalkitFileSystem(AbstractFileSystem):
                     for file_path, value in batch_results.items():
                         if not isinstance(value, dict):
                             continue
-                        info = self._normalize_info(file_path, value)
+                        # Batch API returns shape:
+                        # {"info": {...}, "content_base64": "...", ...}
+                        info_payload = value.get("info")
+                        if not isinstance(info_payload, dict):
+                            continue
+                        info = self._normalize_info(file_path, info_payload)
+                        content_b64 = value.get("content_base64")
+                        if isinstance(content_b64, str):
+                            try:
+                                info["content"] = base64.b64decode(
+                                    content_b64, validate=True
+                                )
+                            except Exception:
+                                pass
                         for original_path in paths_by_file_path.get(
                             file_path, []
                         ):
                             results[original_path] = info
             except Exception:
                 pass
-            for original_path, file_path in entries:
-                if original_path in results:
-                    continue
-                try:
-                    info = self._get_info_for_parsed_path(
-                        owner, project, file_path
-                    )
-                    results[original_path] = info
-                except Exception:
-                    pass
         return results
 
     def cat_file(
@@ -858,6 +862,16 @@ class CalkitFile(AbstractBufferedFile):
 
     def _fetch_range(self, start: int, end: int) -> bytes:
         """Fetch a byte range from the file."""
+        # Fast path: use inline content from info/info_many when available.
+        try:
+            details = self.details
+            content = (
+                details.get("content") if isinstance(details, dict) else None
+            )
+            if isinstance(content, (bytes, bytearray)):
+                return bytes(content)[start:end]
+        except Exception:
+            pass
         if self.operation_info is None:
             # Get file operation info from API
             self.operation_info = self.fs._get_fs_op_info(

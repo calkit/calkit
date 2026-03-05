@@ -78,6 +78,7 @@ import requests
 from fsspec import AbstractFileSystem
 from fsspec.spec import AbstractBufferedFile
 from fsspec.utils import stringify_path
+from requests.exceptions import HTTPError
 
 import calkit
 
@@ -181,6 +182,21 @@ class CalkitFileSystem(AbstractFileSystem):
             kwargs.get("endpoint_url") or calkit.cloud.get_base_url()
         )
 
+    @staticmethod
+    def _cache_key(owner: str, project: str, file_path: str) -> str:
+        return f"{owner}/{project}/{file_path}"
+
+    @staticmethod
+    def _normalize_info(
+        file_path: str, result: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {
+            "name": result.get("name", file_path),
+            "size": result.get("size", 0),
+            "type": result.get("type", "file"),
+            "time_modified": result.get("time_modified"),
+        }
+
     def _get_fs_op_info(
         self,
         owner: str,
@@ -192,7 +208,7 @@ class CalkitFileSystem(AbstractFileSystem):
         detail: bool = False,
     ) -> dict:
         """Get file operation info from the Calkit API."""
-        endpoint = f"/projects/{owner}/{project}/fs-ops"
+        endpoint = f"/projects/{owner}/{project}/fs/ops"
         request_body: dict[str, Any] = {
             "operation": operation,
             "path": path,
@@ -211,6 +227,69 @@ class CalkitFileSystem(AbstractFileSystem):
                 f"Invalid API response: {resp}; Expected 'backend' field"
             )
         return resp
+
+    def _get_fs_op_info_batch(
+        self,
+        owner: str,
+        project: str,
+        paths: list[str],
+        operation: str,
+        include: list[str] | None = None,
+        detail: bool = False,
+    ) -> dict:
+        """Get batch file operation info from the Calkit API."""
+        endpoint = f"/projects/{owner}/{project}/fs/ops/batch"
+        request_body: dict[str, Any] = {
+            "operation": operation,
+            "detail": detail,
+            "paths": paths,
+        }
+        if include:
+            request_body["include"] = include
+        resp = calkit.cloud.post(
+            endpoint, json=request_body, base_url=self.base_url
+        )
+        if "backend" not in resp:
+            raise ValueError(
+                f"Invalid API response: {resp}; Expected 'backend' field"
+            )
+        return resp
+
+    def _get_info_for_parsed_path(
+        self, owner: str, project: str, file_path: str
+    ) -> dict[str, Any]:
+        try:
+            operation_info = self._get_fs_op_info(
+                owner, project, file_path, operation="info"
+            )
+        except HTTPError as e:
+            # If the API returns 404, convert to FileNotFoundError
+            if "404" in str(e):
+                raise FileNotFoundError(f"ck://{owner}/{project}/{file_path}")
+            raise
+        if "result" in operation_info:
+            info = self._normalize_info(file_path, operation_info["result"])
+        else:
+            resp = self._execute_operation(operation_info, "info")
+            if resp.status_code == 404:
+                raise FileNotFoundError(f"ck://{owner}/{project}/{file_path}")
+            resp.raise_for_status()
+            info = self._normalize_info(file_path, resp.json())
+        return info
+
+    def _get_exists_for_parsed_path(
+        self, owner: str, project: str, file_path: str
+    ) -> bool:
+        operation_info = self._get_fs_op_info(
+            owner, project, file_path, operation="exists"
+        )
+        if "result" in operation_info:
+            exists = bool(operation_info["result"].get("exists", False))
+        else:
+            resp = self._execute_operation(operation_info, "exists")
+            resp.raise_for_status()
+            exists = bool(resp.json().get("exists", False))
+        return exists
 
     def _execute_operation(
         self,
@@ -368,8 +447,9 @@ class CalkitFileSystem(AbstractFileSystem):
             session_uri = init_resp.headers.get("Location")
             if not session_uri:
                 raise ValueError(
-                    "Failed to get session URI from resumable upload init response. "
-                    "Expected 'Location' header."
+                    "Failed to get session URI from resumable upload init "
+                    "response; "
+                    "Expected 'Location' header"
                 )
             # Step 2: Upload data in chunks
             total_size = len(data)
@@ -380,7 +460,9 @@ class CalkitFileSystem(AbstractFileSystem):
                 # Set Content-Range header for the chunk
                 chunk_headers = {
                     "Content-Length": str(len(chunk_data)),
-                    "Content-Range": f"bytes {offset}-{chunk_end - 1}/{total_size}",
+                    "Content-Range": (
+                        f"bytes {offset}-{chunk_end - 1}/{total_size}"
+                    ),
                 }
                 chunk_resp = self._session.put(
                     session_uri,
@@ -399,7 +481,8 @@ class CalkitFileSystem(AbstractFileSystem):
                     # Unexpected status
                     chunk_resp.raise_for_status()
                     raise ValueError(
-                        f"Unexpected status code during chunked upload: {chunk_resp.status_code}"
+                        "Unexpected status code during chunked upload: "
+                        f"{chunk_resp.status_code}"
                     )
             # If we reach here, the upload completed without getting a 200/201
             # This shouldn't happen, but handle it gracefully
@@ -491,6 +574,9 @@ class CalkitFileSystem(AbstractFileSystem):
         else:
             # Server returned instructions; execute the operation
             resp = self._execute_operation(operation_info, "find")
+            # Handle 404: directory doesn't exist yet, return empty results
+            if resp.status_code == 404:
+                return [] if not detail else {}
             resp.raise_for_status()
             result = resp.json()
             paths = result.get("paths", [] if not detail else {})
@@ -550,39 +636,109 @@ class CalkitFileSystem(AbstractFileSystem):
     def exists(self, path: str, **kwargs) -> bool:
         """Check if a path exists."""
         owner, project, file_path = _parse_path(path)
-        operation_info = self._get_fs_op_info(
-            owner, project, file_path, operation="exists"
-        )
-        if "result" in operation_info:
-            return operation_info["result"].get("exists", False)
-        resp = self._execute_operation(operation_info, "exists")
-        resp.raise_for_status()
-        result = resp.json()
-        return result.get("exists", False)
+        return self._get_exists_for_parsed_path(owner, project, file_path)
+
+    def exists_many(self, paths: list[str], **kwargs) -> list[bool]:
+        """Check existence for multiple paths in a batch API call."""
+        if not paths:
+            return []
+        grouped: dict[tuple[str, str], list[tuple[int, str, str]]] = {}
+        for idx, path in enumerate(paths):
+            owner, project, file_path = _parse_path(path)
+            grouped.setdefault((owner, project), []).append(
+                (idx, path, file_path)
+            )
+        results: list[bool | None] = [None] * len(paths)
+        for (owner, project), entries in grouped.items():
+            file_paths = [file_path for _, _, file_path in entries]
+            index_by_file_path = {
+                file_path: [idx for idx, _, fp in entries if fp == file_path]
+                for file_path in set([fp for _, _, fp in entries])
+            }
+            try:
+                resp = self._get_fs_op_info_batch(
+                    owner=owner,
+                    project=project,
+                    paths=file_paths,
+                    operation="exists",
+                    include=["exists", "info", "content"],
+                )
+                batch_results = resp.get("results")
+                if isinstance(batch_results, dict):
+                    for file_path, value in batch_results.items():
+                        exists = bool(
+                            value.get("exists", False)
+                            if isinstance(value, dict)
+                            else value
+                        )
+                        for idx in index_by_file_path.get(file_path, []):
+                            results[idx] = exists
+            except Exception:
+                pass
+            # Fall back to single-path exists for any missing results
+            for idx, _, file_path in entries:
+                if results[idx] is None:
+                    try:
+                        results[idx] = self._get_exists_for_parsed_path(
+                            owner, project, file_path
+                        )
+                    except Exception:
+                        results[idx] = False
+        return [bool(v) for v in results]
 
     def info(self, path: str, **kwargs) -> dict:
         """Get file metadata (name, size, type)."""
         owner, project, file_path = _parse_path(path)
-        operation_info = self._get_fs_op_info(
-            owner, project, file_path, operation="info"
-        )
-        if "result" in operation_info:
-            result = operation_info["result"]
-            return {
-                "name": result.get("name", file_path),
-                "size": result.get("size", 0),
-                "type": result.get("type", "file"),
-                "time_modified": result.get("time_modified"),
+        return self._get_info_for_parsed_path(owner, project, file_path)
+
+    def info_many(
+        self, paths: list[str], **kwargs
+    ) -> dict[str, dict[str, Any]]:
+        """Get metadata for multiple paths in a batch API call."""
+        if not paths:
+            return {}
+        grouped: dict[tuple[str, str], list[tuple[str, str]]] = {}
+        results: dict[str, dict[str, Any]] = {}
+        for path in paths:
+            owner, project, file_path = _parse_path(path)
+            grouped.setdefault((owner, project), []).append((path, file_path))
+        for (owner, project), entries in grouped.items():
+            file_paths = [file_path for _, file_path in entries]
+            paths_by_file_path = {
+                file_path: [p for p, fp in entries if fp == file_path]
+                for file_path in set([fp for _, fp in entries])
             }
-        resp = self._execute_operation(operation_info, "info")
-        resp.raise_for_status()
-        result = resp.json()
-        return {
-            "name": result.get("name", file_path),
-            "size": result.get("size", 0),
-            "type": result.get("type", "file"),
-            "time_modified": result.get("time_modified"),
-        }
+            try:
+                resp = self._get_fs_op_info_batch(
+                    owner=owner,
+                    project=project,
+                    paths=file_paths,
+                    operation="info",
+                    include=["content"],
+                )
+                batch_results = resp.get("results")
+                if isinstance(batch_results, dict):
+                    for file_path, value in batch_results.items():
+                        if not isinstance(value, dict):
+                            continue
+                        info = self._normalize_info(file_path, value)
+                        for original_path in paths_by_file_path.get(
+                            file_path, []
+                        ):
+                            results[original_path] = info
+            except Exception:
+                pass
+            for original_path, file_path in entries:
+                if original_path in results:
+                    continue
+                try:
+                    info = self._get_info_for_parsed_path(
+                        owner, project, file_path
+                    )
+                    results[original_path] = info
+                except Exception:
+                    pass
+        return results
 
     def cat_file(
         self,

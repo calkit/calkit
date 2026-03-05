@@ -96,6 +96,10 @@ def register_filesystem():
     register_implementation("ck", "calkit.fs.CalkitFileSystem")
 
 
+# Register the filesystem when the module is imported
+register_filesystem()
+
+
 def _parse_path(path: str) -> tuple[str, str, str]:
     """Parse a Calkit path into components.
 
@@ -1149,9 +1153,10 @@ class CalkitFile(AbstractBufferedFile):
             )
         try:
             logger.debug(f"Fetching bytes {start}-{end - 1} from {self.path}")
-            # Add Range header for partial content. For backends where range is
-            # unsupported, the Calkit Cloud API can choose to ignore this header
-            # or return a backend-specific request configuration.
+            # Add Range header for partial content
+            # For backends where range is unsupported, the Calkit Cloud API can
+            # choose to ignore this header or return a backend-specific request
+            # configuration
             headers = {"Range": f"bytes={start}-{end - 1}"}
             # Execute the get operation with range header
             resp = self.fs._execute_operation(
@@ -1238,11 +1243,6 @@ class CalkitFile(AbstractBufferedFile):
         writing.
         It obtains the operation info (including access credentials) from the
         Calkit Cloud API.
-
-        Raises
-        ------
-        RuntimeError
-            If unable to get operation info
         """
         try:
             logger.debug(
@@ -1259,7 +1259,3 @@ class CalkitFile(AbstractBufferedFile):
         except Exception:
             logger.error("Failed to initiate upload")
             raise
-
-
-# Register the filesystem when the module is imported
-register_filesystem()

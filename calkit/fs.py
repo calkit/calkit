@@ -634,6 +634,20 @@ class CalkitFileSystem(AbstractFileSystem):
         with self.open(path2, "wb") as dst:
             dst.write(data)  # type: ignore[arg-type]
 
+    def makedir(self, path, create_parents=True, **kwargs):
+        """Create a directory (no-op for object storage).
+
+        TODO: Handle other backends when they are supported.
+        """
+        pass
+
+    def makedirs(self, path, exist_ok=False):
+        """Create directories (no-op for object storage).
+
+        TODO: Handle other backends when they are supported.
+        """
+        pass
+
 
 class CalkitFile(AbstractBufferedFile):
     """A file-like object for reading/writing from Calkit cloud storage.

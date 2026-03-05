@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 import git
 from dvc.utils.objects import cached_property
@@ -34,6 +35,12 @@ class CalkitDVCFileSystem(ObjectFileSystem):
             return path[len(prefix) :]
         return path
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Cache for batch operation results (info, content)
+        # Format: {path: {'info': {...}, 'content': bytes, 'exists': bool}}
+        self._cache: dict[str, dict[str, Any]] = {}
+
     @cached_property
     def fs(self):
         from calkit.fs import CalkitFileSystem
@@ -43,6 +50,50 @@ class CalkitDVCFileSystem(ObjectFileSystem):
         if "endpointurl" in self.config:
             kwargs["endpoint_url"] = self.config["endpointurl"]
         return CalkitFileSystem(**kwargs)
+
+    def _extract_owner_project(self) -> tuple[str, str] | None:
+        """Extract owner and project from the path_info."""
+        try:
+            # path_info is an ObjectPath with a path attribute like
+            # "owner/project"
+            path = self.path_info.path  # type: ignore
+            parts = path.split("/", 1)
+            if len(parts) >= 2:
+                return parts[0], parts[1]
+        except Exception:
+            pass
+        return None
+
+    def find(self, path, **kwargs):
+        """Override find to optimize DVC hex-prefixed searches.
+
+        DVC often passes lists of 256+ hex-prefixed paths
+        (files/md5/00 through /ff).
+        Instead of searching each individually, we find the common parent and
+        search once.
+        """
+        # Handle list of paths - find common parent and search once
+        if isinstance(path, list) and len(path) > 1:
+            # Strip trailing slashes and split into parts
+            paths = [p.rstrip("/") for p in path]
+            parts_list = [p.split("/") for p in paths]
+            # Find the deepest common parent directory
+            common_parts = []
+            min_len = min(len(p) for p in parts_list)
+            for i in range(min_len):
+                if all(parts[i] == parts_list[0][i] for parts in parts_list):
+                    common_parts.append(parts_list[0][i])
+                else:
+                    break
+            # Only optimize if we have a common md5 ancestor with reasonable
+            # depth
+            # (prevents going too shallow like just 'files')
+            if len(common_parts) >= 3 and "md5" in common_parts:
+                # Add trailing slash to indicate it's a directory, not a file
+                parent = "/".join(common_parts) + "/"
+                return super().find(parent, **kwargs)
+        # Single path -- pass through to parent
+        return super().find(path, **kwargs)
 
     def info(
         self,
@@ -54,7 +105,16 @@ class CalkitDVCFileSystem(ObjectFileSystem):
     ):
         if isinstance(path, list) and hasattr(self.fs, "info_many"):
             infos = self.fs.info_many(path, **kwargs)
+            # Cache the info results
+            for p in path:
+                if p in infos:
+                    if p not in self._cache:
+                        self._cache[p] = {}
+                    self._cache[p]["info"] = infos[p]
             return [infos[p] for p in path]
+        # Check cache for single path
+        if path in self._cache and "info" in self._cache[path]:
+            return self._cache[path]["info"]
         return super().info(
             path,
             callback=callback,
@@ -71,7 +131,16 @@ class CalkitDVCFileSystem(ObjectFileSystem):
         **kwargs,
     ):
         if isinstance(path, list) and hasattr(self.fs, "exists_many"):
-            return self.fs.exists_many(path, **kwargs)
+            results = self.fs.exists_many(path, **kwargs)
+            # Cache the existence results
+            for p, exists in zip(path, results):
+                if p not in self._cache:
+                    self._cache[p] = {}
+                self._cache[p]["exists"] = exists
+            return results
+        # Check cache for single path
+        if path in self._cache and "exists" in self._cache[path]:
+            return self._cache[path]["exists"]
         return super().exists(path, callback=callback, batch_size=batch_size)
 
 

@@ -70,7 +70,6 @@ or providers through a unified API.
 from __future__ import annotations
 
 import io
-import logging
 import xml.etree.ElementTree as ET
 from typing import Any
 from urllib.parse import urlparse
@@ -81,8 +80,6 @@ from fsspec.spec import AbstractBufferedFile
 from fsspec.utils import stringify_path
 
 import calkit
-
-logger = logging.getLogger(__name__)
 
 
 def register_filesystem():
@@ -101,35 +98,7 @@ register_filesystem()
 
 
 def _parse_path(path: str) -> tuple[str, str, str]:
-    """Parse a Calkit path into components.
-
-    Parameters
-    ----------
-    path : str
-        A path in the format "ck://owner/project/file.txt"
-        Optionally with query parameter:
-        "ck://owner/project/file?endpoint_url=..."
-        The Calkit API endpoint is configured via endpointurl (DVC config),
-        endpoint_url (URI query), or CALKIT_ENV environment variable.
-
-    Returns
-    -------
-    tuple[str, str, str]
-        A tuple of (owner, project, file_path)
-
-    Raises
-    ------
-    ValueError
-        If the path format is invalid
-
-    Examples
-    --------
-    >>> _parse_path("ck://owner/proj/file.txt")
-    ('owner', 'proj', 'file.txt')
-
-    >>> _parse_path("ck://owner/proj")
-    ('owner', 'proj', '')
-    """
+    """Parse a Calkit path into (owner, project, file_path)."""
     path = stringify_path(path)
     parsed = urlparse(path)
     if parsed.scheme == "ck":
@@ -205,11 +174,9 @@ class CalkitFileSystem(AbstractFileSystem):
     protocol = "ck"
 
     def __init__(self, *args, **kwargs):
+        """Initialize the filesystem."""
         super().__init__(*args, **kwargs)
         self._session = requests.Session()
-        # Extract endpoint_url from kwargs (passed by DVC config)
-        # Also support endpoint_url for direct URI usage (fsspec convention)
-        # Defaults to calkit.cloud.get_base_url() if not specified
         self.base_url = (
             kwargs.get("endpoint_url") or calkit.cloud.get_base_url()
         )
@@ -224,88 +191,7 @@ class CalkitFileSystem(AbstractFileSystem):
         content_type: str | None = None,
         detail: bool = False,
     ) -> dict:
-        """Get file operation information from Calkit API.
-
-        The API determines what storage backend is configured for this project
-        and returns either:
-        1. Direct result (for metadata operations like list/exists)
-        2. Instructions on how to perform the operation (for content operations)
-
-        Parameters
-        ----------
-        owner : str
-            Calkit owner/username
-        project : str
-            Calkit project name
-        path : str
-            The path within the project
-        operation : str, default="get"
-            Operation type: 'get', 'put', 'delete', 'list', 'exists'
-        content_length : int | None, optional
-            Content length for put operations (enables chunked uploads)
-        content_type : str | None, optional
-            Content type for put operations
-
-        Returns
-        -------
-        dict
-            A dictionary containing:
-            - backend: Storage backend type (gcs, s3, google-drive, box, hf)
-            - result: Optional dict with direct answer
-              (for list/exists operations with files or exists keys)
-            - access: Optional dict with access details:
-              - kind: Access type (presigned-url, presigned-multipart,
-                presigned-chunked, http-request, sftp)
-              - url/init_url: URL for the operation
-              - http_method: HTTP method to use
-              - headers: Optional headers to include
-              - params: Optional query parameters
-              - For chunked: part_size_bytes/chunk_size_bytes,
-                estimated_part_count/estimated_chunk_count
-
-        Raises
-        ------
-        ValueError
-            If API response is invalid
-        requests.HTTPError
-            If API request fails
-
-        Examples
-        --------
-        Content operation (get file):
-
-        >>> {
-        ...     "backend": "gcs",
-        ...     "access_method": "presigned_url",
-        ...     "url": "https://storage.googleapis.com/...",
-        ...     "http_method": "GET"
-        ... }
-
-        Metadata operation with direct result (list):
-
-        >>> {
-        ...     "backend": "gcs",
-        ...     "operation": "list",
-        ...     "result": {
-        ...         "files": [{"name": "file.txt", "size": 1234}]
-        ...     }
-        ... }
-
-        Chunked upload operation:
-
-        >>> {
-        ...     "backend": "gcs",
-        ...     "access": {
-        ...         "kind": "presigned-chunked",
-        ...         "init_url": "https://storage.googleapis.com/...",
-        ...         "http_method": "POST",
-        ...         "chunk_size_bytes": 5242880,
-        ...         "estimated_chunk_count": 10,
-        ...         "upload_size_bytes": 52428800,
-        ...         "headers": {"x-goog-resumable": "start"}
-        ...     }
-        ... }
-        """
+        """Get file operation info from the Calkit API."""
         endpoint = f"/projects/{owner}/{project}/fs-ops"
         request_body: dict[str, Any] = {
             "operation": operation,
@@ -316,60 +202,15 @@ class CalkitFileSystem(AbstractFileSystem):
             request_body["content_length"] = content_length
         if content_type is not None:
             request_body["content_type"] = content_type
-        try:
-            logger.debug(
-                f"Requesting {operation} instructions for "
-                f"{owner}/{project}/{path}"
+        resp = calkit.cloud.post(
+            endpoint, json=request_body, base_url=self.base_url
+        )
+        # Validate response has required fields
+        if "backend" not in resp:
+            raise ValueError(
+                f"Invalid API response: {resp}; Expected 'backend' field"
             )
-            resp = calkit.cloud.post(
-                endpoint, json=request_body, base_url=self.base_url
-            )
-            # Validate response has required fields
-            if "backend" not in resp:
-                raise ValueError(
-                    f"Invalid API response: {resp}; Expected 'backend' field"
-                )
-            access_kind = (
-                resp.get("access", {}).get("kind")
-                if resp.get("access")
-                else None
-            )
-            logger.debug(
-                f"Storage backend: {resp['backend']}, "
-                f"access kind: {access_kind}"
-            )
-            return resp
-        except requests.exceptions.HTTPError as e:
-            status_code = getattr(
-                getattr(e, "response", None), "status_code", None
-            )
-            message = str(e)
-            is_not_found = status_code == 404 or message.startswith("404:")
-            if is_not_found:
-                target = (
-                    f"{owner}/{project}/{path}"
-                    if path
-                    else f"{owner}/{project}"
-                )
-                logger.debug(
-                    f"File operation target not found for {operation} "
-                    f"{target}: {message}"
-                )
-                raise FileNotFoundError(
-                    f"Not found while requesting '{operation}' operation "
-                    f"info for {target}"
-                ) from e
-            logger.error(
-                f"HTTP error getting file operation info for {operation} "
-                f"{owner}/{project}/{path}: {e}"
-            )
-            raise
-        except Exception as e:
-            logger.error(
-                f"Failed to get file operation info for {operation} "
-                f"{owner}/{project}/{path}: {e}"
-            )
-            raise
+        return resp
 
     def _execute_operation(
         self,
@@ -378,38 +219,7 @@ class CalkitFileSystem(AbstractFileSystem):
         data: bytes | None = None,
         headers: dict | None = None,
     ) -> requests.Response:
-        """Execute a file operation based on the operation info from the API.
-
-        Handles different access types:
-        - presigned-url: Simple HTTP request to presigned URL
-        - presigned-multipart: S3 multipart upload (TODO)
-        - presigned-chunked: GCS resumable upload (TODO)
-        - http-request: Generic HTTP request with custom headers
-        - sftp: SFTP access (TODO)
-
-        Parameters
-        ----------
-        operation_info : dict[str, Any]
-            Dictionary from _get_fs_op_info
-        operation : str
-            The operation type (get, put, delete)
-        data : bytes | None, optional
-            Data to upload (for put operations)
-        headers : dict | None, optional
-            Additional headers
-
-        Returns
-        -------
-        requests.Response
-            Response from the operation
-
-        Raises
-        ------
-        ValueError
-            If access type is not supported or required fields are missing
-        requests.HTTPError
-            If operation fails
-        """
+        """Execute a file operation using the provided operation info."""
         # Extract access info from the operation info
         access = operation_info.get("access")
         if not access:
@@ -498,10 +308,6 @@ class CalkitFileSystem(AbstractFileSystem):
                 end = min(start + part_size, len(data))
                 part_data = data[start:end]
                 part_url = part_urls[part_num - 1]
-                logger.debug(
-                    f"Uploading multipart part {part_num}/{total_parts_needed} "
-                    f"({len(part_data)} bytes)"
-                )
                 part_resp = self._session.put(
                     part_url,
                     headers={"Content-Type": content_type},
@@ -530,9 +336,6 @@ class CalkitFileSystem(AbstractFileSystem):
                 timeout=120,
             )
             complete_resp.raise_for_status()
-            logger.debug(
-                f"Completed multipart upload with upload_id={upload_id}"
-            )
             return complete_resp
         elif kind == "presigned-chunked":
             # GCS resumable upload - requires multiple requests
@@ -550,7 +353,6 @@ class CalkitFileSystem(AbstractFileSystem):
             init_method = access.get("http_method", "POST")
             init_params = access.get("params")
             # Step 1: Initiate resumable upload
-            logger.debug(f"Initiating GCS resumable upload to {init_url}")
             init_headers = dict(access.get("headers") or {})
             init_headers["Content-Type"] = content_type
             init_headers["Content-Length"] = "0"  # Init request has no body
@@ -569,16 +371,12 @@ class CalkitFileSystem(AbstractFileSystem):
                     "Failed to get session URI from resumable upload init response. "
                     "Expected 'Location' header."
                 )
-            logger.debug(f"Got session URI: {session_uri}")
             # Step 2: Upload data in chunks
             total_size = len(data)
             offset = 0
             while offset < total_size:
                 chunk_end = min(offset + chunk_size, total_size)
                 chunk_data = data[offset:chunk_end]
-                logger.debug(
-                    f"Uploading chunk: bytes {offset}-{chunk_end - 1}/{total_size - 1}"
-                )
                 # Set Content-Range header for the chunk
                 chunk_headers = {
                     "Content-Length": str(len(chunk_data)),
@@ -593,15 +391,9 @@ class CalkitFileSystem(AbstractFileSystem):
                 # Check response
                 if chunk_resp.status_code == 308:
                     # Resume Incomplete - continue uploading
-                    # Server returns Range header with bytes received
-                    range_header = chunk_resp.headers.get("Range")
-                    if range_header:
-                        # Parse range like "bytes=0-524287"
-                        logger.debug(f"Server confirmed: {range_header}")
                     offset = chunk_end
                 elif chunk_resp.status_code in (200, 201):
                     # Upload complete
-                    logger.debug("Upload completed successfully")
                     return chunk_resp
                 else:
                     # Unexpected status
@@ -629,33 +421,7 @@ class CalkitFileSystem(AbstractFileSystem):
         cache_options: dict | None = None,
         **kwargs,
     ) -> CalkitFile:
-        """Open a file from Calkit cloud storage.
-
-        Parameters
-        ----------
-        path : str
-            Path like "ck://calkit.io/owner/project/file.txt"
-        mode : str, default="rb"
-            File mode ('rb', 'wb', 'ab')
-        block_size : int | None, optional
-            Block size for buffering
-        autocommit : bool, default=True
-            Whether to commit uploads automatically
-        cache_options : dict | None, optional
-            Cache options
-        **kwargs
-            Additional arguments
-
-        Returns
-        -------
-        CalkitFile
-            A CalkitFile object
-
-        Raises
-        ------
-        ValueError
-            If path format is invalid
-        """
+        """Open a file for reading or writing."""
         owner, project, file_path = _parse_path(path)
         return CalkitFile(
             self,
@@ -673,277 +439,150 @@ class CalkitFileSystem(AbstractFileSystem):
     def ls(
         self, path: str, detail: bool = False, refresh: bool = False, **kwargs
     ) -> list[str] | list[dict]:
-        """List paths in a directory.
-
-        Parameters
-        ----------
-        path : str
-            Directory path (ck://owner/project or with subdirectory)
-        detail : bool, default=False
-            Whether to include file details
-        refresh : bool, default=False
-            Whether to refresh the cache
-        **kwargs
-            Additional arguments
-
-        Returns
-        -------
-        list[str] | list[dict]
-            List of path strings (if detail=False) or list of dicts with info
-
-        Raises
-        ------
-        ValueError
-            If path format is invalid
-        """
+        """List files in a directory."""
         owner, project, file_path = _parse_path(path)
-        try:
-            logger.debug(f"Listing items in {owner}/{project}/{file_path}")
-            # Get operation info from API
-            operation_info = self._get_fs_op_info(
-                owner, project, file_path, operation="list", detail=detail
-            )
-            # Check if server provided the result directly
-            if "result" in operation_info:
-                paths = operation_info["result"].get("paths", [])
+        # Get operation info from API
+        operation_info = self._get_fs_op_info(
+            owner, project, file_path, operation="list", detail=detail
+        )
+        # Check if server provided the result directly
+        if "result" in operation_info:
+            paths = operation_info["result"].get("paths", [])
+        else:
+            # Server returned instructions; execute the operation
+            resp = self._execute_operation(operation_info, "list")
+            resp.raise_for_status()
+            result = resp.json()
+            paths = result.get("paths", [])
+        # Ensure paths have the protocol-stripped format expected by fsspec
+        # Format depends on detail flag:
+        # - detail=False: list of strings (paths without protocol)
+        # - detail=True: list of dicts with 'name', 'size', 'type' keys
+        if detail:
+            # If paths is already a list of dicts, return as-is
+            # Otherwise, convert strings to minimal dict format
+            if paths and isinstance(paths[0], dict):
+                return paths
             else:
-                # Server returned instructions; execute the operation
-                resp = self._execute_operation(operation_info, "list")
-                resp.raise_for_status()
-                result = resp.json()
-                paths = result.get("paths", [])
-            # Ensure paths have the protocol-stripped format expected by fsspec
-            # Format depends on detail flag:
-            # - detail=False: list of strings (paths without protocol)
-            # - detail=True: list of dicts with 'name', 'size', 'type' keys
-            if detail:
-                # If paths is already a list of dicts, return as-is
-                # Otherwise, convert strings to minimal dict format
-                if paths and isinstance(paths[0], dict):
-                    return paths
-                else:
-                    # Convert list of strings to list of dicts
-                    return [
-                        {"name": p, "size": None, "type": "file"}
-                        for p in paths
-                    ]
+                # Convert list of strings to list of dicts
+                return [
+                    {"name": p, "size": None, "type": "file"} for p in paths
+                ]
+        else:
+            # Return list of strings
+            if paths and isinstance(paths[0], dict):
+                return [p["name"] for p in paths]
             else:
-                # Return list of strings
-                if paths and isinstance(paths[0], dict):
-                    return [p["name"] for p in paths]
-                else:
-                    return paths
-        except FileNotFoundError:
-            logger.debug(f"Listing path not found (treating as empty): {path}")
-            return []
-        except Exception as e:
-            logger.error(f"Failed to list items at {path}: {e}")
-            raise
+                return paths
 
     def find(
         self, path, maxdepth=None, withdirs=False, detail=False, **kwargs
     ):
-        """Find all files below path recursively.
-
-        Makes a single API call to recursively list all files under the path,
-        which is much more efficient than the default walk-based implementation
-        for backends with many directories.
-
-        Parameters
-        ----------
-        path : str
-            Root path to search (ck://owner/project or with subdirectory)
-        maxdepth : int | None, optional
-            Maximum recursion depth (None for unlimited)
-        withdirs : bool, default=False
-            Whether to include directories in results
-        detail : bool, default=False
-            Whether to include file details
-        **kwargs
-            Additional arguments
-
-        Returns
-        -------
-        dict | list
-            Mapping of paths to info dicts (if detail=True), else list of paths
-        """
+        """Recursively find all files under a path."""
         owner, project, file_path = _parse_path(path)
-        try:
-            logger.debug(
-                f"Finding all files recursively under "
-                f"{owner}/{project}/{file_path}"
+        operation_info = self._get_fs_op_info(
+            owner, project, file_path, operation="find", detail=detail
+        )
+        # Check if server provided the result directly
+        if "result" in operation_info:
+            paths = operation_info["result"].get(
+                "paths", [] if not detail else {}
             )
-            operation_info = self._get_fs_op_info(
-                owner, project, file_path, operation="find", detail=detail
-            )
-            # Check if server provided the result directly
-            if "result" in operation_info:
-                paths = operation_info["result"].get(
-                    "paths", [] if not detail else {}
-                )
-            else:
-                # Server returned instructions; execute the operation
-                resp = self._execute_operation(operation_info, "find")
-                resp.raise_for_status()
-                result = resp.json()
-                paths = result.get("paths", [] if not detail else {})
+        else:
+            # Server returned instructions; execute the operation
+            resp = self._execute_operation(operation_info, "find")
+            resp.raise_for_status()
+            result = resp.json()
+            paths = result.get("paths", [] if not detail else {})
 
-            # Normalize the paths format:
-            # - detail=False: list of strings
-            # - detail=True: dict mapping path -> info dict
-            if detail:
-                # Convert to dict format if it's a list
-                if isinstance(paths, list):
-                    if paths and isinstance(paths[0], dict):
-                        # List of dicts - convert to dict mapping name -> info
-                        paths = {p["name"]: p for p in paths}
-                    else:
-                        # List of strings - convert to dict with minimal info
-                        paths = {
-                            p: {"name": p, "size": None, "type": "file"}
-                            for p in paths
-                        }
-            else:
-                # Convert to list format if it's a dict
-                if isinstance(paths, dict):
-                    paths = list(paths.keys())
-                # Ensure it's a list of strings
-                elif paths and isinstance(paths[0], dict):
-                    paths = [p["name"] for p in paths]
-
-            # Apply maxdepth filtering if needed
-            if maxdepth is not None:
-                base_depth = file_path.count("/") if file_path else 0
-                if detail and isinstance(paths, dict):
-                    paths = {
-                        p: info
-                        for p, info in paths.items()
-                        if p.count("/") - base_depth <= maxdepth
-                    }
-                elif detail:
-                    paths = {}
+        # Normalize the paths format:
+        # - detail=False: list of strings
+        # - detail=True: dict mapping path -> info dict
+        if detail:
+            # Convert to dict format if it's a list
+            if isinstance(paths, list):
+                if paths and isinstance(paths[0], dict):
+                    # List of dicts - convert to dict mapping name -> info
+                    paths = {p["name"]: p for p in paths}
                 else:
-                    paths = [
-                        p
+                    # List of strings - convert to dict with minimal info
+                    paths = {
+                        p: {"name": p, "size": None, "type": "file"}
                         for p in paths
-                        if p.count("/") - base_depth <= maxdepth
-                    ]
-            # Filter out directories if not requested
-            if not withdirs:
-                if detail and isinstance(paths, dict):
-                    paths = {
-                        p: info
-                        for p, info in paths.items()
-                        if info.get("type") == "file"
                     }
-                else:
-                    # When detail=False, we don't have type info in the list
-                    # The backend should handle this by only returning files
-                    pass
-            return paths
-        except Exception as e:
-            logger.error(f"Failed to find items at {path}: {e}")
-            raise
+        else:
+            # Convert to list format if it's a dict
+            if isinstance(paths, dict):
+                paths = list(paths.keys())
+            # Ensure it's a list of strings
+            elif paths and isinstance(paths[0], dict):
+                paths = [p["name"] for p in paths]
+
+        # Apply maxdepth filtering if needed
+        if maxdepth is not None:
+            base_depth = file_path.count("/") if file_path else 0
+            if detail and isinstance(paths, dict):
+                paths = {
+                    p: info
+                    for p, info in paths.items()
+                    if p.count("/") - base_depth <= maxdepth
+                }
+            elif detail:
+                paths = {}
+            else:
+                paths = [
+                    p for p in paths if p.count("/") - base_depth <= maxdepth
+                ]
+        # Filter out directories if not requested
+        if not withdirs:
+            if detail and isinstance(paths, dict):
+                paths = {
+                    p: info
+                    for p, info in paths.items()
+                    if info.get("type") == "file"
+                }
+            else:
+                # When detail=False, we don't have type info in the list
+                # The backend should handle this by only returning files
+                pass
+        return paths
 
     def exists(self, path: str, **kwargs) -> bool:
-        """Check if a file or directory exists.
-
-        Parameters
-        ----------
-        path : str
-            Path to check (ck://calkit.io/owner/project/file)
-        **kwargs
-            Additional arguments
-
-        Returns
-        -------
-        bool
-            True if the path exists, False otherwise
-        """
-        try:
-            owner, project, file_path = _parse_path(path)
-            logger.debug(f"Checking existence of {path}")
-            # Get operation info from API
-            operation_info = self._get_fs_op_info(
-                owner, project, file_path, operation="exists"
-            )
-            # Check if server provided the result directly
-            if "result" in operation_info:
-                return operation_info["result"].get("exists", False)
-            else:
-                # Server returned instructions - execute the operation
-                resp = self._execute_operation(operation_info, "exists")
-                resp.raise_for_status()
-                result = resp.json()
-                return result.get("exists", False)
-        except Exception as e:
-            logger.debug(f"Path {path} does not exist: {e}")
-            return False
+        """Check if a path exists."""
+        owner, project, file_path = _parse_path(path)
+        operation_info = self._get_fs_op_info(
+            owner, project, file_path, operation="exists"
+        )
+        if "result" in operation_info:
+            return operation_info["result"].get("exists", False)
+        resp = self._execute_operation(operation_info, "exists")
+        resp.raise_for_status()
+        result = resp.json()
+        return result.get("exists", False)
 
     def info(self, path: str, **kwargs) -> dict:
-        """Get information about a path.
-
-        Parameters
-        ----------
-        path : str
-            Path to file (ck://owner/project/file)
-        **kwargs
-            Additional arguments
-
-        Returns
-        -------
-        dict
-            Dictionary with file information including name, size, type, etc.
-
-        Raises
-        ------
-        FileNotFoundError
-            If the file does not exist
-        ValueError
-            If path format is invalid
-        """
+        """Get file metadata (name, size, type)."""
         owner, project, file_path = _parse_path(path)
-        try:
-            logger.debug(f"Getting info for {path}")
-            # Get operation info from API - use dedicated info operation
-            operation_info = self._get_fs_op_info(
-                owner, project, file_path, operation="info"
-            )
-            # Check if server provided the result directly
-            if "result" in operation_info:
-                result = operation_info["result"]
-                return {
-                    "name": result.get("name", file_path),
-                    "size": result.get("size", 0),
-                    "type": result.get("type", "file"),
-                    "time_modified": result.get("time_modified"),
-                }
-            else:
-                # Fallback for servers that don't support info operation
-                logger.debug(
-                    "Server returned instructions instead of result for info"
-                )
-                resp = self._execute_operation(operation_info, "info")
-                resp.raise_for_status()
-                result = resp.json()
-                return {
-                    "name": result.get("name", file_path),
-                    "size": result.get("size", 0),
-                    "type": result.get("type", "file"),
-                    "time_modified": result.get("time_modified"),
-                }
-        except FileNotFoundError:
-            raise
-        except requests.exceptions.HTTPError as e:
-            status_code = getattr(
-                getattr(e, "response", None), "status_code", None
-            )
-            if status_code == 404:
-                raise FileNotFoundError(f"File not found: {path}") from e
-            raise
-        except Exception as e:
-            logger.error(f"Failed to get info for {path}: {e}")
-            raise
+        operation_info = self._get_fs_op_info(
+            owner, project, file_path, operation="info"
+        )
+        if "result" in operation_info:
+            result = operation_info["result"]
+            return {
+                "name": result.get("name", file_path),
+                "size": result.get("size", 0),
+                "type": result.get("type", "file"),
+                "time_modified": result.get("time_modified"),
+            }
+        resp = self._execute_operation(operation_info, "info")
+        resp.raise_for_status()
+        result = resp.json()
+        return {
+            "name": result.get("name", file_path),
+            "size": result.get("size", 0),
+            "type": result.get("type", "file"),
+            "time_modified": result.get("time_modified"),
+        }
 
     def cat_file(
         self,
@@ -952,124 +591,43 @@ class CalkitFileSystem(AbstractFileSystem):
         end: int | None = None,
         **kwargs,
     ) -> bytes:
-        """Read the contents of a file.
-
-        Parameters
-        ----------
-        path : str
-            Path to file (ck://owner/project/file)
-        start : int | None, optional
-            Start byte position (for range reads)
-        end : int | None, optional
-            End byte position (for range reads, exclusive)
-        **kwargs
-            Additional arguments
-
-        Returns
-        -------
-        bytes
-            File contents
-
-        Raises
-        ------
-        FileNotFoundError
-            If the file does not exist
-        ValueError
-            If path format is invalid
-        """
+        """Read file contents."""
         owner, project, file_path = _parse_path(path)
-        try:
-            logger.debug(f"Reading file {path}")
-            # Get file operation info from API (one API call per file)
-            operation_info = self._get_fs_op_info(
-                owner, project, file_path, operation="get"
-            )
-            # Add Range header if reading a specific byte range
-            headers = {}
-            if start is not None and end is not None:
-                headers["Range"] = f"bytes={start}-{end - 1}"
-            elif start is not None:
-                headers["Range"] = f"bytes={start}-"
-            elif end is not None:
-                headers["Range"] = f"bytes=0-{end - 1}"
-            # Execute the get operation
-            resp = self._execute_operation(
-                operation_info, "get", headers=headers
-            )
-            resp.raise_for_status()
-            return resp.content
-        except FileNotFoundError:
-            raise
-        except Exception:
-            logger.exception(f"Failed to read file {path}")
-            raise
+        # Get file operation info from API (one API call per file)
+        operation_info = self._get_fs_op_info(
+            owner, project, file_path, operation="get"
+        )
+        # Add Range header if reading a specific byte range
+        headers = {}
+        if start is not None and end is not None:
+            headers["Range"] = f"bytes={start}-{end - 1}"
+        elif start is not None:
+            headers["Range"] = f"bytes={start}-"
+        elif end is not None:
+            headers["Range"] = f"bytes=0-{end - 1}"
+        # Execute the get operation
+        resp = self._execute_operation(operation_info, "get", headers=headers)
+        resp.raise_for_status()
+        return resp.content
 
     def rm_file(self, path: str, **kwargs):
-        """Remove a single file.
-
-        Parameters
-        ----------
-        path : str
-            Path to file (ck://calkit.io/owner/project/file)
-        **kwargs
-            Additional arguments
-
-        Raises
-        ------
-        ValueError
-            If path format is invalid
-        requests.HTTPError
-            If deletion fails
-        """
+        """Delete a file."""
         owner, project, file_path = _parse_path(path)
-        try:
-            logger.debug(f"Deleting file {path}")
-            # Get file operation info from API
-            operation_info = self._get_fs_op_info(
-                owner, project, file_path, "delete"
-            )
-            # Execute the delete operation
-            resp = self._execute_operation(operation_info, "delete")
-            resp.raise_for_status()
-            logger.debug(f"Successfully deleted {path}")
-        except Exception as e:
-            logger.error(f"Failed to delete {path}: {e}")
-            raise
+        # Get file operation info from API
+        operation_info = self._get_fs_op_info(
+            owner, project, file_path, "delete"
+        )
+        # Execute the delete operation
+        resp = self._execute_operation(operation_info, "delete")
+        resp.raise_for_status()
 
     def mv(self, path1: str, path2: str, **kwargs):
-        """Move or rename a file.
-
-        Parameters
-        ----------
-        path1 : str
-            Source path
-        path2 : str
-            Destination path
-        **kwargs
-            Additional arguments
-
-        Notes
-        -----
-        Currently implemented as copy + delete. In the future, this could
-        be optimized with a direct move operation in the API.
-        """
-        logger.debug(f"Moving {path1} to {path2}")
+        """Move or rename a file (copy + delete)."""
         self.copy(path1, path2, **kwargs)
         self.rm_file(path1, **kwargs)
 
     def cp_file(self, path1: str, path2: str, **kwargs):
-        """Copy a file.
-
-        Parameters
-        ----------
-        path1 : str
-            Source path
-        path2 : str
-            Destination path
-        **kwargs
-            Additional arguments
-        """
-        logger.debug(f"Copying {path1} to {path2}")
+        """Copy a file."""
         with self.open(path1, "rb") as src:
             data = src.read()
         # For binary write to a file, pass the bytes directly
@@ -1129,72 +687,26 @@ class CalkitFile(AbstractBufferedFile):
         )
 
     def _fetch_range(self, start: int, end: int) -> bytes:
-        """Fetch a range of bytes from the file.
-
-        Parameters
-        ----------
-        start : int
-            Start byte position
-        end : int
-            End byte position (exclusive)
-
-        Returns
-        -------
-        bytes
-            Bytes in the range [start, end)
-
-        Raises
-        ------
-        requests.HTTPError
-            If the fetch fails
-        """
+        """Fetch a byte range from the file."""
         if self.operation_info is None:
             # Get file operation info from API
             self.operation_info = self.fs._get_fs_op_info(
                 self.owner, self.project, self.file_path, "get"
             )
-        try:
-            logger.debug(f"Fetching bytes {start}-{end - 1} from {self.path}")
-            # Add Range header for partial content
-            # For backends where range is unsupported, the Calkit Cloud API can
-            # choose to ignore this header or return a backend-specific request
-            # configuration
-            headers = {"Range": f"bytes={start}-{end - 1}"}
-            # Execute the get operation with range header
-            resp = self.fs._execute_operation(
-                self.operation_info, "get", headers=headers
-            )
-            resp.raise_for_status()
-            return resp.content
-        except requests.exceptions.RequestException as e:
-            logger.error(
-                f"Failed to fetch range {start}-{end} from {self.path}: {e}"
-            )
-            raise
+        # Add Range header for partial content
+        # For backends where range is unsupported, the Calkit Cloud API can
+        # choose to ignore this header or return a backend-specific request
+        # configuration
+        headers = {"Range": f"bytes={start}-{end - 1}"}
+        # Execute the get operation with range header
+        resp = self.fs._execute_operation(
+            self.operation_info, "get", headers=headers
+        )
+        resp.raise_for_status()
+        return resp.content
 
     def _upload_chunk(self, final: bool = False) -> int:
-        """Upload a chunk of data.
-
-        This method is called by AbstractBufferedFile to upload buffered data.
-        For DVC operations, we typically upload the entire file in one go.
-
-        Parameters
-        ----------
-        final : bool, default=False
-            Whether this is the final chunk (file is being closed)
-
-        Returns
-        -------
-        int
-            Number of bytes uploaded from this chunk
-
-        Raises
-        ------
-        RuntimeError
-            If upload hasn't been initiated
-        requests.HTTPError
-            If upload fails
-        """
+        """Upload buffered data to cloud storage."""
         if not final:
             # For non-final chunks, we don't upload yet (buffer accumulates)
             return 0
@@ -1209,55 +721,28 @@ class CalkitFile(AbstractBufferedFile):
             raise RuntimeError(
                 "Upload not initiated. Call _initiate_upload first."
             )
-        try:
-            logger.debug(
-                f"Uploading {ndata} bytes to "
-                f"{self.owner}/{self.project}/{self.file_path}"
-            )
-            self.operation_info = self.fs._get_fs_op_info(
-                self.owner,
-                self.project,
-                self.file_path,
-                "put",
-                content_length=ndata,
-                content_type="application/octet-stream",
-            )
-            # Execute the put operation
-            resp = self.fs._execute_operation(
-                self.operation_info,
-                "put",
-                data=data,
-            )
-            resp.raise_for_status()
-            self.uploaded_bytes += ndata
-            logger.debug(f"Successfully uploaded {ndata} bytes")
-            # Clear the buffer after successful upload
-            self.buffer = io.BytesIO()
-            return ndata
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Upload failed for {self.path}: {e}")
-            raise
+        self.operation_info = self.fs._get_fs_op_info(
+            self.owner,
+            self.project,
+            self.file_path,
+            "put",
+            content_length=ndata,
+            content_type="application/octet-stream",
+        )
+        # Execute the put operation
+        resp = self.fs._execute_operation(
+            self.operation_info,
+            "put",
+            data=data,
+        )
+        resp.raise_for_status()
+        self.uploaded_bytes += ndata
+        # Clear the buffer after successful upload
+        self.buffer = io.BytesIO()
+        return ndata
 
     def _initiate_upload(self):
-        """Initiate a file upload.
-
-        This method is called by AbstractBufferedFile when opening a file for
-        writing.
-        It obtains the operation info (including access credentials) from the
-        Calkit Cloud API.
-        """
-        try:
-            logger.debug(
-                f"Initiating upload for "
-                f"{self.owner}/{self.project}/{self.file_path}"
-            )
-            self.operation_info = self.fs._get_fs_op_info(
-                self.owner, self.project, self.file_path, "put"
-            )
-            logger.debug(
-                f"Got operation info for upload "
-                f"(backend: {self.operation_info.get('backend')})"
-            )
-        except Exception:
-            logger.error("Failed to initiate upload")
-            raise
+        """Get upload credentials from the Calkit API."""
+        self.operation_info = self.fs._get_fs_op_info(
+            self.owner, self.project, self.file_path, "put"
+        )

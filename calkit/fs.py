@@ -715,7 +715,7 @@ class CalkitFileSystem(AbstractFileSystem):
                     project=project,
                     paths=file_paths,
                     operation="info",
-                    include=["content"],
+                    include=["info", "content"],
                 )
                 batch_results = resp.get("results")
                 if isinstance(batch_results, dict):

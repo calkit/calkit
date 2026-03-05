@@ -121,26 +121,41 @@ class CalkitDVCFileSystem(ObjectFileSystem):
         **kwargs,
     ):
         if isinstance(path, list) and hasattr(self.fs, "info_many"):
-            infos = self.fs.info_many(path, **kwargs)
-            # Cache the info results and existence status
+            # Separate cached vs uncached paths
+            uncached_paths = []
             for p in path:
-                exists = p in infos and isinstance(infos[p], dict)
-                if p not in self._cache:
-                    self._cache[p] = {}
-                self._cache[p]["exists"] = exists
-                if exists:
-                    self._cache[p]["info"] = infos[p]
-            # Build result list, raising FileNotFoundError for missing paths
+                cached_entry = self._cache.get(p, {})
+                # Skip if we have info OR if we know it doesn't exist
+                if (
+                    "info" not in cached_entry
+                    and cached_entry.get("exists") is not False
+                ):
+                    uncached_paths.append(p)
+            # Only fetch info for uncached paths
+            if uncached_paths:
+                infos = self.fs.info_many(uncached_paths, **kwargs)
+                # Cache the newly fetched info
+                for p in uncached_paths:
+                    exists = p in infos and isinstance(infos[p], dict)
+                    if p not in self._cache:
+                        self._cache[p] = {}
+                    self._cache[p]["exists"] = exists
+                    if exists:
+                        self._cache[p]["info"] = infos[p]
+            # Build result list from cache, raising FileNotFoundError for
+            # missing
             result = []
             for p in path:
-                if p not in infos:
+                cached_entry = self._cache.get(p, {})
+                if "info" in cached_entry:
+                    result.append(cached_entry["info"])
+                else:
+                    # We know it doesn't exist (either from cache or fresh fetch)
                     error = FileNotFoundError(p)
                     if return_exceptions:
                         result.append(error)
                     else:
                         raise error
-                else:
-                    result.append(infos[p])
             return result
         if not isinstance(path, str):
             return super().info(
@@ -168,23 +183,27 @@ class CalkitDVCFileSystem(ObjectFileSystem):
         **kwargs,
     ):
         if isinstance(path, list) and hasattr(self.fs, "info_many"):
-            # Use info_many instead of exists_many to get and cache file info
-            # This preemptively populates the cache for subsequent info() calls
-            # Note: info_many only returns keys for paths that exist and have
-            # valid info dicts. Non-existent paths are not included in the
-            # returned dict.
-            infos = self.fs.info_many(path, **kwargs)
+            # Separate cached vs uncached paths
+            uncached_paths = []
+            for p in path:
+                if p not in self._cache or "exists" not in self._cache[p]:
+                    uncached_paths.append(p)
+            # Only fetch info for uncached paths
+            # Use info_many to get and cache both info and existence
+            if uncached_paths:
+                infos = self.fs.info_many(uncached_paths, **kwargs)
+                for p in uncached_paths:
+                    exists = p in infos and isinstance(infos[p], dict)
+                    if p not in self._cache:
+                        self._cache[p] = {}
+                    self._cache[p]["exists"] = exists
+                    if exists:
+                        self._cache[p]["info"] = infos[p]
+            # Build result list from cache
             results = []
             for p in path:
-                # Key presence indicates existence
-                # Defensively verify the value is a dict (should always be true)
-                exists = p in infos and isinstance(infos[p], dict)
-                if p not in self._cache:
-                    self._cache[p] = {}
-                self._cache[p]["exists"] = exists
-                if exists:
-                    self._cache[p]["info"] = infos[p]
-                results.append(exists)
+                cached_entry = self._cache.get(p, {})
+                results.append(cached_entry.get("exists", False))
             return results
         # Check cache for single path
         if path in self._cache and "exists" in self._cache[path]:

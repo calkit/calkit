@@ -367,30 +367,29 @@ def get_remotes(wdir: str | None = None) -> dict[str, str]:
     """Get a dictionary of DVC remotes, keyed by name, with URL as the
     value.
     """
-    import io
-    from contextlib import redirect_stdout
+    import dvc.repo
+    from dvc.exceptions import NotDvcRepoError
 
-    # Capture stdout from DVC CLI
-    output = io.StringIO()
-    with redirect_stdout(output):
-        result = run_dvc_command(["remote", "list"], cwd=wdir)
-    if result != 0:
-        raise RuntimeError("Error getting DVC remotes")
-    out = output.getvalue().strip()
-    if not out:
+    # Ensure DVC recognizes ck:// remotes when validating config.
+    register_ck_scheme()
+    repo_path = wdir or "."
+    try:
+        repo = dvc.repo.Repo(repo_path)
+    except NotDvcRepoError:
         return {}
-    resp = {}
-    out = out.replace("(default)", "").strip()
-    is_name = True
-    for token in out.split():
-        token = token.strip()
-        if is_name:
-            name = token
-        else:
-            url = token
-            resp[name] = url
-        is_name = not is_name
-    return resp
+    try:
+        remote_cfg = repo.config.get("remote", {})
+        if not isinstance(remote_cfg, dict):
+            return {}
+        remotes: dict[str, str] = {}
+        for name, cfg in remote_cfg.items():
+            if isinstance(name, str) and isinstance(cfg, dict):
+                url = cfg.get("url")
+                if isinstance(url, str):
+                    remotes[name] = url
+        return remotes
+    finally:
+        repo.close()
 
 
 def list_paths(wdir: str | None = None, recursive=False) -> list[str]:

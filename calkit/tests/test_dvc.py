@@ -3,6 +3,7 @@
 import os
 import subprocess
 
+import dvc.repo
 from dvc.config_schema import SCHEMA, Invalid
 from dvc_objects.fs import known_implementations
 
@@ -78,3 +79,13 @@ def test_ck_url_rejected_before_registration_when_schema_reset(monkeypatch):
             pass
     finally:
         SCHEMA["remote"] = original_remote
+
+
+def test_list_files_paths(tmp_dir):
+    subprocess.call(["calkit", "init"])
+    calkit.dvc.list_files()
+    with open("file1.txt", "w") as f:
+        f.write("hello")
+    repo = dvc.repo.Repo()
+    repo.add("file1.txt")  # type: ignore
+    assert "file1.txt" in calkit.dvc.list_paths()

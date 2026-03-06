@@ -71,10 +71,21 @@ def test_calkitfilesystem_dvc(tmp_dir):
     """Test CalkitFileSystem as a DVC remote."""
     subprocess.run(["calkit", "init"])
     subprocess.run(
-        ["calkit", "dvc", "remote", "add", "ck://calkit/example-basic/"]
+        [
+            "calkit",
+            "dvc",
+            "remote",
+            "add",
+            "calkit",
+            "ck://calkit/example-basic/",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["calkit", "dvc", "remote", "default", "calkit"], check=True
     )
     with open("data.txt", "w") as f:
         f.write("hello dvc")
-    subprocess.run(["calkit", "dvc", "add", "data.txt"])
-    subprocess.run(["calkit", "dvc", "push"])
-    subprocess.run(["calkit", "dvc", "pull"])
+    subprocess.run(["calkit", "dvc", "add", "data.txt"], check=True)
+    subprocess.run(["calkit", "dvc", "push"], check=True)
+    subprocess.run(["calkit", "dvc", "pull"], check=True)

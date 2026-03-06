@@ -187,10 +187,6 @@ class CalkitFileSystem(AbstractFileSystem):
         return self._base_url or calkit.cloud.get_base_url()
 
     @staticmethod
-    def _cache_key(owner: str, project: str, file_path: str) -> str:
-        return f"{owner}/{project}/{file_path}"
-
-    @staticmethod
     def _normalize_info(
         file_path: str, result: dict[str, Any]
     ) -> dict[str, Any]:

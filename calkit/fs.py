@@ -180,9 +180,12 @@ class CalkitFileSystem(AbstractFileSystem):
         """Initialize the filesystem."""
         super().__init__(*args, **kwargs)
         self._session = requests.Session()
-        self.base_url = (
-            kwargs.get("endpoint_url") or calkit.cloud.get_base_url()
-        )
+        self._base_url = kwargs.get("endpoint_url")
+
+    @property
+    def base_url(self) -> str:
+        """Get the base URL for the Calkit Cloud API."""
+        return self._base_url or calkit.cloud.get_base_url()
 
     @staticmethod
     def _cache_key(owner: str, project: str, file_path: str) -> str:

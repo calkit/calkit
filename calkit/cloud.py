@@ -83,6 +83,7 @@ def _request(
 ):
     max_retries = 10
     base_delay_seconds = 0.25
+    max_delay_seconds = 30
     func = getattr(requests, kind)
     if base_url is None:
         base_url = get_base_url()
@@ -96,7 +97,8 @@ def _request(
             **kwargs,
         )
         if resp.status_code == 502 and retry_num < max_retries:
-            time.sleep(base_delay_seconds * (2**retry_num))
+            wait = min(base_delay_seconds * (2**retry_num), max_delay_seconds)
+            time.sleep(wait)
             continue
         try:
             resp.raise_for_status()

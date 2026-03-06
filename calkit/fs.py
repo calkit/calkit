@@ -71,7 +71,6 @@ from __future__ import annotations
 
 import base64
 import io
-import time
 import xml.etree.ElementTree as ET
 from typing import Any
 from urllib.parse import urlparse
@@ -1001,38 +1000,10 @@ class CalkitFile(AbstractBufferedFile):
             data=data,
         )
         resp.raise_for_status()
-        # Verify remote size to prevent silent partial uploads.
-        self._verify_remote_size(ndata)
         self.uploaded_bytes += ndata
         # Clear the buffer after successful upload
         self.buffer = io.BytesIO()
         return ndata
-
-    def _verify_remote_size(self, expected_size: int) -> None:
-        """Verify uploaded object size matches expected bytes."""
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            try:
-                info = self.fs._get_info_for_parsed_path(
-                    self.owner,
-                    self.project,
-                    self.file_path,
-                )
-            except Exception:
-                info = None
-            remote_size = info.get("size") if isinstance(info, dict) else None
-            if isinstance(remote_size, int):
-                if remote_size == expected_size:
-                    return
-                raise ValueError(
-                    "Remote size mismatch after upload "
-                    f"(expected {expected_size}, got {remote_size})"
-                )
-            if attempt < max_attempts - 1:
-                time.sleep(0.25)
-        raise ValueError(
-            "Unable to verify uploaded object size after write operation"
-        )
 
     def _initiate_upload(self):
         """Get upload credentials from the Calkit API."""

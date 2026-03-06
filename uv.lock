@@ -811,7 +811,7 @@ requires-dist = [
     { name = "bibtexparser" },
     { name = "checksumdir" },
     { name = "docx2pdf" },
-    { name = "dvc", specifier = "==3.64.2" },
+    { name = "dvc", specifier = "==3.66.1" },
     { name = "fastapi" },
     { name = "fsspec", specifier = ">=2026.2.0" },
     { name = "gitpython" },
@@ -835,7 +835,7 @@ requires-dist = [
     { name = "texsoup", specifier = ">=0.3.1" },
     { name = "toml", specifier = ">=0.10.2" },
     { name = "tqdm", specifier = ">=4.67.1" },
-    { name = "typer", specifier = "==0.21.1" },
+    { name = "typer", specifier = "==0.24.1" },
     { name = "uvicorn" },
     { name = "xet", marker = "extra == 'xet'", specifier = ">=0.0.1" },
 ]
@@ -1795,7 +1795,7 @@ wheels = [
 
 [[package]]
 name = "dvc"
-version = "3.64.2"
+version = "3.66.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
@@ -1842,14 +1842,14 @@ dependencies = [
     { name = "voluptuous" },
     { name = "zc-lockfile" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c1/a2/f92e07e3014952b5b83aa87e6665de87551612168edc22d288923ecb9b97/dvc-3.64.2.tar.gz", hash = "sha256:e5e677d2ab09a26e236ff6a6ba86f3e84be08b6871a4b45dbc234e1c4ddd2258", size = 672335, upload-time = "2025-12-06T05:11:00.915Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b6/46/134ce696e6d4e857e4378ad5dd6f84eac3e1c3b66cdada89baade9cfd1e9/dvc-3.66.1.tar.gz", hash = "sha256:ed8e07050fdf1fc222ea95afbef8540820179e42022bc068c7b343f2a1304e69", size = 674159, upload-time = "2026-01-08T15:29:38.496Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e1/e6/1782bcb8cdf82a971c1447d83f69efb3356945b68e28a28708fa4ddfa3c3/dvc-3.64.2-py3-none-any.whl", hash = "sha256:14e76baaef50cc10a43aaea788b49ea965835a59c16d0d63693a9ba1c2001090", size = 467981, upload-time = "2025-12-06T05:10:58.565Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/66/95726b3700988a8c08f5f1a7221bc93d7984a61ef8889ed10dd50b0dbb70/dvc-3.66.1-py3-none-any.whl", hash = "sha256:6805637cde28902ada95b33127c6a36b85133d6b0f161626eb473504605f686f", size = 469657, upload-time = "2026-01-08T15:29:36.503Z" },
 ]
 
 [[package]]
 name = "dvc-data"
-version = "3.16.12"
+version = "3.18.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
@@ -1863,9 +1863,9 @@ dependencies = [
     { name = "sqltrie" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d6/49/9476147025cbabfa2695700dd0b4564bbeee085729bb2faa221605d85e3c/dvc_data-3.16.12.tar.gz", hash = "sha256:f92cc03ffdddb5bd3a7a7da78d595dec6915311256a4cfefe250967d6ce3d194", size = 81910, upload-time = "2025-08-18T11:27:33.983Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/2f/e00e933d10512ca7ec4f3f2f450d915e6bed4c01cf666d50a1a8f9b033ff/dvc_data-3.18.3.tar.gz", hash = "sha256:61c8085a7c5b5e3ecaa86d63c3f22dc7c951a5dc55bd0a1bb5afa15377a25b1a", size = 84527, upload-time = "2026-02-27T05:12:44.58Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7c/7c/2acac71d2366328ae9da1a0b68292fed07aef28ed6114ce3320f3253c8a2/dvc_data-3.16.12-py3-none-any.whl", hash = "sha256:39c183caecd142cf44bc16186c8e5ef3bb4d739111e41f80682c999db30b8cee", size = 78201, upload-time = "2025-08-18T11:27:32.353Z" },
+    { url = "https://files.pythonhosted.org/packages/65/e0/695d043a0a2a4e830456e841c4a14be99d31305198fc4feccaeaace0b979/dvc_data-3.18.3-py3-none-any.whl", hash = "sha256:ab459a033c07ad94ec23ad4e83c14c68b73e7291367629813e751f882b10b4f3", size = 79324, upload-time = "2026-02-27T05:12:43.27Z" },
 ]
 
 [[package]]
@@ -6597,17 +6597,17 @@ wheels = [
 
 [[package]]
 name = "typer"
-version = "0.21.1"
+version = "0.24.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "annotated-doc" },
     { name = "click" },
     { name = "rich" },
     { name = "shellingham" },
-    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/36/bf/8825b5929afd84d0dabd606c67cd57b8388cb3ec385f7ef19c5cc2202069/typer-0.21.1.tar.gz", hash = "sha256:ea835607cd752343b6b2b7ce676893e5a0324082268b48f27aa058bdb7d2145d", size = 110371, upload-time = "2026-01-06T11:21:10.989Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f5/24/cb09efec5cc954f7f9b930bf8279447d24618bb6758d4f6adf2574c41780/typer-0.24.1.tar.gz", hash = "sha256:e39b4732d65fbdcde189ae76cf7cd48aeae72919dea1fdfc16593be016256b45", size = 118613, upload-time = "2026-02-21T16:54:40.609Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a0/1d/d9257dd49ff2ca23ea5f132edf1281a0c4f9de8a762b9ae399b670a59235/typer-0.21.1-py3-none-any.whl", hash = "sha256:7985e89081c636b88d172c2ee0cfe33c253160994d47bdfdc302defd7d1f1d01", size = 47381, upload-time = "2026-01-06T11:21:09.824Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/91/48db081e7a63bb37284f9fbcefda7c44c277b18b0e13fbc36ea2335b71e6/typer-0.24.1-py3-none-any.whl", hash = "sha256:112c1f0ce578bfb4cab9ffdabc68f031416ebcc216536611ba21f04e9aa84c9e", size = 56085, upload-time = "2026-02-21T16:54:41.616Z" },
 ]
 
 [[package]]

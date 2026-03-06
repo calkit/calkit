@@ -71,6 +71,7 @@ from __future__ import annotations
 
 import base64
 import io
+import time
 import xml.etree.ElementTree as ET
 from typing import Any
 from urllib.parse import urlparse
@@ -373,9 +374,7 @@ class CalkitFileSystem(AbstractFileSystem):
                     "Missing or invalid 'part_size_bytes' for "
                     "presigned-multipart"
                 )
-            content_type = access.get(
-                "content_type", "application/octet-stream"
-            )
+            content_type = access.get("content_type")
             total_parts_needed = (len(data) + part_size - 1) // part_size
             if total_parts_needed > len(part_urls):
                 raise ValueError(
@@ -388,9 +387,12 @@ class CalkitFileSystem(AbstractFileSystem):
                 end = min(start + part_size, len(data))
                 part_data = data[start:end]
                 part_url = part_urls[part_num - 1]
+                part_headers = {}
+                if content_type:
+                    part_headers["Content-Type"] = str(content_type)
                 part_resp = self._session.put(
                     part_url,
-                    headers={"Content-Type": content_type},
+                    headers=part_headers,
                     data=part_data,
                     timeout=120,
                 )
@@ -432,14 +434,14 @@ class CalkitFileSystem(AbstractFileSystem):
                     "Missing or invalid 'chunk_size_bytes' for "
                     "presigned-chunked"
                 )
-            content_type = access.get(
-                "content_type", "application/octet-stream"
-            )
+            content_type = access.get("content_type")
             init_method = access.get("http_method", "POST")
             init_params = access.get("params")
+            chunk_upload_method = access.get("chunk_http_method", "PUT")
             # Step 1: Initiate resumable upload
             init_headers = dict(access.get("headers") or {})
-            init_headers["Content-Type"] = content_type
+            if content_type:
+                init_headers["Content-Type"] = str(content_type)
             init_headers["Content-Length"] = "0"  # Init request has no body
             init_resp = self._session.request(
                 method=init_method.upper(),
@@ -469,6 +471,14 @@ class CalkitFileSystem(AbstractFileSystem):
             # Step 2: Upload data in chunks
             total_size = len(data)
             offset = 0
+            chunk_headers_base = dict(
+                access.get("chunk_headers") or access.get("headers") or {}
+            )
+            # x-goog-resumable is only required to initiate the session.
+            if "chunk_headers" not in access:
+                for header_key in list(chunk_headers_base.keys()):
+                    if header_key.lower() == "x-goog-resumable":
+                        chunk_headers_base.pop(header_key)
 
             def _parse_next_offset_from_range(
                 range_header: str | None,
@@ -495,14 +505,17 @@ class CalkitFileSystem(AbstractFileSystem):
                     chunk_data = data[offset:chunk_end]
                     # Set Content-Range header for the chunk
                     chunk_headers = {
+                        **chunk_headers_base,
                         "Content-Length": str(len(chunk_data)),
                         "Content-Range": (
                             f"bytes {offset}-{chunk_end - 1}/{total_size}"
                         ),
                     }
-                    chunk_resp = self._session.put(
-                        session_uri,
+                    chunk_resp = self._session.request(
+                        method=chunk_upload_method.upper(),
+                        url=session_uri,
                         headers=chunk_headers,
+                        params=access.get("chunk_params"),
                         data=chunk_data,
                         timeout=120,
                     )
@@ -955,11 +968,11 @@ class CalkitFile(AbstractBufferedFile):
         resp.raise_for_status()
         return resp.content
 
-    def _upload_chunk(self, final: bool = False) -> int:
+    def _upload_chunk(self, final: bool = False) -> int | bool:
         """Upload buffered data to cloud storage."""
         if not final:
             # For non-final chunks, we don't upload yet (buffer accumulates)
-            return 0
+            return False
         # Get the data to upload from the buffer
         if self.buffer is None:
             return 0
@@ -969,7 +982,7 @@ class CalkitFile(AbstractBufferedFile):
             return 0
         if self.operation_info is None:
             raise RuntimeError(
-                "Upload not initiated. Call _initiate_upload first."
+                "Upload not initiated; Call _initiate_upload first"
             )
         self.operation_info = self.fs._get_fs_op_info(
             self.owner,
@@ -977,7 +990,6 @@ class CalkitFile(AbstractBufferedFile):
             self.file_path,
             "put",
             content_length=ndata,
-            content_type="application/octet-stream",
         )
         # Execute the put operation
         resp = self.fs._execute_operation(
@@ -986,10 +998,38 @@ class CalkitFile(AbstractBufferedFile):
             data=data,
         )
         resp.raise_for_status()
+        # Verify remote size to prevent silent partial uploads.
+        self._verify_remote_size(ndata)
         self.uploaded_bytes += ndata
         # Clear the buffer after successful upload
         self.buffer = io.BytesIO()
         return ndata
+
+    def _verify_remote_size(self, expected_size: int) -> None:
+        """Verify uploaded object size matches expected bytes."""
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                info = self.fs._get_info_for_parsed_path(
+                    self.owner,
+                    self.project,
+                    self.file_path,
+                )
+            except Exception:
+                info = None
+            remote_size = info.get("size") if isinstance(info, dict) else None
+            if isinstance(remote_size, int):
+                if remote_size == expected_size:
+                    return
+                raise ValueError(
+                    "Remote size mismatch after upload "
+                    f"(expected {expected_size}, got {remote_size})"
+                )
+            if attempt < max_attempts - 1:
+                time.sleep(0.25)
+        raise ValueError(
+            "Unable to verify uploaded object size after write operation"
+        )
 
     def _initiate_upload(self):
         """Get upload credentials from the Calkit API."""

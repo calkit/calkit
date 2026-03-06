@@ -535,7 +535,8 @@ class CalkitFileSystem(AbstractFileSystem):
                             )
                         offset = next_offset
                     elif chunk_resp.status_code in (200, 201):
-                        # Final success is only valid when sending the final range
+                        # Final success is only valid when sending the final
+                        # range
                         if chunk_end != total_size:
                             raise ValueError(
                                 "Chunked upload returned success before all "

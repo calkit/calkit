@@ -427,6 +427,11 @@ class CalkitFileSystem(AbstractFileSystem):
                     "Missing 'init_url' field for presigned-chunked"
                 )
             chunk_size = access.get("chunk_size_bytes", 5 * 1024 * 1024)
+            if not isinstance(chunk_size, int) or chunk_size <= 0:
+                raise ValueError(
+                    "Missing or invalid 'chunk_size_bytes' for "
+                    "presigned-chunked"
+                )
             content_type = access.get(
                 "content_type", "application/octet-stream"
             )
@@ -452,39 +457,101 @@ class CalkitFileSystem(AbstractFileSystem):
                     "response; "
                     "Expected 'Location' header"
                 )
+
+            def _cancel_resumable_upload() -> None:
+                delete_fn = getattr(self._session, "delete", None)
+                if callable(delete_fn):
+                    try:
+                        delete_fn(session_uri, timeout=30)
+                    except Exception:
+                        pass
+
             # Step 2: Upload data in chunks
             total_size = len(data)
             offset = 0
-            while offset < total_size:
-                chunk_end = min(offset + chunk_size, total_size)
-                chunk_data = data[offset:chunk_end]
-                # Set Content-Range header for the chunk
-                chunk_headers = {
-                    "Content-Length": str(len(chunk_data)),
-                    "Content-Range": (
-                        f"bytes {offset}-{chunk_end - 1}/{total_size}"
-                    ),
-                }
-                chunk_resp = self._session.put(
-                    session_uri,
-                    headers=chunk_headers,
-                    data=chunk_data,
-                    timeout=120,
-                )
-                # Check response
-                if chunk_resp.status_code == 308:
-                    # Resume Incomplete - continue uploading
-                    offset = chunk_end
-                elif chunk_resp.status_code in (200, 201):
-                    # Upload complete
-                    return chunk_resp
-                else:
-                    # Unexpected status
-                    chunk_resp.raise_for_status()
-                    raise ValueError(
-                        "Unexpected status code during chunked upload: "
-                        f"{chunk_resp.status_code}"
+
+            def _parse_next_offset_from_range(
+                range_header: str | None,
+            ) -> int | None:
+                if not range_header:
+                    return None
+                value = range_header.strip()
+                if "=" in value:
+                    value = value.split("=", 1)[1].strip()
+                if "-" not in value:
+                    return None
+                start_str, end_str = value.split("-", 1)
+                if not start_str.isdigit() or not end_str.isdigit():
+                    return None
+                start = int(start_str)
+                end = int(end_str)
+                if start < 0 or end < start:
+                    return None
+                return end + 1
+
+            try:
+                while offset < total_size:
+                    chunk_end = min(offset + chunk_size, total_size)
+                    chunk_data = data[offset:chunk_end]
+                    # Set Content-Range header for the chunk
+                    chunk_headers = {
+                        "Content-Length": str(len(chunk_data)),
+                        "Content-Range": (
+                            f"bytes {offset}-{chunk_end - 1}/{total_size}"
+                        ),
+                    }
+                    chunk_resp = self._session.put(
+                        session_uri,
+                        headers=chunk_headers,
+                        data=chunk_data,
+                        timeout=120,
                     )
+                    # Check response
+                    if chunk_resp.status_code == 308:
+                        # Resume incomplete: trust server ack instead of local
+                        # send
+                        ack_range = chunk_resp.headers.get("Range")
+                        next_offset = _parse_next_offset_from_range(ack_range)
+                        if next_offset is None:
+                            raise ValueError(
+                                "Chunked upload received 308 without a valid "
+                                "Range acknowledgement"
+                            )
+                        if next_offset <= offset:
+                            raise ValueError(
+                                "Chunked upload made no forward progress "
+                                f"(offset={offset}, ack={ack_range!r})"
+                            )
+                        if next_offset > chunk_end:
+                            raise ValueError(
+                                "Chunked upload ack exceeds bytes sent in the "
+                                "current request "
+                                f"(sent_end={chunk_end}, ack={ack_range!r})"
+                            )
+                        if next_offset >= total_size:
+                            raise ValueError(
+                                "Chunked upload acknowledged full payload with "
+                                "status 308 instead of final success"
+                            )
+                        offset = next_offset
+                    elif chunk_resp.status_code in (200, 201):
+                        # Final success is only valid when sending the final range
+                        if chunk_end != total_size:
+                            raise ValueError(
+                                "Chunked upload returned success before all "
+                                "bytes were sent"
+                            )
+                        return chunk_resp
+                    else:
+                        # Unexpected status
+                        chunk_resp.raise_for_status()
+                        raise ValueError(
+                            "Unexpected status code during chunked upload: "
+                            f"{chunk_resp.status_code}"
+                        )
+            except Exception:
+                _cancel_resumable_upload()
+                raise
             # If we reach here, the upload completed without getting a 200/201
             # This shouldn't happen, but handle it gracefully
             raise ValueError(

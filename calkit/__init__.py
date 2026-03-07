@@ -6,6 +6,7 @@ from .core import *  # noqa: F403, I001
 from . import git  # noqa: F401
 from . import dvc  # noqa: F401
 from . import cloud  # noqa: F401
+from . import fs  # noqa: F401
 from . import jupyter  # noqa: F401
 from . import config  # noqa: F401
 from . import models  # noqa: F401

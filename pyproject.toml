@@ -30,7 +30,7 @@ dependencies = [
   "bibtexparser",
   "checksumdir",
   "docx2pdf",
-  "dvc==3.64.2",
+  "dvc==3.66.1",
   "fastapi",
   "gitpython",
   "keyring",
@@ -43,7 +43,7 @@ dependencies = [
   "python-dotenv>=1",
   "pywin32; platform_system == 'Windows'",
   "requests",
-  "typer==0.21.1",
+  "typer==0.24.1",
   "uvicorn",
   "tqdm>=4.67.1",
   "psutil>=7.0.0",
@@ -53,6 +53,7 @@ dependencies = [
   "json2latex>=0.0.3",
   "toml>=0.10.2",
   "texsoup>=0.3.1",
+  "fsspec>=2026.2.0",
 ]
 description = "Reproducibility simplified."
 dynamic = ["version"]
@@ -62,6 +63,7 @@ requires-python = ">=3.10"
 
 [project.optional-dependencies]
 data = ["pandas>=2.2.3", "polars>=1.18.0"]
+xet = ["xet>=0.0.1"]  # For fast large file transfers with XeT protocol
 
 [dependency-groups]
 dev = [
@@ -70,7 +72,7 @@ dev = [
   "kaleido==0.2.1",
   "numpy",
   "pandas>=2.2.3",
-  "polars>=1.36.1",
+  "polars[all]>=1.36.1",
   "plotly",
   "pre-commit",
   "pyarrow",
@@ -93,6 +95,9 @@ dev = [
 Homepage = "https://calkit.org"
 Issues = "https://github.com/calkit/calkit/issues"
 Repository = "https://github.com/calkit/calkit"
+
+[project.entry-points."fsspec.specs"]
+ck = "calkit.fs:CalkitFileSystem"
 
 [project.scripts]
 calkit = "calkit.cli:run"

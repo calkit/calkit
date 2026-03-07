@@ -5,13 +5,12 @@ from __future__ import annotations
 import ast
 import os
 import pathlib
-import subprocess
-import sys
 
 from IPython.core import magic_arguments
 from IPython.core.magic import Magics, cell_magic, magics_class
 
 import calkit
+from calkit.dvc import run_dvc_command
 
 # This code used to ensure we can import from the project root in stage
 # scripts
@@ -252,9 +251,6 @@ class Calkit(Magics):
         # dependencies and outputs
         # TODO: Insert this into dvc.yaml directly, since DVC reformats
         cmd = [
-            sys.executable,
-            "-m",
-            "dvc",
             "stage",
             "add",
             "-n",
@@ -306,22 +302,13 @@ class Calkit(Magics):
                 xenv += f" -n {args.env}"
             stage_cmd = xenv + " -- " + stage_cmd
         cmd.append(stage_cmd)
-        try:
-            subprocess.run(
-                cmd, check=True, capture_output=not args.verbose, text=True
-            )
-        except subprocess.CalledProcessError as e:
-            print(f"Error: {e.stderr}")
-            raise e
+        result = run_dvc_command(cmd)
+        if result != 0:
+            raise RuntimeError(f"Failed to add DVC stage {args.name}")
         # Now run the stage
-        run_cmd = [sys.executable, "-m", "dvc", "repro", args.name]
-        try:
-            subprocess.run(
-                run_cmd, check=True, capture_output=False, text=True
-            )
-        except subprocess.CalledProcessError as e:
-            print(f"Error: {e.stderr}")
-            raise e
+        result = run_dvc_command(["repro", args.name])
+        if result != 0:
+            raise RuntimeError(f"DVC repro failed for stage {args.name}")
         # Now let's read in and inject the outputs back into the IPython state
         if args.out:
             for out in args.out:

@@ -7,7 +7,6 @@ import os
 import pathlib
 import shutil
 import subprocess
-import sys
 import zipfile
 from enum import Enum
 
@@ -23,6 +22,7 @@ from calkit.cli.check import check_environment
 from calkit.cli.update import update_devcontainer
 from calkit.core import ryaml
 from calkit.docker import LAYERS
+from calkit.dvc import run_dvc_command
 from calkit.environments import DEFAULT_PYTHON_VERSION
 from calkit.models.pipeline import LatexStage, StageIteration
 
@@ -141,15 +141,14 @@ def new_project(
         if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
             typer.echo("Initializing DVC repository")
             try:
-                subprocess.run(
-                    [sys.executable, "-m", "dvc", "init", "-q"],
+                result = run_dvc_command(
+                    ["init", "-q"],
                     cwd=abs_path,
-                    capture_output=True,
-                    check=True,
-                    text=True,
                 )
+                if result != 0:
+                    raise subprocess.CalledProcessError(result, "dvc init")
             except subprocess.CalledProcessError as e:
-                raise_error(f"Failed to initialize DVC repository: {e.stderr}")
+                raise_error(f"Failed to initialize DVC repository: {e}")
             # Commit the DVC init changes
             if not no_commit:
                 repo.git.add(".dvc")
@@ -330,18 +329,12 @@ def new_project(
                 "You will need to manually run `git remote add origin` "
                 "and `calkit config remote`"
             )
-            subprocess.call(
-                [
-                    sys.executable,
-                    "-m",
-                    "dvc",
-                    "remote",
-                    "remove",
-                    "calkit",
-                    "-q",
-                ],
+            result = run_dvc_command(
+                ["remote", "remove", "calkit", "-q"],
                 cwd=abs_path,
             )
+            if result != 0:
+                warn("Failed to remove DVC remote")
         try:
             calkit.dvc.set_remote_auth(wdir=abs_path)
         except Exception:
@@ -361,9 +354,12 @@ def new_project(
     repo = git.Repo(abs_path)
     if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
         typer.echo("Initializing DVC repository")
-        subprocess.run(
-            [sys.executable, "-m", "dvc", "init", "-q"], cwd=abs_path
+        result = run_dvc_command(
+            ["init", "-q"],
+            cwd=abs_path,
         )
+        if result != 0:
+            raise_error("Failed to initialize DVC repository")
     # Create calkit.yaml file
     ck_info = calkit.load_calkit_info(wdir=abs_path)
     ck_info = dict(name=name, title=title, description=description) | ck_info
@@ -493,13 +489,20 @@ def new_figure(
         outs_cmd = []
         for out in outs:
             outs_cmd += ["-o", out]
-        subprocess.check_call(
-            [sys.executable, "-m", "dvc", "stage", "add", "-n", stage_name]
+        result = run_dvc_command(
+            [
+                "stage",
+                "add",
+                "-n",
+                stage_name,
+            ]
             + (["-f"] if overwrite else [])
             + deps_cmd
             + outs_cmd
             + [cmd]
         )
+        if result != 0:
+            raise_error(f"Failed to add figure {obj}")
     figures.append(obj)
     ck_info["figures"] = figures
     with open("calkit.yaml", "w") as f:
@@ -910,13 +913,20 @@ def new_dataset(
         outs_cmd = []
         for out in outs:
             outs_cmd += ["-o", out]
-        subprocess.check_call(
-            [sys.executable, "-m", "dvc", "stage", "add", "-n", stage_name]
+        result = run_dvc_command(
+            [
+                "stage",
+                "add",
+                "-n",
+                stage_name,
+            ]
             + (["-f"] if overwrite else [])
             + deps_cmd
             + outs_cmd
             + [cmd]
         )
+        if result != 0:
+            raise_error(f"Failed to add dataset {obj}")
     datasets.append(obj)
     ck_info["datasets"] = datasets
     with open("calkit.yaml", "w") as f:
@@ -2977,144 +2987,3 @@ def new_release(
             # TODO: Upload assets for GitHub release if they're not too big?
     typer.echo(f"New {release_type} release {name} successfully created")
     return release
-
-
-@new_app.command(name="stage")
-def new_stage(
-    name: StageArgs.name,
-    kind: Annotated[
-        StageKind, typer.Option("--kind", help="What kind of stage to create.")
-    ],
-    target: Annotated[
-        str,
-        typer.Option(
-            "--target", "-t", help="Target file, e.g., the script to run."
-        ),
-    ],
-    environment: Annotated[
-        str | None,
-        typer.Option(
-            "--environment", "-e", help="Environment to use to run the stage."
-        ),
-    ] = None,
-    deps: Annotated[
-        list[str],
-        typer.Option("--dep", "-d", help="A path on which the stage depends."),
-    ] = [],
-    outs: Annotated[
-        list[str],
-        typer.Option(
-            "--out", "-o", help="A path that is produced by the stage."
-        ),
-    ] = [],
-    outs_persist: Annotated[
-        list[str],
-        typer.Option(
-            "--out-persist",
-            help="An output that should not be deleted before running.",
-        ),
-    ] = [],
-    outs_no_cache: Annotated[
-        list[str],
-        typer.Option(
-            "--out-git",
-            help="An output that should be tracked with Git instead of DVC.",
-        ),
-    ] = [],
-    outs_persist_no_cache: Annotated[
-        list[str],
-        typer.Option(
-            "--out-git-persist",
-            help=(
-                "An output that should be tracked with Git instead of DVC, "
-                "and also should not be deleted before running stage."
-            ),
-        ),
-    ] = [],
-    overwrite: Annotated[
-        bool,
-        typer.Option(
-            "--overwrite",
-            "--force",
-            "-f",
-            help="Overwrite an existing stage with this name if necessary.",
-        ),
-    ] = False,
-    no_check: Annotated[
-        bool,
-        typer.Option(
-            "--no-check",
-            help="Do not check if the target, deps, environment, etc., exist.",
-        ),
-    ] = False,
-    no_commit: Annotated[
-        bool, typer.Option("--no-commit", help="Do not commit changes to Git.")
-    ] = False,
-):
-    """Create a new DVC pipeline stage (deprecated)."""
-    ck_info = calkit.load_calkit_info(process_includes="environments")
-    environments = ck_info.get("environments", {})
-    if environment is None:
-        warn("No environment is specified")
-        cmd = ""
-    else:
-        if environment not in environments and not no_check:
-            raise_error(f"Environment '{environment}' does not exist")
-        cmd = f"calkit xenv -n {environment} -- "
-        # Add environment path as a dependency if applicable
-        env_path = environments.get(environment, {}).get("path")
-        if env_path is not None and env_path not in deps:
-            deps = [env_path] + deps
-    if not os.path.exists(target) and not no_check:
-        raise_error(f"Target '{target}' does not exist")
-    if kind.value == "python-script":
-        cmd += f"python {target}"
-    elif kind.value == "latex":
-        cmd = f"calkit latex build {target}"
-        if environment is not None:
-            cmd += f" --environment {environment}"
-        out_target = target.removesuffix(".tex") + ".pdf"
-        if out_target not in (
-            outs + outs_no_cache + outs_persist + outs_persist_no_cache
-        ):
-            outs = [out_target] + outs
-    elif kind.value == "matlab-script":
-        cmd += f"matlab -noFigureWindows -batch \"run('{target}');\""
-    elif kind.value == "sh-script":
-        cmd += f"sh {target}"
-    elif kind.value == "bash-script":
-        cmd += f"bash {target}"
-    elif kind.value == "zsh-script":
-        cmd += f"zsh {target}"
-    elif kind.value == "r-script":
-        cmd += f"Rscript {target}"
-    add_cmd = [sys.executable, "-m", "dvc", "stage", "add", "-n", name]
-    if target not in deps:
-        deps = [target] + deps
-    for dep in deps:
-        add_cmd += ["-d", dep]
-    for out in outs:
-        add_cmd += ["-o", out]
-    for out in outs_no_cache:
-        add_cmd += ["--outs-no-cache", out]
-    for out in outs_persist:
-        add_cmd += ["--outs-persist", out]
-    for out in outs_persist_no_cache:
-        add_cmd += ["--outs-persist-no-cache", out]
-    if overwrite:
-        add_cmd.append("-f")
-    add_cmd.append(cmd)
-    try:
-        subprocess.check_call(add_cmd)
-    except subprocess.CalledProcessError:
-        raise_error("Failed to create stage")
-    if not no_commit:
-        try:
-            repo = git.Repo()
-        except InvalidGitRepositoryError:
-            raise_error("Can't commit because this is not a Git repo")
-        repo.git.add("dvc.yaml")
-        if "dvc.yaml" in calkit.git.get_staged_files():
-            repo.git.commit(
-                ["dvc.yaml", "-m", f"Add {kind.value} pipeline stage '{name}'"]
-            )

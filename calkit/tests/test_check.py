@@ -1,9 +1,9 @@
 """Tests for ``calkit.check``."""
 
 import subprocess
-import sys
 
 from calkit.check import check_reproducibility
+from calkit.dvc import run_dvc_command
 
 
 def test_check_reproducibility(tmp_dir):
@@ -15,7 +15,7 @@ def test_check_reproducibility(tmp_dir):
     assert not res.is_dvc_repo
     assert not res.has_readme
     assert "no README.md" in res.recommendation  # type: ignore
-    subprocess.run([sys.executable, "-m", "dvc", "init"])
+    run_dvc_command(["init"])
     res = check_reproducibility()
     assert res.is_dvc_repo
     assert res.n_dvc_remotes == 0

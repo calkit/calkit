@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import warnings
 from functools import partial
 from typing import Literal
@@ -21,6 +22,7 @@ def get_base_url() -> str:
         "local": "http://api.localhost",
         "staging": "https://api.staging.calkit.io",
         "production": "https://api.calkit.io",
+        "test": "http://api.localhost",
     }
     return urls[config.get_env()]
 
@@ -76,25 +78,37 @@ def _request(
     headers: dict | None = None,
     as_json=True,
     auth: bool = True,
+    base_url: str | None = None,
     **kwargs,
 ):
+    max_retries = 10
+    base_delay_seconds = 0.25
+    max_delay_seconds = 30
     func = getattr(requests, kind)
-    resp = func(
-        get_base_url() + path,
-        params=params,
-        json=json,
-        data=data,
-        headers=get_headers(headers, auth=auth),
-        **kwargs,
-    )
-    try:
-        resp.raise_for_status()
-    except HTTPError as e:
+    if base_url is None:
+        base_url = get_base_url()
+    for retry_num in range(max_retries + 1):
+        resp = func(
+            base_url + path,
+            params=params,
+            json=json,
+            data=data,
+            headers=get_headers(headers, auth=auth),
+            **kwargs,
+        )
+        if resp.status_code == 502 and retry_num < max_retries:
+            wait = min(base_delay_seconds * (2**retry_num), max_delay_seconds)
+            time.sleep(wait)
+            continue
         try:
-            detail = resp.json()["detail"]
-        except Exception:
-            raise e
-        raise HTTPError(f"{resp.status_code}: {detail}")
+            resp.raise_for_status()
+        except HTTPError as e:
+            try:
+                detail = resp.json()["detail"]
+            except Exception:
+                raise e
+            raise HTTPError(f"{resp.status_code}: {detail}")
+        break
     if as_json:
         return resp.json()
     else:

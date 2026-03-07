@@ -446,6 +446,8 @@ def check_all_in_pipeline(
         ck_info = calkit.load_calkit_info(wdir=wdir)
     stages = ck_info.get("pipeline", {}).get("stages", {})
     if targets:
+        # Split targets by "@" to handle sub-stages from iterations
+        targets = [t.split("@")[0] for t in targets]
         stages = {k: v for k, v in stages.items() if k in targets}
     envs_in_pipeline = [stage.get("environment") for stage in stages.values()]
     envs_in_pipeline = [

@@ -31,6 +31,7 @@ from calkit.cli.new import (
     new_venv,
 )
 from calkit.cli.notebooks import check_env_kernel
+from calkit.dvc import run_dvc_command
 from calkit.environments import DEFAULT_PYTHON_VERSION
 from calkit.git import ensure_path_is_ignored
 from calkit.models.pipeline import JupyterNotebookStage
@@ -801,15 +802,10 @@ class NotebookStageRunSessionRouteHandler(APIHandler):
                 continue
             if is_cached and os.path.exists(out_path):
                 self.log.info(f"Committing output to DVC cache: {out_path}")
-                p = subprocess.run(
-                    [sys.executable, "-m", "dvc", "commit", out_path],
-                    capture_output=True,
-                    text=True,
-                )
-                if p.returncode != 0:
+                result = run_dvc_command(["commit", out_path])
+                if result != 0:
                     self.log.warning(
-                        f"Failed to commit {out_path} to DVC cache: "
-                        f"{p.stderr.strip()}"
+                        f"Failed to commit {out_path} to DVC cache"
                     )
                 else:
                     self.log.info(
@@ -998,9 +994,9 @@ class GitCommitRouteHandler(APIHandler):
             stage = f.get("stage", True)
             if store_in_dvc:
                 try:
-                    subprocess.check_call(
-                        [sys.executable, "-m", "dvc", "add", path]
-                    )
+                    result = run_dvc_command(["add", path])
+                    if result != 0:
+                        raise RuntimeError("Failed to DVC add")
                     ensure_path_is_ignored(repo, path)
                     dvc_file = f"{path}.dvc"
                     if os.path.exists(dvc_file):

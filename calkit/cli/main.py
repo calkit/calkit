@@ -55,6 +55,7 @@ from calkit.cli.office import office_app
 from calkit.cli.overleaf import overleaf_app
 from calkit.cli.slurm import slurm_app
 from calkit.cli.update import update_app
+from calkit.dvc import register_ck_scheme, run_dvc_command
 from calkit.environments import get_env_lock_fpath
 from calkit.models import Procedure
 
@@ -125,14 +126,13 @@ def init(
 ):
     """Initialize the current working directory."""
     subprocess.run(["git", "init"])
-    dvc_cmd = [sys.executable, "-m", "dvc", "init"]
-    if force:
-        dvc_cmd.append("-f")
-    subprocess.run(dvc_cmd)
+    result = run_dvc_command(["init"] + (["--force"] if force else []))
+    if result != 0:
+        raise_error("Failed to initialize DVC")
     # Ensure autostage is enabled for DVC
-    subprocess.call(
-        [sys.executable, "-m", "dvc", "config", "core.autostage", "true"]
-    )
+    result = run_dvc_command(["config", "core.autostage", "true"])
+    if result != 0:
+        raise_error("Failed to configure DVC autostage")
     # Commit the newly created .dvc directory
     repo = git.Repo()
     repo.git.add(".dvc")
@@ -220,9 +220,11 @@ def clone(
     # DVC pull
     if not no_dvc_pull:
         try:
-            subprocess.check_call([sys.executable, "-m", "dvc", "pull"])
-        except subprocess.CalledProcessError:
-            raise_error("Failed to pull from DVC remote(s)")
+            result = run_dvc_command(["pull"])
+            if result != 0:
+                raise_error("Failed to pull from DVC remote(s)")
+        except Exception as e:
+            raise_error(f"Failed to pull from DVC remote(s): {e}")
 
 
 @app.command(name="status")
@@ -286,11 +288,11 @@ def get_status(
         typer.echo()
     if "dvc" in categories:
         print_sep("DVC")
-        run_cmd([sys.executable, "-m", "dvc", "data", "status"])
+        run_dvc_command(["data", "status"])
         typer.echo()
     if "pipeline" in categories or "dvc" in categories:
         print_sep("Pipeline")
-        run_cmd([sys.executable, "-m", "dvc", "status"])
+        run_dvc_command(["status"])
 
 
 @app.command(name="diff")
@@ -309,7 +311,7 @@ def diff(
         git_cmd.append("--staged")
     run_cmd(git_cmd)
     print_sep("Pipeline (DVC)")
-    run_cmd([sys.executable, "-m", "dvc", "diff"])
+    run_dvc_command(["diff"])
 
 
 @app.command(name="add")
@@ -383,13 +385,18 @@ def add(
             raise_error("Not currently in a Git repo; run `calkit init` first")
         repo = git.Repo()
     try:
+        register_ck_scheme()
         dvc_repo = dvc.repo.Repo()
     except NotDvcRepoError:
         warn("DVC not initialized yet; initializing")
         dvc_repo = dvc.repo.Repo.init()
     # Ensure autostage is enabled for DVC
-    subprocess.call(
-        [sys.executable, "-m", "dvc", "config", "core.autostage", "true"]
+    run_dvc_command(
+        [
+            "config",
+            "core.autostage",
+            "true",
+        ]
     )
     subprocess.call(["git", "add", ".dvc/config"])
     dvc_paths = calkit.dvc.list_paths()
@@ -404,7 +411,7 @@ def add(
         if to == "git":
             subprocess.call(["git", "add"] + paths)
         elif to == "dvc":
-            subprocess.call([sys.executable, "-m", "dvc", "add"] + paths)
+            run_dvc_command(["add"] + paths)
         else:
             raise_error(f"Invalid option for 'to': {to}")
     else:
@@ -465,15 +472,15 @@ def add(
                 typer.echo(
                     f"Adding {path} to DVC since it's already tracked with DVC"
                 )
-                subprocess.call([sys.executable, "-m", "dvc", "add", path])
+                run_dvc_command(["add", path])
             elif os.path.splitext(path)[-1] in DVC_EXTENSIONS:
                 typer.echo(f"Adding {path} to DVC per its extension")
-                subprocess.call([sys.executable, "-m", "dvc", "add", path])
+                run_dvc_command(["add", path])
             elif calkit.get_size(path) > DVC_SIZE_THRESH_BYTES:
                 typer.echo(
                     f"Adding {path} to DVC since it's greater than 1 MB"
                 )
-                subprocess.call([sys.executable, "-m", "dvc", "add", path])
+                run_dvc_command(["add", path])
             else:
                 typer.echo(f"Adding {path} to Git")
                 subprocess.call(["git", "add", path])
@@ -694,13 +701,15 @@ def pull(
     if not no_check_auth:
         # Check that our dvc remotes all have our DVC token set for them
         remotes = calkit.dvc.get_remotes()
+        ck_remote_name = calkit.config.get_app_name()
         for name, url in remotes.items():
-            if name == "calkit" or name.startswith("calkit:"):
+            if (
+                name == ck_remote_name or name.startswith(f"{ck_remote_name}:")
+            ) and url.startswith("http"):
                 typer.echo(f"Checking authentication for DVC remote: {name}")
                 calkit.dvc.set_remote_auth(remote_name=name)
-    try:
-        subprocess.check_call([sys.executable, "-m", "dvc", "pull"] + dvc_args)
-    except subprocess.CalledProcessError:
+    result = run_dvc_command(["pull"] + dvc_args)
+    if result != 0:
         raise_error("DVC pull failed")
 
 
@@ -734,17 +743,18 @@ def push(
         if not no_check_auth:
             # Check that our dvc remotes all have our DVC token set for them
             remotes = calkit.dvc.get_remotes()
+            ck_remote_name = calkit.config.get_app_name()
             for name, url in remotes.items():
-                if name == "calkit" or name.startswith("calkit:"):
+                if (
+                    name == ck_remote_name
+                    or name.startswith(f"{ck_remote_name}:")
+                ) and url.startswith("http"):
                     typer.echo(
                         f"Checking authentication for DVC remote: {name}"
                     )
                     calkit.dvc.set_remote_auth(remote_name=name)
-        try:
-            subprocess.check_call(
-                [sys.executable, "-m", "dvc", "push"] + dvc_args
-            )
-        except subprocess.CalledProcessError:
+        result = run_dvc_command(["push"] + dvc_args)
+        if result != 0:
             raise_error("DVC push failed")
 
 
@@ -1109,12 +1119,16 @@ def run(
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Pipeline compilation failed: {e}")
     # Initialize DVC repo if necessary
+    # Register the ck:// scheme before accessing DVC repo
+    register_ck_scheme()
     try:
         dvc.repo.Repo()
     except Exception:
         if not quiet:
             typer.echo("Initializing DVC repo")
-        dvc.repo.Repo.init()
+        result = run_dvc_command(["init"])
+        if result != 0:
+            raise_error("Failed to initialize DVC repo")
     # Convert deps into target stage names
     # TODO: This could probably be merged back upstream into DVC
     if dvc_stages is None:
@@ -1169,6 +1183,7 @@ def run(
         git_staged_files_before = calkit.git.get_staged_files(repo=repo)
         git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
         # Get status of DVC repo before running
+        register_ck_scheme()
         dvc_repo = dvc.repo.Repo()
         dvc_status_before = dvc_repo.status()
         dvc_data_status_before = dvc_repo.data_status()
@@ -2599,8 +2614,8 @@ def call_dvc(
     Useful if Calkit is installed as a tool, e.g., with `uv tool` or `pipx`,
     and DVC is not installed.
     """
-    process = subprocess.run([sys.executable, "-m", "dvc"] + sys.argv[2:])
-    sys.exit(process.returncode)
+    result = run_dvc_command(sys.argv[2:])
+    sys.exit(result)
 
 
 @app.command(

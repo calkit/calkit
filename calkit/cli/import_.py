@@ -6,8 +6,6 @@ import base64
 import fnmatch
 import json
 import os
-import subprocess
-import sys
 from copy import deepcopy
 from typing import Annotated
 
@@ -19,6 +17,7 @@ from tqdm import tqdm
 import calkit
 import calkit.invenio
 from calkit.cli import raise_error
+from calkit.dvc import run_dvc_command
 from calkit.models.core import _ImportedFromProject
 
 import_app = typer.Typer(no_args_is_help=True)
@@ -209,7 +208,9 @@ def import_dataset(
     if not no_dvc_pull and dvc_import is not None:
         # Run dvc pull
         typer.echo("Running dvc pull")
-        subprocess.call([sys.executable, "-m", "dvc", "pull", dvc_fpath])
+        result = run_dvc_command(["pull", dvc_fpath])
+        if result != 0:
+            raise_error("Failed to pull from DVC")
 
 
 @import_app.command(name="environment")
@@ -423,10 +424,8 @@ def import_from_zenodo(
     commit_paths = []
     if storage is None:
         if calkit.get_size(dest_dir) > calkit.DVC_SIZE_THRESH_BYTES:
-            res = subprocess.run(
-                [sys.executable, "-m", "dvc", "add"], check=False
-            )
-            if res.returncode != 0:
+            result = run_dvc_command(["add"])
+            if result != 0:
                 raise_error("Failed to DVC add")
             # Git add the .dvc file
             dvc_file = dest_dir + ".dvc"
@@ -436,10 +435,8 @@ def import_from_zenodo(
             repo.git.add(dest_dir)
             commit_paths.append(dest_dir)
     elif storage.lower() == "dvc":
-        res = subprocess.run(
-            [sys.executable, "-m", "dvc", "add", dest_dir], check=False
-        )
-        if res.returncode != 0:
+        result = run_dvc_command(["add", dest_dir])
+        if result != 0:
             raise_error("Failed to DVC add")
         # Git add the .dvc file
         dvc_file = dest_dir + ".dvc"

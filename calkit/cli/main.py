@@ -1440,6 +1440,37 @@ def run_in_env(
         ck_info["environments"] = envs
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)
+    # If this is a composite environment, make sure we can correctly run in
+    # the outer environment, i.e., if it's slurm, we need to be running on
+    # the host
+    # TODO: Implement remote running on slurm envs, which should run on a
+    # copy of the repo and we need to somehow sync changes back here
+    if res.outer is not None:
+        import socket
+
+        host = res.outer.env.get("host")
+        # Ensure we're on the right host
+        if host is None or socket.gethostname() != host:
+            raise_error(
+                f"This command must be run on {host} to use the "
+                f"{res.outer.name} environment"
+            )
+        # Run calkit xenv with srun and the inner environment specified
+        outer_cmd = ["srun", "calkit", "xenv", "-n", res.name]
+        # TODO Handle any slurm options here
+        if wdir is not None:
+            outer_cmd += ["--wdir", wdir]
+        if no_check:
+            outer_cmd.append("--no-check")
+        if relaxed_check:
+            outer_cmd.append("--relaxed")
+        if verbose:
+            outer_cmd.append("--verbose")
+        outer_cmd += ["--"] + cmd
+        p = subprocess.run(outer_cmd)
+        if not p.returncode == 0:
+            raise_error("Failed to run in composite environment")
+        return
     env_name = res.name
     env = envs[env_name]
     image_name = env.get("image", env_name)

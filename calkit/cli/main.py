@@ -1456,7 +1456,7 @@ def run_in_env(
                 f"{res.outer.name} environment"
             )
         # Run calkit xenv with srun and the inner environment specified
-        outer_cmd = ["srun", "calkit", "xenv", "-n", res.name]
+        outer_cmd = ["srun", "--pty", "calkit", "xenv", "-n", res.name]
         # TODO Handle any slurm options here
         if wdir is not None:
             outer_cmd += ["--wdir", wdir]

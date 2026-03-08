@@ -438,6 +438,15 @@ def execute_notebook(
     # If this is a composite environment with a slurm outer env kind, we need
     # to run the execution command through srun in the outer environment
     if res.outer and res.outer.env.get("kind") == "slurm":
+        import socket
+
+        # Make sure the current hostname matches the host of the environment
+        if socket.gethostname() != res.outer.env.get("host"):
+            raise_error(
+                f"The slurm environment '{res.outer.name}' has "
+                f"host '{res.outer.env.get('host')}', but the current host is "
+                f"'{socket.gethostname()}'"
+            )
         outer_cmd = ["srun"]
         outer_cmd += res.outer.env.get("default_options", [])
         for srun_opt in srun_options:

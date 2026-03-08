@@ -38,6 +38,8 @@ CONDA_VENV_ARCHS = [
 ]
 ENV_CHECK_CACHE_TTL_SECONDS = 3600
 KINDS_NO_CHECK = ["_system", "slurm", "ssh"]
+COMPOSITE_ENV_SEP = ":"
+VALID_OUTER_ENV_KINDS = ["slurm"]
 
 
 def language_from_env(env: dict) -> str | None:
@@ -480,6 +482,7 @@ class EnvDetectResult(BaseModel):
     name: str
     env: dict
     exists: bool
+    outer: "EnvDetectResult | None" = None
 
 
 class EnvForStageResult(BaseModel):
@@ -567,6 +570,7 @@ def env_from_name_or_path(
     envs = ck_info.get("environments", {})
     all_env_names = list(envs.keys())
     # Handle language-based environment detection
+    # This will usually use a spec path, not a name in ck_info
     if name_or_path is None and language is not None:
         # Look for a docker environment matching the language
         for env_name, env in envs.items():
@@ -609,6 +613,24 @@ def env_from_name_or_path(
             "path"
         ) == name_or_path:
             return EnvDetectResult(name=env_name, env=env, exists=True)
+    # Check for composite environments like mycluster:mypython
+    if name_or_path.count(COMPOSITE_ENV_SEP) == 1 and not path_only:
+        outer_env_name, sub_env_name = name_or_path.split(COMPOSITE_ENV_SEP)
+        outer_env = envs.get(outer_env_name)
+        if outer_env and outer_env.get("kind") in VALID_OUTER_ENV_KINDS:
+            # Look for a sub-environment with the given name and path
+            for sub_name, sub_env in envs.items():
+                if (not path_only and sub_name == sub_env_name) or sub_env.get(
+                    "path"
+                ) == name_or_path:
+                    return EnvDetectResult(
+                        name=sub_name,
+                        env=sub_env,
+                        exists=True,
+                        outer=EnvDetectResult(
+                            name=outer_env_name, env=outer_env, exists=True
+                        ),
+                    )
     # Handle special _system environment
     if name_or_path == "_system":
         return EnvDetectResult(

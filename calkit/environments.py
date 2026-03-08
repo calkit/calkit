@@ -741,6 +741,24 @@ def env_from_name_and_or_path(
                 f"('{env.get('path')}') than provided ('{path}')"
             )
         return EnvDetectResult(name=name, env=envs[name], exists=True)
+    # Detect composite environments
+    if name and name.count(COMPOSITE_ENV_SEP) == 1:
+        outer_env_name, sub_env_name = name.split(COMPOSITE_ENV_SEP)
+        outer_env = envs.get(outer_env_name)
+        if outer_env and outer_env.get("kind") in VALID_OUTER_ENV_KINDS:
+            # Look for a sub-environment with the given name and path
+            for sub_name, sub_env in envs.items():
+                if (sub_name == sub_env_name) or (
+                    path and sub_env.get("path") == path
+                ):
+                    return EnvDetectResult(
+                        name=sub_name,
+                        env=sub_env,
+                        exists=True,
+                        outer=EnvDetectResult(
+                            name=outer_env_name, env=outer_env, exists=True
+                        ),
+                    )
     if path:
         res = env_from_name_or_path(
             name_or_path=path, ck_info=ck_info, path_only=True

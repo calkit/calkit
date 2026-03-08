@@ -1467,6 +1467,10 @@ def run_in_env(
         if verbose:
             outer_cmd.append("--verbose")
         outer_cmd += ["--"] + cmd
+        if verbose:
+            typer.echo(
+                f"Running command in composite environment: {outer_cmd}"
+            )
         p = subprocess.run(outer_cmd)
         if not p.returncode == 0:
             raise_error("Failed to run in composite environment")

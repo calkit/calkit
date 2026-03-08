@@ -1405,6 +1405,18 @@ def run_in_env(
             ),
         ),
     ] = None,
+    srun_options: Annotated[
+        list[str],
+        typer.Option(
+            "--srun-option",
+            help=(
+                "Additional option to pass to srun when running in a slurm "
+                "environment. "
+                "Only applicable if the outer environment is of slurm kind, "
+                "e.g., my-cluster:my-python."
+            ),
+        ),
+    ] = [],
     no_check: Annotated[
         bool,
         typer.Option(
@@ -1456,8 +1468,13 @@ def run_in_env(
                 f"{res.outer.name} environment"
             )
         # Run calkit xenv with srun and the inner environment specified
-        outer_cmd = ["srun", "--pty", "calkit", "xenv", "-n", res.name]
-        # TODO Handle any slurm options here
+        outer_cmd = ["srun"]
+        # TODO Handle slurm default options as dict
+        if res.outer.env.get("default_options"):
+            outer_cmd += res.outer.env["default_options"]
+        outer_cmd += srun_options
+        # TODO: Handle environment modules in slurm environments
+        outer_cmd += ["--pty", "calkit", "xenv", "-n", res.name]
         if wdir is not None:
             outer_cmd += ["--wdir", wdir]
         if no_check:

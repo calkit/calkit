@@ -299,6 +299,17 @@ def execute_notebook(
             help="Do not replace notebook outputs from executed version.",
         ),
     ] = False,
+    srun_options: Annotated[
+        list[str],
+        typer.Option(
+            "--srun-option",
+            help=(
+                "Option to pass to srun when executing notebook in a slurm "
+                "environment; can be specified multiple times for multiple "
+                "options."
+            ),
+        ),
+    ] = [],
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -424,6 +435,46 @@ def execute_notebook(
         typer.echo(f"Using kernel: {kernel_name}")
         typer.echo(f"Running with cwd: {notebook_dir}")
         typer.echo(f"Output will be saved to: {fpath_out_exec}")
+    # If this is a composite environment with a slurm outer env kind, we need
+    # to run the execution command through srun in the outer environment
+    if res.outer and res.outer.env.get("kind") == "slurm":
+        outer_cmd = ["srun"]
+        outer_cmd += res.outer.env.get("default_options", [])
+        for srun_opt in srun_options:
+            outer_cmd += [srun_opt]
+        outer_cmd += [
+            "--pty",
+            "calkit",
+            "nb",
+            "exec",
+            "--no-check",
+            "-e",
+            res.name,
+        ]
+        if params:
+            for param in params:
+                outer_cmd += ["-p", param]
+        if params_json is not None:
+            outer_cmd += ["-j", params_json]
+        if params_base64 is not None:
+            outer_cmd += ["-b", params_base64]
+        if language is not None:
+            outer_cmd += ["-l", language]
+        for to_arg in to:
+            outer_cmd += ["--to", to_arg]
+        if no_replace:
+            outer_cmd.append("--no-replace")
+        if verbose:
+            outer_cmd.append("--verbose")
+            typer.echo(
+                f"Running notebook execution command in outer slurm "
+                f"environment: {outer_cmd}"
+            )
+        outer_cmd.append(path)
+        p = subprocess.run(outer_cmd)
+        if p.returncode != 0:
+            raise_error("Failed to execute notebook in slurm environment")
+        return
     # If this is a Python, Julia, or R notebook, we can use Papermill
     # If it's a MATLAB notebook, we need to use the MATLAB kernel inside the
     # specified environment

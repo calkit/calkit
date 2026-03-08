@@ -161,6 +161,7 @@ class Stage(BaseModel):
     always_run: bool = False
     iterate_over: list[StageIteration] | None = None
     description: str | None = None
+    srun_options: list[str] = []
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
 
@@ -197,7 +198,11 @@ class Stage(BaseModel):
     def xenv_cmd(self) -> str:
         if self.environment == "_system":
             return ""
-        return f"calkit xenv -n {self.environment} --no-check --"
+        cmd = f"calkit xenv -n {self.environment} --no-check --"
+        if self.srun_options:
+            for srun_opt in self.srun_options:
+                cmd += f" --srun-option {srun_opt}"
+        return cmd
 
     def to_dvc(self) -> dict:
         """Convert to a DVC stage.
@@ -736,6 +741,9 @@ class JupyterNotebookStage(Stage):
                 params_json.encode("utf-8")
             ).decode("utf-8")
             cmd += f' --params-base64 "{params_base64}"'
+        if self.srun_options:
+            for srun_opt in self.srun_options:
+                cmd += f" --srun-option {srun_opt}"
         cmd += f' "{self.notebook_path}"'
         return cmd
 

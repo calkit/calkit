@@ -455,7 +455,16 @@ def check_all_in_pipeline(
     envs_in_pipeline = [
         e for e in envs_in_pipeline if e and not (str(e)).startswith("_")
     ]
-    envs_in_pipeline = list(set(envs_in_pipeline))
+    # If any environments are composite environments, we need to split them
+    # up into their individual names in the list
+    split_envs = []
+    for env_name in envs_in_pipeline:
+        if env_name.count(COMPOSITE_ENV_SEP) == 1:
+            outer_env_name, sub_env_name = env_name.split(COMPOSITE_ENV_SEP)
+            split_envs += [outer_env_name, sub_env_name]
+        else:
+            split_envs.append(env_name)
+    envs_in_pipeline = list(set(split_envs))
     envs = ck_info.get("environments", {})
     for env_name in envs_in_pipeline:
         env = envs.get(env_name)

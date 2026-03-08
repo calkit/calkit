@@ -247,6 +247,19 @@ def test_env_from_name_or_path_composite():
         calkit.environments.env_from_name_or_path(
             name_or_path="py1:mycluster", ck_info=ck_info
         )
+    # Make sure this works with name and/or path
+    res = calkit.environments.env_from_name_and_or_path(
+        name="mycluster:py1", path=None, ck_info=ck_info
+    )
+    assert res.name == "py1"
+    assert res.env["path"] == "requirements.txt"
+    assert res.env["kind"] == "uv-venv"
+    assert res.outer is not None
+    assert res.outer.name == "mycluster"
+    assert res.outer.env["kind"] == "slurm"
+    assert res.outer.env["host"] == "mycluster.something.edu"
+    assert res.exists
+    assert res.outer.exists
 
 
 def test_detect_default_env(tmp_dir):

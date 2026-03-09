@@ -119,7 +119,8 @@ def to_dvc(
     # First, gather up any env lock paths we might need for DVC deps
     used_envs = set([stage.environment for stage in pipeline.stages.values()])
     env_lock_fpaths = {}
-    for env_name, env in ck_info.get("environments", {}).items():
+    environments = ck_info.get("environments", {})
+    for env_name, env in environments.items():
         if env_name not in used_envs:
             continue
         lock_fpath = get_env_lock_fpath(
@@ -129,6 +130,8 @@ def to_dvc(
             continue
         env_lock_fpaths[env_name] = lock_fpath
     project_params = expand_project_parameters(ck_info.get("parameters", {}))
+    # Set any stage slurm options, which requires environment information
+    pipeline.set_stage_slurm_options(environments=environments)
     # Now convert Calkit stages into DVC stages
     for stage_name, stage in pipeline.stages.items():
         # If this stage is a Jupyter notebook stage, we need to update its

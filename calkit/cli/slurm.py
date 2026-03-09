@@ -24,9 +24,14 @@ def run_sbatch(
         str,
         typer.Option("--name", "-n", help="Job name."),
     ],
-    script: Annotated[
+    target: Annotated[
         str,
-        typer.Argument(help="Path to the SLURM script to run."),
+        typer.Argument(
+            help=(
+                "The target to run."
+                "This can be a shell script or an executable."
+            )
+        ),
     ],
     environment: Annotated[
         str,
@@ -78,6 +83,13 @@ def run_sbatch(
     log_path: Annotated[
         str | None, typer.Option("--log-path", help="Output log path.")
     ] = None,
+    is_command: Annotated[
+        bool | None,
+        typer.Option(
+            "--command",
+            help="Whether the target is a command instead of a script.",
+        ),
+    ] = None,
 ) -> None:
     """Submit a SLURM batch job for the project.
 
@@ -109,21 +121,22 @@ def run_sbatch(
         args = []
     if log_path is None:
         log_path = f".calkit/slurm/logs/{name}.out"
-    cmd = (
-        [
-            "sbatch",
-            "--parsable",
-            "--job-name",
-            name,
-            "-o",
-            log_path,
-        ]
-        + sbatch_opts
-        + [script]
-        + args
-    )
-    if not os.path.isfile(script):
-        raise_error(f"SLURM script '{script}' does not exist")
+    cmd = [
+        "sbatch",
+        "--parsable",
+        "--job-name",
+        name,
+        "-o",
+        log_path,
+    ] + sbatch_opts
+    if is_command is None:
+        is_command = not os.path.isfile(target)
+    if is_command:
+        cmd += ["--wrap", f"{target} {' '.join(args)}"]
+    else:
+        cmd += [target] + args
+        if target not in deps:
+            deps = [target] + deps
     if environment != "_system":
         ck_info = calkit.load_calkit_info()
         env = ck_info.get("environments", {}).get(environment, {})
@@ -139,7 +152,6 @@ def run_sbatch(
                 f"Environment '{environment}' is for host '{env_host}', but "
                 f"this is '{socket.gethostname()}'"
             )
-    deps = [script] + deps
     slurm_dir = os.path.join(".calkit", "slurm")
     os.makedirs(slurm_dir, exist_ok=True)
     logs_dir = os.path.dirname(log_path)
@@ -167,8 +179,7 @@ def run_sbatch(
         should_wait = True
         if running_or_queued:
             typer.echo(
-                f"Job '{name}' is already running or queued with ID "
-                f"{job_id}"
+                f"Job '{name}' is already running or queued with ID {job_id}"
             )
             # Check if args have changed
             if job_args != args:

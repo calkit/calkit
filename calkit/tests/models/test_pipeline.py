@@ -254,7 +254,7 @@ def test_sbatchstage():
     print(sd)
     assert sd["cmd"] == (
         "calkit slurm batch --name job1 --environment slurm-env "
-        "--dep data/input.txt --out data/output.txt "
+        "--dep scripts/run_job.sh --dep data/input.txt --out data/output.txt "
         "-s --time=01:00:00 -s --mem=4G -- scripts/run_job.sh something else"
     )
     assert "scripts/run_job.sh" in sd["deps"]

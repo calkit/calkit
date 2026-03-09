@@ -67,14 +67,19 @@ def test_stages_are_similar():
 
 def test_to_dvc():
     # Test typical proper usage
-    ck_info = {
-        "environments": {
-            "py": {
-                "kind": "venv",
-                "path": "requirements.txt",
-                "prefix": ".venv",
-            }
+    envs = {
+        "py": {
+            "kind": "venv",
+            "path": "requirements.txt",
+            "prefix": ".venv",
         },
+        "something": {
+            "kind": "conda",
+            "path": "environment.yaml",
+        },
+    }
+    ck_info = {
+        "environments": envs,
         "pipeline": {
             "stages": {
                 "get-data": {
@@ -106,6 +111,7 @@ def test_to_dvc():
     # TODO: Test other stage types
     # Test when user forgets to add an environment
     ck_info = {
+        "environments": envs,
         "pipeline": {
             "stages": {
                 "get-data": {
@@ -116,12 +122,13 @@ def test_to_dvc():
                     ],
                 }
             }
-        }
+        },
     }
     with pytest.raises(ValueError):
         calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
     # Test that we can define inputs from stage outputs
     ck_info = {
+        "environments": envs,
         "pipeline": {
             "stages": {
                 "get-data": {
@@ -142,7 +149,7 @@ def test_to_dvc():
                     ],
                 },
             }
-        }
+        },
     }
     dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
     print(dvc_stages)
@@ -150,6 +157,7 @@ def test_to_dvc():
     assert "something.else.txt" in dvc_stages["process-data"]["deps"]
     # Test a complex pipeline with iterations and parameters
     ck_info = {
+        "environments": envs,
         "parameters": {
             "param1": [{"range": {"start": 5, "stop": 23, "step": 2}}],
             "param2": ["s", "m", "l"],
@@ -203,6 +211,17 @@ def test_to_dvc():
 def test_to_dvc_from_matrix_outs():
     # Test that we can define inputs from matrix stage outputs
     ck_info = {
+        "environments": {
+            "py": {
+                "kind": "venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+            },
+            "something": {
+                "kind": "conda",
+                "path": "environment.yaml",
+            },
+        },
         "pipeline": {
             "stages": {
                 "get-data": {
@@ -227,7 +246,7 @@ def test_to_dvc_from_matrix_outs():
                     ],
                 },
             }
-        }
+        },
     }
     dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
     print(dvc_stages)
@@ -244,6 +263,12 @@ def test_to_dvc_notebook_stage():
     # stage to use as a DVC dependency
     nb_path = "something/my-cool-notebook.ipynb"
     ck_info = {
+        "environments": {
+            "something": {
+                "kind": "conda",
+                "path": "environment.yaml",
+            },
+        },
         "pipeline": {
             "stages": {
                 "notebook-1": {
@@ -258,7 +283,7 @@ def test_to_dvc_notebook_stage():
                     "executed_ipynb_storage": None,
                 },
             }
-        }
+        },
     }
     dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
     print(dvc_stages)
@@ -275,6 +300,12 @@ def test_to_dvc_notebook_stage():
     assert found_html
     # Test we can use parameters and iterations in notebook stages
     ck_info = {
+        "environments": {
+            "something": {
+                "kind": "conda",
+                "path": "environment.yaml",
+            },
+        },
         "parameters": {
             "param1": [{"range": {"start": 5, "stop": 23, "step": 2}}],
             "param2": ["s", "m", "l"],
@@ -332,6 +363,17 @@ def test_to_dvc_notebook_stage():
 def test_to_dvc_list_of_list_iteration():
     # Test that we can define iteration over a list of lists
     ck_info = {
+        "environments": {
+            "something": {
+                "kind": "conda",
+                "path": "environment.yaml",
+            },
+            "py": {
+                "kind": "venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+            },
+        },
         "pipeline": {
             "stages": {
                 "get-data": {
@@ -360,7 +402,7 @@ def test_to_dvc_list_of_list_iteration():
                     ],
                 },
             }
-        }
+        },
     }
     dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
     stage = dvc_stages["get-data"]
@@ -450,16 +492,20 @@ def test_sbatch_stage_to_dvc():
                     "data/output2.txt",
                 ],
             }
-        }
+        },
     }
     stages = calkit.pipeline.to_dvc(
-        ck_info={"pipeline": pipeline}, write=False
+        ck_info={
+            "environments": {"slurm-env": {"kind": "slurm"}},
+            "pipeline": pipeline,
+        },
+        write=False,
     )
     stage = stages["job1"]
     print(stage)
     assert stage["cmd"] == (
         "calkit slurm batch --name job1 --environment slurm-env "
-        "--dep data/input.txt --out data/output2.txt "
+        "--dep scripts/run_job.sh --dep data/input.txt --out data/output2.txt "
         "-s --time=01:00:00 -s --mem=4G -- scripts/run_job.sh something else"
     )
     assert "scripts/run_job.sh" in stage["deps"]

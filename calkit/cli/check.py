@@ -204,12 +204,19 @@ def check_environment(
                 subprocess.run(cmd, check=True)
             except subprocess.CalledProcessError:
                 raise_error(f"Failed to install Julia version {julia_version}")
-        elif not calkit.julia.current_version_is_compatible(julia_version):
-            raise_error(
-                f"Current Julia version is not compatible with required "
-                f"version ({julia_version}), and juliaup is not available to "
-                "install it"
-            )
+        else:
+            try:
+                compatible = calkit.julia.current_version_is_compatible(
+                    julia_version
+                )
+            except ValueError as e:
+                raise_error(str(e))
+            if not compatible:
+                raise_error(
+                    f"Current Julia version is not compatible with required "
+                    f"version ({julia_version}), and juliaup is not available to "
+                    "install it"
+                )
         env_dir = os.path.dirname(env_path)
         if not env_dir:
             env_dir = "."

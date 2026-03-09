@@ -946,3 +946,15 @@ class Pipeline(BaseModel):
                     # default options if there are any conflicts
                     orig_options = stage.slurm.options or []
                     stage.slurm.options = slurm_options + orig_options
+
+    def ensure_env_lock_paths_are_inputs(
+        self, env_lock_fpaths: dict[str, str]
+    ) -> None:
+        """Ensure that all environment lock file paths are included as inputs
+        to each stage.
+        """
+        for _, stage in self.stages.items():
+            env_name = stage.inner_environment
+            lock_fpath = env_lock_fpaths.get(env_name)
+            if lock_fpath is not None and lock_fpath not in stage.inputs:
+                stage.inputs.append(lock_fpath)

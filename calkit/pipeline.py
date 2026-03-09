@@ -134,6 +134,8 @@ def to_dvc(
     project_params = expand_project_parameters(ck_info.get("parameters", {}))
     # Set any stage slurm options, which requires environment information
     pipeline.set_stage_slurm_options(environments=environments)
+    # Ensure environment lock files are set as stage inputs if necessary
+    pipeline.ensure_env_lock_paths_are_inputs(env_lock_fpaths=env_lock_fpaths)
     # Now convert Calkit stages into DVC stages
     for stage_name, stage in pipeline.stages.items():
         # If this stage is a Jupyter notebook stage, we need to update its
@@ -141,13 +143,6 @@ def to_dvc(
         if stage.kind == "jupyter-notebook":
             stage.update_parameters(params=project_params)
         dvc_stage = stage.to_dvc()
-        # Add environment lock file to deps
-        env_lock_fpath = env_lock_fpaths.get(stage.inner_environment)
-        if (
-            env_lock_fpath is not None
-            and env_lock_fpath not in dvc_stage["deps"]
-        ):
-            dvc_stage["deps"].append(env_lock_fpath)
         # Check if this stage iterates, which means we should create a matrix
         # stage
         if stage.iterate_over is not None:

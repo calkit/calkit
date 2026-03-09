@@ -565,3 +565,80 @@ def test_sbatch_stage_to_dvc():
     assert ".calkit/notebooks/cleaned/analysis.ipynb" in stage3["deps"]
     assert "data/input2.txt" in stage3["deps"]
     assert "data/notebook_output.txt" in stage3["outs"]
+
+
+def test_non_sbatch_stage_requires_composite_slurm_env():
+    envs = {
+        "mycluster": {"kind": "slurm"},
+    }
+    pipeline = {
+        "stages": {
+            "run": {
+                "kind": "python-script",
+                "script_path": "scripts/run.py",
+                "environment": "mycluster",
+            }
+        }
+    }
+    with pytest.raises(ValueError, match="Use a composite environment"):
+        calkit.pipeline.to_dvc(
+            ck_info={
+                "environments": envs,
+                "pipeline": pipeline,
+            },
+            write=False,
+        )
+
+
+def test_non_sbatch_stage_disallows_slurm_inner_env():
+    envs = {
+        "mycluster": {"kind": "slurm"},
+        "innercluster": {"kind": "slurm"},
+    }
+    pipeline = {
+        "stages": {
+            "run": {
+                "kind": "julia-script",
+                "script_path": "scripts/run.jl",
+                "environment": "mycluster:innercluster",
+            }
+        }
+    }
+    with pytest.raises(
+        ValueError,
+        match="inner environment.*must not be SLURM",
+    ):
+        calkit.pipeline.to_dvc(
+            ck_info={
+                "environments": envs,
+                "pipeline": pipeline,
+            },
+            write=False,
+        )
+
+
+def test_shell_script_stage_allows_non_composite_slurm_env():
+    envs = {
+        "mycluster": {"kind": "slurm"},
+    }
+    pipeline = {
+        "stages": {
+            "run": {
+                "kind": "shell-script",
+                "script_path": "scripts/run.sh",
+                "environment": "mycluster",
+                "args": ["a", "b"],
+            }
+        }
+    }
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": envs,
+            "pipeline": pipeline,
+        },
+        write=False,
+    )
+    assert stages["run"]["cmd"] == (
+        "calkit slurm batch --name run --environment mycluster "
+        "-- scripts/run.sh a b"
+    )

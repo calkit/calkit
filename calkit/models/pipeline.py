@@ -574,6 +574,23 @@ class ShellScriptStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
+        # For shell scripts on a plain SLURM env (no inner env), run directly
+        # through sbatch rather than via xenv, since xenv does not support
+        # SLURM env kinds.
+        if (
+            self.slurm is not None
+            and self.inner_environment == self.outer_environment
+        ):
+            cmd = self.sbatch_cmd
+            cmd += f" -- {self.script_path}"
+            for arg in self.args:
+                cmd += f" {arg}"
+            # Keep compatibility with SBatchStage command formatting
+            dep_txt = f"--dep {self.script_path} "
+            if dep_txt in cmd:
+                cmd = cmd.replace(dep_txt, "")
+            return cmd
+
         cmd = self.xenv_cmd
         if self.shell == "zsh":
             norc_args = "-f"
@@ -946,6 +963,31 @@ class Pipeline(BaseModel):
                 )
             env = environments.get(stage.outer_environment, {})
             if env.get("kind") == "slurm":
+                if stage.kind not in ["sbatch", "shell-script"]:
+                    if stage.inner_environment == stage.outer_environment:
+                        raise ValueError(
+                            f"Stage '{stage.name}' uses non-sbatch kind "
+                            f"'{stage.kind}' with SLURM environment "
+                            f"'{stage.outer_environment}'; Use a composite "
+                            "environment like '<slurm-env>:<inner-env>' "
+                            "where the inner environment is not SLURM"
+                        )
+                    inner_env = environments.get(stage.inner_environment)
+                    if inner_env is None:
+                        raise ValueError(
+                            f"Stage '{stage.name}' has inner environment "
+                            f"'{stage.inner_environment}' that is not "
+                            "defined in environments"
+                        )
+                    if inner_env.get("kind") == "slurm":
+                        raise ValueError(
+                            f"Stage '{stage.name}' has SLURM outer "
+                            f"environment '{stage.outer_environment}' and "
+                            f"SLURM inner environment "
+                            f"'{stage.inner_environment}'; The inner "
+                            "environment for non-sbatch stages must not be "
+                            "SLURM"
+                        )
                 slurm_options = env.get("default_options", [])
                 if stage.slurm is None:
                     stage.slurm = StageSlurmOptions()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import socket
 import subprocess
@@ -132,7 +133,8 @@ def run_sbatch(
     if is_command is None:
         is_command = not os.path.isfile(target)
     if is_command:
-        cmd += ["--wrap", f"{target} {' '.join(args)}"]
+        # Use shlex.join to properly escape target and args for shell execution
+        cmd += ["--wrap", shlex.join([target] + args)]
     else:
         cmd += [target] + args
         if target not in deps:

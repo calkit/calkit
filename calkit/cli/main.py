@@ -229,6 +229,15 @@ def clone(
 
 @app.command(name="status")
 def get_status(
+    targets: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help=(
+                "Optional targets to check status for. These may be "
+                "pipeline stage names or repo paths."
+            ),
+        ),
+    ] = None,
     categories: Annotated[
         list[str] | None,
         typer.Option(
@@ -284,15 +293,24 @@ def get_status(
         typer.echo()
     if "git" in categories:
         print_sep("Git")
-        run_cmd(["git", "status"])
+        git_cmd = ["git", "status"]
+        if targets:
+            git_cmd += ["--"] + targets
+        run_cmd(git_cmd)
         typer.echo()
     if "dvc" in categories:
         print_sep("DVC")
-        run_dvc_command(["data", "status"])
+        dvc_data_cmd = ["data", "status"]
+        if targets:
+            dvc_data_cmd += targets
+        run_dvc_command(dvc_data_cmd)
         typer.echo()
     if "pipeline" in categories or "dvc" in categories:
         print_sep("Pipeline")
-        run_dvc_command(["status"])
+        dvc_pipeline_cmd = ["status"]
+        if targets:
+            dvc_pipeline_cmd += targets
+        run_dvc_command(dvc_pipeline_cmd)
 
 
 @app.command(name="diff")

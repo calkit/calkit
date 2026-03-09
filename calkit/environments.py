@@ -622,16 +622,16 @@ def env_from_name_or_path(
             "path"
         ) == name_or_path:
             return EnvDetectResult(name=env_name, env=env, exists=True)
-    # Check for composite environments like mycluster:mypython
+    # Check for nested environments like mycluster:mypython
     if name_or_path.count(COMPOSITE_ENV_SEP) == 1 and not path_only:
         outer_env_name, sub_env_name = name_or_path.split(COMPOSITE_ENV_SEP)
         outer_env = envs.get(outer_env_name)
         if outer_env and outer_env.get("kind") in VALID_OUTER_ENV_KINDS:
-            # Look for a sub-environment with the given name and path
+            # Look for an inner environment with the given name and path
             for sub_name, sub_env in envs.items():
                 if (not path_only and sub_name == sub_env_name) or sub_env.get(
                     "path"
-                ) == name_or_path:
+                ) == sub_env_name:
                     return EnvDetectResult(
                         name=sub_name,
                         env=sub_env,

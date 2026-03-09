@@ -933,12 +933,8 @@ class Pipeline(BaseModel):
 
         If the stage's main or outer environment is of kind 'slurm',
         we will set the stage's SLURM options based on the provided info,
-        such that it will run with `sbatch` and we can be robust to
+        such that it will run with `sbatch` and will be robust to SSH
         disconnects.
-
-        Note this shows how the pipeline is not decoupled from the
-        environments, which is an architectural flaw that may be good to
-        address in the future.
         """
         for stage in self.stages.values():
             env_name = stage.outer_environment

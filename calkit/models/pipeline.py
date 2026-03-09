@@ -270,6 +270,20 @@ class Stage(BaseModel):
                 cmd += f" --out {out}"
             elif isinstance(out, PathOutput) and out.delete_before_run:
                 cmd += f" --out {out.path}"
+        # Check for any missing outs in dvc_outs
+        # This can be important for implicit outputs like notebook stages
+        for out in self.dvc_outs:
+            # Determine if this is a non-persistent output
+            if isinstance(out, str):
+                txt = f" --out {out}"
+                if txt not in cmd:
+                    cmd += txt
+            elif isinstance(out, dict):
+                out_path = list(out.keys())[0]
+                if not out[out_path].get("persist", False):
+                    txt = f" --out {out_path}"
+                    if txt not in cmd:
+                        cmd += txt
         if self.slurm.options is not None:
             for opt in self.slurm.options:
                 cmd += f" -s {opt}"

@@ -508,6 +508,17 @@ def test_sbatch_stage_to_dvc():
                 "inputs": ["data/input2.txt"],
                 "outputs": ["data/output3.txt"],
             },
+            # Test jupyter-notebook stage in nested env with slurm outer
+            "notebook": {
+                "kind": "jupyter-notebook",
+                "notebook_path": "analysis.ipynb",
+                "environment": "slurm-env:julia1",
+                "html_storage": "dvc",
+                "cleaned_ipynb_storage": None,
+                "executed_ipynb_storage": "git",
+                "inputs": ["data/input2.txt"],
+                "outputs": ["data/notebook_output.txt"],
+            },
         },
     }
     stages = calkit.pipeline.to_dvc(
@@ -539,3 +550,18 @@ def test_sbatch_stage_to_dvc():
     assert "something.jl" in stage2["deps"]
     assert "data/input2.txt" in stage2["deps"]
     assert "data/output3.txt" in stage2["outs"]
+    stage3 = stages["notebook"]
+    print(stage3)
+    assert stage3["cmd"] == (
+        "calkit slurm batch --name notebook --environment slurm-env "
+        "--dep .calkit/notebooks/cleaned/analysis.ipynb "
+        "--dep data/input2.txt --dep Manifest.toml "
+        "--out data/notebook_output.txt "
+        "--out .calkit/notebooks/executed/analysis.ipynb "
+        "--out .calkit/notebooks/html/analysis.html "
+        "--command -- calkit nb execute --environment julia1 --no-check "
+        '--to html "analysis.ipynb"'
+    )
+    assert ".calkit/notebooks/cleaned/analysis.ipynb" in stage3["deps"]
+    assert "data/input2.txt" in stage3["deps"]
+    assert "data/notebook_output.txt" in stage3["outs"]

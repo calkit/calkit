@@ -174,6 +174,7 @@ def run_sbatch(
         job_info = jobs[name]
         job_id = job_info["job_id"]
         job_deps = job_info["deps"]
+        job_target = job_info.get("target")
         job_args = job_info.get("args", [])
         running_or_queued = check_job_running_or_queued(job_id)
         should_wait = True
@@ -181,6 +182,13 @@ def run_sbatch(
             typer.echo(
                 f"Job '{name}' is already running or queued with ID {job_id}"
             )
+            # Check if target has changed
+            if job_target != target:
+                should_wait = False
+                cancel_job(
+                    job_id=job_id,
+                    reason=f"Target for job '{name}' has changed",
+                )
             # Check if args have changed
             if job_args != args:
                 should_wait = False
@@ -237,6 +245,7 @@ def run_sbatch(
     new_job = {
         "job_id": job_id,
         "deps": deps,
+        "target": target,
         "args": args,
         "dep_md5s": current_dep_md5s,
     }

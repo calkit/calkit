@@ -474,6 +474,14 @@ def test_remove_stage(tmp_dir):
 
 
 def test_sbatch_stage_to_dvc():
+    envs = {
+        "slurm-env": {"kind": "slurm"},
+        "julia1": {
+            "kind": "julia",
+            "julia": "1.11",
+            "path": "Project.toml",
+        },
+    }
     pipeline = {
         "stages": {
             "job1": {
@@ -491,12 +499,20 @@ def test_sbatch_stage_to_dvc():
                     },
                     "data/output2.txt",
                 ],
-            }
+            },
+            # Test nested env with slurm outer
+            "job2": {
+                "kind": "julia-script",
+                "script_path": "something.jl",
+                "environment": "slurm-env:julia1",
+                "inputs": ["data/input2.txt"],
+                "outputs": ["data/output3.txt"],
+            },
         },
     }
     stages = calkit.pipeline.to_dvc(
         ck_info={
-            "environments": {"slurm-env": {"kind": "slurm"}},
+            "environments": envs,
             "pipeline": pipeline,
         },
         write=False,
@@ -512,3 +528,14 @@ def test_sbatch_stage_to_dvc():
     assert "data/input.txt" in stage["deps"]
     out = {"data/output.txt": {"cache": False, "persist": True}}
     assert out in stage["outs"]
+    stage2 = stages["job2"]
+    print(stage2)
+    assert stage2["cmd"] == (
+        "calkit slurm batch --name job2 --environment slurm-env "
+        "--dep something.jl --dep data/input2.txt --dep Manifest.toml "
+        "--out data/output3.txt --command "
+        '-- calkit xenv -n julia1 --no-check -- "something.jl"'
+    )
+    assert "something.jl" in stage2["deps"]
+    assert "data/input2.txt" in stage2["deps"]
+    assert "data/output3.txt" in stage2["outs"]

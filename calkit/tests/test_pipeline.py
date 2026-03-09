@@ -505,7 +505,7 @@ def test_sbatch_stage_to_dvc():
     print(stage)
     assert stage["cmd"] == (
         "calkit slurm batch --name job1 --environment slurm-env "
-        "--dep scripts/run_job.sh --dep data/input.txt --out data/output2.txt "
+        "--dep data/input.txt --out data/output2.txt "
         "-s --time=01:00:00 -s --mem=4G -- scripts/run_job.sh something else"
     )
     assert "scripts/run_job.sh" in stage["deps"]

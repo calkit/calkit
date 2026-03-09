@@ -694,6 +694,10 @@ class SBatchStage(Stage):
         cmd += f" -- {self.script_path}"
         for arg in self.args:
             cmd += f" {arg}"
+        # Remove the script path from deps for backward compatibility
+        dep_txt = f"--dep {self.script_path} "
+        if dep_txt in cmd:
+            cmd = cmd.replace(dep_txt, "")
         return cmd
 
 

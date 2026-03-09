@@ -29,7 +29,7 @@ def run_sbatch(
         str,
         typer.Argument(
             help=(
-                "The target to run."
+                "The target to run. "
                 "This can be a shell script or an executable."
             )
         ),
@@ -149,11 +149,20 @@ def run_sbatch(
             )
         # Check host matches
         env_host = env.get("host", "localhost")
-        if env_host != "localhost" and env_host != socket.gethostname():
-            raise_error(
-                f"Environment '{environment}' is for host '{env_host}', but "
-                f"this is '{socket.gethostname()}'"
-            )
+        if env_host != "localhost":
+            current_host = socket.gethostname()
+            current_fqdn = socket.getfqdn()
+            # Match against both short hostname and FQDN
+            if (
+                env_host != current_host
+                and env_host != current_fqdn
+                and current_host != env_host.split(".")[0]
+                and current_fqdn != env_host
+            ):
+                raise_error(
+                    f"Environment '{environment}' is for host '{env_host}', but "
+                    f"this is '{current_host}'"
+                )
     slurm_dir = os.path.join(".calkit", "slurm")
     os.makedirs(slurm_dir, exist_ok=True)
     logs_dir = os.path.dirname(log_path)

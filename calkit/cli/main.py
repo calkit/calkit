@@ -1405,18 +1405,6 @@ def run_in_env(
             ),
         ),
     ] = None,
-    srun_options: Annotated[
-        list[str],
-        typer.Option(
-            "--srun-option",
-            help=(
-                "Additional option to pass to srun when running in a slurm "
-                "environment. "
-                "Only applicable if the outer environment is of slurm kind, "
-                "e.g., my-cluster:my-python."
-            ),
-        ),
-    ] = [],
     no_check: Annotated[
         bool,
         typer.Option(
@@ -1452,46 +1440,6 @@ def run_in_env(
         ck_info["environments"] = envs
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)
-    # If this is a composite environment, make sure we can correctly run in
-    # the outer environment, i.e., if it's slurm, we need to be running on
-    # the host
-    # TODO: Implement remote running on slurm envs, which should run on a
-    # copy of the repo and we need to somehow sync changes back here
-    if res.outer is not None:
-        import socket
-
-        host = res.outer.env.get("host")
-        # Ensure we're on the right host
-        if host is None or socket.gethostname() != host:
-            raise_error(
-                f"This command must be run on {host} to use the "
-                f"{res.outer.name} environment"
-            )
-        # Run calkit xenv with srun and the inner environment specified
-        outer_cmd = ["srun"]
-        # TODO Handle slurm default options as dict
-        if res.outer.env.get("default_options"):
-            outer_cmd += res.outer.env["default_options"]
-        outer_cmd += srun_options
-        # TODO: Handle environment modules in slurm environments
-        outer_cmd += ["--pty", "calkit", "xenv", "-n", res.name]
-        if wdir is not None:
-            outer_cmd += ["--wdir", wdir]
-        if no_check:
-            outer_cmd.append("--no-check")
-        if relaxed_check:
-            outer_cmd.append("--relaxed")
-        if verbose:
-            outer_cmd.append("--verbose")
-        outer_cmd += ["--"] + cmd
-        if verbose:
-            typer.echo(
-                f"Running command in composite environment: {outer_cmd}"
-            )
-        p = subprocess.run(outer_cmd)
-        if not p.returncode == 0:
-            raise_error("Failed to run in composite environment")
-        return
     env_name = res.name
     env = envs[env_name]
     image_name = env.get("image", env_name)

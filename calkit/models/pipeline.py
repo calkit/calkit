@@ -138,6 +138,7 @@ class StageSlurmOptions(BaseModel):
     """Parameters for running a stage with SLURM."""
 
     options: list[str] | None = None
+    use_default_options_from_env: bool = True
     log_path: str | None = None
     log_storage: Literal["git", "dvc"] | None = "git"
 
@@ -688,6 +689,12 @@ class SBatchStage(Stage):
         if self.slurm is None:
             self.slurm = StageSlurmOptions()
         self.slurm.options = self.sbatch_options + (self.slurm.options or [])
+        # Dedupe options but retain order
+        deduped_options = []
+        for opt in self.slurm.options:
+            if opt not in deduped_options:
+                deduped_options.append(opt)
+        self.slurm.options = deduped_options
         self.slurm.log_path = self.log_path
         self.slurm.log_storage = self.log_storage
         cmd = self.sbatch_cmd
@@ -932,7 +939,7 @@ class Pipeline(BaseModel):
                 slurm_options = env.get("default_options", [])
                 if stage.slurm is None:
                     stage.slurm = StageSlurmOptions()
-                if slurm_options:
+                if slurm_options and stage.slurm.use_default_options_from_env:
                     # Append options together
                     # sbatch takes the latest value as the effective one,
                     # so stage-specific options will override environment

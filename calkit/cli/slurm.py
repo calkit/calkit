@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import socket
 import subprocess
@@ -24,9 +25,14 @@ def run_sbatch(
         str,
         typer.Option("--name", "-n", help="Job name."),
     ],
-    script: Annotated[
+    target: Annotated[
         str,
-        typer.Argument(help="Path to the SLURM script to run."),
+        typer.Argument(
+            help=(
+                "The target to run. "
+                "This can be a shell script or an executable."
+            )
+        ),
     ],
     environment: Annotated[
         str,
@@ -78,6 +84,13 @@ def run_sbatch(
     log_path: Annotated[
         str | None, typer.Option("--log-path", help="Output log path.")
     ] = None,
+    is_command: Annotated[
+        bool | None,
+        typer.Option(
+            "--command",
+            help="Whether the target is a command instead of a script.",
+        ),
+    ] = None,
 ) -> None:
     """Submit a SLURM batch job for the project.
 
@@ -109,21 +122,23 @@ def run_sbatch(
         args = []
     if log_path is None:
         log_path = f".calkit/slurm/logs/{name}.out"
-    cmd = (
-        [
-            "sbatch",
-            "--parsable",
-            "--job-name",
-            name,
-            "-o",
-            log_path,
-        ]
-        + sbatch_opts
-        + [script]
-        + args
-    )
-    if not os.path.isfile(script):
-        raise_error(f"SLURM script '{script}' does not exist")
+    cmd = [
+        "sbatch",
+        "--parsable",
+        "--job-name",
+        name,
+        "-o",
+        log_path,
+    ] + sbatch_opts
+    if is_command is None:
+        is_command = not os.path.isfile(target)
+    if is_command:
+        # Use shlex.join to properly escape target and args for shell execution
+        cmd += ["--wrap", shlex.join([target] + args)]
+    else:
+        cmd += [target] + args
+        if target not in deps:
+            deps = [target] + deps
     if environment != "_system":
         ck_info = calkit.load_calkit_info()
         env = ck_info.get("environments", {}).get(environment, {})
@@ -134,12 +149,20 @@ def run_sbatch(
             )
         # Check host matches
         env_host = env.get("host", "localhost")
-        if env_host != "localhost" and env_host != socket.gethostname():
-            raise_error(
-                f"Environment '{environment}' is for host '{env_host}', but "
-                f"this is '{socket.gethostname()}'"
-            )
-    deps = [script] + deps
+        if env_host != "localhost":
+            current_host = socket.gethostname()
+            current_fqdn = socket.getfqdn()
+            # Match against both short hostname and FQDN
+            if (
+                env_host != current_host
+                and env_host != current_fqdn
+                and current_host != env_host.split(".")[0]
+                and current_fqdn != env_host
+            ):
+                raise_error(
+                    f"Environment '{environment}' is for host '{env_host}', but "
+                    f"this is '{current_host}'"
+                )
     slurm_dir = os.path.join(".calkit", "slurm")
     os.makedirs(slurm_dir, exist_ok=True)
     logs_dir = os.path.dirname(log_path)
@@ -162,14 +185,21 @@ def run_sbatch(
         job_info = jobs[name]
         job_id = job_info["job_id"]
         job_deps = job_info["deps"]
+        job_target = job_info.get("target")
         job_args = job_info.get("args", [])
         running_or_queued = check_job_running_or_queued(job_id)
         should_wait = True
         if running_or_queued:
             typer.echo(
-                f"Job '{name}' is already running or queued with ID "
-                f"{job_id}"
+                f"Job '{name}' is already running or queued with ID {job_id}"
             )
+            # Check if target has changed
+            if job_target != target:
+                should_wait = False
+                cancel_job(
+                    job_id=job_id,
+                    reason=f"Target for job '{name}' has changed",
+                )
             # Check if args have changed
             if job_args != args:
                 should_wait = False
@@ -226,6 +256,7 @@ def run_sbatch(
     new_job = {
         "job_id": job_id,
         "deps": deps,
+        "target": target,
         "args": args,
         "dep_md5s": current_dep_md5s,
     }

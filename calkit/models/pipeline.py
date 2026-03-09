@@ -134,6 +134,15 @@ class StageIteration(BaseModel):
         return vals
 
 
+class StageSlurmOptions(BaseModel):
+    """Parameters for running a stage with SLURM."""
+
+    options: list[str] | None = None
+    use_default_options_from_env: bool = True
+    log_path: str | None = None
+    log_storage: Literal["git", "dvc"] | None = "git"
+
+
 class Stage(BaseModel):
     """A stage in the pipeline."""
 
@@ -161,8 +170,37 @@ class Stage(BaseModel):
     always_run: bool = False
     iterate_over: list[StageIteration] | None = None
     description: str | None = None
+    slurm: StageSlurmOptions | None = None
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
+
+    @property
+    def outer_environment(self) -> str:
+        """The outer environment of the stage, in case it is nested."""
+        from calkit.environments import COMPOSITE_ENV_SEP
+
+        if self.environment.count(COMPOSITE_ENV_SEP) == 1:
+            return self.environment.split(COMPOSITE_ENV_SEP)[0]
+        elif self.environment.count(COMPOSITE_ENV_SEP) > 1:
+            raise ValueError(
+                f"Invalid environment name '{self.environment}': more than one "
+                f"composite environment separator '{COMPOSITE_ENV_SEP}'"
+            )
+        return self.environment
+
+    @property
+    def inner_environment(self) -> str:
+        """The inner environment of the stage, in case it is nested."""
+        from calkit.environments import COMPOSITE_ENV_SEP
+
+        if self.environment.count(COMPOSITE_ENV_SEP) == 1:
+            return self.environment.split(COMPOSITE_ENV_SEP)[1]
+        elif self.environment.count(COMPOSITE_ENV_SEP) > 1:
+            raise ValueError(
+                f"Invalid environment name '{self.environment}': more than one "
+                f"composite environment separator '{COMPOSITE_ENV_SEP}'"
+            )
+        return self.environment
 
     @property
     def dvc_cmd(self) -> str:
@@ -195,9 +233,61 @@ class Stage(BaseModel):
 
     @property
     def xenv_cmd(self) -> str:
-        if self.environment == "_system":
+        """Return the command prefix for running in an environment, if
+        needed.
+        """
+        if self.environment == "_system" and self.slurm is None:
             return ""
-        return f"calkit xenv -n {self.environment} --no-check --"
+        cmd = f"calkit xenv -n {self.inner_environment} --no-check --"
+        if self.slurm is not None:
+            cmd = self.sbatch_cmd + " --command -- " + cmd
+        return cmd
+
+    @property
+    def sbatch_cmd(self) -> str:
+        if self.slurm is None:
+            raise ValueError("Stage does not have SLURM options")
+        cmd = f"calkit slurm batch --name {self.name}"
+        if self.iterate_over is not None:
+            arg_names = []
+            for item in self.iterate_over:
+                if isinstance(item.arg_name, list):
+                    arg_names += item.arg_name
+                else:
+                    arg_names.append(item.arg_name)
+            cmd += "@" + ",".join(
+                [f"{{{arg_name}}}" for arg_name in arg_names]
+            )
+        if self.environment != "_system":
+            cmd += f" --environment {self.outer_environment}"
+        if self.slurm.log_path is not None:
+            cmd += f" --log-path '{self.slurm.log_path}'"
+        for dep in self.dvc_deps:
+            cmd += f" --dep {dep}"
+        for out in self.outputs:
+            # Determine if this is a non-persistent output
+            if isinstance(out, str):
+                cmd += f" --out {out}"
+            elif isinstance(out, PathOutput) and out.delete_before_run:
+                cmd += f" --out {out.path}"
+        # Check for any missing outs in dvc_outs
+        # This can be important for implicit outputs like notebook stages
+        for out in self.dvc_outs:
+            # Determine if this is a non-persistent output
+            if isinstance(out, str):
+                txt = f" --out {out}"
+                if txt not in cmd:
+                    cmd += txt
+            elif isinstance(out, dict):
+                out_path = list(out.keys())[0]
+                if not out[out_path].get("persist", False):
+                    txt = f" --out {out_path}"
+                    if txt not in cmd:
+                        cmd += txt
+        if self.slurm.options is not None:
+            for opt in self.slurm.options:
+                cmd += f" -s {opt}"
+        return cmd
 
     def to_dvc(self) -> dict:
         """Convert to a DVC stage.
@@ -484,6 +574,23 @@ class ShellScriptStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
+        # For shell scripts on a plain SLURM env (no inner env), run directly
+        # through sbatch rather than via xenv, since xenv does not support
+        # SLURM env kinds.
+        if (
+            self.slurm is not None
+            and self.inner_environment == self.outer_environment
+        ):
+            cmd = self.sbatch_cmd
+            cmd += f" -- {self.script_path}"
+            for arg in self.args:
+                cmd += f" {arg}"
+            # Keep compatibility with SBatchStage command formatting
+            dep_txt = f"--dep {self.script_path} "
+            if dep_txt in cmd:
+                cmd = cmd.replace(dep_txt, "")
+            return cmd
+
         cmd = self.xenv_cmd
         if self.shell == "zsh":
             norc_args = "-f"
@@ -609,35 +716,26 @@ class SBatchStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"calkit slurm batch --name {self.name}"
-        if self.iterate_over is not None:
-            arg_names = []
-            for item in self.iterate_over:
-                if isinstance(item.arg_name, list):
-                    arg_names += item.arg_name
-                else:
-                    arg_names.append(item.arg_name)
-            cmd += "@" + ",".join(
-                [f"{{{arg_name}}}" for arg_name in arg_names]
-            )
-        if self.environment != "_system":
-            cmd += f" --environment {self.environment}"
-        if self.log_path is not None:
-            cmd += f" --log-path '{self.log_path}'"
-        for dep in self.dvc_deps:
-            if dep != self.script_path:
-                cmd += f" --dep {dep}"
-        for out in self.outputs:
-            # Determine if this is a non-persistent output
-            if isinstance(out, str):
-                cmd += f" --out {out}"
-            elif isinstance(out, PathOutput) and out.delete_before_run:
-                cmd += f" --out {out.path}"
-        for opt in self.sbatch_options:
-            cmd += f" -s {opt}"
+        # Merge top level SLURM options with those in the slurm object
+        if self.slurm is None:
+            self.slurm = StageSlurmOptions()
+        self.slurm.options = self.sbatch_options + (self.slurm.options or [])
+        # Dedupe options but retain order
+        deduped_options = []
+        for opt in self.slurm.options:
+            if opt not in deduped_options:
+                deduped_options.append(opt)
+        self.slurm.options = deduped_options
+        self.slurm.log_path = self.log_path
+        self.slurm.log_storage = self.log_storage
+        cmd = self.sbatch_cmd
         cmd += f" -- {self.script_path}"
         for arg in self.args:
             cmd += f" {arg}"
+        # Remove the script path from deps for backward compatibility
+        dep_txt = f"--dep {self.script_path} "
+        if dep_txt in cmd:
+            cmd = cmd.replace(dep_txt, "")
         return cmd
 
 
@@ -722,7 +820,10 @@ class JupyterNotebookStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"calkit nb execute --environment {self.environment} --no-check"
+        cmd = (
+            f"calkit nb execute --environment {self.inner_environment} "
+            "--no-check"
+        )
         if self.language is not None:
             cmd += f" --language {self.language}"
         if self.html_storage:
@@ -737,6 +838,8 @@ class JupyterNotebookStage(Stage):
             ).decode("utf-8")
             cmd += f' --params-base64 "{params_base64}"'
         cmd += f' "{self.notebook_path}"'
+        if self.slurm is not None:
+            cmd = self.sbatch_cmd + " --command -- " + cmd
         return cmd
 
     @property
@@ -831,7 +934,7 @@ class Pipeline(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")
-    def set_stage_names(self):
+    def set_stage_names(self) -> Pipeline:
         """Set the name field of each stage to match its key in the dict."""
         for stage_name, stage in self.stages.items():
             if stage.name is not None and stage.name != stage_name:
@@ -841,3 +944,69 @@ class Pipeline(BaseModel):
                 )
             stage.name = stage_name
         return self
+
+    def set_stage_slurm_options(self, environments: dict[str, dict]) -> None:
+        """Set the SLURM options for each stage based on the provided info.
+
+        If the stage's main or outer environment is of kind 'slurm',
+        we will set the stage's SLURM options based on the provided info,
+        such that it will run with `sbatch` and will be robust to SSH
+        disconnects.
+        """
+        for stage in self.stages.values():
+            env_name = stage.outer_environment
+            if env_name != "_system" and env_name not in environments:
+                raise ValueError(
+                    f"Stage '{stage.name}' has outer environment "
+                    f"'{stage.outer_environment}' which is not defined in "
+                    "environments"
+                )
+            env = environments.get(stage.outer_environment, {})
+            if env.get("kind") == "slurm":
+                if stage.kind not in ["sbatch", "shell-script"]:
+                    if stage.inner_environment == stage.outer_environment:
+                        raise ValueError(
+                            f"Stage '{stage.name}' uses non-sbatch kind "
+                            f"'{stage.kind}' with SLURM environment "
+                            f"'{stage.outer_environment}'; Use a composite "
+                            "environment like '<slurm-env>:<inner-env>' "
+                            "where the inner environment is not SLURM"
+                        )
+                    inner_env = environments.get(stage.inner_environment)
+                    if inner_env is None:
+                        raise ValueError(
+                            f"Stage '{stage.name}' has inner environment "
+                            f"'{stage.inner_environment}' that is not "
+                            "defined in environments"
+                        )
+                    if inner_env.get("kind") == "slurm":
+                        raise ValueError(
+                            f"Stage '{stage.name}' has SLURM outer "
+                            f"environment '{stage.outer_environment}' and "
+                            f"SLURM inner environment "
+                            f"'{stage.inner_environment}'; The inner "
+                            "environment for non-sbatch stages must not be "
+                            "SLURM"
+                        )
+                slurm_options = env.get("default_options", [])
+                if stage.slurm is None:
+                    stage.slurm = StageSlurmOptions()
+                if slurm_options and stage.slurm.use_default_options_from_env:
+                    # Append options together
+                    # sbatch takes the latest value as the effective one,
+                    # so stage-specific options will override environment
+                    # default options if there are any conflicts
+                    orig_options = stage.slurm.options or []
+                    stage.slurm.options = slurm_options + orig_options
+
+    def ensure_env_lock_paths_are_inputs(
+        self, env_lock_fpaths: dict[str, str]
+    ) -> None:
+        """Ensure that all environment lock file paths are included as inputs
+        to each stage.
+        """
+        for _, stage in self.stages.items():
+            env_name = stage.inner_environment
+            lock_fpath = env_lock_fpaths.get(env_name)
+            if lock_fpath is not None and lock_fpath not in stage.inputs:
+                stage.inputs.append(lock_fpath)

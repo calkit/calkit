@@ -1631,11 +1631,18 @@ def run_in_env(
         # calling julia
         if cmd[0] == "julia":
             cmd = cmd[1:]
+        # If there are any --project= args, remove them since we are already
+        # specifying the project
+        cmd = [arg for arg in cmd if not arg.startswith("--project=")]
         julia_cmd = [
             "julia",
             f"+{julia_version}",
             "--project=" + env_dir,
         ] + cmd
+        try:
+            julia_cmd = calkit.julia.check_version_in_command(julia_cmd)
+        except Exception as e:
+            raise_error(f"Failed to check Julia version: {e}")
         if verbose:
             typer.echo(f"Running command: {julia_cmd}")
         try:

@@ -196,13 +196,27 @@ def check_environment(
                 "Julia environments require a path pointing to Project.toml"
             )
         # First ensure the Julia version exists
-        cmd = ["juliaup", "add", julia_version]
-        if verbose:
-            typer.echo(f"Running command: {cmd}")
-        try:
-            subprocess.run(cmd, check=True)
-        except subprocess.CalledProcessError:
-            raise_error(f"Failed to install Julia version {julia_version}")
+        if shutil.which("juliaup") is not None:
+            cmd = ["juliaup", "add", julia_version]
+            if verbose:
+                typer.echo(f"Running command: {cmd}")
+            try:
+                subprocess.run(cmd, check=True)
+            except subprocess.CalledProcessError:
+                raise_error(f"Failed to install Julia version {julia_version}")
+        else:
+            try:
+                compatible = calkit.julia.current_version_is_compatible(
+                    julia_version
+                )
+            except ValueError as e:
+                raise_error(str(e))
+            if not compatible:
+                raise_error(
+                    f"Current Julia version is not compatible with required "
+                    f"version ({julia_version}), and juliaup is not available to "
+                    "install it"
+                )
         env_dir = os.path.dirname(env_path)
         if not env_dir:
             env_dir = "."
@@ -254,6 +268,10 @@ def check_environment(
                 f"using Pkg; Pkg.add([{pkg_list}]);",
             ]
             try:
+                cmd = calkit.julia.check_version_in_command(cmd)
+            except Exception as e:
+                raise_error(f"Failed to check Julia version: {e}")
+            try:
                 subprocess.check_call(
                     cmd,
                     env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"},
@@ -267,6 +285,10 @@ def check_environment(
             "-e",
             "using Pkg; Pkg.instantiate();",
         ]
+        try:
+            cmd = calkit.julia.check_version_in_command(cmd)
+        except Exception as e:
+            raise_error(f"Failed to check Julia version: {e}")
         try:
             subprocess.check_call(
                 cmd, env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"}

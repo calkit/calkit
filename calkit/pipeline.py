@@ -117,9 +117,12 @@ def to_dvc(
         raise ValueError(f"Pipeline is not defined properly: {e}")
     dvc_stages = {}
     # First, gather up any env lock paths we might need for DVC deps
-    used_envs = set([stage.environment for stage in pipeline.stages.values()])
+    used_envs = set(
+        [stage.inner_environment for stage in pipeline.stages.values()]
+    )
     env_lock_fpaths = {}
-    for env_name, env in ck_info.get("environments", {}).items():
+    environments = ck_info.get("environments", {})
+    for env_name, env in environments.items():
         if env_name not in used_envs:
             continue
         lock_fpath = get_env_lock_fpath(
@@ -129,6 +132,10 @@ def to_dvc(
             continue
         env_lock_fpaths[env_name] = lock_fpath
     project_params = expand_project_parameters(ck_info.get("parameters", {}))
+    # Set any stage slurm options, which requires environment information
+    pipeline.set_stage_slurm_options(environments=environments)
+    # Ensure environment lock files are set as stage inputs if necessary
+    pipeline.ensure_env_lock_paths_are_inputs(env_lock_fpaths=env_lock_fpaths)
     # Now convert Calkit stages into DVC stages
     for stage_name, stage in pipeline.stages.items():
         # If this stage is a Jupyter notebook stage, we need to update its
@@ -136,13 +143,6 @@ def to_dvc(
         if stage.kind == "jupyter-notebook":
             stage.update_parameters(params=project_params)
         dvc_stage = stage.to_dvc()
-        # Add environment lock file to deps
-        env_lock_fpath = env_lock_fpaths.get(stage.environment)
-        if (
-            env_lock_fpath is not None
-            and env_lock_fpath not in dvc_stage["deps"]
-        ):
-            dvc_stage["deps"].append(env_lock_fpath)
         # Check if this stage iterates, which means we should create a matrix
         # stage
         if stage.iterate_over is not None:

@@ -117,7 +117,9 @@ def to_dvc(
         raise ValueError(f"Pipeline is not defined properly: {e}")
     dvc_stages = {}
     # First, gather up any env lock paths we might need for DVC deps
-    used_envs = set([stage.environment for stage in pipeline.stages.values()])
+    used_envs = set(
+        [stage.inner_environment for stage in pipeline.stages.values()]
+    )
     env_lock_fpaths = {}
     environments = ck_info.get("environments", {})
     for env_name, env in environments.items():
@@ -140,7 +142,7 @@ def to_dvc(
             stage.update_parameters(params=project_params)
         dvc_stage = stage.to_dvc()
         # Add environment lock file to deps
-        env_lock_fpath = env_lock_fpaths.get(stage.environment)
+        env_lock_fpath = env_lock_fpaths.get(stage.inner_environment)
         if (
             env_lock_fpath is not None
             and env_lock_fpath not in dvc_stage["deps"]

@@ -41,7 +41,7 @@ export interface CalkitEnvironment {
 export interface CalkitCandidate {
   label: string;
   description: string;
-  detail: string;
+  detail?: string;
   environmentName: string;
   innerEnvironment: string;
   innerKind: EnvKind;
@@ -171,7 +171,6 @@ export function makeEnvironmentCandidates(
     allNonSlurmInners.push({
       label: name,
       description: env.kind,
-      detail: "Run in this environment under a slurm outer environment",
       environmentName: name,
       innerEnvironment: name,
       innerKind: env.kind,
@@ -184,7 +183,6 @@ export function makeEnvironmentCandidates(
     standalone.push({
       label: name,
       description: env.kind,
-      detail: "Run Jupyter server in this environment",
       environmentName: name,
       innerEnvironment: name,
       innerKind: env.kind,
@@ -197,7 +195,6 @@ export function makeEnvironmentCandidates(
       nested.push({
         label: `${slurmOuter}:${inner.environmentName}`,
         description: `slurm + ${inner.description}`,
-        detail: "Run server with srun, then enter inner environment",
         environmentName: `${slurmOuter}:${inner.environmentName}`,
         innerEnvironment: inner.environmentName,
         innerKind: inner.innerKind,

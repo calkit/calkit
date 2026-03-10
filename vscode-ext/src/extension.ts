@@ -359,8 +359,6 @@ async function selectCalkitEnvironment(
 
     items.push({
       label: "$(add) Create new Calkit environment...",
-      description: "Add SLURM or Julia environment to calkit.yaml",
-      detail: "Create environment",
     });
 
     const selected = await vscode.window.showQuickPick(items, {
@@ -680,55 +678,194 @@ async function saveNotebookEnvironmentSelection(
 async function runCreateEnvironmentWizard(
   workspaceRoot: string,
 ): Promise<string | undefined> {
-  const kindPick = await vscode.window.showQuickPick(
-    [
-      {
-        label: "slurm",
-        description: "Remote SLURM scheduler environment",
-      },
-      {
-        label: "julia",
-        description: "Julia Project.toml-based environment",
-      },
-    ],
-    {
-      title: "Create Calkit environment",
-      placeHolder: "Pick environment kind",
-    },
-  );
-  if (!kindPick) {
-    return undefined;
-  }
-
   const config = (await readCalkitConfig(workspaceRoot)) ?? {};
   const environments = config.environments ?? {};
-
-  if (kindPick.label === "slurm") {
-    const name = await askForEnvironmentName(environments, "my-slurm");
-    if (!name) {
+  for (;;) {
+    const kindPick = await vscode.window.showQuickPick(
+      [
+        {
+          label: "slurm",
+          description: "Remote SLURM scheduler environment",
+        },
+        {
+          label: "julia",
+          description: "Julia Project.toml-based environment",
+        },
+      ],
+      {
+        title: "Create Calkit environment",
+        placeHolder: "Pick environment kind",
+      },
+    );
+    if (!kindPick) {
       return undefined;
     }
 
-    const host = await vscode.window.showInputBox({
-      title: "SLURM environment host",
-      prompt: "Host where SLURM commands should run",
-      value: "localhost",
-      placeHolder: "e.g. hpc.my-org.edu",
-      validateInput: (value) =>
-        value.trim().length === 0 ? "Host is required" : undefined,
+    if (kindPick.label === "slurm") {
+      const created = await runCreateSlurmEnvironmentWizard(
+        workspaceRoot,
+        config,
+        environments,
+      );
+      if (created === "__back__") {
+        continue;
+      }
+      return created;
+    }
+
+    const created = await runCreateJuliaEnvironmentWizard(
+      workspaceRoot,
+      config,
+      environments,
+    );
+    if (created === "__back__") {
+      continue;
+    }
+    return created;
+  }
+}
+
+type WizardStepResult<T> =
+  | { kind: "value"; value: T }
+  | { kind: "back" }
+  | { kind: "cancel" };
+
+async function showInputBoxStep(options: {
+  title: string;
+  prompt?: string;
+  value?: string;
+  placeHolder?: string;
+  validateInput?: (
+    value: string,
+  ) => string | undefined | Promise<string | undefined>;
+  canGoBack?: boolean;
+}): Promise<WizardStepResult<string>> {
+  const input = vscode.window.createInputBox();
+  input.title = options.title;
+  input.prompt = options.prompt;
+  input.value = options.value ?? "";
+  input.placeholder = options.placeHolder;
+  if (options.canGoBack) {
+    input.buttons = [vscode.QuickInputButtons.Back];
+  }
+
+  return await new Promise<WizardStepResult<string>>((resolve) => {
+    let done = false;
+    const finish = (result: WizardStepResult<string>) => {
+      if (done) {
+        return;
+      }
+      done = true;
+      input.hide();
+      input.dispose();
+      resolve(result);
+    };
+
+    input.onDidTriggerButton((button) => {
+      if (button === vscode.QuickInputButtons.Back) {
+        finish({ kind: "back" });
+      }
     });
-    if (host === undefined) {
-      return undefined;
+
+    input.onDidAccept(async () => {
+      const current = input.value;
+      const validationMessage = options.validateInput
+        ? await options.validateInput(current)
+        : undefined;
+      if (validationMessage) {
+        input.validationMessage = validationMessage;
+        return;
+      }
+      finish({ kind: "value", value: current });
+    });
+
+    input.onDidHide(() => {
+      if (!done) {
+        finish({ kind: "cancel" });
+      }
+    });
+
+    input.show();
+  });
+}
+
+async function runCreateSlurmEnvironmentWizard(
+  workspaceRoot: string,
+  config: CalkitConfig,
+  environments: Record<string, CalkitEnvironment>,
+): Promise<string | "__back__" | undefined> {
+  let name = "my-slurm";
+  let host = "localhost";
+  let defaults: SlurmLaunchOptions = {};
+  let step = 0;
+
+  while (step >= 0) {
+    if (step === 0) {
+      const nameStep = await showInputBoxStep({
+        title: "Environment name",
+        prompt: "Unique environment name in calkit.yaml",
+        value: name,
+        canGoBack: true,
+        validateInput: (value) => {
+          const trimmed = value.trim();
+          if (trimmed.length === 0) {
+            return "Environment name is required";
+          }
+          if (trimmed.includes(":")) {
+            return "Environment names cannot contain ':'";
+          }
+          if (trimmed in environments) {
+            return "An environment with this name already exists";
+          }
+          return undefined;
+        },
+      });
+      if (nameStep.kind === "cancel") {
+        return undefined;
+      }
+      if (nameStep.kind === "back") {
+        return "__back__";
+      }
+      name = nameStep.value.trim();
+      step = 1;
+      continue;
     }
 
-    const defaults = await askForSlurmOptions();
-    if (!defaults) {
+    if (step === 1) {
+      const hostStep = await showInputBoxStep({
+        title: "SLURM environment host",
+        prompt: "Host where SLURM commands should run",
+        value: host,
+        placeHolder: "e.g. hpc.my-org.edu",
+        canGoBack: true,
+        validateInput: (value) =>
+          value.trim().length === 0 ? "Host is required" : undefined,
+      });
+      if (hostStep.kind === "cancel") {
+        return undefined;
+      }
+      if (hostStep.kind === "back") {
+        step = 0;
+        continue;
+      }
+      host = hostStep.value.trim();
+      step = 2;
+      continue;
+    }
+
+    const optionsStep = await askForSlurmOptionsWizard(defaults);
+    if (optionsStep.kind === "cancel") {
       return undefined;
     }
+    if (optionsStep.kind === "back") {
+      step = 1;
+      continue;
+    }
+    defaults = optionsStep.value;
 
     environments[name] = {
       kind: "slurm",
-      host: host.trim(),
+      host,
       default_options: slurmOptionsToOptionList(defaults),
     };
     config.environments = environments;
@@ -744,83 +881,207 @@ async function runCreateEnvironmentWizard(
     return name;
   }
 
-  const name = await askForEnvironmentName(environments, "my-julia-env");
-  if (!name) {
-    return undefined;
-  }
-
-  const projectTomlPath = await vscode.window.showInputBox({
-    title: "Julia Project.toml path",
-    prompt: "Path to Project.toml (workspace-relative or absolute)",
-    value: "Project.toml",
-    validateInput: (value) => {
-      const trimmed = value.trim();
-      if (trimmed.length === 0) {
-        return "Path is required";
-      }
-      if (path.basename(trimmed) !== "Project.toml") {
-        return "Path must point to Project.toml";
-      }
-      return undefined;
-    },
-  });
-  if (projectTomlPath === undefined) {
-    return undefined;
-  }
-
-  const detectedJulia = await detectJuliaVersion(workspaceRoot);
-  const juliaVersion = await vscode.window.showInputBox({
-    title: "Julia version",
-    prompt: "Julia major.minor version",
-    value: detectedJulia,
-    validateInput: (value) =>
-      value.trim().length === 0 ? "Julia version is required" : undefined,
-  });
-  if (juliaVersion === undefined) {
-    return undefined;
-  }
-
-  environments[name] = {
-    kind: "julia",
-    path: projectTomlPath.trim(),
-    julia: juliaVersion.trim(),
-  };
-  config.environments = environments;
-
-  const ok = await writeCalkitConfig(workspaceRoot, config);
-  if (!ok) {
-    return undefined;
-  }
-
-  void vscode.window.showInformationMessage(
-    `Created Julia environment '${name}' in calkit.yaml.`,
-  );
-  return name;
+  return undefined;
 }
 
-async function askForEnvironmentName(
+async function runCreateJuliaEnvironmentWizard(
+  workspaceRoot: string,
+  config: CalkitConfig,
   environments: Record<string, CalkitEnvironment>,
-  suggested: string,
-): Promise<string | undefined> {
-  const name = await vscode.window.showInputBox({
-    title: "Environment name",
-    prompt: "Unique environment name in calkit.yaml",
-    value: suggested,
-    validateInput: (value) => {
-      const trimmed = value.trim();
-      if (trimmed.length === 0) {
-        return "Environment name is required";
+): Promise<string | "__back__" | undefined> {
+  const detectedJulia = await detectJuliaVersion(workspaceRoot);
+
+  let name = "my-julia-env";
+  let projectTomlPath = "Project.toml";
+  let juliaVersion = detectedJulia;
+  let step = 0;
+
+  while (step >= 0) {
+    if (step === 0) {
+      const nameStep = await showInputBoxStep({
+        title: "Environment name",
+        prompt: "Unique environment name in calkit.yaml",
+        value: name,
+        canGoBack: true,
+        validateInput: (value) => {
+          const trimmed = value.trim();
+          if (trimmed.length === 0) {
+            return "Environment name is required";
+          }
+          if (trimmed.includes(":")) {
+            return "Environment names cannot contain ':'";
+          }
+          if (trimmed in environments) {
+            return "An environment with this name already exists";
+          }
+          return undefined;
+        },
+      });
+      if (nameStep.kind === "cancel") {
+        return undefined;
       }
-      if (trimmed.includes(":")) {
-        return "Environment names cannot contain ':'";
+      if (nameStep.kind === "back") {
+        return "__back__";
       }
-      if (trimmed in environments) {
-        return "An environment with this name already exists";
+      name = nameStep.value.trim();
+      step = 1;
+      continue;
+    }
+
+    if (step === 1) {
+      const pathStep = await showInputBoxStep({
+        title: "Julia Project.toml path",
+        prompt: "Path to Project.toml (workspace-relative or absolute)",
+        value: projectTomlPath,
+        canGoBack: true,
+        validateInput: (value) => {
+          const trimmed = value.trim();
+          if (trimmed.length === 0) {
+            return "Path is required";
+          }
+          if (path.basename(trimmed) !== "Project.toml") {
+            return "Path must point to Project.toml";
+          }
+          return undefined;
+        },
+      });
+      if (pathStep.kind === "cancel") {
+        return undefined;
       }
+      if (pathStep.kind === "back") {
+        step = 0;
+        continue;
+      }
+      projectTomlPath = pathStep.value.trim();
+      step = 2;
+      continue;
+    }
+
+    const versionStep = await showInputBoxStep({
+      title: "Julia version",
+      prompt: "Julia major.minor version",
+      value: juliaVersion,
+      canGoBack: true,
+      validateInput: (value) =>
+        value.trim().length === 0 ? "Julia version is required" : undefined,
+    });
+    if (versionStep.kind === "cancel") {
       return undefined;
-    },
-  });
-  return name?.trim();
+    }
+    if (versionStep.kind === "back") {
+      step = 1;
+      continue;
+    }
+    juliaVersion = versionStep.value.trim();
+
+    environments[name] = {
+      kind: "julia",
+      path: projectTomlPath,
+      julia: juliaVersion,
+    };
+    config.environments = environments;
+
+    const ok = await writeCalkitConfig(workspaceRoot, config);
+    if (!ok) {
+      return undefined;
+    }
+
+    void vscode.window.showInformationMessage(
+      `Created Julia environment '${name}' in calkit.yaml.`,
+    );
+    return name;
+  }
+
+  return undefined;
+}
+
+async function askForSlurmOptionsWizard(
+  defaults: SlurmLaunchOptions,
+): Promise<WizardStepResult<SlurmLaunchOptions>> {
+  const values: SlurmLaunchOptions = {
+    ...defaults,
+  };
+  let step = 0;
+
+  while (step >= 0) {
+    if (step === 0) {
+      const result = await showInputBoxStep({
+        title: "Slurm option: --gpus",
+        prompt: "Optional GPU count or value (e.g. 1 or a100:1)",
+        value: values.gpus ?? "",
+        placeHolder: "leave blank to skip",
+        canGoBack: true,
+      });
+      if (result.kind === "cancel") {
+        return result;
+      }
+      if (result.kind === "back") {
+        return { kind: "back" };
+      }
+      values.gpus = result.value;
+      step = 1;
+      continue;
+    }
+
+    if (step === 1) {
+      const result = await showInputBoxStep({
+        title: "Slurm option: --time",
+        prompt: "Optional time (e.g. 60 or 01:00:00)",
+        value: values.time ?? "",
+        placeHolder: "leave blank to skip",
+        canGoBack: true,
+      });
+      if (result.kind === "cancel") {
+        return result;
+      }
+      if (result.kind === "back") {
+        step = 0;
+        continue;
+      }
+      values.time = result.value;
+      step = 2;
+      continue;
+    }
+
+    if (step === 2) {
+      const result = await showInputBoxStep({
+        title: "Slurm option: --partition",
+        prompt: "Optional partition name",
+        value: values.partition ?? "",
+        placeHolder: "leave blank to skip",
+        canGoBack: true,
+      });
+      if (result.kind === "cancel") {
+        return result;
+      }
+      if (result.kind === "back") {
+        step = 1;
+        continue;
+      }
+      values.partition = result.value;
+      step = 3;
+      continue;
+    }
+
+    const result = await showInputBoxStep({
+      title: "Additional srun options",
+      prompt: "Optional raw options appended as-is (e.g. --cpus-per-task=8)",
+      value: values.extra ?? "",
+      placeHolder: "leave blank to skip",
+      canGoBack: true,
+    });
+    if (result.kind === "cancel") {
+      return result;
+    }
+    if (result.kind === "back") {
+      step = 2;
+      continue;
+    }
+    values.extra = result.value;
+    return { kind: "value", value: compactSlurmOptions(values) };
+  }
+
+  return { kind: "cancel" };
 }
 
 async function detectJuliaVersion(workspaceRoot: string): Promise<string> {

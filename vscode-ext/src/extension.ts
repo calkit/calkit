@@ -29,6 +29,7 @@ let outputChannel: vscode.OutputChannel;
 let serverProcess: import("node:child_process").ChildProcess | undefined;
 let activeServerSession: ActiveServerSession | undefined;
 let extensionContextRef: vscode.ExtensionContext | undefined;
+const autoSelectingNotebookUris = new Set<string>();
 
 function log(message: string): void {
   if (outputChannel) {
@@ -118,7 +119,12 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  context.subscriptions.push();
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveNotebookEditor(() => {
+      void refreshNotebookToolbarContext(context);
+      void autoSelectEnvironmentForActiveNotebook(context);
+    }),
+  );
 
   void refreshNotebookToolbarContext(context);
 
@@ -699,6 +705,122 @@ function getLaunchProfileForActiveNotebook(
     return undefined;
   }
   return getNotebookLaunchProfiles(context)[notebookUri];
+}
+
+async function getConfiguredCandidateForNotebookPath(
+  workspaceRoot: string,
+  notebookRelativePath: string,
+): Promise<CalkitCandidate | undefined> {
+  const config = await readCalkitConfig(workspaceRoot);
+  if (!config) {
+    return undefined;
+  }
+
+  // Normalize path for comparison
+  const normalizedPath = notebookRelativePath.replace(/\\/g, "/");
+
+  let environmentName: string | undefined;
+
+  // Check pipeline stages first
+  if (config.pipeline?.stages) {
+    for (const stage of Object.values(config.pipeline.stages)) {
+      if (stage.notebook_path === normalizedPath && stage.environment) {
+        environmentName = stage.environment;
+        break;
+      }
+    }
+  }
+
+  // Then check notebooks section
+  if (!environmentName && config.notebooks) {
+    for (const nb of config.notebooks) {
+      if (nb.path === normalizedPath && nb.environment) {
+        environmentName = nb.environment;
+        break;
+      }
+    }
+  }
+
+  if (!environmentName) {
+    return undefined;
+  }
+
+  const candidates = makeEnvironmentCandidates(config.environments ?? {});
+  const candidate = candidates.find(
+    (item) => item.environmentName === environmentName,
+  );
+
+  if (!candidate) {
+    log(
+      `Environment '${environmentName}' is configured for notebook '${normalizedPath}', but no matching selectable Calkit candidate was found.`,
+    );
+  }
+
+  return candidate;
+}
+
+async function autoSelectEnvironmentForActiveNotebook(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const workspaceRoot = getWorkspaceRoot();
+  if (!workspaceRoot) {
+    return;
+  }
+
+  const notebookUri = getActiveNotebookUriKey();
+  if (!notebookUri) {
+    return;
+  }
+
+  if (autoSelectingNotebookUris.has(notebookUri)) {
+    return;
+  }
+
+  autoSelectingNotebookUris.add(notebookUri);
+
+  try {
+    const notebookRelativePath = getActiveNotebookRelativePath(workspaceRoot);
+    if (!notebookRelativePath) {
+      return;
+    }
+
+    const configuredCandidate = await getConfiguredCandidateForNotebookPath(
+      workspaceRoot,
+      notebookRelativePath,
+    );
+    if (!configuredCandidate) {
+      log(
+        `No environment configured in calkit.yaml for notebook ${notebookRelativePath}`,
+      );
+      return;
+    }
+
+    const hasSelectedKernel = await hasAnyKernelSelectedForActiveNotebook();
+    if (hasSelectedKernel) {
+      log(
+        `Notebook ${notebookRelativePath} already has a selected kernel; overriding it with calkit.yaml environment '${configuredCandidate.environmentName}'.`,
+      );
+    } else {
+      log(
+        `Auto-selecting calkit.yaml environment '${configuredCandidate.environmentName}' for notebook ${notebookRelativePath}.`,
+      );
+    }
+
+    const kernelId = await registerAndSelectKernel(
+      workspaceRoot,
+      configuredCandidate.innerEnvironment,
+      "-e",
+    );
+    if (kernelId) {
+      log(
+        `Auto-selected kernel ${kernelId} for environment ${configuredCandidate.environmentName}`,
+      );
+    }
+
+    await refreshNotebookToolbarContext(context);
+  } finally {
+    autoSelectingNotebookUris.delete(notebookUri);
+  }
 }
 
 async function askForSlurmOptions(

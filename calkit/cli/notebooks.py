@@ -115,6 +115,10 @@ def check_env_kernel(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Output result as JSON."),
+    ] = False,
 ) -> tuple[str, str]:
     """Check that an environment has a registered Jupyter kernel."""
     from calkit.cli.check import check_environment
@@ -152,14 +156,24 @@ def check_env_kernel(
             "--display-name",
             display_name,
         ]
-        res = run_in_env(
-            cmd=cmd,
-            env_name=env_name,
-            no_check=no_check,
-            verbose=verbose,
-            relaxed_check=True,
-        )
-        return kernel_name, display_name
+        if json_output:
+            # For JSON output, run silently and don't show intermediate
+            # messages
+            res = run_in_env(
+                cmd=cmd,
+                env_name=env_name,
+                no_check=no_check,
+                verbose=False,
+                relaxed_check=True,
+            )
+        else:
+            res = run_in_env(
+                cmd=cmd,
+                env_name=env_name,
+                no_check=no_check,
+                verbose=verbose,
+                relaxed_check=True,
+            )
     elif language == "r":
         cmd = [
             "Rscript",
@@ -176,7 +190,6 @@ def check_env_kernel(
             verbose=verbose,
             relaxed_check=True,
         )
-        return kernel_name, display_name
     elif language == "julia":
         if not no_check:
             check_environment(env_name=env_name, verbose=verbose)
@@ -218,13 +231,21 @@ def check_env_kernel(
             raise_error(f"Failed to create kernel:\n{res.stdout}")
         kernel_path = res.stdout.strip()
         kernel_name = os.path.basename(kernel_path)
-        typer.echo(
-            f"Registered IJulia kernel '{kernel_name}' at: {kernel_path}"
-        )
-        return kernel_name, display_name
+        if not json_output:
+            typer.echo(
+                f"Registered IJulia kernel '{kernel_name}' at: {kernel_path}"
+            )
     else:
         raise_error(f"{language} not supported")
         return "", ""  # For typing analysis since raise_error exits
+    # Output result
+    if json_output:
+        result = {
+            "kernel_name": kernel_name,
+            "display_name": display_name,
+        }
+        typer.echo(json.dumps(result))
+    return kernel_name, display_name
 
 
 @notebooks_app.command("exec", help="Alias for 'execute'.")

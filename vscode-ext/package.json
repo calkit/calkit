@@ -1,0 +1,72 @@
+{
+  "name": "calkit-vscode",
+  "displayName": "Calkit Notebook Environments",
+  "description": "Select Calkit environments from VS Code notebook kernel flows, including nested Slurm scenarios.",
+  "version": "0.0.1",
+  "publisher": "calkit",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Notebooks",
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:calkit-vscode.selectCalkitEnvironment",
+    "onNotebook:jupyter-notebook"
+  ],
+  "extensionDependencies": [
+    "ms-toolsai.jupyter"
+  ],
+  "enabledApiProposals": [
+    "notebookKernelSource"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "calkit-vscode.selectCalkitEnvironment",
+        "title": "Calkit: Select Notebook Environment",
+        "category": "Calkit"
+      }
+    ],
+    "menus": {
+      "notebook/toolbar": [
+        {
+          "command": "calkit-vscode.selectCalkitEnvironment",
+          "when": "notebookType == 'jupyter-notebook'",
+          "group": "navigation@99"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "calkit-vscode.selectCalkitEnvironment"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Calkit Notebook Environments",
+      "properties": {
+        "calkit.notebook.defaultJupyterPort": {
+          "type": "number",
+          "default": 8888,
+          "description": "Default port used when launching a Calkit-backed Jupyter server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.12",
+    "@types/vscode": "^1.95.0",
+    "typescript": "^5.6.2"
+  },
+  "dependencies": {
+    "yaml": "^2.5.1"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "compile"],
+      "options": {
+        "cwd": "${workspaceFolder}/vscode-ext"
+      },
+      "label": "npm: compile (vscode-ext)",
+      "problemMatcher": ["$tsc"]
+    }
+  ]
+}

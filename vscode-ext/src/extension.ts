@@ -21,6 +21,7 @@ const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
 const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
 const COMMAND_START_SLURM = "calkit-vscode.startCalkitSlurmJob";
 const COMMAND_STOP_SLURM = "calkit-vscode.stopCalkitSlurmJob";
+const COMMAND_RESTART_JOB = "calkit-vscode.restartCalkitJob";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
 const execFileAsync = promisify(execFile);
 
@@ -112,10 +113,12 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.window.onDidChangeActiveNotebookEditor(() => {
-      void refreshNotebookToolbarContext(context);
+    vscode.commands.registerCommand(COMMAND_RESTART_JOB, async () => {
+      await restartCalkitJobForActiveNotebook(context);
     }),
   );
+
+  context.subscriptions.push();
 
   void refreshNotebookToolbarContext(context);
 
@@ -300,8 +303,21 @@ async function selectCalkitEnvironment(
   // Docker and Slurm environments require connecting to an existing server
   if (picked.outerSlurmEnvironment || picked.innerKind === "docker") {
     const envType = picked.outerSlurmEnvironment ? "Slurm" : "Docker";
-    const isReady = await waitForServerReady(uri);
-    const connected = isReady ? await selectExistingJupyterServer(uri) : false;
+
+    const serverReady = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `${envType} notebook server starting...`,
+        cancellable: false,
+      },
+      async () => {
+        return await waitForServerReady(uri);
+      },
+    );
+
+    const connected = serverReady
+      ? await selectExistingJupyterServer(uri)
+      : false;
 
     // For Docker, we don't need to register a kernel separately since it should
     // be in the image, but we can try to select it if needed
@@ -346,8 +362,19 @@ async function selectCalkitEnvironment(
     return selectedKernelId;
   }
 
-  const isReady = await waitForServerReady(uri);
-  const connected = isReady ? await selectExistingJupyterServer(uri) : false;
+  const serverReady = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "Jupyter notebook server starting...",
+      cancellable: false,
+    },
+    async () => {
+      return await waitForServerReady(uri);
+    },
+  );
+  const connected = serverReady
+    ? await selectExistingJupyterServer(uri)
+    : false;
 
   const action = await vscode.window.showInformationMessage(
     connected
@@ -422,44 +449,40 @@ async function saveNotebookEnvironmentSelection(
   notebookPath: string,
   environmentName: string,
 ): Promise<boolean> {
-  const config = await readCalkitConfig(workspaceRoot);
-  if (!config) {
-    return false;
-  }
-
-  // Check if notebook is part of a pipeline stage
-  let foundInPipeline = false;
-  if (config.pipeline?.stages) {
-    for (const [stageName, stage] of Object.entries(config.pipeline.stages)) {
-      if (stage.notebook_path === notebookPath) {
-        stage.environment = environmentName;
-        foundInPipeline = true;
-        break;
-      }
-    }
-  }
-
-  // If not in pipeline, add/update in notebooks section
-  if (!foundInPipeline) {
-    if (!config.notebooks) {
-      config.notebooks = [];
-    }
-
-    const existingIndex = config.notebooks.findIndex(
-      (nb) => nb.path === notebookPath,
+  try {
+    // Use Calkit CLI to properly save the notebook environment
+    // The CLI handles formatting and determines whether to use notebooks or pipeline section
+    const { stderr } = await execFileAsync(
+      "calkit",
+      ["update", "notebook", notebookPath, "--set-env", environmentName],
+      {
+        cwd: workspaceRoot,
+      },
     );
 
-    if (existingIndex >= 0) {
-      config.notebooks[existingIndex].environment = environmentName;
-    } else {
-      config.notebooks.push({
-        path: notebookPath,
-        environment: environmentName,
-      });
+    if (stderr) {
+      log(`calkit update notebook warning: ${stderr}`);
     }
-  }
 
-  return await writeCalkitConfig(workspaceRoot, config);
+    log(
+      `Saved environment '${environmentName}' for notebook '${notebookPath}'`,
+    );
+    return true;
+  } catch (error: unknown) {
+    const err = error as {
+      stdout?: string;
+      stderr?: string;
+      message?: string;
+    };
+    const details = (err.stderr || err.stdout || err.message || "").trim();
+    log(`Failed to save environment selection: ${details}`);
+    void vscode.window.showWarningMessage(
+      `Failed to save environment to calkit.yaml: ${
+        details || "unknown error"
+      }`,
+    );
+    return false;
+  }
 }
 
 async function runCreateEnvironmentWizard(
@@ -1048,69 +1071,74 @@ async function registerAndSelectKernel(
 ): Promise<string | undefined> {
   log(`Registering and selecting kernel for env: ${envName}`);
 
-  try {
-    const { stdout, stderr } = await execFileAsync(
-      "calkit",
-      ["nb", "check-kernel", envFlag, envName, "--json"],
-      {
-        cwd: workspaceRoot,
-      },
-    );
-
-    log(`calkit output: ${stdout}`);
-
-    let kernelName: string;
-    let displayName: string | undefined;
+  return await withKernelProgress("Setting kernel...", async () => {
     try {
-      // Response may contain non-JSON output before the JSON.
-      // Find and parse just the JSON object (line starting with {).
-      const jsonMatch = stdout.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error("No JSON found in output");
+      const { stdout, stderr } = await execFileAsync(
+        "calkit",
+        ["nb", "check-kernel", envFlag, envName, "--json"],
+        {
+          cwd: workspaceRoot,
+        },
+      );
+
+      log(`calkit output: ${stdout}`);
+
+      let kernelName: string;
+      let displayName: string | undefined;
+      try {
+        // Response may contain non-JSON output before the JSON.
+        // Find and parse just the JSON object (line starting with {).
+        const jsonMatch = stdout.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+          throw new Error("No JSON found in output");
+        }
+        const result = JSON.parse(jsonMatch[0]);
+        kernelName = result.kernel_name;
+        displayName = result.display_name;
+        if (!kernelName) {
+          throw new Error("kernel_name not in JSON response");
+        }
+        log(`Extracted kernel name: ${kernelName}`);
+      } catch (parseError) {
+        const details = `${stderr || stdout || String(parseError)}`.trim();
+        log(`JSON parse error: ${details}`);
+        void vscode.window.showErrorMessage(
+          `Failed to parse kernel info from 'calkit nb check-kernel': ${details}`,
+        );
+        return undefined;
       }
-      const result = JSON.parse(jsonMatch[0]);
-      kernelName = result.kernel_name;
-      displayName = result.display_name;
-      if (!kernelName) {
-        throw new Error("kernel_name not in JSON response");
+
+      const selectedKernelId = await tryAutoSelectKernel(
+        kernelName,
+        displayName,
+      );
+
+      if (selectedKernelId) {
+        log(`Kernel selection successful`);
+        return selectedKernelId;
       }
-      log(`Extracted kernel name: ${kernelName}`);
-    } catch (parseError) {
-      const details = `${stderr || stdout || String(parseError)}`.trim();
-      log(`JSON parse error: ${details}`);
+
+      log(`Kernel selection failed or unconfirmed`);
+      void vscode.window.showInformationMessage(
+        `Registered kernel '${kernelName}', but could not confirm auto-selection. Select the kernel manually from the picker.`,
+      );
+      return undefined;
+    } catch (error: unknown) {
+      const err = error as {
+        stdout?: string;
+        stderr?: string;
+        message?: string;
+      };
+      const details = (err.stderr || err.stdout || err.message || "").trim();
+      log(`Error: ${details}`);
       void vscode.window.showErrorMessage(
-        `Failed to parse kernel info from 'calkit nb check-kernel': ${details}`,
+        `Failed to run 'calkit nb check-kernel ${envFlag} ${envName}': ${
+          details || "unknown error"
+        }`,
       );
       return undefined;
     }
-
-    const selectedKernelId = await tryAutoSelectKernel(kernelName, displayName);
-
-    if (selectedKernelId) {
-      log(`Kernel selection successful`);
-      return selectedKernelId;
-    }
-
-    log(`Kernel selection failed or unconfirmed`);
-    void vscode.window.showInformationMessage(
-      `Registered kernel '${kernelName}', but could not confirm auto-selection. Select the kernel manually from the picker.`,
-    );
-    return undefined;
-  } catch (error: unknown) {
-    const err = error as {
-      stdout?: string;
-      stderr?: string;
-      message?: string;
-    };
-    const details = (err.stderr || err.stdout || err.message || "").trim();
-    log(`Error: ${details}`);
-    void vscode.window.showErrorMessage(
-      `Failed to run 'calkit nb check-kernel ${envFlag} ${envName}': ${
-        details || "unknown error"
-      }`,
-    );
-    return undefined;
-  }
+  });
 }
 
 async function tryAutoSelectKernel(
@@ -1579,8 +1607,19 @@ async function startSlurmJobForActiveNotebook(
   )}`;
   await vscode.env.clipboard.writeText(uri);
 
-  const isReady = await waitForServerReady(uri);
-  const connected = isReady ? await selectExistingJupyterServer(uri) : false;
+  const serverReady = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "SLURM notebook server starting...",
+      cancellable: false,
+    },
+    async () => {
+      return await waitForServerReady(uri);
+    },
+  );
+  const connected = serverReady
+    ? await selectExistingJupyterServer(uri)
+    : false;
 
   const selectedKernelId = await registerAndSelectKernel(
     workspaceRoot,
@@ -1630,6 +1669,37 @@ async function stopSlurmJobForActiveNotebook(
   await refreshNotebookToolbarContext(context);
 }
 
+async function restartCalkitJobForActiveNotebook(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  // First, stop any running server
+  const runningProcess = serverProcess;
+  if (runningProcess && isProcessRunning(runningProcess)) {
+    runningProcess.kill();
+    log("Stopped notebook server to restart");
+    activeServerSession = undefined;
+    serverProcess = undefined;
+    // Give the server a moment to shut down
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  // Then, start a new server based on the session type
+  if (activeServerSession?.kind === "slurm") {
+    await startSlurmJobForActiveNotebook(context);
+  } else if (activeServerSession?.kind === "docker") {
+    // For Docker, we would need to trigger the docker container restart
+    // For now, just show an info message
+    void vscode.window.showInformationMessage(
+      "Docker server restarted. You may need to reconnect.",
+    );
+    await refreshNotebookToolbarContext(context);
+  } else {
+    void vscode.window.showInformationMessage(
+      "No running notebook server to restart.",
+    );
+  }
+}
+
 async function refreshNotebookToolbarContext(
   context: vscode.ExtensionContext,
 ): Promise<void> {
@@ -1637,6 +1707,8 @@ async function refreshNotebookToolbarContext(
   const hasResumableSlurm = Boolean(profile?.outerSlurmEnvironment);
   const isRunningSlurm =
     activeServerSession?.kind === "slurm" && isProcessRunning(serverProcess);
+  const isRunningDocker =
+    activeServerSession?.kind === "docker" && isProcessRunning(serverProcess);
 
   await vscode.commands.executeCommand(
     "setContext",
@@ -1647,6 +1719,40 @@ async function refreshNotebookToolbarContext(
     "setContext",
     "calkit.hasRunningSlurmSession",
     isRunningSlurm,
+  );
+  await vscode.commands.executeCommand(
+    "setContext",
+    "calkit.hasRunningDockerSession",
+    isRunningDocker,
+  );
+}
+
+async function setKernelCheckingState(isChecking: boolean): Promise<void> {
+  await vscode.commands.executeCommand(
+    "setContext",
+    "calkit.isSettingKernel",
+    isChecking,
+  );
+}
+
+async function withKernelProgress<T>(
+  message: string,
+  task: () => Promise<T>,
+): Promise<T> {
+  return vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: message,
+      cancellable: false,
+    },
+    async () => {
+      await setKernelCheckingState(true);
+      try {
+        return await task();
+      } finally {
+        await setKernelCheckingState(false);
+      }
+    },
   );
 }
 

@@ -1300,13 +1300,6 @@ async function tryAutoSelectBestAvailableKernel(options?: {
     return undefined;
   }
 
-  type ResolvedKernel = {
-    id?: string;
-    label?: string;
-    description?: string;
-    detail?: string;
-  };
-
   const languageHint = getNotebookLanguageHint(editor).toLowerCase();
   const existingIds = options?.existingKernelIds ?? new Set<string>();
   const requireNewKernel = options?.requireNewKernel ?? false;

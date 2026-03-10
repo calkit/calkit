@@ -152,6 +152,20 @@
       "project": "tsconfig.json",
       "sourceType": "module"
     },
+    "overrides": [
+      {
+        "files": [
+          "vscode-ext/**/*.ts"
+        ],
+        "parserOptions": {
+          "project": "vscode-ext/tsconfig.json",
+          "sourceType": "module"
+        },
+        "rules": {
+          "@typescript-eslint/naming-convention": "off"
+        }
+      }
+    ],
     "plugins": [
       "@typescript-eslint"
     ],

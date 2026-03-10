@@ -14,6 +14,9 @@
   ],
   "activationEvents": [
     "onCommand:calkit-vscode.selectCalkitEnvironment",
+    "onCommand:calkit-vscode.createCalkitEnvironment",
+    "onCommand:calkit-vscode.startCalkitSlurmJob",
+    "onCommand:calkit-vscode.stopCalkitSlurmJob",
     "onNotebook:jupyter-notebook"
   ],
   "extensionDependencies": [
@@ -29,6 +32,23 @@
         "command": "calkit-vscode.selectCalkitEnvironment",
         "title": "Calkit: Select Notebook Environment",
         "category": "Calkit"
+      },
+      {
+        "command": "calkit-vscode.createCalkitEnvironment",
+        "title": "Calkit: Create Environment",
+        "category": "Calkit"
+      },
+      {
+        "command": "calkit-vscode.startCalkitSlurmJob",
+        "title": "Calkit: Start SLURM Notebook Job",
+        "category": "Calkit",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "calkit-vscode.stopCalkitSlurmJob",
+        "title": "Calkit: Stop SLURM Notebook Job",
+        "category": "Calkit",
+        "icon": "$(debug-stop)"
       }
     ],
     "menus": {
@@ -37,11 +57,30 @@
           "command": "calkit-vscode.selectCalkitEnvironment",
           "when": "notebookType == 'jupyter-notebook'",
           "group": "navigation@99"
+        },
+        {
+          "command": "calkit-vscode.startCalkitSlurmJob",
+          "when": "notebookType == 'jupyter-notebook' && calkit.hasResumableSlurmSession && !calkit.hasRunningSlurmSession",
+          "group": "navigation@100"
+        },
+        {
+          "command": "calkit-vscode.stopCalkitSlurmJob",
+          "when": "notebookType == 'jupyter-notebook' && calkit.hasRunningSlurmSession",
+          "group": "navigation@101"
         }
       ],
       "commandPalette": [
         {
           "command": "calkit-vscode.selectCalkitEnvironment"
+        },
+        {
+          "command": "calkit-vscode.createCalkitEnvironment"
+        },
+        {
+          "command": "calkit-vscode.startCalkitSlurmJob"
+        },
+        {
+          "command": "calkit-vscode.stopCalkitSlurmJob"
         }
       ]
     },

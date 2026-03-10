@@ -8,10 +8,16 @@ import * as vscode from "vscode";
 import YAML from "yaml";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
+const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
+const COMMAND_START_SLURM = "calkit-vscode.startCalkitSlurmJob";
+const COMMAND_STOP_SLURM = "calkit-vscode.stopCalkitSlurmJob";
+const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
 const execFileAsync = promisify(execFile);
 
 let outputChannel: vscode.OutputChannel;
 let serverProcess: import("node:child_process").ChildProcess | undefined;
+let activeServerSession: ActiveServerSession | undefined;
+let extensionContextRef: vscode.ExtensionContext | undefined;
 
 function log(message: string): void {
   if (outputChannel) {
@@ -37,6 +43,8 @@ type EnvKind =
 interface CalkitEnvironment {
   kind: EnvKind;
   host?: string;
+  path?: string;
+  julia?: string;
   image?: string;
   platform?: string;
   env_vars?: Record<string, string>;
@@ -45,6 +53,9 @@ interface CalkitEnvironment {
   user?: string;
   wdir?: string;
   args?: string[];
+  default_options?: string[];
+  default_slurm_options?: SlurmLaunchOptions;
+  [key: string]: unknown;
 }
 
 interface CalkitConfig {
@@ -70,15 +81,65 @@ interface SlurmLaunchOptions {
   extra?: string;
 }
 
+interface NotebookLaunchProfile {
+  notebookUri: string;
+  environmentName: string;
+  innerEnvironment: string;
+  innerKind: EnvKind;
+  outerSlurmEnvironment?: string;
+  slurmOptions?: SlurmLaunchOptions;
+  preferredPort?: number;
+}
+
+interface ActiveServerSession {
+  kind: "slurm" | "docker" | "other";
+  notebookUri?: string;
+}
+
 export function activate(context: vscode.ExtensionContext): void {
+  extensionContextRef = context;
   outputChannel = vscode.window.createOutputChannel("Calkit");
   log("Calkit extension activated");
 
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_SELECT_ENV, async () => {
-      return await selectCalkitEnvironment();
+      return await selectCalkitEnvironment(context);
     }),
   );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_CREATE_ENV, async () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        void vscode.window.showErrorMessage(
+          "Open a workspace folder to create Calkit environments.",
+        );
+        return;
+      }
+      await runCreateEnvironmentWizard(workspaceRoot);
+      await refreshNotebookToolbarContext(context);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_START_SLURM, async () => {
+      await startSlurmJobForActiveNotebook(context);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_STOP_SLURM, async () => {
+      await stopSlurmJobForActiveNotebook(context);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveNotebookEditor(() => {
+      void refreshNotebookToolbarContext(context);
+    }),
+  );
+
+  void refreshNotebookToolbarContext(context);
 
   // Proposed API: shows Calkit in the top-level kernel source list.
   // This must never break activation when proposed APIs are unavailable.
@@ -86,10 +147,16 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
-  // No-op
+  if (isProcessRunning(serverProcess)) {
+    serverProcess?.kill();
+    serverProcess = undefined;
+    activeServerSession = undefined;
+  }
 }
 
-async function selectCalkitEnvironment(): Promise<string | undefined> {
+async function selectCalkitEnvironment(
+  context: vscode.ExtensionContext,
+): Promise<string | undefined> {
   const workspaceRoot = getWorkspaceRoot();
   if (!workspaceRoot) {
     void vscode.window.showErrorMessage(
@@ -98,48 +165,86 @@ async function selectCalkitEnvironment(): Promise<string | undefined> {
     return undefined;
   }
 
-  const config = await readCalkitConfig(workspaceRoot);
-  if (!config?.environments || Object.keys(config.environments).length === 0) {
-    void vscode.window.showErrorMessage(
-      "No environments were found in calkit.yaml.",
-    );
-    return undefined;
+  let picked: CalkitCandidate | undefined;
+  let config: CalkitConfig | undefined;
+  while (!picked) {
+    config = await readCalkitConfig(workspaceRoot);
+    if (!config) {
+      return undefined;
+    }
+
+    const environments = config.environments ?? {};
+    const candidates = makeEnvironmentCandidates(environments);
+    const items: Array<
+      (CalkitCandidate & { action: "select" }) | vscode.QuickPickItem
+    > = candidates.map((candidate) => ({
+      ...candidate,
+      action: "select",
+    }));
+
+    items.push({
+      label: "$(add) Create new Calkit environment...",
+      description: "Add SLURM or Julia environment to calkit.yaml",
+      detail: "Create environment",
+    });
+
+    const selected = await vscode.window.showQuickPick(items, {
+      placeHolder: "Select a Calkit environment for this notebook",
+      matchOnDescription: true,
+      matchOnDetail: true,
+    });
+
+    if (!selected) {
+      await refreshNotebookToolbarContext(context);
+      return undefined;
+    }
+
+    if ((selected as { action?: string }).action === "select") {
+      picked = selected as CalkitCandidate;
+      break;
+    }
+
+    await runCreateEnvironmentWizard(workspaceRoot);
   }
 
-  const candidates = makeEnvironmentCandidates(config.environments);
-  if (candidates.length === 0) {
-    void vscode.window.showErrorMessage(
-      "No notebook-capable Calkit environments were found.",
-    );
-    return undefined;
-  }
-
-  const picked = await vscode.window.showQuickPick(candidates, {
-    placeHolder: "Select a Calkit environment for this notebook",
-    matchOnDescription: true,
-    matchOnDetail: true,
-  });
   if (!picked) {
+    await refreshNotebookToolbarContext(context);
     return undefined;
   }
 
   // uv environments should only register/check the kernel and then select it.
   // No Jupyter server launch is needed for this path.
   if (picked.innerKind === "uv") {
-    return await registerAndSelectKernel(
+    const kernelId = await registerAndSelectKernel(
       workspaceRoot,
       picked.innerEnvironment,
       "-e",
     );
+    await refreshNotebookToolbarContext(context);
+    return kernelId;
   }
 
   let slurmOptions: SlurmLaunchOptions | undefined;
   if (picked.outerSlurmEnvironment) {
-    slurmOptions = await askForSlurmOptions();
+    slurmOptions = await askForSlurmOptions(
+      getDefaultSlurmOptions(
+        config?.environments?.[picked.outerSlurmEnvironment],
+      ),
+    );
     if (!slurmOptions) {
+      await refreshNotebookToolbarContext(context);
       return undefined;
     }
   }
+
+  await saveLaunchProfileForActiveNotebook(context, {
+    environmentName: picked.environmentName,
+    innerEnvironment: picked.innerEnvironment,
+    innerKind: picked.innerKind,
+    outerSlurmEnvironment: picked.outerSlurmEnvironment,
+    slurmOptions,
+    preferredPort: getDefaultPort(),
+  });
 
   // For uv/julia in a non-nested setup, only register/check the kernel and
   // then select it in VS Code. No server launch is needed here.
@@ -147,11 +252,13 @@ async function selectCalkitEnvironment(): Promise<string | undefined> {
     !picked.outerSlurmEnvironment &&
     needsKernelRegistration(picked.innerKind)
   ) {
-    return await registerAndSelectKernel(
+    const kernelId = await registerAndSelectKernel(
       workspaceRoot,
       picked.innerEnvironment,
       "-e",
     );
+    await refreshNotebookToolbarContext(context);
+    return kernelId;
   }
 
   // Docker and Slurm environments need tokenized servers
@@ -178,14 +285,21 @@ async function selectCalkitEnvironment(): Promise<string | undefined> {
   const launchCmd = buildLaunchCommand(
     picked,
     workspaceRoot,
-    config,
+    config ?? {},
     port,
     slurmOptions,
     serverToken,
     dockerContainerName,
   );
 
-  startServerInBackground(launchCmd, workspaceRoot);
+  startServerInBackground(launchCmd, workspaceRoot, {
+    kind: picked.outerSlurmEnvironment
+      ? "slurm"
+      : picked.innerKind === "docker"
+      ? "docker"
+      : "other",
+    notebookUri: getActiveNotebookUriKey(),
+  });
 
   const uri = serverToken
     ? `http://localhost:${port}/lab?token=${encodeURIComponent(serverToken)}`
@@ -238,6 +352,7 @@ async function selectCalkitEnvironment(): Promise<string | undefined> {
         });
     }
 
+    await refreshNotebookToolbarContext(context);
     return selectedKernelId;
   }
 
@@ -255,6 +370,7 @@ async function selectCalkitEnvironment(): Promise<string | undefined> {
     await openKernelPicker();
   }
 
+  await refreshNotebookToolbarContext(context);
   return undefined;
 }
 
@@ -265,18 +381,343 @@ function getWorkspaceRoot(): string | undefined {
 async function readCalkitConfig(
   workspaceRoot: string,
 ): Promise<CalkitConfig | undefined> {
+  const fileUri = vscode.Uri.file(path.join(workspaceRoot, "calkit.yaml"));
   try {
-    const fileUri = vscode.Uri.file(path.join(workspaceRoot, "calkit.yaml"));
     const bytes = await vscode.workspace.fs.readFile(fileUri);
     const raw = Buffer.from(bytes).toString("utf8");
-    const parsed = YAML.parse(raw) as CalkitConfig;
-    return parsed;
+    const parsed = YAML.parse(raw) as CalkitConfig | undefined;
+    return parsed ?? {};
   } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return {};
+    }
     void vscode.window.showErrorMessage(
       `Failed to read calkit.yaml: ${String(error)}`,
     );
     return undefined;
   }
+}
+
+async function writeCalkitConfig(
+  workspaceRoot: string,
+  config: CalkitConfig,
+): Promise<boolean> {
+  try {
+    const fileUri = vscode.Uri.file(path.join(workspaceRoot, "calkit.yaml"));
+    const raw = `${YAML.stringify(config)}`;
+    await vscode.workspace.fs.writeFile(fileUri, Buffer.from(raw, "utf8"));
+    return true;
+  } catch (error) {
+    void vscode.window.showErrorMessage(
+      `Failed to write calkit.yaml: ${String(error)}`,
+    );
+    return false;
+  }
+}
+
+function isFileNotFoundError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("filenotfound") ||
+    message.includes("no such file") ||
+    message.includes("entry not found")
+  );
+}
+
+async function runCreateEnvironmentWizard(
+  workspaceRoot: string,
+): Promise<string | undefined> {
+  const kindPick = await vscode.window.showQuickPick(
+    [
+      {
+        label: "slurm",
+        description: "Remote SLURM scheduler environment",
+      },
+      {
+        label: "julia",
+        description: "Julia Project.toml-based environment",
+      },
+    ],
+    {
+      title: "Create Calkit environment",
+      placeHolder: "Pick environment kind",
+    },
+  );
+  if (!kindPick) {
+    return undefined;
+  }
+
+  const config = (await readCalkitConfig(workspaceRoot)) ?? {};
+  const environments = config.environments ?? {};
+
+  if (kindPick.label === "slurm") {
+    const name = await askForEnvironmentName(environments, "my-slurm");
+    if (!name) {
+      return undefined;
+    }
+
+    const host = await vscode.window.showInputBox({
+      title: "SLURM environment host",
+      prompt: "Host where SLURM commands should run",
+      value: "localhost",
+      placeHolder: "e.g. hpc.my-org.edu",
+      validateInput: (value) =>
+        value.trim().length === 0 ? "Host is required" : undefined,
+    });
+    if (host === undefined) {
+      return undefined;
+    }
+
+    const defaults = await askForSlurmOptions();
+    if (!defaults) {
+      return undefined;
+    }
+
+    environments[name] = {
+      kind: "slurm",
+      host: host.trim(),
+      default_options: slurmOptionsToOptionList(defaults),
+    };
+    config.environments = environments;
+
+    const ok = await writeCalkitConfig(workspaceRoot, config);
+    if (!ok) {
+      return undefined;
+    }
+
+    void vscode.window.showInformationMessage(
+      `Created SLURM environment '${name}' in calkit.yaml.`,
+    );
+    return name;
+  }
+
+  const name = await askForEnvironmentName(environments, "my-julia-env");
+  if (!name) {
+    return undefined;
+  }
+
+  const projectTomlPath = await vscode.window.showInputBox({
+    title: "Julia Project.toml path",
+    prompt: "Path to Project.toml (workspace-relative or absolute)",
+    value: "Project.toml",
+    validateInput: (value) => {
+      const trimmed = value.trim();
+      if (trimmed.length === 0) {
+        return "Path is required";
+      }
+      if (path.basename(trimmed) !== "Project.toml") {
+        return "Path must point to Project.toml";
+      }
+      return undefined;
+    },
+  });
+  if (projectTomlPath === undefined) {
+    return undefined;
+  }
+
+  const detectedJulia = await detectJuliaVersion(workspaceRoot);
+  const juliaVersion = await vscode.window.showInputBox({
+    title: "Julia version",
+    prompt: "Julia major.minor version",
+    value: detectedJulia,
+    validateInput: (value) =>
+      value.trim().length === 0 ? "Julia version is required" : undefined,
+  });
+  if (juliaVersion === undefined) {
+    return undefined;
+  }
+
+  environments[name] = {
+    kind: "julia",
+    path: projectTomlPath.trim(),
+    julia: juliaVersion.trim(),
+  };
+  config.environments = environments;
+
+  const ok = await writeCalkitConfig(workspaceRoot, config);
+  if (!ok) {
+    return undefined;
+  }
+
+  void vscode.window.showInformationMessage(
+    `Created Julia environment '${name}' in calkit.yaml.`,
+  );
+  return name;
+}
+
+async function askForEnvironmentName(
+  environments: Record<string, CalkitEnvironment>,
+  suggested: string,
+): Promise<string | undefined> {
+  const name = await vscode.window.showInputBox({
+    title: "Environment name",
+    prompt: "Unique environment name in calkit.yaml",
+    value: suggested,
+    validateInput: (value) => {
+      const trimmed = value.trim();
+      if (trimmed.length === 0) {
+        return "Environment name is required";
+      }
+      if (trimmed.includes(":")) {
+        return "Environment names cannot contain ':'";
+      }
+      if (trimmed in environments) {
+        return "An environment with this name already exists";
+      }
+      return undefined;
+    },
+  });
+  return name?.trim();
+}
+
+async function detectJuliaVersion(workspaceRoot: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("julia", ["--version"], {
+      cwd: workspaceRoot,
+      timeout: 5_000,
+    });
+    const versionMatch = stdout.match(/(\d+)\.(\d+)/);
+    if (versionMatch) {
+      return `${versionMatch[1]}.${versionMatch[2]}`;
+    }
+  } catch {
+    // Fall back to a reasonable default when julia is unavailable.
+  }
+  return "1.10";
+}
+
+function getDefaultSlurmOptions(
+  env: CalkitEnvironment | undefined,
+): SlurmLaunchOptions | undefined {
+  if (!env) {
+    return undefined;
+  }
+
+  if (Array.isArray(env.default_options)) {
+    const parsed = parseSlurmOptionList(env.default_options);
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  // Backward compatibility for early extension versions.
+  const fromLegacy = env.default_slurm_options;
+  if (fromLegacy) {
+    return compactSlurmOptions(fromLegacy);
+  }
+
+  return undefined;
+}
+
+function compactSlurmOptions(options: SlurmLaunchOptions): SlurmLaunchOptions {
+  return {
+    gpus: options.gpus?.trim() || undefined,
+    time: options.time?.trim() || undefined,
+    partition: options.partition?.trim() || undefined,
+    extra: options.extra?.trim() || undefined,
+  };
+}
+
+function slurmOptionsToOptionList(options: SlurmLaunchOptions): string[] {
+  const compact = compactSlurmOptions(options);
+  const result: string[] = [];
+  if (compact.gpus) {
+    result.push(`--gpus=${compact.gpus}`);
+  }
+  if (compact.time) {
+    result.push(`--time=${compact.time}`);
+  }
+  if (compact.partition) {
+    result.push(`--partition=${compact.partition}`);
+  }
+  if (compact.extra) {
+    result.push(compact.extra);
+  }
+  return result;
+}
+
+function parseSlurmOptionList(
+  options: string[],
+): SlurmLaunchOptions | undefined {
+  const result: SlurmLaunchOptions = {};
+  const extraParts: string[] = [];
+
+  for (const raw of options) {
+    const opt = raw.trim();
+    if (!opt) {
+      continue;
+    }
+    const gpusMatch = opt.match(/^--gpus(?:=|\s+)(.+)$/);
+    if (gpusMatch) {
+      result.gpus = gpusMatch[1].trim();
+      continue;
+    }
+    const timeMatch = opt.match(/^--time(?:=|\s+)(.+)$/);
+    if (timeMatch) {
+      result.time = timeMatch[1].trim();
+      continue;
+    }
+    const partitionMatch = opt.match(/^--partition(?:=|\s+)(.+)$/);
+    if (partitionMatch) {
+      result.partition = partitionMatch[1].trim();
+      continue;
+    }
+    extraParts.push(opt);
+  }
+
+  if (extraParts.length > 0) {
+    result.extra = extraParts.join(" ");
+  }
+
+  const compact = compactSlurmOptions(result);
+  if (!compact.gpus && !compact.time && !compact.partition && !compact.extra) {
+    return undefined;
+  }
+  return compact;
+}
+
+function getActiveNotebookUriKey(): string | undefined {
+  return vscode.window.activeNotebookEditor?.notebook.uri.toString();
+}
+
+function getNotebookLaunchProfiles(
+  context: vscode.ExtensionContext,
+): Record<string, NotebookLaunchProfile> {
+  return (
+    context.workspaceState.get<Record<string, NotebookLaunchProfile>>(
+      STATE_KEY_NOTEBOOK_PROFILES,
+      {},
+    ) ?? {}
+  );
+}
+
+async function saveLaunchProfileForActiveNotebook(
+  context: vscode.ExtensionContext,
+  profile: Omit<NotebookLaunchProfile, "notebookUri">,
+): Promise<void> {
+  const notebookUri = getActiveNotebookUriKey();
+  if (!notebookUri) {
+    return;
+  }
+  const allProfiles = getNotebookLaunchProfiles(context);
+  allProfiles[notebookUri] = {
+    notebookUri,
+    ...profile,
+  };
+  await context.workspaceState.update(STATE_KEY_NOTEBOOK_PROFILES, allProfiles);
+}
+
+function getLaunchProfileForActiveNotebook(
+  context: vscode.ExtensionContext,
+): NotebookLaunchProfile | undefined {
+  const notebookUri = getActiveNotebookUriKey();
+  if (!notebookUri) {
+    return undefined;
+  }
+  return getNotebookLaunchProfiles(context)[notebookUri];
 }
 
 function makeEnvironmentCandidates(
@@ -348,10 +789,13 @@ function makeEnvironmentCandidates(
   return [...standalone, ...nested];
 }
 
-async function askForSlurmOptions(): Promise<SlurmLaunchOptions | undefined> {
+async function askForSlurmOptions(
+  defaults?: SlurmLaunchOptions,
+): Promise<SlurmLaunchOptions | undefined> {
   const gpus = await vscode.window.showInputBox({
     title: "Slurm option: --gpus",
     prompt: "Optional GPU count or value (e.g. 1 or a100:1)",
+    value: defaults?.gpus ?? "",
     placeHolder: "leave blank to skip",
   });
   if (gpus === undefined) {
@@ -361,6 +805,7 @@ async function askForSlurmOptions(): Promise<SlurmLaunchOptions | undefined> {
   const time = await vscode.window.showInputBox({
     title: "Slurm option: --time",
     prompt: "Optional time (e.g. 60 or 01:00:00)",
+    value: defaults?.time ?? "",
     placeHolder: "leave blank to skip",
   });
   if (time === undefined) {
@@ -370,6 +815,7 @@ async function askForSlurmOptions(): Promise<SlurmLaunchOptions | undefined> {
   const partition = await vscode.window.showInputBox({
     title: "Slurm option: --partition",
     prompt: "Optional partition name",
+    value: defaults?.partition ?? "",
     placeHolder: "leave blank to skip",
   });
   if (partition === undefined) {
@@ -379,13 +825,14 @@ async function askForSlurmOptions(): Promise<SlurmLaunchOptions | undefined> {
   const extra = await vscode.window.showInputBox({
     title: "Additional srun options",
     prompt: "Optional raw options appended as-is (e.g. --cpus-per-task=8)",
+    value: defaults?.extra ?? "",
     placeHolder: "leave blank to skip",
   });
   if (extra === undefined) {
     return undefined;
   }
 
-  return { gpus, time, partition, extra };
+  return compactSlurmOptions({ gpus, time, partition, extra });
 }
 
 function getDefaultPort(): number {
@@ -1183,7 +1630,148 @@ function shQuote(input: string): string {
   return `'${input.replace(/'/g, `'\\''`)}'`;
 }
 
-function startServerInBackground(command: string, cwd: string): void {
+async function startSlurmJobForActiveNotebook(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const workspaceRoot = getWorkspaceRoot();
+  if (!workspaceRoot) {
+    void vscode.window.showErrorMessage(
+      "Open a workspace folder to start a Calkit SLURM notebook job.",
+    );
+    return;
+  }
+
+  const profile = getLaunchProfileForActiveNotebook(context);
+  if (!profile?.outerSlurmEnvironment) {
+    void vscode.window.showInformationMessage(
+      "No saved SLURM notebook profile for this notebook. Select a nested slurm:environment first.",
+    );
+    return;
+  }
+
+  const config = await readCalkitConfig(workspaceRoot);
+  if (!config?.environments) {
+    void vscode.window.showErrorMessage(
+      "Could not read environments from calkit.yaml.",
+    );
+    return;
+  }
+
+  const picked: CalkitCandidate = {
+    label: profile.environmentName,
+    description: `${profile.outerSlurmEnvironment} + ${profile.innerKind}`,
+    detail: "Resume SLURM notebook session",
+    environmentName: profile.environmentName,
+    innerEnvironment: profile.innerEnvironment,
+    innerKind: profile.innerKind,
+    outerSlurmEnvironment: profile.outerSlurmEnvironment,
+    outerKind: "slurm",
+  };
+
+  const port = profile.preferredPort ?? getDefaultPort();
+  const serverToken = createServerToken();
+  const launchCmd = buildLaunchCommand(
+    picked,
+    workspaceRoot,
+    config,
+    port,
+    profile.slurmOptions,
+    serverToken,
+    undefined,
+  );
+
+  startServerInBackground(launchCmd, workspaceRoot, {
+    kind: "slurm",
+    notebookUri: profile.notebookUri,
+  });
+
+  const uri = `http://localhost:${port}/lab?token=${encodeURIComponent(
+    serverToken,
+  )}`;
+  await vscode.env.clipboard.writeText(uri);
+
+  const isReady = await waitForServerReady(uri);
+  const connected = isReady ? await selectExistingJupyterServer(uri) : false;
+
+  const selectedKernelId = await registerAndSelectKernel(
+    workspaceRoot,
+    profile.innerEnvironment,
+    "-e",
+  );
+
+  if (!connected) {
+    void vscode.window.showWarningMessage(
+      `SLURM server started, but VS Code could not auto-connect yet. URI copied: ${uri}`,
+    );
+  } else if (!selectedKernelId) {
+    void vscode.window.showInformationMessage(
+      "Connected to SLURM server. Select kernel manually if needed.",
+    );
+  }
+
+  await refreshNotebookToolbarContext(context);
+}
+
+async function stopSlurmJobForActiveNotebook(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const runningProcess = serverProcess;
+  if (!runningProcess) {
+    void vscode.window.showInformationMessage(
+      "No running Calkit SLURM notebook job.",
+    );
+    await refreshNotebookToolbarContext(context);
+    return;
+  }
+  if (
+    !isProcessRunning(runningProcess) ||
+    activeServerSession?.kind !== "slurm"
+  ) {
+    void vscode.window.showInformationMessage(
+      "No running Calkit SLURM notebook job.",
+    );
+    await refreshNotebookToolbarContext(context);
+    return;
+  }
+
+  runningProcess.kill();
+  log("Stopped SLURM notebook job by user request");
+  activeServerSession = undefined;
+  serverProcess = undefined;
+  await refreshNotebookToolbarContext(context);
+}
+
+async function refreshNotebookToolbarContext(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const profile = getLaunchProfileForActiveNotebook(context);
+  const hasResumableSlurm = Boolean(profile?.outerSlurmEnvironment);
+  const isRunningSlurm =
+    activeServerSession?.kind === "slurm" && isProcessRunning(serverProcess);
+
+  await vscode.commands.executeCommand(
+    "setContext",
+    "calkit.hasResumableSlurmSession",
+    hasResumableSlurm,
+  );
+  await vscode.commands.executeCommand(
+    "setContext",
+    "calkit.hasRunningSlurmSession",
+    isRunningSlurm,
+  );
+}
+
+function isProcessRunning(
+  process: import("node:child_process").ChildProcess | undefined,
+): boolean {
+  return Boolean(process && process.exitCode === null && !process.killed);
+}
+
+function startServerInBackground(
+  command: string,
+  cwd: string,
+  session: ActiveServerSession,
+): void {
   if (
     serverProcess &&
     serverProcess.exitCode === null &&
@@ -1200,6 +1788,7 @@ function startServerInBackground(command: string, cwd: string): void {
     env: process.env,
   });
   serverProcess = child;
+  activeServerSession = session;
 
   child.stdout?.on("data", (chunk: Buffer | string) => {
     const text = chunk.toString().trim();
@@ -1230,6 +1819,10 @@ function startServerInBackground(command: string, cwd: string): void {
     );
     if (serverProcess === child) {
       serverProcess = undefined;
+      activeServerSession = undefined;
+      if (extensionContextRef) {
+        void refreshNotebookToolbarContext(extensionContextRef);
+      }
     }
   });
 }
@@ -1247,10 +1840,10 @@ function registerKernelSourceIfAvailable(
       provideNotebookKernelSourceActions: async () => {
         return [
           {
-            label: "Calkit",
+            label: "Calkit environments...",
             detail: "Select a Calkit environment and kernel",
             command: {
-              title: "Calkit",
+              title: "Calkit environments...",
               command: COMMAND_SELECT_ENV,
             },
           },

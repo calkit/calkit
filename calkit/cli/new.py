@@ -1317,6 +1317,75 @@ def new_uv_env(
             repo.git.commit(["-m", f"Add uv environment {name}"])
 
 
+@new_app.command("slurm-env")
+def new_slurm_env(
+    name: Annotated[
+        str, typer.Option("--name", "-n", help="Environment name.")
+    ],
+    host: Annotated[
+        str,
+        typer.Option("--host", help="Host where SLURM commands should run."),
+    ] = "localhost",
+    default_options: Annotated[
+        list[str],
+        typer.Option(
+            "--default-option",
+            help=(
+                "Default sbatch/srun option string (for example --gpus=1). "
+                "Repeat for multiple options."
+            ),
+        ),
+    ] = [],
+    description: Annotated[
+        str | None, typer.Option("--description", help="Description.")
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite any existing environment with this name.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
+):
+    """Create a new SLURM environment."""
+    host = host.strip()
+    if not host:
+        raise_error("Host is required")
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if isinstance(envs, list):
+        typer.echo("Converting environments from list to dict")
+        envs = {env.pop("name"): env for env in envs}
+    if name in envs and not overwrite:
+        raise_error(
+            f"Environment with name {name} already exists "
+            "(use -f to overwrite)"
+        )
+    normalized_default_options = [
+        opt.strip() for opt in default_options if opt.strip()
+    ]
+    env = {"kind": "slurm", "host": host}
+    if normalized_default_options:
+        env["default_options"] = normalized_default_options  # type: ignore
+    if description is not None:
+        env["description"] = description
+    envs[name] = env
+    ck_info["environments"] = envs
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    if not no_commit:
+        repo = git.Repo()
+        repo.git.add("calkit.yaml")
+        if repo.git.diff(["--staged", "calkit.yaml"]):
+            repo.git.commit(
+                ["calkit.yaml", "-m", f"Add SLURM environment {name}"]
+            )
+
+
 @new_app.command("uv-venv")
 def new_uv_venv(
     name: Annotated[

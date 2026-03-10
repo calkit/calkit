@@ -612,23 +612,6 @@ async function readCalkitConfig(
   }
 }
 
-async function writeCalkitConfig(
-  workspaceRoot: string,
-  config: CalkitConfig,
-): Promise<boolean> {
-  try {
-    const fileUri = vscode.Uri.file(path.join(workspaceRoot, "calkit.yaml"));
-    const raw = `${YAML.stringify(config)}`;
-    await vscode.workspace.fs.writeFile(fileUri, Buffer.from(raw, "utf8"));
-    return true;
-  } catch (error) {
-    void vscode.window.showErrorMessage(
-      `Failed to write calkit.yaml: ${String(error)}`,
-    );
-    return false;
-  }
-}
-
 function isFileNotFoundError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
@@ -743,7 +726,6 @@ async function runCreateEnvironmentWizard(
     if (kindPick.label === "slurm") {
       const created = await runCreateSlurmEnvironmentWizard(
         workspaceRoot,
-        config,
         environments,
       );
       if (created === "__back__") {
@@ -830,7 +812,6 @@ async function showInputBoxStep(options: {
 
 async function runCreateSlurmEnvironmentWizard(
   workspaceRoot: string,
-  config: CalkitConfig,
   environments: Record<string, CalkitEnvironment>,
 ): Promise<string | "__back__" | undefined> {
   let name = "my-slurm";
@@ -902,15 +883,27 @@ async function runCreateSlurmEnvironmentWizard(
     }
     defaults = optionsStep.value;
 
-    environments[name] = {
-      kind: "slurm",
-      host,
-      default_options: slurmOptionsToOptionList(defaults),
-    };
-    config.environments = environments;
+    const args = ["new", "slurm-env", "--name", name, "--host", host];
+    for (const option of slurmOptionsToOptionList(defaults)) {
+      args.push("--default-option", option);
+    }
+    args.push("--no-commit");
 
-    const ok = await writeCalkitConfig(workspaceRoot, config);
-    if (!ok) {
+    try {
+      await execFileAsync("calkit", args, {
+        cwd: workspaceRoot,
+      });
+    } catch (error: unknown) {
+      const err = error as {
+        stdout?: string;
+        stderr?: string;
+        message?: string;
+      };
+      const details = (err.stderr || err.stdout || err.message || "").trim();
+      log(`Failed to create SLURM environment: ${details}`);
+      void vscode.window.showErrorMessage(
+        `Failed to create SLURM environment: ${details || "unknown error"}`,
+      );
       return undefined;
     }
 

@@ -215,6 +215,7 @@ function makeEnvironmentCandidates(
   ]);
 
   const standalone: CalkitCandidate[] = [];
+  const allNonSlurmInners: CalkitCandidate[] = [];
   const slurmOuterNames: string[] = [];
 
   for (const [name, env] of Object.entries(environments)) {
@@ -222,6 +223,17 @@ function makeEnvironmentCandidates(
       slurmOuterNames.push(name);
       continue;
     }
+
+    // Any non-slurm environment can be used as an inner environment for a
+    // slurm outer environment (for example: myslurm:py).
+    allNonSlurmInners.push({
+      label: name,
+      description: env.kind,
+      detail: "Run in this environment under a slurm outer environment",
+      environmentName: name,
+      innerEnvironment: name,
+      innerKind: env.kind,
+    });
 
     if (!notebookKinds.has(env.kind)) {
       continue;
@@ -239,7 +251,7 @@ function makeEnvironmentCandidates(
 
   const nested: CalkitCandidate[] = [];
   for (const slurmOuter of slurmOuterNames) {
-    for (const inner of standalone) {
+    for (const inner of allNonSlurmInners) {
       nested.push({
         label: `${slurmOuter}:${inner.environmentName}`,
         description: `slurm + ${inner.description}`,

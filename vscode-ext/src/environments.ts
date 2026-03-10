@@ -162,9 +162,21 @@ export function makeEnvironmentCandidates(
   const allNonSlurmInners: CalkitCandidate[] = [];
   const slurmOuterNames: string[] = [];
 
+  const isNotebookCapableDocker = (env: CalkitEnvironment): boolean => {
+    if (env.kind !== "docker") {
+      return true;
+    }
+    const image = String(env.image ?? "").toLowerCase();
+    return !image.includes("texlive");
+  };
+
   for (const [name, env] of Object.entries(environments)) {
     if (env.kind === "slurm") {
       slurmOuterNames.push(name);
+      continue;
+    }
+
+    if (!isNotebookCapableDocker(env)) {
       continue;
     }
 

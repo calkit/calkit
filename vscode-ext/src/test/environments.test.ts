@@ -91,3 +91,17 @@ test("makeEnvironmentCandidates returns standalone notebook envs and nested slur
     "slurmOuter:sshEnv",
   ]);
 });
+
+test("makeEnvironmentCandidates excludes texlive docker environments", () => {
+  const candidates = makeEnvironmentCandidates({
+    slurmOuter: { kind: "slurm", host: "cluster.school.edu" },
+    texliveDocker: { kind: "docker", image: "texlive/texlive:latest" },
+    normalDocker: { kind: "docker", image: "jupyter/minimal-notebook:latest" },
+    pyEnv: { kind: "uv", path: "pyproject.toml" },
+  });
+
+  assert.ok(!candidates.some((c) => c.label === "texliveDocker"));
+  assert.ok(!candidates.some((c) => c.label === "slurmOuter:texliveDocker"));
+  assert.ok(candidates.some((c) => c.label === "normalDocker"));
+  assert.ok(candidates.some((c) => c.label === "slurmOuter:normalDocker"));
+});

@@ -206,6 +206,7 @@ def check_env_kernel(
         if not env_dir:
             env_dir = "."
         env_dir_abs = os.path.abspath(env_dir)
+        # Don't include version in display_name; IJulia appends it automatically
         julia_cmd = (
             "import IJulia;"
             "kp=IJulia.installkernel("
@@ -231,6 +232,10 @@ def check_env_kernel(
             raise_error(f"Failed to create kernel:\n{res.stdout}")
         kernel_path = res.stdout.strip()
         kernel_name = os.path.basename(kernel_path)
+        # Update display_name to include version for matching in VS Code
+        # The kernel name format is like: project_-env-X.Y or project_-env-X.Y.Z
+        # Extract version from kernel_name or use julia_version
+        display_name = f"{display_name} {julia_version}"
         if not json_output:
             typer.echo(
                 f"Registered IJulia kernel '{kernel_name}' at: {kernel_path}"

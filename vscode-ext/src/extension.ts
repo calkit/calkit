@@ -143,6 +143,9 @@ async function selectCalkitEnvironment(): Promise<string | undefined> {
     );
   }
 
+  const slurmToken = picked.outerSlurmEnvironment
+    ? createServerToken()
+    : undefined;
   const port = getDefaultPort();
   const launchCmd = buildLaunchCommand(
     picked,
@@ -150,6 +153,7 @@ async function selectCalkitEnvironment(): Promise<string | undefined> {
     config,
     port,
     slurmOptions,
+    slurmToken,
   );
 
   const terminal =
@@ -158,8 +162,41 @@ async function selectCalkitEnvironment(): Promise<string | undefined> {
   terminal.show(true);
   terminal.sendText(launchCmd, true);
 
-  const uri = `http://localhost:${port}/lab`;
+  const uri = slurmToken
+    ? `http://localhost:${port}/lab?token=${encodeURIComponent(slurmToken)}`
+    : `http://localhost:${port}/lab`;
   await vscode.env.clipboard.writeText(uri);
+
+  if (picked.outerSlurmEnvironment) {
+    // For Slurm-backed servers, prompt VS Code to connect to the tokenized URI,
+    // then select the expected inner-environment kernel.
+    await selectExistingJupyterServer(uri);
+
+    const selectedKernelId = await registerAndSelectKernel(
+      workspaceRoot,
+      picked.innerEnvironment,
+      "-e",
+    );
+
+    if (!selectedKernelId) {
+      void vscode.window
+        .showInformationMessage(
+          `Launched Slurm Jupyter server. URI copied: ${uri}. Select the kernel manually if needed.`,
+          "Select Jupyter URI",
+          "Select Kernel",
+        )
+        .then(async (action) => {
+          if (action === "Select Jupyter URI") {
+            await selectExistingJupyterServer(uri);
+          }
+          if (action === "Select Kernel") {
+            await openKernelPicker();
+          }
+        });
+    }
+
+    return selectedKernelId;
+  }
 
   const action = await vscode.window.showInformationMessage(
     `Launched Jupyter via Calkit. URI copied: ${uri}`,
@@ -172,7 +209,7 @@ async function selectCalkitEnvironment(): Promise<string | undefined> {
   }
 
   if (action === "Select Jupyter URI") {
-    await vscode.commands.executeCommand("jupyter.selectjupyteruri");
+    await selectExistingJupyterServer(uri);
   }
 
   return undefined;
@@ -321,14 +358,23 @@ function buildLaunchCommand(
   config: CalkitConfig,
   port: number,
   slurmOptions?: SlurmLaunchOptions,
+  slurmToken?: string,
 ): string {
   const cdPart = `cd ${shQuote(workspaceRoot)}`;
   const checkPart = `calkit check env -n ${shQuote(picked.innerEnvironment)}`;
-  const kernelCheckPart = needsKernelRegistration(picked.innerKind)
+  const shouldRunKernelCheck =
+    Boolean(picked.outerSlurmEnvironment) ||
+    needsKernelRegistration(picked.innerKind);
+  const kernelCheckPart = shouldRunKernelCheck
     ? `calkit nb check-kernel -e ${shQuote(picked.innerEnvironment)}`
     : "";
-  const slurmIpArg = picked.outerSlurmEnvironment ? " --ip=0.0.0.0" : "";
-  const jupyterPart = `calkit jupyter lab --no-browser --ServerApp.token='' --ServerApp.password='' --port=${port}${slurmIpArg}`;
+
+  const jupyterPart = picked.outerSlurmEnvironment
+    ? `calkit jupyter lab --ip=0.0.0.0 --no-browser --port=${port}${
+        slurmToken ? ` --ServerApp.token=${shQuote(slurmToken)}` : ""
+      }`
+    : `calkit jupyter lab --no-browser --ServerApp.token='' --ServerApp.password='' --port=${port}`;
+
   const xenvPart = `calkit xenv -n ${shQuote(
     picked.innerEnvironment,
   )} -- ${jupyterPart}`;
@@ -382,6 +428,29 @@ function needsKernelRegistration(kind: EnvKind): boolean {
   return kind === "uv" || kind === "julia";
 }
 
+function createServerToken(): string {
+  return `calkit-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+async function selectExistingJupyterServer(uri: string): Promise<void> {
+  // Try a few command shapes; Jupyter command contracts vary across versions.
+  const attempts: Array<{ command: string; args: unknown[] }> = [
+    { command: "jupyter.selectjupyteruri", args: [uri] },
+    { command: "jupyter.selectjupyteruri", args: [{ uri }] },
+    { command: "jupyter.commandLineSelectJupyterURI", args: [uri] },
+    { command: "jupyter.selectjupyteruri", args: [] },
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      await vscode.commands.executeCommand(attempt.command, ...attempt.args);
+      return;
+    } catch {
+      // Try next command signature.
+    }
+  }
+}
+
 async function registerAndSelectKernel(
   workspaceRoot: string,
   envName: string,
@@ -429,9 +498,6 @@ async function registerAndSelectKernel(
 
     if (selectedKernelId) {
       log(`Kernel selection successful`);
-      void vscode.window.showInformationMessage(
-        `Registered kernel '${kernelName}' and selected it for the active notebook.`,
-      );
       return selectedKernelId;
     }
 

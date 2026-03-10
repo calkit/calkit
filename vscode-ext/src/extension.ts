@@ -24,12 +24,15 @@ const COMMAND_STOP_SLURM = "calkit-vscode.stopCalkitSlurmJob";
 const COMMAND_RESTART_JOB = "calkit-vscode.restartCalkitJob";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
 const execFileAsync = promisify(execFile);
+const DEFAULT_MIN_CALKIT_VERSION = "0.35.0";
+const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
 
 let outputChannel: vscode.OutputChannel;
 let serverProcess: import("node:child_process").ChildProcess | undefined;
 let activeServerSession: ActiveServerSession | undefined;
 let extensionContextRef: vscode.ExtensionContext | undefined;
 const autoSelectingNotebookUris = new Set<string>();
+let hasCheckedCalkitCli = false;
 
 function log(message: string): void {
   if (outputChannel) {
@@ -126,6 +129,8 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  void ensureCalkitCliReady();
+
   void refreshNotebookToolbarContext(context);
 
   // Proposed API: shows Calkit in the top-level kernel source list.
@@ -133,6 +138,187 @@ export function activate(context: vscode.ExtensionContext): void {
   registerKernelSourceIfAvailable(context);
 
   console.log("Calkit extension: activate() completed successfully");
+}
+
+async function ensureCalkitCliReady(): Promise<void> {
+  if (hasCheckedCalkitCli) {
+    return;
+  }
+  hasCheckedCalkitCli = true;
+
+  const minimumVersion = DEFAULT_MIN_CALKIT_VERSION;
+  const workspaceRoot = getWorkspaceRoot();
+
+  try {
+    const { stdout, stderr } = await execFileAsync("calkit", ["--version"], {
+      cwd: workspaceRoot,
+      timeout: 5_000,
+    });
+    const output = `${stdout ?? ""}\n${stderr ?? ""}`;
+    const installedVersion = extractFirstSemver(output);
+
+    if (!installedVersion) {
+      log("Could not parse Calkit CLI version from 'calkit --version' output");
+      return;
+    }
+
+    const hasNotebookUpdate = await hasUpdateNotebookCommand(workspaceRoot);
+    if (!hasNotebookUpdate) {
+      await promptCalkitInstallOrUpgrade({
+        mode: "upgrade",
+        title: "Calkit CLI is too old for this extension",
+        message: `Detected Calkit ${installedVersion}, but this extension requires at least ${minimumVersion} with 'calkit update notebook'.`,
+      });
+      return;
+    }
+
+    if (compareSemver(installedVersion, minimumVersion) < 0) {
+      await promptCalkitInstallOrUpgrade({
+        mode: "upgrade",
+        title: "Calkit CLI upgrade required",
+        message: `Detected Calkit ${installedVersion}, but this extension requires version ${minimumVersion} or newer.`,
+      });
+      return;
+    }
+
+    log(
+      `Calkit CLI check passed (installed=${installedVersion}, min=${minimumVersion})`,
+    );
+  } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    log(`Calkit CLI check failed: ${details}`);
+    await promptCalkitInstallOrUpgrade({
+      mode: "install",
+      title: "Calkit CLI not found",
+      message:
+        "This extension requires the Calkit CLI in your PATH. Install it to use notebook environment features.",
+    });
+  }
+}
+
+function extractFirstSemver(input: string): string | undefined {
+  const match = input.match(/\b(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?\b/);
+  return match?.[1] && match?.[2] && match?.[3]
+    ? `${match[1]}.${match[2]}.${match[3]}`
+    : undefined;
+}
+
+function compareSemver(a: string, b: string): number {
+  const pa = a.split(".").map((n) => Number.parseInt(n, 10));
+  const pb = b.split(".").map((n) => Number.parseInt(n, 10));
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const av = Number.isFinite(pa[i]) ? pa[i] : 0;
+    const bv = Number.isFinite(pb[i]) ? pb[i] : 0;
+    if (av > bv) {
+      return 1;
+    }
+    if (av < bv) {
+      return -1;
+    }
+  }
+  return 0;
+}
+
+async function hasUpdateNotebookCommand(
+  workspaceRoot?: string,
+): Promise<boolean> {
+  try {
+    await execFileAsync("calkit", ["update", "notebook", "--help"], {
+      cwd: workspaceRoot,
+      timeout: 5_000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function promptCalkitInstallOrUpgrade(options: {
+  mode: "install" | "upgrade";
+  title: string;
+  message: string;
+}): Promise<void> {
+  const primaryAction = options.mode === "install" ? "Install" : "Upgrade";
+  const choice = await vscode.window.showWarningMessage(
+    options.message,
+    { modal: false, detail: options.title },
+    primaryAction,
+    "Open Install Docs",
+  );
+
+  if (choice === "Open Install Docs") {
+    await vscode.env.openExternal(vscode.Uri.parse(CALKIT_INSTALL_DOCS_URL));
+    return;
+  }
+
+  if (choice !== primaryAction) {
+    return;
+  }
+
+  const command = await pickCalkitSetupCommand(options.mode);
+  if (!command) {
+    return;
+  }
+
+  const terminal = vscode.window.createTerminal("Calkit Setup");
+  terminal.show(true);
+  terminal.sendText(command, true);
+  void vscode.window.showInformationMessage(
+    "Started Calkit setup command in terminal. After it finishes, reload VS Code.",
+  );
+}
+
+async function pickCalkitSetupCommand(
+  mode: "install" | "upgrade",
+): Promise<string | undefined> {
+  const isWindows = process.platform === "win32";
+  const installItems = [
+    {
+      label: "Official installer (recommended)",
+      description: isWindows
+        ? 'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"'
+        : "curl -LsSf install.calkit.org | sh",
+      command: isWindows
+        ? 'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"'
+        : "curl -LsSf install.calkit.org | sh",
+    },
+    {
+      label: "uv tool",
+      description:
+        mode === "install"
+          ? "uv tool install calkit-python"
+          : "uv tool upgrade calkit-python",
+      command:
+        mode === "install"
+          ? "uv tool install calkit-python"
+          : "uv tool upgrade calkit-python",
+    },
+    {
+      label: "pip",
+      description: "python -m pip install --upgrade calkit-python",
+      command: "python -m pip install --upgrade calkit-python",
+    },
+    {
+      label: "Windows PowerShell installer",
+      description:
+        'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"',
+      command:
+        'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"',
+    },
+    {
+      label: "Linux/macOS installer",
+      description: "curl -LsSf install.calkit.org | sh",
+      command: "curl -LsSf install.calkit.org | sh",
+    },
+  ];
+
+  const selected = await vscode.window.showQuickPick(installItems, {
+    title: mode === "install" ? "Install Calkit CLI" : "Upgrade Calkit CLI",
+    placeHolder: "Choose an installation command to run in terminal",
+    matchOnDescription: true,
+  });
+  return selected?.command;
 }
 
 export function deactivate(): void {

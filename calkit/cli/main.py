@@ -735,6 +735,7 @@ def pull(
 def push(
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
     no_dvc: Annotated[bool, typer.Option("--no-dvc")] = False,
+    no_git: Annotated[bool, typer.Option("--no-git")] = False,
     git_args: Annotated[
         list[str],
         typer.Option("--git-arg", help="Additional Git args."),
@@ -748,14 +749,6 @@ def push(
     ] = False,
 ):
     """Push with both Git and DVC."""
-    typer.echo("Pushing to Git remote")
-    try:
-        git_cmd = ["git", "push"]
-        if not no_recursive and "--recurse-submodules" not in git_args:
-            git_cmd.append("--recurse-submodules=on-demand")
-        subprocess.check_call(git_cmd + git_args)
-    except subprocess.CalledProcessError:
-        raise_error("Git push failed")
     if not no_dvc:
         typer.echo("Pushing to DVC remote")
         if not no_check_auth:
@@ -774,6 +767,15 @@ def push(
         result = run_dvc_command(["push"] + dvc_args)
         if result != 0:
             raise_error("DVC push failed")
+    if not no_git:
+        typer.echo("Pushing to Git remote")
+        try:
+            git_cmd = ["git", "push"]
+            if not no_recursive and "--recurse-submodules" not in git_args:
+                git_cmd.append("--recurse-submodules=on-demand")
+            subprocess.check_call(git_cmd + git_args)
+        except subprocess.CalledProcessError:
+            raise_error("Git push failed")
 
 
 @app.command(name="sync")

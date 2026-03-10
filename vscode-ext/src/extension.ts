@@ -1,14 +1,17 @@
 import * as path from "node:path";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
+import * as http from "node:http";
+import * as https from "node:https";
+import * as net from "node:net";
 import * as vscode from "vscode";
 import YAML from "yaml";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
-const SERVER_TERMINAL_NAME = "Calkit Notebook Server";
 const execFileAsync = promisify(execFile);
 
 let outputChannel: vscode.OutputChannel;
+let serverProcess: import("node:child_process").ChildProcess | undefined;
 
 function log(message: string): void {
   if (outputChannel) {
@@ -34,6 +37,14 @@ type EnvKind =
 interface CalkitEnvironment {
   kind: EnvKind;
   host?: string;
+  image?: string;
+  platform?: string;
+  env_vars?: Record<string, string>;
+  gpus?: string;
+  ports?: string[];
+  user?: string;
+  wdir?: string;
+  args?: string[];
 }
 
 interface CalkitConfig {
@@ -143,52 +154,84 @@ async function selectCalkitEnvironment(): Promise<string | undefined> {
     );
   }
 
-  const slurmToken = picked.outerSlurmEnvironment
-    ? createServerToken()
-    : undefined;
+  // Docker and Slurm environments need tokenized servers
+  const needsToken =
+    picked.outerSlurmEnvironment || picked.innerKind === "docker";
+  const serverToken = needsToken ? createServerToken() : undefined;
   const port = getDefaultPort();
+  let dockerContainerName: string | undefined;
+  if (!picked.outerSlurmEnvironment && picked.innerKind === "docker") {
+    dockerContainerName = getManagedDockerContainerName(
+      picked.innerEnvironment,
+      port,
+    );
+    await stopManagedDockerContainerIfExists(dockerContainerName);
+    const portIsFree = await waitForPortToBeFree(port, 7_000);
+    if (!portIsFree) {
+      void vscode.window.showErrorMessage(
+        `Cannot start Docker notebook server: localhost:${port} is already in use. Stop the process using that port or change 'calkit.notebook.defaultJupyterPort'.`,
+      );
+      return undefined;
+    }
+  }
+
   const launchCmd = buildLaunchCommand(
     picked,
     workspaceRoot,
     config,
     port,
     slurmOptions,
-    slurmToken,
+    serverToken,
+    dockerContainerName,
   );
 
-  const terminal =
-    vscode.window.terminals.find((t) => t.name === SERVER_TERMINAL_NAME) ??
-    vscode.window.createTerminal(SERVER_TERMINAL_NAME);
-  terminal.show(true);
-  terminal.sendText(launchCmd, true);
+  startServerInBackground(launchCmd, workspaceRoot);
 
-  const uri = slurmToken
-    ? `http://localhost:${port}/lab?token=${encodeURIComponent(slurmToken)}`
+  const uri = serverToken
+    ? `http://localhost:${port}/lab?token=${encodeURIComponent(serverToken)}`
     : `http://localhost:${port}/lab`;
   await vscode.env.clipboard.writeText(uri);
+  const kernelsBeforeConnect = await getResolvedKernelIdsForActiveNotebook();
 
-  if (picked.outerSlurmEnvironment) {
-    // For Slurm-backed servers, prompt VS Code to connect to the tokenized URI,
-    // then select the expected inner-environment kernel.
-    await selectExistingJupyterServer(uri);
+  // Docker and Slurm environments require connecting to an existing server
+  if (picked.outerSlurmEnvironment || picked.innerKind === "docker") {
+    const envType = picked.outerSlurmEnvironment ? "Slurm" : "Docker";
+    const isReady = await waitForServerReady(uri);
+    const connected = isReady ? await selectExistingJupyterServer(uri) : false;
 
-    const selectedKernelId = await registerAndSelectKernel(
-      workspaceRoot,
-      picked.innerEnvironment,
-      "-e",
-    );
+    // For Docker, we don't need to register a kernel separately since it should
+    // be in the image, but we can try to select it if needed
+    let selectedKernelId: string | undefined;
+    if (picked.outerSlurmEnvironment) {
+      selectedKernelId = await registerAndSelectKernel(
+        workspaceRoot,
+        picked.innerEnvironment,
+        "-e",
+      );
+    } else if (picked.innerKind === "docker") {
+      // After connecting to a Docker-backed server, try selecting a sensible
+      // default kernel automatically before falling back to manual selection.
+      selectedKernelId = await tryAutoSelectBestAvailableKernel({
+        existingKernelIds: kernelsBeforeConnect,
+        requireNewKernel: true,
+      });
+    }
 
-    if (!selectedKernelId) {
+    if (!connected) {
+      void vscode.window.showWarningMessage(
+        `${envType} server started, but VS Code could not auto-connect yet. URI copied: ${uri}`,
+      );
+    }
+
+    const hasSelectedKernel = await hasAnyKernelSelectedForActiveNotebook();
+
+    if (!selectedKernelId && !hasSelectedKernel) {
       void vscode.window
         .showInformationMessage(
-          `Launched Slurm Jupyter server. URI copied: ${uri}. Select the kernel manually if needed.`,
-          "Select Jupyter URI",
+          `Launched ${envType} Jupyter server. Select the kernel manually if needed.`,
           "Select Kernel",
         )
         .then(async (action) => {
-          if (action === "Select Jupyter URI") {
-            await selectExistingJupyterServer(uri);
-          }
           if (action === "Select Kernel") {
             await openKernelPicker();
           }
@@ -198,18 +241,18 @@ async function selectCalkitEnvironment(): Promise<string | undefined> {
     return selectedKernelId;
   }
 
+  const isReady = await waitForServerReady(uri);
+  const connected = isReady ? await selectExistingJupyterServer(uri) : false;
+
   const action = await vscode.window.showInformationMessage(
-    `Launched Jupyter via Calkit. URI copied: ${uri}`,
+    connected
+      ? "Launched Jupyter via Calkit."
+      : `Launched Jupyter via Calkit. Could not auto-connect yet; URI copied: ${uri}`,
     "Select Kernel",
-    "Select Jupyter URI",
   );
 
   if (action === "Select Kernel") {
     await openKernelPicker();
-  }
-
-  if (action === "Select Jupyter URI") {
-    await selectExistingJupyterServer(uri);
   }
 
   return undefined;
@@ -358,7 +401,8 @@ function buildLaunchCommand(
   config: CalkitConfig,
   port: number,
   slurmOptions?: SlurmLaunchOptions,
-  slurmToken?: string,
+  serverToken?: string,
+  dockerContainerName?: string,
 ): string {
   const cdPart = `cd ${shQuote(workspaceRoot)}`;
   const checkPart = `calkit check env -n ${shQuote(picked.innerEnvironment)}`;
@@ -369,9 +413,12 @@ function buildLaunchCommand(
     ? `calkit nb check-kernel -e ${shQuote(picked.innerEnvironment)}`
     : "";
 
-  const jupyterPart = picked.outerSlurmEnvironment
+  // Docker and Slurm need ip=0.0.0.0 and token for external access
+  const needsExternalAccess =
+    picked.outerSlurmEnvironment || picked.innerKind === "docker";
+  const jupyterPart = needsExternalAccess
     ? `calkit jupyter lab --ip=0.0.0.0 --no-browser --port=${port}${
-        slurmToken ? ` --ServerApp.token=${shQuote(slurmToken)}` : ""
+        serverToken ? ` --ServerApp.token=${shQuote(serverToken)}` : ""
       }`
     : `calkit jupyter lab --no-browser --ServerApp.token='' --ServerApp.password='' --port=${port}`;
 
@@ -390,9 +437,15 @@ function buildLaunchCommand(
       return `${prefixParts.join(" && ")} && ${jupyterPart}`;
     }
 
+    // Docker environments launch Jupyter inside the container
     if (picked.innerKind === "docker") {
-      void vscode.window.showInformationMessage(
-        "Docker environments may need host networking for Jupyter access (for example via environment args).",
+      return buildDockerRunCommand(
+        picked,
+        workspaceRoot,
+        config,
+        port,
+        serverToken,
+        dockerContainerName,
       );
     }
     return `${prefixParts.join(" && ")} && ${xenvPart}`;
@@ -424,6 +477,97 @@ function buildLaunchCommand(
   return `${prefixParts.join(" && ")} && ${srunPart}`;
 }
 
+function buildDockerRunCommand(
+  picked: CalkitCandidate,
+  workspaceRoot: string,
+  config: CalkitConfig,
+  port: number,
+  serverToken?: string,
+  containerName?: string,
+): string {
+  const env = config.environments?.[picked.innerEnvironment];
+  if (!env) {
+    throw new Error(`Environment ${picked.innerEnvironment} not found`);
+  }
+
+  const image = env.image || picked.innerEnvironment;
+  const wdir = env.wdir || "/work";
+
+  const dockerArgs: string[] = ["docker", "run"];
+
+  // Platform
+  if (env.platform) {
+    dockerArgs.push("--platform", env.platform);
+  }
+
+  // Environment variables
+  if (env.env_vars) {
+    for (const [key, value] of Object.entries(env.env_vars)) {
+      dockerArgs.push("-e", `${key}=${value}`);
+    }
+  }
+
+  // GPUs
+  if (env.gpus) {
+    dockerArgs.push("--gpus", env.gpus);
+  }
+
+  // Port mapping - ensure Jupyter port is mapped
+  const portMapped = env.ports?.some((p) => p.includes(`${port}`));
+  if (!portMapped) {
+    dockerArgs.push("-p", `${port}:${port}`);
+  }
+  if (env.ports) {
+    for (const portSpec of env.ports) {
+      // Skip if we already added this port
+      if (!portSpec.includes(`${port}`)) {
+        dockerArgs.push("-p", portSpec);
+      }
+    }
+  }
+
+  // User mapping (defaults to current user)
+  if (env.user !== undefined) {
+    dockerArgs.push("--user", env.user);
+  }
+
+  // Additional args from environment config
+  if (env.args) {
+    dockerArgs.push(...env.args);
+  }
+
+  // Standard docker run flags for background execution
+  dockerArgs.push("--rm");
+  if (containerName) {
+    dockerArgs.push("--name", containerName);
+  }
+
+  // Working directory and volume mount
+  dockerArgs.push("-w", wdir);
+  dockerArgs.push("-v", `${workspaceRoot}:${wdir}`);
+
+  // Image name
+  dockerArgs.push(image);
+
+  // Jupyter command (no need for --ip=0.0.0.0 with port mapping)
+  const tokenArg = serverToken
+    ? `--ServerApp.token=${shQuote(serverToken)}`
+    : "";
+  dockerArgs.push(
+    "sh",
+    "-c",
+    `jupyter lab --no-browser --port=${port} ${tokenArg}`.trim(),
+  );
+
+  const dockerCmd = dockerArgs.map(shQuote).join(" ");
+
+  // Prepend environment check to lock the environment
+  const cdPart = `cd ${shQuote(workspaceRoot)}`;
+  const checkPart = `calkit check env -n ${shQuote(picked.innerEnvironment)}`;
+
+  return `${cdPart} && ${checkPart} && ${dockerCmd}`;
+}
+
 function needsKernelRegistration(kind: EnvKind): boolean {
   return kind === "uv" || kind === "julia";
 }
@@ -432,7 +576,56 @@ function createServerToken(): string {
   return `calkit-${Math.random().toString(36).slice(2, 12)}`;
 }
 
-async function selectExistingJupyterServer(uri: string): Promise<void> {
+function getManagedDockerContainerName(envName: string, port: number): string {
+  const safeEnv = envName.toLowerCase().replace(/[^a-z0-9_.-]/g, "-");
+  return `calkit-nb-${safeEnv}-${port}`;
+}
+
+async function stopManagedDockerContainerIfExists(
+  containerName: string,
+): Promise<void> {
+  try {
+    await execFileAsync("docker", ["rm", "-f", containerName]);
+    log(`Removed existing managed Docker container: ${containerName}`);
+  } catch {
+    // Container not found or not running; nothing to do.
+  }
+}
+
+async function waitForPortToBeFree(
+  port: number,
+  timeoutMs = 5_000,
+): Promise<boolean> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (await isPortFree(port)) {
+      return true;
+    }
+    await sleep(250);
+  }
+  return false;
+}
+
+async function isPortFree(port: number): Promise<boolean> {
+  return await new Promise<boolean>((resolve) => {
+    const server = net.createServer();
+    server.unref();
+
+    server.once("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") {
+        resolve(false);
+      } else {
+        resolve(false);
+      }
+    });
+
+    server.listen(port, "127.0.0.1", () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
+async function selectExistingJupyterServer(uri: string): Promise<boolean> {
   // Try a few command shapes; Jupyter command contracts vary across versions.
   const attempts: Array<{ command: string; args: unknown[] }> = [
     { command: "jupyter.selectjupyteruri", args: [uri] },
@@ -444,11 +637,63 @@ async function selectExistingJupyterServer(uri: string): Promise<void> {
   for (const attempt of attempts) {
     try {
       await vscode.commands.executeCommand(attempt.command, ...attempt.args);
-      return;
+      return true;
     } catch {
       // Try next command signature.
     }
   }
+
+  return false;
+}
+
+async function waitForServerReady(
+  uri: string,
+  timeoutMs = 45_000,
+  pollMs = 1_000,
+): Promise<boolean> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (await isHttpEndpointReachable(uri)) {
+      return true;
+    }
+    await sleep(pollMs);
+  }
+  return false;
+}
+
+async function isHttpEndpointReachable(targetUrl: string): Promise<boolean> {
+  return await new Promise<boolean>((resolve) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(targetUrl);
+    } catch {
+      resolve(false);
+      return;
+    }
+
+    const client = parsed.protocol === "https:" ? https : http;
+    const req = client.request(
+      {
+        method: "GET",
+        hostname: parsed.hostname,
+        port: parsed.port,
+        path: `${parsed.pathname}${parsed.search}`,
+        timeout: 1_500,
+      },
+      (res) => {
+        // Any HTTP response means the server is accepting connections.
+        res.resume();
+        resolve(true);
+      },
+    );
+
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(false);
+    });
+    req.on("error", () => resolve(false));
+    req.end();
+  });
 }
 
 async function registerAndSelectKernel(
@@ -549,6 +794,187 @@ async function tryAutoSelectKernel(
 
   log(`Failed to select kernel: ${kernelName}`);
   return undefined;
+}
+
+async function tryAutoSelectBestAvailableKernel(options?: {
+  existingKernelIds?: Set<string>;
+  requireNewKernel?: boolean;
+}): Promise<string | undefined> {
+  const editor = vscode.window.activeNotebookEditor;
+  if (!editor) {
+    return undefined;
+  }
+
+  type ResolvedKernel = {
+    id?: string;
+    label?: string;
+    description?: string;
+    detail?: string;
+  };
+
+  const languageHint = getNotebookLanguageHint(editor).toLowerCase();
+  const existingIds = options?.existingKernelIds ?? new Set<string>();
+  const requireNewKernel = options?.requireNewKernel ?? false;
+
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const resolved = await getResolvedNotebookKernels(editor);
+
+    if (!Array.isArray(resolved) || resolved.length === 0) {
+      await sleep(400);
+      continue;
+    }
+
+    const candidates = resolved.filter((k) => {
+      const id = k.id ?? "";
+      return id.includes("/");
+    });
+
+    const newCandidates = candidates.filter((k) => {
+      const id = k.id ?? "";
+      return id.length > 0 && !existingIds.has(id);
+    });
+
+    const candidatePool = newCandidates.length > 0 ? newCandidates : candidates;
+    if (requireNewKernel && newCandidates.length === 0) {
+      await sleep(400);
+      continue;
+    }
+
+    const sorted = [...candidatePool].sort((a, b) => {
+      const sa = scoreKernelCandidate(a, languageHint);
+      const sb = scoreKernelCandidate(b, languageHint);
+      return sb - sa;
+    });
+
+    for (const candidate of sorted) {
+      const id = candidate.id ?? "";
+      const slash = id.indexOf("/");
+      if (slash <= 0 || slash >= id.length - 1) {
+        continue;
+      }
+
+      const extension = id.slice(0, slash);
+      const controllerId = id.slice(slash + 1);
+
+      try {
+        await vscode.commands.executeCommand("notebook.selectKernel", {
+          extension,
+          id: controllerId,
+          notebookEditor: editor,
+          skipIfAlreadySelected: false,
+        });
+        await sleep(400);
+
+        if (await hasAnyKernelSelectedForActiveNotebook()) {
+          log(`Auto-selected best available kernel: ${id}`);
+          return id;
+        }
+      } catch {
+        // Try next candidate.
+      }
+    }
+
+    await sleep(400);
+  }
+
+  return undefined;
+}
+
+function scoreKernelCandidate(
+  kernel: {
+    id?: string;
+    label?: string;
+    description?: string;
+    detail?: string;
+  },
+  languageHint: string,
+): number {
+  const id = (kernel.id ?? "").toLowerCase();
+  const label = (kernel.label ?? "").toLowerCase();
+  const desc = (kernel.description ?? "").toLowerCase();
+  const detail = (kernel.detail ?? "").toLowerCase();
+
+  let score = 0;
+
+  if (id.startsWith("ms-toolsai.jupyter/")) {
+    score += 50;
+  }
+
+  if (languageHint.length > 0) {
+    if (
+      label.includes(languageHint) ||
+      desc.includes(languageHint) ||
+      detail.includes(languageHint)
+    ) {
+      score += 100;
+    }
+  }
+
+  if (
+    languageHint === "python" &&
+    (label.includes("ipykernel") || label.includes("python"))
+  ) {
+    score += 30;
+  }
+  if (languageHint === "julia" && label.includes("julia")) {
+    score += 30;
+  }
+  if (languageHint === "r" && label.includes("r")) {
+    score += 30;
+  }
+
+  return score;
+}
+
+function getNotebookLanguageHint(editor: vscode.NotebookEditor): string {
+  const metadata = editor.notebook.metadata as any;
+  const fromMetadata =
+    metadata?.language_info?.name ?? metadata?.metadata?.language_info?.name;
+  if (typeof fromMetadata === "string" && fromMetadata.trim()) {
+    return fromMetadata.trim();
+  }
+
+  const firstCodeCell = editor.notebook
+    .getCells()
+    .find((cell) => cell.kind === vscode.NotebookCellKind.Code);
+  if (firstCodeCell?.document.languageId) {
+    return firstCodeCell.document.languageId;
+  }
+
+  return "";
+}
+
+async function getResolvedNotebookKernels(
+  editor: vscode.NotebookEditor,
+): Promise<
+  Array<{ id?: string; label?: string; description?: string; detail?: string }>
+> {
+  const resolved = (await vscode.commands.executeCommand(
+    "_resolveNotebookKernels",
+    {
+      viewType: editor.notebook.notebookType,
+      uri: editor.notebook.uri,
+    },
+  )) as Array<{
+    id?: string;
+    label?: string;
+    description?: string;
+    detail?: string;
+  }>;
+  return Array.isArray(resolved) ? resolved : [];
+}
+
+async function getResolvedKernelIdsForActiveNotebook(): Promise<Set<string>> {
+  const editor = vscode.window.activeNotebookEditor;
+  if (!editor) {
+    return new Set<string>();
+  }
+
+  const kernels = await getResolvedNotebookKernels(editor);
+  const ids = kernels
+    .map((k) => k.id)
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
+  return new Set(ids);
 }
 
 async function trySelectKernelViaNotebookApi(
@@ -699,6 +1125,15 @@ async function isKernelSelectedForActiveNotebook(
   return typeof selectedName === "string" && selectedName === kernelName;
 }
 
+async function hasAnyKernelSelectedForActiveNotebook(): Promise<boolean> {
+  // Give Jupyter a brief moment to attach kernelspec metadata after connect.
+  await sleep(200);
+  const md = vscode.window.activeNotebookEditor?.notebook.metadata as any;
+  const selectedName =
+    md?.kernelspec?.name ?? md?.metadata?.kernelspec?.name ?? "";
+  return typeof selectedName === "string" && selectedName.trim().length > 0;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -737,6 +1172,57 @@ async function openKernelPicker(): Promise<void> {
 
 function shQuote(input: string): string {
   return `'${input.replace(/'/g, `'\\''`)}'`;
+}
+
+function startServerInBackground(command: string, cwd: string): void {
+  if (
+    serverProcess &&
+    serverProcess.exitCode === null &&
+    !serverProcess.killed
+  ) {
+    log("Stopping previous Calkit server process");
+    serverProcess.kill();
+  }
+
+  log(`Starting server in background: ${command}`);
+  const child = spawn(command, {
+    cwd,
+    shell: true,
+    env: process.env,
+  });
+  serverProcess = child;
+
+  child.stdout?.on("data", (chunk: Buffer | string) => {
+    const text = chunk.toString().trim();
+    if (text) {
+      log(`[server] ${text}`);
+    }
+  });
+
+  child.stderr?.on("data", (chunk: Buffer | string) => {
+    const text = chunk.toString().trim();
+    if (text) {
+      log(`[server:err] ${text}`);
+    }
+  });
+
+  child.on("error", (error) => {
+    log(`Background server failed to start: ${String(error)}`);
+    void vscode.window.showErrorMessage(
+      `Failed to start Calkit notebook server in background: ${String(error)}`,
+    );
+  });
+
+  child.on("close", (code, signal) => {
+    log(
+      `Background server exited (code=${code ?? "null"}, signal=${
+        signal ?? "null"
+      })`,
+    );
+    if (serverProcess === child) {
+      serverProcess = undefined;
+    }
+  });
 }
 
 function registerKernelSourceIfAvailable(

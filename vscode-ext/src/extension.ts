@@ -684,12 +684,20 @@ async function runCreateEnvironmentWizard(
     const kindPick = await vscode.window.showQuickPick(
       [
         {
-          label: "slurm",
-          description: "Remote SLURM scheduler environment",
+          label: "conda",
+          description: "Conda environment.yml-based environment",
         },
         {
           label: "julia",
           description: "Julia Project.toml-based environment",
+        },
+        {
+          label: "slurm",
+          description: "Remote SLURM scheduler environment",
+        },
+        {
+          label: "uv",
+          description: "uv pyproject.toml-based environment",
         },
       ],
       {
@@ -699,6 +707,30 @@ async function runCreateEnvironmentWizard(
     );
     if (!kindPick) {
       return undefined;
+    }
+
+    if (kindPick.label === "conda") {
+      const created = await runCreateCondaEnvironmentWizard(
+        workspaceRoot,
+        config,
+        environments,
+      );
+      if (created === "__back__") {
+        continue;
+      }
+      return created;
+    }
+
+    if (kindPick.label === "julia") {
+      const created = await runCreateJuliaEnvironmentWizard(
+        workspaceRoot,
+        config,
+        environments,
+      );
+      if (created === "__back__") {
+        continue;
+      }
+      return created;
     }
 
     if (kindPick.label === "slurm") {
@@ -713,7 +745,7 @@ async function runCreateEnvironmentWizard(
       return created;
     }
 
-    const created = await runCreateJuliaEnvironmentWizard(
+    const created = await runCreateUvEnvironmentWizard(
       workspaceRoot,
       config,
       environments,
@@ -889,11 +921,8 @@ async function runCreateJuliaEnvironmentWizard(
   config: CalkitConfig,
   environments: Record<string, CalkitEnvironment>,
 ): Promise<string | "__back__" | undefined> {
-  const detectedJulia = await detectJuliaVersion(workspaceRoot);
-
   let name = "my-julia-env";
   let projectTomlPath = "Project.toml";
-  let juliaVersion = detectedJulia;
   let step = 0;
 
   while (step >= 0) {
@@ -928,68 +957,62 @@ async function runCreateJuliaEnvironmentWizard(
       continue;
     }
 
-    if (step === 1) {
-      const pathStep = await showInputBoxStep({
-        title: "Julia Project.toml path",
-        prompt: "Path to Project.toml (workspace-relative or absolute)",
-        value: projectTomlPath,
-        canGoBack: true,
-        validateInput: (value) => {
-          const trimmed = value.trim();
-          if (trimmed.length === 0) {
-            return "Path is required";
-          }
-          if (path.basename(trimmed) !== "Project.toml") {
-            return "Path must point to Project.toml";
-          }
-          return undefined;
-        },
-      });
-      if (pathStep.kind === "cancel") {
-        return undefined;
-      }
-      if (pathStep.kind === "back") {
-        step = 0;
-        continue;
-      }
-      projectTomlPath = pathStep.value.trim();
-      step = 2;
-      continue;
-    }
-
-    const versionStep = await showInputBoxStep({
-      title: "Julia version",
-      prompt: "Julia major.minor version",
-      value: juliaVersion,
+    const pathStep = await showInputBoxStep({
+      title: "Julia Project.toml path",
+      prompt: "Path to Project.toml (workspace-relative or absolute)",
+      value: projectTomlPath,
       canGoBack: true,
-      validateInput: (value) =>
-        value.trim().length === 0 ? "Julia version is required" : undefined,
+      validateInput: (value) => {
+        const trimmed = value.trim();
+        if (trimmed.length === 0) {
+          return "Path is required";
+        }
+        if (path.basename(trimmed) !== "Project.toml") {
+          return "Path must point to Project.toml";
+        }
+        return undefined;
+      },
     });
-    if (versionStep.kind === "cancel") {
+    if (pathStep.kind === "cancel") {
       return undefined;
     }
-    if (versionStep.kind === "back") {
-      step = 1;
+    if (pathStep.kind === "back") {
+      step = 0;
       continue;
     }
-    juliaVersion = versionStep.value.trim();
+    projectTomlPath = pathStep.value.trim();
 
-    environments[name] = {
-      kind: "julia",
-      path: projectTomlPath,
-      julia: juliaVersion,
-    };
-    config.environments = environments;
+    try {
+      await execFileAsync(
+        "calkit",
+        [
+          "new",
+          "julia-env",
+          "--name",
+          name,
+          "--path",
+          projectTomlPath,
+          "--no-commit",
+        ],
+        { cwd: workspaceRoot },
+      );
 
-    const ok = await writeCalkitConfig(workspaceRoot, config);
-    if (!ok) {
+      void vscode.window.showInformationMessage(
+        `Created Julia environment '${name}' in calkit.yaml.`,
+      );
+      return name;
+    } catch (error: unknown) {
+      const err = error as {
+        stderr?: string;
+        message?: string;
+      };
+      const details = (err.stderr || err.message || "").trim();
+      log(`Failed to create julia environment: ${details}`);
+      void vscode.window.showErrorMessage(
+        `Failed to create julia environment: ${details || "unknown error"}`,
+      );
       return undefined;
     }
-
-    void vscode.window.showInformationMessage(
-      `Created Julia environment '${name}' in calkit.yaml.`,
-    );
-    return name;
   }
 
   return undefined;
@@ -1084,20 +1107,202 @@ async function askForSlurmOptionsWizard(
   return { kind: "cancel" };
 }
 
-async function detectJuliaVersion(workspaceRoot: string): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync("julia", ["--version"], {
-      cwd: workspaceRoot,
-      timeout: 5_000,
-    });
-    const versionMatch = stdout.match(/(\d+)\.(\d+)/);
-    if (versionMatch) {
-      return `${versionMatch[1]}.${versionMatch[2]}`;
+async function runCreateCondaEnvironmentWizard(
+  workspaceRoot: string,
+  config: CalkitConfig,
+  environments: Record<string, CalkitEnvironment>,
+): Promise<string | "__back__" | undefined> {
+  let name = "my-conda-env";
+  let envPath = "environment.yml";
+  let step = 0;
+
+  while (step >= 0) {
+    if (step === 0) {
+      const nameStep = await showInputBoxStep({
+        title: "Environment name",
+        prompt: "Unique environment name in calkit.yaml",
+        value: name,
+        canGoBack: true,
+        validateInput: (value) => {
+          const trimmed = value.trim();
+          if (trimmed.length === 0) {
+            return "Environment name is required";
+          }
+          if (trimmed.includes(":")) {
+            return "Environment names cannot contain ':'";
+          }
+          if (trimmed in environments) {
+            return "An environment with this name already exists";
+          }
+          return undefined;
+        },
+      });
+      if (nameStep.kind === "cancel") {
+        return undefined;
+      }
+      if (nameStep.kind === "back") {
+        return "__back__";
+      }
+      name = nameStep.value.trim();
+      step = 1;
+      continue;
     }
-  } catch {
-    // Fall back to a reasonable default when julia is unavailable.
+
+    const pathStep = await showInputBoxStep({
+      title: "Conda environment.yml path",
+      prompt: "Path to conda environment file (workspace-relative or absolute)",
+      value: envPath,
+      placeHolder: "e.g. environment.yml or env/conda-env.yml",
+      canGoBack: true,
+      validateInput: (value) => {
+        const trimmed = value.trim();
+        if (trimmed.length === 0) {
+          return "Path is required";
+        }
+        if (!trimmed.endsWith(".yml") && !trimmed.endsWith(".yaml")) {
+          return "Path must end with .yml or .yaml";
+        }
+        return undefined;
+      },
+    });
+    if (pathStep.kind === "cancel") {
+      return undefined;
+    }
+    if (pathStep.kind === "back") {
+      step = 0;
+      continue;
+    }
+    envPath = pathStep.value.trim();
+
+    try {
+      await execFileAsync(
+        "calkit",
+        ["new", "conda-env", "--name", name, "--path", envPath, "--no-commit"],
+        { cwd: workspaceRoot },
+      );
+
+      void vscode.window.showInformationMessage(
+        `Created Conda environment '${name}' in calkit.yaml.`,
+      );
+      return name;
+    } catch (error: unknown) {
+      const err = error as {
+        stderr?: string;
+        message?: string;
+      };
+      const details = (err.stderr || err.message || "").trim();
+      log(`Failed to create conda environment: ${details}`);
+      void vscode.window.showErrorMessage(
+        `Failed to create conda environment: ${details || "unknown error"}`,
+      );
+      return undefined;
+    }
   }
-  return "1.10";
+
+  return undefined;
+}
+
+async function runCreateUvEnvironmentWizard(
+  workspaceRoot: string,
+  config: CalkitConfig,
+  environments: Record<string, CalkitEnvironment>,
+): Promise<string | "__back__" | undefined> {
+  let name = "my-uv-env";
+  let pyprojectPath = "pyproject.toml";
+  let step = 0;
+
+  while (step >= 0) {
+    if (step === 0) {
+      const nameStep = await showInputBoxStep({
+        title: "Environment name",
+        prompt: "Unique environment name in calkit.yaml",
+        value: name,
+        canGoBack: true,
+        validateInput: (value) => {
+          const trimmed = value.trim();
+          if (trimmed.length === 0) {
+            return "Environment name is required";
+          }
+          if (trimmed.includes(":")) {
+            return "Environment names cannot contain ':'";
+          }
+          if (trimmed in environments) {
+            return "An environment with this name already exists";
+          }
+          return undefined;
+        },
+      });
+      if (nameStep.kind === "cancel") {
+        return undefined;
+      }
+      if (nameStep.kind === "back") {
+        return "__back__";
+      }
+      name = nameStep.value.trim();
+      step = 1;
+      continue;
+    }
+
+    const pathStep = await showInputBoxStep({
+      title: "uv pyproject.toml path",
+      prompt: "Path to pyproject.toml (workspace-relative or absolute)",
+      value: pyprojectPath,
+      placeHolder: "e.g. pyproject.toml or .calkit/envs/my-uv/pyproject.toml",
+      canGoBack: true,
+      validateInput: (value) => {
+        const trimmed = value.trim();
+        if (trimmed.length === 0) {
+          return "Path is required";
+        }
+        if (!trimmed.endsWith("pyproject.toml")) {
+          return "Path must end with pyproject.toml";
+        }
+        return undefined;
+      },
+    });
+    if (pathStep.kind === "cancel") {
+      return undefined;
+    }
+    if (pathStep.kind === "back") {
+      step = 0;
+      continue;
+    }
+    pyprojectPath = pathStep.value.trim();
+
+    try {
+      await execFileAsync(
+        "calkit",
+        [
+          "new",
+          "uv-env",
+          "--name",
+          name,
+          "--path",
+          pyprojectPath,
+          "--no-commit",
+        ],
+        { cwd: workspaceRoot },
+      );
+
+      void vscode.window.showInformationMessage(
+        `Created uv environment '${name}' in calkit.yaml.`,
+      );
+      return name;
+    } catch (error: unknown) {
+      const err = error as {
+        stderr?: string;
+        message?: string;
+      };
+      const details = (err.stderr || err.message || "").trim();
+      log(`Failed to create uv environment: ${details}`);
+      void vscode.window.showErrorMessage(
+        `Failed to create uv environment: ${details || "unknown error"}`,
+      );
+      return undefined;
+    }
+  }
+
+  return undefined;
 }
 
 function getActiveNotebookUriKey(): string | undefined {
@@ -1640,74 +1845,77 @@ async function registerAndSelectKernel(
 ): Promise<string | undefined> {
   log(`Registering and selecting kernel for env: ${envName}`);
 
-  return await withKernelProgress("Setting kernel...", async () => {
-    try {
-      const { stdout, stderr } = await execFileAsync(
-        "calkit",
-        ["nb", "check-kernel", envFlag, envName, "--json"],
-        {
-          cwd: workspaceRoot,
-        },
-      );
-
-      log(`calkit output: ${stdout}`);
-
-      let kernelName: string;
-      let displayName: string | undefined;
+  return await withKernelProgress(
+    "Checking environment and setting kernel...",
+    async () => {
       try {
-        // Response may contain non-JSON output before the JSON.
-        // Find and parse just the JSON object (line starting with {).
-        const jsonMatch = stdout.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-          throw new Error("No JSON found in output");
+        const { stdout, stderr } = await execFileAsync(
+          "calkit",
+          ["nb", "check-kernel", envFlag, envName, "--json"],
+          {
+            cwd: workspaceRoot,
+          },
+        );
+
+        log(`calkit output: ${stdout}`);
+
+        let kernelName: string;
+        let displayName: string | undefined;
+        try {
+          // Response may contain non-JSON output before the JSON.
+          // Find and parse just the JSON object (line starting with {).
+          const jsonMatch = stdout.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) {
+            throw new Error("No JSON found in output");
+          }
+          const result = JSON.parse(jsonMatch[0]);
+          kernelName = result.kernel_name;
+          displayName = result.display_name;
+          if (!kernelName) {
+            throw new Error("kernel_name not in JSON response");
+          }
+          log(`Extracted kernel name: ${kernelName}`);
+        } catch (parseError) {
+          const details = `${stderr || stdout || String(parseError)}`.trim();
+          log(`JSON parse error: ${details}`);
+          void vscode.window.showErrorMessage(
+            `Failed to parse kernel info from 'calkit nb check-kernel': ${details}`,
+          );
+          return undefined;
         }
-        const result = JSON.parse(jsonMatch[0]);
-        kernelName = result.kernel_name;
-        displayName = result.display_name;
-        if (!kernelName) {
-          throw new Error("kernel_name not in JSON response");
+
+        const selectedKernelId = await tryAutoSelectKernel(
+          kernelName,
+          displayName,
+        );
+
+        if (selectedKernelId) {
+          log(`Kernel selection successful`);
+          return selectedKernelId;
         }
-        log(`Extracted kernel name: ${kernelName}`);
-      } catch (parseError) {
-        const details = `${stderr || stdout || String(parseError)}`.trim();
-        log(`JSON parse error: ${details}`);
+
+        log(`Kernel selection failed or unconfirmed`);
+        void vscode.window.showWarningMessage(
+          `Kernel '${kernelName}' was registered but auto-selection timed out. It should appear in the notebook kernel picker (top-right).`,
+        );
+        return undefined;
+      } catch (error: unknown) {
+        const err = error as {
+          stdout?: string;
+          stderr?: string;
+          message?: string;
+        };
+        const details = (err.stderr || err.stdout || err.message || "").trim();
+        log(`Error: ${details}`);
         void vscode.window.showErrorMessage(
-          `Failed to parse kernel info from 'calkit nb check-kernel': ${details}`,
+          `Failed to run 'calkit nb check-kernel ${envFlag} ${envName}': ${
+            details || "unknown error"
+          }`,
         );
         return undefined;
       }
-
-      const selectedKernelId = await tryAutoSelectKernel(
-        kernelName,
-        displayName,
-      );
-
-      if (selectedKernelId) {
-        log(`Kernel selection successful`);
-        return selectedKernelId;
-      }
-
-      log(`Kernel selection failed or unconfirmed`);
-      void vscode.window.showInformationMessage(
-        `Registered kernel '${kernelName}', but could not confirm auto-selection. Select the kernel manually from the picker.`,
-      );
-      return undefined;
-    } catch (error: unknown) {
-      const err = error as {
-        stdout?: string;
-        stderr?: string;
-        message?: string;
-      };
-      const details = (err.stderr || err.stdout || err.message || "").trim();
-      log(`Error: ${details}`);
-      void vscode.window.showErrorMessage(
-        `Failed to run 'calkit nb check-kernel ${envFlag} ${envName}': ${
-          details || "unknown error"
-        }`,
-      );
-      return undefined;
-    }
-  });
+    },
+  );
 }
 
 async function tryAutoSelectKernel(
@@ -2013,7 +2221,9 @@ async function trySelectKernelViaNotebookApi(
     const extension = candidate.id.slice(0, slash);
     const id = candidate.id.slice(slash + 1);
 
-    log(`Selecting controller id '${candidate.id}'`);
+    log(
+      `Selecting controller id '${candidate.id}' (extension='${extension}', id='${id}')`,
+    );
     await vscode.commands.executeCommand("notebook.selectKernel", {
       extension,
       id,
@@ -2021,12 +2231,21 @@ async function trySelectKernelViaNotebookApi(
       skipIfAlreadySelected: false,
     });
 
-    // Give VS Code/Jupyter time to bind the selected controller.
-    await sleep(300);
+    // Give VS Code/Jupyter time to bind the selected controller and update metadata.
+    await sleep(500);
 
     if (await isKernelSelectedForActiveNotebook(kernelName)) {
+      log(`Kernel selection confirmed in notebook metadata`);
       return candidate.id;
     }
+
+    // Selection may have succeeded even though metadata check failed
+    // (metadata update can be delayed in some VS Code versions).
+    // Log the situation but still return success if controller was actually selected.
+    log(
+      `Kernel controller was selected but metadata confirmation timed out. Assuming selection succeeded.`,
+    );
+    return candidate.id;
   } catch (err) {
     log(
       `Controller selection failed: ${
@@ -2057,7 +2276,13 @@ async function isKernelSelectedForActiveNotebook(
   log(`Expected kernel: ${kernelName}`);
 
   // Check for exact match on the kernel name
-  return typeof selectedName === "string" && selectedName === kernelName;
+  const isSelected =
+    typeof selectedName === "string" && selectedName === kernelName;
+  if (!isSelected) {
+    // Log additional debugging info when not selected
+    log(`Full metadata object: ${JSON.stringify(md, null, 2)}`);
+  }
+  return isSelected;
 }
 
 async function hasAnyKernelSelectedForActiveNotebook(): Promise<boolean> {

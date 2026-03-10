@@ -39,29 +39,29 @@
     "commands": [
       {
         "command": "calkit-vscode.selectCalkitEnvironment",
-        "title": "Calkit: Select Notebook Environment",
+        "title": "Select Notebook Environment",
         "category": "Calkit"
       },
       {
         "command": "calkit-vscode.createCalkitEnvironment",
-        "title": "Calkit: Create Environment",
+        "title": "Create Environment",
         "category": "Calkit"
       },
       {
         "command": "calkit-vscode.startCalkitSlurmJob",
-        "title": "Calkit: Start SLURM Notebook Job",
+        "title": "Start SLURM Notebook Job",
         "category": "Calkit",
         "icon": "$(debug-start)"
       },
       {
         "command": "calkit-vscode.stopCalkitSlurmJob",
-        "title": "Calkit: Stop SLURM Notebook Job",
+        "title": "Stop SLURM Notebook Job",
         "category": "Calkit",
         "icon": "$(debug-stop)"
       },
       {
         "command": "calkit-vscode.restartCalkitJob",
-        "title": "Calkit: Restart Notebook Server",
+        "title": "Restart Notebook Server",
         "category": "Calkit",
         "icon": "$(debug-restart)"
       }

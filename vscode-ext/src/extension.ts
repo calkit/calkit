@@ -32,6 +32,7 @@ let serverProcess: import("node:child_process").ChildProcess | undefined;
 let activeServerSession: ActiveServerSession | undefined;
 let extensionContextRef: vscode.ExtensionContext | undefined;
 const autoSelectingNotebookUris = new Set<string>();
+const configuredNotebooksThisSession = new Set<string>();
 let hasCheckedCalkitCli = false;
 
 function log(message: string): void {
@@ -125,6 +126,11 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.window.onDidChangeActiveNotebookEditor(() => {
       void refreshNotebookToolbarContext(context);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenNotebookDocument(() => {
       void autoSelectEnvironmentForActiveNotebook(context);
     }),
   );
@@ -132,6 +138,7 @@ export function activate(context: vscode.ExtensionContext): void {
   void ensureCalkitCliReady();
 
   void refreshNotebookToolbarContext(context);
+  void autoSelectEnvironmentForActiveNotebook(context);
 
   // Proposed API: shows Calkit in the top-level kernel source list.
   // This must never break activation when proposed APIs are unavailable.
@@ -921,8 +928,11 @@ async function runCreateJuliaEnvironmentWizard(
   config: CalkitConfig,
   environments: Record<string, CalkitEnvironment>,
 ): Promise<string | "__back__" | undefined> {
-  let name = "my-julia-env";
+  const detectedJulia = await detectJuliaVersion(workspaceRoot);
+
+  let name = "main";
   let projectTomlPath = "Project.toml";
+  let juliaVersion = detectedJulia;
   let step = 0;
 
   while (step >= 0) {
@@ -957,45 +967,74 @@ async function runCreateJuliaEnvironmentWizard(
       continue;
     }
 
-    const pathStep = await showInputBoxStep({
-      title: "Julia Project.toml path",
-      prompt: "Path to Project.toml (workspace-relative or absolute)",
-      value: projectTomlPath,
+    if (step === 1) {
+      const pathStep = await showInputBoxStep({
+        title: "Julia Project.toml path",
+        prompt: "Path to Project.toml (workspace-relative or absolute)",
+        value: projectTomlPath,
+        canGoBack: true,
+        validateInput: (value) => {
+          const trimmed = value.trim();
+          if (trimmed.length === 0) {
+            return "Path is required";
+          }
+          if (path.basename(trimmed) !== "Project.toml") {
+            return "Path must point to Project.toml";
+          }
+          return undefined;
+        },
+      });
+      if (pathStep.kind === "cancel") {
+        return undefined;
+      }
+      if (pathStep.kind === "back") {
+        step = 0;
+        continue;
+      }
+      projectTomlPath = pathStep.value.trim();
+      step = 2;
+      continue;
+    }
+
+    const versionStep = await showInputBoxStep({
+      title: "Julia version (optional)",
+      prompt: "Use detected version or specify a different major.minor version",
+      value: juliaVersion,
       canGoBack: true,
       validateInput: (value) => {
         const trimmed = value.trim();
         if (trimmed.length === 0) {
-          return "Path is required";
-        }
-        if (path.basename(trimmed) !== "Project.toml") {
-          return "Path must point to Project.toml";
+          return "Julia version is required";
         }
         return undefined;
       },
     });
-    if (pathStep.kind === "cancel") {
+    if (versionStep.kind === "cancel") {
       return undefined;
     }
-    if (pathStep.kind === "back") {
-      step = 0;
+    if (versionStep.kind === "back") {
+      step = 1;
       continue;
     }
-    projectTomlPath = pathStep.value.trim();
+    juliaVersion = versionStep.value.trim();
 
     try {
-      await execFileAsync(
-        "calkit",
-        [
-          "new",
-          "julia-env",
-          "--name",
-          name,
-          "--path",
-          projectTomlPath,
-          "--no-commit",
-        ],
-        { cwd: workspaceRoot },
-      );
+      const args: string[] = [
+        "new",
+        "julia-env",
+        "--name",
+        name,
+        "--path",
+        projectTomlPath,
+      ];
+      // Only pass --julia if it's different from the detected version
+      if (juliaVersion !== detectedJulia) {
+        args.push("--julia");
+        args.push(juliaVersion);
+      }
+      args.push("--no-commit");
+
+      await execFileAsync("calkit", args, { cwd: workspaceRoot });
 
       void vscode.window.showInformationMessage(
         `Created Julia environment '${name}' in calkit.yaml.`,
@@ -1016,6 +1055,22 @@ async function runCreateJuliaEnvironmentWizard(
   }
 
   return undefined;
+}
+
+async function detectJuliaVersion(workspaceRoot: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("julia", ["--version"], {
+      cwd: workspaceRoot,
+      timeout: 5_000,
+    });
+    const versionMatch = stdout.match(/(\d+)\.(\d+)/);
+    if (versionMatch) {
+      return `${versionMatch[1]}.${versionMatch[2]}`;
+    }
+  } catch {
+    // Fall back to a reasonable default when julia is unavailable.
+  }
+  return "1.10";
 }
 
 async function askForSlurmOptionsWizard(
@@ -1428,35 +1483,48 @@ async function autoSelectEnvironmentForActiveNotebook(
     return;
   }
 
+  const notebookRelativePath = getActiveNotebookRelativePath(workspaceRoot);
+  if (!notebookRelativePath) {
+    return;
+  }
+
+  const configuredCandidate = await getConfiguredCandidateForNotebookPath(
+    workspaceRoot,
+    notebookRelativePath,
+  );
+  if (!configuredCandidate) {
+    log(
+      `No environment configured in calkit.yaml for notebook ${notebookRelativePath}`,
+    );
+    return;
+  }
+
+  // If this notebook has already been configured in this session,
+  // check if the kernel matches and skip if it does.
+  // This avoids re-checking the environment when switching tabs.
+  if (configuredNotebooksThisSession.has(notebookUri)) {
+    const expectedKernelName = await getExpectedKernelNameForEnvironment(
+      workspaceRoot,
+      configuredCandidate.innerEnvironment,
+      "-e",
+    );
+    if (expectedKernelName) {
+      const selectedKernelName = getSelectedKernelNameForActiveNotebook();
+      if (selectedKernelName === expectedKernelName) {
+        log(
+          `Notebook kernel '${selectedKernelName}' already matches the calkit environment '${configuredCandidate.environmentName}'; skipping re-selection.`,
+        );
+        return;
+      }
+    }
+  }
+
   autoSelectingNotebookUris.add(notebookUri);
 
   try {
-    const notebookRelativePath = getActiveNotebookRelativePath(workspaceRoot);
-    if (!notebookRelativePath) {
-      return;
-    }
-
-    const configuredCandidate = await getConfiguredCandidateForNotebookPath(
-      workspaceRoot,
-      notebookRelativePath,
+    log(
+      `Auto-selecting calkit.yaml environment '${configuredCandidate.environmentName}' for notebook ${notebookRelativePath}.`,
     );
-    if (!configuredCandidate) {
-      log(
-        `No environment configured in calkit.yaml for notebook ${notebookRelativePath}`,
-      );
-      return;
-    }
-
-    const hasSelectedKernel = await hasAnyKernelSelectedForActiveNotebook();
-    if (hasSelectedKernel) {
-      log(
-        `Notebook ${notebookRelativePath} already has a selected kernel; overriding it with calkit.yaml environment '${configuredCandidate.environmentName}'.`,
-      );
-    } else {
-      log(
-        `Auto-selecting calkit.yaml environment '${configuredCandidate.environmentName}' for notebook ${notebookRelativePath}.`,
-      );
-    }
 
     const kernelId = await registerAndSelectKernel(
       workspaceRoot,
@@ -1467,6 +1535,7 @@ async function autoSelectEnvironmentForActiveNotebook(
       log(
         `Auto-selected kernel ${kernelId} for environment ${configuredCandidate.environmentName}`,
       );
+      configuredNotebooksThisSession.add(notebookUri);
     }
 
     await refreshNotebookToolbarContext(context);
@@ -2157,17 +2226,7 @@ async function trySelectKernelViaNotebookApi(
         continue;
       }
 
-      // Log compact resolved kernel information for debugging.
-      const preview = resolved
-        .slice(0, 12)
-        .map(
-          (k) =>
-            `id='${k.id ?? ""}' label='${k.label ?? ""}' detail='${
-              k.detail ?? ""
-            }' desc='${k.description ?? ""}'`,
-        )
-        .join(" | ");
-      log(`Resolved kernels (attempt ${attempt + 1}/10): ${preview}`);
+      log(`Resolved ${resolved.length} kernels (attempt ${attempt + 1}/10)`);
 
       candidate = resolved.find((k) => {
         const id = (k.id ?? "").toLowerCase();
@@ -2221,9 +2280,7 @@ async function trySelectKernelViaNotebookApi(
     const extension = candidate.id.slice(0, slash);
     const id = candidate.id.slice(slash + 1);
 
-    log(
-      `Selecting controller id '${candidate.id}' (extension='${extension}', id='${id}')`,
-    );
+    log(`Selecting kernel controller for '${kernelName}'`);
     await vscode.commands.executeCommand("notebook.selectKernel", {
       extension,
       id,
@@ -2292,6 +2349,46 @@ async function hasAnyKernelSelectedForActiveNotebook(): Promise<boolean> {
   const selectedName =
     md?.kernelspec?.name ?? md?.metadata?.kernelspec?.name ?? "";
   return typeof selectedName === "string" && selectedName.trim().length > 0;
+}
+
+function getSelectedKernelNameForActiveNotebook(): string | undefined {
+  const md = vscode.window.activeNotebookEditor?.notebook.metadata as any;
+  const selectedName =
+    md?.kernelspec?.name ?? md?.metadata?.kernelspec?.name ?? "";
+  return typeof selectedName === "string" && selectedName.trim().length > 0
+    ? selectedName
+    : undefined;
+}
+
+async function getExpectedKernelNameForEnvironment(
+  workspaceRoot: string,
+  envName: string,
+  envFlag: "-n" | "-e",
+): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync(
+      "calkit",
+      ["nb", "check-kernel", envFlag, envName, "--json"],
+      {
+        cwd: workspaceRoot,
+      },
+    );
+
+    try {
+      // Response may contain non-JSON output before the JSON.
+      // Find and parse just the JSON object (line starting with {).
+      const jsonMatch = stdout.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        return undefined;
+      }
+      const result = JSON.parse(jsonMatch[0]);
+      return result.kernel_name ?? undefined;
+    } catch {
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
 }
 
 function sleep(ms: number): Promise<void> {

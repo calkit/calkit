@@ -22,9 +22,11 @@ const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
 const COMMAND_START_SLURM = "calkit-vscode.startCalkitSlurmJob";
 const COMMAND_STOP_SLURM = "calkit-vscode.stopCalkitSlurmJob";
 const COMMAND_RESTART_JOB = "calkit-vscode.restartCalkitJob";
+const COMMAND_SLURM_STATUS = "calkit-vscode.showCalkitSlurmStatus";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
 const execFileAsync = promisify(execFile);
 const DEFAULT_MIN_CALKIT_VERSION = "0.35.0";
+const DEFAULT_NOTEBOOK_SLURM_TIME = "120";
 const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
 
 let outputChannel: vscode.OutputChannel;
@@ -49,6 +51,8 @@ interface NotebookConfig {
 interface PipelineStage {
   kind?: string;
   notebook_path?: string;
+  script_path?: string;
+  path?: string;
   environment?: string;
   [key: string]: unknown;
 }
@@ -120,6 +124,18 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_RESTART_JOB, async () => {
       await restartCalkitJobForActiveNotebook(context);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_SLURM_STATUS, async () => {
+      const action = await vscode.window.showInformationMessage(
+        "A Calkit SLURM notebook job is currently running for this notebook.",
+        "Stop Job",
+      );
+      if (action === "Stop Job") {
+        await stopSlurmJobForActiveNotebook(context);
+      }
     }),
   );
 
@@ -417,8 +433,10 @@ async function selectCalkitEnvironment(
   let slurmOptions: SlurmLaunchOptions | undefined;
   if (picked.outerSlurmEnvironment) {
     slurmOptions = await askForSlurmOptions(
-      getDefaultSlurmOptions(
-        config?.environments?.[picked.outerSlurmEnvironment],
+      getNotebookSlurmOptionsWithDefaults(
+        getDefaultSlurmOptions(
+          config?.environments?.[picked.outerSlurmEnvironment],
+        ),
       ),
     );
     if (!slurmOptions) {
@@ -472,6 +490,14 @@ async function selectCalkitEnvironment(
     }
   }
 
+  const expectedKernel = picked.outerSlurmEnvironment
+    ? await getExpectedKernelSpecForEnvironment(
+        workspaceRoot,
+        picked.innerEnvironment,
+        "-e",
+      )
+    : undefined;
+
   const launchCmd = buildLaunchCommand(
     picked,
     workspaceRoot,
@@ -480,6 +506,7 @@ async function selectCalkitEnvironment(
     slurmOptions,
     serverToken,
     dockerContainerName,
+    expectedKernel?.kernelName,
   );
 
   startServerInBackground(launchCmd, workspaceRoot, {
@@ -508,7 +535,10 @@ async function selectCalkitEnvironment(
         cancellable: false,
       },
       async () => {
-        return await waitForServerReady(uri);
+        return await waitForServerReady(uri, {
+          sessionKind: picked.outerSlurmEnvironment ? "slurm" : "docker",
+          notebookUri: getActiveNotebookUriKey(),
+        });
       },
     );
 
@@ -519,13 +549,21 @@ async function selectCalkitEnvironment(
     // For Docker, we don't need to register a kernel separately since it should
     // be in the image, but we can try to select it if needed
     let selectedKernelId: string | undefined;
-    if (picked.outerSlurmEnvironment) {
-      selectedKernelId = await registerAndSelectKernel(
+    if (picked.outerSlurmEnvironment && connected) {
+      const expectedKernel = await getExpectedKernelSpecForEnvironment(
         workspaceRoot,
         picked.innerEnvironment,
         "-e",
       );
-    } else if (picked.innerKind === "docker") {
+      selectedKernelId = expectedKernel
+        ? await trySelectExpectedKernelFromAvailableCandidates({
+            kernelName: expectedKernel.kernelName,
+            displayName: expectedKernel.displayName,
+            existingKernelIds: kernelsBeforeConnect,
+            requireNewKernel: true,
+          })
+        : undefined;
+    } else if (picked.innerKind === "docker" && connected) {
       // After connecting to a Docker-backed server, try selecting a sensible
       // default kernel automatically before falling back to manual selection.
       selectedKernelId = await tryAutoSelectBestAvailableKernel({
@@ -535,8 +573,13 @@ async function selectCalkitEnvironment(
     }
 
     if (!connected) {
+      const launchState =
+        picked.outerSlurmEnvironment &&
+        !hasRunningServerSession("slurm", getActiveNotebookUriKey())
+          ? "failed to start"
+          : "started";
       void vscode.window.showWarningMessage(
-        `${envType} server started, but VS Code could not auto-connect yet. URI copied: ${uri}`,
+        `${envType} server ${launchState}, but VS Code could not auto-connect. URI copied: ${uri}`,
       );
     }
 
@@ -1114,26 +1157,6 @@ async function askForSlurmOptionsWizard(
       continue;
     }
 
-    if (step === 2) {
-      const result = await showInputBoxStep({
-        title: "Slurm option: --partition",
-        prompt: "Optional partition name",
-        value: values.partition ?? "",
-        placeHolder: "leave blank to skip",
-        canGoBack: true,
-      });
-      if (result.kind === "cancel") {
-        return result;
-      }
-      if (result.kind === "back") {
-        step = 1;
-        continue;
-      }
-      values.partition = result.value;
-      step = 3;
-      continue;
-    }
-
     const result = await showInputBoxStep({
       title: "Additional srun options",
       prompt: "Optional raw options appended as-is (e.g. --cpus-per-task=8)",
@@ -1145,7 +1168,7 @@ async function askForSlurmOptionsWizard(
       return result;
     }
     if (result.kind === "back") {
-      step = 2;
+      step = 1;
       continue;
     }
     values.extra = result.value;
@@ -1407,6 +1430,19 @@ function getLaunchProfileForActiveNotebook(
   return getNotebookLaunchProfiles(context)[notebookUri];
 }
 
+function hasRunningServerSession(
+  kind: ActiveServerSession["kind"],
+  notebookUri?: string,
+): boolean {
+  if (!isProcessRunning(serverProcess) || activeServerSession?.kind !== kind) {
+    return false;
+  }
+  if (notebookUri && activeServerSession.notebookUri !== notebookUri) {
+    return false;
+  }
+  return true;
+}
+
 async function getConfiguredCandidateForNotebookPath(
   workspaceRoot: string,
   notebookRelativePath: string,
@@ -1424,7 +1460,13 @@ async function getConfiguredCandidateForNotebookPath(
   // Check pipeline stages first
   if (config.pipeline?.stages) {
     for (const stage of Object.values(config.pipeline.stages)) {
-      if (stage.notebook_path === normalizedPath && stage.environment) {
+      const stageNotebookPath =
+        stage.notebook_path ?? stage.script_path ?? stage.path;
+      if (
+        stage.kind === "jupyter-notebook" &&
+        stageNotebookPath === normalizedPath &&
+        stage.environment
+      ) {
         environmentName = stage.environment;
         break;
       }
@@ -1449,12 +1491,6 @@ async function getConfiguredCandidateForNotebookPath(
   const candidate = candidates.find(
     (item) => item.environmentName === environmentName,
   );
-
-  if (!candidate) {
-    log(
-      `Environment '${environmentName}' is configured for notebook '${normalizedPath}', but no matching selectable Calkit candidate was found.`,
-    );
-  }
 
   return candidate;
 }
@@ -1492,6 +1528,11 @@ async function autoSelectEnvironmentForActiveNotebook(
     return;
   }
 
+  const config = await readCalkitConfig(workspaceRoot);
+  if (!config) {
+    return;
+  }
+
   // If this notebook has already been configured in this session,
   // check if the kernel matches and skip if it does.
   // This avoids re-checking the environment when switching tabs.
@@ -1503,7 +1544,10 @@ async function autoSelectEnvironmentForActiveNotebook(
     );
     if (expectedKernelName) {
       const selectedKernelName = getSelectedKernelNameForActiveNotebook();
-      if (selectedKernelName === expectedKernelName) {
+      const hasMatchingServer = configuredCandidate.outerSlurmEnvironment
+        ? hasRunningServerSession("slurm", notebookUri)
+        : true;
+      if (selectedKernelName === expectedKernelName && hasMatchingServer) {
         log(
           `Notebook kernel '${selectedKernelName}' already matches the calkit environment '${configuredCandidate.environmentName}'; skipping re-selection.`,
         );
@@ -1518,6 +1562,52 @@ async function autoSelectEnvironmentForActiveNotebook(
     log(
       `Auto-selecting calkit.yaml environment '${configuredCandidate.environmentName}' for notebook ${notebookRelativePath}.`,
     );
+
+    if (configuredCandidate.outerSlurmEnvironment) {
+      await saveLaunchProfileForActiveNotebook(context, {
+        environmentName: configuredCandidate.environmentName,
+        innerEnvironment: configuredCandidate.innerEnvironment,
+        innerKind: configuredCandidate.innerKind,
+        outerSlurmEnvironment: configuredCandidate.outerSlurmEnvironment,
+        slurmOptions: getNotebookSlurmOptionsWithDefaults(
+          getDefaultSlurmOptions(
+            config.environments?.[configuredCandidate.outerSlurmEnvironment],
+          ),
+        ),
+        preferredPort: getDefaultPort(),
+      });
+
+      if (hasRunningServerSession("slurm", notebookUri)) {
+        log(
+          `Reusing running SLURM notebook session for '${configuredCandidate.environmentName}' and ensuring the kernel is selected.`,
+        );
+        const expectedKernel = await getExpectedKernelSpecForEnvironment(
+          workspaceRoot,
+          configuredCandidate.innerEnvironment,
+          "-e",
+        );
+        const kernelId = expectedKernel
+          ? await trySelectExpectedKernelFromAvailableCandidates({
+              kernelName: expectedKernel.kernelName,
+              displayName: expectedKernel.displayName,
+            })
+          : undefined;
+        if (kernelId) {
+          configuredNotebooksThisSession.add(notebookUri);
+        }
+      } else {
+        log(
+          `Auto-starting SLURM notebook session for '${configuredCandidate.environmentName}'.`,
+        );
+        const connected = await startSlurmJobForActiveNotebook(context);
+        if (connected) {
+          configuredNotebooksThisSession.add(notebookUri);
+        }
+      }
+
+      await refreshNotebookToolbarContext(context);
+      return;
+    }
 
     const kernelId = await registerAndSelectKernel(
       workspaceRoot,
@@ -1540,10 +1630,11 @@ async function autoSelectEnvironmentForActiveNotebook(
 async function askForSlurmOptions(
   defaults?: SlurmLaunchOptions,
 ): Promise<SlurmLaunchOptions | undefined> {
+  const effectiveDefaults = getNotebookSlurmOptionsWithDefaults(defaults);
   const gpus = await vscode.window.showInputBox({
     title: "Slurm option: --gpus",
     prompt: "Optional GPU count or value (e.g. 1 or a100:1)",
-    value: defaults?.gpus ?? "",
+    value: effectiveDefaults.gpus ?? "",
     placeHolder: "leave blank to skip",
   });
   if (gpus === undefined) {
@@ -1553,34 +1644,40 @@ async function askForSlurmOptions(
   const time = await vscode.window.showInputBox({
     title: "Slurm option: --time",
     prompt: "Optional time (e.g. 60 or 01:00:00)",
-    value: defaults?.time ?? "",
+    value: effectiveDefaults.time ?? "",
     placeHolder: "leave blank to skip",
   });
   if (time === undefined) {
     return undefined;
   }
 
-  const partition = await vscode.window.showInputBox({
-    title: "Slurm option: --partition",
-    prompt: "Optional partition name",
-    value: defaults?.partition ?? "",
-    placeHolder: "leave blank to skip",
-  });
-  if (partition === undefined) {
-    return undefined;
-  }
-
   const extra = await vscode.window.showInputBox({
     title: "Additional srun options",
     prompt: "Optional raw options appended as-is (e.g. --cpus-per-task=8)",
-    value: defaults?.extra ?? "",
+    value: effectiveDefaults.extra ?? "",
     placeHolder: "leave blank to skip",
   });
   if (extra === undefined) {
     return undefined;
   }
 
-  return compactSlurmOptions({ gpus, time, partition, extra });
+  return compactSlurmOptions({
+    gpus,
+    time,
+    partition: effectiveDefaults.partition,
+    extra,
+  });
+}
+
+function getNotebookSlurmOptionsWithDefaults(
+  defaults?: SlurmLaunchOptions,
+): SlurmLaunchOptions {
+  return compactSlurmOptions({
+    gpus: defaults?.gpus,
+    time: defaults?.time ?? DEFAULT_NOTEBOOK_SLURM_TIME,
+    partition: defaults?.partition,
+    extra: defaults?.extra,
+  });
 }
 
 function getDefaultPort(): number {
@@ -1598,6 +1695,7 @@ function buildLaunchCommand(
   slurmOptions?: SlurmLaunchOptions,
   serverToken?: string,
   dockerContainerName?: string,
+  defaultKernelName?: string,
 ): string {
   const cdPart = `cd ${shQuote(workspaceRoot)}`;
   const checkPart = `calkit check env -n ${shQuote(picked.innerEnvironment)}`;
@@ -1610,11 +1708,12 @@ function buildLaunchCommand(
   // Docker and Slurm need ip=0.0.0.0 and token for external access
   const needsExternalAccess =
     picked.outerSlurmEnvironment || picked.innerKind === "docker";
+  const defaultKernelFlag = buildDefaultKernelFlag(defaultKernelName);
   const jupyterPart = needsExternalAccess
     ? `calkit jupyter lab --ip=0.0.0.0 --no-browser --port=${port}${
-        serverToken ? ` --ServerApp.token=${shQuote(serverToken)}` : ""
-      }`
-    : `calkit jupyter lab --no-browser --ServerApp.token='' --ServerApp.password='' --port=${port}`;
+        serverToken ? ` --IdentityProvider.token=${shQuote(serverToken)}` : ""
+      }${defaultKernelFlag}`
+    : `calkit jupyter lab --no-browser --IdentityProvider.token='' --ServerApp.password='' --port=${port}${defaultKernelFlag}`;
 
   const xenvPart = `calkit xenv -n ${shQuote(
     picked.innerEnvironment,
@@ -1672,13 +1771,21 @@ function buildLaunchCommand(
   // For a SLURM outer environment, run jupyter directly under srun.
   // No need for calkit xenv wrapper - srun provides the environment context.
   // Use --kill-on-bad-exit to ensure cleanup when srun is interrupted.
-  const rawJupyterCmd = `jupyter lab --ip=0.0.0.0 --no-browser --port=${port}${
-    serverToken ? ` --ServerApp.token=${shQuote(serverToken)}` : ""
-  }`;
+  const rawJupyterCmd = `calkit jupyter lab --ip=0.0.0.0 --no-browser --port=${port}${
+    serverToken ? ` --IdentityProvider.token=${shQuote(serverToken)}` : ""
+  }${defaultKernelFlag}`;
   const srunPart = `srun --kill-on-bad-exit ${opts.join(
     " ",
   )} ${rawJupyterCmd}`.trim();
   return `${prefixParts.join(" && ")} && ${srunPart}`;
+}
+
+function buildDefaultKernelFlag(kernelName?: string): string {
+  return kernelName?.trim()
+    ? ` --MappingKernelManager.default_kernel_name=${shQuote(
+        kernelName.trim(),
+      )}`
+    : "";
 }
 
 function buildDockerRunCommand(
@@ -1755,7 +1862,7 @@ function buildDockerRunCommand(
 
   // Jupyter command (no need for --ip=0.0.0.0 with port mapping)
   const tokenArg = serverToken
-    ? `--ServerApp.token=${shQuote(serverToken)}`
+    ? `--IdentityProvider.token=${shQuote(serverToken)}`
     : "";
   dockerArgs.push(
     "sh",
@@ -1852,11 +1959,21 @@ async function selectExistingJupyterServer(uri: string): Promise<boolean> {
 
 async function waitForServerReady(
   uri: string,
+  options?: {
+    sessionKind?: ActiveServerSession["kind"];
+    notebookUri?: string;
+  },
   timeoutMs = 45_000,
   pollMs = 1_000,
 ): Promise<boolean> {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
+    if (
+      options?.sessionKind &&
+      !hasRunningServerSession(options.sessionKind, options.notebookUri)
+    ) {
+      return false;
+    }
     if (await isHttpEndpointReachable(uri)) {
       return true;
     }
@@ -1921,30 +2038,18 @@ async function registerAndSelectKernel(
 
         log(`calkit output: ${stdout}`);
 
-        let kernelName: string;
-        let displayName: string | undefined;
-        try {
-          // Response may contain non-JSON output before the JSON.
-          // Find and parse just the JSON object (line starting with {).
-          const jsonMatch = stdout.match(/\{[\s\S]*\}/);
-          if (!jsonMatch) {
-            throw new Error("No JSON found in output");
-          }
-          const result = JSON.parse(jsonMatch[0]);
-          kernelName = result.kernel_name;
-          displayName = result.display_name;
-          if (!kernelName) {
-            throw new Error("kernel_name not in JSON response");
-          }
-          log(`Extracted kernel name: ${kernelName}`);
-        } catch (parseError) {
-          const details = `${stderr || stdout || String(parseError)}`.trim();
+        const kernelSpec = parseCheckKernelJson(stdout);
+        if (!kernelSpec) {
+          const details = `${stderr || stdout || "Invalid JSON output"}`.trim();
           log(`JSON parse error: ${details}`);
           void vscode.window.showErrorMessage(
             `Failed to parse kernel info from 'calkit nb check-kernel': ${details}`,
           );
           return undefined;
         }
+
+        const { kernelName, displayName } = kernelSpec;
+        log(`Extracted kernel name: ${kernelName}`);
 
         const selectedKernelId = await tryAutoSelectKernel(
           kernelName,
@@ -2008,9 +2113,121 @@ async function tryAutoSelectKernel(
   return undefined;
 }
 
+async function trySelectExpectedKernelFromAvailableCandidates(options: {
+  kernelName: string;
+  displayName?: string;
+  existingKernelIds?: Set<string>;
+  requireNewKernel?: boolean;
+}): Promise<string | undefined> {
+  const editor = vscode.window.activeNotebookEditor;
+  if (!editor) {
+    return undefined;
+  }
+
+  const existingIds = options.existingKernelIds ?? new Set<string>();
+  const requireNewKernel = options.requireNewKernel ?? false;
+
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const resolved = await getResolvedNotebookKernels(editor);
+    if (!Array.isArray(resolved) || resolved.length === 0) {
+      await sleep(400);
+      continue;
+    }
+
+    const candidates = resolved.filter((kernel) => {
+      const id = kernel.id ?? "";
+      return id.includes("/");
+    });
+
+    const candidatePool = requireNewKernel
+      ? candidates.filter((kernel) => {
+          const id = kernel.id ?? "";
+          return id.length > 0 && !existingIds.has(id);
+        })
+      : candidates;
+
+    if (requireNewKernel && candidatePool.length === 0) {
+      await sleep(400);
+      continue;
+    }
+
+    const matchingCandidates = candidatePool.filter((candidate) =>
+      kernelMatchesPreference(
+        candidate,
+        options.kernelName,
+        options.displayName,
+      ),
+    );
+
+    if (matchingCandidates.length === 0) {
+      await sleep(400);
+      continue;
+    }
+
+    const sorted = [...matchingCandidates].sort((a, b) => {
+      const sa = scoreKernelCandidate(
+        a,
+        "",
+        options.kernelName,
+        options.displayName,
+      );
+      const sb = scoreKernelCandidate(
+        b,
+        "",
+        options.kernelName,
+        options.displayName,
+      );
+      return sb - sa;
+    });
+
+    for (const candidate of sorted) {
+      const id = candidate.id ?? "";
+      const slash = id.indexOf("/");
+      if (slash <= 0 || slash >= id.length - 1) {
+        continue;
+      }
+
+      const extension = id.slice(0, slash);
+      const controllerId = id.slice(slash + 1);
+
+      try {
+        await vscode.commands.executeCommand("notebook.selectKernel", {
+          extension,
+          id: controllerId,
+          notebookEditor: editor,
+          skipIfAlreadySelected: false,
+        });
+        await sleep(500);
+
+        if (await isKernelSelectedForActiveNotebook(options.kernelName)) {
+          log(`Selected expected server kernel: ${id}`);
+          return id;
+        }
+
+        log(
+          `Selected expected kernel candidate '${id}', but metadata confirmation timed out. Assuming selection succeeded.`,
+        );
+        return id;
+      } catch {
+        // Try next candidate.
+      }
+    }
+
+    await sleep(400);
+  }
+
+  log(
+    `Could not find expected kernel '${options.kernelName}' from connected server candidates.`,
+  );
+  return undefined;
+}
+
 async function tryAutoSelectBestAvailableKernel(options?: {
   existingKernelIds?: Set<string>;
   requireNewKernel?: boolean;
+  preferredKernelName?: string;
+  preferredDisplayName?: string;
+  requirePreferredMatch?: boolean;
 }): Promise<string | undefined> {
   const editor = vscode.window.activeNotebookEditor;
   if (!editor) {
@@ -2020,6 +2237,9 @@ async function tryAutoSelectBestAvailableKernel(options?: {
   const languageHint = getNotebookLanguageHint(editor).toLowerCase();
   const existingIds = options?.existingKernelIds ?? new Set<string>();
   const requireNewKernel = options?.requireNewKernel ?? false;
+  const preferredKernelName = options?.preferredKernelName;
+  const preferredDisplayName = options?.preferredDisplayName;
+  const requirePreferredMatch = options?.requirePreferredMatch ?? false;
 
   for (let attempt = 0; attempt < 15; attempt++) {
     const resolved = await getResolvedNotebookKernels(editor);
@@ -2045,9 +2265,41 @@ async function tryAutoSelectBestAvailableKernel(options?: {
       continue;
     }
 
-    const sorted = [...candidatePool].sort((a, b) => {
-      const sa = scoreKernelCandidate(a, languageHint);
-      const sb = scoreKernelCandidate(b, languageHint);
+    const preferredCandidates =
+      preferredKernelName || preferredDisplayName
+        ? candidatePool.filter((candidate) =>
+            kernelMatchesPreference(
+              candidate,
+              preferredKernelName,
+              preferredDisplayName,
+            ),
+          )
+        : [];
+    if (
+      requirePreferredMatch &&
+      (preferredKernelName || preferredDisplayName) &&
+      preferredCandidates.length === 0
+    ) {
+      await sleep(400);
+      continue;
+    }
+
+    const selectionPool =
+      preferredCandidates.length > 0 ? preferredCandidates : candidatePool;
+
+    const sorted = [...selectionPool].sort((a, b) => {
+      const sa = scoreKernelCandidate(
+        a,
+        languageHint,
+        preferredKernelName,
+        preferredDisplayName,
+      );
+      const sb = scoreKernelCandidate(
+        b,
+        languageHint,
+        preferredKernelName,
+        preferredDisplayName,
+      );
       return sb - sa;
     });
 
@@ -2093,6 +2345,8 @@ function scoreKernelCandidate(
     detail?: string;
   },
   languageHint: string,
+  preferredKernelName?: string,
+  preferredDisplayName?: string,
 ): number {
   const id = (kernel.id ?? "").toLowerCase();
   const label = (kernel.label ?? "").toLowerCase();
@@ -2103,6 +2357,12 @@ function scoreKernelCandidate(
 
   if (id.startsWith("ms-toolsai.jupyter/")) {
     score += 50;
+  }
+
+  if (
+    kernelMatchesPreference(kernel, preferredKernelName, preferredDisplayName)
+  ) {
+    score += 1000;
   }
 
   if (languageHint.length > 0) {
@@ -2129,6 +2389,41 @@ function scoreKernelCandidate(
   }
 
   return score;
+}
+
+function kernelMatchesPreference(
+  kernel: {
+    id?: string;
+    label?: string;
+    description?: string;
+    detail?: string;
+  },
+  kernelName?: string,
+  displayName?: string,
+): boolean {
+  const normalizedKernel = (kernelName ?? "").toLowerCase();
+  const normalizedDisplay = (displayName ?? "").toLowerCase();
+  const id = (kernel.id ?? "").toLowerCase();
+  const label = (kernel.label ?? "").toLowerCase();
+  const desc = (kernel.description ?? "").toLowerCase();
+  const detail = (kernel.detail ?? "").toLowerCase();
+  const idCompact = id.replace(/[^a-z0-9]/g, "");
+  const kernelCompact = normalizedKernel.replace(/[^a-z0-9]/g, "");
+  const displayCompact = normalizedDisplay.replace(/[^a-z0-9]/g, "");
+
+  return (
+    (normalizedKernel.length > 0 && id.endsWith(`/${normalizedKernel}`)) ||
+    (normalizedKernel.length > 0 && id === normalizedKernel) ||
+    (normalizedKernel.length > 0 && id.includes(normalizedKernel)) ||
+    (kernelCompact.length > 0 && idCompact.includes(kernelCompact)) ||
+    (normalizedDisplay.length > 0 && label === normalizedDisplay) ||
+    (normalizedDisplay.length > 0 && label.includes(normalizedDisplay)) ||
+    (normalizedDisplay.length > 0 && desc.includes(normalizedDisplay)) ||
+    (normalizedDisplay.length > 0 && detail.includes(normalizedDisplay)) ||
+    (displayCompact.length > 0 &&
+      label.replace(/[^a-z0-9]/g, "").includes(displayCompact)) ||
+    (normalizedKernel.length > 0 && label.includes(normalizedKernel))
+  );
 }
 
 function getNotebookLanguageHint(editor: vscode.NotebookEditor): string {
@@ -2221,30 +2516,9 @@ async function trySelectKernelViaNotebookApi(
 
       log(`Resolved ${resolved.length} kernels (attempt ${attempt + 1}/10)`);
 
-      candidate = resolved.find((k) => {
-        const id = (k.id ?? "").toLowerCase();
-        const label = (k.label ?? "").toLowerCase();
-        const desc = (k.description ?? "").toLowerCase();
-        const detail = (k.detail ?? "").toLowerCase();
-        const idCompact = id.replace(/[^a-z0-9]/g, "");
-        const kernelCompact = normalizedKernel.replace(/[^a-z0-9]/g, "");
-        const displayCompact = normalizedDisplay.replace(/[^a-z0-9]/g, "");
-
-        return (
-          id.endsWith(`/${normalizedKernel}`) ||
-          id === normalizedKernel ||
-          id.includes(normalizedKernel) ||
-          (kernelCompact.length > 0 && idCompact.includes(kernelCompact)) ||
-          (normalizedDisplay.length > 0 && label === normalizedDisplay) ||
-          (normalizedDisplay.length > 0 && label.includes(normalizedDisplay)) ||
-          (normalizedDisplay.length > 0 && desc.includes(normalizedDisplay)) ||
-          (normalizedDisplay.length > 0 &&
-            detail.includes(normalizedDisplay)) ||
-          (displayCompact.length > 0 &&
-            label.replace(/[^a-z0-9]/g, "").includes(displayCompact)) ||
-          label.includes(normalizedKernel)
-        );
-      });
+      candidate = resolved.find((k) =>
+        kernelMatchesPreference(k, normalizedKernel, normalizedDisplay),
+      );
 
       if (candidate?.id) {
         break;
@@ -2358,6 +2632,19 @@ async function getExpectedKernelNameForEnvironment(
   envName: string,
   envFlag: "-n" | "-e",
 ): Promise<string | undefined> {
+  const result = await getExpectedKernelSpecForEnvironment(
+    workspaceRoot,
+    envName,
+    envFlag,
+  );
+  return result?.kernelName;
+}
+
+async function getExpectedKernelSpecForEnvironment(
+  workspaceRoot: string,
+  envName: string,
+  envFlag: "-n" | "-e",
+): Promise<{ kernelName: string; displayName?: string } | undefined> {
   try {
     const { stdout } = await execFileAsync(
       "calkit",
@@ -2367,18 +2654,30 @@ async function getExpectedKernelNameForEnvironment(
       },
     );
 
-    try {
-      // Response may contain non-JSON output before the JSON.
-      // Find and parse just the JSON object (line starting with {).
-      const jsonMatch = stdout.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        return undefined;
-      }
-      const result = JSON.parse(jsonMatch[0]);
-      return result.kernel_name ?? undefined;
-    } catch {
+    return parseCheckKernelJson(stdout);
+  } catch {
+    return undefined;
+  }
+}
+
+function parseCheckKernelJson(
+  stdout: string,
+): { kernelName: string; displayName?: string } | undefined {
+  try {
+    const jsonMatch = stdout.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
       return undefined;
     }
+    const result = JSON.parse(jsonMatch[0]);
+    const kernelName = result.kernel_name;
+    if (typeof kernelName !== "string" || kernelName.length === 0) {
+      return undefined;
+    }
+    const displayName =
+      typeof result.display_name === "string" && result.display_name.length > 0
+        ? result.display_name
+        : undefined;
+    return { kernelName, displayName };
   } catch {
     return undefined;
   }
@@ -2426,13 +2725,13 @@ function shQuote(input: string): string {
 
 async function startSlurmJobForActiveNotebook(
   context: vscode.ExtensionContext,
-): Promise<void> {
+): Promise<boolean> {
   const workspaceRoot = getWorkspaceRoot();
   if (!workspaceRoot) {
     void vscode.window.showErrorMessage(
       "Open a workspace folder to start a Calkit SLURM notebook job.",
     );
-    return;
+    return false;
   }
 
   const profile = getLaunchProfileForActiveNotebook(context);
@@ -2440,7 +2739,7 @@ async function startSlurmJobForActiveNotebook(
     void vscode.window.showInformationMessage(
       "No saved SLURM notebook profile for this notebook. Select a nested slurm:environment first.",
     );
-    return;
+    return false;
   }
 
   const config = await readCalkitConfig(workspaceRoot);
@@ -2448,7 +2747,7 @@ async function startSlurmJobForActiveNotebook(
     void vscode.window.showErrorMessage(
       "Could not read environments from calkit.yaml.",
     );
-    return;
+    return false;
   }
 
   const picked: CalkitCandidate = {
@@ -2464,6 +2763,11 @@ async function startSlurmJobForActiveNotebook(
 
   const port = profile.preferredPort ?? getDefaultPort();
   const serverToken = createServerToken();
+  const expectedKernel = await getExpectedKernelSpecForEnvironment(
+    workspaceRoot,
+    profile.innerEnvironment,
+    "-e",
+  );
   const launchCmd = buildLaunchCommand(
     picked,
     workspaceRoot,
@@ -2472,6 +2776,7 @@ async function startSlurmJobForActiveNotebook(
     profile.slurmOptions,
     serverToken,
     undefined,
+    expectedKernel?.kernelName,
   );
 
   startServerInBackground(launchCmd, workspaceRoot, {
@@ -2483,6 +2788,7 @@ async function startSlurmJobForActiveNotebook(
     serverToken,
   )}`;
   await vscode.env.clipboard.writeText(uri);
+  const kernelsBeforeConnect = await getResolvedKernelIdsForActiveNotebook();
 
   const serverReady = await vscode.window.withProgress(
     {
@@ -2491,22 +2797,39 @@ async function startSlurmJobForActiveNotebook(
       cancellable: false,
     },
     async () => {
-      return await waitForServerReady(uri);
+      return await waitForServerReady(uri, {
+        sessionKind: "slurm",
+        notebookUri: profile.notebookUri,
+      });
     },
   );
   const connected = serverReady
     ? await selectExistingJupyterServer(uri)
     : false;
 
-  const selectedKernelId = await registerAndSelectKernel(
-    workspaceRoot,
-    profile.innerEnvironment,
-    "-e",
-  );
+  let selectedKernelId: string | undefined;
+  if (connected) {
+    const expectedKernel = await getExpectedKernelSpecForEnvironment(
+      workspaceRoot,
+      profile.innerEnvironment,
+      "-e",
+    );
+    selectedKernelId = expectedKernel
+      ? await trySelectExpectedKernelFromAvailableCandidates({
+          kernelName: expectedKernel.kernelName,
+          displayName: expectedKernel.displayName,
+          existingKernelIds: kernelsBeforeConnect,
+          requireNewKernel: true,
+        })
+      : undefined;
+  }
 
   if (!connected) {
+    const launchState = hasRunningServerSession("slurm", profile.notebookUri)
+      ? "started"
+      : "failed to start";
     void vscode.window.showWarningMessage(
-      `SLURM server started, but VS Code could not auto-connect yet. URI copied: ${uri}`,
+      `SLURM server ${launchState}, but VS Code could not auto-connect. URI copied: ${uri}`,
     );
   } else if (!selectedKernelId) {
     void vscode.window.showInformationMessage(
@@ -2515,6 +2838,7 @@ async function startSlurmJobForActiveNotebook(
   }
 
   await refreshNotebookToolbarContext(context);
+  return connected;
 }
 
 async function stopSlurmJobForActiveNotebook(
@@ -2582,10 +2906,8 @@ async function refreshNotebookToolbarContext(
 ): Promise<void> {
   const profile = getLaunchProfileForActiveNotebook(context);
   const hasResumableSlurm = Boolean(profile?.outerSlurmEnvironment);
-  const isRunningSlurm =
-    activeServerSession?.kind === "slurm" && isProcessRunning(serverProcess);
-  const isRunningDocker =
-    activeServerSession?.kind === "docker" && isProcessRunning(serverProcess);
+  const isRunningSlurm = hasRunningServerSession("slurm");
+  const isRunningDocker = hasRunningServerSession("docker");
 
   await vscode.commands.executeCommand(
     "setContext",

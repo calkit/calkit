@@ -1,7 +1,7 @@
 {
   "name": "calkit-vscode",
-  "displayName": "Calkit Notebook Environments",
-  "description": "Select Calkit environments from VS Code notebook kernel flows, including nested Slurm scenarios.",
+  "displayName": "Calkit",
+  "description": "Select Calkit environments for VS Code notebook kernels, including nested SLURM environments.",
   "version": "0.0.1",
   "publisher": "calkit",
   "license": "MIT",

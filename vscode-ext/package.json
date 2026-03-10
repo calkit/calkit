@@ -5,6 +5,22 @@
   "version": "0.0.1",
   "publisher": "calkit",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/calkit/calkit.git"
+  },
+  "homepage": "https://github.com/calkit/calkit/tree/main/vscode-ext",
+  "bugs": {
+    "url": "https://github.com/calkit/calkit/issues"
+  },
+  "keywords": [
+    "calkit",
+    "jupyter",
+    "notebook",
+    "slurm",
+    "reproducibility"
+  ],
+  "icon": "images/calkit-no-bg.png",
   "engines": {
     "vscode": "^1.95.0"
   },
@@ -17,9 +33,6 @@
   ],
   "extensionDependencies": [
     "ms-toolsai.jupyter"
-  ],
-  "enabledApiProposals": [
-    "notebookKernelSource"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -106,10 +119,13 @@
     }
   },
   "scripts": {
+    "prepare:dev": "node ./scripts/set-proposed-api.js on",
+    "prepare:publish": "node ./scripts/set-proposed-api.js off",
     "compile": "tsc -p ./",
+    "dev:compile": "npm run prepare:dev && npm run compile",
     "test": "npm run compile && node --test out/test/**/*.test.js",
-    "watch": "tsc -watch -p ./",
-    "vscode:prepublish": "npm run compile"
+    "watch": "npm run prepare:dev && tsc -watch -p ./",
+    "vscode:prepublish": "npm run prepare:publish && npm run compile"
   },
   "devDependencies": {
     "@types/node": "^20.14.12",
@@ -118,5 +134,8 @@
   },
   "dependencies": {
     "yaml": "^2.5.1"
-  }
+  },
+  "enabledApiProposals": [
+    "notebookKernelSource"
+  ]
 }

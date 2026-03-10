@@ -4,7 +4,7 @@
     {
       "type": "shell",
       "command": "npm",
-      "args": ["run", "compile"],
+      "args": ["run", "dev:compile"],
       "options": {
         "cwd": "${workspaceFolder}/vscode-ext"
       },

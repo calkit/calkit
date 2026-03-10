@@ -406,12 +406,11 @@ function buildLaunchCommand(
 ): string {
   const cdPart = `cd ${shQuote(workspaceRoot)}`;
   const checkPart = `calkit check env -n ${shQuote(picked.innerEnvironment)}`;
-  const shouldRunKernelCheck =
-    Boolean(picked.outerSlurmEnvironment) ||
-    needsKernelRegistration(picked.innerKind);
-  const kernelCheckPart = shouldRunKernelCheck
-    ? `calkit nb check-kernel -e ${shQuote(picked.innerEnvironment)}`
-    : "";
+  // All non-docker environments use kernel check; docker only needs env check
+  const kernelCheckPart =
+    picked.innerKind !== "docker"
+      ? `calkit nb check-kernel -e ${shQuote(picked.innerEnvironment)}`
+      : "";
 
   // Docker and Slurm need ip=0.0.0.0 and token for external access
   const needsExternalAccess =
@@ -426,8 +425,11 @@ function buildLaunchCommand(
     picked.innerEnvironment,
   )} -- ${jupyterPart}`;
 
-  const prefixParts = [cdPart, checkPart];
-  if (kernelCheckPart) {
+  const prefixParts = [cdPart];
+  // Docker only needs env check; all others only need kernel check
+  if (picked.innerKind === "docker") {
+    prefixParts.push(checkPart);
+  } else {
     prefixParts.push(kernelCheckPart);
   }
 
@@ -472,8 +474,15 @@ function buildLaunchCommand(
     );
   }
 
-  // For a SLURM outer environment, start the server directly under srun.
-  const srunPart = `srun ${opts.join(" ")} ${jupyterPart}`.trim();
+  // For a SLURM outer environment, run jupyter directly under srun.
+  // No need for calkit xenv wrapper - srun provides the environment context.
+  // Use --kill-on-bad-exit to ensure cleanup when srun is interrupted.
+  const rawJupyterCmd = `jupyter lab --ip=0.0.0.0 --no-browser --port=${port}${
+    serverToken ? ` --ServerApp.token=${shQuote(serverToken)}` : ""
+  }`;
+  const srunPart = `srun --kill-on-bad-exit ${opts.join(
+    " ",
+  )} ${rawJupyterCmd}`.trim();
   return `${prefixParts.join(" && ")} && ${srunPart}`;
 }
 

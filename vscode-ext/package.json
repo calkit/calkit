@@ -13,11 +13,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:calkit-vscode.selectCalkitEnvironment",
-    "onCommand:calkit-vscode.createCalkitEnvironment",
-    "onCommand:calkit-vscode.startCalkitSlurmJob",
-    "onCommand:calkit-vscode.stopCalkitSlurmJob",
-    "onNotebook:jupyter-notebook"
+    "onStartupFinished"
   ],
   "extensionDependencies": [
     "ms-toolsai.jupyter"
@@ -97,6 +93,7 @@
   },
   "scripts": {
     "compile": "tsc -p ./",
+    "test": "npm run compile && node --test out/test/**/*.test.js",
     "watch": "tsc -watch -p ./",
     "vscode:prepublish": "npm run compile"
   },

@@ -6,6 +6,16 @@ import * as https from "node:https";
 import * as net from "node:net";
 import * as vscode from "vscode";
 import YAML from "yaml";
+import {
+  compactSlurmOptions,
+  getDefaultSlurmOptions,
+  makeEnvironmentCandidates,
+  slurmOptionsToOptionList,
+  type CalkitCandidate,
+  type CalkitEnvironment,
+  type EnvKind,
+  type SlurmLaunchOptions,
+} from "./environments";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
 const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
@@ -25,60 +35,25 @@ function log(message: string): void {
   }
 }
 
-type EnvKind =
-  | "conda"
-  | "docker"
-  | "julia"
-  | "matlab"
-  | "pixi"
-  | "renv"
-  | "slurm"
-  | "uv"
-  | "uv-venv"
-  | "venv"
-  | "ssh"
-  | "_system"
-  | string;
+interface NotebookConfig {
+  path: string;
+  environment?: string;
+}
 
-interface CalkitEnvironment {
-  kind: EnvKind;
-  host?: string;
-  path?: string;
-  julia?: string;
-  image?: string;
-  platform?: string;
-  env_vars?: Record<string, string>;
-  gpus?: string;
-  ports?: string[];
-  user?: string;
-  wdir?: string;
-  args?: string[];
-  default_options?: string[];
-  default_slurm_options?: SlurmLaunchOptions;
+interface PipelineStage {
+  kind?: string;
+  notebook_path?: string;
+  environment?: string;
   [key: string]: unknown;
 }
 
 interface CalkitConfig {
   name?: string;
   environments?: Record<string, CalkitEnvironment>;
-}
-
-interface CalkitCandidate {
-  label: string;
-  description: string;
-  detail: string;
-  environmentName: string;
-  innerEnvironment: string;
-  innerKind: EnvKind;
-  outerSlurmEnvironment?: string;
-  outerKind?: EnvKind;
-}
-
-interface SlurmLaunchOptions {
-  gpus?: string;
-  time?: string;
-  partition?: string;
-  extra?: string;
+  notebooks?: NotebookConfig[];
+  pipeline?: {
+    stages?: Record<string, PipelineStage>;
+  };
 }
 
 interface NotebookLaunchProfile {
@@ -97,9 +72,12 @@ interface ActiveServerSession {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+  console.log("Calkit extension: activate() called");
   extensionContextRef = context;
   outputChannel = vscode.window.createOutputChannel("Calkit");
+  context.subscriptions.push(outputChannel);
   log("Calkit extension activated");
+  console.log("Calkit extension: outputChannel created and registered");
 
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_SELECT_ENV, async () => {
@@ -144,6 +122,8 @@ export function activate(context: vscode.ExtensionContext): void {
   // Proposed API: shows Calkit in the top-level kernel source list.
   // This must never break activation when proposed APIs are unavailable.
   registerKernelSourceIfAvailable(context);
+
+  console.log("Calkit extension: activate() completed successfully");
 }
 
 export function deactivate(): void {
@@ -210,6 +190,16 @@ async function selectCalkitEnvironment(
   if (!picked) {
     await refreshNotebookToolbarContext(context);
     return undefined;
+  }
+
+  // Save the environment selection to calkit.yaml
+  const notebookRelativePath = getActiveNotebookRelativePath(workspaceRoot);
+  if (notebookRelativePath) {
+    await saveNotebookEnvironmentSelection(
+      workspaceRoot,
+      notebookRelativePath,
+      picked.environmentName,
+    );
   }
 
   // uv environments should only register/check the kernel and then select it.
@@ -427,6 +417,51 @@ function isFileNotFoundError(error: unknown): boolean {
   );
 }
 
+async function saveNotebookEnvironmentSelection(
+  workspaceRoot: string,
+  notebookPath: string,
+  environmentName: string,
+): Promise<boolean> {
+  const config = await readCalkitConfig(workspaceRoot);
+  if (!config) {
+    return false;
+  }
+
+  // Check if notebook is part of a pipeline stage
+  let foundInPipeline = false;
+  if (config.pipeline?.stages) {
+    for (const [stageName, stage] of Object.entries(config.pipeline.stages)) {
+      if (stage.notebook_path === notebookPath) {
+        stage.environment = environmentName;
+        foundInPipeline = true;
+        break;
+      }
+    }
+  }
+
+  // If not in pipeline, add/update in notebooks section
+  if (!foundInPipeline) {
+    if (!config.notebooks) {
+      config.notebooks = [];
+    }
+
+    const existingIndex = config.notebooks.findIndex(
+      (nb) => nb.path === notebookPath,
+    );
+
+    if (existingIndex >= 0) {
+      config.notebooks[existingIndex].environment = environmentName;
+    } else {
+      config.notebooks.push({
+        path: notebookPath,
+        environment: environmentName,
+      });
+    }
+  }
+
+  return await writeCalkitConfig(workspaceRoot, config);
+}
+
 async function runCreateEnvironmentWizard(
   workspaceRoot: string,
 ): Promise<string | undefined> {
@@ -589,98 +624,21 @@ async function detectJuliaVersion(workspaceRoot: string): Promise<string> {
   return "1.10";
 }
 
-function getDefaultSlurmOptions(
-  env: CalkitEnvironment | undefined,
-): SlurmLaunchOptions | undefined {
-  if (!env) {
-    return undefined;
-  }
-
-  if (Array.isArray(env.default_options)) {
-    const parsed = parseSlurmOptionList(env.default_options);
-    if (parsed) {
-      return parsed;
-    }
-  }
-
-  // Backward compatibility for early extension versions.
-  const fromLegacy = env.default_slurm_options;
-  if (fromLegacy) {
-    return compactSlurmOptions(fromLegacy);
-  }
-
-  return undefined;
-}
-
-function compactSlurmOptions(options: SlurmLaunchOptions): SlurmLaunchOptions {
-  return {
-    gpus: options.gpus?.trim() || undefined,
-    time: options.time?.trim() || undefined,
-    partition: options.partition?.trim() || undefined,
-    extra: options.extra?.trim() || undefined,
-  };
-}
-
-function slurmOptionsToOptionList(options: SlurmLaunchOptions): string[] {
-  const compact = compactSlurmOptions(options);
-  const result: string[] = [];
-  if (compact.gpus) {
-    result.push(`--gpus=${compact.gpus}`);
-  }
-  if (compact.time) {
-    result.push(`--time=${compact.time}`);
-  }
-  if (compact.partition) {
-    result.push(`--partition=${compact.partition}`);
-  }
-  if (compact.extra) {
-    result.push(compact.extra);
-  }
-  return result;
-}
-
-function parseSlurmOptionList(
-  options: string[],
-): SlurmLaunchOptions | undefined {
-  const result: SlurmLaunchOptions = {};
-  const extraParts: string[] = [];
-
-  for (const raw of options) {
-    const opt = raw.trim();
-    if (!opt) {
-      continue;
-    }
-    const gpusMatch = opt.match(/^--gpus(?:=|\s+)(.+)$/);
-    if (gpusMatch) {
-      result.gpus = gpusMatch[1].trim();
-      continue;
-    }
-    const timeMatch = opt.match(/^--time(?:=|\s+)(.+)$/);
-    if (timeMatch) {
-      result.time = timeMatch[1].trim();
-      continue;
-    }
-    const partitionMatch = opt.match(/^--partition(?:=|\s+)(.+)$/);
-    if (partitionMatch) {
-      result.partition = partitionMatch[1].trim();
-      continue;
-    }
-    extraParts.push(opt);
-  }
-
-  if (extraParts.length > 0) {
-    result.extra = extraParts.join(" ");
-  }
-
-  const compact = compactSlurmOptions(result);
-  if (!compact.gpus && !compact.time && !compact.partition && !compact.extra) {
-    return undefined;
-  }
-  return compact;
-}
-
 function getActiveNotebookUriKey(): string | undefined {
   return vscode.window.activeNotebookEditor?.notebook.uri.toString();
+}
+
+function getActiveNotebookRelativePath(
+  workspaceRoot: string,
+): string | undefined {
+  const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
+  if (!notebookUri) {
+    return undefined;
+  }
+  const notebookPath = notebookUri.fsPath;
+  const relativePath = path.relative(workspaceRoot, notebookPath);
+  // Use forward slashes for consistency in calkit.yaml
+  return relativePath.replace(/\\/g, "/");
 }
 
 function getNotebookLaunchProfiles(
@@ -718,75 +676,6 @@ function getLaunchProfileForActiveNotebook(
     return undefined;
   }
   return getNotebookLaunchProfiles(context)[notebookUri];
-}
-
-function makeEnvironmentCandidates(
-  environments: Record<string, CalkitEnvironment>,
-): CalkitCandidate[] {
-  const notebookKinds = new Set<EnvKind>([
-    "conda",
-    "docker",
-    "julia",
-    "matlab",
-    "pixi",
-    "renv",
-    "uv",
-    "uv-venv",
-    "venv",
-  ]);
-
-  const standalone: CalkitCandidate[] = [];
-  const allNonSlurmInners: CalkitCandidate[] = [];
-  const slurmOuterNames: string[] = [];
-
-  for (const [name, env] of Object.entries(environments)) {
-    if (env.kind === "slurm") {
-      slurmOuterNames.push(name);
-      continue;
-    }
-
-    // Any non-slurm environment can be used as an inner environment for a
-    // slurm outer environment (for example: myslurm:py).
-    allNonSlurmInners.push({
-      label: name,
-      description: env.kind,
-      detail: "Run in this environment under a slurm outer environment",
-      environmentName: name,
-      innerEnvironment: name,
-      innerKind: env.kind,
-    });
-
-    if (!notebookKinds.has(env.kind)) {
-      continue;
-    }
-
-    standalone.push({
-      label: name,
-      description: env.kind,
-      detail: "Run Jupyter server in this environment",
-      environmentName: name,
-      innerEnvironment: name,
-      innerKind: env.kind,
-    });
-  }
-
-  const nested: CalkitCandidate[] = [];
-  for (const slurmOuter of slurmOuterNames) {
-    for (const inner of allNonSlurmInners) {
-      nested.push({
-        label: `${slurmOuter}:${inner.environmentName}`,
-        description: `slurm + ${inner.description}`,
-        detail: "Run server with srun, then enter inner environment",
-        environmentName: `${slurmOuter}:${inner.environmentName}`,
-        innerEnvironment: inner.environmentName,
-        innerKind: inner.innerKind,
-        outerSlurmEnvironment: slurmOuter,
-        outerKind: "slurm",
-      });
-    }
-  }
-
-  return [...standalone, ...nested];
 }
 
 async function askForSlurmOptions(

@@ -249,6 +249,9 @@ def get_status(
             ),
         ),
     ] = None,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Output status as JSON.")
+    ] = False,
 ):
     """View status (project, version control, and/or pipeline)."""
     ck_info = calkit.load_calkit_info()
@@ -271,6 +274,85 @@ def get_status(
         calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
     except Exception as e:
         warn(f"Failed to clean notebooks: {e.__class__.__name__}: {e}")
+    if as_json:
+        status_dict = {}
+        if "project" in categories:
+            status = calkit.get_latest_project_status()
+            status_dict["project"] = (
+                None
+                if status is None
+                else {
+                    "status": status.status,
+                    "message": status.message,
+                    "timestamp": status.timestamp.isoformat(),
+                }
+            )
+        if "git" in categories:
+            try:
+                repo = git.Repo()
+                changed_files = calkit.git.get_changed_files(repo=repo)
+                staged_files = calkit.git.get_staged_files(repo=repo)
+                untracked_files = calkit.git.get_untracked_files(repo=repo)
+                if targets:
+                    target_prefixes = [
+                        Path(target).as_posix().rstrip("/")
+                        for target in targets
+                    ]
+
+                    def _matches_target(path: str) -> bool:
+                        path = Path(path).as_posix()
+                        return any(
+                            path == prefix or path.startswith(prefix + "/")
+                            for prefix in target_prefixes
+                        )
+
+                    changed_files = [
+                        path for path in changed_files if _matches_target(path)
+                    ]
+                    staged_files = [
+                        path for path in staged_files if _matches_target(path)
+                    ]
+                    untracked_files = [
+                        path
+                        for path in untracked_files
+                        if _matches_target(path)
+                    ]
+                status_dict["git"] = {
+                    "branch": None
+                    if repo.head.is_detached
+                    else repo.active_branch.name,
+                    "is_dirty": repo.is_dirty(untracked_files=True),
+                    "changed_files": changed_files,
+                    "staged_files": staged_files,
+                    "untracked_files": untracked_files,
+                }
+            except InvalidGitRepositoryError:
+                status_dict["git"] = {"error": "Not a Git repository"}
+        if "dvc" in categories:
+            try:
+                import dvc.repo
+
+                register_ck_scheme()
+                dvc_repo = dvc.repo.Repo()
+                data_status = dvc_repo.data_status()
+                if isinstance(data_status, dict):
+                    data_status.pop("git", None)
+                status_dict["dvc"] = data_status
+            except Exception as e:
+                status_dict["dvc"] = {"error": f"{e.__class__.__name__}: {e}"}
+        if "pipeline" in categories or "dvc" in categories:
+            try:
+                import dvc.repo
+
+                register_ck_scheme()
+                dvc_repo = dvc.repo.Repo()
+                status_dict["pipeline"] = dvc_repo.status()
+            except Exception as e:
+                status_dict["pipeline"] = {
+                    "error": f"{e.__class__.__name__}: {e}"
+                }
+        print(json.dumps(status_dict, indent=2, default=str))
+        return
     if "project" in categories:
         print_sep("Project")
         # Print latest status

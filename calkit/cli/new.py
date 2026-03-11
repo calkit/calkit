@@ -1317,6 +1317,75 @@ def new_uv_env(
             repo.git.commit(["-m", f"Add uv environment {name}"])
 
 
+@new_app.command("slurm-env")
+def new_slurm_env(
+    name: Annotated[
+        str, typer.Option("--name", "-n", help="Environment name.")
+    ],
+    host: Annotated[
+        str,
+        typer.Option("--host", help="Host where SLURM commands should run."),
+    ] = "localhost",
+    default_options: Annotated[
+        list[str],
+        typer.Option(
+            "--default-option",
+            help=(
+                "Default sbatch/srun option string (for example --gpus=1). "
+                "Repeat for multiple options."
+            ),
+        ),
+    ] = [],
+    description: Annotated[
+        str | None, typer.Option("--description", help="Description.")
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite any existing environment with this name.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
+):
+    """Create a new SLURM environment."""
+    host = host.strip()
+    if not host:
+        raise_error("Host is required")
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if isinstance(envs, list):
+        typer.echo("Converting environments from list to dict")
+        envs = {env.pop("name"): env for env in envs}
+    if name in envs and not overwrite:
+        raise_error(
+            f"Environment with name {name} already exists "
+            "(use -f to overwrite)"
+        )
+    normalized_default_options = [
+        opt.strip() for opt in default_options if opt.strip()
+    ]
+    env = {"kind": "slurm", "host": host}
+    if normalized_default_options:
+        env["default_options"] = normalized_default_options  # type: ignore
+    if description is not None:
+        env["description"] = description
+    envs[name] = env
+    ck_info["environments"] = envs
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    if not no_commit:
+        repo = git.Repo()
+        repo.git.add("calkit.yaml")
+        if repo.git.diff(["--staged", "calkit.yaml"]):
+            repo.git.commit(
+                ["calkit.yaml", "-m", f"Add SLURM environment {name}"]
+            )
+
+
 @new_app.command("uv-venv")
 def new_uv_venv(
     name: Annotated[
@@ -1599,21 +1668,27 @@ def new_pixi_env(
 @new_app.command("julia-env")
 def new_julia_env(
     packages: Annotated[
-        list[str],
+        list[str] | None,
         typer.Argument(help="Packages to include in the environment."),
-    ],
+    ] = None,
     name: Annotated[
         str, typer.Option("--name", "-n", help="Environment name.")
-    ],
+    ] = "main",
     path: Annotated[
-        str, typer.Option("--path", help="Path for Project.toml file.")
-    ] = "Project.toml",
+        str | None,
+        typer.Option("--path", help="Path for Project.toml file."),
+    ] = None,
     description: Annotated[
         str | None, typer.Option("--description", help="Description.")
     ] = None,
     julia_version: Annotated[
-        str, typer.Option("--julia", "-j", help="Julia version.")
-    ] = "1.11",
+        str | None,
+        typer.Option(
+            "--julia",
+            "-j",
+            help="Julia version. Auto-detected if not supplied.",
+        ),
+    ] = None,
     overwrite: Annotated[
         bool,
         typer.Option(
@@ -1625,8 +1700,21 @@ def new_julia_env(
     no_commit: Annotated[
         bool, typer.Option("--no-commit", help="Do not commit changes.")
     ] = False,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Do not check environment is up-to-date after creation.",
+        ),
+    ] = False,
 ):
-    """Create a new Julia environment."""
+    """Create a new Julia environment or add an existing one to calkit.yaml."""
+    if path is None:
+        if packages:
+            path = "Project.toml"
+        else:
+            raise_error("Packages must be provided if path is not specified")
+            return
     if not os.path.basename(path) == "Project.toml":
         raise_error(
             "Julia environment paths must point to a Project.toml file"
@@ -1649,27 +1737,54 @@ def new_julia_env(
             f"Environment with name {name} already exists "
             "(use -f to overwrite)"
         )
-    # Create the environment now
+    # Detect Julia version if not supplied
+    if julia_version is None:
+        try:
+            julia_version = calkit.julia.get_version()
+        except ValueError as e:
+            raise_error(
+                f"Failed to detect Julia version: {e}. "
+                "Use --julia to specify a version."
+            )
+    # Check for duplicate Julia environments with same path and version
+    for env_name, env_config in envs.items():
+        if (
+            env_config.get("kind") == "julia"
+            and env_config.get("path") == path
+            and env_config.get("julia") == julia_version
+        ):
+            raise_error(
+                f"Julia environment '{env_name}' already exists with path "
+                f"'{path}' and version '{julia_version}'; "
+                f"Use a different path, version, or --overwrite to replace it"
+            )
     env_dir = os.path.dirname(path)
     if env_dir:
         os.makedirs(env_dir, exist_ok=True)
     else:
         env_dir = "."
-    # First make sure the Julia version is installed
-    cmd = ["juliaup", "add", julia_version]
-    try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError:
-        raise_error(f"Failed to install Julia version {julia_version}")
-    cmd = ["julia", f"+{julia_version}", f"--project={env_dir}", "-e"]
-    install_cmd = "using Pkg;"
-    for package in packages:
-        install_cmd += f' Pkg.add("{package}");'
-    cmd.append(install_cmd)
-    try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError:
-        raise_error("Failed to create new Julia environment")
+    # If packages are provided, create a new environment
+    if packages:
+        # First make sure the Julia version is installed
+        cmd = ["juliaup", "add", julia_version]
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError:
+            raise_error(f"Failed to install Julia version {julia_version}")
+        cmd = ["julia", f"+{julia_version}", f"--project={env_dir}", "-e"]
+        install_cmd = "using Pkg;"
+        for package in packages:
+            install_cmd += f' Pkg.add("{package}");'
+        cmd.append(install_cmd)
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to create new Julia environment")
+    elif not os.path.isfile(path):
+        raise_error(
+            "Project.toml not found; provide packages to create a new "
+            "environment"
+        )
     typer.echo("Adding environment to calkit.yaml")
     env = dict(kind="julia", path=path, julia=julia_version)
     if description is not None:
@@ -1678,11 +1793,17 @@ def new_julia_env(
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
-    repo.git.add(path)
-    repo.git.add(os.path.join(env_dir, "Manifest.toml"))
-    repo.git.add("calkit.yaml")
-    if not no_commit and repo.git.diff("--staged"):
-        repo.git.commit(["-m", f"Add Julia env {name}"])
+    if not no_commit:
+        repo.git.add("calkit.yaml")
+        if packages:
+            repo.git.add(path)
+            repo.git.add(os.path.join(env_dir, "Manifest.toml"))
+        if not no_check and packages:
+            env_lock_fpath = check_environment(env_name=name)
+            if env_lock_fpath is not None:
+                repo.git.add(env_lock_fpath)
+        if repo.git.diff("--staged"):
+            repo.git.commit(["-m", f"Add Julia env {name}"])
 
 
 @new_app.command("renv")

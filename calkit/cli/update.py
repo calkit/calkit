@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import zipfile
 from datetime import datetime
@@ -395,3 +396,88 @@ def update_github_actions(
         repo.git.add(rel_path)
         if repo.git.diff(["--staged", "--", rel_path]):
             repo.git.commit([rel_path, "-m", "Update GitHub Actions workflow"])
+
+
+@update_app.command(name="notebook")
+def update_notebook(
+    notebook_path: Annotated[
+        str,
+        typer.Argument(
+            help="Path to the notebook file (relative to workspace)"
+        ),
+    ],
+    set_env: Annotated[
+        str | None,
+        typer.Option(
+            "--set-env",
+            help="Environment name to associate with the notebook",
+        ),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Output result as JSON."),
+    ] = False,
+):
+    """Update notebook information.
+
+    Updates the notebook's environment association in either the
+    'notebooks' section or the appropriate 'pipeline' stage, depending on
+    whether the notebook has a corresponding pipeline stage.
+    """
+    try:
+        # TODO: Enable updating other things
+        if set_env is None:
+            raise ValueError("--set-env option is required")
+        # Load the current configuration
+        ck_info = calkit.load_calkit_info()
+        # Normalize the notebook path
+        notebook_path_normalized = notebook_path.replace("\\", "/")
+        # Check if notebook is part of a pipeline stage first
+        found_in_pipeline = False
+        if "pipeline" in ck_info and "stages" in ck_info["pipeline"]:
+            for stage_name, stage in ck_info["pipeline"]["stages"].items():
+                if stage.get("notebook_path") == notebook_path_normalized:
+                    stage["environment"] = set_env
+                    found_in_pipeline = True
+                    break
+        # If not in pipeline, update in notebooks section
+        if not found_in_pipeline:
+            if "notebooks" not in ck_info:
+                ck_info["notebooks"] = []
+            # Find existing notebook entry or create new one
+            notebooks = ck_info["notebooks"]
+            found_index = None
+            for i, nb in enumerate(notebooks):
+                if nb.get("path") == notebook_path_normalized:
+                    found_index = i
+                    break
+            if found_index is not None:
+                notebooks[found_index]["environment"] = set_env
+            else:
+                notebooks.append(
+                    {
+                        "path": notebook_path_normalized,
+                        "environment": set_env,
+                    }
+                )
+        # Write the updated configuration
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        # Output result
+        result = {
+            "notebook_path": notebook_path_normalized,
+            "environment": set_env,
+            "location": "pipeline" if found_in_pipeline else "notebooks",
+        }
+        if json_output:
+            typer.echo(json.dumps(result))
+        else:
+            location_text = (
+                "pipeline stage" if found_in_pipeline else "notebooks section"
+            )
+            typer.echo(
+                f"Updated notebook '{notebook_path_normalized}' with "
+                f"environment '{set_env}' in {location_text}"
+            )
+    except Exception as e:
+        raise_error(f"Failed to update notebook: {e}")

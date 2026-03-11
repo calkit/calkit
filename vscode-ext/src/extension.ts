@@ -1,0 +1,3279 @@
+import * as path from "node:path";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
+import * as http from "node:http";
+import * as https from "node:https";
+import * as net from "node:net";
+import * as vscode from "vscode";
+import YAML from "yaml";
+import {
+  compactSlurmOptions,
+  getDefaultSlurmOptions,
+  makeEnvironmentCandidates,
+  slurmOptionsToOptionList,
+  type CalkitCandidate,
+  type CalkitEnvironment,
+  type EnvKind,
+  type SlurmLaunchOptions,
+} from "./environments";
+
+const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
+const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
+const COMMAND_START_SLURM = "calkit-vscode.startCalkitSlurmJob";
+const COMMAND_STOP_SLURM = "calkit-vscode.stopCalkitSlurmJob";
+const COMMAND_RESTART_JOB = "calkit-vscode.restartCalkitJob";
+const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
+const execFileAsync = promisify(execFile);
+const DEFAULT_MIN_CALKIT_VERSION = "0.35.0";
+const DEFAULT_NOTEBOOK_SLURM_TIME = "120";
+const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
+
+let outputChannel: vscode.OutputChannel;
+let slurmStatusBarItem: vscode.StatusBarItem | undefined;
+let serverProcess: import("node:child_process").ChildProcess | undefined;
+let activeServerSession: ActiveServerSession | undefined;
+let extensionContextRef: vscode.ExtensionContext | undefined;
+const autoSelectingNotebookUris = new Set<string>();
+const configuredNotebooksThisSession = new Set<string>();
+const slurmAutoStartDeclinedThisSession = new Set<string>();
+const slurmAutoStartSuppressedThisSession = new Set<string>();
+let hasCheckedCalkitCli = false;
+
+function log(message: string): void {
+  if (outputChannel) {
+    outputChannel.appendLine(message);
+  }
+}
+
+interface NotebookConfig {
+  path: string;
+  environment?: string;
+}
+
+interface PipelineStage {
+  kind?: string;
+  notebook_path?: string;
+  script_path?: string;
+  path?: string;
+  environment?: string;
+  [key: string]: unknown;
+}
+
+interface CalkitConfig {
+  name?: string;
+  environments?: Record<string, CalkitEnvironment>;
+  notebooks?: NotebookConfig[];
+  pipeline?: {
+    stages?: Record<string, PipelineStage>;
+  };
+}
+
+interface NotebookLaunchProfile {
+  notebookUri: string;
+  environmentName: string;
+  innerEnvironment: string;
+  innerKind: EnvKind;
+  outerSlurmEnvironment?: string;
+  slurmOptions?: SlurmLaunchOptions;
+  preferredPort?: number;
+}
+
+interface ActiveServerSession {
+  kind: "slurm" | "docker" | "other";
+  notebookUri?: string;
+}
+
+export function activate(context: vscode.ExtensionContext): void {
+  console.log("Calkit extension: activate() called");
+  extensionContextRef = context;
+  outputChannel = vscode.window.createOutputChannel("Calkit");
+  context.subscriptions.push(outputChannel);
+  slurmStatusBarItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Right,
+    200,
+  );
+  slurmStatusBarItem.text = "$(server-process)";
+  slurmStatusBarItem.name = "Calkit SLURM Job";
+  slurmStatusBarItem.tooltip =
+    "Calkit SLURM notebook job is running. Click to stop.";
+  slurmStatusBarItem.command = COMMAND_STOP_SLURM;
+  context.subscriptions.push(slurmStatusBarItem);
+  log("Calkit extension activated");
+  console.log("Calkit extension: outputChannel created and registered");
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_SELECT_ENV, async () => {
+      return await selectCalkitEnvironment(context);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_CREATE_ENV, async () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        void vscode.window.showErrorMessage(
+          "Open a workspace folder to create Calkit environments.",
+        );
+        return;
+      }
+      await runCreateEnvironmentWizard(workspaceRoot);
+      await refreshNotebookToolbarContext(context);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_START_SLURM, async () => {
+      await startSlurmJobForActiveNotebook(context);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_STOP_SLURM, async () => {
+      await stopSlurmJobForActiveNotebook(context);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_RESTART_JOB, async () => {
+      await restartCalkitJobForActiveNotebook(context);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveNotebookEditor(() => {
+      void refreshNotebookToolbarContext(context);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenNotebookDocument(() => {
+      void autoSelectEnvironmentForActiveNotebook(context);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidCloseNotebookDocument((document) => {
+      const closedNotebookUri = document.uri.toString();
+      void stopSlurmJobForClosedNotebook(context, closedNotebookUri);
+    }),
+  );
+
+  void ensureCalkitCliReady();
+
+  void refreshNotebookToolbarContext(context);
+  void autoSelectEnvironmentForActiveNotebook(context);
+
+  // Proposed API: shows Calkit in the top-level kernel source list.
+  // This must never break activation when proposed APIs are unavailable.
+  registerKernelSourceIfAvailable(context);
+
+  console.log("Calkit extension: activate() completed successfully");
+}
+
+async function ensureCalkitCliReady(): Promise<void> {
+  if (hasCheckedCalkitCli) {
+    return;
+  }
+  hasCheckedCalkitCli = true;
+
+  const minimumVersion = DEFAULT_MIN_CALKIT_VERSION;
+  const workspaceRoot = getWorkspaceRoot();
+
+  try {
+    const { stdout, stderr } = await execFileAsync("calkit", ["--version"], {
+      cwd: workspaceRoot,
+      timeout: 5_000,
+    });
+    const output = `${stdout ?? ""}\n${stderr ?? ""}`;
+    const installedVersion = extractFirstSemver(output);
+
+    if (!installedVersion) {
+      log("Could not parse Calkit CLI version from 'calkit --version' output");
+      return;
+    }
+
+    const hasNotebookUpdate = await hasUpdateNotebookCommand(workspaceRoot);
+    if (!hasNotebookUpdate) {
+      await promptCalkitInstallOrUpgrade({
+        mode: "upgrade",
+        title: "Calkit CLI is too old for this extension",
+        message: `Detected Calkit ${installedVersion}, but this extension requires at least ${minimumVersion} with 'calkit update notebook'.`,
+      });
+      return;
+    }
+
+    if (compareSemver(installedVersion, minimumVersion) < 0) {
+      await promptCalkitInstallOrUpgrade({
+        mode: "upgrade",
+        title: "Calkit CLI upgrade required",
+        message: `Detected Calkit ${installedVersion}, but this extension requires version ${minimumVersion} or newer.`,
+      });
+      return;
+    }
+
+    log(
+      `Calkit CLI check passed (installed=${installedVersion}, min=${minimumVersion})`,
+    );
+  } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    log(`Calkit CLI check failed: ${details}`);
+    await promptCalkitInstallOrUpgrade({
+      mode: "install",
+      title: "Calkit CLI not found",
+      message:
+        "This extension requires the Calkit CLI in your PATH. Install it to use notebook environment features.",
+    });
+  }
+}
+
+function extractFirstSemver(input: string): string | undefined {
+  const match = input.match(/\b(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?\b/);
+  return match?.[1] && match?.[2] && match?.[3]
+    ? `${match[1]}.${match[2]}.${match[3]}`
+    : undefined;
+}
+
+function compareSemver(a: string, b: string): number {
+  const pa = a.split(".").map((n) => Number.parseInt(n, 10));
+  const pb = b.split(".").map((n) => Number.parseInt(n, 10));
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const av = Number.isFinite(pa[i]) ? pa[i] : 0;
+    const bv = Number.isFinite(pb[i]) ? pb[i] : 0;
+    if (av > bv) {
+      return 1;
+    }
+    if (av < bv) {
+      return -1;
+    }
+  }
+  return 0;
+}
+
+async function hasUpdateNotebookCommand(
+  workspaceRoot?: string,
+): Promise<boolean> {
+  try {
+    await execFileAsync("calkit", ["update", "notebook", "--help"], {
+      cwd: workspaceRoot,
+      timeout: 5_000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function promptCalkitInstallOrUpgrade(options: {
+  mode: "install" | "upgrade";
+  title: string;
+  message: string;
+}): Promise<void> {
+  const primaryAction = options.mode === "install" ? "Install" : "Upgrade";
+  const choice = await vscode.window.showWarningMessage(
+    options.message,
+    { modal: false, detail: options.title },
+    primaryAction,
+    "Open Install Docs",
+  );
+
+  if (choice === "Open Install Docs") {
+    await vscode.env.openExternal(vscode.Uri.parse(CALKIT_INSTALL_DOCS_URL));
+    return;
+  }
+
+  if (choice !== primaryAction) {
+    return;
+  }
+
+  const command = await pickCalkitSetupCommand(options.mode);
+  if (!command) {
+    return;
+  }
+
+  const terminal = vscode.window.createTerminal("Calkit Setup");
+  terminal.show(true);
+  terminal.sendText(command, true);
+  void vscode.window.showInformationMessage(
+    "Started Calkit setup command in terminal. After it finishes, reload VS Code.",
+  );
+}
+
+async function pickCalkitSetupCommand(
+  mode: "install" | "upgrade",
+): Promise<string | undefined> {
+  const isWindows = process.platform === "win32";
+  const installItems = [
+    {
+      label: "Official installer (recommended)",
+      description: isWindows
+        ? 'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"'
+        : "curl -LsSf install.calkit.org | sh",
+      command: isWindows
+        ? 'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"'
+        : "curl -LsSf install.calkit.org | sh",
+    },
+    {
+      label: "uv tool",
+      description:
+        mode === "install"
+          ? "uv tool install calkit-python"
+          : "uv tool upgrade calkit-python",
+      command:
+        mode === "install"
+          ? "uv tool install calkit-python"
+          : "uv tool upgrade calkit-python",
+    },
+    {
+      label: "pip",
+      description: "python -m pip install --upgrade calkit-python",
+      command: "python -m pip install --upgrade calkit-python",
+    },
+    {
+      label: "Windows PowerShell installer",
+      description:
+        'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"',
+      command:
+        'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"',
+    },
+    {
+      label: "Linux/macOS installer",
+      description: "curl -LsSf install.calkit.org | sh",
+      command: "curl -LsSf install.calkit.org | sh",
+    },
+  ];
+
+  const selected = await vscode.window.showQuickPick(installItems, {
+    title: mode === "install" ? "Install Calkit CLI" : "Upgrade Calkit CLI",
+    placeHolder: "Choose an installation command to run in terminal",
+    matchOnDescription: true,
+  });
+  return selected?.command;
+}
+
+export function deactivate(): void {
+  if (isProcessRunning(serverProcess)) {
+    serverProcess?.kill();
+    serverProcess = undefined;
+    activeServerSession = undefined;
+  }
+}
+
+async function selectCalkitEnvironment(
+  context: vscode.ExtensionContext,
+): Promise<string | undefined> {
+  const workspaceRoot = getWorkspaceRoot();
+  if (!workspaceRoot) {
+    void vscode.window.showErrorMessage(
+      "Open a workspace folder to use Calkit notebook environments.",
+    );
+    return undefined;
+  }
+
+  let picked: CalkitCandidate | undefined;
+  let config: CalkitConfig | undefined;
+  while (!picked) {
+    config = await readCalkitConfig(workspaceRoot);
+    if (!config) {
+      return undefined;
+    }
+
+    const environments = config.environments ?? {};
+    const candidates = makeEnvironmentCandidates(environments);
+    const items: Array<
+      (CalkitCandidate & { action: "select" }) | vscode.QuickPickItem
+    > = candidates.map((candidate) => ({
+      ...candidate,
+      action: "select",
+    }));
+
+    items.push({
+      label: "$(add) Create new Calkit environment...",
+    });
+
+    const selected = await vscode.window.showQuickPick(items, {
+      placeHolder: "Select a Calkit environment for this notebook",
+      matchOnDescription: true,
+      matchOnDetail: true,
+    });
+
+    if (!selected) {
+      await refreshNotebookToolbarContext(context);
+      return undefined;
+    }
+
+    if ((selected as { action?: string }).action === "select") {
+      picked = selected as CalkitCandidate;
+      break;
+    }
+
+    await runCreateEnvironmentWizard(workspaceRoot);
+  }
+
+  if (!picked) {
+    await refreshNotebookToolbarContext(context);
+    return undefined;
+  }
+
+  const targetNotebookUri = getActiveNotebookUriKey();
+  if (!targetNotebookUri) {
+    await refreshNotebookToolbarContext(context);
+    return undefined;
+  }
+
+  // Save the environment selection to calkit.yaml
+  const notebookRelativePath = getNotebookRelativePathForUri(
+    workspaceRoot,
+    targetNotebookUri,
+  );
+  if (notebookRelativePath) {
+    await saveNotebookEnvironmentSelection(
+      workspaceRoot,
+      notebookRelativePath,
+      picked.environmentName,
+    );
+  }
+
+  // uv environments should only register/check the kernel and then select it.
+  // No Jupyter server launch is needed for this path.
+  if (picked.innerKind === "uv") {
+    const kernelId = await registerAndSelectKernel(
+      workspaceRoot,
+      picked.innerEnvironment,
+      "-e",
+      targetNotebookUri,
+    );
+    await refreshNotebookToolbarContext(context);
+    return kernelId;
+  }
+
+  let slurmOptions: SlurmLaunchOptions | undefined;
+  if (picked.outerSlurmEnvironment) {
+    slurmOptions = await askForSlurmOptions(
+      getNotebookSlurmOptionsWithDefaults(
+        getDefaultSlurmOptions(
+          config?.environments?.[picked.outerSlurmEnvironment],
+        ),
+      ),
+    );
+    if (!slurmOptions) {
+      await refreshNotebookToolbarContext(context);
+      return undefined;
+    }
+  }
+
+  await saveLaunchProfileForNotebookUri(context, targetNotebookUri, {
+    environmentName: picked.environmentName,
+    innerEnvironment: picked.innerEnvironment,
+    innerKind: picked.innerKind,
+    outerSlurmEnvironment: picked.outerSlurmEnvironment,
+    slurmOptions,
+    preferredPort: getDefaultPort(),
+  });
+
+  if (picked.outerSlurmEnvironment) {
+    slurmAutoStartSuppressedThisSession.delete(targetNotebookUri);
+  }
+
+  // For uv/julia in a non-nested setup, only register/check the kernel and
+  // then select it in VS Code. No server launch is needed here.
+  if (
+    !picked.outerSlurmEnvironment &&
+    needsKernelRegistration(picked.innerKind)
+  ) {
+    const kernelId = await registerAndSelectKernel(
+      workspaceRoot,
+      picked.innerEnvironment,
+      "-e",
+      targetNotebookUri,
+    );
+    await refreshNotebookToolbarContext(context);
+    return kernelId;
+  }
+
+  // Docker and Slurm environments need tokenized servers
+  const needsToken =
+    picked.outerSlurmEnvironment || picked.innerKind === "docker";
+  const serverToken = needsToken ? createServerToken() : undefined;
+  const port = getDefaultPort();
+  let dockerContainerName: string | undefined;
+  if (!picked.outerSlurmEnvironment && picked.innerKind === "docker") {
+    dockerContainerName = getManagedDockerContainerName(
+      picked.innerEnvironment,
+      port,
+    );
+    await stopManagedDockerContainerIfExists(dockerContainerName);
+    const portIsFree = await waitForPortToBeFree(port, 7_000);
+    if (!portIsFree) {
+      void vscode.window.showErrorMessage(
+        `Cannot start Docker notebook server: localhost:${port} is already in use. Stop the process using that port or change 'calkit.notebook.defaultJupyterPort'.`,
+      );
+      return undefined;
+    }
+  }
+
+  const expectedKernel = picked.outerSlurmEnvironment
+    ? await getExpectedKernelSpecForEnvironment(
+        workspaceRoot,
+        picked.innerEnvironment,
+        "-e",
+      )
+    : undefined;
+
+  const launchCmd = buildLaunchCommand(
+    picked,
+    workspaceRoot,
+    config ?? {},
+    port,
+    slurmOptions,
+    serverToken,
+    dockerContainerName,
+    expectedKernel?.kernelName,
+  );
+
+  startServerInBackground(launchCmd, workspaceRoot, {
+    kind: picked.outerSlurmEnvironment
+      ? "slurm"
+      : picked.innerKind === "docker"
+      ? "docker"
+      : "other",
+    notebookUri: targetNotebookUri,
+  });
+
+  const uri = serverToken
+    ? `http://localhost:${port}/lab?token=${encodeURIComponent(serverToken)}`
+    : `http://localhost:${port}/lab`;
+  await vscode.env.clipboard.writeText(uri);
+  const kernelsBeforeConnect =
+    await getResolvedKernelIdsForActiveNotebook(targetNotebookUri);
+
+  // Docker and Slurm environments require connecting to an existing server
+  if (picked.outerSlurmEnvironment || picked.innerKind === "docker") {
+    const envType = picked.outerSlurmEnvironment ? "Slurm" : "Docker";
+    const runConnectFlow = async (): Promise<string | undefined> => {
+      const serverReady = picked.outerSlurmEnvironment
+        ? await waitForServerReady(uri, {
+            sessionKind: "slurm",
+            notebookUri: targetNotebookUri,
+          })
+        : await vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: `${envType} notebook server starting...`,
+              cancellable: false,
+            },
+            async () => {
+              return await waitForServerReady(uri, {
+                sessionKind: "docker",
+                notebookUri: targetNotebookUri,
+              });
+            },
+          );
+
+      const connected = serverReady
+        ? await selectExistingJupyterServer(uri)
+        : false;
+
+      // For Docker, we don't need to register a kernel separately since it should
+      // be in the image, but we can try to select it if needed
+      let selectedKernelId: string | undefined;
+      if (picked.outerSlurmEnvironment && connected) {
+        const expectedKernel = await getExpectedKernelSpecForEnvironment(
+          workspaceRoot,
+          picked.innerEnvironment,
+          "-e",
+        );
+        selectedKernelId = expectedKernel
+          ? await trySelectExpectedKernelFromAvailableCandidates({
+              kernelName: expectedKernel.kernelName,
+              displayName: expectedKernel.displayName,
+              existingKernelIds: kernelsBeforeConnect,
+              requireNewKernel: true,
+              notebookUri: targetNotebookUri,
+            })
+          : undefined;
+      } else if (picked.innerKind === "docker" && connected) {
+        // After connecting to a Docker-backed server, try selecting a sensible
+        // default kernel automatically before falling back to manual selection.
+        selectedKernelId = await tryAutoSelectBestAvailableKernel({
+          existingKernelIds: kernelsBeforeConnect,
+          requireNewKernel: true,
+        });
+      }
+
+      if (!connected) {
+        const launchState =
+          picked.outerSlurmEnvironment &&
+          !hasRunningServerSession("slurm", targetNotebookUri)
+            ? "failed to start"
+            : "started";
+        void vscode.window.showWarningMessage(
+          `${envType} server ${launchState}, but VS Code could not auto-connect. URI copied: ${uri}`,
+        );
+      }
+
+      const hasSelectedKernel =
+        await hasAnyKernelSelectedForActiveNotebook(targetNotebookUri);
+
+      if (!selectedKernelId && !hasSelectedKernel) {
+        void vscode.window
+          .showInformationMessage(
+            `Launched ${envType} Jupyter server. Select the kernel manually if needed.`,
+            "Select Kernel",
+          )
+          .then(async (action) => {
+            if (action === "Select Kernel") {
+              await openKernelPicker();
+            }
+          });
+      }
+
+      await refreshNotebookToolbarContext(context);
+      return selectedKernelId;
+    };
+
+    return picked.outerSlurmEnvironment
+      ? await withKernelProgress(
+          "Starting SLURM notebook and selecting kernel...",
+          runConnectFlow,
+        )
+      : await runConnectFlow();
+  }
+
+  const serverReady = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "Jupyter notebook server starting...",
+      cancellable: false,
+    },
+    async () => {
+      return await waitForServerReady(uri);
+    },
+  );
+  const connected = serverReady
+    ? await selectExistingJupyterServer(uri)
+    : false;
+
+  const action = await vscode.window.showInformationMessage(
+    connected
+      ? "Launched Jupyter via Calkit."
+      : `Launched Jupyter via Calkit. Could not auto-connect yet; URI copied: ${uri}`,
+    "Select Kernel",
+  );
+
+  if (action === "Select Kernel") {
+    await openKernelPicker();
+  }
+
+  await refreshNotebookToolbarContext(context);
+  return undefined;
+}
+
+function getWorkspaceRoot(): string | undefined {
+  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+async function readCalkitConfig(
+  workspaceRoot: string,
+): Promise<CalkitConfig | undefined> {
+  const fileUri = vscode.Uri.file(path.join(workspaceRoot, "calkit.yaml"));
+  try {
+    const bytes = await vscode.workspace.fs.readFile(fileUri);
+    const raw = Buffer.from(bytes).toString("utf8");
+    const parsed = YAML.parse(raw) as CalkitConfig | undefined;
+    return parsed ?? {};
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return {};
+    }
+    void vscode.window.showErrorMessage(
+      `Failed to read calkit.yaml: ${String(error)}`,
+    );
+    return undefined;
+  }
+}
+
+function isFileNotFoundError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("filenotfound") ||
+    message.includes("no such file") ||
+    message.includes("entry not found")
+  );
+}
+
+async function saveNotebookEnvironmentSelection(
+  workspaceRoot: string,
+  notebookPath: string,
+  environmentName: string,
+): Promise<boolean> {
+  try {
+    // Use Calkit CLI to properly save the notebook environment
+    // The CLI handles formatting and determines whether to use notebooks or pipeline section
+    const { stderr } = await execFileAsync(
+      "calkit",
+      ["update", "notebook", notebookPath, "--set-env", environmentName],
+      {
+        cwd: workspaceRoot,
+      },
+    );
+
+    if (stderr) {
+      log(`calkit update notebook warning: ${stderr}`);
+    }
+
+    log(
+      `Saved environment '${environmentName}' for notebook '${notebookPath}'`,
+    );
+    return true;
+  } catch (error: unknown) {
+    const err = error as {
+      stdout?: string;
+      stderr?: string;
+      message?: string;
+    };
+    const details = (err.stderr || err.stdout || err.message || "").trim();
+    log(`Failed to save environment selection: ${details}`);
+    void vscode.window.showWarningMessage(
+      `Failed to save environment to calkit.yaml: ${
+        details || "unknown error"
+      }`,
+    );
+    return false;
+  }
+}
+
+async function runCreateEnvironmentWizard(
+  workspaceRoot: string,
+): Promise<string | undefined> {
+  const config = (await readCalkitConfig(workspaceRoot)) ?? {};
+  const environments = config.environments ?? {};
+  for (;;) {
+    const kindPick = await vscode.window.showQuickPick(
+      [
+        {
+          label: "conda",
+          description: "Conda environment.yml-based environment",
+        },
+        {
+          label: "julia",
+          description: "Julia Project.toml-based environment",
+        },
+        {
+          label: "slurm",
+          description: "Remote SLURM scheduler environment",
+        },
+        {
+          label: "uv",
+          description: "uv pyproject.toml-based environment",
+        },
+      ],
+      {
+        title: "Create Calkit environment",
+        placeHolder: "Pick environment kind",
+      },
+    );
+    if (!kindPick) {
+      return undefined;
+    }
+
+    if (kindPick.label === "conda") {
+      const created = await runCreateCondaEnvironmentWizard(
+        workspaceRoot,
+        config,
+        environments,
+      );
+      if (created === "__back__") {
+        continue;
+      }
+      return created;
+    }
+
+    if (kindPick.label === "julia") {
+      const created = await runCreateJuliaEnvironmentWizard(
+        workspaceRoot,
+        config,
+        environments,
+      );
+      if (created === "__back__") {
+        continue;
+      }
+      return created;
+    }
+
+    if (kindPick.label === "slurm") {
+      const created = await runCreateSlurmEnvironmentWizard(
+        workspaceRoot,
+        environments,
+      );
+      if (created === "__back__") {
+        continue;
+      }
+      return created;
+    }
+
+    const created = await runCreateUvEnvironmentWizard(
+      workspaceRoot,
+      config,
+      environments,
+    );
+    if (created === "__back__") {
+      continue;
+    }
+    return created;
+  }
+}
+
+type WizardStepResult<T> =
+  | { kind: "value"; value: T }
+  | { kind: "back" }
+  | { kind: "cancel" };
+
+async function showInputBoxStep(options: {
+  title: string;
+  prompt?: string;
+  value?: string;
+  placeHolder?: string;
+  validateInput?: (
+    value: string,
+  ) => string | undefined | Promise<string | undefined>;
+  canGoBack?: boolean;
+}): Promise<WizardStepResult<string>> {
+  const input = vscode.window.createInputBox();
+  input.title = options.title;
+  input.prompt = options.prompt;
+  input.value = options.value ?? "";
+  input.placeholder = options.placeHolder;
+  if (options.canGoBack) {
+    input.buttons = [vscode.QuickInputButtons.Back];
+  }
+
+  return await new Promise<WizardStepResult<string>>((resolve) => {
+    let done = false;
+    const finish = (result: WizardStepResult<string>) => {
+      if (done) {
+        return;
+      }
+      done = true;
+      input.hide();
+      input.dispose();
+      resolve(result);
+    };
+
+    input.onDidTriggerButton((button) => {
+      if (button === vscode.QuickInputButtons.Back) {
+        finish({ kind: "back" });
+      }
+    });
+
+    input.onDidAccept(async () => {
+      const current = input.value;
+      const validationMessage = options.validateInput
+        ? await options.validateInput(current)
+        : undefined;
+      if (validationMessage) {
+        input.validationMessage = validationMessage;
+        return;
+      }
+      finish({ kind: "value", value: current });
+    });
+
+    input.onDidHide(() => {
+      if (!done) {
+        finish({ kind: "cancel" });
+      }
+    });
+
+    input.show();
+  });
+}
+
+async function runCreateSlurmEnvironmentWizard(
+  workspaceRoot: string,
+  environments: Record<string, CalkitEnvironment>,
+): Promise<string | "__back__" | undefined> {
+  let name = "my-slurm";
+  let host = "localhost";
+  let defaults: SlurmLaunchOptions = {};
+  let step = 0;
+
+  while (step >= 0) {
+    if (step === 0) {
+      const nameStep = await showInputBoxStep({
+        title: "Environment name",
+        prompt: "Unique environment name in calkit.yaml",
+        value: name,
+        canGoBack: true,
+        validateInput: (value) => {
+          const trimmed = value.trim();
+          if (trimmed.length === 0) {
+            return "Environment name is required";
+          }
+          if (trimmed.includes(":")) {
+            return "Environment names cannot contain ':'";
+          }
+          if (trimmed in environments) {
+            return "An environment with this name already exists";
+          }
+          return undefined;
+        },
+      });
+      if (nameStep.kind === "cancel") {
+        return undefined;
+      }
+      if (nameStep.kind === "back") {
+        return "__back__";
+      }
+      name = nameStep.value.trim();
+      step = 1;
+      continue;
+    }
+
+    if (step === 1) {
+      const hostStep = await showInputBoxStep({
+        title: "SLURM environment host",
+        prompt: "Host where SLURM commands should run",
+        value: host,
+        placeHolder: "e.g. hpc.my-org.edu",
+        canGoBack: true,
+        validateInput: (value) =>
+          value.trim().length === 0 ? "Host is required" : undefined,
+      });
+      if (hostStep.kind === "cancel") {
+        return undefined;
+      }
+      if (hostStep.kind === "back") {
+        step = 0;
+        continue;
+      }
+      host = hostStep.value.trim();
+      step = 2;
+      continue;
+    }
+
+    const optionsStep = await askForSlurmOptionsWizard(defaults);
+    if (optionsStep.kind === "cancel") {
+      return undefined;
+    }
+    if (optionsStep.kind === "back") {
+      step = 1;
+      continue;
+    }
+    defaults = optionsStep.value;
+
+    const args = ["new", "slurm-env", "--name", name, "--host", host];
+    for (const option of slurmOptionsToOptionList(defaults)) {
+      args.push("--default-option", option);
+    }
+    args.push("--no-commit");
+
+    try {
+      await execFileAsync("calkit", args, {
+        cwd: workspaceRoot,
+      });
+    } catch (error: unknown) {
+      const err = error as {
+        stdout?: string;
+        stderr?: string;
+        message?: string;
+      };
+      const details = (err.stderr || err.stdout || err.message || "").trim();
+      log(`Failed to create SLURM environment: ${details}`);
+      void vscode.window.showErrorMessage(
+        `Failed to create SLURM environment: ${details || "unknown error"}`,
+      );
+      return undefined;
+    }
+
+    void vscode.window.showInformationMessage(
+      `Created SLURM environment '${name}' in calkit.yaml.`,
+    );
+    return name;
+  }
+
+  return undefined;
+}
+
+async function runCreateJuliaEnvironmentWizard(
+  workspaceRoot: string,
+  config: CalkitConfig,
+  environments: Record<string, CalkitEnvironment>,
+): Promise<string | "__back__" | undefined> {
+  const detectedJulia = await detectJuliaVersion(workspaceRoot);
+
+  let name = "main";
+  let projectTomlPath = "Project.toml";
+  let juliaVersion = detectedJulia;
+  let step = 0;
+
+  while (step >= 0) {
+    if (step === 0) {
+      const nameStep = await showInputBoxStep({
+        title: "Environment name",
+        prompt: "Unique environment name in calkit.yaml",
+        value: name,
+        canGoBack: true,
+        validateInput: (value) => {
+          const trimmed = value.trim();
+          if (trimmed.length === 0) {
+            return "Environment name is required";
+          }
+          if (trimmed.includes(":")) {
+            return "Environment names cannot contain ':'";
+          }
+          if (trimmed in environments) {
+            return "An environment with this name already exists";
+          }
+          return undefined;
+        },
+      });
+      if (nameStep.kind === "cancel") {
+        return undefined;
+      }
+      if (nameStep.kind === "back") {
+        return "__back__";
+      }
+      name = nameStep.value.trim();
+      step = 1;
+      continue;
+    }
+
+    if (step === 1) {
+      const pathStep = await showInputBoxStep({
+        title: "Julia Project.toml path",
+        prompt: "Path to Project.toml (workspace-relative or absolute)",
+        value: projectTomlPath,
+        canGoBack: true,
+        validateInput: (value) => {
+          const trimmed = value.trim();
+          if (trimmed.length === 0) {
+            return "Path is required";
+          }
+          if (path.basename(trimmed) !== "Project.toml") {
+            return "Path must point to Project.toml";
+          }
+          return undefined;
+        },
+      });
+      if (pathStep.kind === "cancel") {
+        return undefined;
+      }
+      if (pathStep.kind === "back") {
+        step = 0;
+        continue;
+      }
+      projectTomlPath = pathStep.value.trim();
+      step = 2;
+      continue;
+    }
+
+    const versionStep = await showInputBoxStep({
+      title: "Julia version (optional)",
+      prompt: "Use detected version or specify a different major.minor version",
+      value: juliaVersion,
+      canGoBack: true,
+      validateInput: (value) => {
+        const trimmed = value.trim();
+        if (trimmed.length === 0) {
+          return "Julia version is required";
+        }
+        return undefined;
+      },
+    });
+    if (versionStep.kind === "cancel") {
+      return undefined;
+    }
+    if (versionStep.kind === "back") {
+      step = 1;
+      continue;
+    }
+    juliaVersion = versionStep.value.trim();
+
+    try {
+      const args: string[] = [
+        "new",
+        "julia-env",
+        "--name",
+        name,
+        "--path",
+        projectTomlPath,
+      ];
+      // Only pass --julia if it's different from the detected version
+      if (juliaVersion !== detectedJulia) {
+        args.push("--julia");
+        args.push(juliaVersion);
+      }
+      args.push("--no-commit");
+
+      await execFileAsync("calkit", args, { cwd: workspaceRoot });
+
+      void vscode.window.showInformationMessage(
+        `Created Julia environment '${name}' in calkit.yaml.`,
+      );
+      return name;
+    } catch (error: unknown) {
+      const err = error as {
+        stderr?: string;
+        message?: string;
+      };
+      const details = (err.stderr || err.message || "").trim();
+      log(`Failed to create julia environment: ${details}`);
+      void vscode.window.showErrorMessage(
+        `Failed to create julia environment: ${details || "unknown error"}`,
+      );
+      return undefined;
+    }
+  }
+
+  return undefined;
+}
+
+async function detectJuliaVersion(workspaceRoot: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("julia", ["--version"], {
+      cwd: workspaceRoot,
+      timeout: 5_000,
+    });
+    const versionMatch = stdout.match(/(\d+)\.(\d+)/);
+    if (versionMatch) {
+      return `${versionMatch[1]}.${versionMatch[2]}`;
+    }
+  } catch {
+    // Fall back to a reasonable default when julia is unavailable.
+  }
+  return "1.10";
+}
+
+async function askForSlurmOptionsWizard(
+  defaults: SlurmLaunchOptions,
+): Promise<WizardStepResult<SlurmLaunchOptions>> {
+  const values: SlurmLaunchOptions = {
+    ...defaults,
+  };
+  let step = 0;
+
+  while (step >= 0) {
+    if (step === 0) {
+      const result = await showInputBoxStep({
+        title: "Slurm option: --gpus",
+        prompt: "Optional GPU count or value (e.g. 1 or a100:1)",
+        value: values.gpus ?? "",
+        placeHolder: "leave blank to skip",
+        canGoBack: true,
+      });
+      if (result.kind === "cancel") {
+        return result;
+      }
+      if (result.kind === "back") {
+        return { kind: "back" };
+      }
+      values.gpus = result.value;
+      step = 1;
+      continue;
+    }
+
+    if (step === 1) {
+      const result = await showInputBoxStep({
+        title: "Slurm option: --time",
+        prompt: "Optional time (e.g. 60 or 01:00:00)",
+        value: values.time ?? "",
+        placeHolder: "leave blank to skip",
+        canGoBack: true,
+      });
+      if (result.kind === "cancel") {
+        return result;
+      }
+      if (result.kind === "back") {
+        step = 0;
+        continue;
+      }
+      values.time = result.value;
+      step = 2;
+      continue;
+    }
+
+    const result = await showInputBoxStep({
+      title: "Additional srun options",
+      prompt: "Optional raw options appended as-is (e.g. --cpus-per-task=8)",
+      value: values.extra ?? "",
+      placeHolder: "leave blank to skip",
+      canGoBack: true,
+    });
+    if (result.kind === "cancel") {
+      return result;
+    }
+    if (result.kind === "back") {
+      step = 1;
+      continue;
+    }
+    values.extra = result.value;
+    return { kind: "value", value: compactSlurmOptions(values) };
+  }
+
+  return { kind: "cancel" };
+}
+
+async function runCreateCondaEnvironmentWizard(
+  workspaceRoot: string,
+  config: CalkitConfig,
+  environments: Record<string, CalkitEnvironment>,
+): Promise<string | "__back__" | undefined> {
+  let name = "my-conda-env";
+  let envPath = "environment.yml";
+  let step = 0;
+
+  while (step >= 0) {
+    if (step === 0) {
+      const nameStep = await showInputBoxStep({
+        title: "Environment name",
+        prompt: "Unique environment name in calkit.yaml",
+        value: name,
+        canGoBack: true,
+        validateInput: (value) => {
+          const trimmed = value.trim();
+          if (trimmed.length === 0) {
+            return "Environment name is required";
+          }
+          if (trimmed.includes(":")) {
+            return "Environment names cannot contain ':'";
+          }
+          if (trimmed in environments) {
+            return "An environment with this name already exists";
+          }
+          return undefined;
+        },
+      });
+      if (nameStep.kind === "cancel") {
+        return undefined;
+      }
+      if (nameStep.kind === "back") {
+        return "__back__";
+      }
+      name = nameStep.value.trim();
+      step = 1;
+      continue;
+    }
+
+    const pathStep = await showInputBoxStep({
+      title: "Conda environment.yml path",
+      prompt: "Path to conda environment file (workspace-relative or absolute)",
+      value: envPath,
+      placeHolder: "e.g. environment.yml or env/conda-env.yml",
+      canGoBack: true,
+      validateInput: (value) => {
+        const trimmed = value.trim();
+        if (trimmed.length === 0) {
+          return "Path is required";
+        }
+        if (!trimmed.endsWith(".yml") && !trimmed.endsWith(".yaml")) {
+          return "Path must end with .yml or .yaml";
+        }
+        return undefined;
+      },
+    });
+    if (pathStep.kind === "cancel") {
+      return undefined;
+    }
+    if (pathStep.kind === "back") {
+      step = 0;
+      continue;
+    }
+    envPath = pathStep.value.trim();
+
+    try {
+      await execFileAsync(
+        "calkit",
+        ["new", "conda-env", "--name", name, "--path", envPath, "--no-commit"],
+        { cwd: workspaceRoot },
+      );
+
+      void vscode.window.showInformationMessage(
+        `Created Conda environment '${name}' in calkit.yaml.`,
+      );
+      return name;
+    } catch (error: unknown) {
+      const err = error as {
+        stderr?: string;
+        message?: string;
+      };
+      const details = (err.stderr || err.message || "").trim();
+      log(`Failed to create conda environment: ${details}`);
+      void vscode.window.showErrorMessage(
+        `Failed to create conda environment: ${details || "unknown error"}`,
+      );
+      return undefined;
+    }
+  }
+
+  return undefined;
+}
+
+async function runCreateUvEnvironmentWizard(
+  workspaceRoot: string,
+  config: CalkitConfig,
+  environments: Record<string, CalkitEnvironment>,
+): Promise<string | "__back__" | undefined> {
+  let name = "my-uv-env";
+  let pyprojectPath = "pyproject.toml";
+  let step = 0;
+
+  while (step >= 0) {
+    if (step === 0) {
+      const nameStep = await showInputBoxStep({
+        title: "Environment name",
+        prompt: "Unique environment name in calkit.yaml",
+        value: name,
+        canGoBack: true,
+        validateInput: (value) => {
+          const trimmed = value.trim();
+          if (trimmed.length === 0) {
+            return "Environment name is required";
+          }
+          if (trimmed.includes(":")) {
+            return "Environment names cannot contain ':'";
+          }
+          if (trimmed in environments) {
+            return "An environment with this name already exists";
+          }
+          return undefined;
+        },
+      });
+      if (nameStep.kind === "cancel") {
+        return undefined;
+      }
+      if (nameStep.kind === "back") {
+        return "__back__";
+      }
+      name = nameStep.value.trim();
+      step = 1;
+      continue;
+    }
+
+    const pathStep = await showInputBoxStep({
+      title: "uv pyproject.toml path",
+      prompt: "Path to pyproject.toml (workspace-relative or absolute)",
+      value: pyprojectPath,
+      placeHolder: "e.g. pyproject.toml or .calkit/envs/my-uv/pyproject.toml",
+      canGoBack: true,
+      validateInput: (value) => {
+        const trimmed = value.trim();
+        if (trimmed.length === 0) {
+          return "Path is required";
+        }
+        if (!trimmed.endsWith("pyproject.toml")) {
+          return "Path must end with pyproject.toml";
+        }
+        return undefined;
+      },
+    });
+    if (pathStep.kind === "cancel") {
+      return undefined;
+    }
+    if (pathStep.kind === "back") {
+      step = 0;
+      continue;
+    }
+    pyprojectPath = pathStep.value.trim();
+
+    try {
+      await execFileAsync(
+        "calkit",
+        [
+          "new",
+          "uv-env",
+          "--name",
+          name,
+          "--path",
+          pyprojectPath,
+          "--no-commit",
+        ],
+        { cwd: workspaceRoot },
+      );
+
+      void vscode.window.showInformationMessage(
+        `Created uv environment '${name}' in calkit.yaml.`,
+      );
+      return name;
+    } catch (error: unknown) {
+      const err = error as {
+        stderr?: string;
+        message?: string;
+      };
+      const details = (err.stderr || err.message || "").trim();
+      log(`Failed to create uv environment: ${details}`);
+      void vscode.window.showErrorMessage(
+        `Failed to create uv environment: ${details || "unknown error"}`,
+      );
+      return undefined;
+    }
+  }
+
+  return undefined;
+}
+
+function getActiveNotebookUriKey(): string | undefined {
+  return vscode.window.activeNotebookEditor?.notebook.uri.toString();
+}
+
+function getNotebookRelativePathForUri(
+  workspaceRoot: string,
+  notebookUri: string,
+): string | undefined {
+  const uri = vscode.Uri.parse(notebookUri);
+  const relativePath = path.relative(workspaceRoot, uri.fsPath);
+  return relativePath.replace(/\\/g, "/");
+}
+
+function getActiveNotebookRelativePath(
+  workspaceRoot: string,
+): string | undefined {
+  const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
+  if (!notebookUri) {
+    return undefined;
+  }
+  const notebookPath = notebookUri.fsPath;
+  const relativePath = path.relative(workspaceRoot, notebookPath);
+  // Use forward slashes for consistency in calkit.yaml
+  return relativePath.replace(/\\/g, "/");
+}
+
+function getNotebookLaunchProfiles(
+  context: vscode.ExtensionContext,
+): Record<string, NotebookLaunchProfile> {
+  return (
+    context.workspaceState.get<Record<string, NotebookLaunchProfile>>(
+      STATE_KEY_NOTEBOOK_PROFILES,
+      {},
+    ) ?? {}
+  );
+}
+
+async function saveLaunchProfileForActiveNotebook(
+  context: vscode.ExtensionContext,
+  profile: Omit<NotebookLaunchProfile, "notebookUri">,
+): Promise<void> {
+  const notebookUri = getActiveNotebookUriKey();
+  if (!notebookUri) {
+    return;
+  }
+  await saveLaunchProfileForNotebookUri(context, notebookUri, profile);
+}
+
+async function saveLaunchProfileForNotebookUri(
+  context: vscode.ExtensionContext,
+  notebookUri: string,
+  profile: Omit<NotebookLaunchProfile, "notebookUri">,
+): Promise<void> {
+  const allProfiles = getNotebookLaunchProfiles(context);
+  allProfiles[notebookUri] = {
+    notebookUri,
+    ...profile,
+  };
+  await context.workspaceState.update(STATE_KEY_NOTEBOOK_PROFILES, allProfiles);
+}
+
+function getLaunchProfileForActiveNotebook(
+  context: vscode.ExtensionContext,
+): NotebookLaunchProfile | undefined {
+  const notebookUri = getActiveNotebookUriKey();
+  if (!notebookUri) {
+    return undefined;
+  }
+  return getLaunchProfileForNotebookUri(context, notebookUri);
+}
+
+function getLaunchProfileForNotebookUri(
+  context: vscode.ExtensionContext,
+  notebookUri: string,
+): NotebookLaunchProfile | undefined {
+  return getNotebookLaunchProfiles(context)[notebookUri];
+}
+
+function hasRunningServerSession(
+  kind: ActiveServerSession["kind"],
+  notebookUri?: string,
+): boolean {
+  if (!isProcessRunning(serverProcess) || activeServerSession?.kind !== kind) {
+    return false;
+  }
+  if (notebookUri && activeServerSession.notebookUri !== notebookUri) {
+    return false;
+  }
+  return true;
+}
+
+async function getConfiguredCandidateForNotebookPath(
+  workspaceRoot: string,
+  notebookRelativePath: string,
+): Promise<CalkitCandidate | undefined> {
+  const config = await readCalkitConfig(workspaceRoot);
+  if (!config) {
+    return undefined;
+  }
+
+  // Normalize path for comparison
+  const normalizedPath = notebookRelativePath.replace(/\\/g, "/");
+
+  let environmentName: string | undefined;
+
+  // Check pipeline stages first
+  if (config.pipeline?.stages) {
+    for (const stage of Object.values(config.pipeline.stages)) {
+      const stageNotebookPath =
+        stage.notebook_path ?? stage.script_path ?? stage.path;
+      if (
+        stage.kind === "jupyter-notebook" &&
+        stageNotebookPath === normalizedPath &&
+        stage.environment
+      ) {
+        environmentName = stage.environment;
+        break;
+      }
+    }
+  }
+
+  // Then check notebooks section
+  if (!environmentName && config.notebooks) {
+    for (const nb of config.notebooks) {
+      if (nb.path === normalizedPath && nb.environment) {
+        environmentName = nb.environment;
+        break;
+      }
+    }
+  }
+
+  if (!environmentName) {
+    return undefined;
+  }
+
+  const candidates = makeEnvironmentCandidates(config.environments ?? {});
+  const candidate = candidates.find(
+    (item) => item.environmentName === environmentName,
+  );
+
+  return candidate;
+}
+
+async function autoSelectEnvironmentForActiveNotebook(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const workspaceRoot = getWorkspaceRoot();
+  if (!workspaceRoot) {
+    return;
+  }
+
+  const notebookUri = getActiveNotebookUriKey();
+  if (!notebookUri) {
+    return;
+  }
+
+  if (autoSelectingNotebookUris.has(notebookUri)) {
+    return;
+  }
+
+  const notebookRelativePath = getActiveNotebookRelativePath(workspaceRoot);
+  if (!notebookRelativePath) {
+    return;
+  }
+
+  const configuredCandidate = await getConfiguredCandidateForNotebookPath(
+    workspaceRoot,
+    notebookRelativePath,
+  );
+  if (!configuredCandidate) {
+    log(
+      `No environment configured in calkit.yaml for notebook ${notebookRelativePath}`,
+    );
+    return;
+  }
+
+  const config = await readCalkitConfig(workspaceRoot);
+  if (!config) {
+    return;
+  }
+
+  // If this notebook has already been configured in this session,
+  // check if the kernel matches and skip if it does.
+  // This avoids re-checking the environment when switching tabs.
+  if (configuredNotebooksThisSession.has(notebookUri)) {
+    const expectedKernelName = await getExpectedKernelNameForEnvironment(
+      workspaceRoot,
+      configuredCandidate.innerEnvironment,
+      "-e",
+    );
+    if (expectedKernelName) {
+      const selectedKernelName =
+        getSelectedKernelNameForActiveNotebook(notebookUri);
+      const hasMatchingServer = configuredCandidate.outerSlurmEnvironment
+        ? hasRunningServerSession("slurm", notebookUri)
+        : true;
+      if (selectedKernelName === expectedKernelName && hasMatchingServer) {
+        log(
+          `Notebook kernel '${selectedKernelName}' already matches the calkit environment '${configuredCandidate.environmentName}'; skipping re-selection.`,
+        );
+        return;
+      }
+    }
+  }
+
+  autoSelectingNotebookUris.add(notebookUri);
+
+  try {
+    log(
+      `Auto-selecting calkit.yaml environment '${configuredCandidate.environmentName}' for notebook ${notebookRelativePath}.`,
+    );
+
+    if (configuredCandidate.outerSlurmEnvironment) {
+      await saveLaunchProfileForNotebookUri(context, notebookUri, {
+        environmentName: configuredCandidate.environmentName,
+        innerEnvironment: configuredCandidate.innerEnvironment,
+        innerKind: configuredCandidate.innerKind,
+        outerSlurmEnvironment: configuredCandidate.outerSlurmEnvironment,
+        slurmOptions: getNotebookSlurmOptionsWithDefaults(
+          getDefaultSlurmOptions(
+            config.environments?.[configuredCandidate.outerSlurmEnvironment],
+          ),
+        ),
+        preferredPort: getDefaultPort(),
+      });
+
+      if (hasRunningServerSession("slurm", notebookUri)) {
+        log(
+          `Reusing running SLURM notebook session for '${configuredCandidate.environmentName}' and ensuring the kernel is selected.`,
+        );
+        const expectedKernel = await getExpectedKernelSpecForEnvironment(
+          workspaceRoot,
+          configuredCandidate.innerEnvironment,
+          "-e",
+        );
+        const kernelId = expectedKernel
+          ? await trySelectExpectedKernelFromAvailableCandidates({
+              kernelName: expectedKernel.kernelName,
+              displayName: expectedKernel.displayName,
+              notebookUri,
+            })
+          : undefined;
+        if (kernelId) {
+          configuredNotebooksThisSession.add(notebookUri);
+        }
+      } else {
+        log(
+          `Auto-starting SLURM notebook session for '${configuredCandidate.environmentName}'.`,
+        );
+        if (slurmAutoStartSuppressedThisSession.has(notebookUri)) {
+          log(
+            `Skipping auto-start for '${configuredCandidate.environmentName}' because this notebook's SLURM session was stopped and requires explicit restart.`,
+          );
+          await refreshNotebookToolbarContext(context);
+          return;
+        }
+
+        if (slurmAutoStartDeclinedThisSession.has(notebookUri)) {
+          log(
+            `Skipping auto-start for '${configuredCandidate.environmentName}' because it was declined earlier in this session.`,
+          );
+          await refreshNotebookToolbarContext(context);
+          return;
+        }
+
+        const shouldStart = await confirmAutoStartSlurmNotebookSession(
+          configuredCandidate.environmentName,
+          notebookRelativePath,
+        );
+        if (!shouldStart) {
+          slurmAutoStartDeclinedThisSession.add(notebookUri);
+          await refreshNotebookToolbarContext(context);
+          return;
+        }
+
+        slurmAutoStartDeclinedThisSession.delete(notebookUri);
+        const connected = await startSlurmJobForActiveNotebook(
+          context,
+          notebookUri,
+        );
+        if (connected) {
+          configuredNotebooksThisSession.add(notebookUri);
+        }
+      }
+
+      await refreshNotebookToolbarContext(context);
+      return;
+    }
+
+    const kernelId = await registerAndSelectKernel(
+      workspaceRoot,
+      configuredCandidate.innerEnvironment,
+      "-e",
+      notebookUri,
+    );
+    if (kernelId) {
+      log(
+        `Auto-selected kernel ${kernelId} for environment ${configuredCandidate.environmentName}`,
+      );
+      configuredNotebooksThisSession.add(notebookUri);
+    }
+
+    await refreshNotebookToolbarContext(context);
+  } finally {
+    autoSelectingNotebookUris.delete(notebookUri);
+  }
+}
+
+async function askForSlurmOptions(
+  defaults?: SlurmLaunchOptions,
+): Promise<SlurmLaunchOptions | undefined> {
+  const effectiveDefaults = getNotebookSlurmOptionsWithDefaults(defaults);
+  const gpus = await vscode.window.showInputBox({
+    title: "Slurm option: --gpus",
+    prompt: "Optional GPU count or value (e.g. 1 or a100:1)",
+    value: effectiveDefaults.gpus ?? "",
+    placeHolder: "leave blank to skip",
+  });
+  if (gpus === undefined) {
+    return undefined;
+  }
+
+  const time = await vscode.window.showInputBox({
+    title: "Slurm option: --time",
+    prompt: "Optional time (e.g. 60 or 01:00:00)",
+    value: effectiveDefaults.time ?? "",
+    placeHolder: "leave blank to skip",
+  });
+  if (time === undefined) {
+    return undefined;
+  }
+
+  const extra = await vscode.window.showInputBox({
+    title: "Additional srun options",
+    prompt: "Optional raw options appended as-is (e.g. --cpus-per-task=8)",
+    value: effectiveDefaults.extra ?? "",
+    placeHolder: "leave blank to skip",
+  });
+  if (extra === undefined) {
+    return undefined;
+  }
+
+  return compactSlurmOptions({
+    gpus,
+    time,
+    partition: effectiveDefaults.partition,
+    extra,
+  });
+}
+
+function getNotebookSlurmOptionsWithDefaults(
+  defaults?: SlurmLaunchOptions,
+): SlurmLaunchOptions {
+  return compactSlurmOptions({
+    gpus: defaults?.gpus,
+    time: defaults?.time ?? DEFAULT_NOTEBOOK_SLURM_TIME,
+    partition: defaults?.partition,
+    extra: defaults?.extra,
+  });
+}
+
+async function confirmAutoStartSlurmNotebookSession(
+  environmentName: string,
+  notebookPath: string,
+): Promise<boolean> {
+  const choice = await vscode.window.showWarningMessage(
+    `Notebook '${notebookPath}' is configured to run in '${environmentName}', which starts a SLURM job. Start it now?`,
+    "Start SLURM Job",
+    "Not Now",
+  );
+  return choice === "Start SLURM Job";
+}
+
+function getDefaultPort(): number {
+  const configured = vscode.workspace
+    .getConfiguration("calkit.notebook")
+    .get<number>("defaultJupyterPort", 8888);
+  return configured > 0 ? configured : 8888;
+}
+
+function buildLaunchCommand(
+  picked: CalkitCandidate,
+  workspaceRoot: string,
+  config: CalkitConfig,
+  port: number,
+  slurmOptions?: SlurmLaunchOptions,
+  serverToken?: string,
+  dockerContainerName?: string,
+  defaultKernelName?: string,
+): string {
+  const cdPart = `cd ${shQuote(workspaceRoot)}`;
+  const checkPart = `calkit check env -n ${shQuote(picked.innerEnvironment)}`;
+  // All non-docker environments use kernel check; docker only needs env check
+  const kernelCheckPart =
+    picked.innerKind !== "docker"
+      ? `calkit nb check-kernel -e ${shQuote(picked.innerEnvironment)}`
+      : "";
+
+  // Docker and Slurm need ip=0.0.0.0 and token for external access
+  const needsExternalAccess =
+    picked.outerSlurmEnvironment || picked.innerKind === "docker";
+  const defaultKernelFlag = buildDefaultKernelFlag(defaultKernelName);
+  const jupyterPart = needsExternalAccess
+    ? `calkit jupyter lab --ip=0.0.0.0 --no-browser --port=${port}${
+        serverToken ? ` --IdentityProvider.token=${shQuote(serverToken)}` : ""
+      }${defaultKernelFlag}`
+    : `calkit jupyter lab --no-browser --IdentityProvider.token='' --ServerApp.password='' --port=${port}${defaultKernelFlag}`;
+
+  const xenvPart = `calkit xenv -n ${shQuote(
+    picked.innerEnvironment,
+  )} -- ${jupyterPart}`;
+
+  const prefixParts = [cdPart];
+  // Docker only needs env check; all others only need kernel check
+  if (picked.innerKind === "docker") {
+    prefixParts.push(checkPart);
+  } else {
+    prefixParts.push(kernelCheckPart);
+  }
+
+  if (!picked.outerSlurmEnvironment) {
+    // uv/julia kernels can be registered up front and used directly by Jupyter.
+    if (needsKernelRegistration(picked.innerKind)) {
+      return `${prefixParts.join(" && ")} && ${jupyterPart}`;
+    }
+
+    // Docker environments launch Jupyter inside the container
+    if (picked.innerKind === "docker") {
+      return buildDockerRunCommand(
+        picked,
+        workspaceRoot,
+        config,
+        port,
+        serverToken,
+        dockerContainerName,
+      );
+    }
+    return `${prefixParts.join(" && ")} && ${xenvPart}`;
+  }
+
+  const opts: string[] = [];
+  if (slurmOptions?.gpus?.trim()) {
+    opts.push(`--gpus=${slurmOptions.gpus.trim()}`);
+  }
+  if (slurmOptions?.time?.trim()) {
+    opts.push(`--time=${slurmOptions.time.trim()}`);
+  }
+  if (slurmOptions?.partition?.trim()) {
+    opts.push(`--partition=${slurmOptions.partition.trim()}`);
+  }
+  if (slurmOptions?.extra?.trim()) {
+    opts.push(slurmOptions.extra.trim());
+  }
+
+  // For a SLURM outer environment, run jupyter directly under srun.
+  // No need for calkit xenv wrapper - srun provides the environment context.
+  // Use --kill-on-bad-exit to ensure cleanup when srun is interrupted.
+  const rawJupyterCmd = `calkit jupyter lab --ip=0.0.0.0 --no-browser --port=${port}${
+    serverToken ? ` --IdentityProvider.token=${shQuote(serverToken)}` : ""
+  }${defaultKernelFlag}`;
+  const srunPart = `srun --kill-on-bad-exit ${opts.join(
+    " ",
+  )} ${rawJupyterCmd}`.trim();
+  return `${prefixParts.join(" && ")} && ${srunPart}`;
+}
+
+function buildDefaultKernelFlag(kernelName?: string): string {
+  return kernelName?.trim()
+    ? ` --MappingKernelManager.default_kernel_name=${shQuote(
+        kernelName.trim(),
+      )}`
+    : "";
+}
+
+function buildDockerRunCommand(
+  picked: CalkitCandidate,
+  workspaceRoot: string,
+  config: CalkitConfig,
+  port: number,
+  serverToken?: string,
+  containerName?: string,
+): string {
+  const env = config.environments?.[picked.innerEnvironment];
+  if (!env) {
+    throw new Error(`Environment ${picked.innerEnvironment} not found`);
+  }
+
+  const image = env.image || picked.innerEnvironment;
+  const wdir = env.wdir || "/work";
+
+  const dockerArgs: string[] = ["docker", "run"];
+
+  // Platform
+  if (env.platform) {
+    dockerArgs.push("--platform", env.platform);
+  }
+
+  // Environment variables
+  if (env.env_vars) {
+    for (const [key, value] of Object.entries(env.env_vars)) {
+      dockerArgs.push("-e", `${key}=${value}`);
+    }
+  }
+
+  // GPUs
+  if (env.gpus) {
+    dockerArgs.push("--gpus", env.gpus);
+  }
+
+  // Port mapping - ensure Jupyter port is mapped
+  const portMapped = env.ports?.some((p) => p.includes(`${port}`));
+  if (!portMapped) {
+    dockerArgs.push("-p", `${port}:${port}`);
+  }
+  if (env.ports) {
+    for (const portSpec of env.ports) {
+      // Skip if we already added this port
+      if (!portSpec.includes(`${port}`)) {
+        dockerArgs.push("-p", portSpec);
+      }
+    }
+  }
+
+  // User mapping (defaults to current user)
+  if (env.user !== undefined) {
+    dockerArgs.push("--user", env.user);
+  }
+
+  // Additional args from environment config
+  if (env.args) {
+    dockerArgs.push(...env.args);
+  }
+
+  // Standard docker run flags for background execution
+  dockerArgs.push("--rm");
+  if (containerName) {
+    dockerArgs.push("--name", containerName);
+  }
+
+  // Working directory and volume mount
+  dockerArgs.push("-w", wdir);
+  dockerArgs.push("-v", `${workspaceRoot}:${wdir}`);
+
+  // Image name
+  dockerArgs.push(image);
+
+  // Jupyter command (no need for --ip=0.0.0.0 with port mapping)
+  const tokenArg = serverToken
+    ? `--IdentityProvider.token=${shQuote(serverToken)}`
+    : "";
+  dockerArgs.push(
+    "sh",
+    "-c",
+    `jupyter lab --no-browser --port=${port} ${tokenArg}`.trim(),
+  );
+
+  const dockerCmd = dockerArgs.map(shQuote).join(" ");
+
+  // Prepend environment check to lock the environment
+  const cdPart = `cd ${shQuote(workspaceRoot)}`;
+  const checkPart = `calkit check env -n ${shQuote(picked.innerEnvironment)}`;
+
+  return `${cdPart} && ${checkPart} && ${dockerCmd}`;
+}
+
+function needsKernelRegistration(kind: EnvKind): boolean {
+  return kind === "uv" || kind === "julia";
+}
+
+function createServerToken(): string {
+  return `calkit-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function getManagedDockerContainerName(envName: string, port: number): string {
+  const safeEnv = envName.toLowerCase().replace(/[^a-z0-9_.-]/g, "-");
+  return `calkit-nb-${safeEnv}-${port}`;
+}
+
+async function stopManagedDockerContainerIfExists(
+  containerName: string,
+): Promise<void> {
+  try {
+    await execFileAsync("docker", ["rm", "-f", containerName]);
+    log(`Removed existing managed Docker container: ${containerName}`);
+  } catch {
+    // Container not found or not running; nothing to do.
+  }
+}
+
+async function waitForPortToBeFree(
+  port: number,
+  timeoutMs = 5_000,
+): Promise<boolean> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (await isPortFree(port)) {
+      return true;
+    }
+    await sleep(250);
+  }
+  return false;
+}
+
+async function isPortFree(port: number): Promise<boolean> {
+  return await new Promise<boolean>((resolve) => {
+    const server = net.createServer();
+    server.unref();
+
+    server.once("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") {
+        resolve(false);
+      } else {
+        resolve(false);
+      }
+    });
+
+    server.listen(port, "127.0.0.1", () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
+async function selectExistingJupyterServer(uri: string): Promise<boolean> {
+  // Try a few command shapes; Jupyter command contracts vary across versions.
+  const attempts: Array<{ command: string; args: unknown[] }> = [
+    { command: "jupyter.selectjupyteruri", args: [uri] },
+    { command: "jupyter.selectjupyteruri", args: [{ uri }] },
+    { command: "jupyter.commandLineSelectJupyterURI", args: [uri] },
+    { command: "jupyter.selectjupyteruri", args: [] },
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      await vscode.commands.executeCommand(attempt.command, ...attempt.args);
+      return true;
+    } catch {
+      // Try next command signature.
+    }
+  }
+
+  return false;
+}
+
+async function switchToLocalJupyterServerSilently(): Promise<boolean> {
+  // Best effort: move notebooks off a dead remote server after SLURM stop.
+  const attempts: Array<{ command: string; args: unknown[] }> = [
+    { command: "jupyter.selectjupyteruri", args: ["local"] },
+    { command: "jupyter.selectjupyteruri", args: [{ uri: "local" }] },
+    { command: "jupyter.commandLineSelectJupyterURI", args: ["local"] },
+    { command: "jupyter.selectjupyteruri", args: [""] },
+    { command: "jupyter.selectjupyteruri", args: [{ uri: "" }] },
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      await vscode.commands.executeCommand(attempt.command, ...attempt.args);
+      return true;
+    } catch {
+      // Try next signature.
+    }
+  }
+
+  return false;
+}
+
+async function waitForServerReady(
+  uri: string,
+  options?: {
+    sessionKind?: ActiveServerSession["kind"];
+    notebookUri?: string;
+  },
+  timeoutMs = 45_000,
+  pollMs = 1_000,
+): Promise<boolean> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (
+      options?.sessionKind &&
+      !hasRunningServerSession(options.sessionKind, options.notebookUri)
+    ) {
+      return false;
+    }
+    if (await isHttpEndpointReachable(uri)) {
+      return true;
+    }
+    await sleep(pollMs);
+  }
+  return false;
+}
+
+async function isHttpEndpointReachable(targetUrl: string): Promise<boolean> {
+  return await new Promise<boolean>((resolve) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(targetUrl);
+    } catch {
+      resolve(false);
+      return;
+    }
+
+    const client = parsed.protocol === "https:" ? https : http;
+    const req = client.request(
+      {
+        method: "GET",
+        hostname: parsed.hostname,
+        port: parsed.port,
+        path: `${parsed.pathname}${parsed.search}`,
+        timeout: 1_500,
+      },
+      (res) => {
+        // Any HTTP response means the server is accepting connections.
+        res.resume();
+        resolve(true);
+      },
+    );
+
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(false);
+    });
+    req.on("error", () => resolve(false));
+    req.end();
+  });
+}
+
+async function registerAndSelectKernel(
+  workspaceRoot: string,
+  envName: string,
+  envFlag: "-n" | "-e",
+  expectedNotebookUri?: string,
+): Promise<string | undefined> {
+  log(`Registering and selecting kernel for env: ${envName}`);
+
+  return await withKernelProgress(
+    "Checking environment and setting kernel...",
+    async () => {
+      try {
+        const { stdout, stderr } = await execFileAsync(
+          "calkit",
+          ["nb", "check-kernel", envFlag, envName, "--json"],
+          {
+            cwd: workspaceRoot,
+          },
+        );
+
+        log(`calkit output: ${stdout}`);
+
+        const kernelSpec = parseCheckKernelJson(stdout);
+        if (!kernelSpec) {
+          const details = `${stderr || stdout || "Invalid JSON output"}`.trim();
+          log(`JSON parse error: ${details}`);
+          void vscode.window.showErrorMessage(
+            `Failed to parse kernel info from 'calkit nb check-kernel': ${details}`,
+          );
+          return undefined;
+        }
+
+        const { kernelName, displayName } = kernelSpec;
+        log(`Extracted kernel name: ${kernelName}`);
+
+        const selectedKernelId = await tryAutoSelectKernel(
+          kernelName,
+          displayName,
+          expectedNotebookUri,
+        );
+
+        if (selectedKernelId) {
+          log(`Kernel selection successful`);
+          return selectedKernelId;
+        }
+
+        log(`Kernel selection failed or unconfirmed`);
+        void vscode.window.showWarningMessage(
+          `Kernel '${kernelName}' was registered but auto-selection timed out. It should appear in the notebook kernel picker (top-right).`,
+        );
+        return undefined;
+      } catch (error: unknown) {
+        const err = error as {
+          stdout?: string;
+          stderr?: string;
+          message?: string;
+        };
+        const details = (err.stderr || err.stdout || err.message || "").trim();
+        log(`Error: ${details}`);
+        void vscode.window.showErrorMessage(
+          `Failed to run 'calkit nb check-kernel ${envFlag} ${envName}': ${
+            details || "unknown error"
+          }`,
+        );
+        return undefined;
+      }
+    },
+  );
+}
+
+async function tryAutoSelectKernel(
+  kernelName: string,
+  displayName?: string,
+  expectedNotebookUri?: string,
+): Promise<string | undefined> {
+  const editor = getNotebookEditorForUri(expectedNotebookUri);
+  if (!editor) {
+    if (expectedNotebookUri) {
+      log(
+        `No notebook editor found for kernel selection (target=${expectedNotebookUri})`,
+      );
+    } else {
+      log("No active notebook editor found for kernel selection");
+    }
+    return undefined;
+  }
+
+  log(`Attempting to select kernel: ${kernelName}`);
+  const editorId = getActiveNotebookEditorId() ?? "(none)";
+  log(`Editor ID: ${editorId}`);
+
+  const selectedKernelId = await trySelectKernelViaNotebookApi(
+    editor,
+    kernelName,
+    displayName,
+  );
+  if (selectedKernelId) {
+    log(`Successfully selected kernel controller: ${selectedKernelId}`);
+    return selectedKernelId;
+  }
+
+  log(`Failed to select kernel: ${kernelName}`);
+  return undefined;
+}
+
+async function trySelectExpectedKernelFromAvailableCandidates(options: {
+  kernelName: string;
+  displayName?: string;
+  existingKernelIds?: Set<string>;
+  requireNewKernel?: boolean;
+  notebookUri?: string;
+}): Promise<string | undefined> {
+  const editor = getNotebookEditorForUri(options.notebookUri);
+  if (!editor) {
+    return undefined;
+  }
+
+  const existingIds = options.existingKernelIds ?? new Set<string>();
+  const requireNewKernel = options.requireNewKernel ?? false;
+
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const resolved = await getResolvedNotebookKernels(editor);
+    if (!Array.isArray(resolved) || resolved.length === 0) {
+      await sleep(400);
+      continue;
+    }
+
+    const candidates = resolved.filter((kernel) => {
+      const id = kernel.id ?? "";
+      return id.includes("/");
+    });
+
+    const candidatePool = requireNewKernel
+      ? candidates.filter((kernel) => {
+          const id = kernel.id ?? "";
+          return id.length > 0 && !existingIds.has(id);
+        })
+      : candidates;
+
+    if (requireNewKernel && candidatePool.length === 0) {
+      await sleep(400);
+      continue;
+    }
+
+    const matchingCandidates = candidatePool.filter((candidate) =>
+      kernelMatchesPreference(
+        candidate,
+        options.kernelName,
+        options.displayName,
+      ),
+    );
+
+    if (matchingCandidates.length === 0) {
+      await sleep(400);
+      continue;
+    }
+
+    const sorted = [...matchingCandidates].sort((a, b) => {
+      const sa = scoreKernelCandidate(
+        a,
+        "",
+        options.kernelName,
+        options.displayName,
+      );
+      const sb = scoreKernelCandidate(
+        b,
+        "",
+        options.kernelName,
+        options.displayName,
+      );
+      return sb - sa;
+    });
+
+    for (const candidate of sorted) {
+      const id = candidate.id ?? "";
+      const slash = id.indexOf("/");
+      if (slash <= 0 || slash >= id.length - 1) {
+        continue;
+      }
+
+      const extension = id.slice(0, slash);
+      const controllerId = id.slice(slash + 1);
+
+      try {
+        await vscode.commands.executeCommand("notebook.selectKernel", {
+          extension,
+          id: controllerId,
+          notebookEditor: editor,
+          skipIfAlreadySelected: false,
+        });
+        await sleep(500);
+
+        if (
+          await isKernelSelectedForActiveNotebook(options.kernelName, editor)
+        ) {
+          log(`Selected expected server kernel: ${id}`);
+          return id;
+        }
+
+        log(
+          `Selected expected kernel candidate '${id}', but metadata confirmation timed out. Assuming selection succeeded.`,
+        );
+        return id;
+      } catch {
+        // Try next candidate.
+      }
+    }
+
+    await sleep(400);
+  }
+
+  log(
+    `Could not find expected kernel '${options.kernelName}' from connected server candidates.`,
+  );
+  return undefined;
+}
+
+async function tryAutoSelectBestAvailableKernel(options?: {
+  existingKernelIds?: Set<string>;
+  requireNewKernel?: boolean;
+  preferredKernelName?: string;
+  preferredDisplayName?: string;
+  requirePreferredMatch?: boolean;
+}): Promise<string | undefined> {
+  const editor = vscode.window.activeNotebookEditor;
+  if (!editor) {
+    return undefined;
+  }
+
+  const languageHint = getNotebookLanguageHint(editor).toLowerCase();
+  const existingIds = options?.existingKernelIds ?? new Set<string>();
+  const requireNewKernel = options?.requireNewKernel ?? false;
+  const preferredKernelName = options?.preferredKernelName;
+  const preferredDisplayName = options?.preferredDisplayName;
+  const requirePreferredMatch = options?.requirePreferredMatch ?? false;
+
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const resolved = await getResolvedNotebookKernels(editor);
+
+    if (!Array.isArray(resolved) || resolved.length === 0) {
+      await sleep(400);
+      continue;
+    }
+
+    const candidates = resolved.filter((k) => {
+      const id = k.id ?? "";
+      return id.includes("/");
+    });
+
+    const newCandidates = candidates.filter((k) => {
+      const id = k.id ?? "";
+      return id.length > 0 && !existingIds.has(id);
+    });
+
+    const candidatePool = newCandidates.length > 0 ? newCandidates : candidates;
+    if (requireNewKernel && newCandidates.length === 0) {
+      await sleep(400);
+      continue;
+    }
+
+    const preferredCandidates =
+      preferredKernelName || preferredDisplayName
+        ? candidatePool.filter((candidate) =>
+            kernelMatchesPreference(
+              candidate,
+              preferredKernelName,
+              preferredDisplayName,
+            ),
+          )
+        : [];
+    if (
+      requirePreferredMatch &&
+      (preferredKernelName || preferredDisplayName) &&
+      preferredCandidates.length === 0
+    ) {
+      await sleep(400);
+      continue;
+    }
+
+    const selectionPool =
+      preferredCandidates.length > 0 ? preferredCandidates : candidatePool;
+
+    const sorted = [...selectionPool].sort((a, b) => {
+      const sa = scoreKernelCandidate(
+        a,
+        languageHint,
+        preferredKernelName,
+        preferredDisplayName,
+      );
+      const sb = scoreKernelCandidate(
+        b,
+        languageHint,
+        preferredKernelName,
+        preferredDisplayName,
+      );
+      return sb - sa;
+    });
+
+    for (const candidate of sorted) {
+      const id = candidate.id ?? "";
+      const slash = id.indexOf("/");
+      if (slash <= 0 || slash >= id.length - 1) {
+        continue;
+      }
+
+      const extension = id.slice(0, slash);
+      const controllerId = id.slice(slash + 1);
+
+      try {
+        await vscode.commands.executeCommand("notebook.selectKernel", {
+          extension,
+          id: controllerId,
+          notebookEditor: editor,
+          skipIfAlreadySelected: false,
+        });
+        await sleep(400);
+
+        if (await hasAnyKernelSelectedForActiveNotebook()) {
+          log(`Auto-selected best available kernel: ${id}`);
+          return id;
+        }
+      } catch {
+        // Try next candidate.
+      }
+    }
+
+    await sleep(400);
+  }
+
+  return undefined;
+}
+
+function scoreKernelCandidate(
+  kernel: {
+    id?: string;
+    label?: string;
+    description?: string;
+    detail?: string;
+  },
+  languageHint: string,
+  preferredKernelName?: string,
+  preferredDisplayName?: string,
+): number {
+  const id = (kernel.id ?? "").toLowerCase();
+  const label = (kernel.label ?? "").toLowerCase();
+  const desc = (kernel.description ?? "").toLowerCase();
+  const detail = (kernel.detail ?? "").toLowerCase();
+
+  let score = 0;
+
+  if (id.startsWith("ms-toolsai.jupyter/")) {
+    score += 50;
+  }
+
+  if (
+    kernelMatchesPreference(kernel, preferredKernelName, preferredDisplayName)
+  ) {
+    score += 1000;
+  }
+
+  if (languageHint.length > 0) {
+    if (
+      label.includes(languageHint) ||
+      desc.includes(languageHint) ||
+      detail.includes(languageHint)
+    ) {
+      score += 100;
+    }
+  }
+
+  if (
+    languageHint === "python" &&
+    (label.includes("ipykernel") || label.includes("python"))
+  ) {
+    score += 30;
+  }
+  if (languageHint === "julia" && label.includes("julia")) {
+    score += 30;
+  }
+  if (languageHint === "r" && label.includes("r")) {
+    score += 30;
+  }
+
+  return score;
+}
+
+function kernelMatchesPreference(
+  kernel: {
+    id?: string;
+    label?: string;
+    description?: string;
+    detail?: string;
+  },
+  kernelName?: string,
+  displayName?: string,
+): boolean {
+  const normalizedKernel = (kernelName ?? "").toLowerCase();
+  const normalizedDisplay = (displayName ?? "").toLowerCase();
+  const id = (kernel.id ?? "").toLowerCase();
+  const label = (kernel.label ?? "").toLowerCase();
+  const desc = (kernel.description ?? "").toLowerCase();
+  const detail = (kernel.detail ?? "").toLowerCase();
+  const idCompact = id.replace(/[^a-z0-9]/g, "");
+  const kernelCompact = normalizedKernel.replace(/[^a-z0-9]/g, "");
+  const displayCompact = normalizedDisplay.replace(/[^a-z0-9]/g, "");
+
+  return (
+    (normalizedKernel.length > 0 && id.endsWith(`/${normalizedKernel}`)) ||
+    (normalizedKernel.length > 0 && id === normalizedKernel) ||
+    (normalizedKernel.length > 0 && id.includes(normalizedKernel)) ||
+    (kernelCompact.length > 0 && idCompact.includes(kernelCompact)) ||
+    (normalizedDisplay.length > 0 && label === normalizedDisplay) ||
+    (normalizedDisplay.length > 0 && label.includes(normalizedDisplay)) ||
+    (normalizedDisplay.length > 0 && desc.includes(normalizedDisplay)) ||
+    (normalizedDisplay.length > 0 && detail.includes(normalizedDisplay)) ||
+    (displayCompact.length > 0 &&
+      label.replace(/[^a-z0-9]/g, "").includes(displayCompact)) ||
+    (normalizedKernel.length > 0 && label.includes(normalizedKernel))
+  );
+}
+
+function getNotebookLanguageHint(editor: vscode.NotebookEditor): string {
+  const metadata = editor.notebook.metadata as any;
+  const fromMetadata =
+    metadata?.language_info?.name ?? metadata?.metadata?.language_info?.name;
+  if (typeof fromMetadata === "string" && fromMetadata.trim()) {
+    return fromMetadata.trim();
+  }
+
+  const firstCodeCell = editor.notebook
+    .getCells()
+    .find((cell) => cell.kind === vscode.NotebookCellKind.Code);
+  if (firstCodeCell?.document.languageId) {
+    return firstCodeCell.document.languageId;
+  }
+
+  return "";
+}
+
+async function getResolvedNotebookKernels(
+  editor: vscode.NotebookEditor,
+): Promise<
+  Array<{ id?: string; label?: string; description?: string; detail?: string }>
+> {
+  const resolved = (await vscode.commands.executeCommand(
+    "_resolveNotebookKernels",
+    {
+      viewType: editor.notebook.notebookType,
+      uri: editor.notebook.uri,
+    },
+  )) as Array<{
+    id?: string;
+    label?: string;
+    description?: string;
+    detail?: string;
+  }>;
+  return Array.isArray(resolved) ? resolved : [];
+}
+
+async function getResolvedKernelIdsForActiveNotebook(
+  notebookUri?: string,
+): Promise<Set<string>> {
+  const editor = getNotebookEditorForUri(notebookUri);
+  if (!editor) {
+    return new Set<string>();
+  }
+
+  const kernels = await getResolvedNotebookKernels(editor);
+  const ids = kernels
+    .map((k) => k.id)
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
+  return new Set(ids);
+}
+
+async function trySelectKernelViaNotebookApi(
+  editor: vscode.NotebookEditor,
+  kernelName: string,
+  displayName?: string,
+): Promise<string | undefined> {
+  type ResolvedKernel = {
+    id?: string;
+    label?: string;
+    description?: string;
+    detail?: string;
+  };
+
+  try {
+    const normalizedDisplay = (displayName ?? "").toLowerCase();
+    const normalizedKernel = kernelName.toLowerCase();
+
+    // Jupyter kernel discovery can lag behind check-kernel. Poll briefly.
+    let candidate: ResolvedKernel | undefined;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const resolved = (await vscode.commands.executeCommand(
+        "_resolveNotebookKernels",
+        {
+          viewType: editor.notebook.notebookType,
+          uri: editor.notebook.uri,
+        },
+      )) as ResolvedKernel[];
+
+      if (!Array.isArray(resolved) || resolved.length === 0) {
+        log(
+          `No kernels returned by _resolveNotebookKernels (attempt ${
+            attempt + 1
+          }/10)`,
+        );
+        await sleep(300);
+        continue;
+      }
+
+      log(`Resolved ${resolved.length} kernels (attempt ${attempt + 1}/10)`);
+
+      candidate = resolved.find((k) =>
+        kernelMatchesPreference(k, normalizedKernel, normalizedDisplay),
+      );
+
+      if (candidate?.id) {
+        break;
+      }
+
+      await sleep(300);
+    }
+
+    if (!candidate?.id) {
+      log(
+        `No matching controller found for kernel '${kernelName}' (${
+          displayName ?? "no display name"
+        })`,
+      );
+      return undefined;
+    }
+
+    const slash = candidate.id.indexOf("/");
+    if (slash <= 0 || slash >= candidate.id.length - 1) {
+      log(
+        `Resolved controller id is not in extension/id format: ${candidate.id}`,
+      );
+      return undefined;
+    }
+
+    const extension = candidate.id.slice(0, slash);
+    const id = candidate.id.slice(slash + 1);
+
+    log(`Selecting kernel controller for '${kernelName}'`);
+    await vscode.commands.executeCommand("notebook.selectKernel", {
+      extension,
+      id,
+      notebookEditor: editor,
+      skipIfAlreadySelected: false,
+    });
+
+    // Give VS Code/Jupyter time to bind the selected controller and update metadata.
+    await sleep(500);
+
+    if (await isKernelSelectedForActiveNotebook(kernelName, editor)) {
+      log(`Kernel selection confirmed in notebook metadata`);
+      return candidate.id;
+    }
+
+    // Selection may have succeeded even though metadata check failed
+    // (metadata update can be delayed in some VS Code versions).
+    // Log the situation but still return success if controller was actually selected.
+    log(
+      `Kernel controller was selected but metadata confirmation timed out. Assuming selection succeeded.`,
+    );
+    return candidate.id;
+  } catch (err) {
+    log(
+      `Controller selection failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
+  return undefined;
+}
+
+async function isKernelSelectedForActiveNotebook(
+  kernelName: string,
+  editor?: vscode.NotebookEditor,
+): Promise<boolean> {
+  // Let Jupyter update notebook metadata after a kernel change.
+  await sleep(250);
+  const targetEditor = editor ?? vscode.window.activeNotebookEditor;
+  const md = targetEditor?.notebook.metadata as any;
+  const selectedName =
+    md?.kernelspec?.name ?? md?.metadata?.kernelspec?.name ?? "";
+  const notebookPath = targetEditor?.notebook.uri.fsPath;
+
+  log(`Checking kernel selection - notebook: ${notebookPath}`);
+  log(
+    `Current kernel metadata: ${
+      typeof selectedName === "string" ? selectedName : "(not set)"
+    }`,
+  );
+  log(`Expected kernel: ${kernelName}`);
+
+  // Check for exact match on the kernel name
+  const isSelected =
+    typeof selectedName === "string" && selectedName === kernelName;
+  if (!isSelected) {
+    // Log additional debugging info when not selected
+    log(`Full metadata object: ${JSON.stringify(md, null, 2)}`);
+  }
+  return isSelected;
+}
+
+function getNotebookEditorForUri(
+  notebookUri?: string,
+): vscode.NotebookEditor | undefined {
+  if (!notebookUri) {
+    return vscode.window.activeNotebookEditor;
+  }
+
+  const active = vscode.window.activeNotebookEditor;
+  if (active?.notebook.uri.toString() === notebookUri) {
+    return active;
+  }
+
+  return vscode.window.visibleNotebookEditors.find(
+    (editor) => editor.notebook.uri.toString() === notebookUri,
+  );
+}
+
+async function hasAnyKernelSelectedForActiveNotebook(
+  notebookUri?: string,
+): Promise<boolean> {
+  // Give Jupyter a brief moment to attach kernelspec metadata after connect.
+  await sleep(200);
+  const md = getNotebookEditorForUri(notebookUri)?.notebook.metadata as any;
+  const selectedName =
+    md?.kernelspec?.name ?? md?.metadata?.kernelspec?.name ?? "";
+  return typeof selectedName === "string" && selectedName.trim().length > 0;
+}
+
+function getSelectedKernelNameForActiveNotebook(
+  notebookUri?: string,
+): string | undefined {
+  const md = getNotebookEditorForUri(notebookUri)?.notebook.metadata as any;
+  const selectedName =
+    md?.kernelspec?.name ?? md?.metadata?.kernelspec?.name ?? "";
+  return typeof selectedName === "string" && selectedName.trim().length > 0
+    ? selectedName
+    : undefined;
+}
+
+async function getExpectedKernelNameForEnvironment(
+  workspaceRoot: string,
+  envName: string,
+  envFlag: "-n" | "-e",
+): Promise<string | undefined> {
+  const result = await getExpectedKernelSpecForEnvironment(
+    workspaceRoot,
+    envName,
+    envFlag,
+  );
+  return result?.kernelName;
+}
+
+async function getExpectedKernelSpecForEnvironment(
+  workspaceRoot: string,
+  envName: string,
+  envFlag: "-n" | "-e",
+): Promise<{ kernelName: string; displayName?: string } | undefined> {
+  try {
+    const { stdout } = await execFileAsync(
+      "calkit",
+      ["nb", "check-kernel", envFlag, envName, "--json"],
+      {
+        cwd: workspaceRoot,
+      },
+    );
+
+    return parseCheckKernelJson(stdout);
+  } catch {
+    return undefined;
+  }
+}
+
+function parseCheckKernelJson(
+  stdout: string,
+): { kernelName: string; displayName?: string } | undefined {
+  try {
+    const jsonMatch = stdout.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return undefined;
+    }
+    const result = JSON.parse(jsonMatch[0]);
+    const kernelName = result.kernel_name;
+    if (typeof kernelName !== "string" || kernelName.length === 0) {
+      return undefined;
+    }
+    const displayName =
+      typeof result.display_name === "string" && result.display_name.length > 0
+        ? result.display_name
+        : undefined;
+    return { kernelName, displayName };
+  } catch {
+    return undefined;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getActiveNotebookEditorId(): string | undefined {
+  const editorAny = vscode.window.activeNotebookEditor as
+    | (vscode.NotebookEditor & { id?: string })
+    | undefined;
+  if (!editorAny?.id) {
+    return undefined;
+  }
+  return editorAny.id;
+}
+
+async function openKernelPicker(): Promise<void> {
+  if (!vscode.window.activeNotebookEditor) {
+    void vscode.window.showWarningMessage(
+      "Open a notebook editor first, then select a kernel.",
+    );
+    return;
+  }
+
+  const editorId = getActiveNotebookEditorId();
+  const args = editorId ? { notebookEditorId: editorId } : undefined;
+  try {
+    if (args) {
+      await vscode.commands.executeCommand("notebook.selectKernel", args);
+    } else {
+      await vscode.commands.executeCommand("notebook.selectKernel");
+    }
+  } catch {
+    // Fallback to no-args invocation for VS Code versions that ignore args.
+    await vscode.commands.executeCommand("notebook.selectKernel");
+  }
+}
+
+function shQuote(input: string): string {
+  return `'${input.replace(/'/g, `'\\''`)}'`;
+}
+
+async function startSlurmJobForActiveNotebook(
+  context: vscode.ExtensionContext,
+  notebookUri?: string,
+): Promise<boolean> {
+  const workspaceRoot = getWorkspaceRoot();
+  if (!workspaceRoot) {
+    void vscode.window.showErrorMessage(
+      "Open a workspace folder to start a Calkit SLURM notebook job.",
+    );
+    return false;
+  }
+
+  const targetNotebookUri = notebookUri ?? getActiveNotebookUriKey();
+  const profile = targetNotebookUri
+    ? getLaunchProfileForNotebookUri(context, targetNotebookUri)
+    : undefined;
+  if (!profile?.outerSlurmEnvironment) {
+    void vscode.window.showInformationMessage(
+      "No saved SLURM notebook profile for this notebook. Select a nested slurm:environment first.",
+    );
+    return false;
+  }
+
+  if (targetNotebookUri) {
+    slurmAutoStartSuppressedThisSession.delete(targetNotebookUri);
+    slurmAutoStartDeclinedThisSession.delete(targetNotebookUri);
+  }
+
+  const config = await readCalkitConfig(workspaceRoot);
+  if (!config?.environments) {
+    void vscode.window.showErrorMessage(
+      "Could not read environments from calkit.yaml.",
+    );
+    return false;
+  }
+
+  const picked: CalkitCandidate = {
+    label: profile.environmentName,
+    description: `${profile.outerSlurmEnvironment} + ${profile.innerKind}`,
+    detail: "Resume SLURM notebook session",
+    environmentName: profile.environmentName,
+    innerEnvironment: profile.innerEnvironment,
+    innerKind: profile.innerKind,
+    outerSlurmEnvironment: profile.outerSlurmEnvironment,
+    outerKind: "slurm",
+  };
+
+  const port = profile.preferredPort ?? getDefaultPort();
+  const serverToken = createServerToken();
+
+  return await withKernelProgress(
+    "Starting SLURM notebook and selecting kernel...",
+    async () => {
+      const expectedKernel = await getExpectedKernelSpecForEnvironment(
+        workspaceRoot,
+        profile.innerEnvironment,
+        "-e",
+      );
+      const launchCmd = buildLaunchCommand(
+        picked,
+        workspaceRoot,
+        config,
+        port,
+        profile.slurmOptions,
+        serverToken,
+        undefined,
+        expectedKernel?.kernelName,
+      );
+
+      startServerInBackground(launchCmd, workspaceRoot, {
+        kind: "slurm",
+        notebookUri: profile.notebookUri,
+      });
+
+      const uri = `http://localhost:${port}/lab?token=${encodeURIComponent(
+        serverToken,
+      )}`;
+      await vscode.env.clipboard.writeText(uri);
+      const kernelsBeforeConnect = await getResolvedKernelIdsForActiveNotebook(
+        profile.notebookUri,
+      );
+
+      const serverReady = await waitForServerReady(uri, {
+        sessionKind: "slurm",
+        notebookUri: profile.notebookUri,
+      });
+      const connected = serverReady
+        ? await selectExistingJupyterServer(uri)
+        : false;
+
+      let selectedKernelId: string | undefined;
+      if (connected) {
+        const expectedKernel = await getExpectedKernelSpecForEnvironment(
+          workspaceRoot,
+          profile.innerEnvironment,
+          "-e",
+        );
+        selectedKernelId = expectedKernel
+          ? await trySelectExpectedKernelFromAvailableCandidates({
+              kernelName: expectedKernel.kernelName,
+              displayName: expectedKernel.displayName,
+              existingKernelIds: kernelsBeforeConnect,
+              requireNewKernel: true,
+              notebookUri: profile.notebookUri,
+            })
+          : undefined;
+      }
+
+      if (!connected) {
+        const launchState = hasRunningServerSession(
+          "slurm",
+          profile.notebookUri,
+        )
+          ? "started"
+          : "failed to start";
+        void vscode.window.showWarningMessage(
+          `SLURM server ${launchState}, but VS Code could not auto-connect. URI copied: ${uri}`,
+        );
+      } else if (!selectedKernelId) {
+        void vscode.window.showInformationMessage(
+          "Connected to SLURM server. Select kernel manually if needed.",
+        );
+      }
+
+      await refreshNotebookToolbarContext(context);
+      return connected;
+    },
+  );
+}
+
+async function stopSlurmJobForActiveNotebook(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const runningProcess = serverProcess;
+  if (!runningProcess) {
+    void vscode.window.showInformationMessage(
+      "No running Calkit SLURM notebook job.",
+    );
+    await refreshNotebookToolbarContext(context);
+    return;
+  }
+  if (
+    !isProcessRunning(runningProcess) ||
+    activeServerSession?.kind !== "slurm"
+  ) {
+    void vscode.window.showInformationMessage(
+      "No running Calkit SLURM notebook job.",
+    );
+    await refreshNotebookToolbarContext(context);
+    return;
+  }
+
+  runningProcess.kill();
+  log("Stopped SLURM notebook job by user request");
+  const stoppedNotebookUri =
+    activeServerSession?.notebookUri ?? getActiveNotebookUriKey();
+  activeServerSession = undefined;
+  serverProcess = undefined;
+
+  if (stoppedNotebookUri) {
+    slurmAutoStartSuppressedThisSession.add(stoppedNotebookUri);
+    slurmAutoStartDeclinedThisSession.delete(stoppedNotebookUri);
+  }
+
+  // Best effort to break Jupyter's reconnect loop to a dead remote kernel.
+  await switchToLocalJupyterServerSilently();
+
+  await refreshNotebookToolbarContext(context);
+}
+
+async function stopSlurmJobForClosedNotebook(
+  context: vscode.ExtensionContext,
+  notebookUri: string,
+): Promise<void> {
+  const runningProcess = serverProcess;
+  if (
+    !runningProcess ||
+    !isProcessRunning(runningProcess) ||
+    activeServerSession?.kind !== "slurm" ||
+    activeServerSession.notebookUri !== notebookUri
+  ) {
+    return;
+  }
+
+  runningProcess.kill();
+  log(`Stopped SLURM notebook job because notebook was closed: ${notebookUri}`);
+  activeServerSession = undefined;
+  serverProcess = undefined;
+
+  // Notebook is gone; clear session-only auto-start state for this URI.
+  slurmAutoStartSuppressedThisSession.delete(notebookUri);
+  slurmAutoStartDeclinedThisSession.delete(notebookUri);
+
+  await switchToLocalJupyterServerSilently();
+  await refreshNotebookToolbarContext(context);
+}
+
+async function restartCalkitJobForActiveNotebook(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const sessionKindToRestart = activeServerSession?.kind;
+
+  // First, stop any running server
+  const runningProcess = serverProcess;
+  if (runningProcess && isProcessRunning(runningProcess)) {
+    runningProcess.kill();
+    log("Stopped notebook server to restart");
+    activeServerSession = undefined;
+    serverProcess = undefined;
+    // Give the server a moment to shut down
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  // Then, start a new server based on the session type
+  if (sessionKindToRestart === "slurm") {
+    await startSlurmJobForActiveNotebook(context);
+  } else if (sessionKindToRestart === "docker") {
+    // For Docker, we would need to trigger the docker container restart
+    // For now, just show an info message
+    void vscode.window.showInformationMessage(
+      "Docker server restarted. You may need to reconnect.",
+    );
+    await refreshNotebookToolbarContext(context);
+  } else {
+    void vscode.window.showInformationMessage(
+      "No running notebook server to restart.",
+    );
+  }
+}
+
+async function refreshNotebookToolbarContext(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const profile = getLaunchProfileForActiveNotebook(context);
+  const hasResumableSlurm = Boolean(profile?.outerSlurmEnvironment);
+  const isRunningSlurm = hasRunningServerSession("slurm");
+  const isRunningDocker = hasRunningServerSession("docker");
+
+  await vscode.commands.executeCommand(
+    "setContext",
+    "calkit.hasResumableSlurmSession",
+    hasResumableSlurm,
+  );
+  await vscode.commands.executeCommand(
+    "setContext",
+    "calkit.hasRunningSlurmSession",
+    isRunningSlurm,
+  );
+  await vscode.commands.executeCommand(
+    "setContext",
+    "calkit.hasRunningDockerSession",
+    isRunningDocker,
+  );
+
+  if (slurmStatusBarItem) {
+    if (isRunningSlurm) {
+      slurmStatusBarItem.show();
+    } else {
+      slurmStatusBarItem.hide();
+    }
+  }
+}
+
+async function setKernelCheckingState(isChecking: boolean): Promise<void> {
+  await vscode.commands.executeCommand(
+    "setContext",
+    "calkit.isSettingKernel",
+    isChecking,
+  );
+}
+
+async function withKernelProgress<T>(
+  message: string,
+  task: () => Promise<T>,
+): Promise<T> {
+  return vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: message,
+      cancellable: false,
+    },
+    async () => {
+      await setKernelCheckingState(true);
+      try {
+        return await task();
+      } finally {
+        await setKernelCheckingState(false);
+      }
+    },
+  );
+}
+
+function isProcessRunning(
+  process: import("node:child_process").ChildProcess | undefined,
+): boolean {
+  return Boolean(process && process.exitCode === null && !process.killed);
+}
+
+function startServerInBackground(
+  command: string,
+  cwd: string,
+  session: ActiveServerSession,
+): void {
+  if (
+    serverProcess &&
+    serverProcess.exitCode === null &&
+    !serverProcess.killed
+  ) {
+    log("Stopping previous Calkit server process");
+    serverProcess.kill();
+  }
+
+  log(`Starting server in background: ${command}`);
+  const child = spawn(command, {
+    cwd,
+    shell: true,
+    env: process.env,
+  });
+  serverProcess = child;
+  activeServerSession = session;
+
+  child.stdout?.on("data", (chunk: Buffer | string) => {
+    const text = chunk.toString().trim();
+    if (text) {
+      log(`[server] ${text}`);
+    }
+  });
+
+  child.stderr?.on("data", (chunk: Buffer | string) => {
+    const text = chunk.toString().trim();
+    if (text) {
+      log(`[server:err] ${text}`);
+    }
+  });
+
+  child.on("error", (error) => {
+    log(`Background server failed to start: ${String(error)}`);
+    void vscode.window.showErrorMessage(
+      `Failed to start Calkit notebook server in background: ${String(error)}`,
+    );
+  });
+
+  child.on("close", (code, signal) => {
+    log(
+      `Background server exited (code=${code ?? "null"}, signal=${
+        signal ?? "null"
+      })`,
+    );
+    if (serverProcess === child) {
+      serverProcess = undefined;
+      activeServerSession = undefined;
+      if (extensionContextRef) {
+        void refreshNotebookToolbarContext(extensionContextRef);
+      }
+    }
+  });
+}
+
+function registerKernelSourceIfAvailable(
+  context: vscode.ExtensionContext,
+): void {
+  try {
+    const notebooksAny = vscode.notebooks as any;
+    if (typeof notebooksAny.registerKernelSourceActionProvider !== "function") {
+      return;
+    }
+
+    const provider = {
+      provideNotebookKernelSourceActions: async () => {
+        return [
+          {
+            label: "Calkit environments...",
+            detail: "Select a Calkit environment and kernel",
+            command: {
+              title: "Calkit environments...",
+              command: COMMAND_SELECT_ENV,
+            },
+          },
+        ];
+      },
+    };
+
+    context.subscriptions.push(
+      notebooksAny.registerKernelSourceActionProvider(
+        "jupyter-notebook",
+        provider,
+      ),
+    );
+  } catch (error) {
+    console.warn(
+      "Calkit: notebook kernel source proposal unavailable; using stable command/toolbar entry points only.",
+      error,
+    );
+  }
+}

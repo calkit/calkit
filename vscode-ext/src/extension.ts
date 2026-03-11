@@ -36,6 +36,7 @@ let extensionContextRef: vscode.ExtensionContext | undefined;
 const autoSelectingNotebookUris = new Set<string>();
 const configuredNotebooksThisSession = new Set<string>();
 const slurmAutoStartDeclinedThisSession = new Set<string>();
+const slurmAutoStartSuppressedThisSession = new Set<string>();
 let hasCheckedCalkitCli = false;
 
 function log(message: string): void {
@@ -147,6 +148,13 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.workspace.onDidOpenNotebookDocument(() => {
       void autoSelectEnvironmentForActiveNotebook(context);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidCloseNotebookDocument((document) => {
+      const closedNotebookUri = document.uri.toString();
+      void stopSlurmJobForClosedNotebook(context, closedNotebookUri);
     }),
   );
 
@@ -407,8 +415,17 @@ async function selectCalkitEnvironment(
     return undefined;
   }
 
+  const targetNotebookUri = getActiveNotebookUriKey();
+  if (!targetNotebookUri) {
+    await refreshNotebookToolbarContext(context);
+    return undefined;
+  }
+
   // Save the environment selection to calkit.yaml
-  const notebookRelativePath = getActiveNotebookRelativePath(workspaceRoot);
+  const notebookRelativePath = getNotebookRelativePathForUri(
+    workspaceRoot,
+    targetNotebookUri,
+  );
   if (notebookRelativePath) {
     await saveNotebookEnvironmentSelection(
       workspaceRoot,
@@ -424,6 +441,7 @@ async function selectCalkitEnvironment(
       workspaceRoot,
       picked.innerEnvironment,
       "-e",
+      targetNotebookUri,
     );
     await refreshNotebookToolbarContext(context);
     return kernelId;
@@ -444,7 +462,7 @@ async function selectCalkitEnvironment(
     }
   }
 
-  await saveLaunchProfileForActiveNotebook(context, {
+  await saveLaunchProfileForNotebookUri(context, targetNotebookUri, {
     environmentName: picked.environmentName,
     innerEnvironment: picked.innerEnvironment,
     innerKind: picked.innerKind,
@@ -452,6 +470,10 @@ async function selectCalkitEnvironment(
     slurmOptions,
     preferredPort: getDefaultPort(),
   });
+
+  if (picked.outerSlurmEnvironment) {
+    slurmAutoStartSuppressedThisSession.delete(targetNotebookUri);
+  }
 
   // For uv/julia in a non-nested setup, only register/check the kernel and
   // then select it in VS Code. No server launch is needed here.
@@ -463,6 +485,7 @@ async function selectCalkitEnvironment(
       workspaceRoot,
       picked.innerEnvironment,
       "-e",
+      targetNotebookUri,
     );
     await refreshNotebookToolbarContext(context);
     return kernelId;
@@ -514,14 +537,15 @@ async function selectCalkitEnvironment(
       : picked.innerKind === "docker"
       ? "docker"
       : "other",
-    notebookUri: getActiveNotebookUriKey(),
+    notebookUri: targetNotebookUri,
   });
 
   const uri = serverToken
     ? `http://localhost:${port}/lab?token=${encodeURIComponent(serverToken)}`
     : `http://localhost:${port}/lab`;
   await vscode.env.clipboard.writeText(uri);
-  const kernelsBeforeConnect = await getResolvedKernelIdsForActiveNotebook();
+  const kernelsBeforeConnect =
+    await getResolvedKernelIdsForActiveNotebook(targetNotebookUri);
 
   // Docker and Slurm environments require connecting to an existing server
   if (picked.outerSlurmEnvironment || picked.innerKind === "docker") {
@@ -530,7 +554,7 @@ async function selectCalkitEnvironment(
       const serverReady = picked.outerSlurmEnvironment
         ? await waitForServerReady(uri, {
             sessionKind: "slurm",
-            notebookUri: getActiveNotebookUriKey(),
+            notebookUri: targetNotebookUri,
           })
         : await vscode.window.withProgress(
             {
@@ -541,7 +565,7 @@ async function selectCalkitEnvironment(
             async () => {
               return await waitForServerReady(uri, {
                 sessionKind: "docker",
-                notebookUri: getActiveNotebookUriKey(),
+                notebookUri: targetNotebookUri,
               });
             },
           );
@@ -565,6 +589,7 @@ async function selectCalkitEnvironment(
               displayName: expectedKernel.displayName,
               existingKernelIds: kernelsBeforeConnect,
               requireNewKernel: true,
+              notebookUri: targetNotebookUri,
             })
           : undefined;
       } else if (picked.innerKind === "docker" && connected) {
@@ -579,7 +604,7 @@ async function selectCalkitEnvironment(
       if (!connected) {
         const launchState =
           picked.outerSlurmEnvironment &&
-          !hasRunningServerSession("slurm", getActiveNotebookUriKey())
+          !hasRunningServerSession("slurm", targetNotebookUri)
             ? "failed to start"
             : "started";
         void vscode.window.showWarningMessage(
@@ -587,7 +612,8 @@ async function selectCalkitEnvironment(
         );
       }
 
-      const hasSelectedKernel = await hasAnyKernelSelectedForActiveNotebook();
+      const hasSelectedKernel =
+        await hasAnyKernelSelectedForActiveNotebook(targetNotebookUri);
 
       if (!selectedKernelId && !hasSelectedKernel) {
         void vscode.window
@@ -1392,6 +1418,15 @@ function getActiveNotebookUriKey(): string | undefined {
   return vscode.window.activeNotebookEditor?.notebook.uri.toString();
 }
 
+function getNotebookRelativePathForUri(
+  workspaceRoot: string,
+  notebookUri: string,
+): string | undefined {
+  const uri = vscode.Uri.parse(notebookUri);
+  const relativePath = path.relative(workspaceRoot, uri.fsPath);
+  return relativePath.replace(/\\/g, "/");
+}
+
 function getActiveNotebookRelativePath(
   workspaceRoot: string,
 ): string | undefined {
@@ -1424,6 +1459,14 @@ async function saveLaunchProfileForActiveNotebook(
   if (!notebookUri) {
     return;
   }
+  await saveLaunchProfileForNotebookUri(context, notebookUri, profile);
+}
+
+async function saveLaunchProfileForNotebookUri(
+  context: vscode.ExtensionContext,
+  notebookUri: string,
+  profile: Omit<NotebookLaunchProfile, "notebookUri">,
+): Promise<void> {
   const allProfiles = getNotebookLaunchProfiles(context);
   allProfiles[notebookUri] = {
     notebookUri,
@@ -1439,6 +1482,13 @@ function getLaunchProfileForActiveNotebook(
   if (!notebookUri) {
     return undefined;
   }
+  return getLaunchProfileForNotebookUri(context, notebookUri);
+}
+
+function getLaunchProfileForNotebookUri(
+  context: vscode.ExtensionContext,
+  notebookUri: string,
+): NotebookLaunchProfile | undefined {
   return getNotebookLaunchProfiles(context)[notebookUri];
 }
 
@@ -1555,7 +1605,8 @@ async function autoSelectEnvironmentForActiveNotebook(
       "-e",
     );
     if (expectedKernelName) {
-      const selectedKernelName = getSelectedKernelNameForActiveNotebook();
+      const selectedKernelName =
+        getSelectedKernelNameForActiveNotebook(notebookUri);
       const hasMatchingServer = configuredCandidate.outerSlurmEnvironment
         ? hasRunningServerSession("slurm", notebookUri)
         : true;
@@ -1576,7 +1627,7 @@ async function autoSelectEnvironmentForActiveNotebook(
     );
 
     if (configuredCandidate.outerSlurmEnvironment) {
-      await saveLaunchProfileForActiveNotebook(context, {
+      await saveLaunchProfileForNotebookUri(context, notebookUri, {
         environmentName: configuredCandidate.environmentName,
         innerEnvironment: configuredCandidate.innerEnvironment,
         innerKind: configuredCandidate.innerKind,
@@ -1602,6 +1653,7 @@ async function autoSelectEnvironmentForActiveNotebook(
           ? await trySelectExpectedKernelFromAvailableCandidates({
               kernelName: expectedKernel.kernelName,
               displayName: expectedKernel.displayName,
+              notebookUri,
             })
           : undefined;
         if (kernelId) {
@@ -1611,6 +1663,14 @@ async function autoSelectEnvironmentForActiveNotebook(
         log(
           `Auto-starting SLURM notebook session for '${configuredCandidate.environmentName}'.`,
         );
+        if (slurmAutoStartSuppressedThisSession.has(notebookUri)) {
+          log(
+            `Skipping auto-start for '${configuredCandidate.environmentName}' because this notebook's SLURM session was stopped and requires explicit restart.`,
+          );
+          await refreshNotebookToolbarContext(context);
+          return;
+        }
+
         if (slurmAutoStartDeclinedThisSession.has(notebookUri)) {
           log(
             `Skipping auto-start for '${configuredCandidate.environmentName}' because it was declined earlier in this session.`,
@@ -1630,7 +1690,10 @@ async function autoSelectEnvironmentForActiveNotebook(
         }
 
         slurmAutoStartDeclinedThisSession.delete(notebookUri);
-        const connected = await startSlurmJobForActiveNotebook(context);
+        const connected = await startSlurmJobForActiveNotebook(
+          context,
+          notebookUri,
+        );
         if (connected) {
           configuredNotebooksThisSession.add(notebookUri);
         }
@@ -1644,6 +1707,7 @@ async function autoSelectEnvironmentForActiveNotebook(
       workspaceRoot,
       configuredCandidate.innerEnvironment,
       "-e",
+      notebookUri,
     );
     if (kernelId) {
       log(
@@ -1993,9 +2057,8 @@ async function selectExistingJupyterServer(uri: string): Promise<boolean> {
   return false;
 }
 
-async function switchToLocalJupyterServer(): Promise<boolean> {
-  // Try a handful of likely command signatures to move away from a dead
-  // remote server after stopping a SLURM-backed session.
+async function switchToLocalJupyterServerSilently(): Promise<boolean> {
+  // Best effort: move notebooks off a dead remote server after SLURM stop.
   const attempts: Array<{ command: string; args: unknown[] }> = [
     { command: "jupyter.selectjupyteruri", args: ["local"] },
     { command: "jupyter.selectjupyteruri", args: [{ uri: "local" }] },
@@ -2007,10 +2070,9 @@ async function switchToLocalJupyterServer(): Promise<boolean> {
   for (const attempt of attempts) {
     try {
       await vscode.commands.executeCommand(attempt.command, ...attempt.args);
-      log(`Switched Jupyter server context using ${attempt.command}`);
       return true;
     } catch {
-      // Try next command signature.
+      // Try next signature.
     }
   }
 
@@ -2081,6 +2143,7 @@ async function registerAndSelectKernel(
   workspaceRoot: string,
   envName: string,
   envFlag: "-n" | "-e",
+  expectedNotebookUri?: string,
 ): Promise<string | undefined> {
   log(`Registering and selecting kernel for env: ${envName}`);
 
@@ -2114,6 +2177,7 @@ async function registerAndSelectKernel(
         const selectedKernelId = await tryAutoSelectKernel(
           kernelName,
           displayName,
+          expectedNotebookUri,
         );
 
         if (selectedKernelId) {
@@ -2148,10 +2212,17 @@ async function registerAndSelectKernel(
 async function tryAutoSelectKernel(
   kernelName: string,
   displayName?: string,
+  expectedNotebookUri?: string,
 ): Promise<string | undefined> {
-  const editor = vscode.window.activeNotebookEditor;
+  const editor = getNotebookEditorForUri(expectedNotebookUri);
   if (!editor) {
-    log("No active notebook editor found for kernel selection");
+    if (expectedNotebookUri) {
+      log(
+        `No notebook editor found for kernel selection (target=${expectedNotebookUri})`,
+      );
+    } else {
+      log("No active notebook editor found for kernel selection");
+    }
     return undefined;
   }
 
@@ -2178,8 +2249,9 @@ async function trySelectExpectedKernelFromAvailableCandidates(options: {
   displayName?: string;
   existingKernelIds?: Set<string>;
   requireNewKernel?: boolean;
+  notebookUri?: string;
 }): Promise<string | undefined> {
-  const editor = vscode.window.activeNotebookEditor;
+  const editor = getNotebookEditorForUri(options.notebookUri);
   if (!editor) {
     return undefined;
   }
@@ -2259,7 +2331,9 @@ async function trySelectExpectedKernelFromAvailableCandidates(options: {
         });
         await sleep(500);
 
-        if (await isKernelSelectedForActiveNotebook(options.kernelName)) {
+        if (
+          await isKernelSelectedForActiveNotebook(options.kernelName, editor)
+        ) {
           log(`Selected expected server kernel: ${id}`);
           return id;
         }
@@ -2524,8 +2598,10 @@ async function getResolvedNotebookKernels(
   return Array.isArray(resolved) ? resolved : [];
 }
 
-async function getResolvedKernelIdsForActiveNotebook(): Promise<Set<string>> {
-  const editor = vscode.window.activeNotebookEditor;
+async function getResolvedKernelIdsForActiveNotebook(
+  notebookUri?: string,
+): Promise<Set<string>> {
+  const editor = getNotebookEditorForUri(notebookUri);
   if (!editor) {
     return new Set<string>();
   }
@@ -2618,7 +2694,7 @@ async function trySelectKernelViaNotebookApi(
     // Give VS Code/Jupyter time to bind the selected controller and update metadata.
     await sleep(500);
 
-    if (await isKernelSelectedForActiveNotebook(kernelName)) {
+    if (await isKernelSelectedForActiveNotebook(kernelName, editor)) {
       log(`Kernel selection confirmed in notebook metadata`);
       return candidate.id;
     }
@@ -2643,13 +2719,15 @@ async function trySelectKernelViaNotebookApi(
 
 async function isKernelSelectedForActiveNotebook(
   kernelName: string,
+  editor?: vscode.NotebookEditor,
 ): Promise<boolean> {
   // Let Jupyter update notebook metadata after a kernel change.
   await sleep(250);
-  const md = vscode.window.activeNotebookEditor?.notebook.metadata as any;
+  const targetEditor = editor ?? vscode.window.activeNotebookEditor;
+  const md = targetEditor?.notebook.metadata as any;
   const selectedName =
     md?.kernelspec?.name ?? md?.metadata?.kernelspec?.name ?? "";
-  const notebookPath = vscode.window.activeNotebookEditor?.notebook.uri.fsPath;
+  const notebookPath = targetEditor?.notebook.uri.fsPath;
 
   log(`Checking kernel selection - notebook: ${notebookPath}`);
   log(
@@ -2669,17 +2747,38 @@ async function isKernelSelectedForActiveNotebook(
   return isSelected;
 }
 
-async function hasAnyKernelSelectedForActiveNotebook(): Promise<boolean> {
+function getNotebookEditorForUri(
+  notebookUri?: string,
+): vscode.NotebookEditor | undefined {
+  if (!notebookUri) {
+    return vscode.window.activeNotebookEditor;
+  }
+
+  const active = vscode.window.activeNotebookEditor;
+  if (active?.notebook.uri.toString() === notebookUri) {
+    return active;
+  }
+
+  return vscode.window.visibleNotebookEditors.find(
+    (editor) => editor.notebook.uri.toString() === notebookUri,
+  );
+}
+
+async function hasAnyKernelSelectedForActiveNotebook(
+  notebookUri?: string,
+): Promise<boolean> {
   // Give Jupyter a brief moment to attach kernelspec metadata after connect.
   await sleep(200);
-  const md = vscode.window.activeNotebookEditor?.notebook.metadata as any;
+  const md = getNotebookEditorForUri(notebookUri)?.notebook.metadata as any;
   const selectedName =
     md?.kernelspec?.name ?? md?.metadata?.kernelspec?.name ?? "";
   return typeof selectedName === "string" && selectedName.trim().length > 0;
 }
 
-function getSelectedKernelNameForActiveNotebook(): string | undefined {
-  const md = vscode.window.activeNotebookEditor?.notebook.metadata as any;
+function getSelectedKernelNameForActiveNotebook(
+  notebookUri?: string,
+): string | undefined {
+  const md = getNotebookEditorForUri(notebookUri)?.notebook.metadata as any;
   const selectedName =
     md?.kernelspec?.name ?? md?.metadata?.kernelspec?.name ?? "";
   return typeof selectedName === "string" && selectedName.trim().length > 0
@@ -2785,6 +2884,7 @@ function shQuote(input: string): string {
 
 async function startSlurmJobForActiveNotebook(
   context: vscode.ExtensionContext,
+  notebookUri?: string,
 ): Promise<boolean> {
   const workspaceRoot = getWorkspaceRoot();
   if (!workspaceRoot) {
@@ -2794,12 +2894,20 @@ async function startSlurmJobForActiveNotebook(
     return false;
   }
 
-  const profile = getLaunchProfileForActiveNotebook(context);
+  const targetNotebookUri = notebookUri ?? getActiveNotebookUriKey();
+  const profile = targetNotebookUri
+    ? getLaunchProfileForNotebookUri(context, targetNotebookUri)
+    : undefined;
   if (!profile?.outerSlurmEnvironment) {
     void vscode.window.showInformationMessage(
       "No saved SLURM notebook profile for this notebook. Select a nested slurm:environment first.",
     );
     return false;
+  }
+
+  if (targetNotebookUri) {
+    slurmAutoStartSuppressedThisSession.delete(targetNotebookUri);
+    slurmAutoStartDeclinedThisSession.delete(targetNotebookUri);
   }
 
   const config = await readCalkitConfig(workspaceRoot);
@@ -2852,8 +2960,9 @@ async function startSlurmJobForActiveNotebook(
         serverToken,
       )}`;
       await vscode.env.clipboard.writeText(uri);
-      const kernelsBeforeConnect =
-        await getResolvedKernelIdsForActiveNotebook();
+      const kernelsBeforeConnect = await getResolvedKernelIdsForActiveNotebook(
+        profile.notebookUri,
+      );
 
       const serverReady = await waitForServerReady(uri, {
         sessionKind: "slurm",
@@ -2876,6 +2985,7 @@ async function startSlurmJobForActiveNotebook(
               displayName: expectedKernel.displayName,
               existingKernelIds: kernelsBeforeConnect,
               requireNewKernel: true,
+              notebookUri: profile.notebookUri,
             })
           : undefined;
       }
@@ -2926,16 +3036,46 @@ async function stopSlurmJobForActiveNotebook(
 
   runningProcess.kill();
   log("Stopped SLURM notebook job by user request");
+  const stoppedNotebookUri =
+    activeServerSession?.notebookUri ?? getActiveNotebookUriKey();
   activeServerSession = undefined;
   serverProcess = undefined;
 
-  const switchedToLocal = await switchToLocalJupyterServer();
-  if (!switchedToLocal) {
-    void vscode.window.showInformationMessage(
-      "SLURM job stopped. If notebook keeps reconnecting, switch Jupyter server from the kernel/server picker.",
-    );
+  if (stoppedNotebookUri) {
+    slurmAutoStartSuppressedThisSession.add(stoppedNotebookUri);
+    slurmAutoStartDeclinedThisSession.delete(stoppedNotebookUri);
   }
 
+  // Best effort to break Jupyter's reconnect loop to a dead remote kernel.
+  await switchToLocalJupyterServerSilently();
+
+  await refreshNotebookToolbarContext(context);
+}
+
+async function stopSlurmJobForClosedNotebook(
+  context: vscode.ExtensionContext,
+  notebookUri: string,
+): Promise<void> {
+  const runningProcess = serverProcess;
+  if (
+    !runningProcess ||
+    !isProcessRunning(runningProcess) ||
+    activeServerSession?.kind !== "slurm" ||
+    activeServerSession.notebookUri !== notebookUri
+  ) {
+    return;
+  }
+
+  runningProcess.kill();
+  log(`Stopped SLURM notebook job because notebook was closed: ${notebookUri}`);
+  activeServerSession = undefined;
+  serverProcess = undefined;
+
+  // Notebook is gone; clear session-only auto-start state for this URI.
+  slurmAutoStartSuppressedThisSession.delete(notebookUri);
+  slurmAutoStartDeclinedThisSession.delete(notebookUri);
+
+  await switchToLocalJupyterServerSilently();
   await refreshNotebookToolbarContext(context);
 }
 

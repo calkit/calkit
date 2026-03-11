@@ -22,7 +22,6 @@ const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
 const COMMAND_START_SLURM = "calkit-vscode.startCalkitSlurmJob";
 const COMMAND_STOP_SLURM = "calkit-vscode.stopCalkitSlurmJob";
 const COMMAND_RESTART_JOB = "calkit-vscode.restartCalkitJob";
-const COMMAND_SLURM_STATUS = "calkit-vscode.showCalkitSlurmStatus";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
 const execFileAsync = promisify(execFile);
 const DEFAULT_MIN_CALKIT_VERSION = "0.35.0";
@@ -30,11 +29,13 @@ const DEFAULT_NOTEBOOK_SLURM_TIME = "120";
 const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
 
 let outputChannel: vscode.OutputChannel;
+let slurmStatusBarItem: vscode.StatusBarItem | undefined;
 let serverProcess: import("node:child_process").ChildProcess | undefined;
 let activeServerSession: ActiveServerSession | undefined;
 let extensionContextRef: vscode.ExtensionContext | undefined;
 const autoSelectingNotebookUris = new Set<string>();
 const configuredNotebooksThisSession = new Set<string>();
+const slurmAutoStartDeclinedThisSession = new Set<string>();
 let hasCheckedCalkitCli = false;
 
 function log(message: string): void {
@@ -86,6 +87,16 @@ export function activate(context: vscode.ExtensionContext): void {
   extensionContextRef = context;
   outputChannel = vscode.window.createOutputChannel("Calkit");
   context.subscriptions.push(outputChannel);
+  slurmStatusBarItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Right,
+    200,
+  );
+  slurmStatusBarItem.text = "$(server-process)";
+  slurmStatusBarItem.name = "Calkit SLURM Job";
+  slurmStatusBarItem.tooltip =
+    "Calkit SLURM notebook job is running. Click to stop.";
+  slurmStatusBarItem.command = COMMAND_STOP_SLURM;
+  context.subscriptions.push(slurmStatusBarItem);
   log("Calkit extension activated");
   console.log("Calkit extension: outputChannel created and registered");
 
@@ -124,18 +135,6 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_RESTART_JOB, async () => {
       await restartCalkitJobForActiveNotebook(context);
-    }),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand(COMMAND_SLURM_STATUS, async () => {
-      const action = await vscode.window.showInformationMessage(
-        "A Calkit SLURM notebook job is currently running for this notebook.",
-        "Stop Job",
-      );
-      if (action === "Stop Job") {
-        await stopSlurmJobForActiveNotebook(context);
-      }
     }),
   );
 
@@ -527,79 +526,92 @@ async function selectCalkitEnvironment(
   // Docker and Slurm environments require connecting to an existing server
   if (picked.outerSlurmEnvironment || picked.innerKind === "docker") {
     const envType = picked.outerSlurmEnvironment ? "Slurm" : "Docker";
-
-    const serverReady = await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: `${envType} notebook server starting...`,
-        cancellable: false,
-      },
-      async () => {
-        return await waitForServerReady(uri, {
-          sessionKind: picked.outerSlurmEnvironment ? "slurm" : "docker",
-          notebookUri: getActiveNotebookUriKey(),
-        });
-      },
-    );
-
-    const connected = serverReady
-      ? await selectExistingJupyterServer(uri)
-      : false;
-
-    // For Docker, we don't need to register a kernel separately since it should
-    // be in the image, but we can try to select it if needed
-    let selectedKernelId: string | undefined;
-    if (picked.outerSlurmEnvironment && connected) {
-      const expectedKernel = await getExpectedKernelSpecForEnvironment(
-        workspaceRoot,
-        picked.innerEnvironment,
-        "-e",
-      );
-      selectedKernelId = expectedKernel
-        ? await trySelectExpectedKernelFromAvailableCandidates({
-            kernelName: expectedKernel.kernelName,
-            displayName: expectedKernel.displayName,
-            existingKernelIds: kernelsBeforeConnect,
-            requireNewKernel: true,
+    const runConnectFlow = async (): Promise<string | undefined> => {
+      const serverReady = picked.outerSlurmEnvironment
+        ? await waitForServerReady(uri, {
+            sessionKind: "slurm",
+            notebookUri: getActiveNotebookUriKey(),
           })
-        : undefined;
-    } else if (picked.innerKind === "docker" && connected) {
-      // After connecting to a Docker-backed server, try selecting a sensible
-      // default kernel automatically before falling back to manual selection.
-      selectedKernelId = await tryAutoSelectBestAvailableKernel({
-        existingKernelIds: kernelsBeforeConnect,
-        requireNewKernel: true,
-      });
-    }
+        : await vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: `${envType} notebook server starting...`,
+              cancellable: false,
+            },
+            async () => {
+              return await waitForServerReady(uri, {
+                sessionKind: "docker",
+                notebookUri: getActiveNotebookUriKey(),
+              });
+            },
+          );
 
-    if (!connected) {
-      const launchState =
-        picked.outerSlurmEnvironment &&
-        !hasRunningServerSession("slurm", getActiveNotebookUriKey())
-          ? "failed to start"
-          : "started";
-      void vscode.window.showWarningMessage(
-        `${envType} server ${launchState}, but VS Code could not auto-connect. URI copied: ${uri}`,
-      );
-    }
+      const connected = serverReady
+        ? await selectExistingJupyterServer(uri)
+        : false;
 
-    const hasSelectedKernel = await hasAnyKernelSelectedForActiveNotebook();
-
-    if (!selectedKernelId && !hasSelectedKernel) {
-      void vscode.window
-        .showInformationMessage(
-          `Launched ${envType} Jupyter server. Select the kernel manually if needed.`,
-          "Select Kernel",
-        )
-        .then(async (action) => {
-          if (action === "Select Kernel") {
-            await openKernelPicker();
-          }
+      // For Docker, we don't need to register a kernel separately since it should
+      // be in the image, but we can try to select it if needed
+      let selectedKernelId: string | undefined;
+      if (picked.outerSlurmEnvironment && connected) {
+        const expectedKernel = await getExpectedKernelSpecForEnvironment(
+          workspaceRoot,
+          picked.innerEnvironment,
+          "-e",
+        );
+        selectedKernelId = expectedKernel
+          ? await trySelectExpectedKernelFromAvailableCandidates({
+              kernelName: expectedKernel.kernelName,
+              displayName: expectedKernel.displayName,
+              existingKernelIds: kernelsBeforeConnect,
+              requireNewKernel: true,
+            })
+          : undefined;
+      } else if (picked.innerKind === "docker" && connected) {
+        // After connecting to a Docker-backed server, try selecting a sensible
+        // default kernel automatically before falling back to manual selection.
+        selectedKernelId = await tryAutoSelectBestAvailableKernel({
+          existingKernelIds: kernelsBeforeConnect,
+          requireNewKernel: true,
         });
-    }
+      }
 
-    await refreshNotebookToolbarContext(context);
-    return selectedKernelId;
+      if (!connected) {
+        const launchState =
+          picked.outerSlurmEnvironment &&
+          !hasRunningServerSession("slurm", getActiveNotebookUriKey())
+            ? "failed to start"
+            : "started";
+        void vscode.window.showWarningMessage(
+          `${envType} server ${launchState}, but VS Code could not auto-connect. URI copied: ${uri}`,
+        );
+      }
+
+      const hasSelectedKernel = await hasAnyKernelSelectedForActiveNotebook();
+
+      if (!selectedKernelId && !hasSelectedKernel) {
+        void vscode.window
+          .showInformationMessage(
+            `Launched ${envType} Jupyter server. Select the kernel manually if needed.`,
+            "Select Kernel",
+          )
+          .then(async (action) => {
+            if (action === "Select Kernel") {
+              await openKernelPicker();
+            }
+          });
+      }
+
+      await refreshNotebookToolbarContext(context);
+      return selectedKernelId;
+    };
+
+    return picked.outerSlurmEnvironment
+      ? await withKernelProgress(
+          "Starting SLURM notebook and selecting kernel...",
+          runConnectFlow,
+        )
+      : await runConnectFlow();
   }
 
   const serverReady = await vscode.window.withProgress(
@@ -1599,6 +1611,25 @@ async function autoSelectEnvironmentForActiveNotebook(
         log(
           `Auto-starting SLURM notebook session for '${configuredCandidate.environmentName}'.`,
         );
+        if (slurmAutoStartDeclinedThisSession.has(notebookUri)) {
+          log(
+            `Skipping auto-start for '${configuredCandidate.environmentName}' because it was declined earlier in this session.`,
+          );
+          await refreshNotebookToolbarContext(context);
+          return;
+        }
+
+        const shouldStart = await confirmAutoStartSlurmNotebookSession(
+          configuredCandidate.environmentName,
+          notebookRelativePath,
+        );
+        if (!shouldStart) {
+          slurmAutoStartDeclinedThisSession.add(notebookUri);
+          await refreshNotebookToolbarContext(context);
+          return;
+        }
+
+        slurmAutoStartDeclinedThisSession.delete(notebookUri);
         const connected = await startSlurmJobForActiveNotebook(context);
         if (connected) {
           configuredNotebooksThisSession.add(notebookUri);
@@ -1680,6 +1711,18 @@ function getNotebookSlurmOptionsWithDefaults(
   });
 }
 
+async function confirmAutoStartSlurmNotebookSession(
+  environmentName: string,
+  notebookPath: string,
+): Promise<boolean> {
+  const choice = await vscode.window.showWarningMessage(
+    `Notebook '${notebookPath}' is configured to run in '${environmentName}', which starts a SLURM job. Start it now?`,
+    "Start SLURM Job",
+    "Not Now",
+  );
+  return choice === "Start SLURM Job";
+}
+
 function getDefaultPort(): number {
   const configured = vscode.workspace
     .getConfiguration("calkit.notebook")
@@ -1759,13 +1802,6 @@ function buildLaunchCommand(
   }
   if (slurmOptions?.extra?.trim()) {
     opts.push(slurmOptions.extra.trim());
-  }
-
-  const host = config.environments?.[picked.outerSlurmEnvironment]?.host;
-  if (host && host !== "localhost") {
-    void vscode.window.showWarningMessage(
-      `Outer SLURM environment host is '${host}'. The launch command will run locally; switch to that host first if needed.`,
-    );
   }
 
   // For a SLURM outer environment, run jupyter directly under srun.
@@ -1948,6 +1984,30 @@ async function selectExistingJupyterServer(uri: string): Promise<boolean> {
   for (const attempt of attempts) {
     try {
       await vscode.commands.executeCommand(attempt.command, ...attempt.args);
+      return true;
+    } catch {
+      // Try next command signature.
+    }
+  }
+
+  return false;
+}
+
+async function switchToLocalJupyterServer(): Promise<boolean> {
+  // Try a handful of likely command signatures to move away from a dead
+  // remote server after stopping a SLURM-backed session.
+  const attempts: Array<{ command: string; args: unknown[] }> = [
+    { command: "jupyter.selectjupyteruri", args: ["local"] },
+    { command: "jupyter.selectjupyteruri", args: [{ uri: "local" }] },
+    { command: "jupyter.commandLineSelectJupyterURI", args: ["local"] },
+    { command: "jupyter.selectjupyteruri", args: [""] },
+    { command: "jupyter.selectjupyteruri", args: [{ uri: "" }] },
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      await vscode.commands.executeCommand(attempt.command, ...attempt.args);
+      log(`Switched Jupyter server context using ${attempt.command}`);
       return true;
     } catch {
       // Try next command signature.
@@ -2763,82 +2823,83 @@ async function startSlurmJobForActiveNotebook(
 
   const port = profile.preferredPort ?? getDefaultPort();
   const serverToken = createServerToken();
-  const expectedKernel = await getExpectedKernelSpecForEnvironment(
-    workspaceRoot,
-    profile.innerEnvironment,
-    "-e",
-  );
-  const launchCmd = buildLaunchCommand(
-    picked,
-    workspaceRoot,
-    config,
-    port,
-    profile.slurmOptions,
-    serverToken,
-    undefined,
-    expectedKernel?.kernelName,
-  );
 
-  startServerInBackground(launchCmd, workspaceRoot, {
-    kind: "slurm",
-    notebookUri: profile.notebookUri,
-  });
-
-  const uri = `http://localhost:${port}/lab?token=${encodeURIComponent(
-    serverToken,
-  )}`;
-  await vscode.env.clipboard.writeText(uri);
-  const kernelsBeforeConnect = await getResolvedKernelIdsForActiveNotebook();
-
-  const serverReady = await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: "SLURM notebook server starting...",
-      cancellable: false,
-    },
+  return await withKernelProgress(
+    "Starting SLURM notebook and selecting kernel...",
     async () => {
-      return await waitForServerReady(uri, {
+      const expectedKernel = await getExpectedKernelSpecForEnvironment(
+        workspaceRoot,
+        profile.innerEnvironment,
+        "-e",
+      );
+      const launchCmd = buildLaunchCommand(
+        picked,
+        workspaceRoot,
+        config,
+        port,
+        profile.slurmOptions,
+        serverToken,
+        undefined,
+        expectedKernel?.kernelName,
+      );
+
+      startServerInBackground(launchCmd, workspaceRoot, {
+        kind: "slurm",
+        notebookUri: profile.notebookUri,
+      });
+
+      const uri = `http://localhost:${port}/lab?token=${encodeURIComponent(
+        serverToken,
+      )}`;
+      await vscode.env.clipboard.writeText(uri);
+      const kernelsBeforeConnect =
+        await getResolvedKernelIdsForActiveNotebook();
+
+      const serverReady = await waitForServerReady(uri, {
         sessionKind: "slurm",
         notebookUri: profile.notebookUri,
       });
+      const connected = serverReady
+        ? await selectExistingJupyterServer(uri)
+        : false;
+
+      let selectedKernelId: string | undefined;
+      if (connected) {
+        const expectedKernel = await getExpectedKernelSpecForEnvironment(
+          workspaceRoot,
+          profile.innerEnvironment,
+          "-e",
+        );
+        selectedKernelId = expectedKernel
+          ? await trySelectExpectedKernelFromAvailableCandidates({
+              kernelName: expectedKernel.kernelName,
+              displayName: expectedKernel.displayName,
+              existingKernelIds: kernelsBeforeConnect,
+              requireNewKernel: true,
+            })
+          : undefined;
+      }
+
+      if (!connected) {
+        const launchState = hasRunningServerSession(
+          "slurm",
+          profile.notebookUri,
+        )
+          ? "started"
+          : "failed to start";
+        void vscode.window.showWarningMessage(
+          `SLURM server ${launchState}, but VS Code could not auto-connect. URI copied: ${uri}`,
+        );
+      } else if (!selectedKernelId) {
+        void vscode.window.showInformationMessage(
+          "Connected to SLURM server. Select kernel manually if needed.",
+        );
+      }
+
+      await refreshNotebookToolbarContext(context);
+      return connected;
     },
   );
-  const connected = serverReady
-    ? await selectExistingJupyterServer(uri)
-    : false;
-
-  let selectedKernelId: string | undefined;
-  if (connected) {
-    const expectedKernel = await getExpectedKernelSpecForEnvironment(
-      workspaceRoot,
-      profile.innerEnvironment,
-      "-e",
-    );
-    selectedKernelId = expectedKernel
-      ? await trySelectExpectedKernelFromAvailableCandidates({
-          kernelName: expectedKernel.kernelName,
-          displayName: expectedKernel.displayName,
-          existingKernelIds: kernelsBeforeConnect,
-          requireNewKernel: true,
-        })
-      : undefined;
-  }
-
-  if (!connected) {
-    const launchState = hasRunningServerSession("slurm", profile.notebookUri)
-      ? "started"
-      : "failed to start";
-    void vscode.window.showWarningMessage(
-      `SLURM server ${launchState}, but VS Code could not auto-connect. URI copied: ${uri}`,
-    );
-  } else if (!selectedKernelId) {
-    void vscode.window.showInformationMessage(
-      "Connected to SLURM server. Select kernel manually if needed.",
-    );
-  }
-
-  await refreshNotebookToolbarContext(context);
-  return connected;
 }
 
 async function stopSlurmJobForActiveNotebook(
@@ -2867,12 +2928,22 @@ async function stopSlurmJobForActiveNotebook(
   log("Stopped SLURM notebook job by user request");
   activeServerSession = undefined;
   serverProcess = undefined;
+
+  const switchedToLocal = await switchToLocalJupyterServer();
+  if (!switchedToLocal) {
+    void vscode.window.showInformationMessage(
+      "SLURM job stopped. If notebook keeps reconnecting, switch Jupyter server from the kernel/server picker.",
+    );
+  }
+
   await refreshNotebookToolbarContext(context);
 }
 
 async function restartCalkitJobForActiveNotebook(
   context: vscode.ExtensionContext,
 ): Promise<void> {
+  const sessionKindToRestart = activeServerSession?.kind;
+
   // First, stop any running server
   const runningProcess = serverProcess;
   if (runningProcess && isProcessRunning(runningProcess)) {
@@ -2885,9 +2956,9 @@ async function restartCalkitJobForActiveNotebook(
   }
 
   // Then, start a new server based on the session type
-  if (activeServerSession?.kind === "slurm") {
+  if (sessionKindToRestart === "slurm") {
     await startSlurmJobForActiveNotebook(context);
-  } else if (activeServerSession?.kind === "docker") {
+  } else if (sessionKindToRestart === "docker") {
     // For Docker, we would need to trigger the docker container restart
     // For now, just show an info message
     void vscode.window.showInformationMessage(
@@ -2924,6 +2995,14 @@ async function refreshNotebookToolbarContext(
     "calkit.hasRunningDockerSession",
     isRunningDocker,
   );
+
+  if (slurmStatusBarItem) {
+    if (isRunningSlurm) {
+      slurmStatusBarItem.show();
+    } else {
+      slurmStatusBarItem.hide();
+    }
+  }
 }
 
 async function setKernelCheckingState(isChecking: boolean): Promise<void> {

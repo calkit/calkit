@@ -64,12 +64,6 @@
         "title": "Restart Notebook Server",
         "category": "Calkit",
         "icon": "$(debug-restart)"
-      },
-      {
-        "command": "calkit-vscode.showCalkitSlurmStatus",
-        "title": "SLURM Running",
-        "category": "Calkit",
-        "icon": "$(server-process)"
       }
     ],
     "menus": {
@@ -85,19 +79,14 @@
           "group": "navigation@100"
         },
         {
-          "command": "calkit-vscode.showCalkitSlurmStatus",
+          "command": "calkit-vscode.stopCalkitSlurmJob",
           "when": "notebookType == 'jupyter-notebook' && calkit.hasRunningSlurmSession",
           "group": "navigation@101"
         },
         {
-          "command": "calkit-vscode.stopCalkitSlurmJob",
-          "when": "notebookType == 'jupyter-notebook' && calkit.hasRunningSlurmSession",
-          "group": "navigation@102"
-        },
-        {
           "command": "calkit-vscode.restartCalkitJob",
           "when": "notebookType == 'jupyter-notebook' && (calkit.hasRunningSlurmSession || calkit.hasRunningDockerSession)",
-          "group": "navigation@103"
+          "group": "navigation@102"
         }
       ],
       "commandPalette": [
@@ -115,9 +104,6 @@
         },
         {
           "command": "calkit-vscode.restartCalkitJob"
-        },
-        {
-          "command": "calkit-vscode.showCalkitSlurmStatus"
         }
       ]
     },

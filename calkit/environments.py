@@ -281,6 +281,8 @@ def get_env_lock_fpath(
         # Replace DESCRIPTION with renv.lock
         env_dir = os.path.dirname(env_path)
         lock_fpath = os.path.join(env_dir, "renv.lock")
+    elif env_kind == "current-system":
+        lock_fpath = os.path.join(env_lock_dir, env_name, "properties.json")
     else:
         return
     if as_posix:

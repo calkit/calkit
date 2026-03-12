@@ -66,3 +66,30 @@ class SSHEnvironment(BaseModel):
     key: str | None = None
     send_paths: list[str] = ["./*"]
     get_paths: list[str] = ["*"]
+
+
+class CurrentSystemEnvironment(Environment):
+    """An environment the represents the current system where Calkit is being
+    run.
+
+    This is useful for ensuring all pipeline stages are run on the same system,
+    e.g., for benchmarking. The properties saved in the lock file can be
+    controlled with the `properties` field, which can then ensure that stage
+    outputs cached will be invalidated if any of those properties change.
+
+    Application versions can be rounded by... TODO.
+    """
+
+    kind: Literal["current-system"] = "current-system"
+    properties: (
+        list[
+            Literal[
+                "hostname",
+                "n_cpus",
+                "calkit_version",
+                "uv_version",
+                "docker_version",
+            ]
+        ]
+        | None
+    ) = None

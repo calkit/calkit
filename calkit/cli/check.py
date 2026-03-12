@@ -214,8 +214,8 @@ def check_environment(
             if not compatible:
                 raise_error(
                     f"Current Julia version is not compatible with required "
-                    f"version ({julia_version}), and juliaup is not available to "
-                    "install it"
+                    f"version ({julia_version}), and juliaup is not available "
+                    "to install it"
                 )
         env_dir = os.path.dirname(env_path)
         if not env_dir:

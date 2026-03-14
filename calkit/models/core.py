@@ -110,6 +110,7 @@ class DockerEnvironment(Environment):
     image: str
     layers: list[str] | None = None
     shell: Literal["bash", "sh"] = "sh"
+    command_mode: Literal["shell", "entrypoint"] = "shell"
     platform: str | None = None
 
 

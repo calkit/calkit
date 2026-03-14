@@ -1472,6 +1472,12 @@ def run_in_env(
     if env["kind"] == "docker":
         if "image" not in env:
             raise_error("Image must be defined for Docker environments")
+        command_mode = env.get("command_mode", "shell")
+        if command_mode not in ["shell", "entrypoint"]:
+            raise_error(
+                "Invalid Docker environment 'command_mode': "
+                f"{command_mode}; Use 'shell' or 'entrypoint'"
+            )
         if not no_check:
             check_docker_env(
                 tag=env["image"],
@@ -1489,7 +1495,6 @@ def run_in_env(
                 args=env.get("args", []),
                 quiet=not verbose,
             )
-        shell_cmd = _to_shell_cmd(cmd)
         docker_cmd = [
             "docker",
             "run",
@@ -1536,10 +1541,17 @@ def run_in_env(
             "-v",
             f"{os.getcwd()}:{docker_wdir_mount}",
             image_name,
-            shell,
-            "-c",
-            shell_cmd,
         ]
+        if command_mode == "shell":
+            shell_cmd = _to_shell_cmd(cmd)
+            docker_cmd += [shell, "-c", shell_cmd]
+        else:
+            if not cmd:
+                raise_error(
+                    "No command provided for Docker environment in "
+                    "'entrypoint' command mode"
+                )
+            docker_cmd += cmd
         if verbose:
             typer.echo(f"Running command: {docker_cmd}")
         try:

@@ -173,6 +173,30 @@ You can similarly jump into an interactive `bash` terminal with:
 calkit xenv -n foam bash
 ```
 
+Some Docker images are CLI tools with an image entrypoint already defined
+(for example `minlag/mermaid-cli`).
+In that case, use `command_mode: entrypoint` so Calkit passes your command
+arguments directly to the container entrypoint instead of running
+`shell -c ...`.
+
+```yaml
+# In calkit.yaml
+environments:
+  mermaid:
+    kind: docker
+    image: minlag/mermaid-cli
+    wdir: /data
+    command_mode: entrypoint
+```
+
+Then execute with:
+
+```sh
+calkit xenv -n mermaid -- \
+  -i figures/my-mermaid-diagram.mmd \
+  -o figures/my-mermaid-diagram.pdf
+```
+
 But what if there isn't an image out there that has everything you need
 already installed into it?
 In this case, you can define and build a new derived image in the project

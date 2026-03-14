@@ -1326,7 +1326,10 @@ def run(
     if failed:
         raise_error("Pipeline failed")
     else:
-        typer.echo("Pipeline completed successfully ✅")
+        try:
+            typer.echo("Pipeline completed successfully ✅")
+        except UnicodeEncodeError:
+            typer.echo("Pipeline completed successfully")
     if save_after_run or save_message is not None:
         if save_message is None:
             save_message = "Run pipeline"
@@ -1979,7 +1982,10 @@ def execute_and_record(
         detect_io,
         generate_stage_name,
     )
-    from calkit.docker import normalize_xr_docker_command, split_xr_command
+    from calkit.docker import (
+        normalize_xr_docker_command,
+        split_xr_command,
+    )
     from calkit.environments import EnvForStageResult, detect_env_for_stage
     from calkit.models.io import PathOutput
     from calkit.models.pipeline import (
@@ -2079,6 +2085,8 @@ def execute_and_record(
     stage: dict[str, Any] = {}
     language = None
     if first_arg == "docker":
+        # Docker runs for entrypoint-mode allowlisted images are normalized
+        # into `command` stages; others remain regular shell-command stages
         docker_command = normalize_xr_docker_command(
             cmd=cmd,
             environment=environment,

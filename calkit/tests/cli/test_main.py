@@ -988,6 +988,65 @@ def test_execute_and_record_json_run_mode(tmp_dir):
     assert payload["stage"]["config"]["command"] == "true"
 
 
+def test_execute_and_record_non_allowlisted_docker_command_dry_run(tmp_dir):
+    result = subprocess.run(
+        [
+            "calkit",
+            "xr",
+            "--dry-run",
+            "--json",
+            "--environment",
+            "_system",
+            (
+                "docker run --rm -it -v $PWD:/work "
+                "ghcr.io/turbinesfoam/turbinesfoam blockMesh"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    print("stdout:", result.stdout)
+    print("stderr:", result.stderr)
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["mode"] == "dry-run"
+    assert payload["environment"]["name"] == "_system"
+    assert payload["stage"]["config"]["kind"] == "shell-command"
+    assert payload["stage"]["config"]["command"].startswith("docker run")
+    assert (
+        "ghcr.io/turbinesfoam/turbinesfoam"
+        in payload["stage"]["config"]["command"]
+    )
+
+
+def test_execute_and_record_non_allowlisted_docker_run_stays_shell_command(
+    tmp_dir,
+):
+    result = subprocess.run(
+        [
+            "calkit",
+            "xr",
+            "--dry-run",
+            "--json",
+            "--environment",
+            "_system",
+            "docker run -it ubuntu cp myfile otherfile",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    print("stdout:", result.stdout)
+    print("stderr:", result.stderr)
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["mode"] == "dry-run"
+    assert payload["stage"]["config"]["kind"] == "shell-command"
+    assert (
+        payload["stage"]["config"]["command"]
+        == "docker run -it ubuntu cp myfile otherfile"
+    )
+
+
 def test_execute_and_record_julia_script(tmp_dir):
     """Test xr command with Julia script.
 

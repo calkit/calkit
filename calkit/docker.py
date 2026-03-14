@@ -76,6 +76,12 @@ LAYERS = {
     "julia": JULIA_LAYER_TEXT,
 }
 
+# Docker images whose commands should be passed directly to the image
+# entrypoint when normalizing `xr` commands
+XR_DOCKER_ENTRYPOINT_IMAGES = {
+    "minlag/mermaid-cli",
+}
+
 
 class NormalizedXRDockerCommand(BaseModel):
     """Normalized Docker command metadata for `calkit xr`."""
@@ -89,6 +95,23 @@ class NormalizedXRDockerCommand(BaseModel):
     stage_name: str | None = None
     description: str | None = None
     command_mode: str = "shell"
+
+
+def _image_name_without_tag_or_digest(image: str) -> str:
+    """Return an image name without tag or digest components."""
+    return image.split("@", 1)[0].split(":", 1)[0].lower()
+
+
+def _uses_entrypoint_command_mode(image: str) -> bool:
+    """Return True when image is in the `xr` entrypoint-mode allowlist."""
+    image_name = _image_name_without_tag_or_digest(image)
+    for configured in XR_DOCKER_ENTRYPOINT_IMAGES:
+        configured_name = configured.lower()
+        if image_name == configured_name:
+            return True
+        if image_name.endswith("/" + configured_name):
+            return True
+    return False
 
 
 def split_xr_command(cmd: list[str]) -> list[str]:
@@ -114,10 +137,32 @@ def _normalize_docker_image(image: str) -> str:
 
 def _parse_volume_spec(volume_spec: str) -> tuple[str, str] | None:
     """Parse a Docker volume spec into source and destination paths."""
-    parts = volume_spec.split(":")
-    if len(parts) < 2:
+    if ":" not in volume_spec:
         return None
-    return parts[0], parts[1]
+    parts = volume_spec.rsplit(":", 2)
+    source = ""
+    dest = ""
+    if len(parts) == 2:
+        source, dest = parts
+    elif len(parts) == 3:
+        first, second, third = parts
+        # Handle Windows drive-letter sources with no explicit mode, e.g.,
+        # C:\path:/data, which rsplit(':', 2) yields as
+        # ["C", "\\path", "/data"]
+        if (
+            len(first) == 1
+            and first.isalpha()
+            and second.startswith(("\\", "/"))
+        ):
+            source, dest = first + ":" + second, third
+        else:
+            # Assume source:dest:mode and ignore the optional mode segment
+            source, dest = first, second
+    else:
+        return None
+    if not source or not dest:
+        return None
+    return source, dest
 
 
 def _to_project_relative_path(path: str, cwd: Path) -> str | None:
@@ -229,16 +274,17 @@ def normalize_xr_docker_command(
     environment: str | None = None,
     cwd: str | None = None,
 ) -> NormalizedXRDockerCommand | None:
-    """Normalize Mermaid `docker run` commands into `xr` command-stage metadata."""
+    """Normalize supported `docker run` commands into `xr` command metadata."""
     cwd_path = Path(cwd or ".").resolve()
     cmd = split_xr_command(cmd)
     parsed = _parse_docker_run_command(cmd)
     if parsed is None:
         return None
     image = _normalize_docker_image(parsed["image"])
-    image_name = image.split("@", 1)[0].split(":", 1)[0]
-    if "mermaid-cli" not in image_name:
+    if not _uses_entrypoint_command_mode(image):
         return None
+    image_name = _image_name_without_tag_or_digest(image)
+    is_mermaid_image = image_name.endswith("mermaid-cli")
     chosen_mount = None
     volumes = parsed["volumes"]
     if parsed["workdir"] is not None:
@@ -256,9 +302,10 @@ def normalize_xr_docker_command(
             chosen_mount = parsed_volume
     container_wdir = parsed["workdir"]
     if container_wdir is None:
-        container_wdir = (
-            chosen_mount[1] if chosen_mount is not None else "/data"
-        )
+        if chosen_mount is not None:
+            container_wdir = chosen_mount[1]
+        else:
+            container_wdir = "/data" if is_mermaid_image else "/work"
     source_prefix = None
     if chosen_mount is not None:
         source_prefix = _to_project_relative_path(chosen_mount[0], cwd_path)
@@ -267,57 +314,68 @@ def normalize_xr_docker_command(
     command_tokens = parsed["command"]
     if not command_tokens:
         return None
-    normalized_args: list[str] = []
+    normalized_args: list[str] = list(command_tokens)
     detected_inputs: list[str] = []
     detected_outputs: list[str] = []
-    idx = 0
-    while idx < len(command_tokens):
-        token = command_tokens[idx]
-        if token in ["-i", "--input", "-o", "--output"]:
+    if is_mermaid_image:
+        normalized_args = []
+        idx = 0
+        while idx < len(command_tokens):
+            token = command_tokens[idx]
+            if token in ["-i", "--input", "-o", "--output"]:
+                normalized_args.append(token)
+                if idx + 1 >= len(command_tokens):
+                    break
+                mapped_path = _map_container_path_to_project(
+                    command_tokens[idx + 1],
+                    source_prefix,
+                    container_wdir,
+                )
+                normalized_args.append(mapped_path)
+                if token in ["-i", "--input"]:
+                    detected_inputs.append(mapped_path)
+                else:
+                    detected_outputs.append(mapped_path)
+                idx += 2
+                continue
+            if token.startswith("--input=") or token.startswith("--output="):
+                option, path_value = token.split("=", 1)
+                mapped_path = _map_container_path_to_project(
+                    path_value,
+                    source_prefix,
+                    container_wdir,
+                )
+                normalized_args.append(f"{option}={mapped_path}")
+                if option == "--input":
+                    detected_inputs.append(mapped_path)
+                else:
+                    detected_outputs.append(mapped_path)
+                idx += 1
+                continue
             normalized_args.append(token)
-            if idx + 1 >= len(command_tokens):
-                break
-            mapped_path = _map_container_path_to_project(
-                command_tokens[idx + 1],
-                source_prefix,
-                container_wdir,
-            )
-            normalized_args.append(mapped_path)
-            if token in ["-i", "--input"]:
-                detected_inputs.append(mapped_path)
-            else:
-                detected_outputs.append(mapped_path)
-            idx += 2
-            continue
-        if token.startswith("--input=") or token.startswith("--output="):
-            option, path_value = token.split("=", 1)
-            mapped_path = _map_container_path_to_project(
-                path_value,
-                source_prefix,
-                container_wdir,
-            )
-            normalized_args.append(f"{option}={mapped_path}")
-            if option == "--input":
-                detected_inputs.append(mapped_path)
-            else:
-                detected_outputs.append(mapped_path)
             idx += 1
-            continue
-        normalized_args.append(token)
-        idx += 1
     stage_name = None
-    if detected_inputs:
+    if is_mermaid_image and detected_inputs:
         stage_name = f"mermaid-{Path(detected_inputs[0]).stem}".replace(
             "_", "-"
         ).lower()
+    env_name = environment
+    if env_name is None:
+        if is_mermaid_image:
+            env_name = "mermaid"
+        else:
+            env_name = image_name.split("/")[-1].replace("_", "-")
+    description = "Mermaid CLI via Docker."
+    if not is_mermaid_image:
+        description = f"Docker CLI via image {image}."
     return NormalizedXRDockerCommand(
         image=image,
         wdir=container_wdir,
         command=normalized_args,
         inputs=detected_inputs,
         outputs=detected_outputs,
-        environment_name=environment or "mermaid",
+        environment_name=env_name,
         stage_name=stage_name,
-        description="Mermaid CLI via Docker.",
+        description=description,
         command_mode="entrypoint",
     )

@@ -17,6 +17,7 @@ import uuid
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import dotenv
 import git
@@ -1325,11 +1326,7 @@ def run(
     if failed:
         raise_error("Pipeline failed")
     else:
-        typer.echo(
-            "Pipeline completed successfully ✅".encode(
-                "utf-8", errors="replace"
-            )
-        )
+        typer.echo("Pipeline completed successfully ✅")
     if save_after_run or save_message is not None:
         if save_message is None:
             save_message = "Run pipeline"
@@ -1954,6 +1951,13 @@ def execute_and_record(
             ),
         ),
     ] = False,
+    fmt_json: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Print xr results as JSON.",
+        ),
+    ] = False,
     force: Annotated[
         bool,
         typer.Option(
@@ -1967,6 +1971,7 @@ def execute_and_record(
     ] = False,
 ):
     """Execute a command and if successful, record in the pipeline."""
+    import contextlib
     import io
     import shlex
 
@@ -1974,9 +1979,11 @@ def execute_and_record(
         detect_io,
         generate_stage_name,
     )
-    from calkit.environments import detect_env_for_stage
+    from calkit.docker import normalize_xr_docker_command, split_xr_command
+    from calkit.environments import EnvForStageResult, detect_env_for_stage
     from calkit.models.io import PathOutput
     from calkit.models.pipeline import (
+        CommandStage,
         JuliaCommandStage,
         JuliaScriptStage,
         JupyterNotebookStage,
@@ -2041,6 +2048,12 @@ def execute_and_record(
     ck_info_orig = deepcopy(ck_info)
     pipeline = ck_info.get("pipeline", {})
     stages = pipeline.get("stages", {})
+    # Populated only when a `docker run ...` command is normalized into an
+    # xr `command` stage (e.g., Mermaid CLI), overriding default detection
+    docker_override_stage_name = None
+    docker_override_env_result = None
+    docker_override_detected_inputs: list[str] = []
+    docker_override_detected_outputs: list[str] = []
     # Strip and detect uv/pixi run prefix
     if len(cmd) >= 2 and cmd[0] == "uv" and cmd[1] == "run":
         if environment is None and os.path.isfile("pyproject.toml"):
@@ -2050,21 +2063,60 @@ def execute_and_record(
         if environment is None and os.path.isfile("pixi.toml"):
             environment = "pixi.toml"
         cmd = cmd[2:]
+    cmd = split_xr_command(cmd)
     # Guard against empty command after stripping uv/pixi run
     if not cmd:
         raise_error(
             "No command specified after stripping environment prefix. "
             "Usage: calkit xr [uv|pixi run] <command> [args]"
         )
+    first_arg = cmd[0]
     # Detect what kind of stage this is based on the command
     # If the first argument is a notebook, we'll treat this as a notebook stage
     # If the first argument is `python`, check that the second argument is a
     # script, otherwise it's a shell-command stage
     # If the first argument ends with .tex, we'll treat this as a LaTeX stage
-    first_arg = cmd[0]
-    stage = {}
+    stage: dict[str, Any] = {}
     language = None
-    if first_arg.endswith(".ipynb"):
+    if first_arg == "docker":
+        docker_command = normalize_xr_docker_command(
+            cmd=cmd,
+            environment=environment,
+            cwd=os.getcwd(),
+        )
+        if docker_command is not None:
+            cmd = docker_command.command
+            cls = CommandStage
+            stage = {
+                "kind": "command",
+                "command": " ".join(shlex.quote(arg) for arg in cmd),
+            }
+            environment = docker_command.environment_name
+            envs = ck_info.get("environments", {})
+            if environment not in envs:
+                docker_override_env_result = EnvForStageResult(
+                    name=environment,
+                    env={
+                        "kind": "docker",
+                        "image": docker_command.image,
+                        "description": docker_command.description,
+                        "wdir": docker_command.wdir,
+                        "command_mode": docker_command.command_mode,
+                    },
+                    exists=False,
+                    spec_path=None,
+                    dependencies=[],
+                    created_from_dependencies=False,
+                )
+            docker_override_stage_name = docker_command.stage_name
+            docker_override_detected_inputs = docker_command.inputs
+            docker_override_detected_outputs = docker_command.outputs
+        else:
+            cls = ShellCommandStage
+            stage["kind"] = "shell-command"
+            stage["command"] = " ".join(shlex.quote(arg) for arg in cmd)
+            language = "shell"
+    elif first_arg.endswith(".ipynb"):
         cls = JupyterNotebookStage
         stage["kind"] = "jupyter-notebook"
         stage["notebook_path"] = first_arg
@@ -2076,7 +2128,6 @@ def execute_and_record(
         stage["kind"] = "latex"
         stage["target_path"] = first_arg
         language = "latex"
-        # Determine PDF storage based on whether it's already in git
         pdf_path = first_arg.removesuffix(".tex") + ".pdf"
         try:
             repo = git.Repo(".")
@@ -2085,7 +2136,6 @@ def execute_and_record(
             else:
                 stage["pdf_storage"] = "dvc"
         except InvalidGitRepositoryError:
-            # Not a git repo, default to dvc
             stage["pdf_storage"] = "dvc"
     elif first_arg == "python" and len(cmd) > 1 and cmd[1].endswith(".py"):
         cls = PythonScriptStage
@@ -2155,7 +2205,6 @@ def execute_and_record(
         stage["script_path"] = first_arg
         if len(cmd) > 1:
             stage["args"] = cmd[1:]
-        # Detect shell type from extension
         if first_arg.endswith(".bash"):
             stage["shell"] = "bash"
         elif first_arg.endswith(".zsh"):
@@ -2171,7 +2220,9 @@ def execute_and_record(
     # Create a stage name if one isn't provided and check for existing similar
     # stages
     if stage_name is None:
-        base_stage_name = generate_stage_name(cmd)
+        base_stage_name = docker_override_stage_name or generate_stage_name(
+            cmd
+        )
         stage_name = base_stage_name
         # If a stage with this name exists and is different, auto-increment
         if stage_name in stages:
@@ -2213,12 +2264,15 @@ def execute_and_record(
                 f"stage '{stage_name}'"
             )
     # Detect or create environment for this stage
-    env_result = detect_env_for_stage(
-        stage=stage,
-        environment=environment,
-        ck_info=ck_info,
-        language=language,
-    )
+    if docker_override_env_result is not None:
+        env_result = docker_override_env_result
+    else:
+        env_result = detect_env_for_stage(
+            stage=stage,
+            environment=environment,
+            ck_info=ck_info,
+            language=language,
+        )
     # If we created an environment from dependencies, write the spec file
     if env_result.created_from_dependencies and not dry_run:
         typer.echo(
@@ -2249,9 +2303,9 @@ def execute_and_record(
     env_name = env_result.name
     stage["environment"] = env_name
     # Detect inputs and outputs if not disabled
-    detected_inputs = []
-    detected_outputs = []
-    if not no_detect_io:
+    detected_inputs = list(docker_override_detected_inputs)
+    detected_outputs = list(docker_override_detected_outputs)
+    if not no_detect_io and not (detected_inputs or detected_outputs):
         try:
             io_info = detect_io(stage)
             detected_inputs = io_info["inputs"]
@@ -2329,8 +2383,46 @@ def execute_and_record(
         cls.model_validate(stage)
     except Exception as e:
         raise_error(f"Failed to create stage: {e}")
+
+    def _xr_json_result(
+        mode: str,
+        execution_status: str | None = None,
+        error: str | None = None,
+        run_stdout: str | None = None,
+        run_stderr: str | None = None,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "mode": mode,
+            "environment": {
+                "name": env_result.name,
+                "exists": env_result.exists,
+                "created_from_dependencies": (
+                    env_result.created_from_dependencies
+                ),
+                "env": env_result.env,
+                "spec_path": env_result.spec_path,
+                "spec_content": env_result.spec_content,
+                "dependencies": env_result.dependencies,
+            },
+            "stage": {
+                "name": stage_name,
+                "config": stage,
+            },
+        }
+        if execution_status is not None:
+            result["execution"] = {
+                "status": execution_status,
+                "error": error,
+                "stdout": run_stdout,
+                "stderr": run_stderr,
+            }
+        return result
+
     # If dry-run, print environment and stage then return
     if dry_run:
+        if fmt_json:
+            typer.echo(json.dumps(_xr_json_result(mode="dry-run"), indent=2))
+            return
         # Print environment info
         if env_result.created_from_dependencies:
             typer.echo("Environment (would be created):")
@@ -2359,25 +2451,66 @@ def execute_and_record(
     ck_info["pipeline"] = pipeline
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
+    run_stdout = io.StringIO()
+    run_stderr = io.StringIO()
     try:
-        # Format stage as YAML for display
-        yaml_output = io.StringIO()
-        calkit.ryaml.dump({stage_name: stage}, yaml_output)
-        # Indent YAML by 2 spaces
-        indented_yaml = "\n".join(
-            "  " + line if line.strip() else line
-            for line in yaml_output.getvalue().rstrip().split("\n")
-        )
-        typer.echo(
-            f"Adding stage to pipeline and attempting to execute:"
-            f"\n{indented_yaml}"
-        )
-        run(targets=[stage_name], force=force, verbose=verbose)
+        if not fmt_json:
+            # Format stage as YAML for display
+            yaml_output = io.StringIO()
+            calkit.ryaml.dump({stage_name: stage}, yaml_output)
+            # Indent YAML by 2 spaces
+            indented_yaml = "\n".join(
+                "  " + line if line.strip() else line
+                for line in yaml_output.getvalue().rstrip().split("\n")
+            )
+            typer.echo(
+                f"Adding stage to pipeline and attempting to execute:"
+                f"\n{indented_yaml}"
+            )
+            run(targets=[stage_name], force=force, verbose=verbose)
+        else:
+            with contextlib.redirect_stdout(run_stdout):
+                with contextlib.redirect_stderr(run_stderr):
+                    run(
+                        targets=[stage_name],
+                        force=force,
+                        verbose=verbose,
+                        quiet=True,
+                    )
+            stdout_value = run_stdout.getvalue().rstrip() or None
+            stderr_value = run_stderr.getvalue().rstrip() or None
+            typer.echo(
+                json.dumps(
+                    _xr_json_result(
+                        mode="run",
+                        execution_status="completed",
+                        run_stdout=stdout_value,
+                        run_stderr=stderr_value,
+                    ),
+                    indent=2,
+                )
+            )
     except Exception as e:
         # If the stage failed, write the old ck_info back to calkit.yaml to
         # remove the stage that we added
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info_orig, f)
+        if fmt_json:
+            stdout_value = run_stdout.getvalue().rstrip() or None
+            stderr_value = run_stderr.getvalue().rstrip() or None
+            typer.echo(
+                json.dumps(
+                    _xr_json_result(
+                        mode="run",
+                        execution_status="failed",
+                        error=f"Failed to execute stage: {e}",
+                        run_stdout=stdout_value,
+                        run_stderr=stderr_value,
+                    ),
+                    indent=2,
+                )
+            )
+            raise typer.Exit(code=1)
         raise_error(f"Failed to execute stage: {e}")
 
 
@@ -2400,7 +2533,7 @@ def run_procedure(
             typer.echo(out, nl=False)
             time.sleep(dt)
             seconds -= dt
-        typer.echo()
+        typer.echo("Done")
 
     def convert_value(value, dtype):
         if dtype == "int":

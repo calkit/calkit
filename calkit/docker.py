@@ -1,5 +1,13 @@
 """Functionality for working with Docker."""
 
+from __future__ import annotations
+
+import os
+import shlex
+from pathlib import Path
+
+from pydantic import BaseModel
+
 MINIFORGE_LAYER_TXT = r"""
 # Install Miniforge
 ARG MINIFORGE_NAME=Miniforge3
@@ -67,3 +75,249 @@ LAYERS = {
     "uv": UV_LAYER_TEXT,
     "julia": JULIA_LAYER_TEXT,
 }
+
+
+class NormalizedXRDockerCommand(BaseModel):
+    """Normalized Docker command metadata for `calkit xr`."""
+
+    image: str
+    wdir: str
+    command: list[str]
+    inputs: list[str]
+    outputs: list[str]
+    environment_name: str
+    stage_name: str | None = None
+    description: str | None = None
+    command_mode: str = "shell"
+
+
+def split_xr_command(cmd: list[str]) -> list[str]:
+    """Split a single quoted `docker run ...` command into argv tokens."""
+    if len(cmd) != 1:
+        return cmd
+    if not cmd[0].lstrip().startswith("docker run"):
+        return cmd
+    try:
+        return shlex.split(cmd[0])
+    except ValueError:
+        return cmd
+
+
+def _normalize_docker_image(image: str) -> str:
+    """Ensure Docker image references include an explicit tag."""
+    if "@" in image:
+        return image
+    if ":" in image.rsplit("/", 1)[-1]:
+        return image
+    return image + ":latest"
+
+
+def _parse_volume_spec(volume_spec: str) -> tuple[str, str] | None:
+    """Parse a Docker volume spec into source and destination paths."""
+    parts = volume_spec.split(":")
+    if len(parts) < 2:
+        return None
+    return parts[0], parts[1]
+
+
+def _to_project_relative_path(path: str, cwd: Path) -> str | None:
+    """Resolve a path and return it relative to the project root when possible."""
+    path_obj = Path(os.path.expanduser(path))
+    if not path_obj.is_absolute():
+        path_obj = (cwd / path_obj).resolve(strict=False)
+    else:
+        path_obj = path_obj.resolve(strict=False)
+    try:
+        return path_obj.relative_to(cwd).as_posix()
+    except ValueError:
+        return None
+
+
+def _parse_docker_run_command(cmd: list[str]) -> dict | None:
+    """Parse a `docker run` argv list into image, args, mounts, and workdir."""
+    if len(cmd) < 3 or cmd[0] != "docker" or cmd[1] != "run":
+        return None
+    no_arg_opts = {"--rm", "-i", "-t", "-it"}
+    one_arg_opts = {
+        "-u": "user",
+        "--user": "user",
+        "-v": "volume",
+        "--volume": "volume",
+        "-w": "workdir",
+        "--workdir": "workdir",
+        "--platform": "platform",
+        "--gpus": "gpus",
+        "-p": "port",
+        "--publish": "port",
+        "--name": "name",
+        "--entrypoint": "entrypoint",
+    }
+    volume_specs: list[str] = []
+    workdir = None
+    image = None
+    idx = 2
+    while idx < len(cmd):
+        token = cmd[idx]
+        if token == "--":
+            idx += 1
+            break
+        if token in no_arg_opts:
+            idx += 1
+            continue
+        if token in one_arg_opts:
+            if idx + 1 >= len(cmd):
+                return None
+            value = cmd[idx + 1]
+            if one_arg_opts[token] == "volume":
+                volume_specs.append(value)
+            elif one_arg_opts[token] == "workdir":
+                workdir = value
+            idx += 2
+            continue
+        if token.startswith("--volume="):
+            volume_specs.append(token.split("=", 1)[1])
+            idx += 1
+            continue
+        if token.startswith("--workdir="):
+            workdir = token.split("=", 1)[1]
+            idx += 1
+            continue
+        if token.startswith("--user="):
+            idx += 1
+            continue
+        if token.startswith("-"):
+            return None
+        image = token
+        idx += 1
+        break
+    if image is None:
+        return None
+    return {
+        "image": image,
+        "workdir": workdir,
+        "volumes": volume_specs,
+        "command": cmd[idx:],
+    }
+
+
+def _map_container_path_to_project(
+    path: str,
+    source_prefix: str | None,
+    container_wdir: str,
+) -> str:
+    """Map a container path back to a project-relative path when possible."""
+    path = path.strip()
+    if source_prefix is None:
+        return path
+    source_prefix = source_prefix.strip("/")
+    if path.startswith(container_wdir.rstrip("/") + "/"):
+        suffix = path[len(container_wdir.rstrip("/")) + 1 :]
+        if source_prefix:
+            return Path(source_prefix, suffix).as_posix()
+        return Path(suffix).as_posix()
+    if os.path.isabs(path):
+        return path
+    if source_prefix and path.startswith(source_prefix + "/"):
+        return path
+    if source_prefix:
+        return Path(source_prefix, path).as_posix()
+    return Path(path).as_posix()
+
+
+def normalize_xr_docker_command(
+    cmd: list[str],
+    environment: str | None = None,
+    cwd: str | None = None,
+) -> NormalizedXRDockerCommand | None:
+    """Normalize Mermaid `docker run` commands into `xr` command-stage metadata."""
+    cwd_path = Path(cwd or ".").resolve()
+    cmd = split_xr_command(cmd)
+    parsed = _parse_docker_run_command(cmd)
+    if parsed is None:
+        return None
+    image = _normalize_docker_image(parsed["image"])
+    image_name = image.split("@", 1)[0].split(":", 1)[0]
+    if "mermaid-cli" not in image_name:
+        return None
+    chosen_mount = None
+    volumes = parsed["volumes"]
+    if parsed["workdir"] is not None:
+        for volume_spec in volumes:
+            parsed_volume = _parse_volume_spec(volume_spec)
+            if parsed_volume is None:
+                continue
+            source, dest = parsed_volume
+            if dest == parsed["workdir"]:
+                chosen_mount = (source, dest)
+                break
+    if chosen_mount is None and volumes:
+        parsed_volume = _parse_volume_spec(volumes[0])
+        if parsed_volume is not None:
+            chosen_mount = parsed_volume
+    container_wdir = parsed["workdir"]
+    if container_wdir is None:
+        container_wdir = (
+            chosen_mount[1] if chosen_mount is not None else "/data"
+        )
+    source_prefix = None
+    if chosen_mount is not None:
+        source_prefix = _to_project_relative_path(chosen_mount[0], cwd_path)
+        if source_prefix is None:
+            source_prefix = chosen_mount[0]
+    command_tokens = parsed["command"]
+    if not command_tokens:
+        return None
+    normalized_args: list[str] = []
+    detected_inputs: list[str] = []
+    detected_outputs: list[str] = []
+    idx = 0
+    while idx < len(command_tokens):
+        token = command_tokens[idx]
+        if token in ["-i", "--input", "-o", "--output"]:
+            normalized_args.append(token)
+            if idx + 1 >= len(command_tokens):
+                break
+            mapped_path = _map_container_path_to_project(
+                command_tokens[idx + 1],
+                source_prefix,
+                container_wdir,
+            )
+            normalized_args.append(mapped_path)
+            if token in ["-i", "--input"]:
+                detected_inputs.append(mapped_path)
+            else:
+                detected_outputs.append(mapped_path)
+            idx += 2
+            continue
+        if token.startswith("--input=") or token.startswith("--output="):
+            option, path_value = token.split("=", 1)
+            mapped_path = _map_container_path_to_project(
+                path_value,
+                source_prefix,
+                container_wdir,
+            )
+            normalized_args.append(f"{option}={mapped_path}")
+            if option == "--input":
+                detected_inputs.append(mapped_path)
+            else:
+                detected_outputs.append(mapped_path)
+            idx += 1
+            continue
+        normalized_args.append(token)
+        idx += 1
+    stage_name = None
+    if detected_inputs:
+        stage_name = f"mermaid-{Path(detected_inputs[0]).stem}".replace(
+            "_", "-"
+        ).lower()
+    return NormalizedXRDockerCommand(
+        image=image,
+        wdir=container_wdir,
+        command=normalized_args,
+        inputs=detected_inputs,
+        outputs=detected_outputs,
+        environment_name=environment or "mermaid",
+        stage_name=stage_name,
+        description="Mermaid CLI via Docker.",
+        command_mode="entrypoint",
+    )

@@ -63,6 +63,12 @@ def test_stages_are_similar():
     assert stages_are_similar(mat1, mat2)
     mat3 = {"kind": "matlab-command", "command": "disp('goodbye')"}
     assert not stages_are_similar(mat1, mat3)
+    # Test plain command stages
+    command1 = {"kind": "command", "command": "-i figure.mmd -o figure.svg"}
+    command2 = {"kind": "command", "command": "-i figure.mmd -o figure.svg"}
+    assert stages_are_similar(command1, command2)
+    command3 = {"kind": "command", "command": "-i other.mmd -o other.svg"}
+    assert not stages_are_similar(command1, command3)
 
 
 def test_to_dvc():

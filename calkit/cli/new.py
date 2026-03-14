@@ -650,6 +650,17 @@ def new_docker_env(
     wdir: Annotated[
         str, typer.Option("--wdir", help="Working directory.")
     ] = "/work",
+    command_mode: Annotated[
+        str,
+        typer.Option(
+            "--command-mode",
+            help=(
+                "How to execute commands in the container: "
+                "'shell' runs shell -c, 'entrypoint' passes args "
+                "directly to the image entrypoint."
+            ),
+        ),
+    ] = "shell",
     user: Annotated[
         str | None,
         typer.Option(
@@ -703,6 +714,8 @@ def new_docker_env(
         )
         _, project_name = calkit.detect_project_name().split("/")
         image_name = f"{project_name}-{name}"
+    if command_mode not in ["shell", "entrypoint"]:
+        raise_error("--command-mode must be one of: shell, entrypoint")
     repo = git.Repo()
     if base and path is not None:
         txt = "FROM " + base + "\n\n"
@@ -733,6 +746,7 @@ def new_docker_env(
         kind="docker",
         image=image_name,
         wdir=wdir,
+        command_mode=command_mode,
     )
     if base is not None or path is not None:
         env["path"] = path  # type: ignore

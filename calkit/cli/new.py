@@ -746,7 +746,6 @@ def new_docker_env(
         kind="docker",
         image=image_name,
         wdir=wdir,
-        command_mode=command_mode,
     )
     if base is not None or path is not None:
         env["path"] = path  # type: ignore
@@ -760,6 +759,8 @@ def new_docker_env(
         env["user"] = user
     if gpus:
         env["gpus"] = gpus
+    if command_mode != "shell":
+        env["command_mode"] = command_mode
     if env_vars:
         env["env_vars"] = {}  # type: ignore
         for var in env_vars:

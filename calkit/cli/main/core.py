@@ -1,4 +1,4 @@
-"""Core functionality to the main namespace of the CLI."""
+"""Core functionality in the main namespace of the CLI."""
 
 from __future__ import annotations
 

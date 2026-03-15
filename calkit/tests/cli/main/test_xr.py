@@ -232,11 +232,7 @@ def test_xr_non_allowlisted_docker_command_dry_run(tmp_dir):
         "command_mode": "shell",
     }
     assert payload["stage"]["stage"]["kind"] == "shell-command"
-    assert payload["stage"]["stage"]["command"].startswith("docker run")
-    assert (
-        "ghcr.io/turbinesfoam/turbinesfoam"
-        in payload["stage"]["stage"]["command"]
-    )
+    assert payload["stage"]["stage"]["command"] == "blockMesh"
 
 
 def test_xr_non_allowlisted_docker_run_stays_shell_command(
@@ -260,10 +256,7 @@ def test_xr_non_allowlisted_docker_run_stays_shell_command(
     payload = json.loads(result.stdout)
     assert payload["mode"] == "dry-run"
     assert payload["stage"]["stage"]["kind"] == "shell-command"
-    assert (
-        payload["stage"]["stage"]["command"]
-        == "docker run -it ubuntu cp myfile otherfile"
-    )
+    assert payload["stage"]["stage"]["command"] == "cp myfile otherfile"
     stage = payload["stage"]["stage"]
     assert stage["inputs"] == ["myfile"]
     assert stage["outputs"] == [{"path": "otherfile", "storage": "git"}]

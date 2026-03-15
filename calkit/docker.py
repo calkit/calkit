@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 from pathlib import Path
 
@@ -99,7 +100,26 @@ class NormalizedXRDockerCommand(BaseModel):
 
 def _image_name_without_tag_or_digest(image: str) -> str:
     """Return an image name without tag or digest components."""
-    return image.split("@", 1)[0].split(":", 1)[0].lower()
+    name = image.split("@", 1)[0]
+    last_slash = name.rfind("/")
+    last_colon = name.rfind(":")
+    # Only strip a tag when the colon appears in the final path segment.
+    if last_colon > last_slash:
+        name = name[:last_colon]
+    return name.lower()
+
+
+def _sanitize_stage_name(stage_name: str) -> str:
+    """Normalize a stage name to the same kebab-case style used by xr."""
+    stage_name = stage_name.replace("_", "-").lower()
+    stage_name = stage_name.replace(".", "-")
+    stage_name = stage_name.replace(" ", "-")
+    stage_name = re.sub(r"[(){}\[\]'\"><|&;/]", "", stage_name)
+    stage_name = re.sub(r"-+", "-", stage_name)
+    stage_name = stage_name.strip("-")
+    if not stage_name:
+        return "stage"
+    return stage_name
 
 
 def _uses_entrypoint_command_mode(image: str) -> bool:
@@ -186,6 +206,11 @@ def _parse_docker_run_command(cmd: list[str]) -> dict | None:
     one_arg_opts = {
         "-u": "user",
         "--user": "user",
+        "-e": "env",
+        "--env": "env",
+        "--env-file": "env-file",
+        "--network": "network",
+        "--pull": "pull",
         "-v": "volume",
         "--volume": "volume",
         "-w": "workdir",
@@ -227,11 +252,27 @@ def _parse_docker_run_command(cmd: list[str]) -> dict | None:
             workdir = token.split("=", 1)[1]
             idx += 1
             continue
+        if token.startswith("--env="):
+            idx += 1
+            continue
+        if token.startswith("--env-file="):
+            idx += 1
+            continue
+        if token.startswith("--network="):
+            idx += 1
+            continue
+        if token.startswith("--pull="):
+            idx += 1
+            continue
         if token.startswith("--user="):
             idx += 1
             continue
         if token.startswith("-"):
-            return None
+            # Unknown docker option: skip and continue scanning for image.
+            # This keeps normalization resilient to common flags we don't
+            # explicitly model.
+            idx += 1
+            continue
         image = token
         idx += 1
         break
@@ -356,9 +397,8 @@ def normalize_xr_docker_command(
             idx += 1
     stage_name = None
     if is_mermaid_image and detected_inputs:
-        stage_name = f"mermaid-{Path(detected_inputs[0]).stem}".replace(
-            "_", "-"
-        ).lower()
+        raw_stage_name = f"mermaid-{Path(detected_inputs[0]).stem}"
+        stage_name = _sanitize_stage_name(raw_stage_name)
     env_name = environment
     if env_name is None:
         if is_mermaid_image:

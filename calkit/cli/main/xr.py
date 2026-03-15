@@ -259,7 +259,7 @@ def execute_and_record(
             stage["kind"] = "shell-command"
             stage["command"] = " ".join(shlex.quote(arg) for arg in cmd)
             language = "shell"
-            if environment is None:
+            if environment is None and inner_command is not None:
                 inferred_env = infer_xr_docker_environment(cmd=docker_run_cmd)
                 if inferred_env is not None:
                     inferred_name, inferred_env_dict = inferred_env

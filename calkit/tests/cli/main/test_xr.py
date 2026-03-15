@@ -262,6 +262,54 @@ def test_xr_non_allowlisted_docker_run_stays_shell_command(
     assert stage["outputs"] == [{"path": "otherfile", "storage": "git"}]
 
 
+def test_xr_non_allowlisted_docker_run_without_inner_command_uses_system_env(
+    tmp_dir,
+):
+    result = subprocess.run(
+        [
+            "calkit",
+            "xr",
+            "--dry-run",
+            "--json",
+            "--",
+            "docker run -it ubuntu",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    print("stdout:", result.stdout)
+    print("stderr:", result.stderr)
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["mode"] == "dry-run"
+    assert payload["environment"]["name"] == "_system"
+    assert payload["environment"]["env"] == {"kind": "system"}
+    assert payload["stage"]["stage"]["kind"] == "shell-command"
+    assert payload["stage"]["stage"]["command"] == "docker run -it ubuntu"
+
+
+def test_xr_mermaid_stage_name_is_sanitized(tmp_dir):
+    result = subprocess.run(
+        [
+            "calkit",
+            "xr",
+            "--dry-run",
+            "--json",
+            (
+                "docker run --rm -v $PWD:/data minlag/mermaid-cli "
+                "-i '/data/Flow Chart (v1).mmd' -o '/data/flow.svg'"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    print("stdout:", result.stdout)
+    print("stderr:", result.stderr)
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["stage"]["name"] == "mermaid-flow-chart-v1"
+
+
 def test_xr_julia_script(tmp_dir):
     """Test xr command with Julia script in dry-run JSON mode."""
     subprocess.check_call(["calkit", "init"])

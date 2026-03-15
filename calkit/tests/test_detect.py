@@ -685,7 +685,7 @@ with open('output.txt', 'w') as f:
     assert "output.dat" in result["outputs"]
     stage = {
         "kind": "shell-command",
-        "command": "docker run -it ubuntu cp myfile otherfile",
+        "command": "cp myfile otherfile",
         "environment": "_system",
     }
     result = detect_io(stage)

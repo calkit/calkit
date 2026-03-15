@@ -1,5 +1,6 @@
-"""Functionality for detecting inputs and outputs from scripts,
-notebooks, and commands."""
+"""Functionality for detecting inputs, outputs, and dependencies from scripts,
+notebooks, and commands.
+"""
 
 from __future__ import annotations
 

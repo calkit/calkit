@@ -3,29 +3,17 @@
 from calkit.docker import _parse_volume_spec, _uses_entrypoint_command_mode
 
 
-def test_parse_volume_spec_basic():
+def test_parse_volume_spec():
     assert _parse_volume_spec("./data:/work") == ("./data", "/work")
-
-
-def test_parse_volume_spec_with_mode():
     assert _parse_volume_spec("./data:/work:ro") == ("./data", "/work")
-
-
-def test_parse_volume_spec_windows_without_mode():
     assert _parse_volume_spec(r"C:\Users\me:/data") == (
         r"C:\Users\me",
         "/data",
     )
-
-
-def test_parse_volume_spec_windows_with_mode():
     assert _parse_volume_spec(r"C:\Users\me:/data:ro") == (
         r"C:\Users\me",
         "/data",
     )
-
-
-def test_parse_volume_spec_invalid():
     assert _parse_volume_spec("not-a-volume") is None
 
 

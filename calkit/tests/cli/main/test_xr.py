@@ -1,4 +1,4 @@
-"""Tests for the `calkit xr` command."""
+"""Tests for the ``calkit xr`` command."""
 
 import json
 import os
@@ -12,7 +12,7 @@ import toml
 import calkit
 
 
-def test_execute_and_record_python_script(tmp_dir):
+def test_xr_python_script(tmp_dir):
     """Test xr command with Python script."""
     # Create a simple Python script with I/O
     script_path = "process_data.py"
@@ -77,7 +77,7 @@ print("Processing complete")
     assert "output.txt" in output_paths
 
 
-def test_execute_and_record_shell_command(tmp_dir):
+def test_xr_shell_command(tmp_dir):
     """Test xr command with shell command."""
     subprocess.check_call(["calkit", "init"])
     # Create a simple docker environment for shell commands
@@ -123,7 +123,7 @@ def test_execute_and_record_shell_command(tmp_dir):
     assert stage["environment"] == "shell-env"
 
 
-def test_execute_and_record_mermaid_docker_command_dry_run(tmp_dir):
+def test_xr_mermaid_docker_command_dry_run(tmp_dir):
     result = subprocess.run(
         [
             "calkit",
@@ -174,7 +174,7 @@ def test_execute_and_record_mermaid_docker_command_dry_run(tmp_dir):
     ]
 
 
-def test_execute_and_record_json_run_mode(tmp_dir):
+def test_xr_json_run_mode(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     result = subprocess.run(
         [
@@ -199,7 +199,7 @@ def test_execute_and_record_json_run_mode(tmp_dir):
     assert payload["stage"]["stage"]["command"] == "true"
 
 
-def test_execute_and_record_non_allowlisted_docker_command_dry_run(tmp_dir):
+def test_xr_non_allowlisted_docker_command_dry_run(tmp_dir):
     result = subprocess.run(
         [
             "calkit",
@@ -239,7 +239,7 @@ def test_execute_and_record_non_allowlisted_docker_command_dry_run(tmp_dir):
     )
 
 
-def test_execute_and_record_non_allowlisted_docker_run_stays_shell_command(
+def test_xr_non_allowlisted_docker_run_stays_shell_command(
     tmp_dir,
 ):
     result = subprocess.run(
@@ -266,7 +266,7 @@ def test_execute_and_record_non_allowlisted_docker_run_stays_shell_command(
     )
 
 
-def test_execute_and_record_julia_script(tmp_dir):
+def test_xr_julia_script(tmp_dir):
     """Test xr command with Julia script in dry-run JSON mode."""
     subprocess.check_call(["calkit", "init"])
     # Create a Julia script that uses CSV to read/write
@@ -315,7 +315,7 @@ println("Analysis complete")
     assert not os.path.exists("Project.toml")
 
 
-def test_execute_and_record_r_script(tmp_dir):
+def test_xr_r_script(tmp_dir):
     """Test xr command with R script in dry-run JSON mode."""
     subprocess.check_call(["calkit", "init"])
     # Create an R script with library dependencies for auto-detection
@@ -372,7 +372,7 @@ cat("Analysis complete\\n")
 @pytest.mark.skipif(
     shutil.which("matlab") is None, reason="MATLAB not installed"
 )
-def test_execute_and_record_matlab_script(tmp_dir):
+def test_xr_matlab_script(tmp_dir):
     from scipy.io import savemat
 
     # Create a dependency MATLAB function
@@ -421,7 +421,7 @@ parquetwrite("data.parquet", table(rand(1000, 1)));
     assert "compute.m" not in stage["inputs"]
 
 
-def test_execute_and_record_with_user_inputs_outputs(tmp_dir):
+def test_xr_with_user_inputs_outputs(tmp_dir):
     """Test xr command with user-specified inputs and outputs."""
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
@@ -481,7 +481,7 @@ np.save('data.npy', arr)
     )
 
 
-def test_execute_and_record_failure_rollback(tmp_dir):
+def test_xr_failure_rollback(tmp_dir):
     """Test that xr rolls back pipeline changes if execution fails."""
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
@@ -516,7 +516,7 @@ raise RuntimeError("Intentional failure")
     assert "fail" not in stages
 
 
-def test_execute_and_record_no_io_detect(tmp_dir):
+def test_xr_no_io_detect(tmp_dir):
     """Test xr command with I/O detection disabled."""
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
@@ -557,7 +557,7 @@ with open('output.txt', 'w') as f:
     assert len(stage.get("inputs", [])) == 0
 
 
-def test_execute_and_record_stage_name_conflict(tmp_dir):
+def test_xr_stage_name_conflict(tmp_dir):
     """Test that xr auto-increments stage names on conflict."""
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
@@ -638,7 +638,7 @@ def test_execute_and_record_stage_name_conflict(tmp_dir):
     assert stages["process-v3"]["script_path"] == "other/process.py"
 
 
-def test_execute_and_record_jupyter_notebook_conda_env(tmp_dir):
+def test_xr_jupyter_notebook_conda_env(tmp_dir):
     # First, create a conda env with matplotlib and jupyter deps
     os.makedirs("env")
     env_path = "env/environment.yml"

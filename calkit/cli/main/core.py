@@ -1325,10 +1325,11 @@ def run(
     if failed:
         raise_error("Pipeline failed")
     else:
-        try:
-            typer.echo("Pipeline completed successfully ✅")
-        except UnicodeEncodeError:
-            typer.echo("Pipeline completed successfully")
+        typer.echo(
+            "Pipeline completed successfully ✅".encode(
+                "utf-8", errors="replace"
+            )
+        )
     if save_after_run or save_message is not None:
         if save_message is None:
             save_message = "Run pipeline"

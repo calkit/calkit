@@ -226,7 +226,7 @@ def test_xr_non_allowlisted_docker_command_dry_run(tmp_dir):
         "kind": "docker",
         "image": "ghcr.io/turbinesfoam/turbinesfoam:latest",
         "description": (
-            "Docker CLI via image " "ghcr.io/turbinesfoam/turbinesfoam:latest."
+            "Docker CLI via image ghcr.io/turbinesfoam/turbinesfoam:latest."
         ),
         "wdir": "/work",
         "command_mode": "shell",
@@ -264,6 +264,9 @@ def test_xr_non_allowlisted_docker_run_stays_shell_command(
         payload["stage"]["stage"]["command"]
         == "docker run -it ubuntu cp myfile otherfile"
     )
+    stage = payload["stage"]["stage"]
+    assert stage["inputs"] == ["myfile"]
+    assert stage["outputs"] == [{"path": "otherfile", "storage": "git"}]
 
 
 def test_xr_julia_script(tmp_dir):

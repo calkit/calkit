@@ -683,6 +683,14 @@ with open('output.txt', 'w') as f:
     result = detect_io(stage)
     assert "input.dat" in result["inputs"]
     assert "output.dat" in result["outputs"]
+    stage = {
+        "kind": "shell-command",
+        "command": "docker run -it ubuntu cp myfile otherfile",
+        "environment": "_system",
+    }
+    result = detect_io(stage)
+    assert result["inputs"] == ["myfile"]
+    assert result["outputs"] == ["otherfile"]
     # Test LaTeX stage
     latex_content = r"""
 \documentclass{article}

@@ -8,6 +8,7 @@ import ast
 import json
 import os
 import re
+import shlex
 import sys
 from typing import Literal
 
@@ -448,13 +449,35 @@ def detect_latex_io(tex_path: str) -> dict[str, list[str]]:
 
 def detect_shell_command_io(command: str) -> dict[str, list[str]]:
     """Detect inputs and outputs from a shell command string."""
+    from calkit.docker import extract_docker_run_inner_command
+
     inputs = []
     outputs = []
-    input_redirects = re.findall(r"<\s*(\S+)", command)
+    analyzed_command = command
+    inner_command = extract_docker_run_inner_command(command)
+    if inner_command is not None:
+        analyzed_command = " ".join(
+            shlex.quote(part) for part in inner_command
+        )
+    input_redirects = re.findall(r"<\s*(\S+)", analyzed_command)
     inputs.extend([f.strip("\"'") for f in input_redirects])
-    output_redirects = re.findall(r">>?\s*(\S+)", command)
+    output_redirects = re.findall(r">>?\s*(\S+)", analyzed_command)
     outputs.extend([f.strip("\"'") for f in output_redirects])
-    words = command.split()
+    try:
+        words = shlex.split(analyzed_command)
+    except ValueError:
+        words = analyzed_command.split()
+    if words and words[0] in ["cp", "mv"]:
+        operands = []
+        for word in words[1:]:
+            if word == "--":
+                continue
+            if word.startswith("-"):
+                continue
+            operands.append(word.strip("\"'"))
+        if len(operands) >= 2:
+            inputs.extend(operands[:-1])
+            outputs.append(operands[-1])
     for i, word in enumerate(words):
         if word.startswith("-"):
             continue

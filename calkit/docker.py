@@ -381,6 +381,27 @@ def normalize_xr_docker_command(
     )
 
 
+def extract_docker_run_inner_command(
+    cmd: str | list[str],
+) -> list[str] | None:
+    """Extract the inner command from a ``docker run ...`` invocation."""
+    if isinstance(cmd, str):
+        try:
+            tokens = shlex.split(cmd)
+        except ValueError:
+            return None
+    else:
+        tokens = cmd
+    tokens = split_xr_command(tokens)
+    parsed = _parse_docker_run_command(tokens)
+    if parsed is None:
+        return None
+    inner_command = parsed.get("command", [])
+    if not inner_command:
+        return None
+    return inner_command
+
+
 def infer_xr_docker_environment(
     cmd: list[str],
     environment: str | None = None,

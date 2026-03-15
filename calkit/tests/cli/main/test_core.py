@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime
+from pathlib import Path
 from pprint import pprint
 
 import dvc.repo
@@ -20,6 +21,17 @@ from calkit.cli.main.core import (
     _stage_run_info_from_log_content,
     _to_shell_cmd,
 )
+
+
+def _repo_test_file(name: str) -> Path:
+    """Find a file in the repository-level ``test`` directory."""
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "test" / name
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(
+        f"Could not find repository test file: test/{name}"
+    )
 
 
 def test_run_in_env(tmp_dir):
@@ -565,9 +577,7 @@ def test_run(tmp_dir):
     )
     # Test that we can run a Python script
     # Copy script.py from the repo's test directory
-    script_path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "..", "test", "script.py"
-    )
+    script_path = _repo_test_file("script.py")
     shutil.copy2(script_path, "script.py")
     subprocess.check_call(
         [
@@ -711,9 +721,7 @@ def test_run_downstream(tmp_dir):
 
 
 def test_stage_run_info_from_log_content():
-    fpath = os.path.join(
-        os.path.dirname(__file__), "..", "..", "..", "test", "test-log.log"
-    )
+    fpath = _repo_test_file("test-log.log")
     with open(fpath, "r") as f:
         content = f.read()
     info = _stage_run_info_from_log_content(content)

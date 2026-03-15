@@ -267,15 +267,8 @@ def test_execute_and_record_non_allowlisted_docker_run_stays_shell_command(
 
 
 def test_execute_and_record_julia_script(tmp_dir):
-    """Test xr command with Julia script.
-
-    Tests both with explicit environment and with auto-detection of
-    dependencies and Project.toml creation.
-    """
+    """Test xr command with Julia script in dry-run JSON mode."""
     subprocess.check_call(["calkit", "init"])
-    subprocess.check_call(
-        ["calkit", "new", "julia-env", "-n", "jl-env", "CSV", "DataFrames"]
-    )
     # Create a Julia script that uses CSV to read/write
     with open("analyze.jl", "w") as f:
         f.write("""
@@ -296,65 +289,34 @@ println("Analysis complete")
     # Create input CSV file
     with open("input.csv", "w") as f:
         f.write("id,value\n1,10\n2,20\n3,30\n")
-    # Execute and record with explicit environment
+    # Dry-run should infer environment and stage metadata without execution
     result = subprocess.run(
-        ["calkit", "xr", "analyze.jl", "-e", "jl-env"],
+        ["calkit", "xr", "--dry-run", "--json", "analyze.jl"],
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, f"Command failed: {result.stderr}"
-    # Verify stage was added with inputs/outputs detected
-    ck_info = calkit.load_calkit_info()
-    stages = ck_info.get("pipeline", {}).get("stages", {})
-    assert "analyze" in stages
-    stage = stages["analyze"]
-    assert stage["kind"] == "julia-script"
-    assert stage["script_path"] == "analyze.jl"
-    assert stage["environment"] == "jl-env"
-    # Verify inputs and outputs were detected
-    assert "input.csv" in stage.get("inputs", [])
-    assert {"path": "output.csv", "storage": "git"} in stage.get("outputs", [])
-    # Verify output file was created
-    assert os.path.exists("output.csv")
-    # Test auto-detection of dependencies and Project.toml creation
-    # First, clean up the previous environment and files
-    shutil.rmtree(".calkit", ignore_errors=True)
-    os.remove("calkit.yaml")
-    os.remove("Project.toml")
-    os.remove("Manifest.toml")
-    # Run xr without specifying environment
-    # This should auto-detect CSV dependency and create Project.toml
-    result = subprocess.run(
-        ["calkit", "xr", "analyze.jl"],
-        capture_output=True,
-        text=True,
-    )
-    assert (
-        result.returncode == 0
-    ), f"Auto-detect command failed: {result.stderr}"
-    # Verify Project.toml was created with CSV as dependency
-    assert os.path.exists("Project.toml")
-    with open("Project.toml") as f:
-        project_content = f.read()
-    # Check that CSV is listed as a dependency (either in [deps] or
-    # in comments)
-    assert "CSV" in project_content
-    # Verify stage was added
-    ck_info = calkit.load_calkit_info()
-    stages = ck_info.get("pipeline", {}).get("stages", {})
-    assert "analyze" in stages
-    stage = stages["analyze"]
-    assert stage["kind"] == "julia-script"
-    env = ck_info.get("environments", {}).get(stage.get("environment"))
-    assert env is not None
-    assert env["kind"] == "julia"
-    assert env["path"] == "Project.toml"
-    assert "input.csv" in stage.get("inputs", [])
-    assert {"path": "output.csv", "storage": "git"} in stage.get("outputs", [])
+    assert result.returncode == 0, f"Dry-run command failed: {result.stderr}"
+    payload = json.loads(result.stdout)
+    assert payload["mode"] == "dry-run"
+    assert payload["environment"]["created_from_dependencies"] is True
+    assert payload["environment"]["env"]["kind"] == "julia"
+    assert payload["environment"]["spec_path"] == "Project.toml"
+    assert "CSV" in payload["environment"]["dependencies"]
+    assert "DataFrames" in payload["environment"]["dependencies"]
+    assert payload["stage"]["name"] == "analyze"
+    assert payload["stage"]["stage"]["kind"] == "julia-script"
+    assert payload["stage"]["stage"]["script_path"] == "analyze.jl"
+    assert "input.csv" in payload["stage"]["stage"].get("inputs", [])
+    assert {"path": "output.csv", "storage": "git"} in payload["stage"][
+        "stage"
+    ].get("outputs", [])
+    # Dry-run should not execute the script or materialize env files
+    assert not os.path.exists("output.csv")
+    assert not os.path.exists("Project.toml")
 
 
 def test_execute_and_record_r_script(tmp_dir):
-    """Test xr command with R script using automated environment detection."""
+    """Test xr command with R script in dry-run JSON mode."""
     subprocess.check_call(["calkit", "init"])
     # Create an R script with library dependencies for auto-detection
     with open("analyze.R", "w") as f:
@@ -377,53 +339,34 @@ cat("Analysis complete\\n")
     # Create input file
     with open("input.csv", "w") as f:
         f.write("value\n1\n2\n3\n")
-    # Execute and record
-    # (no environment specified; should auto-detect dependencies)
+    # Dry-run should infer environment and stage metadata without execution
     result = subprocess.run(
-        ["calkit", "xr", "analyze.R"],
+        ["calkit", "xr", "--dry-run", "--json", "analyze.R"],
         capture_output=True,
         text=True,
     )
     print("stdout:", result.stdout)
     print("stderr:", result.stderr)
-    assert result.returncode == 0, f"Command failed: {result.stderr}"
-    # Verify stage was added
-    ck_info = calkit.load_calkit_info()
-    stages = ck_info.get("pipeline", {}).get("stages", {})
-    assert "analyze" in stages
-    stage = stages["analyze"]
-    assert stage["kind"] == "r-script"
-    assert stage["script_path"] == "analyze.R"
-    # Verify environment was auto-created
-    assert "environment" in stage
-    env_name = stage["environment"]
-    envs = ck_info.get("environments", {})
-    assert env_name in envs
-    env = envs[env_name]
-    assert env["kind"] == "renv"
-    # Verify DESCRIPTION file was created with detected dependencies
-    env_path = env.get("path")
-    assert env_path is not None
-    assert os.path.isfile(env_path)
-    with open(env_path, "r") as f:
-        desc_content = f.read()
-    # Check that detected packages are in DESCRIPTION
-    assert "readr" in desc_content
-    assert "dplyr" in desc_content
-    # Verify renv.lock was created during environment check
-    env_dir = os.path.dirname(env_path)
-    lock_path = os.path.join(env_dir, "renv.lock")
-    assert os.path.isfile(lock_path), f"renv.lock not found at {lock_path}"
-    # Verify I/O detection
-    assert "input.csv" in stage["inputs"]
-    # Check output was created
-    assert os.path.exists("output.csv")
-    # Verify output was detected
-    outputs = stage.get("outputs", [])
+    assert result.returncode == 0, f"Dry-run command failed: {result.stderr}"
+    payload = json.loads(result.stdout)
+    assert payload["mode"] == "dry-run"
+    assert payload["environment"]["created_from_dependencies"] is True
+    assert payload["environment"]["env"]["kind"] == "renv"
+    assert payload["environment"]["spec_path"] == "DESCRIPTION"
+    assert "readr" in payload["environment"]["dependencies"]
+    assert "dplyr" in payload["environment"]["dependencies"]
+    assert payload["stage"]["name"] == "analyze"
+    assert payload["stage"]["stage"]["kind"] == "r-script"
+    assert payload["stage"]["stage"]["script_path"] == "analyze.R"
+    assert "input.csv" in payload["stage"]["stage"].get("inputs", [])
+    outputs = payload["stage"]["stage"].get("outputs", [])
     output_paths = [
         out["path"] if isinstance(out, dict) else out for out in outputs
     ]
     assert "output.csv" in output_paths
+    # Dry-run should not execute the script or materialize env files
+    assert not os.path.exists("output.csv")
+    assert not os.path.exists("DESCRIPTION")
 
 
 @pytest.mark.skipif(

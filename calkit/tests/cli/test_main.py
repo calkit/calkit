@@ -995,8 +995,7 @@ def test_execute_and_record_non_allowlisted_docker_command_dry_run(tmp_dir):
             "xr",
             "--dry-run",
             "--json",
-            "--environment",
-            "_system",
+            "--",
             (
                 "docker run --rm -it -v $PWD:/work "
                 "ghcr.io/turbinesfoam/turbinesfoam blockMesh"

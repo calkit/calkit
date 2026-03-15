@@ -379,3 +379,32 @@ def normalize_xr_docker_command(
         description=description,
         command_mode="entrypoint",
     )
+
+
+def infer_xr_docker_environment(
+    cmd: list[str],
+    environment: str | None = None,
+) -> tuple[str, dict] | None:
+    """Infer a Docker environment from a `docker run ...` command.
+
+    Returns a tuple of `(env_name, env_dict)` when parsing succeeds, or
+    `None` for non-Docker/non-parseable commands.
+    """
+    cmd = split_xr_command(cmd)
+    parsed = _parse_docker_run_command(cmd)
+    if parsed is None:
+        return None
+    image = _normalize_docker_image(parsed["image"])
+    image_name = _image_name_without_tag_or_digest(image)
+    env_name = environment or image_name.split("/")[-1].replace("_", "-")
+    command_mode = (
+        "entrypoint" if _uses_entrypoint_command_mode(image) else "shell"
+    )
+    env: dict = {
+        "kind": "docker",
+        "image": image,
+        "description": f"Docker CLI via image {image}.",
+        "wdir": parsed["workdir"] or "/work",
+        "command_mode": command_mode,
+    }
+    return env_name, env

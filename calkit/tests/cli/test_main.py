@@ -1009,7 +1009,17 @@ def test_execute_and_record_non_allowlisted_docker_command_dry_run(tmp_dir):
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     assert payload["mode"] == "dry-run"
-    assert payload["environment"]["name"] == "_system"
+    assert payload["environment"]["name"] == "turbinesfoam"
+    assert payload["environment"]["exists"] is False
+    assert payload["environment"]["env"] == {
+        "kind": "docker",
+        "image": "ghcr.io/turbinesfoam/turbinesfoam:latest",
+        "description": (
+            "Docker CLI via image " "ghcr.io/turbinesfoam/turbinesfoam:latest."
+        ),
+        "wdir": "/work",
+        "command_mode": "shell",
+    }
     assert payload["stage"]["config"]["kind"] == "shell-command"
     assert payload["stage"]["config"]["command"].startswith("docker run")
     assert (

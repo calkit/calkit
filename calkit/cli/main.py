@@ -1983,6 +1983,7 @@ def execute_and_record(
         generate_stage_name,
     )
     from calkit.docker import (
+        infer_xr_docker_environment,
         normalize_xr_docker_command,
         split_xr_command,
     )
@@ -2124,6 +2125,30 @@ def execute_and_record(
             stage["kind"] = "shell-command"
             stage["command"] = " ".join(shlex.quote(arg) for arg in cmd)
             language = "shell"
+            if environment is None:
+                inferred_env = infer_xr_docker_environment(cmd=cmd)
+                if inferred_env is not None:
+                    inferred_name, inferred_env_dict = inferred_env
+                    envs = ck_info.get("environments", {})
+                    existing_env = envs.get(inferred_name)
+                    if isinstance(existing_env, dict):
+                        docker_override_env_result = EnvForStageResult(
+                            name=inferred_name,
+                            env=existing_env,
+                            exists=True,
+                            spec_path=existing_env.get("path"),
+                            dependencies=[],
+                            created_from_dependencies=False,
+                        )
+                    else:
+                        docker_override_env_result = EnvForStageResult(
+                            name=inferred_name,
+                            env=inferred_env_dict,
+                            exists=False,
+                            spec_path=inferred_env_dict.get("path"),
+                            dependencies=[],
+                            created_from_dependencies=False,
+                        )
     elif first_arg.endswith(".ipynb"):
         cls = JupyterNotebookStage
         stage["kind"] = "jupyter-notebook"

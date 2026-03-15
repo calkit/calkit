@@ -2439,7 +2439,7 @@ def execute_and_record(
             },
             "stage": {
                 "name": stage_name,
-                "config": stage,
+                "stage": stage,
             },
         }
         if execution_status is not None:

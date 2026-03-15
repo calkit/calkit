@@ -946,16 +946,16 @@ def test_execute_and_record_mermaid_docker_command_dry_run(tmp_dir):
         "command_mode": "entrypoint",
     }
     assert payload["stage"]["name"] == "mermaid-taxonomy"
-    assert payload["stage"]["config"]["kind"] == "command"
-    assert payload["stage"]["config"]["environment"] == "mermaid"
-    assert payload["stage"]["config"]["command"] == (
+    assert payload["stage"]["stage"]["kind"] == "command"
+    assert payload["stage"]["stage"]["environment"] == "mermaid"
+    assert payload["stage"]["stage"]["command"] == (
         "-i mdocean/plots/non_matlab_figs/taxonomy.mmd "
         "-o mdocean/plots/non_matlab_figs/taxonomy.pdf"
     )
-    assert payload["stage"]["config"]["inputs"] == [
+    assert payload["stage"]["stage"]["inputs"] == [
         "mdocean/plots/non_matlab_figs/taxonomy.mmd"
     ]
-    assert payload["stage"]["config"]["outputs"] == [
+    assert payload["stage"]["stage"]["outputs"] == [
         {
             "path": "mdocean/plots/non_matlab_figs/taxonomy.pdf",
             "storage": "dvc",
@@ -984,8 +984,8 @@ def test_execute_and_record_json_run_mode(tmp_dir):
     assert payload["mode"] == "run"
     assert payload["execution"]["status"] == "completed"
     assert payload["execution"]["error"] is None
-    assert payload["stage"]["config"]["kind"] == "shell-command"
-    assert payload["stage"]["config"]["command"] == "true"
+    assert payload["stage"]["stage"]["kind"] == "shell-command"
+    assert payload["stage"]["stage"]["command"] == "true"
 
 
 def test_execute_and_record_non_allowlisted_docker_command_dry_run(tmp_dir):
@@ -1020,11 +1020,11 @@ def test_execute_and_record_non_allowlisted_docker_command_dry_run(tmp_dir):
         "wdir": "/work",
         "command_mode": "shell",
     }
-    assert payload["stage"]["config"]["kind"] == "shell-command"
-    assert payload["stage"]["config"]["command"].startswith("docker run")
+    assert payload["stage"]["stage"]["kind"] == "shell-command"
+    assert payload["stage"]["stage"]["command"].startswith("docker run")
     assert (
         "ghcr.io/turbinesfoam/turbinesfoam"
-        in payload["stage"]["config"]["command"]
+        in payload["stage"]["stage"]["command"]
     )
 
 
@@ -1048,9 +1048,9 @@ def test_execute_and_record_non_allowlisted_docker_run_stays_shell_command(
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     assert payload["mode"] == "dry-run"
-    assert payload["stage"]["config"]["kind"] == "shell-command"
+    assert payload["stage"]["stage"]["kind"] == "shell-command"
     assert (
-        payload["stage"]["config"]["command"]
+        payload["stage"]["stage"]["command"]
         == "docker run -it ubuntu cp myfile otherfile"
     )
 

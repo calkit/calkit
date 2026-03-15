@@ -112,6 +112,7 @@ def execute_and_record(
         generate_stage_name,
     )
     from calkit.docker import (
+        extract_docker_run_inner_command,
         infer_xr_docker_environment,
         normalize_xr_docker_command,
         split_xr_command,
@@ -217,6 +218,7 @@ def execute_and_record(
     if first_arg == "docker":
         # Docker runs for entrypoint-mode allowlisted images are normalized
         # into `command` stages; others remain regular shell-command stages
+        docker_run_cmd = list(cmd)
         docker_command = normalize_xr_docker_command(
             cmd=cmd,
             environment=environment,
@@ -250,12 +252,15 @@ def execute_and_record(
             docker_override_detected_inputs = docker_command.inputs
             docker_override_detected_outputs = docker_command.outputs
         else:
+            inner_command = extract_docker_run_inner_command(docker_run_cmd)
+            if inner_command is not None:
+                cmd = inner_command
             cls = ShellCommandStage
             stage["kind"] = "shell-command"
             stage["command"] = " ".join(shlex.quote(arg) for arg in cmd)
             language = "shell"
             if environment is None:
-                inferred_env = infer_xr_docker_environment(cmd=cmd)
+                inferred_env = infer_xr_docker_environment(cmd=docker_run_cmd)
                 if inferred_env is not None:
                     inferred_name, inferred_env_dict = inferred_env
                     envs = ck_info.get("environments", {})

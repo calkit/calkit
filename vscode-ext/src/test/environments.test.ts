@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   getDefaultSlurmOptions,
-  makeEnvironmentCandidates,
+  makeCalkitEnvKernelSourceCandidates,
   parseSlurmOptionList,
   slurmOptionsToOptionList,
 } from "../environments";
@@ -69,7 +69,7 @@ test("getDefaultSlurmOptions falls back to legacy object format", () => {
 });
 
 test("makeEnvironmentCandidates returns standalone notebook envs and nested slurm combinations", () => {
-  const candidates = makeEnvironmentCandidates({
+  const candidates = makeCalkitEnvKernelSourceCandidates({
     slurmOuter: { kind: "slurm", host: "cluster.school.edu" },
     juliaEnv: { kind: "julia", path: "Project.toml", julia: "1.11" },
     pyEnv: { kind: "uv", path: "pyproject.toml" },
@@ -93,7 +93,7 @@ test("makeEnvironmentCandidates returns standalone notebook envs and nested slur
 });
 
 test("makeEnvironmentCandidates excludes texlive docker environments", () => {
-  const candidates = makeEnvironmentCandidates({
+  const candidates = makeCalkitEnvKernelSourceCandidates({
     slurmOuter: { kind: "slurm", host: "cluster.school.edu" },
     texliveDocker: { kind: "docker", image: "texlive/texlive:latest" },
     normalDocker: { kind: "docker", image: "jupyter/minimal-notebook:latest" },

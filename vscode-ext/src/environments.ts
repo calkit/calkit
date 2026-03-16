@@ -38,7 +38,9 @@ export interface CalkitEnvironment {
   [key: string]: unknown;
 }
 
-export interface CalkitCandidate {
+// An environment candidate for the notebook, which shows up in
+// the kernel source list in the Calkit Environments section
+export interface CalkitEnvNotebookKernelSource {
   label: string;
   description: string;
   detail?: string;
@@ -143,9 +145,9 @@ export function getDefaultSlurmOptions(
   return undefined;
 }
 
-export function makeEnvironmentCandidates(
+export function makeCalkitEnvKernelSourceCandidates(
   environments: Record<string, CalkitEnvironment>,
-): CalkitCandidate[] {
+): CalkitEnvNotebookKernelSource[] {
   const notebookKinds = new Set<EnvKind>([
     "conda",
     "docker",
@@ -158,8 +160,8 @@ export function makeEnvironmentCandidates(
     "venv",
   ]);
 
-  const standalone: CalkitCandidate[] = [];
-  const allNonSlurmInners: CalkitCandidate[] = [];
+  const standalone: CalkitEnvNotebookKernelSource[] = [];
+  const allNonSlurmInners: CalkitEnvNotebookKernelSource[] = [];
   const slurmOuterNames: string[] = [];
 
   const isNotebookCapableDocker = (env: CalkitEnvironment): boolean => {
@@ -201,7 +203,7 @@ export function makeEnvironmentCandidates(
     });
   }
 
-  const nested: CalkitCandidate[] = [];
+  const nested: CalkitEnvNotebookKernelSource[] = [];
   for (const slurmOuter of slurmOuterNames) {
     for (const inner of allNonSlurmInners) {
       nested.push({

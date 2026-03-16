@@ -9,13 +9,17 @@ import YAML from "yaml";
 import {
   compactSlurmOptions,
   getDefaultSlurmOptions,
-  makeEnvironmentCandidates,
+  makeCalkitEnvKernelSourceCandidates,
   slurmOptionsToOptionList,
-  type CalkitCandidate,
+  type CalkitEnvNotebookKernelSource,
   type CalkitEnvironment,
   type EnvKind,
   type SlurmLaunchOptions,
 } from "./environments";
+import {
+  getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath,
+} from "./notebooks";
+import type { CalkitInfo, PipelineStage, NotebookEntry } from "./types";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
 const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
@@ -43,29 +47,6 @@ function log(message: string): void {
   if (outputChannel) {
     outputChannel.appendLine(message);
   }
-}
-
-interface NotebookConfig {
-  path: string;
-  environment?: string;
-}
-
-interface PipelineStage {
-  kind?: string;
-  notebook_path?: string;
-  script_path?: string;
-  path?: string;
-  environment?: string;
-  [key: string]: unknown;
-}
-
-interface CalkitConfig {
-  name?: string;
-  environments?: Record<string, CalkitEnvironment>;
-  notebooks?: NotebookConfig[];
-  pipeline?: {
-    stages?: Record<string, PipelineStage>;
-  };
 }
 
 interface NotebookLaunchProfile {
@@ -370,8 +351,8 @@ async function selectCalkitEnvironment(
     return undefined;
   }
 
-  let picked: CalkitCandidate | undefined;
-  let config: CalkitConfig | undefined;
+  let picked: CalkitEnvNotebookKernelSource | undefined;
+  let config: CalkitInfo | undefined;
   while (!picked) {
     config = await readCalkitConfig(workspaceRoot);
     if (!config) {
@@ -379,9 +360,9 @@ async function selectCalkitEnvironment(
     }
 
     const environments = config.environments ?? {};
-    const candidates = makeEnvironmentCandidates(environments);
+    const candidates = makeCalkitEnvKernelSourceCandidates(environments);
     const items: Array<
-      (CalkitCandidate & { action: "select" }) | vscode.QuickPickItem
+      (CalkitEnvNotebookKernelSource & { action: "select" }) | vscode.QuickPickItem
     > = candidates.map((candidate) => ({
       ...candidate,
       action: "select",
@@ -403,7 +384,7 @@ async function selectCalkitEnvironment(
     }
 
     if ((selected as { action?: string }).action === "select") {
-      picked = selected as CalkitCandidate;
+      picked = selected as CalkitEnvNotebookKernelSource;
       break;
     }
 
@@ -675,12 +656,12 @@ function getWorkspaceRoot(): string | undefined {
 
 async function readCalkitConfig(
   workspaceRoot: string,
-): Promise<CalkitConfig | undefined> {
+): Promise<CalkitInfo | undefined> {
   const fileUri = vscode.Uri.file(path.join(workspaceRoot, "calkit.yaml"));
   try {
     const bytes = await vscode.workspace.fs.readFile(fileUri);
     const raw = Buffer.from(bytes).toString("utf8");
-    const parsed = YAML.parse(raw) as CalkitConfig | undefined;
+    const parsed = YAML.parse(raw) as CalkitInfo | undefined;
     return parsed ?? {};
   } catch (error) {
     if (isFileNotFoundError(error)) {
@@ -999,7 +980,7 @@ async function runCreateSlurmEnvironmentWizard(
 
 async function runCreateJuliaEnvironmentWizard(
   workspaceRoot: string,
-  config: CalkitConfig,
+  config: CalkitInfo,
   environments: Record<string, CalkitEnvironment>,
 ): Promise<string | "__back__" | undefined> {
   const detectedJulia = await detectJuliaVersion(workspaceRoot);
@@ -1218,7 +1199,7 @@ async function askForSlurmOptionsWizard(
 
 async function runCreateCondaEnvironmentWizard(
   workspaceRoot: string,
-  config: CalkitConfig,
+  config: CalkitInfo,
   environments: Record<string, CalkitEnvironment>,
 ): Promise<string | "__back__" | undefined> {
   let name = "my-conda-env";
@@ -1313,7 +1294,7 @@ async function runCreateCondaEnvironmentWizard(
 
 async function runCreateUvEnvironmentWizard(
   workspaceRoot: string,
-  config: CalkitConfig,
+  config: CalkitInfo,
   environments: Record<string, CalkitEnvironment>,
 ): Promise<string | "__back__" | undefined> {
   let name = "my-uv-env";
@@ -1508,53 +1489,13 @@ function hasRunningServerSession(
 async function getConfiguredCandidateForNotebookPath(
   workspaceRoot: string,
   notebookRelativePath: string,
-): Promise<CalkitCandidate | undefined> {
-  const config = await readCalkitConfig(workspaceRoot);
-  if (!config) {
+): Promise<CalkitEnvNotebookKernelSource | undefined> {
+  const info = await readCalkitConfig(workspaceRoot);
+  if (!info) {
     return undefined;
   }
 
-  // Normalize path for comparison
-  const normalizedPath = notebookRelativePath.replace(/\\/g, "/");
-
-  let environmentName: string | undefined;
-
-  // Check pipeline stages first
-  if (config.pipeline?.stages) {
-    for (const stage of Object.values(config.pipeline.stages)) {
-      const stageNotebookPath =
-        stage.notebook_path ?? stage.script_path ?? stage.path;
-      if (
-        stage.kind === "jupyter-notebook" &&
-        stageNotebookPath === normalizedPath &&
-        stage.environment
-      ) {
-        environmentName = stage.environment;
-        break;
-      }
-    }
-  }
-
-  // Then check notebooks section
-  if (!environmentName && config.notebooks) {
-    for (const nb of config.notebooks) {
-      if (nb.path === normalizedPath && nb.environment) {
-        environmentName = nb.environment;
-        break;
-      }
-    }
-  }
-
-  if (!environmentName) {
-    return undefined;
-  }
-
-  const candidates = makeEnvironmentCandidates(config.environments ?? {});
-  const candidate = candidates.find(
-    (item) => item.environmentName === environmentName,
-  );
-
-  return candidate;
+  return resolveConfiguredCandidateForNotebookPath(info, notebookRelativePath);
 }
 
 async function autoSelectEnvironmentForActiveNotebook(
@@ -1795,9 +1736,9 @@ function getDefaultPort(): number {
 }
 
 function buildLaunchCommand(
-  picked: CalkitCandidate,
+  picked: CalkitEnvNotebookKernelSource,
   workspaceRoot: string,
-  config: CalkitConfig,
+  config: CalkitInfo,
   port: number,
   slurmOptions?: SlurmLaunchOptions,
   serverToken?: string,
@@ -1889,9 +1830,9 @@ function buildDefaultKernelFlag(kernelName?: string): string {
 }
 
 function buildDockerRunCommand(
-  picked: CalkitCandidate,
+  picked: CalkitEnvNotebookKernelSource,
   workspaceRoot: string,
-  config: CalkitConfig,
+  config: CalkitInfo,
   port: number,
   serverToken?: string,
   containerName?: string,
@@ -1924,7 +1865,7 @@ function buildDockerRunCommand(
   }
 
   // Port mapping - ensure Jupyter port is mapped
-  const portMapped = env.ports?.some((p) => p.includes(`${port}`));
+  const portMapped = env.ports?.some((p: string) => p.includes(`${port}`));
   if (!portMapped) {
     dockerArgs.push("-p", `${port}:${port}`);
   }
@@ -2918,7 +2859,7 @@ async function startSlurmJobForActiveNotebook(
     return false;
   }
 
-  const picked: CalkitCandidate = {
+  const picked: CalkitEnvNotebookKernelSource = {
     label: profile.environmentName,
     description: `${profile.outerSlurmEnvironment} + ${profile.innerKind}`,
     detail: "Resume SLURM notebook session",

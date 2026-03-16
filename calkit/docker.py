@@ -458,14 +458,13 @@ def infer_xr_docker_environment(
     image = _normalize_docker_image(parsed["image"])
     image_name = _image_name_without_tag_or_digest(image)
     env_name = environment or image_name.split("/")[-1].replace("_", "-")
-    command_mode = (
-        "entrypoint" if _uses_entrypoint_command_mode(image) else "shell"
-    )
+    wdir = parsed["workdir"] or "/work"
     env: dict = {
         "kind": "docker",
         "image": image,
-        "description": f"Docker CLI via image {image}.",
-        "wdir": parsed["workdir"] or "/work",
-        "command_mode": command_mode,
     }
+    if wdir != "/work":
+        env["wdir"] = wdir
+    if _uses_entrypoint_command_mode(image):
+        env["command_mode"] = "entrypoint"
     return env_name, env

@@ -239,7 +239,6 @@ def execute_and_record(
                     env={
                         "kind": "docker",
                         "image": docker_command.image,
-                        "description": docker_command.description,
                         "wdir": docker_command.wdir,
                         "command_mode": docker_command.command_mode,
                     },

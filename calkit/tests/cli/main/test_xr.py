@@ -152,7 +152,6 @@ def test_xr_mermaid_docker_command_dry_run(tmp_dir):
     assert payload["environment"]["env"] == {
         "kind": "docker",
         "image": "minlag/mermaid-cli:latest",
-        "description": "Mermaid CLI via Docker.",
         "wdir": "/data",
         "command_mode": "entrypoint",
     }
@@ -225,11 +224,6 @@ def test_xr_non_allowlisted_docker_command_dry_run(tmp_dir):
     assert payload["environment"]["env"] == {
         "kind": "docker",
         "image": "ghcr.io/turbinesfoam/turbinesfoam:latest",
-        "description": (
-            "Docker CLI via image ghcr.io/turbinesfoam/turbinesfoam:latest."
-        ),
-        "wdir": "/work",
-        "command_mode": "shell",
     }
     assert payload["stage"]["stage"]["kind"] == "shell-command"
     assert payload["stage"]["stage"]["command"] == "blockMesh"

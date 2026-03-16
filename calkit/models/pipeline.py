@@ -611,6 +611,15 @@ class DockerCommandStage(Stage):
         return self.command
 
 
+class CommandStage(Stage):
+    kind: Literal["command"] = "command"
+    command: str
+
+    @property
+    def dvc_cmd(self) -> str:
+        return f"{self.xenv_cmd} {self.command}"
+
+
 class RScriptStage(Stage):
     kind: Literal["r-script"]
     script_path: RelativeChildPathString
@@ -919,6 +928,7 @@ class Pipeline(BaseModel):
                 | ShellCommandStage
                 | ShellScriptStage
                 | DockerCommandStage
+                | CommandStage
                 | RScriptStage
                 | WordToPdfStage
                 | JupyterNotebookStage

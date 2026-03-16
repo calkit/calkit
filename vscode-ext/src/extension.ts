@@ -16,9 +16,7 @@ import {
   type EnvKind,
   type SlurmLaunchOptions,
 } from "./environments";
-import {
-  getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath,
-} from "./notebooks";
+import { getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath } from "./notebooks";
 import type { CalkitInfo, PipelineStage, NotebookEntry } from "./types";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
@@ -362,7 +360,8 @@ async function selectCalkitEnvironment(
     const environments = config.environments ?? {};
     const candidates = makeCalkitEnvKernelSourceCandidates(environments);
     const items: Array<
-      (CalkitEnvNotebookKernelSource & { action: "select" }) | vscode.QuickPickItem
+      | (CalkitEnvNotebookKernelSource & { action: "select" })
+      | vscode.QuickPickItem
     > = candidates.map((candidate) => ({
       ...candidate,
       action: "select",

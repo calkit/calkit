@@ -22,8 +22,7 @@ function getNotebookEnvironmentFromPipelineStages(
     if (stage.kind !== "jupyter-notebook") {
       continue;
     }
-    const stagePath =
-      stage.notebook_path ?? stage.script_path ?? stage.path;
+    const stagePath = stage.notebook_path ?? stage.script_path ?? stage.path;
     if (
       typeof stagePath === "string" &&
       normalizeNotebookPath(stagePath) === normalizedPath &&

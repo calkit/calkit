@@ -152,6 +152,7 @@ class Stage(BaseModel):
         "latex",
         "matlab-script",
         "matlab-command",
+        "command",
         "docker-command",
         "shell-command",
         "shell-script",

@@ -17,3 +17,5 @@ coverage
 junit.xml
 calk9
 dist
+*.vsix
+vscode-ext/out

@@ -17,7 +17,7 @@ import {
   type SlurmLaunchOptions,
 } from "./environments";
 import { getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath } from "./notebooks";
-import type { CalkitInfo, PipelineStage, NotebookEntry } from "./types";
+import type { CalkitInfo } from "./types";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
 const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
@@ -1429,17 +1429,6 @@ function getNotebookLaunchProfiles(
       {},
     ) ?? {}
   );
-}
-
-async function saveLaunchProfileForActiveNotebook(
-  context: vscode.ExtensionContext,
-  profile: Omit<NotebookLaunchProfile, "notebookUri">,
-): Promise<void> {
-  const notebookUri = getActiveNotebookUriKey();
-  if (!notebookUri) {
-    return;
-  }
-  await saveLaunchProfileForNotebookUri(context, notebookUri, profile);
 }
 
 async function saveLaunchProfileForNotebookUri(

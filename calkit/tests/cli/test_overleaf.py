@@ -161,20 +161,20 @@ def test_overleaf(tmp_dir):
     repo.git.commit(["-m", "Delete figure 2"])
     subprocess.run(["calkit", "overleaf", "sync", "--verbose"], check=True)
     assert "ol-project/figs/fig2.txt" not in ls_files(repo)
-    assert "ol-project/figs/fig2.txt" not in ls_files(ol_repo)
+    assert "figs/fig2.txt" not in ls_files(ol_repo)
     # Make sure that if we add that file back on Overleaf, it comes back to the
     # main repo
     with open(
-        os.path.join(ol_repo.working_dir, "ol-project", "figs", "fig2.txt"),
+        os.path.join(ol_repo.working_dir, "figs", "fig2.txt"),
         "w",
     ) as f:
         f.write("Fig2 created again on Overleaf")
-    ol_repo.git.add("ol-project/figs/fig2.txt")
+    ol_repo.git.add("figs/fig2.txt")
     ol_repo.git.commit(["-m", "Add figure 2 again on Overleaf"])
     subprocess.run(["calkit", "overleaf", "sync", "--verbose"], check=True)
     print("Overleaf Git show after adding fig2 back:", ol_repo.git.show())
     assert "ol-project/figs/fig2.txt" in ls_files(repo)
-    assert "ol-project/figs/fig2.txt" in ls_files(ol_repo)
+    assert "figs/fig2.txt" in ls_files(ol_repo)
 
 
 def test_extract_title_from_tex(tmp_dir):

@@ -163,11 +163,12 @@ class OverleafSyncPaths:
 
     @cached_property
     def files_to_copy_from_overleaf(self) -> list[str]:
-        """We basically copy all files from Overleaf unless they are in
-        push paths or ignored in the main repo.
+        """Return Overleaf files to copy into the main repo.
 
-        The only exception is if the the file was deleted locally since
-        the last sync.
+        We copy all files from Overleaf unless they are in push-only paths
+        or are ignored in the main repo. This method does not itself apply
+        any special handling for files that were deleted locally since the
+        last sync; such deletions are handled elsewhere in the sync logic.
         """
         all_ol_files = calkit.git.ls_files(self.overleaf_repo)
         # Normalize push paths (treat both files and directories)

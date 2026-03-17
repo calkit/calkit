@@ -301,11 +301,11 @@ class OverleafSyncPaths:
                     ).split("\n")
                 )
                 files.discard("")
-            except (git.BadName, git.GitCommandError, ValueError) as exc:
+            except (git.BadName, git.GitCommandError, ValueError) as e:
                 warnings.warn(
                     f"Could not determine files at last Overleaf sync commit "
-                    f"'{self.last_sync_commit}'; proceeding without stale-file "
-                    f"information. Underlying error: {exc}"
+                    f"'{self.last_sync_commit}'; proceeding without stale file "
+                    f"information. Underlying error: {e}"
                 )
         return files
 

@@ -220,3 +220,61 @@ If successful, it will be added to the pipeline and kept reproducible from
 that point onwards.
 That is, calling `calkit run` again will detect if the script, environment,
 or any input files have changed, and rerun if so.
+
+### What commands work best with `xr`
+
+`xr` works best when your command has a clear executable and arguments,
+or when the first argument is a recognized file type (for example `.py`,
+`.ipynb`, `.tex`, `.jl`, `.R`, `.m`, `.sh`).
+
+For Docker commands:
+
+- `docker run` commands are supported.
+- For some CLI-style images (for example Mermaid CLI), Calkit converts the
+  command into a `command` stage and configures Docker `entrypoint` mode.
+- For other images, Calkit keeps a `shell-command` stage, infers a Docker
+  environment from the image, and stores the inner command (the command run
+  inside the container) as the stage command.
+
+### What I/O `xr` can usually detect
+
+I/O detection is heuristic and depends on stage kind.
+It is strongest for:
+
+- Python/R/Julia scripts with common file read/write APIs.
+- Notebooks with straightforward file reads/writes.
+- LaTeX includes and bibliography references.
+- Shell commands that use redirection (`<`, `>`, `>>`) and common
+  file operations (for example `cp` and `mv`).
+
+For Docker shell commands, I/O detection is applied to the inner command
+inside `docker run`, not the outer Docker wrapper.
+
+I/O detection is less reliable when paths are dynamic (constructed at runtime,
+read from environment variables, generated in loops, or hidden behind custom
+wrappers).
+
+When needed, provide explicit paths with:
+
+- `--input` (repeatable)
+- `--output` (repeatable)
+- `--no-detect-io` to disable automatic detection completely
+
+### How environment detection works
+
+At a high level, `xr` chooses environments in this order:
+
+1. Use `--environment` if provided.
+2. Reuse an existing matching stage environment when possible.
+3. Infer from stage language and dependencies:
+   - Python: typically `pyproject.toml`, `requirements.txt`, `environment.yml`,
+     or a generated Python environment spec.
+   - R: typically `DESCRIPTION` or a generated `renv` spec.
+   - Julia: typically `Project.toml` or a generated Julia project spec.
+   - LaTeX: typically a Docker LaTeX environment.
+4. For shell commands:
+   - `docker run ...` can infer a Docker environment from the image.
+   - non-Docker shell commands default to `_system` unless explicitly set.
+
+If you want to inspect what `xr` would do without changing project files,
+use the `--dry-run` option.

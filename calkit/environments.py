@@ -1358,6 +1358,16 @@ def detect_env_for_stage(
     # Get existing environment names
     envs = ck_info.get("environments", {})
     all_env_names = list(envs.keys())
+    # Generic shell commands should run on the host when no env is set.
+    if environment is None and stage.get("kind") == "shell-command":
+        return EnvForStageResult(
+            name="_system",
+            env={"kind": "system"},
+            exists=True,
+            spec_path=None,
+            dependencies=[],
+            created_from_dependencies=False,
+        )
     # 1) If stage has an environment, use that
     if environment is not None:
         res = env_from_name_or_path(

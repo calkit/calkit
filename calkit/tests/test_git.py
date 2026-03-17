@@ -1,5 +1,6 @@
 """Tests for ``calkit.git``."""
 
+import os
 from pathlib import Path
 
 import git
@@ -97,3 +98,53 @@ def test_ensure_path_is_not_ignored(tmp_dir):
         gi_sub = f.read().splitlines()
     assert "test.txt" not in gi_sub
     assert "!test.txt" not in gi_sub
+
+
+def test_ensure_path_is_not_ignored_nested(tmp_dir):
+    """Test that nested paths in ignored directories are correctly un-ignored.
+
+    When a parent directory is excluded with a trailing slash (e.g.,
+    ``results/``), git will not traverse into it, so a simple negation like
+    ``!results/StageName/end.json`` has no effect.  The fix converts the
+    directory exclude to a glob pattern and adds intermediate un-ignore rules.
+    """
+    repo = git.Repo.init()
+    # Ignore the entire results/ directory
+    with open(".gitignore", "w") as f:
+        f.write("results/\n")
+    # Create the nested target file so git can evaluate ignore status
+    os.makedirs("results/StageName", exist_ok=True)
+    with open("results/StageName/end.json", "w") as f:
+        f.write("{}")
+    # The file must be ignored before we try to un-ignore it
+    assert repo.ignored("results/StageName/end.json")
+    result = calkit.git.ensure_path_is_not_ignored(
+        repo, path="results/StageName/end.json"
+    )
+    assert result is True
+    with open(".gitignore") as f:
+        lines = f.read().splitlines()
+    # The plain directory exclude should be replaced with a glob
+    assert "results/" not in lines
+    assert "results/*" in lines
+    # Intermediate directory must be un-ignored so git traverses into it
+    assert "!results/StageName/" in lines
+    # The intermediate directory's other contents must be re-ignored
+    assert "results/StageName/*" in lines
+    # The specific file must be explicitly un-ignored
+    assert "!results/StageName/end.json" in lines
+    # Verify git no longer considers the target file as ignored
+    assert not repo.ignored("results/StageName/end.json")
+    # Other files in results/ must still be ignored
+    with open("results/other.txt", "w") as f:
+        f.write("other")
+    assert repo.ignored("results/other.txt")
+    # Other files in the intermediate directory must still be ignored
+    with open("results/StageName/other.json", "w") as f:
+        f.write("{}")
+    assert repo.ignored("results/StageName/other.json")
+    # Calling again should be a no-op (path is no longer ignored)
+    result2 = calkit.git.ensure_path_is_not_ignored(
+        repo, path="results/StageName/end.json"
+    )
+    assert result2 is None

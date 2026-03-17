@@ -59,6 +59,7 @@ def stages_are_similar(stage1: dict, stage2: dict) -> bool:
             return False
     # For command stages, check the command
     elif kind in [
+        "command",
         "shell-command",
         "matlab-command",
         "julia-command",

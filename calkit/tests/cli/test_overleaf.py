@@ -172,6 +172,7 @@ def test_overleaf(tmp_dir):
     ol_repo.git.add("ol-project/figs/fig2.txt")
     ol_repo.git.commit(["-m", "Add figure 2 again on Overleaf"])
     subprocess.run(["calkit", "overleaf", "sync", "--verbose"], check=True)
+    print("Overleaf Git show after adding fig2 back:", ol_repo.git.show())
     assert "ol-project/figs/fig2.txt" in ls_files(repo)
     assert "ol-project/figs/fig2.txt" in ls_files(ol_repo)
 

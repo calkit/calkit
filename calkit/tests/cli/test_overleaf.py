@@ -142,6 +142,26 @@ def test_overleaf(tmp_dir):
     assert "main.pdf" not in ol_repo_git_show
     assert "main.log" not in ol_repo_git_show
     assert "main.aux" not in ol_repo_git_show
+    # Test that if we add a file locally, sync to Overleaf, then delete from
+    # local, it is deleted on Overleaf as well
+    with open(
+        os.path.join(repo.working_dir, "ol-project", "figs", "fig2.txt"), "w"
+    ) as f:
+        f.write("Fig2 created in main repo")
+    repo.git.add("ol-project/figs")
+    repo.git.commit(["-m", "Add figure 2"])
+    assert "ol-project/figs/fig2.txt" in ls_files(repo)
+    subprocess.run(["calkit", "overleaf", "sync", "--verbose"], check=True)
+    ol_repo_git_show = ol_repo.git.show()
+    print("Git show in OL repo:\n", ol_repo_git_show)
+    assert "diff --git a/figs/fig2.txt b/figs/fig2.txt" in ol_repo_git_show
+    assert "Fig2 created in main repo" in ol_repo_git_show
+    assert "new file mode 100644" in ol_repo_git_show
+    repo.git.rm("ol-project/figs/fig2.txt")
+    repo.git.commit(["-m", "Delete figure 2"])
+    subprocess.run(["calkit", "overleaf", "sync", "--verbose"], check=True)
+    assert "ol-project/figs/fig2.txt" not in ls_files(repo)
+    assert "ol-project/figs/fig2.txt" not in ls_files(ol_repo)
 
 
 def test_extract_title_from_tex(tmp_dir):

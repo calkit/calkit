@@ -162,6 +162,9 @@ class OverleafSyncPaths:
     def files_to_copy_from_overleaf(self) -> list[str]:
         """We basically copy all files from Overleaf unless they are in
         push paths or ignored in the main repo.
+
+        The only exception is if the the file was deleted locally since
+        the last sync.
         """
         all_ol_files = calkit.git.ls_files(self.overleaf_repo)
         # Normalize push paths (treat both files and directories)
@@ -263,10 +266,6 @@ class OverleafSyncPaths:
                 ):
                     continue
                 results.append(rel_posix)
-        # Always copy anything from here if it's already in Overleaf
-        for fpath in self.files_to_copy_from_overleaf:
-            if fpath not in results:
-                results.append(fpath)
         return results
 
     @property
@@ -469,16 +468,46 @@ def sync(
             # Copy the file
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             shutil.copy2(src, dst)
-        elif os.path.isfile(dst) and not os.path.isfile(src):
-            # Handle newly created files on Overleaf, i.e., they exist
-            # in dst but not in src
-            os.makedirs(os.path.dirname(src), exist_ok=True)
-            shutil.copy2(dst, src)
         else:
             raise RuntimeError(
                 f"Source path {src} does not exist; "
                 "please check your Overleaf config"
             )
+    # Identify files that were in the previous sync (existing on Overleaf at
+    # last_sync_commit) versus newly added on Overleaf since then
+    files_in_last_sync = set()
+    if last_sync_commit:
+        try:
+            commit_obj = overleaf_repo.commit(last_sync_commit)
+            files_in_last_sync = set(
+                overleaf_repo.git.ls_tree(
+                    "-r", "--name-only", commit_obj.hexsha
+                ).split("\n")
+            )
+            files_in_last_sync.discard("")
+        except Exception:
+            pass
+    res["files_in_last_sync"] = sorted(files_in_last_sync)
+    # Files we should keep on Overleaf:
+    # 1. All files being copied from local
+    # 2. Any files newly added on Overleaf since last sync (not from deletion)
+    newly_added_on_overleaf = (
+        set(paths.files_to_copy_from_overleaf) - files_in_last_sync
+    )
+    res["newly_added_on_overleaf"] = sorted(newly_added_on_overleaf)
+    files_to_keep_on_overleaf = (
+        set(files_to_copy_to_overleaf) | newly_added_on_overleaf
+    )
+    # Stale files are those that existed in the last sync but are not in our
+    # keep set (deleted locally or excluded from sync)
+    stale_files_in_overleaf = sorted(
+        files_in_last_sync - files_to_keep_on_overleaf
+    )
+    res["stale_files_in_overleaf"] = stale_files_in_overleaf
+    for stale_path in stale_files_in_overleaf:
+        file_path = os.path.join(overleaf_project_dir_abs, stale_path)
+        if os.path.isfile(file_path):
+            os.remove(file_path)
     # Stage the changes in the Overleaf project
     res["committed_overleaf"] = False
     overleaf_repo.git.add(".")

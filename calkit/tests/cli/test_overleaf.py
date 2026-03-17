@@ -107,6 +107,9 @@ def test_overleaf(tmp_dir):
     repo.git.commit(["-m", "Add figure"])
     assert "ol-project/figs/fig1.txt" in ls_files(repo)
     subprocess.run(["calkit", "overleaf", "sync", "--verbose"], check=True)
+    # Note: We have to look at the git show in the Overleaf repo to verify the
+    # file made it there, since it is a dummy remote and doesn't actually
+    # update the file system
     ol_repo_git_show = ol_repo.git.show()
     print("Git show in OL repo:\n", ol_repo_git_show)
     assert "diff --git a/figs/fig1.txt b/figs/fig1.txt" in ol_repo_git_show
@@ -161,9 +164,13 @@ def test_overleaf(tmp_dir):
     repo.git.commit(["-m", "Delete figure 2"])
     subprocess.run(["calkit", "overleaf", "sync", "--verbose"], check=True)
     assert "ol-project/figs/fig2.txt" not in ls_files(repo)
-    assert "figs/fig2.txt" not in ls_files(ol_repo)
+    ol_repo_git_show = ol_repo.git.show()
+    print("Git show in OL repo after deletion:\n", ol_repo_git_show)
+    assert "deleted file mode 100644" in ol_repo_git_show
+    assert "--- a/figs/fig2.txt" in ol_repo_git_show
     # Make sure that if we add that file back on Overleaf, it comes back to the
     # main repo
+    os.makedirs(os.path.join(ol_repo.working_dir, "figs"), exist_ok=True)
     with open(
         os.path.join(ol_repo.working_dir, "figs", "fig2.txt"),
         "w",
@@ -174,7 +181,6 @@ def test_overleaf(tmp_dir):
     subprocess.run(["calkit", "overleaf", "sync", "--verbose"], check=True)
     print("Overleaf Git show after adding fig2 back:", ol_repo.git.show())
     assert "ol-project/figs/fig2.txt" in ls_files(repo)
-    assert "figs/fig2.txt" in ls_files(ol_repo)
 
 
 def test_extract_title_from_tex(tmp_dir):

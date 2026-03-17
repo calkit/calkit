@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import warnings
 from copy import deepcopy
+from functools import cached_property
 from os import PathLike
 from pathlib import Path
 
@@ -160,7 +161,7 @@ class OverleafSyncPaths:
         """
         return self.push_paths_from_config
 
-    @property
+    @cached_property
     def files_to_copy_from_overleaf(self) -> list[str]:
         """We basically copy all files from Overleaf unless they are in
         push paths or ignored in the main repo.
@@ -191,7 +192,7 @@ class OverleafSyncPaths:
             res.append(fpath_posix)
         return res
 
-    @property
+    @cached_property
     def files_to_copy_to_overleaf(self) -> list[str]:
         """We should basically copy all files to Overleaf except for
         private (dot) files, the main PDF, and aux files.
@@ -277,7 +278,7 @@ class OverleafSyncPaths:
         """
         return self.files_to_copy_from_overleaf
 
-    @property
+    @cached_property
     def all_synced_files(self) -> list[str]:
         return list(
             set(
@@ -286,7 +287,7 @@ class OverleafSyncPaths:
             )
         )
 
-    @property
+    @cached_property
     def files_in_overleaf_last_sync(self) -> set[str]:
         """Files that existed on Overleaf at the last sync commit."""
         files = set()
@@ -303,7 +304,7 @@ class OverleafSyncPaths:
                 pass
         return files
 
-    @property
+    @cached_property
     def newly_added_on_overleaf(self) -> set[str]:
         """Files that were added on Overleaf since the last sync."""
         return (
@@ -311,7 +312,7 @@ class OverleafSyncPaths:
             - self.files_in_overleaf_last_sync
         )
 
-    @property
+    @cached_property
     def files_to_keep_on_overleaf(self) -> set[str]:
         """Files that should be preserved on Overleaf.
 
@@ -323,7 +324,7 @@ class OverleafSyncPaths:
             set(self.files_to_copy_to_overleaf) | self.newly_added_on_overleaf
         )
 
-    @property
+    @cached_property
     def stale_files_in_overleaf(self) -> list[str]:
         """Files that existed in the last sync but should be deleted.
 

@@ -142,6 +142,7 @@ class OverleafSyncPaths:
         overleaf_repo: git.Repo,
         path_in_project: str,
         sync_info_for_path: dict,
+        last_sync_commit: str | None = None,
     ) -> None:
         self.main_repo = main_repo
         self.overleaf_repo = overleaf_repo
@@ -149,6 +150,7 @@ class OverleafSyncPaths:
         self.sync_info_for_path = deepcopy(sync_info_for_path)
         self.sync_paths_from_config = sync_info_for_path.get("sync_paths", [])
         self.push_paths_from_config = sync_info_for_path.get("push_paths", [])
+        self.last_sync_commit = last_sync_commit
 
     @property
     def push_paths(self) -> list[str]:
@@ -284,6 +286,53 @@ class OverleafSyncPaths:
             )
         )
 
+    @property
+    def files_in_overleaf_last_sync(self) -> set[str]:
+        """Files that existed on Overleaf at the last sync commit."""
+        files = set()
+        if self.last_sync_commit:
+            try:
+                commit_obj = self.overleaf_repo.commit(self.last_sync_commit)
+                files = set(
+                    self.overleaf_repo.git.ls_tree(
+                        "-r", "--name-only", commit_obj.hexsha
+                    ).split("\n")
+                )
+                files.discard("")
+            except Exception:
+                pass
+        return files
+
+    @property
+    def newly_added_on_overleaf(self) -> set[str]:
+        """Files that were added on Overleaf since the last sync."""
+        return (
+            set(self.files_to_copy_from_overleaf)
+            - self.files_in_overleaf_last_sync
+        )
+
+    @property
+    def files_to_keep_on_overleaf(self) -> set[str]:
+        """Files that should be preserved on Overleaf.
+
+        This includes:
+        1. All files being copied from local
+        2. Any files newly added on Overleaf since last sync
+        """
+        return (
+            set(self.files_to_copy_to_overleaf) | self.newly_added_on_overleaf
+        )
+
+    @property
+    def stale_files_in_overleaf(self) -> list[str]:
+        """Files that existed in the last sync but should be deleted.
+
+        These are files that were deleted locally or excluded from sync.
+        """
+        return sorted(
+            self.files_in_overleaf_last_sync - self.files_to_keep_on_overleaf
+        )
+
 
 def get_commits_since_last_sync(
     overleaf_repo: git.Repo, last_sync_commit: str | None
@@ -345,6 +394,7 @@ def sync(
         overleaf_repo=overleaf_repo,
         path_in_project=path_in_project,
         sync_info_for_path=sync_info_for_path,
+        last_sync_commit=last_sync_commit,
     )
     paths_for_overleaf_patch = paths.paths_to_use_for_git_patch
     res["paths_for_overleaf_patch"] = paths_for_overleaf_patch
@@ -473,38 +523,12 @@ def sync(
                 f"Source path {src} does not exist; "
                 "please check your Overleaf config"
             )
-    # Identify files that were in the previous sync (existing on Overleaf at
-    # last_sync_commit) versus newly added on Overleaf since then
-    files_in_last_sync = set()
-    if last_sync_commit:
-        try:
-            commit_obj = overleaf_repo.commit(last_sync_commit)
-            files_in_last_sync = set(
-                overleaf_repo.git.ls_tree(
-                    "-r", "--name-only", commit_obj.hexsha
-                ).split("\n")
-            )
-            files_in_last_sync.discard("")
-        except Exception:
-            pass
-    res["files_in_last_sync"] = sorted(files_in_last_sync)
-    # Files we should keep on Overleaf:
-    # 1. All files being copied from local
-    # 2. Any files newly added on Overleaf since last sync (not from deletion)
-    newly_added_on_overleaf = (
-        set(paths.files_to_copy_from_overleaf) - files_in_last_sync
-    )
-    res["newly_added_on_overleaf"] = sorted(newly_added_on_overleaf)
-    files_to_keep_on_overleaf = (
-        set(files_to_copy_to_overleaf) | newly_added_on_overleaf
-    )
-    # Stale files are those that existed in the last sync but are not in our
-    # keep set (deleted locally or excluded from sync)
-    stale_files_in_overleaf = sorted(
-        files_in_last_sync - files_to_keep_on_overleaf
-    )
-    res["stale_files_in_overleaf"] = stale_files_in_overleaf
-    for stale_path in stale_files_in_overleaf:
+    # Delete stale files from Overleaf (files that existed before but are
+    # no longer locally or have been excluded from sync)
+    res["newly_added_on_overleaf"] = sorted(paths.newly_added_on_overleaf)
+    res["files_to_keep_on_overleaf"] = sorted(paths.files_to_keep_on_overleaf)
+    res["stale_files_in_overleaf"] = paths.stale_files_in_overleaf
+    for stale_path in paths.stale_files_in_overleaf:
         file_path = os.path.join(overleaf_project_dir_abs, stale_path)
         if os.path.isfile(file_path):
             os.remove(file_path)

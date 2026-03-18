@@ -872,7 +872,7 @@ async function runCreateSlurmEnvironmentWizard(
   workspaceRoot: string,
   environments: Record<string, CalkitEnvironment>,
 ): Promise<string | "__back__" | undefined> {
-  let name = "my-slurm";
+  let name = "cluster";
   let host = "localhost";
   let defaults: SlurmLaunchOptions = {};
   let step = 0;
@@ -914,7 +914,7 @@ async function runCreateSlurmEnvironmentWizard(
         title: "SLURM environment host",
         prompt: "Host where SLURM commands should run",
         value: host,
-        placeHolder: "e.g. hpc.my-org.edu",
+        placeHolder: "e.g., hpc.my-org.edu",
         canGoBack: true,
         validateInput: (value) =>
           value.trim().length === 0 ? "Host is required" : undefined,

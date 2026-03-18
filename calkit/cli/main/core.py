@@ -12,6 +12,7 @@ import posixpath
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from copy import deepcopy
@@ -908,8 +909,91 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
                 )
                 add_stage_info(stage_name, "end_time", errored_timestamp)
                 add_stage_info(stage_name, "status", "failed")
-                break
     return res
+
+
+def _format_elapsed_time(seconds: float) -> str:
+    seconds_int = max(0, int(seconds))
+    hrs, rem = divmod(seconds_int, 3600)
+    mins, secs = divmod(rem, 60)
+    if hrs:
+        return f"{hrs:02d}:{mins:02d}:{secs:02d}"
+    return f"{mins:02d}:{secs:02d}"
+
+
+def _build_pipeline_status_line(
+    stage_run_info: dict,
+    total_stages: int | None,
+    elapsed_seconds: float,
+) -> str:
+    completed_statuses = {"completed", "skipped", "failed"}
+    completed_count = sum(
+        1
+        for stage_data in stage_run_info.values()
+        if stage_data.get("status") in completed_statuses
+    )
+    running_stage = None
+    for stage_name, stage_data in stage_run_info.items():
+        if stage_data.get("status") == "running":
+            running_stage = stage_name
+    if running_stage is None:
+        running_stage = "starting"
+
+    if total_stages is not None and total_stages > 0:
+        bar_width = 20
+        progress = min(1.0, completed_count / total_stages)
+        filled = int(round(progress * bar_width))
+        bar = "#" * filled + "-" * (bar_width - filled)
+        counts = f"{completed_count}/{total_stages}"
+    else:
+        bar = "?" * 20
+        counts = f"{completed_count}/?"
+
+    elapsed = _format_elapsed_time(elapsed_seconds)
+    line = (
+        f"[{bar}] stages {counts} | elapsed {elapsed} | current: "
+        f"{running_stage}"
+    )
+    cols = shutil.get_terminal_size(fallback=(120, 20)).columns
+    if len(line) > cols - 1:
+        line = line[: max(0, cols - 4)] + "..."
+    return line
+
+
+def _pipeline_status_monitor(
+    log_fpath: str,
+    total_stages: int | None,
+    run_start_monotonic: float,
+    stop_event: threading.Event,
+    quiet: bool,
+) -> None:
+    if quiet or not sys.stdout.isatty():
+        return
+
+    previous_width = 0
+    while not stop_event.is_set():
+        stage_run_info = {}
+        if os.path.exists(log_fpath):
+            try:
+                with open(log_fpath, "r") as f:
+                    stage_run_info = _stage_run_info_from_log_content(f.read())
+            except OSError:
+                stage_run_info = {}
+        line = _build_pipeline_status_line(
+            stage_run_info=stage_run_info,
+            total_stages=total_stages,
+            elapsed_seconds=time.monotonic() - run_start_monotonic,
+        )
+        padding = " " * max(0, previous_width - len(line))
+        sys.stdout.write("\r" + line + padding)
+        sys.stdout.flush()
+        previous_width = len(line)
+        if stop_event.wait(0.25):
+            break
+
+    # Ensure we leave the status line cleanly before subsequent output.
+    sys.stdout.write("\n")
+    sys.stdout.flush()
 
 
 @app.command(name="run")
@@ -1260,19 +1344,40 @@ def run(
     formatter.converter = time.gmtime  # Use UTC time for asctime
     file_handler.setFormatter(formatter)
     dvc.log.logger.addHandler(file_handler)
+    total_stages = len(dvc_stages) if dvc_stages else None
+    run_start_monotonic = time.monotonic()
+    monitor_stop_event = threading.Event()
+    monitor_thread = threading.Thread(
+        target=_pipeline_status_monitor,
+        kwargs={
+            "log_fpath": log_fpath,
+            "total_stages": total_stages,
+            "run_start_monotonic": run_start_monotonic,
+            "stop_event": monitor_stop_event,
+            "quiet": quiet,
+        },
+        daemon=True,
+    )
+    monitor_thread.start()
     # Remove newline logging in dvc.repo.reproduce
     dvc.repo.reproduce.logger.setLevel(logging.ERROR)
     # Disable other misc DVC output
+    original_dvc_ui_write = dvc.ui.ui.write
     dvc.ui.ui.write = lambda *args, **kwargs: None
-    res = dvc_cli_main(["repro"] + args)
+    try:
+        res = dvc_cli_main(["repro"] + args)
+    finally:
+        monitor_stop_event.set()
+        monitor_thread.join(timeout=1)
+        dvc.ui.ui.write = original_dvc_ui_write
+        # Close logger file handler to prevent permissions issues if deleting
+        dvc.log.logger.removeHandler(file_handler)
+        file_handler.close()
     failed = res != 0
     # Parse log to get timing
     with open(log_fpath, "r") as f:
         log_content = f.read()
         stage_run_info = _stage_run_info_from_log_content(log_content)
-    # Close logger file handler to prevent permissions issues if deleting
-    dvc.log.logger.removeHandler(file_handler)
-    file_handler.close()
     if save_logs:
         # Get Git status after running
         git_changed_files_after = calkit.git.get_changed_files(repo=repo)

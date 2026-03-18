@@ -1459,7 +1459,7 @@ function getLaunchProfileForNotebookUri(
 }
 
 function hasRunningServerSession(
-  kind: ActiveServerSession["kind"],
+  kind: ActiveJupyterServerSession["kind"],
   notebookUri?: string,
 ): boolean {
   if (
@@ -2011,7 +2011,7 @@ async function switchToLocalJupyterServerSilently(): Promise<boolean> {
 async function waitForServerReady(
   uri: string,
   options?: {
-    sessionKind?: ActiveServerSession["kind"];
+    sessionKind?: ActiveJupyterServerSession["kind"];
     notebookUri?: string;
   },
   timeoutMs = 45_000,
@@ -3159,7 +3159,7 @@ function terminateChildProcessTree(
 function startServerInBackground(
   command: string,
   cwd: string,
-  session: ActiveServerSession,
+  session: ActiveJupyterServerSession,
 ): void {
   if (
     jupyterServerProcess &&

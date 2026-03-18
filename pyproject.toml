@@ -150,6 +150,7 @@ ignore = ["W002"]
 
 [tool.hatch.version]
 source = "vcs"
+tag-pattern = "^v(?P<version>.+)$"
 
 [tool.mypy]
 files = ["calkit"]

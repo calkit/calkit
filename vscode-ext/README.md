@@ -33,3 +33,17 @@ pipeline:
       notebook_path: my-notebook.ipynb
       environment: my-env
 ```
+
+## Releasing
+
+Publishing is handled by the GitHub Actions workflow at `.github/workflows/publish-vscode-ext.yml`.
+
+1. Bump the version in `vscode-ext/package.json`.
+2. Create a GitHub release whose tag is named `vscode-ext/vX.Y.Z` and matches that version.
+
+The workflow installs dependencies, runs the extension tests, packages a `.vsix`, and publishes it to both the Visual Studio Marketplace and Open VSX.
+
+Required repository secrets:
+
+- `VSCE_PAT` for the Visual Studio Marketplace publisher token
+- `OVSX_PAT` for the Open VSX access token

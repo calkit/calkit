@@ -32,8 +32,8 @@ const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
 
 let outputChannel: vscode.OutputChannel;
 let slurmStatusBarItem: vscode.StatusBarItem | undefined;
-let serverProcess: import("node:child_process").ChildProcess | undefined;
-let activeServerSession: ActiveServerSession | undefined;
+let jupyterServerProcess: import("node:child_process").ChildProcess | undefined;
+let activeJupyterServerSession: ActiveJupyterServerSession | undefined;
 let extensionContextRef: vscode.ExtensionContext | undefined;
 const autoSelectingNotebookUris = new Set<string>();
 const configuredNotebooksThisSession = new Set<string>();
@@ -57,7 +57,7 @@ interface NotebookLaunchProfile {
   preferredPort?: number;
 }
 
-interface ActiveServerSession {
+interface ActiveJupyterServerSession {
   kind: "slurm" | "docker" | "other";
   notebookUri?: string;
 }
@@ -331,11 +331,8 @@ async function pickCalkitSetupCommand(
 }
 
 export function deactivate(): void {
-  if (isProcessRunning(serverProcess)) {
-    serverProcess?.kill();
-    serverProcess = undefined;
-    activeServerSession = undefined;
-  }
+  // Shut down any running SLURM jobs for notebook kernels
+  terminateJupyterServerProcess("extension deactivation");
 }
 
 async function selectCalkitEnvironment(
@@ -1139,7 +1136,7 @@ async function askForSlurmOptionsWizard(
     if (step === 0) {
       const result = await showInputBoxStep({
         title: "Slurm option: --gpus",
-        prompt: "Optional GPU count or value (e.g. 1 or a100:1)",
+        prompt: "Optional GPU count or value (e.g., 1 or a100:1)",
         value: values.gpus ?? "",
         placeHolder: "leave blank to skip",
         canGoBack: true,
@@ -1465,10 +1462,13 @@ function hasRunningServerSession(
   kind: ActiveServerSession["kind"],
   notebookUri?: string,
 ): boolean {
-  if (!isProcessRunning(serverProcess) || activeServerSession?.kind !== kind) {
+  if (
+    !isProcessRunning(jupyterServerProcess) ||
+    activeJupyterServerSession?.kind !== kind
+  ) {
     return false;
   }
-  if (notebookUri && activeServerSession.notebookUri !== notebookUri) {
+  if (notebookUri && activeJupyterServerSession.notebookUri !== notebookUri) {
     return false;
   }
   return true;
@@ -2944,7 +2944,7 @@ async function startSlurmJobForActiveNotebook(
 async function stopSlurmJobForActiveNotebook(
   context: vscode.ExtensionContext,
 ): Promise<void> {
-  const runningProcess = serverProcess;
+  const runningProcess = jupyterServerProcess;
   if (!runningProcess) {
     void vscode.window.showInformationMessage(
       "No running Calkit SLURM notebook job.",
@@ -2954,7 +2954,7 @@ async function stopSlurmJobForActiveNotebook(
   }
   if (
     !isProcessRunning(runningProcess) ||
-    activeServerSession?.kind !== "slurm"
+    activeJupyterServerSession?.kind !== "slurm"
   ) {
     void vscode.window.showInformationMessage(
       "No running Calkit SLURM notebook job.",
@@ -2963,12 +2963,12 @@ async function stopSlurmJobForActiveNotebook(
     return;
   }
 
-  runningProcess.kill();
+  terminateJupyterServerProcess("user requested SLURM stop");
   log("Stopped SLURM notebook job by user request");
   const stoppedNotebookUri =
-    activeServerSession?.notebookUri ?? getActiveNotebookUriKey();
-  activeServerSession = undefined;
-  serverProcess = undefined;
+    activeJupyterServerSession?.notebookUri ?? getActiveNotebookUriKey();
+  activeJupyterServerSession = undefined;
+  jupyterServerProcess = undefined;
 
   if (stoppedNotebookUri) {
     slurmAutoStartSuppressedThisSession.add(stoppedNotebookUri);
@@ -2985,20 +2985,20 @@ async function stopSlurmJobForClosedNotebook(
   context: vscode.ExtensionContext,
   notebookUri: string,
 ): Promise<void> {
-  const runningProcess = serverProcess;
+  const runningProcess = jupyterServerProcess;
   if (
     !runningProcess ||
     !isProcessRunning(runningProcess) ||
-    activeServerSession?.kind !== "slurm" ||
-    activeServerSession.notebookUri !== notebookUri
+    activeJupyterServerSession?.kind !== "slurm" ||
+    activeJupyterServerSession.notebookUri !== notebookUri
   ) {
     return;
   }
 
-  runningProcess.kill();
+  terminateJupyterServerProcess("notebook closed");
   log(`Stopped SLURM notebook job because notebook was closed: ${notebookUri}`);
-  activeServerSession = undefined;
-  serverProcess = undefined;
+  activeJupyterServerSession = undefined;
+  jupyterServerProcess = undefined;
 
   // Notebook is gone; clear session-only auto-start state for this URI.
   slurmAutoStartSuppressedThisSession.delete(notebookUri);
@@ -3011,15 +3011,15 @@ async function stopSlurmJobForClosedNotebook(
 async function restartCalkitJobForActiveNotebook(
   context: vscode.ExtensionContext,
 ): Promise<void> {
-  const sessionKindToRestart = activeServerSession?.kind;
+  const sessionKindToRestart = activeJupyterServerSession?.kind;
 
   // First, stop any running server
-  const runningProcess = serverProcess;
+  const runningProcess = jupyterServerProcess;
   if (runningProcess && isProcessRunning(runningProcess)) {
-    runningProcess.kill();
+    terminateJupyterServerProcess("server restart");
     log("Stopped notebook server to restart");
-    activeServerSession = undefined;
-    serverProcess = undefined;
+    activeJupyterServerSession = undefined;
+    jupyterServerProcess = undefined;
     // Give the server a moment to shut down
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
@@ -3109,28 +3109,76 @@ function isProcessRunning(
   return Boolean(process && process.exitCode === null && !process.killed);
 }
 
+function terminateJupyterServerProcess(reason: string): void {
+  const runningProcess = jupyterServerProcess;
+  if (!runningProcess || !isProcessRunning(runningProcess)) {
+    return;
+  }
+
+  terminateChildProcessTree(runningProcess);
+  log(`Stopped managed notebook server process (${reason})`);
+  jupyterServerProcess = undefined;
+  activeJupyterServerSession = undefined;
+}
+
+function terminateChildProcessTree(
+  child: import("node:child_process").ChildProcess,
+): void {
+  const pid = child.pid;
+  if (!pid) {
+    child.kill();
+    return;
+  }
+
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    killer.on("error", () => {
+      child.kill();
+    });
+    return;
+  }
+
+  try {
+    // Kill the process group so shell children like srun are terminated too.
+    process.kill(-pid, "SIGTERM");
+    setTimeout(() => {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        // Ignore if the process group already exited.
+      }
+    }, 2_000);
+  } catch {
+    child.kill();
+  }
+}
+
 function startServerInBackground(
   command: string,
   cwd: string,
   session: ActiveServerSession,
 ): void {
   if (
-    serverProcess &&
-    serverProcess.exitCode === null &&
-    !serverProcess.killed
+    jupyterServerProcess &&
+    jupyterServerProcess.exitCode === null &&
+    !jupyterServerProcess.killed
   ) {
     log("Stopping previous Calkit server process");
-    serverProcess.kill();
+    terminateJupyterServerProcess("starting a new server");
   }
 
   log(`Starting server in background: ${command}`);
   const child = spawn(command, {
     cwd,
     shell: true,
+    detached: process.platform !== "win32",
     env: process.env,
   });
-  serverProcess = child;
-  activeServerSession = session;
+  jupyterServerProcess = child;
+  activeJupyterServerSession = session;
 
   child.stdout?.on("data", (chunk: Buffer | string) => {
     const text = chunk.toString().trim();
@@ -3159,9 +3207,9 @@ function startServerInBackground(
         signal ?? "null"
       })`,
     );
-    if (serverProcess === child) {
-      serverProcess = undefined;
-      activeServerSession = undefined;
+    if (jupyterServerProcess === child) {
+      jupyterServerProcess = undefined;
+      activeJupyterServerSession = undefined;
       if (extensionContextRef) {
         void refreshNotebookToolbarContext(extensionContextRef);
       }

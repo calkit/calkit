@@ -47,7 +47,7 @@ cli-reference: ## Generate docs/cli-reference.md from CLI help output.
 	@uv run python scripts/generate-cli-reference.py
 
 .PHONY: docs
-docs: ## Build and serve the documentation.
+docs: sync-docs ## Build and serve the documentation.
 	@uv run mkdocs serve --livereload
 
 .PHONY: import-profile

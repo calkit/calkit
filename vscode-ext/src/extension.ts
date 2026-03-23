@@ -30,6 +30,8 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_MIN_CALKIT_VERSION = "0.35.0";
 const DEFAULT_NOTEBOOK_SLURM_TIME = "120";
 const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
+const MISSING_IJULIA_ERROR_TEXT =
+  "IJulia is not installed in this Julia environment";
 
 let outputChannel: vscode.OutputChannel;
 let slurmStatusBarItem: vscode.StatusBarItem | undefined;
@@ -2141,61 +2143,35 @@ async function registerAndSelectKernel(
   return await withKernelProgress(
     "Checking environment and setting kernel...",
     async () => {
-      try {
-        const { stdout, stderr } = await execFileAsync(
-          "calkit",
-          ["nb", "check-kernel", envFlag, envName, "--json"],
-          {
-            cwd: workspaceRoot,
-          },
-        );
-
-        log(`calkit output: ${stdout}`);
-
-        const kernelSpec = parseCheckKernelJson(stdout);
-        if (!kernelSpec) {
-          const details = `${stderr || stdout || "Invalid JSON output"}`.trim();
-          log(`JSON parse error: ${details}`);
-          void vscode.window.showErrorMessage(
-            `Failed to parse kernel info from 'calkit nb check-kernel': ${details}`,
-          );
-          return undefined;
-        }
-
-        const { kernelName, displayName } = kernelSpec;
-        log(`Extracted kernel name: ${kernelName}`);
-
-        const selectedKernelId = await tryAutoSelectKernel(
-          kernelName,
-          displayName,
-          expectedNotebookUri,
-        );
-
-        if (selectedKernelId) {
-          log(`Kernel selection successful`);
-          return selectedKernelId;
-        }
-
-        log(`Kernel selection failed or unconfirmed`);
-        void vscode.window.showWarningMessage(
-          `Kernel '${kernelName}' was registered but auto-selection timed out. It should appear in the notebook kernel picker (top-right).`,
-        );
-        return undefined;
-      } catch (error: unknown) {
-        const err = error as {
-          stdout?: string;
-          stderr?: string;
-          message?: string;
-        };
-        const details = (err.stderr || err.stdout || err.message || "").trim();
-        log(`Error: ${details}`);
-        void vscode.window.showErrorMessage(
-          `Failed to run 'calkit nb check-kernel ${envFlag} ${envName}': ${
-            details || "unknown error"
-          }`,
-        );
+      const kernelSpec = await getExpectedKernelSpecForEnvironment(
+        workspaceRoot,
+        envName,
+        envFlag,
+        true,
+      );
+      if (!kernelSpec) {
         return undefined;
       }
+
+      const { kernelName, displayName } = kernelSpec;
+      log(`Extracted kernel name: ${kernelName}`);
+
+      const selectedKernelId = await tryAutoSelectKernel(
+        kernelName,
+        displayName,
+        expectedNotebookUri,
+      );
+
+      if (selectedKernelId) {
+        log(`Kernel selection successful`);
+        return selectedKernelId;
+      }
+
+      log(`Kernel selection failed or unconfirmed`);
+      void vscode.window.showWarningMessage(
+        `Kernel '${kernelName}' was registered but auto-selection timed out. It should appear in the notebook kernel picker (top-right).`,
+      );
+      return undefined;
     },
   );
 }
@@ -2794,20 +2770,82 @@ async function getExpectedKernelSpecForEnvironment(
   workspaceRoot: string,
   envName: string,
   envFlag: "-n" | "-e",
+  allowAutoInstallPrompt = false,
 ): Promise<{ kernelName: string; displayName?: string } | undefined> {
-  try {
-    const { stdout } = await execFileAsync(
-      "calkit",
-      ["nb", "check-kernel", envFlag, envName, "--json"],
-      {
+  const runCheckKernel = async (): Promise<{
+    kernelSpec?: { kernelName: string; displayName?: string };
+    details?: string;
+  }> => {
+    try {
+      const args = [
+        "nb",
+        "check-kernel",
+        envFlag,
+        envName,
+        "--json",
+        "--auto-add-deps",
+      ];
+      const { stdout, stderr } = await execFileAsync("calkit", args, {
         cwd: workspaceRoot,
-      },
-    );
+      });
+      log(`calkit output: ${stdout}`);
+      const kernelSpec = parseCheckKernelJson(stdout);
+      if (!kernelSpec) {
+        const details = `${stderr || stdout || "Invalid JSON output"}`.trim();
+        return { details };
+      }
+      return { kernelSpec };
+    } catch (error: unknown) {
+      const err = error as {
+        stdout?: string;
+        stderr?: string;
+        message?: string;
+      };
+      const details = (err.stderr || err.stdout || err.message || "").trim();
+      return { details };
+    }
+  };
 
-    return parseCheckKernelJson(stdout);
-  } catch {
+  const firstAttempt = await runCheckKernel();
+  if (firstAttempt.kernelSpec) {
+    return firstAttempt.kernelSpec;
+  }
+
+  const details = firstAttempt.details || "unknown error";
+  const missingIJulia = details.includes(MISSING_IJULIA_ERROR_TEXT);
+  if (allowAutoInstallPrompt && missingIJulia) {
+    const choice = await vscode.window.showWarningMessage(
+      "IJulia is missing from this Julia environment. Install it now so the notebook kernel can be registered?",
+      "Install IJulia",
+      "Cancel",
+    );
+    if (choice === "Install IJulia") {
+      const secondAttempt = await runCheckKernel();
+      if (secondAttempt.kernelSpec) {
+        return secondAttempt.kernelSpec;
+      }
+      const retryDetails = secondAttempt.details || "unknown error";
+      log(`Error after auto-install retry: ${retryDetails}`);
+      void vscode.window.showErrorMessage(
+        `Failed to run 'calkit nb check-kernel ${envFlag} ${envName}' after installing IJulia: ${retryDetails}`,
+      );
+      return undefined;
+    }
     return undefined;
   }
+
+  if (allowAutoInstallPrompt) {
+    log(`Error: ${details}`);
+    void vscode.window.showErrorMessage(
+      `Failed to run 'calkit nb check-kernel ${envFlag} ${envName}': ${details}`,
+    );
+  }
+
+  if (!allowAutoInstallPrompt) {
+    return undefined;
+  }
+
+  return undefined;
 }
 
 function parseCheckKernelJson(

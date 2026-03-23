@@ -77,7 +77,7 @@ export function activate(context: vscode.ExtensionContext): void {
   slurmStatusBarItem.text = "$(server-process)";
   slurmStatusBarItem.name = "Calkit SLURM Job";
   slurmStatusBarItem.tooltip =
-    "Calkit SLURM notebook job is running. Click to stop.";
+    "Calkit Jupyter SLURM job is running. Click to stop.";
   slurmStatusBarItem.command = COMMAND_STOP_SLURM;
   context.subscriptions.push(slurmStatusBarItem);
   log("Calkit extension activated");
@@ -3007,7 +3007,7 @@ async function startSlurmJobForActiveNotebook(
   const workspaceRoot = getWorkspaceRoot();
   if (!workspaceRoot) {
     void vscode.window.showErrorMessage(
-      "Open a workspace folder to start a Calkit SLURM notebook job.",
+      "Open a workspace folder to start a Calkit Jupyter SLURM job.",
     );
     return false;
   }
@@ -3136,7 +3136,7 @@ async function stopSlurmJobForActiveNotebook(
   const runningProcess = jupyterServerProcess;
   if (!runningProcess) {
     void vscode.window.showInformationMessage(
-      "No running Calkit SLURM notebook job.",
+      "No running Calkit Jupyter SLURM job.",
     );
     await refreshNotebookToolbarContext(context);
     return;
@@ -3146,14 +3146,14 @@ async function stopSlurmJobForActiveNotebook(
     activeJupyterServerSession?.kind !== "slurm"
   ) {
     void vscode.window.showInformationMessage(
-      "No running Calkit SLURM notebook job.",
+      "No running Calkit Jupyter SLURM job.",
     );
     await refreshNotebookToolbarContext(context);
     return;
   }
 
   terminateJupyterServerProcess("user requested SLURM stop");
-  log("Stopped SLURM notebook job by user request");
+  log("Stopped Jupyter SLURM job by user request");
   const stoppedNotebookUri =
     activeJupyterServerSession?.notebookUri ?? getActiveNotebookUriKey();
   activeJupyterServerSession = undefined;
@@ -3166,6 +3166,14 @@ async function stopSlurmJobForActiveNotebook(
 
   // Best effort to break Jupyter's reconnect loop to a dead remote kernel.
   await switchToLocalJupyterServerSilently();
+  // Restarting the kernel aborts VS Code's "Reconnecting to the kernel..."
+  // notification, which would otherwise spin indefinitely after the SLURM job
+  // is killed.
+  try {
+    await vscode.commands.executeCommand("notebook.kernel.restart");
+  } catch {
+    // Not critical; suppress.
+  }
 
   await refreshNotebookToolbarContext(context);
 }

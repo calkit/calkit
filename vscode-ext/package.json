@@ -49,13 +49,13 @@
       },
       {
         "command": "calkit-vscode.startCalkitSlurmJob",
-        "title": "Start SLURM Notebook Job",
+        "title": "Start Jupyter SLURM Job",
         "category": "Calkit",
         "icon": "$(debug-start)"
       },
       {
         "command": "calkit-vscode.stopCalkitSlurmJob",
-        "title": "Stop SLURM Notebook Job",
+        "title": "Stop Jupyter SLURM Job",
         "category": "Calkit",
         "icon": "$(debug-stop)"
       },

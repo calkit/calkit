@@ -481,3 +481,44 @@ def update_notebook(
             )
     except Exception as e:
         raise_error(f"Failed to update notebook: {e}")
+
+
+@update_app.command(name="environment")
+@update_app.command(name="env")
+def update_environment(
+    env_name: Annotated[
+        str,
+        typer.Option("--name", "-n", help="Name of the environment to update"),
+    ],
+    add_packages: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--add",
+            help=("Add package to environment,"),
+        ),
+    ] = None,
+) -> None:
+    """Update an environment.
+
+    Currently only supports adding packages to Julia environments.
+    """
+    from calkit.cli.main import run_in_env
+
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if env_name not in envs:
+        raise_error(f"Environment '{env_name}' does not exist")
+    if add_packages is None:
+        raise_error(
+            "No updates specified. Use --add to specify packages to add."
+        )
+    env = envs[env_name]
+    if env.get("kind") != "julia":
+        raise_error("Currently only Julia environments are supported")
+    # If adding package to a Julia environment, we need to simply run a command
+    # in it
+    assert isinstance(add_packages, list)
+    add_packages_str = ", ".join([f'"{pkg.strip()}"' for pkg in add_packages])
+    julia_cmd = ["-e", f"using Pkg; Pkg.add([{add_packages_str}])"]
+    run_in_env(env_name=env_name, cmd=julia_cmd)
+    typer.echo(f"Updated environment '{env_name}'")

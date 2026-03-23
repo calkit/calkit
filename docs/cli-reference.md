@@ -627,9 +627,9 @@ calkit new julia-env [OPTIONS] [PACKAGES...]
 
 Arguments:
 
-| Argument   | Type | Required | Default | Description                             |
-| ---------- | ---- | -------- | ------- | --------------------------------------- |
-| `packages` | text | no       |         | Packages to include in the environment. |
+| Argument   | Type | Required | Default | Description                                      |
+| ---------- | ---- | -------- | ------- | ------------------------------------------------ |
+| `packages` | text | no       |         | Optional packages to include in the environment. |
 
 Options:
 
@@ -1305,9 +1305,9 @@ calkit create julia-env [OPTIONS] [PACKAGES...]
 
 Arguments:
 
-| Argument   | Type | Required | Default | Description                             |
-| ---------- | ---- | -------- | ------- | --------------------------------------- |
-| `packages` | text | no       |         | Packages to include in the environment. |
+| Argument   | Type | Required | Default | Description                                      |
+| ---------- | ---- | -------- | ------- | ------------------------------------------------ |
+| `packages` | text | no       |         | Optional packages to include in the environment. |
 
 Options:
 
@@ -1974,6 +1974,8 @@ Update objects.
 | `vscode-config`  | Update a project's VS Code config to match the latest Calkit recommendations.                                                                                                                                            |
 | `github-actions` | Update a project's GitHub Actions to match the latest Calkit recommendations.                                                                                                                                            |
 | `notebook`       | Update notebook information. Updates the notebook's environment association in either the 'notebooks' section or the appropriate 'pipeline' stage, depending on whether the notebook has a corresponding pipeline stage. |
+| `env`            | Update an environment. Currently only supports adding packages to Julia environments.                                                                                                                                    |
+| `environment`    | Update an environment. Currently only supports adding packages to Julia environments.                                                                                                                                    |
 
 #### `calkit update devcontainer`
 
@@ -2087,6 +2089,40 @@ Options:
 | ----------- | ------- | -------- | ------- | ----------------------------------------------- |
 | `--set-env` | text    | no       |         | Environment name to associate with the notebook |
 | `--json`    | boolean | no       | False   | Output result as JSON.                          |
+
+#### `calkit update env`
+
+Update an environment. Currently only supports adding packages to Julia environments.
+
+Usage:
+
+```text
+calkit update env [OPTIONS]
+```
+
+Options:
+
+| Option         | Type | Required | Default | Description                       |
+| -------------- | ---- | -------- | ------- | --------------------------------- |
+| `--name`, `-n` | text | yes      |         | Name of the environment to update |
+| `--add`        | text | no       |         | Add package to environment,       |
+
+#### `calkit update environment`
+
+Update an environment. Currently only supports adding packages to Julia environments.
+
+Usage:
+
+```text
+calkit update environment [OPTIONS]
+```
+
+Options:
+
+| Option         | Type | Required | Default | Description                       |
+| -------------- | ---- | -------- | ------- | --------------------------------- |
+| `--name`, `-n` | text | yes      |         | Name of the environment to update |
+| `--add`        | text | no       |         | Add package to environment,       |
 
 ### `calkit check`
 

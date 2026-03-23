@@ -84,6 +84,39 @@ def _parse_params(params: list[str]) -> dict[str, Any]:
     return parameters
 
 
+def _check_ijulia_available(
+    julia_version: str,
+    env_dir: str,
+) -> bool:
+    ijulia_check_cmd = [
+        "julia",
+        f"+{julia_version}",
+        "--project=" + env_dir,
+        "-e",
+        (
+            "import Pkg; "
+            "deps = Pkg.project().dependencies; "
+            'if !haskey(deps, "IJulia"); '
+            'println("IJulia is not in this Julia project environment."); '
+            "exit(3); "
+            "end"
+        ),
+    ]
+    try:
+        ijulia_check_cmd_checked = calkit.julia.check_version_in_command(
+            ijulia_check_cmd
+        )
+    except Exception as e:
+        raise_error(f"Failed to check Julia version: {e}")
+        return False
+    res = subprocess.run(
+        ijulia_check_cmd_checked,
+        capture_output=True,
+        text=True,
+    )
+    return res.returncode == 0
+
+
 @notebooks_app.command("check-kernel")
 def check_env_kernel(
     env_name: Annotated[
@@ -119,10 +152,21 @@ def check_env_kernel(
         bool,
         typer.Option("--json", help="Output result as JSON."),
     ] = False,
+    auto_add_deps: Annotated[
+        bool,
+        typer.Option(
+            "--auto-add-deps",
+            help=(
+                "Automatically install missing kernel dependencies "
+                "(e.g., IJulia for Julia environments)."
+            ),
+        ),
+    ] = False,
 ) -> tuple[str, str]:
     """Check that an environment has a registered Jupyter kernel."""
     from calkit.cli.check import check_environment
     from calkit.cli.main import run_in_env
+    from calkit.cli.update import update_environment
     from calkit.environments import language_from_env
 
     def get_env():
@@ -206,6 +250,42 @@ def check_env_kernel(
         if not env_dir:
             env_dir = "."
         env_dir_abs = os.path.abspath(env_dir)
+        # In reproducible Julia environments we disable global package loading,
+        # so IJulia must exist in the project environment itself.
+        ijulia_ok = _check_ijulia_available(
+            julia_version=julia_version,
+            env_dir=env_dir,
+        )
+        if not ijulia_ok:
+            should_install = auto_add_deps
+            if not should_install and sys.stdin.isatty() and not json_output:
+                should_install = typer.confirm(
+                    (
+                        "IJulia is not installed in this Julia environment. "
+                        "Install now with "
+                        f"'calkit update env --name {env_name} --add IJulia'?"
+                    ),
+                    default=True,
+                )
+            if not should_install:
+                raise_error(
+                    "IJulia is not installed in this Julia environment. "
+                    "Install it and retry, or pass --auto-add-deps to "
+                    "install automatically."
+                )
+            try:
+                update_environment(env_name=env_name, add_packages=["IJulia"])
+            except Exception as e:
+                raise_error(f"Failed to install IJulia: {e}")
+            ijulia_ok = _check_ijulia_available(
+                julia_version=julia_version,
+                env_dir=env_dir,
+            )
+            if not ijulia_ok:
+                raise_error(
+                    "IJulia installation completed but the dependency check "
+                    "still failed."
+                )
         # Don't include version in display_name; IJulia appends it automatically
         julia_cmd = (
             "import IJulia;"

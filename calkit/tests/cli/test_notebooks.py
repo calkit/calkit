@@ -174,7 +174,7 @@ def test_execute_notebook_julia(tmp_dir):
     )
 
 
-def test_check_env_kernel_fails_if_ijulia_missing(tmp_dir):
+def test_check_env_kernel_julia(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
         [
@@ -195,6 +195,19 @@ def test_check_env_kernel_fails_if_ijulia_missing(tmp_dir):
         "IJulia is not installed in this Julia environment"
         in res.stderr.decode()
     )
+    # Now let's use the auto-add-deps option
+    res = subprocess.run(
+        [
+            "calkit",
+            "nb",
+            "check-kernel",
+            "-e",
+            "main",
+            "--auto-add-deps",
+        ],
+        capture_output=True,
+    )
+    assert res.returncode == 0
 
 
 def test_execute_notebook_auto_env(tmp_dir):

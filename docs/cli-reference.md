@@ -1613,13 +1613,14 @@ calkit nb check-kernel [OPTIONS]
 
 Options:
 
-| Option                         | Type    | Required | Default | Description                                                                     |
-| ------------------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------- |
-| `--environment`, `--env`, `-e` | text    | yes      |         | Environment name in which to run the notebook.                                  |
-| `--no-check`                   | boolean | no       | False   | Do not check environment before executing.                                      |
-| `--language`, `-l`             | text    | no       |         | Notebook language; if 'matlab', MATLAB kernel must be available in environment. |
-| `--verbose`, `-v`              | boolean | no       | False   | Print verbose output.                                                           |
-| `--json`                       | boolean | no       | False   | Output result as JSON.                                                          |
+| Option                         | Type    | Required | Default | Description                                                                              |
+| ------------------------------ | ------- | -------- | ------- | ---------------------------------------------------------------------------------------- |
+| `--environment`, `--env`, `-e` | text    | yes      |         | Environment name in which to run the notebook.                                           |
+| `--no-check`                   | boolean | no       | False   | Do not check environment before executing.                                               |
+| `--language`, `-l`             | text    | no       |         | Notebook language; if 'matlab', MATLAB kernel must be available in environment.          |
+| `--verbose`, `-v`              | boolean | no       | False   | Print verbose output.                                                                    |
+| `--json`                       | boolean | no       | False   | Output result as JSON.                                                                   |
+| `--auto-add-deps`              | boolean | no       | False   | Automatically install missing kernel dependencies (e.g., IJulia for Julia environments). |
 
 #### `calkit nb execute`
 

@@ -429,13 +429,12 @@ async function selectCalkitEnvironment(
 
   let slurmOptions: SlurmLaunchOptions | undefined;
   if (picked.outerSlurmEnvironment) {
-    slurmOptions = await askForSlurmOptions(
-      getNotebookSlurmOptionsWithDefaults(
-        getDefaultSlurmOptions(
-          config?.environments?.[picked.outerSlurmEnvironment],
-        ),
+    const defaultSlurmOptions = getNotebookSlurmOptionsWithDefaults(
+      getDefaultSlurmOptions(
+        config?.environments?.[picked.outerSlurmEnvironment],
       ),
     );
+    slurmOptions = await chooseSlurmOptionsForLaunch(defaultSlurmOptions);
     if (!slurmOptions) {
       await refreshNotebookToolbarContext(context);
       return undefined;
@@ -614,7 +613,7 @@ async function selectCalkitEnvironment(
 
     return picked.outerSlurmEnvironment
       ? await withKernelProgress(
-          "Starting SLURM notebook and selecting kernel...",
+          "Starting Jupyter SLURM job and selecting kernel...",
           runConnectFlow,
         )
       : await runConnectFlow();
@@ -882,7 +881,7 @@ async function runCreateSlurmEnvironmentWizard(
   environments: Record<string, CalkitEnvironment>,
 ): Promise<string | "__back__" | undefined> {
   let name = "cluster";
-  let host = "localhost";
+  let host = await detectLocalHostname(workspaceRoot);
   let defaults: SlurmLaunchOptions = {};
   let step = 0;
 
@@ -1084,17 +1083,15 @@ async function runCreateJuliaEnvironmentWizard(
 
     if (step === 1) {
       const pathStep = await showInputBoxStep({
-        title: "Julia Project.toml path",
-        prompt: "Path to Project.toml (workspace-relative or absolute)",
+        title: "Julia project path",
+        prompt:
+          "Path to Project.toml or the Julia project folder, relative to the repo root",
         value: projectTomlPath,
         canGoBack: true,
         validateInput: (value) => {
           const trimmed = value.trim();
           if (trimmed.length === 0) {
             return "Path is required";
-          }
-          if (path.basename(trimmed) !== "Project.toml") {
-            return "Path must point to Project.toml";
           }
           return undefined;
         },
@@ -1106,7 +1103,10 @@ async function runCreateJuliaEnvironmentWizard(
         step = 0;
         continue;
       }
-      projectTomlPath = pathStep.value.trim();
+      projectTomlPath = normalizeJuliaProjectTomlPath(
+        pathStep.value.trim(),
+        workspaceRoot,
+      );
       step = 2;
       continue;
     }
@@ -1186,6 +1186,95 @@ async function detectJuliaVersion(workspaceRoot: string): Promise<string> {
     // Fall back to a reasonable default when julia is unavailable.
   }
   return "1.10";
+}
+
+function normalizeJuliaProjectTomlPath(
+  inputPath: string,
+  workspaceRoot: string,
+): string {
+  const normalized = toRepoRelativePath(inputPath.trim(), workspaceRoot);
+  if (normalized.length === 0) {
+    return normalized;
+  }
+  if (path.basename(normalized) === "Project.toml") {
+    return normalized;
+  }
+  return path.join(normalized, "Project.toml");
+}
+
+function toRepoRelativePath(inputPath: string, workspaceRoot: string): string {
+  if (!inputPath || !path.isAbsolute(inputPath)) {
+    return inputPath;
+  }
+  return path.relative(workspaceRoot, inputPath);
+}
+
+async function detectLocalHostname(workspaceRoot: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("hostname", [], {
+      cwd: workspaceRoot,
+      timeout: 2_000,
+    });
+    const hostname = stdout.trim();
+    if (hostname.length > 0) {
+      return hostname;
+    }
+  } catch {
+    // Fallback if hostname cannot be detected.
+  }
+  return "localhost";
+}
+
+async function chooseSlurmOptionsForLaunch(
+  defaults?: SlurmLaunchOptions,
+): Promise<SlurmLaunchOptions | undefined> {
+  const effectiveDefaults = getNotebookSlurmOptionsWithDefaults(defaults);
+  const choice = await vscode.window.showQuickPick(
+    [
+      {
+        label: "Use saved/default SLURM options",
+        description: summarizeSlurmOptions(effectiveDefaults),
+        action: "use",
+      },
+      {
+        label: "Modify SLURM options...",
+        description: "Edit --gpus, --time, and extra srun flags",
+        action: "edit",
+      },
+    ],
+    {
+      title: "SLURM launch options",
+      placeHolder: "Choose how to launch the SLURM notebook session",
+      ignoreFocusOut: true,
+    },
+  );
+
+  if (!choice) {
+    return undefined;
+  }
+
+  if (choice.action === "use") {
+    return effectiveDefaults;
+  }
+
+  return await askForSlurmOptions(effectiveDefaults);
+}
+
+function summarizeSlurmOptions(options: SlurmLaunchOptions): string {
+  const parts: string[] = [];
+  if (options.gpus) {
+    parts.push(`--gpus=${options.gpus}`);
+  }
+  if (options.time) {
+    parts.push(`--time=${options.time}`);
+  }
+  if (options.partition) {
+    parts.push(`--partition=${options.partition}`);
+  }
+  if (options.extra) {
+    parts.push(options.extra);
+  }
+  return parts.length > 0 ? parts.join(" ") : "No extra options";
 }
 
 async function askForSlurmOptionsWizard(
@@ -1300,7 +1389,7 @@ async function runCreateCondaEnvironmentWizard(
 
     const pathStep = await showInputBoxStep({
       title: "Conda environment.yml path",
-      prompt: "Path to conda environment file (workspace-relative or absolute)",
+      prompt: "Path to conda environment file, relative to the repo root",
       value: envPath,
       placeHolder: "e.g. environment.yml or env/conda-env.yml",
       canGoBack: true,
@@ -1322,7 +1411,7 @@ async function runCreateCondaEnvironmentWizard(
       step = 0;
       continue;
     }
-    envPath = pathStep.value.trim();
+    envPath = toRepoRelativePath(pathStep.value.trim(), workspaceRoot);
 
     try {
       await execFileAsync(
@@ -1395,7 +1484,7 @@ async function runCreateUvEnvironmentWizard(
 
     const pathStep = await showInputBoxStep({
       title: "uv pyproject.toml path",
-      prompt: "Path to pyproject.toml (workspace-relative or absolute)",
+      prompt: "Path to pyproject.toml, relative to the repo root",
       value: pyprojectPath,
       placeHolder: "e.g. pyproject.toml or .calkit/envs/my-uv/pyproject.toml",
       canGoBack: true,
@@ -1417,7 +1506,7 @@ async function runCreateUvEnvironmentWizard(
       step = 0;
       continue;
     }
-    pyprojectPath = pathStep.value.trim();
+    pyprojectPath = toRepoRelativePath(pathStep.value.trim(), workspaceRoot);
 
     try {
       await execFileAsync(
@@ -2962,7 +3051,7 @@ async function startSlurmJobForActiveNotebook(
   const serverToken = createServerToken();
 
   return await withKernelProgress(
-    "Starting SLURM notebook and selecting kernel...",
+    "Starting Jupyter SLURM job and selecting kernel...",
     async () => {
       const expectedKernel = await getExpectedKernelSpecForEnvironment(
         workspaceRoot,

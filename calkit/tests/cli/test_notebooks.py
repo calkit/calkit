@@ -174,6 +174,29 @@ def test_execute_notebook_julia(tmp_dir):
     )
 
 
+def test_check_env_kernel_fails_if_ijulia_missing(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "julia-env",
+            "--name",
+            "main",
+            "--julia",
+            "1.11",
+        ]
+    )
+    res = subprocess.run(
+        ["calkit", "nb", "check-kernel", "-e", "main"], capture_output=True
+    )
+    assert res.returncode != 0
+    assert (
+        "IJulia is not installed in this Julia environment"
+        in res.stderr.decode()
+    )
+
+
 def test_execute_notebook_auto_env(tmp_dir):
     # Check that we can execute a notebook but only specify the environment's
     # path, rather than its name

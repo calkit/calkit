@@ -545,6 +545,7 @@ def test_new_julia_env(tmp_dir):
         ]
     )
     assert os.path.isfile("envs/empty/Project.toml")
+    assert not os.path.isfile("envs/empty/Manifest.toml")
 
 
 def test_new_release(tmp_dir):

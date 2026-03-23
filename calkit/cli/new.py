@@ -1684,7 +1684,9 @@ def new_pixi_env(
 def new_julia_env(
     packages: Annotated[
         list[str] | None,
-        typer.Argument(help="Packages to include in the environment."),
+        typer.Argument(
+            help="Optional packages to include in the environment."
+        ),
     ] = None,
     name: Annotated[
         str, typer.Option("--name", "-n", help="Environment name.")
@@ -1725,11 +1727,7 @@ def new_julia_env(
 ):
     """Create a new Julia environment or add an existing one to calkit.yaml."""
     if path is None:
-        if packages:
-            path = "Project.toml"
-        else:
-            raise_error("Packages must be provided if path is not specified")
-            return
+        path = "Project.toml"
     if not os.path.basename(path) == "Project.toml":
         raise_error(
             "Julia environment paths must point to a Project.toml file"
@@ -1778,7 +1776,9 @@ def new_julia_env(
         os.makedirs(env_dir, exist_ok=True)
     else:
         env_dir = "."
-    # If packages are provided, create a new environment
+    project_exists = os.path.isfile(path)
+    created_project_file = False
+    # If packages are provided, initialize via Julia/Pkg.
     if packages:
         # First make sure the Julia version is installed
         cmd = ["juliaup", "add", julia_version]
@@ -1787,19 +1787,20 @@ def new_julia_env(
         except subprocess.CalledProcessError:
             raise_error(f"Failed to install Julia version {julia_version}")
         cmd = ["julia", f"+{julia_version}", f"--project={env_dir}", "-e"]
-        install_cmd = "using Pkg;"
-        for package in packages:
+        install_cmd = f'using Pkg; Pkg.activate("{env_dir}");'
+        for package in packages or []:
             install_cmd += f' Pkg.add("{package}");'
         cmd.append(install_cmd)
         try:
             subprocess.run(cmd, check=True)
         except subprocess.CalledProcessError:
             raise_error("Failed to create new Julia environment")
-    elif not os.path.isfile(path):
-        raise_error(
-            "Project.toml not found; provide packages to create a new "
-            "environment"
-        )
+    elif not project_exists:
+        # Allow creating a Julia environment scaffold without requiring Julia
+        # tooling at creation time. IJulia or other packages can be added later.
+        with open(path, "w") as f:
+            f.write("[deps]\n")
+        created_project_file = True
     typer.echo("Adding environment to calkit.yaml")
     env = dict(kind="julia", path=path, julia=julia_version)
     if description is not None:
@@ -1810,8 +1811,9 @@ def new_julia_env(
         ryaml.dump(ck_info, f)
     if not no_commit:
         repo.git.add("calkit.yaml")
-        if packages:
+        if packages or created_project_file:
             repo.git.add(path)
+        if packages:
             repo.git.add(os.path.join(env_dir, "Manifest.toml"))
         if not no_check and packages:
             env_lock_fpath = check_environment(env_name=name)

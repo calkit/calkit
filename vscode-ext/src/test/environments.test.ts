@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  findCalkitEnvKernelSourceCandidate,
   getDefaultSlurmOptions,
   makeCalkitEnvKernelSourceCandidates,
   parseSlurmOptionList,
@@ -104,4 +105,29 @@ test("makeEnvironmentCandidates excludes texlive docker environments", () => {
   assert.ok(!candidates.some((c) => c.label === "slurmOuter:texliveDocker"));
   assert.ok(candidates.some((c) => c.label === "normalDocker"));
   assert.ok(candidates.some((c) => c.label === "slurmOuter:normalDocker"));
+});
+
+test("findCalkitEnvKernelSourceCandidate resolves standalone and nested names", () => {
+  const environments = {
+    slurmOuter: { kind: "slurm", host: "cluster.school.edu" },
+    juliaEnv: { kind: "julia", path: "Project.toml", julia: "1.11" },
+  };
+
+  const standalone = findCalkitEnvKernelSourceCandidate(
+    environments,
+    "juliaEnv",
+  );
+  const nested = findCalkitEnvKernelSourceCandidate(
+    environments,
+    "slurmOuter:juliaEnv",
+  );
+  const outerOnly = findCalkitEnvKernelSourceCandidate(
+    environments,
+    "slurmOuter",
+  );
+
+  assert.equal(standalone?.environmentName, "juliaEnv");
+  assert.equal(nested?.environmentName, "slurmOuter:juliaEnv");
+  assert.equal(nested?.outerSlurmEnvironment, "slurmOuter");
+  assert.equal(outerOnly, undefined);
 });

@@ -220,3 +220,12 @@ export function makeCalkitEnvKernelSourceCandidates(
 
   return [...standalone, ...nested];
 }
+
+export function findCalkitEnvKernelSourceCandidate(
+  environments: Record<string, CalkitEnvironment>,
+  environmentName: string,
+): CalkitEnvNotebookKernelSource | undefined {
+  return makeCalkitEnvKernelSourceCandidates(environments).find(
+    (candidate) => candidate.environmentName === environmentName,
+  );
+}

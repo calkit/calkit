@@ -211,10 +211,11 @@ Create a new Calkit object.
 | `publication`            | Create a new publication.                                                                                                     |
 | `conda-env`              | Create a new Conda environment.                                                                                               |
 | `uv-env`                 | Create a new uv project environment.                                                                                          |
+| `slurm-env`              | Create a new SLURM environment.                                                                                               |
 | `uv-venv`                | Create a new uv virtual environment.                                                                                          |
 | `venv`                   | Create a new Python virtual environment with venv.                                                                            |
 | `pixi-env`               | Create a new pixi virtual environment.                                                                                        |
-| `julia-env`              | Create a new Julia environment.                                                                                               |
+| `julia-env`              | Create a new Julia environment or add an existing one to calkit.yaml.                                                         |
 | `renv`                   | Create a new R environment with renv.                                                                                         |
 | `status`                 | Add a new project status to the log.                                                                                          |
 | `python-script-stage`    | Add a stage to the pipeline that runs a Python script.                                                                        |
@@ -508,6 +509,27 @@ Options:
 | `--no-check`     | boolean | no       | False   | Do not check environment is up-to-date after creation. |
 | `--no-commit`    | boolean | no       | False   | Do not commit changes.                                 |
 
+#### `calkit new slurm-env`
+
+Create a new SLURM environment.
+
+Usage:
+
+```text
+calkit new slurm-env [OPTIONS]
+```
+
+Options:
+
+| Option              | Type    | Required | Default   | Description                                                                            |
+| ------------------- | ------- | -------- | --------- | -------------------------------------------------------------------------------------- |
+| `--name`, `-n`      | text    | yes      |           | Environment name.                                                                      |
+| `--host`            | text    | no       | localhost | Host where SLURM commands should run.                                                  |
+| `--default-option`  | text    | no       |           | Default sbatch/srun option string (for example --gpus=1). Repeat for multiple options. |
+| `--description`     | text    | no       |           | Description.                                                                           |
+| `--overwrite`, `-f` | boolean | no       | False     | Overwrite any existing environment with this name.                                     |
+| `--no-commit`       | boolean | no       | False     | Do not commit changes.                                                                 |
+
 #### `calkit new uv-venv`
 
 Create a new uv virtual environment.
@@ -595,30 +617,31 @@ Options:
 
 #### `calkit new julia-env`
 
-Create a new Julia environment.
+Create a new Julia environment or add an existing one to calkit.yaml.
 
 Usage:
 
 ```text
-calkit new julia-env [OPTIONS] PACKAGES...
+calkit new julia-env [OPTIONS] [PACKAGES...]
 ```
 
 Arguments:
 
 | Argument   | Type | Required | Default | Description                             |
 | ---------- | ---- | -------- | ------- | --------------------------------------- |
-| `packages` | text | yes      |         | Packages to include in the environment. |
+| `packages` | text | no       |         | Packages to include in the environment. |
 
 Options:
 
-| Option              | Type    | Required | Default      | Description                                        |
-| ------------------- | ------- | -------- | ------------ | -------------------------------------------------- |
-| `--name`, `-n`      | text    | yes      |              | Environment name.                                  |
-| `--path`            | text    | no       | Project.toml | Path for Project.toml file.                        |
-| `--description`     | text    | no       |              | Description.                                       |
-| `--julia`, `-j`     | text    | no       | 1.11         | Julia version.                                     |
-| `--overwrite`, `-f` | boolean | no       | False        | Overwrite any existing environment with this name. |
-| `--no-commit`       | boolean | no       | False        | Do not commit changes.                             |
+| Option              | Type    | Required | Default | Description                                            |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------ |
+| `--name`, `-n`      | text    | no       | main    | Environment name.                                      |
+| `--path`            | text    | no       |         | Path for Project.toml file.                            |
+| `--description`     | text    | no       |         | Description.                                           |
+| `--julia`, `-j`     | text    | no       |         | Julia version. Auto-detected if not supplied.          |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.     |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes.                                 |
+| `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation. |
 
 #### `calkit new renv`
 
@@ -866,10 +889,11 @@ Create a new Calkit object (alias for 'new').
 | `publication`            | Create a new publication.                                                                                                     |
 | `conda-env`              | Create a new Conda environment.                                                                                               |
 | `uv-env`                 | Create a new uv project environment.                                                                                          |
+| `slurm-env`              | Create a new SLURM environment.                                                                                               |
 | `uv-venv`                | Create a new uv virtual environment.                                                                                          |
 | `venv`                   | Create a new Python virtual environment with venv.                                                                            |
 | `pixi-env`               | Create a new pixi virtual environment.                                                                                        |
-| `julia-env`              | Create a new Julia environment.                                                                                               |
+| `julia-env`              | Create a new Julia environment or add an existing one to calkit.yaml.                                                         |
 | `renv`                   | Create a new R environment with renv.                                                                                         |
 | `status`                 | Add a new project status to the log.                                                                                          |
 | `python-script-stage`    | Add a stage to the pipeline that runs a Python script.                                                                        |
@@ -1163,6 +1187,27 @@ Options:
 | `--no-check`     | boolean | no       | False   | Do not check environment is up-to-date after creation. |
 | `--no-commit`    | boolean | no       | False   | Do not commit changes.                                 |
 
+#### `calkit create slurm-env`
+
+Create a new SLURM environment.
+
+Usage:
+
+```text
+calkit create slurm-env [OPTIONS]
+```
+
+Options:
+
+| Option              | Type    | Required | Default   | Description                                                                            |
+| ------------------- | ------- | -------- | --------- | -------------------------------------------------------------------------------------- |
+| `--name`, `-n`      | text    | yes      |           | Environment name.                                                                      |
+| `--host`            | text    | no       | localhost | Host where SLURM commands should run.                                                  |
+| `--default-option`  | text    | no       |           | Default sbatch/srun option string (for example --gpus=1). Repeat for multiple options. |
+| `--description`     | text    | no       |           | Description.                                                                           |
+| `--overwrite`, `-f` | boolean | no       | False     | Overwrite any existing environment with this name.                                     |
+| `--no-commit`       | boolean | no       | False     | Do not commit changes.                                                                 |
+
 #### `calkit create uv-venv`
 
 Create a new uv virtual environment.
@@ -1250,30 +1295,31 @@ Options:
 
 #### `calkit create julia-env`
 
-Create a new Julia environment.
+Create a new Julia environment or add an existing one to calkit.yaml.
 
 Usage:
 
 ```text
-calkit create julia-env [OPTIONS] PACKAGES...
+calkit create julia-env [OPTIONS] [PACKAGES...]
 ```
 
 Arguments:
 
 | Argument   | Type | Required | Default | Description                             |
 | ---------- | ---- | -------- | ------- | --------------------------------------- |
-| `packages` | text | yes      |         | Packages to include in the environment. |
+| `packages` | text | no       |         | Packages to include in the environment. |
 
 Options:
 
-| Option              | Type    | Required | Default      | Description                                        |
-| ------------------- | ------- | -------- | ------------ | -------------------------------------------------- |
-| `--name`, `-n`      | text    | yes      |              | Environment name.                                  |
-| `--path`            | text    | no       | Project.toml | Path for Project.toml file.                        |
-| `--description`     | text    | no       |              | Description.                                       |
-| `--julia`, `-j`     | text    | no       | 1.11         | Julia version.                                     |
-| `--overwrite`, `-f` | boolean | no       | False        | Overwrite any existing environment with this name. |
-| `--no-commit`       | boolean | no       | False        | Do not commit changes.                             |
+| Option              | Type    | Required | Default | Description                                            |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------ |
+| `--name`, `-n`      | text    | no       | main    | Environment name.                                      |
+| `--path`            | text    | no       |         | Path for Project.toml file.                            |
+| `--description`     | text    | no       |         | Description.                                           |
+| `--julia`, `-j`     | text    | no       |         | Julia version. Auto-detected if not supplied.          |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.     |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes.                                 |
+| `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation. |
 
 #### `calkit create renv`
 
@@ -1573,6 +1619,7 @@ Options:
 | `--no-check`                   | boolean | no       | False   | Do not check environment before executing.                                      |
 | `--language`, `-l`             | text    | no       |         | Notebook language; if 'matlab', MATLAB kernel must be available in environment. |
 | `--verbose`, `-v`              | boolean | no       | False   | Print verbose output.                                                           |
+| `--json`                       | boolean | no       | False   | Output result as JSON.                                                          |
 
 #### `calkit nb execute`
 
@@ -1919,13 +1966,14 @@ Options:
 
 Update objects.
 
-| Command          | Description                                                                         |
-| ---------------- | ----------------------------------------------------------------------------------- |
-| `devcontainer`   | Update a project's devcontainer to match the latest Calkit spec.                    |
-| `license`        | Update license with a reasonable default (MIT for code, CC-BY-4.0 for other files). |
-| `release`        | Update a release.                                                                   |
-| `vscode-config`  | Update a project's VS Code config to match the latest Calkit recommendations.       |
-| `github-actions` | Update a project's GitHub Actions to match the latest Calkit recommendations.       |
+| Command          | Description                                                                                                                                                                                                              |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `devcontainer`   | Update a project's devcontainer to match the latest Calkit spec.                                                                                                                                                         |
+| `license`        | Update license with a reasonable default (MIT for code, CC-BY-4.0 for other files).                                                                                                                                      |
+| `release`        | Update a release.                                                                                                                                                                                                        |
+| `vscode-config`  | Update a project's VS Code config to match the latest Calkit recommendations.                                                                                                                                            |
+| `github-actions` | Update a project's GitHub Actions to match the latest Calkit recommendations.                                                                                                                                            |
+| `notebook`       | Update notebook information. Updates the notebook's environment association in either the 'notebooks' section or the appropriate 'pipeline' stage, depending on whether the notebook has a corresponding pipeline stage. |
 
 #### `calkit update devcontainer`
 
@@ -2016,6 +2064,29 @@ Options:
 | ------------- | ------- | -------- | ------- | ----------------------------------------------------------------- |
 | `--wdir`      | text    | no       |         | Working directory. By default will run current working directory. |
 | `--no-commit` | boolean | no       | False   | Do not create a Git commit for the updated GitHub Actions.        |
+
+#### `calkit update notebook`
+
+Update notebook information. Updates the notebook's environment association in either the 'notebooks' section or the appropriate 'pipeline' stage, depending on whether the notebook has a corresponding pipeline stage.
+
+Usage:
+
+```text
+calkit update notebook [OPTIONS] NOTEBOOK-PATH
+```
+
+Arguments:
+
+| Argument        | Type | Required | Default | Description                                       |
+| --------------- | ---- | -------- | ------- | ------------------------------------------------- |
+| `notebook_path` | text | yes      |         | Path to the notebook file (relative to workspace) |
+
+Options:
+
+| Option      | Type    | Required | Default | Description                                     |
+| ----------- | ------- | -------- | ------- | ----------------------------------------------- |
+| `--set-env` | text    | no       |         | Environment name to associate with the notebook |
+| `--json`    | boolean | no       | False   | Output result as JSON.                          |
 
 ### `calkit check`
 

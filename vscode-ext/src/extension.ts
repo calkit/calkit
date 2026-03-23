@@ -8,6 +8,7 @@ import * as vscode from "vscode";
 import YAML from "yaml";
 import {
   compactSlurmOptions,
+  findCalkitEnvKernelSourceCandidate,
   getDefaultSlurmOptions,
   makeCalkitEnvKernelSourceCandidates,
   slurmOptionsToOptionList,
@@ -384,7 +385,7 @@ async function selectCalkitEnvironment(
       break;
     }
 
-    await runCreateEnvironmentWizard(workspaceRoot);
+    picked = await runCreateNotebookEnvironmentCreationFlow(workspaceRoot);
   }
 
   if (!picked) {
@@ -725,34 +726,40 @@ async function saveNotebookEnvironmentSelection(
 
 async function runCreateEnvironmentWizard(
   workspaceRoot: string,
+  options?: {
+    includeSlurm?: boolean;
+    title?: string;
+    placeHolder?: string;
+  },
 ): Promise<string | undefined> {
   const config = (await readCalkitConfig(workspaceRoot)) ?? {};
   const environments = config.environments ?? {};
   for (;;) {
-    const kindPick = await vscode.window.showQuickPick(
-      [
-        {
-          label: "conda",
-          description: "Conda environment.yml-based environment",
-        },
-        {
-          label: "julia",
-          description: "Julia Project.toml-based environment",
-        },
-        {
-          label: "slurm",
-          description: "Remote SLURM scheduler environment",
-        },
-        {
-          label: "uv",
-          description: "uv pyproject.toml-based environment",
-        },
-      ],
+    const kindItems = [
       {
-        title: "Create Calkit environment",
-        placeHolder: "Pick environment kind",
+        label: "conda",
+        description: "Conda environment.yml-based environment",
       },
-    );
+      {
+        label: "julia",
+        description: "Julia Project.toml-based environment",
+      },
+      {
+        label: "uv",
+        description: "uv pyproject.toml-based environment",
+      },
+    ];
+    if (options?.includeSlurm ?? true) {
+      kindItems.splice(2, 0, {
+        label: "slurm",
+        description: "Remote SLURM scheduler environment",
+      });
+    }
+
+    const kindPick = await vscode.window.showQuickPick(kindItems, {
+      title: options?.title ?? "Create Calkit environment",
+      placeHolder: options?.placeHolder ?? "Pick environment kind",
+    });
     if (!kindPick) {
       return undefined;
     }
@@ -972,6 +979,61 @@ async function runCreateSlurmEnvironmentWizard(
   }
 
   return undefined;
+}
+
+async function runCreateNotebookEnvironmentCreationFlow(
+  workspaceRoot: string,
+): Promise<CalkitEnvNotebookKernelSource | undefined> {
+  let outerSlurmEnvironment: string | undefined;
+
+  for (;;) {
+    const createdEnvironmentName = await runCreateEnvironmentWizard(
+      workspaceRoot,
+      outerSlurmEnvironment
+        ? {
+            includeSlurm: false,
+            title: `Create inner environment for ${outerSlurmEnvironment}`,
+            placeHolder: "Pick an environment kind to run inside SLURM",
+          }
+        : undefined,
+    );
+
+    if (!createdEnvironmentName) {
+      return undefined;
+    }
+
+    const config = await readCalkitConfig(workspaceRoot);
+    if (!config) {
+      return undefined;
+    }
+
+    const environments = config.environments ?? {};
+    const createdEnvironment = environments[createdEnvironmentName];
+    if (!createdEnvironment) {
+      void vscode.window.showWarningMessage(
+        `Created environment '${createdEnvironmentName}' was not found in calkit.yaml.`,
+      );
+      return undefined;
+    }
+
+    if (createdEnvironment.kind === "slurm") {
+      outerSlurmEnvironment = createdEnvironmentName;
+      const nextAction = await vscode.window.showInformationMessage(
+        `Created SLURM environment '${createdEnvironmentName}'. Create an inner environment for notebook kernels now?`,
+        "Create Inner Environment",
+        "Back to Environment List",
+      );
+      if (nextAction === "Create Inner Environment") {
+        continue;
+      }
+      return undefined;
+    }
+
+    const environmentName = outerSlurmEnvironment
+      ? `${outerSlurmEnvironment}:${createdEnvironmentName}`
+      : createdEnvironmentName;
+    return findCalkitEnvKernelSourceCandidate(environments, environmentName);
+  }
 }
 
 async function runCreateJuliaEnvironmentWizard(

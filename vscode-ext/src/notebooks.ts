@@ -1,5 +1,5 @@
 import {
-  makeCalkitEnvKernelSourceCandidates,
+  findCalkitEnvKernelSourceCandidate,
   type CalkitEnvNotebookKernelSource,
 } from "./environments";
 import type { CalkitInfo, PipelineStage } from "./types";
@@ -72,7 +72,8 @@ export function getConfiguredCandidateForNotebookPath(
     return undefined;
   }
 
-  return makeCalkitEnvKernelSourceCandidates(info.environments ?? {}).find(
-    (candidate) => candidate.environmentName === environmentName,
+  return findCalkitEnvKernelSourceCandidate(
+    info.environments ?? {},
+    environmentName,
   );
 }

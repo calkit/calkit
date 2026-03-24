@@ -7,7 +7,13 @@ import subprocess
 import pytest
 
 import calkit
-from calkit.conda import _check_list, _check_single, check_env
+from calkit.conda import (
+    _check_list,
+    _check_single,
+    _get_pip_dependency_list,
+    _split_env_dependencies,
+    check_env,
+)
 
 ENV_NAME = "main"
 
@@ -36,6 +42,25 @@ def test_check_list():
     assert _check_list("python>=3", installed, env_spec_dir=".", conda=False)
     assert _check_list("numpy", installed, env_spec_dir=".", conda=False)
     assert not _check_list("pandas", installed, env_spec_dir=".", conda=False)
+
+
+def test_split_env_dependencies():
+    dependencies = [
+        "python=3.12",
+        "pip",
+        "numpy=2",
+        {"pip": ["sqlalchemy==2.0.39"]},
+    ]
+    conda_deps, pip_deps = _split_env_dependencies(dependencies)
+    assert conda_deps == ["python=3.12", "pip", "numpy=2"]
+    assert pip_deps == ["sqlalchemy==2.0.39"]
+
+
+def test_get_pip_dependency_list():
+    dependencies = ["python=3.12", "pip", {"pip": "sqlalchemy==2.0.39"}]
+    pip_deps = _get_pip_dependency_list(dependencies)
+    assert pip_deps == ["sqlalchemy==2.0.39"]
+    assert dependencies[-1]["pip"] == ["sqlalchemy==2.0.39"]
 
 
 def delete_env(name: str):

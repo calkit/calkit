@@ -149,13 +149,15 @@ def test_ensure_path_is_not_ignored_nested(tmp_dir):
 
 
 def test_ensure_path_is_not_ignored_nested_direct_path_rule(tmp_dir):
-    """Unignoring a directly ignored nested path should not add ancestors."""
+    """Unignoring a directly ignored nested path should only remove that
+    rule.
+    """
     repo = git.Repo.init()
-    target = "pubs/model/references.bib"
-    sibling = "pubs/model/paper.pdf"
+    target = "pubs/applied-ocean-research-model/references.bib"
+    sibling = "pubs/applied-ocean-research-model/paper.pdf"
     with open(".gitignore", "w") as f:
         f.write(f"{target}\n")
-    os.makedirs("pubs/model", exist_ok=True)
+    os.makedirs("pubs/applied-ocean-research-model", exist_ok=True)
     with open(target, "w") as f:
         f.write("@article{test}\n")
     with open(sibling, "w") as f:
@@ -163,18 +165,18 @@ def test_ensure_path_is_not_ignored_nested_direct_path_rule(tmp_dir):
     # Only the direct target path should be ignored initially
     assert repo.ignored(target)
     assert not repo.ignored(sibling)
-    result = calkit.git.ensure_path_is_not_ignored(repo, path=sibling)
-    assert result is None
+    result = calkit.git.ensure_path_is_not_ignored(repo, path=target)
+    assert result is True
     with open(".gitignore") as f:
         lines = f.read().splitlines()
-    # The direct rule should be removed with no recursive ancestor entries
-    assert target in lines
+    # Remove only the direct rule, with no recursive ancestor entries
+    assert target not in lines
     assert f"!{target}" not in lines
     assert "!pubs/" not in lines
     assert "pubs/*" not in lines
-    assert "!pubs/model/" not in lines
-    assert "pubs/model/*" not in lines
-    assert repo.ignored(target)
+    assert "!pubs/applied-ocean-research-model/" not in lines
+    assert "pubs/applied-ocean-research-model/*" not in lines
+    assert not repo.ignored(target)
     assert not repo.ignored(sibling)
 
 

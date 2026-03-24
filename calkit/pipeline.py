@@ -251,7 +251,7 @@ def to_dvc(
                     current_out_paths.add(out)
             # If this stage already existed, un-ignore any outputs that have
             # been renamed or removed so .gitignore does not accumulate stale
-            # entries (e.g., after a capitalisation change in the path).
+            # entries (e.g., after a capitalization change in the path)
             old_stage = _existing_dvc_stages.get(stage_name, {})
             for old_out in old_stage.get("outs", []):
                 if isinstance(old_out, str):

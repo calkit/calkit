@@ -120,9 +120,7 @@ def to_dvc(
     # Read existing dvc.yaml now so we can clean up stale .gitignore entries
     # when stage outputs are renamed or removed
     if write:
-        dvc_yaml_path = (
-            os.path.join(wdir, "dvc.yaml") if wdir else "dvc.yaml"
-        )
+        dvc_yaml_path = os.path.join(wdir, "dvc.yaml") if wdir else "dvc.yaml"
         if os.path.isfile(dvc_yaml_path):
             with open(dvc_yaml_path) as f:
                 _existing_dvc_yaml = calkit.ryaml.load(f)
@@ -263,9 +261,7 @@ def to_dvc(
                 else:
                     continue
                 if old_path not in current_out_paths:
-                    calkit.git.ensure_path_is_not_ignored(
-                        repo, path=old_path
-                    )
+                    calkit.git.ensure_path_is_not_ignored(repo, path=old_path)
             # Deal with any gitignore changes necessary
             for out in outputs:
                 if isinstance(out, PathOutput) and out.storage is None:

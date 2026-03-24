@@ -318,8 +318,8 @@ class OverleafSyncPaths:
         )
 
     @cached_property
-    def dvc_files_in_path(self) -> set[str]:
-        """Files tracked by DVC within the Overleaf project path.
+    def dvc_files(self) -> set[str]:
+        """Files tracked by DVC within the Overleaf project folder.
 
         These paths are relative to the project directory (i.e., relative to
         the Overleaf repo root). Files tracked by DVC may not exist on disk if
@@ -330,7 +330,7 @@ class OverleafSyncPaths:
             import calkit.dvc
 
             dvc_paths = calkit.dvc.list_paths(
-                wdir=self.main_repo.working_dir, recursive=True
+                wdir=str(self.main_repo.working_dir), recursive=True
             )
         except Exception as e:
             warnings.warn(f"Could not list DVC files: {e}")
@@ -357,7 +357,7 @@ class OverleafSyncPaths:
         return (
             set(self.files_to_copy_to_overleaf)
             | self.newly_added_on_overleaf
-            | self.dvc_files_in_path
+            | self.dvc_files
         )
 
     @cached_property

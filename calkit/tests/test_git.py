@@ -176,3 +176,22 @@ def test_ensure_path_is_not_ignored_nested_direct_path_rule(tmp_dir):
     assert "pubs/model/*" not in lines
     assert repo.ignored(target)
     assert not repo.ignored(sibling)
+
+
+def test_ensure_path_is_not_ignored_nested_gitignore_direct_path_rule(tmp_dir):
+    repo = git.Repo.init()
+    os.makedirs("paper", exist_ok=True)
+    target = "paper/main.pdf"
+    with open("paper/.gitignore", "w") as f:
+        f.write("/main.pdf\n")
+    with open(target, "w") as f:
+        f.write("pdf\n")
+    assert repo.ignored(target)
+    result = calkit.git.ensure_path_is_not_ignored(repo, path=target)
+    assert result is True
+    with open("paper/.gitignore") as f:
+        lines = f.read().splitlines()
+    assert "/main.pdf" not in lines
+    assert "!/main.pdf" not in lines
+    assert not os.path.exists(".gitignore")
+    assert not repo.ignored(target)

@@ -100,6 +100,30 @@ def _resolve_repo_and_ignore_path(
     return repo, rel_path
 
 
+def _get_matching_gitignore_details(
+    repo: git.Repo, path: str
+) -> tuple[Path | None, str | None]:
+    """Return the repo-local gitignore file and pattern matching ``path``."""
+    try:
+        check_ignore = repo.git.check_ignore("-v", "--", path)
+    except git.GitCommandError:
+        return None, None
+    line = check_ignore.splitlines()[0]
+    try:
+        source_info, _ = line.split("\t", 1)
+        source_path, _, pattern = source_info.rsplit(":", 2)
+    except ValueError:
+        return None, None
+    if not source_path.endswith(".gitignore"):
+        return None, pattern
+    gitignore_path = (Path(repo.working_dir) / source_path).resolve()
+    try:
+        gitignore_path.relative_to(Path(repo.working_dir).resolve())
+    except ValueError:
+        return None, pattern
+    return gitignore_path, pattern
+
+
 def ensure_path_is_ignored(
     repo: git.Repo, path: str | PathLike
 ) -> None | bool:
@@ -141,16 +165,33 @@ def ensure_path_is_not_ignored(
     # No-op if Git does not ignore this path.
     if not target_repo.ignored(target_path):
         return
-    gitignore_path = os.path.join(target_repo.working_dir, ".gitignore")
+    matching_gitignore_path, matched_pattern = _get_matching_gitignore_details(
+        target_repo, target_path
+    )
+    if matching_gitignore_path is not None:
+        gitignore_path = matching_gitignore_path.as_posix()
+        path_for_gitignore = (
+            (Path(target_repo.working_dir) / target_path)
+            .resolve()
+            .relative_to(matching_gitignore_path.parent.resolve())
+            .as_posix()
+        )
+    else:
+        gitignore_path = os.path.join(target_repo.working_dir, ".gitignore")
+        path_for_gitignore = target_path
     if not os.path.isfile(gitignore_path):
         with open(gitignore_path, "w") as f:
-            f.write(f"!{target_path}\n")
+            f.write(f"!{path_for_gitignore}\n")
         return True
     with open(gitignore_path) as f:
         gitignore_txt = f.read()
     lines = gitignore_txt.splitlines()
-    no_ignore_line = f"!{target_path}"
-    path_parts = Path(target_path).parts
+    direct_rule_variants = [path_for_gitignore, f"/{path_for_gitignore}"]
+    if matched_pattern is not None and matched_pattern.startswith("/"):
+        no_ignore_line = f"!/{path_for_gitignore}"
+    else:
+        no_ignore_line = f"!{path_for_gitignore}"
+    path_parts = Path(path_for_gitignore).parts
 
     def ancestor_requires_recursive_unignore() -> bool:
         """Return True when an ancestor directory is explicitly ignored."""
@@ -158,8 +199,11 @@ def ensure_path_is_not_ignored(
             ancestor = "/".join(path_parts[:i])
             if (
                 ancestor in lines
+                or f"/{ancestor}" in lines
                 or f"{ancestor}/" in lines
+                or f"/{ancestor}/" in lines
                 or f"{ancestor}/*" in lines
+                or f"/{ancestor}/*" in lines
             ):
                 return True
         return False
@@ -167,8 +211,11 @@ def ensure_path_is_not_ignored(
     if len(path_parts) == 1:
         # Simple (non-nested) path: remove the direct ignore rule, or add a
         # negation if the ignore comes from a glob or other pattern
-        if target_path in lines:
-            lines.remove(target_path)
+        direct_rule = next(
+            (rule for rule in direct_rule_variants if rule in lines), None
+        )
+        if direct_rule is not None:
+            lines.remove(direct_rule)
         elif no_ignore_line not in lines:
             lines.append(no_ignore_line)
     else:
@@ -177,8 +224,11 @@ def ensure_path_is_not_ignored(
         # Otherwise, remove a direct ignore
         # rule for this path or add a simple negation if needed
         removed_direct_rule = False
-        if target_path in lines:
-            lines.remove(target_path)
+        direct_rule = next(
+            (rule for rule in direct_rule_variants if rule in lines), None
+        )
+        if direct_rule is not None:
+            lines.remove(direct_rule)
             removed_direct_rule = True
         if ancestor_requires_recursive_unignore():
             # Git will not traverse into a directory excluded by a "dir/"
@@ -196,15 +246,29 @@ def ensure_path_is_not_ignored(
                 if f"{ancestor}/" in lines:
                     idx = lines.index(f"{ancestor}/")
                     lines[idx] = reignore_glob
+                elif f"/{ancestor}/" in lines:
+                    idx = lines.index(f"/{ancestor}/")
+                    lines[idx] = f"/{ancestor}/*"
                 elif ancestor in lines:
                     idx = lines.index(ancestor)
                     lines[idx] = reignore_glob
+                elif f"/{ancestor}" in lines:
+                    idx = lines.index(f"/{ancestor}")
+                    lines[idx] = f"/{ancestor}/*"
                 no_ignore_dir = f"!{ancestor}/"
+                anchored_no_ignore_dir = f"!/{ancestor}/"
                 # The first ancestor does not need an explicit un-ignore once
                 # converted to "ancestor/*". Deeper ancestors do.
-                if i > 1 and no_ignore_dir not in lines:
+                if (
+                    i > 1
+                    and no_ignore_dir not in lines
+                    and anchored_no_ignore_dir not in lines
+                ):
                     lines.append(no_ignore_dir)
-                if reignore_glob not in lines:
+                if (
+                    reignore_glob not in lines
+                    and f"/{ancestor}/*" not in lines
+                ):
                     lines.append(reignore_glob)
             if no_ignore_line not in lines:
                 lines.append(no_ignore_line)

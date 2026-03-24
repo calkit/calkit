@@ -241,14 +241,15 @@ def to_dvc(
                 outputs += stage.notebook_outputs
             elif stage.kind == "sbatch":
                 outputs.append(stage.log_output)
-            # Build the set of current output paths so we can detect stale
-            # .gitignore entries from the previous version of the stage
+            # Build the set of current DVC output paths so we can detect stale
+            # .gitignore entries from the previous version of the stage,
+            # including synthesized outputs like LaTeX PDFs
             current_out_paths = set()
-            for out in outputs:
-                if isinstance(out, PathOutput):
-                    current_out_paths.add(out.path)
-                elif isinstance(out, str):
+            for out in dvc_stage.get("outs", []):
+                if isinstance(out, str):
                     current_out_paths.add(out)
+                elif isinstance(out, dict):
+                    current_out_paths.add(list(out.keys())[0])
             # If this stage already existed, un-ignore any outputs that have
             # been renamed or removed so .gitignore does not accumulate stale
             # entries (e.g., after a capitalization change in the path)

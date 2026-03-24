@@ -1,5 +1,6 @@
 """Tests for ``calkit.pipeline``."""
 
+import os
 import subprocess
 
 import git
@@ -653,9 +654,12 @@ def test_shell_script_stage_allows_non_composite_slurm_env():
 
 
 def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
-    """When a stage output path is renamed (e.g., from a capitalization change) the
-    old path should be removed from .gitignore and the new path should be
-    added.
+    """When a stage output path is renamed, stale .gitignore entries are
+    replaced.
+
+    Use the .gitignore contents for verification because case-only renames can
+    still appear ignored on case-insensitive filesystems like the default macOS
+    setup.
     """
     subprocess.check_call(["calkit", "init"])
     # Stage 1: initial calkit.yaml with output 'b_sparsity_plot.pdf' stored in DVC
@@ -682,6 +686,9 @@ def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
     # Verify DVC has added the old output path to .gitignore
     repo = git.Repo(".")
     assert repo.ignored("b_sparsity_plot.pdf")
+    with open(".gitignore") as f:
+        lines = f.read().splitlines()
+    assert "/b_sparsity_plot.pdf" in lines
     # Stage 2: rename output (capitalization change) to 'B_sparsity_plot.pdf'
     ck_info["pipeline"]["stages"]["plot"]["command"] = (
         "touch B_sparsity_plot.pdf"
@@ -692,6 +699,52 @@ def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     subprocess.check_call(["calkit", "run"])
-    # Old (stale) path should no longer be ignored by git
-    assert not repo.ignored("b_sparsity_plot.pdf")
+    with open(".gitignore") as f:
+        lines = f.read().splitlines()
+    assert "/b_sparsity_plot.pdf" not in lines
+    assert "/B_sparsity_plot.pdf" in lines
     assert repo.ignored("B_sparsity_plot.pdf")
+
+
+def test_gitignore_not_unignored_latex_pdf_output(tmp_dir):
+    repo = git.Repo.init()
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("paper", exist_ok=True)
+    with open("paper/.gitignore", "w") as f:
+        f.write("/main.pdf\n")
+    ck_info = {
+        "environments": {
+            "tex": {
+                "kind": "conda",
+                "path": "environment.yaml",
+            }
+        },
+        "pipeline": {
+            "stages": {
+                "build-paper": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "paper/main.tex",
+                    "force": True,
+                    "inputs": [
+                        "paper/references.bib",
+                        "paper/aasjournal.bst",
+                        "paper/aastex631.cls",
+                        "paper/results.tex",
+                        "paper/diagrams",
+                        "paper/figures",
+                    ],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert not os.path.exists(".gitignore")
+    assert repo.ignored("paper/main.pdf")
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert not os.path.exists(".gitignore")
+    with open("paper/.gitignore") as f:
+        assert f.read().splitlines() == ["/main.pdf"]
+    assert repo.ignored("paper/main.pdf")

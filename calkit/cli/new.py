@@ -2523,6 +2523,18 @@ def new_release(
     repo = git.Repo()
     if name in repo.tags:
         raise_error(f"Git tag with name '{name}' already exists")
+    typer.echo("Checking pipeline reproducibility for release")
+    if dry_run:
+        typer.echo("Would run: calkit run")
+        if path != ".":
+            typer.echo(f"Would run: calkit run --output {path}")
+    else:
+        try:
+            calkit.releases.check_release_reproducibility(
+                path=path, verbose=verbose
+            )
+        except Exception as e:
+            raise_error(str(e))
     release_dir = f".calkit/releases/{name}"
     release_files_dir = release_dir + "/files"
     os.makedirs(release_files_dir, exist_ok=True)
@@ -2545,6 +2557,16 @@ def new_release(
         with zipfile.ZipFile(zip_path, "w") as zipf:
             for fpath in all_paths:
                 zipf.write(fpath)
+        typer.echo("Validating extracted project release archive")
+        if dry_run:
+            typer.echo(f"Would validate extracted archive: {zip_path}")
+        else:
+            try:
+                calkit.releases.check_project_release_archive(
+                    zip_path, verbose=verbose
+                )
+            except Exception as e:
+                raise_error(str(e))
         title = ck_info.get("title")
         if title is None:
             warn("Project has no title")

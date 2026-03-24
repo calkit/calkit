@@ -5,6 +5,10 @@ https://github.com/citation-file-format/citation-file-format
 """
 
 import os
+import subprocess
+import sys
+import tempfile
+import zipfile
 from typing import Literal
 
 import git
@@ -171,3 +175,77 @@ def populate_dvc_cache():
                     print(zip_fpath)
                 # Extract out of ZIP file if necessary
                 # TODO: Check MD5 before inserting into the cache
+
+
+def check_release_reproducibility(
+    path: str = ".", verbose: bool = False
+) -> None:
+    """Ensure release content is reproducible from the pipeline.
+
+    This always runs the full project pipeline first from the main project
+    root. For non-project releases, it then runs a targeted output check for
+    the artifact path, still from the main project root.
+    """
+    ck_info = calkit.load_calkit_info()
+    has_pipeline = bool(ck_info.get("pipeline")) or os.path.isfile("dvc.yaml")
+    if not has_pipeline:
+        return
+    cmd = [sys.executable, "-m", "calkit", "run"]
+    if verbose:
+        cmd.append("--verbose")
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(
+            "Pipeline is not reproducible: `calkit run` failed"
+        ) from e
+    if path != ".":
+        cmd = [sys.executable, "-m", "calkit", "run", "--output", path]
+        if verbose:
+            cmd.append("--verbose")
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                "Pipeline is not reproducible for release artifact: "
+                f"`calkit run --output {path}` failed"
+            ) from e
+
+
+def check_project_release_archive(
+    zip_path: str, verbose: bool = False
+) -> None:
+    """Ensure an extracted project release archive is already up-to-date."""
+    from calkit.cli.main.core import run as run_pipeline
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with zipfile.ZipFile(zip_path) as zipf:
+            zipf.extractall(tmpdir)
+        ck_info = calkit.load_calkit_info(wdir=tmpdir)
+        has_pipeline = bool(ck_info.get("pipeline")) or os.path.isfile(
+            os.path.join(tmpdir, "dvc.yaml")
+        )
+        if not has_pipeline:
+            return
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            result = run_pipeline(quiet=not verbose, verbose=verbose)
+        except Exception as e:
+            raise RuntimeError(
+                "Released project archive failed reproducibility check: "
+                f"{e}"
+            ) from e
+        finally:
+            os.chdir(cwd)
+    stage_run_info = result.get("stage_run_info", {})
+    ran_stages = [
+        name
+        for name, info in stage_run_info.items()
+        if info.get("status") not in [None, "skipped"]
+    ]
+    if ran_stages:
+        raise RuntimeError(
+            "Released project archive is not up-to-date; these stages ran: "
+            + ", ".join(ran_stages)
+        )

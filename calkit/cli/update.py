@@ -156,6 +156,13 @@ def update_release(
     record_id = release.get("record_id")
     if record_id is None:
         raise_error("Release has no record ID")
+    if publish or reupload:
+        typer.echo("Checking pipeline reproducibility for release update")
+        path = release.get("path", ".")
+        try:
+            calkit.releases.check_release_reproducibility(path=path)
+        except Exception as e:
+            raise_error(str(e))
     if publish:
         try:
             calkit.invenio.post(
@@ -247,6 +254,11 @@ def update_release(
         with zipfile.ZipFile(zip_path, "w") as zipf:
             for fpath in all_paths:
                 zipf.write(fpath)
+        typer.echo("Checking project release archive")
+        try:
+            calkit.releases.check_project_release_archive(zip_path)
+        except Exception as e:
+            raise_error(str(e))
         try:
             files_in_record = [
                 entry["key"]

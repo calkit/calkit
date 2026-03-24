@@ -216,7 +216,11 @@ def ensure_path_is_not_ignored(
         )
         if direct_rule is not None:
             lines.remove(direct_rule)
-        elif no_ignore_line not in lines:
+        else:
+            # Remove any stale negation and re-append at the end so it takes
+            # precedence over any later re-ignore rule
+            if no_ignore_line in lines:
+                lines.remove(no_ignore_line)
             lines.append(no_ignore_line)
     else:
         # Nested path: only apply recursive un-ignore rules when an ancestor
@@ -259,21 +263,28 @@ def ensure_path_is_not_ignored(
                 anchored_no_ignore_dir = f"!/{ancestor}/"
                 # The first ancestor does not need an explicit un-ignore once
                 # converted to "ancestor/*". Deeper ancestors do.
-                if (
-                    i > 1
-                    and no_ignore_dir not in lines
-                    and anchored_no_ignore_dir not in lines
-                ):
+                if i > 1:
+                    # Remove stale entry and re-append so it takes precedence
+                    if no_ignore_dir in lines:
+                        lines.remove(no_ignore_dir)
+                    elif anchored_no_ignore_dir in lines:
+                        lines.remove(anchored_no_ignore_dir)
                     lines.append(no_ignore_dir)
                 if (
                     reignore_glob not in lines
                     and f"/{ancestor}/*" not in lines
                 ):
                     lines.append(reignore_glob)
-            if no_ignore_line not in lines:
-                lines.append(no_ignore_line)
-        elif not removed_direct_rule and no_ignore_line not in lines:
-            # The path may be ignored by a non-directory pattern (e.g., glob)
+            # Remove stale negation and re-append at the end so it takes
+            # precedence over any later re-ignore rule
+            if no_ignore_line in lines:
+                lines.remove(no_ignore_line)
+            lines.append(no_ignore_line)
+        elif not removed_direct_rule:
+            # The path may be ignored by a non-directory pattern (e.g., glob);
+            # remove stale negation and append at end so it takes precedence
+            if no_ignore_line in lines:
+                lines.remove(no_ignore_line)
             lines.append(no_ignore_line)
     with open(gitignore_path, "w") as f:
         f.write(os.linesep.join(lines))

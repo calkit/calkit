@@ -151,46 +151,65 @@ def ensure_path_is_not_ignored(
     lines = gitignore_txt.splitlines()
     no_ignore_line = f"!{target_path}"
     path_parts = Path(target_path).parts
+
+    def ancestor_requires_recursive_unignore() -> bool:
+        """Return True when an ancestor directory is explicitly ignored."""
+        for i in range(1, len(path_parts)):
+            ancestor = "/".join(path_parts[:i])
+            if (
+                ancestor in lines
+                or f"{ancestor}/" in lines
+                or f"{ancestor}/*" in lines
+            ):
+                return True
+        return False
+
     if len(path_parts) == 1:
         # Simple (non-nested) path: remove the direct ignore rule, or add a
-        # negation if the ignore comes from a glob or other pattern.
+        # negation if the ignore comes from a glob or other pattern
         if target_path in lines:
             lines.remove(target_path)
         elif no_ignore_line not in lines:
             lines.append(no_ignore_line)
     else:
-        # Nested path: Git will not traverse into a directory excluded by a
-        # "dir/" pattern, so a bare "!dir/sub/file" negation has no effect.
-        # We need to:
-        #   1. Convert any "ancestor/" (or "ancestor") exclude to "ancestor/*"
-        #      so that git traverses the directory while still ignoring its
-        #      direct children by default.
-        #   2. Add "!ancestor/" un-ignore rules for each intermediate directory
-        #      so git recurses into them.
-        #   3. Add "ancestor/*" re-ignore rules so that only explicitly
-        #      un-ignored files within each intermediate directory are tracked.
-        #   4. Add the final "!target_path" negation for the specific file.
+        # Nested path: only apply recursive un-ignore rules when an ancestor
+        # directory is explicitly ignored
+        # Otherwise, remove a direct ignore
+        # rule for this path or add a simple negation if needed
+        removed_direct_rule = False
         if target_path in lines:
             lines.remove(target_path)
-        for i in range(1, len(path_parts)):
-            ancestor = "/".join(path_parts[:i])
-            reignore_glob = f"{ancestor}/*"
-            # Convert a directory-exclude pattern to a glob so git traverses it
-            if f"{ancestor}/" in lines:
-                idx = lines.index(f"{ancestor}/")
-                lines[idx] = reignore_glob
-            elif ancestor in lines:
-                idx = lines.index(ancestor)
-                lines[idx] = reignore_glob
-            # Un-ignore this intermediate directory so git recurses into it
-            no_ignore_dir = f"!{ancestor}/"
-            if no_ignore_dir not in lines:
-                lines.append(no_ignore_dir)
-            # Re-ignore everything inside this intermediate directory so that
-            # only explicitly un-ignored entries are tracked
-            if reignore_glob not in lines:
-                lines.append(reignore_glob)
-        if no_ignore_line not in lines:
+            removed_direct_rule = True
+        if ancestor_requires_recursive_unignore():
+            # Git will not traverse into a directory excluded by a "dir/"
+            # pattern, so a bare "!dir/sub/file" negation has no effect.
+            # We need to:
+            #   1. Convert any "ancestor/" (or "ancestor") exclude to
+            #      "ancestor/*" so git traverses the directory while still
+            #      ignoring direct children by default.
+            #   2. Add "!ancestor/" rules for intermediate directories.
+            #   3. Add "ancestor/*" re-ignore rules for each intermediate dir.
+            #   4. Add "!target_path" for the specific file.
+            for i in range(1, len(path_parts)):
+                ancestor = "/".join(path_parts[:i])
+                reignore_glob = f"{ancestor}/*"
+                if f"{ancestor}/" in lines:
+                    idx = lines.index(f"{ancestor}/")
+                    lines[idx] = reignore_glob
+                elif ancestor in lines:
+                    idx = lines.index(ancestor)
+                    lines[idx] = reignore_glob
+                no_ignore_dir = f"!{ancestor}/"
+                # The first ancestor does not need an explicit un-ignore once
+                # converted to "ancestor/*". Deeper ancestors do.
+                if i > 1 and no_ignore_dir not in lines:
+                    lines.append(no_ignore_dir)
+                if reignore_glob not in lines:
+                    lines.append(reignore_glob)
+            if no_ignore_line not in lines:
+                lines.append(no_ignore_line)
+        elif not removed_direct_rule and no_ignore_line not in lines:
+            # The path may be ignored by a non-directory pattern (e.g., glob)
             lines.append(no_ignore_line)
     with open(gitignore_path, "w") as f:
         f.write(os.linesep.join(lines))

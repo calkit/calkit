@@ -1,6 +1,7 @@
 """Tests for the ``conda`` module."""
 
 import os
+import shutil
 import subprocess
 
 import pytest
@@ -262,7 +263,7 @@ def test_check_prefix_env(tmp_dir, conda_env_prefix):
     )
 
 
-def test_check_editable(tmp_dir, conda_env_name):
+def test_check_env_editable(tmp_dir, conda_env_name):
     subprocess.check_call(["calkit", "init"])
     # Create a dummy package named 'src' to install in editable mode
     os.makedirs("src", exist_ok=True)
@@ -306,6 +307,50 @@ setup(
         lock = calkit.ryaml.load(f)
     pip_deps = lock["dependencies"][-1]["pip"]
     assert "-e ." in pip_deps
+    # Now let's make sure we get proper output if the editable package is
+    # has an invalid pyproject.toml
+    os.remove("setup.py")
+    shutil.rmtree("src.egg-info")
+    toml_txt = """[build-system]
+requires = ["setuptools>=61.0.0", "wheel", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "src-thing"
+dynamic = ["version"]
+authors = [
+  {name = "Someone"}
+]
+description = "Test"
+
+dependencies = [
+    "numpy>=1.21",
+    "scipy>=1.7",
+    "pandas>=1.5",
+    "matplotlib>=3.5",
+    "h5netcdf>=0.12",
+    "h5py>=3.0",
+    "xarray>=2023.0",
+    "streamlit>=1.0"
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["src-thing"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"src-thing" = [] # Explicitly state no package data
+
+[tool.setuptools_scm]
+local_scheme = "no-local-version"
+fallback_version = "0+unknown"
+"""
+    with open("pyproject.toml", "w") as f:
+        f.write(toml_txt)
+    res = check_env()
 
 
 def test_find_conda_exe():

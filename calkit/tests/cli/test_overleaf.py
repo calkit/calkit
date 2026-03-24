@@ -181,7 +181,7 @@ def test_overleaf(tmp_dir):
     subprocess.run(["calkit", "overleaf", "sync", "--verbose"], check=True)
     print("Overleaf Git show after adding fig2 back:", ol_repo.git.show())
     assert "ol-project/figs/fig2.txt" in ls_files(repo)
-    # Test that if a file is deleted from Git but added to DVC, it is NOT
+    # Test that if a file is deleted from Git but added to DVC, it is not
     # deleted from Overleaf (the file still logically exists in the DVC repo)
     with open(
         os.path.join(repo.working_dir, "ol-project", "figs", "fig3.txt"), "w"
@@ -216,7 +216,7 @@ def test_overleaf(tmp_dir):
     subprocess.run(["calkit", "overleaf", "sync", "--verbose"], check=True)
     ol_repo_git_show = ol_repo.git.show()
     print("Git show in OL repo after moving fig3 to DVC:\n", ol_repo_git_show)
-    # The file should NOT have been deleted from Overleaf
+    # The file should not have been deleted from Overleaf
     assert "deleted file mode" not in ol_repo_git_show
     assert "--- a/figs/fig3.txt" not in ol_repo_git_show
 

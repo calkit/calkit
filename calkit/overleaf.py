@@ -318,15 +318,46 @@ class OverleafSyncPaths:
         )
 
     @cached_property
+    def dvc_files(self) -> set[str]:
+        """Files tracked by DVC within the Overleaf project folder.
+
+        These paths are relative to the project directory (i.e., relative to
+        the Overleaf repo root). Files tracked by DVC may not exist on disk if
+        they haven't been pulled, but should still be kept on Overleaf rather
+        than deleted.
+        """
+        try:
+            import calkit.dvc
+
+            dvc_paths = calkit.dvc.list_paths(
+                wdir=str(self.main_repo.working_dir), recursive=True
+            )
+        except Exception as e:
+            warnings.warn(f"Could not list DVC files: {e}")
+            return set()
+        prefix = Path(self.path_in_project).as_posix().rstrip("/") + "/"
+        result = set()
+        for p in dvc_paths:
+            p_posix = Path(p).as_posix()
+            if p_posix.startswith(prefix):
+                result.add(p_posix[len(prefix) :])
+        return result
+
+    @cached_property
     def files_to_keep_on_overleaf(self) -> set[str]:
         """Files that should be preserved on Overleaf.
 
         This includes:
         1. All files being copied from local
         2. Any files newly added on Overleaf since last sync
+        3. Any files tracked by DVC within the project path (these may not
+           exist on disk if not pulled, but should not be deleted from
+           Overleaf)
         """
         return (
-            set(self.files_to_copy_to_overleaf) | self.newly_added_on_overleaf
+            set(self.files_to_copy_to_overleaf)
+            | self.newly_added_on_overleaf
+            | self.dvc_files
         )
 
     @cached_property

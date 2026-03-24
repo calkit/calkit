@@ -657,7 +657,7 @@ def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
     old path should be removed from .gitignore and the new path should be
     added.
     """
-    git.Repo.init()
+    subprocess.check_call(["calkit", "init"])
     # Stage 1: initial calkit.yaml with output 'b_sparsity_plot.pdf' stored in DVC
     ck_info = {
         "pipeline": {
@@ -665,7 +665,7 @@ def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
                 "plot": {
                     "kind": "command",
                     "environment": "_system",
-                    "command": "echo hi",
+                    "command": "touch b_sparsity_plot.pdf",
                     "outputs": [
                         {
                             "path": "b_sparsity_plot.pdf",
@@ -678,18 +678,18 @@ def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
-    # Simulate DVC having added the output to .gitignore when the stage ran
-    with open(".gitignore", "w") as f:
-        f.write("b_sparsity_plot.pdf\n")
+    subprocess.check_call(["calkit", "check", "pipeline", "-c"])
+    # Run the pipeline so DVC actually creates the output and adds it to .gitignore
+    subprocess.check_call(["dvc", "repro"])
+    # Verify DVC has added the old output path to .gitignore
+    repo = git.Repo(".")
+    assert repo.ignored("b_sparsity_plot.pdf")
     # Stage 2: rename output (capitalization change) to 'B_sparsity_plot.pdf'
     ck_info["pipeline"]["stages"]["plot"]["outputs"] = [
         {"path": "B_sparsity_plot.pdf", "storage": "dvc"}
     ]
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
-    with open(".gitignore") as f:
-        gi2 = f.read().splitlines()
-    # Old (stale) path should no longer be ignored
-    assert "b_sparsity_plot.pdf" not in gi2
+    subprocess.check_call(["calkit", "check", "pipeline", "-c"])
+    # Old (stale) path should no longer be ignored by git
+    assert not repo.ignored("b_sparsity_plot.pdf")

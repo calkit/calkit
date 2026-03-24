@@ -158,9 +158,8 @@ def update_release(
         raise_error("Release has no record ID")
     if publish or reupload:
         typer.echo("Checking pipeline reproducibility for release update")
-        path = release.get("path", ".")
         try:
-            calkit.releases.check_release_reproducibility(path=path)
+            calkit.releases.check_release_reproducibility()
         except Exception as e:
             raise_error(str(e))
     if publish:

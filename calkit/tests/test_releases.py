@@ -52,7 +52,7 @@ def test_ls_files(tmp_dir):
     assert "submodule/submodule-file.txt" in files
 
 
-def test_check_release_reproducibility_targets_artifact_from_root(
+def test_check_release_reproducibility_runs_from_project_root(
     tmp_dir, monkeypatch
 ):
     subprocess.run(["calkit", "init"], check=True)
@@ -68,20 +68,9 @@ def test_check_release_reproducibility_targets_artifact_from_root(
 
     monkeypatch.setattr("calkit.releases.subprocess.run", fake_run)
 
-    check_release_reproducibility("pubs/paper.pdf", verbose=True)
+    check_release_reproducibility(verbose=True)
 
-    assert calls == [
-        [sys.executable, "-m", "calkit", "run", "--verbose"],
-        [
-            sys.executable,
-            "-m",
-            "calkit",
-            "run",
-            "--output",
-            "pubs/paper.pdf",
-            "--verbose",
-        ],
-    ]
+    assert calls == [[sys.executable, "-m", "calkit", "run", "--verbose"]]
 
 
 def test_check_project_release_archive_passes_when_only_skipped_stages(

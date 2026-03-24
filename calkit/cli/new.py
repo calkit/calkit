@@ -2526,13 +2526,9 @@ def new_release(
     typer.echo("Checking pipeline reproducibility for release")
     if dry_run:
         typer.echo("Would run: calkit run")
-        if path != ".":
-            typer.echo(f"Would run: calkit run --output {path}")
     else:
         try:
-            calkit.releases.check_release_reproducibility(
-                path=path, verbose=verbose
-            )
+            calkit.releases.check_release_reproducibility(verbose=verbose)
         except Exception as e:
             raise_error(str(e))
     release_dir = f".calkit/releases/{name}"

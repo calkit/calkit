@@ -177,14 +177,10 @@ def populate_dvc_cache():
                 # TODO: Check MD5 before inserting into the cache
 
 
-def check_release_reproducibility(
-    path: str = ".", verbose: bool = False
-) -> None:
+def check_release_reproducibility(verbose: bool = False) -> None:
     """Ensure release content is reproducible from the pipeline.
 
-    This always runs the full project pipeline first from the main project
-    root. For non-project releases, it then runs a targeted output check for
-    the artifact path, still from the main project root.
+    This always runs the full project pipeline from the main project root.
     """
     ck_info = calkit.load_calkit_info()
     has_pipeline = bool(ck_info.get("pipeline")) or os.path.isfile("dvc.yaml")
@@ -199,17 +195,6 @@ def check_release_reproducibility(
         raise RuntimeError(
             "Pipeline is not reproducible: `calkit run` failed"
         ) from e
-    if path != ".":
-        cmd = [sys.executable, "-m", "calkit", "run", "--output", path]
-        if verbose:
-            cmd.append("--verbose")
-        try:
-            subprocess.run(cmd, check=True)
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError(
-                "Pipeline is not reproducible for release artifact: "
-                f"`calkit run --output {path}` failed"
-            ) from e
 
 
 def check_project_release_archive(

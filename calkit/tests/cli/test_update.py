@@ -44,8 +44,8 @@ def test_update_release_publish_checks_reproducibility(tmp_path, monkeypatch):
     _init_release_project(tmp_path, monkeypatch)
     check_calls = []
 
-    def _fake_check(path=".", verbose=False):
-        check_calls.append((path, verbose))
+    def _fake_check(verbose=False):
+        check_calls.append(verbose)
 
     monkeypatch.setattr(
         calkit.releases, "check_release_reproducibility", _fake_check
@@ -57,7 +57,7 @@ def test_update_release_publish_checks_reproducibility(tmp_path, monkeypatch):
         no_github=True,
         no_push_tags=True,
     )
-    assert check_calls == [(".", False)]
+    assert check_calls == [False]
     assert "v0.1.0" in [tag.name for tag in git.Repo().tags]
 
 
@@ -65,8 +65,8 @@ def test_update_release_reupload_checks_reproducibility(tmp_path, monkeypatch):
     _init_release_project(tmp_path, monkeypatch)
     check_calls = []
 
-    def _fake_check(path=".", verbose=False):
-        check_calls.append((path, verbose))
+    def _fake_check(verbose=False):
+        check_calls.append(verbose)
 
     class _Resp:
         status_code = 200
@@ -93,7 +93,7 @@ def test_update_release_reupload_checks_reproducibility(tmp_path, monkeypatch):
     monkeypatch.setattr(calkit.invenio, "delete", lambda *args, **kwargs: None)
     monkeypatch.setattr(calkit.invenio, "put", lambda *args, **kwargs: _Resp())
     update_release(name="v0.1.0", reupload=True)
-    assert check_calls == [(".", False)]
+    assert check_calls == [False]
     assert archive_checks == [
         (
             ".calkit/releases/v0.1.0/files/archive.zip",

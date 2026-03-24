@@ -683,7 +683,9 @@ def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
     repo = git.Repo(".")
     assert repo.ignored("b_sparsity_plot.pdf")
     # Stage 2: rename output (capitalization change) to 'B_sparsity_plot.pdf'
-    ck_info["pipeline"]["stages"]["plot"]["command"] = "touch B_sparsity_plot.pdf"
+    ck_info["pipeline"]["stages"]["plot"]["command"] = (
+        "touch B_sparsity_plot.pdf"
+    )
     ck_info["pipeline"]["stages"]["plot"]["outputs"] = [
         {"path": "B_sparsity_plot.pdf", "storage": "dvc"}
     ]

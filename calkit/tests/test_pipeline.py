@@ -2,8 +2,10 @@
 
 import subprocess
 
+import git
 import pytest
 
+import calkit
 import calkit.pipeline
 from calkit.environments import get_env_lock_fpath
 from calkit.pipeline import stages_are_similar
@@ -648,3 +650,48 @@ def test_shell_script_stage_allows_non_composite_slurm_env():
         "calkit slurm batch --name run --environment mycluster "
         "-- scripts/run.sh a b"
     )
+
+
+def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
+    """When a stage output path is renamed (e.g., from a capitalization change) the
+    old path should be removed from .gitignore and the new path should be
+    added.
+    """
+    subprocess.check_call(["calkit", "init"])
+    # Stage 1: initial calkit.yaml with output 'b_sparsity_plot.pdf' stored in DVC
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "touch b_sparsity_plot.pdf",
+                    "outputs": [
+                        {
+                            "path": "b_sparsity_plot.pdf",
+                            "storage": "dvc",
+                        }
+                    ],
+                }
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
+    # Verify DVC has added the old output path to .gitignore
+    repo = git.Repo(".")
+    assert repo.ignored("b_sparsity_plot.pdf")
+    # Stage 2: rename output (capitalization change) to 'B_sparsity_plot.pdf'
+    ck_info["pipeline"]["stages"]["plot"]["command"] = (
+        "touch B_sparsity_plot.pdf"
+    )
+    ck_info["pipeline"]["stages"]["plot"]["outputs"] = [
+        {"path": "B_sparsity_plot.pdf", "storage": "dvc"}
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
+    # Old (stale) path should no longer be ignored by git
+    assert not repo.ignored("b_sparsity_plot.pdf")
+    assert repo.ignored("B_sparsity_plot.pdf")

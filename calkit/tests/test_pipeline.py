@@ -694,3 +694,4 @@ def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
     subprocess.check_call(["calkit", "run"])
     # Old (stale) path should no longer be ignored by git
     assert not repo.ignored("b_sparsity_plot.pdf")
+    assert repo.ignored("B_sparsity_plot.pdf")

@@ -375,7 +375,8 @@ fallback_version = "0+unknown"
 """
     with open("pyproject.toml", "w") as f:
         f.write(toml_txt)
-    res = check_env()
+    with pytest.raises(Exception, match="Failed to load pyproject.toml"):
+        res = check_env()
 
 
 def test_find_conda_exe():

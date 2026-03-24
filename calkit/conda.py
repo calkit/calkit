@@ -124,7 +124,13 @@ def _editable_package_name_from_dir(dir_path: str) -> str:
     elif os.path.isfile(os.path.join(dir_path, "pyproject.toml")):
         # Read pyproject.toml to get the package name
         with open(os.path.join(dir_path, "pyproject.toml")) as f:
-            pyproject = toml.load(f)
+            try:
+                pyproject = toml.load(f)
+            except Exception as e:
+                raise type(e)(
+                    f"Failed to load pyproject.toml from {dir_path}; "
+                    "check that it is valid TOML"
+                ) from e
         if "project" in pyproject:
             if "name" in pyproject["project"]:
                 return pyproject["project"]["name"]
@@ -194,6 +200,10 @@ def _check_list(
     if "::" in req:
         req = req.split("::", 1)[1]
     for installed in actual:
+        if not isinstance(installed, str):
+            raise ValueError(
+                f"Expected installed package to be a string, got {installed}"
+            )
         if _check_single(
             req, installed, env_spec_dir=env_spec_dir, conda=conda
         ):
@@ -560,6 +570,11 @@ def check_env(
                 dir_path = dir_path.strip()
                 dir_path = os.path.join(env_spec_dir, dir_path)
                 pkg_name = _editable_package_name_from_dir(dir_path)
+                if verbose:
+                    log_func(
+                        f"Found editable pip dependency '{pkg_name}' "
+                        f"at '{dir_path}'"
+                    )
                 editable_pip_deps[pkg_name] = dir_path
         export_pip_deps = _get_pip_dependency_list(env_export["dependencies"])
         if export_pip_deps:

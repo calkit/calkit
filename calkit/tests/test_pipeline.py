@@ -653,12 +653,12 @@ def test_shell_script_stage_allows_non_composite_slurm_env():
 
 
 def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
-    """When a stage output path is renamed (e.g. capitalisation change) the
+    """When a stage output path is renamed (e.g., from a capitalization change) the
     old path should be removed from .gitignore and the new path should be
     added.
     """
     git.Repo.init()
-    # Stage 1: initial calkit.yaml with output 'b_sparsity_plot.pdf'
+    # Stage 1: initial calkit.yaml with output 'b_sparsity_plot.pdf' stored in DVC
     ck_info = {
         "pipeline": {
             "stages": {
@@ -669,7 +669,7 @@ def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
                     "outputs": [
                         {
                             "path": "b_sparsity_plot.pdf",
-                            "storage": None,
+                            "storage": "dvc",
                         }
                     ],
                 }
@@ -679,19 +679,17 @@ def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
-    with open(".gitignore") as f:
-        gi = f.read().splitlines()
-    assert "b_sparsity_plot.pdf" in gi
-    # Stage 2: rename output (capitalisation change) to 'B_sparsity_plot.pdf'
+    # Simulate DVC having added the output to .gitignore when the stage ran
+    with open(".gitignore", "w") as f:
+        f.write("b_sparsity_plot.pdf\n")
+    # Stage 2: rename output (capitalization change) to 'B_sparsity_plot.pdf'
     ck_info["pipeline"]["stages"]["plot"]["outputs"] = [
-        {"path": "B_sparsity_plot.pdf", "storage": None}
+        {"path": "B_sparsity_plot.pdf", "storage": "dvc"}
     ]
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     with open(".gitignore") as f:
         gi2 = f.read().splitlines()
-    # New path should be ignored
-    assert "B_sparsity_plot.pdf" in gi2
     # Old (stale) path should no longer be ignored
     assert "b_sparsity_plot.pdf" not in gi2

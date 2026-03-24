@@ -181,6 +181,42 @@ def test_overleaf(tmp_dir):
     subprocess.run(["calkit", "overleaf", "sync", "--verbose"], check=True)
     print("Overleaf Git show after adding fig2 back:", ol_repo.git.show())
     assert "ol-project/figs/fig2.txt" in ls_files(repo)
+    # Test that if a file is deleted from Git but added to DVC, it is NOT
+    # deleted from Overleaf (the file still logically exists in the DVC repo)
+    with open(
+        os.path.join(repo.working_dir, "ol-project", "figs", "fig3.txt"), "w"
+    ) as f:
+        f.write("Fig3 created in main repo")
+    repo.git.add("ol-project/figs/fig3.txt")
+    repo.git.commit(["-m", "Add figure 3"])
+    assert "ol-project/figs/fig3.txt" in ls_files(repo)
+    subprocess.run(["calkit", "overleaf", "sync", "--verbose"], check=True)
+    ol_repo_git_show = ol_repo.git.show()
+    assert "diff --git a/figs/fig3.txt b/figs/fig3.txt" in ol_repo_git_show
+    # Now move from Git to DVC: first remove from Git index (keeping file on
+    # disk), then add to DVC so it gets moved to DVC cache
+    repo.git.rm(["--cached", "ol-project/figs/fig3.txt"])
+    subprocess.run(
+        ["dvc", "add", "ol-project/figs/fig3.txt"], check=True
+    )
+    # Commit the DVC pointer file (fig3.txt is now tracked by DVC, not Git)
+    repo.git.add("ol-project/figs/fig3.txt.dvc", "ol-project/figs/.gitignore")
+    repo.git.commit(["-m", "Move figure 3 from git to DVC"])
+    assert "ol-project/figs/fig3.txt" not in ls_files(repo)
+    # Also remove the local file to simulate the file not being pulled from
+    # DVC (i.e., only the DVC pointer exists locally, not the actual file)
+    fig3_path = os.path.join(
+        repo.working_dir, "ol-project", "figs", "fig3.txt"
+    )
+    if os.path.exists(fig3_path):
+        os.remove(fig3_path)
+    assert not os.path.exists(fig3_path)
+    subprocess.run(["calkit", "overleaf", "sync", "--verbose"], check=True)
+    ol_repo_git_show = ol_repo.git.show()
+    print("Git show in OL repo after moving fig3 to DVC:\n", ol_repo_git_show)
+    # The file should NOT have been deleted from Overleaf
+    assert "deleted file mode" not in ol_repo_git_show
+    assert "--- a/figs/fig3.txt" not in ol_repo_git_show
 
 
 def test_extract_title_from_tex(tmp_dir):

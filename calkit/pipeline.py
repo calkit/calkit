@@ -123,14 +123,14 @@ def to_dvc(
         dvc_yaml_path = os.path.join(wdir, "dvc.yaml") if wdir else "dvc.yaml"
         if os.path.isfile(dvc_yaml_path):
             with open(dvc_yaml_path) as f:
-                _existing_dvc_yaml = calkit.ryaml.load(f)
+                existing_dvc_yaml = calkit.ryaml.load(f)
         else:
-            _existing_dvc_yaml = {}
-        if _existing_dvc_yaml is None:
-            _existing_dvc_yaml = {}
-        _existing_dvc_stages = _existing_dvc_yaml.get("stages", {})
+            existing_dvc_yaml = {}
+        if existing_dvc_yaml is None:
+            existing_dvc_yaml = {}
+        existing_dvc_stages = existing_dvc_yaml.get("stages", {})
     else:
-        _existing_dvc_stages = {}
+        existing_dvc_stages = {}
     # First, gather up any env lock paths we might need for DVC deps
     used_envs = set(
         [stage.inner_environment for stage in pipeline.stages.values()]
@@ -252,7 +252,7 @@ def to_dvc(
             # If this stage already existed, un-ignore any outputs that have
             # been renamed or removed so .gitignore does not accumulate stale
             # entries (e.g., after a capitalization change in the path)
-            old_stage = _existing_dvc_stages.get(stage_name, {})
+            old_stage = existing_dvc_stages.get(stage_name, {})
             for old_out in old_stage.get("outs", []):
                 if isinstance(old_out, str):
                     old_path = old_out
@@ -303,8 +303,8 @@ def to_dvc(
                         else:
                             dvc_stages[stage_name]["deps"].append(out)
     if write:
-        dvc_yaml = _existing_dvc_yaml
-        existing_stages = _existing_dvc_stages
+        dvc_yaml = existing_dvc_yaml
+        existing_stages = existing_dvc_stages
         for stage_name, stage in existing_stages.items():
             # Skip private stages (ones whose names start with an underscore)
             # and stages that are automatically generated

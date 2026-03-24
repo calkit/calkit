@@ -332,7 +332,8 @@ class OverleafSyncPaths:
             dvc_paths = calkit.dvc.list_paths(
                 wdir=self.main_repo.working_dir, recursive=True
             )
-        except Exception:
+        except Exception as e:
+            warnings.warn(f"Could not list DVC files: {e}")
             return set()
         prefix = Path(self.path_in_project).as_posix().rstrip("/") + "/"
         result = set()

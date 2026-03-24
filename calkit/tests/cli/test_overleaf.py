@@ -197,7 +197,9 @@ def test_overleaf(tmp_dir):
     # disk), then add to DVC so it gets moved to DVC cache
     repo.git.rm(["--cached", "ol-project/figs/fig3.txt"])
     subprocess.run(
-        ["dvc", "add", "ol-project/figs/fig3.txt"], check=True
+        ["dvc", "add", "ol-project/figs/fig3.txt"],
+        check=True,
+        cwd=repo.working_dir,
     )
     # Commit the DVC pointer file (fig3.txt is now tracked by DVC, not Git)
     repo.git.add("ol-project/figs/fig3.txt.dvc", "ol-project/figs/.gitignore")

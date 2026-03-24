@@ -2,8 +2,10 @@
 
 import subprocess
 
+import git
 import pytest
 
+import calkit
 import calkit.pipeline
 from calkit.environments import get_env_lock_fpath
 from calkit.pipeline import stages_are_similar
@@ -648,3 +650,48 @@ def test_shell_script_stage_allows_non_composite_slurm_env():
         "calkit slurm batch --name run --environment mycluster "
         "-- scripts/run.sh a b"
     )
+
+
+def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
+    """When a stage output path is renamed (e.g. capitalisation change) the
+    old path should be removed from .gitignore and the new path should be
+    added.
+    """
+    git.Repo.init()
+    # Stage 1: initial calkit.yaml with output 'b_sparsity_plot.pdf'
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "echo hi",
+                    "outputs": [
+                        {
+                            "path": "b_sparsity_plot.pdf",
+                            "storage": None,
+                        }
+                    ],
+                }
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    with open(".gitignore") as f:
+        gi = f.read().splitlines()
+    assert "b_sparsity_plot.pdf" in gi
+    # Stage 2: rename output (capitalisation change) to 'B_sparsity_plot.pdf'
+    ck_info["pipeline"]["stages"]["plot"]["outputs"] = [
+        {"path": "B_sparsity_plot.pdf", "storage": None}
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    with open(".gitignore") as f:
+        gi2 = f.read().splitlines()
+    # New path should be ignored
+    assert "B_sparsity_plot.pdf" in gi2
+    # Old (stale) path should no longer be ignored
+    assert "b_sparsity_plot.pdf" not in gi2

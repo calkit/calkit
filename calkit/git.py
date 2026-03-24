@@ -194,7 +194,13 @@ def ensure_path_is_not_ignored(
     path_parts = Path(path_for_gitignore).parts
 
     def ancestor_requires_recursive_unignore() -> bool:
-        """Return True when an ancestor directory is explicitly ignored."""
+        """Return True if any ancestor-level ignore rule would block this path.
+
+        This includes explicit directory ignores (e.g. 'dir/' or '/dir/')
+        as well as ancestor-based glob patterns like 'dir/*' or '/dir/*',
+        i.e., any rule that would prevent reaching the nested path without
+        adding recursive unignore patterns.
+        """
         for i in range(1, len(path_parts)):
             ancestor = "/".join(path_parts[:i])
             if (

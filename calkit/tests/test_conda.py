@@ -377,6 +377,53 @@ fallback_version = "0+unknown"
         f.write(toml_txt)
     with pytest.raises(Exception, match="Failed to load pyproject.toml"):
         res = check_env()
+    # Fix it and make sure it runs with relaxed mode
+    toml_txt = """[build-system]
+requires = ["setuptools>=61.0.0", "wheel", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "src-thing"
+dynamic = ["version"]
+authors = [
+  {name = "Someone"}
+]
+description = "Test"
+
+dependencies = []
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.setuptools_scm]
+local_scheme = "no-local-version"
+fallback_version = "0+unknown"
+"""
+    with open("pyproject.toml", "w") as f:
+        f.write(toml_txt)
+    res = check_env(relaxed=True)
+    assert res.env_exists
+    assert res.env_needs_rebuild
+    assert res.env_needs_export
+    # Make sure we can import the editable package
+    os.makedirs("subdir")
+    subprocess.check_call(
+        [
+            "conda",
+            "run",
+            "-n",
+            conda_env_name,
+            "python",
+            "-c",
+            "import src; print('src file:', src.__file__);",
+        ],
+        cwd="subdir",
+    )
+    # Check again and make sure we don't need a rebuild since the editable
+    # package is still valid
+    res = check_env(relaxed=True)
+    assert res.env_exists
+    assert not res.env_needs_rebuild
 
 
 def test_find_conda_exe():

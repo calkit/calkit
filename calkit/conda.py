@@ -146,6 +146,7 @@ def _check_single(
     """
     # If this is an editable install it needs to be handled specially
     # It also needs to be relative to the env spec dir
+    editable = False
     if req.startswith("-e ") or req.startswith("--editable "):
         req = req.split(" ", 1)[1]
         if "#" in req:
@@ -154,6 +155,7 @@ def _check_single(
         # Create path relative to env spec dir
         req = os.path.join(env_spec_dir, req)
         req = _editable_package_name_from_dir(req)
+        editable = True
     # If this is a Git version, we can't check it
     # TODO: Clone Git repos to check?
     if "@git" in req:
@@ -189,7 +191,7 @@ def _check_single(
         # TODO: Check exact version only
         return True
     spec = SpecifierSet(req_spec)
-    return spec.contains(version)
+    return spec.contains(version, prereleases=editable)
 
 
 def _check_list(

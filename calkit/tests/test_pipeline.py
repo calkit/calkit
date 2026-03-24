@@ -678,18 +678,17 @@ def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    subprocess.check_call(["calkit", "check", "pipeline", "-c"])
-    # Run the pipeline so DVC actually creates the output and adds it to .gitignore
-    subprocess.check_call(["dvc", "repro"])
+    subprocess.check_call(["calkit", "run"])
     # Verify DVC has added the old output path to .gitignore
     repo = git.Repo(".")
     assert repo.ignored("b_sparsity_plot.pdf")
     # Stage 2: rename output (capitalization change) to 'B_sparsity_plot.pdf'
+    ck_info["pipeline"]["stages"]["plot"]["command"] = "touch B_sparsity_plot.pdf"
     ck_info["pipeline"]["stages"]["plot"]["outputs"] = [
         {"path": "B_sparsity_plot.pdf", "storage": "dvc"}
     ]
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    subprocess.check_call(["calkit", "check", "pipeline", "-c"])
+    subprocess.check_call(["calkit", "run"])
     # Old (stale) path should no longer be ignored by git
     assert not repo.ignored("b_sparsity_plot.pdf")

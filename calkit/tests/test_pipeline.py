@@ -748,3 +748,73 @@ def test_gitignore_not_unignored_latex_pdf_output(tmp_dir):
     with open("paper/.gitignore") as f:
         assert f.read().splitlines() == ["/main.pdf"]
     assert repo.ignored("paper/main.pdf")
+
+
+def test_get_status(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "environments": {
+            "py": {
+                "kind": "uv-venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+            }
+        },
+        "pipeline": {
+            "stages": {
+                "get-data": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "something/my-cool-script.py",
+                    "outputs": [
+                        "my-output.out",
+                    ],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("requirements.txt", "w") as f:
+        f.write("requests\n")
+    os.makedirs("something", exist_ok=True)
+    with open("something/my-cool-script.py", "w") as f:
+        f.write(
+            "with open('my-output.out', 'w') as f:\n"
+            "    f.write('Hello, world!')\n"
+        )
+    status = calkit.pipeline.get_status(ck_info=ck_info)
+    assert not status.failed_environment_checks
+    assert status.is_stale
+    assert "get-data" in status.out_of_date_stages
+    # Run the pipeline and check that status updates to up-to-date
+    subprocess.check_call(["calkit", "run"])
+    status = calkit.pipeline.get_status(ck_info=ck_info)
+    assert not status.failed_environment_checks
+    assert not status.is_stale
+    assert not status.out_of_date_stages
+    # Now manually modify the output and ensure we have a changed output, but
+    # not a stale output
+    with open("my-output.out", "w") as f:
+        f.write("Goodbye, world!")
+    status = calkit.pipeline.get_status(ck_info=ck_info)
+    assert not status.failed_environment_checks
+    assert status.is_stale
+    assert status.stale_stages["get-data"].changed_outputs == ["my-output.out"]
+    # Now change the output back to the original, but modify the script so we
+    # can check we have stale outputs due to changed dependencies
+    # TODO: Should we distinguish between a changed script and a changed input?
+    # Technically in the stage definition there are no inputs
+    with open("my-output.out", "w") as f:
+        f.write("Hello, world!")
+    with open("something/my-cool-script.py", "w") as f:
+        f.write(
+            "with open('my-output.out', 'w') as f:\n"
+            "    f.write('Hello again, world!')\n"
+        )
+    status = calkit.pipeline.get_status(ck_info=ck_info)
+    assert not status.failed_environment_checks
+    assert status.is_stale
+    assert status.stale_stages["get-data"].changed_inputs == [
+        "something/my-cool-script.py"
+    ]

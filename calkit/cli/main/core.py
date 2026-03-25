@@ -252,10 +252,6 @@ def get_status(
 ):
     """View status (project, version control, and/or pipeline)."""
     ck_info = calkit.load_calkit_info()
-    try:
-        calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
-    except Exception as e:
-        warn(f"Failed to compile pipeline: {e.__class__.__name__}: {e}")
     valid_categories = ["project", "git", "dvc", "pipeline"]
     if categories is not None:
         for category in categories:
@@ -266,11 +262,22 @@ def get_status(
                 )
     else:
         categories = valid_categories
-    # Clean all notebooks in the pipeline
-    try:
-        calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
-    except Exception as e:
-        warn(f"Failed to clean notebooks: {e.__class__.__name__}: {e}")
+    pipeline_status = None
+    if "pipeline" in categories or "dvc" in categories:
+        pipeline_status = calkit.pipeline.get_status(
+            ck_info=ck_info,
+            targets=targets,
+            check_environments=True,
+            clean_notebooks=True,
+            compile_to_dvc=True,
+        )
+        for error in pipeline_status.errors:
+            warn(error)
+        if pipeline_status.failed_environment_checks:
+            warn(
+                "Failed pipeline environment checks for: "
+                + ", ".join(pipeline_status.failed_environment_checks)
+            )
     if "project" in categories:
         print_sep("Project")
         # Print latest status
@@ -307,10 +314,30 @@ def get_status(
         typer.echo()
     if "pipeline" in categories or "dvc" in categories:
         print_sep("Pipeline")
-        dvc_pipeline_cmd = ["status"]
-        if targets:
-            dvc_pipeline_cmd += targets
-        run_dvc_command(dvc_pipeline_cmd)
+        # Nicely format the results from pipeline status
+        if pipeline_status and pipeline_status.is_stale:
+            for stage_name in pipeline_status.stale_stage_names:
+                stale_stage = pipeline_status.stale_stages.get(stage_name)
+                if stale_stage is None:
+                    continue
+                typer.echo(f"{typer.style(stage_name, fg='yellow')}:")
+                # Show stale outputs for this stage
+                if stale_stage.stale_outputs:
+                    typer.echo("  stale outputs:")
+                    for output_path in stale_stage.stale_outputs:
+                        typer.echo(f"    - {output_path}")
+                # Show modified outputs from this stage
+                if stale_stage.modified_outputs:
+                    typer.echo("  modified outputs:")
+                    for output_path in stale_stage.modified_outputs:
+                        typer.echo(f"    - {output_path}")
+                # Show modified inputs making the stage stale
+                if stale_stage.modified_inputs:
+                    typer.echo("  modified inputs:")
+                    for input_path in stale_stage.modified_inputs:
+                        typer.echo(f"    - {input_path}")
+        elif pipeline_status:
+            typer.echo("Pipeline is up to date.")
 
 
 @app.command(name="diff")

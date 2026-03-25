@@ -786,13 +786,15 @@ def test_get_status(tmp_dir):
     status = calkit.pipeline.get_status(ck_info=ck_info)
     assert not status.failed_environment_checks
     assert status.is_stale
-    assert "get-data" in status.out_of_date_stages
+    assert "get-data" in status.stale_stage_names
+    assert status.stale_stages["get-data"].stale_outputs == ["my-output.out"]
+    assert status.stale_stages["get-data"].modified_outputs == []
     # Run the pipeline and check that status updates to up-to-date
     subprocess.check_call(["calkit", "run"])
     status = calkit.pipeline.get_status(ck_info=ck_info)
     assert not status.failed_environment_checks
     assert not status.is_stale
-    assert not status.out_of_date_stages
+    assert not status.stale_stage_names
     # Now manually modify the output and ensure we have a changed output, but
     # not a stale output
     with open("my-output.out", "w") as f:
@@ -800,7 +802,10 @@ def test_get_status(tmp_dir):
     status = calkit.pipeline.get_status(ck_info=ck_info)
     assert not status.failed_environment_checks
     assert status.is_stale
-    assert status.stale_stages["get-data"].changed_outputs == ["my-output.out"]
+    assert status.stale_stages["get-data"].modified_outputs == [
+        "my-output.out"
+    ]
+    assert status.stale_stages["get-data"].stale_outputs == []
     # Now change the output back to the original, but modify the script so we
     # can check we have stale outputs due to changed dependencies
     # TODO: Should we distinguish between a changed script and a changed input?
@@ -815,6 +820,8 @@ def test_get_status(tmp_dir):
     status = calkit.pipeline.get_status(ck_info=ck_info)
     assert not status.failed_environment_checks
     assert status.is_stale
-    assert status.stale_stages["get-data"].changed_inputs == [
+    assert status.stale_stages["get-data"].modified_inputs == [
         "something/my-cool-script.py"
     ]
+    assert status.stale_stages["get-data"].stale_outputs == ["my-output.out"]
+    assert status.stale_stages["get-data"].modified_outputs == []

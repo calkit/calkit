@@ -241,25 +241,15 @@ def to_dvc(
                 outputs += stage.notebook_outputs
             elif stage.kind == "sbatch":
                 outputs.append(stage.log_output)
-            # Build the set of current output paths so we can detect stale
-            # .gitignore entries from the previous version of the stage
-            current_out_paths = set()
-            for out in outputs:
-                if isinstance(out, PathOutput):
-                    current_out_paths.add(out.path)
-                elif isinstance(out, str):
-                    current_out_paths.add(out)
+            # Build the set of current DVC output paths so we can detect stale
+            # .gitignore entries from the previous version of the stage,
+            # including synthesized outputs like LaTeX PDFs
+            current_out_paths = set(calkit.dvc.out_paths_from_stage(dvc_stage))
             # If this stage already existed, un-ignore any outputs that have
             # been renamed or removed so .gitignore does not accumulate stale
             # entries (e.g., after a capitalization change in the path)
             old_stage = existing_dvc_stages.get(stage_name, {})
-            for old_out in old_stage.get("outs", []):
-                if isinstance(old_out, str):
-                    old_path = old_out
-                elif isinstance(old_out, dict):
-                    old_path = list(old_out.keys())[0]
-                else:
-                    continue
+            for old_path in calkit.dvc.out_paths_from_stage(old_stage):
                 if old_path not in current_out_paths:
                     calkit.git.ensure_path_is_not_ignored(repo, path=old_path)
             # Deal with any gitignore changes necessary

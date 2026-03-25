@@ -105,7 +105,7 @@ def test_ensure_path_is_not_ignored_nested(tmp_dir):
 
     When a parent directory is excluded with a trailing slash (e.g.,
     ``results/``), git will not traverse into it, so a simple negation like
-    ``!results/StageName/end.json`` has no effect.  The fix converts the
+    ``!results/StageName/end.json`` has no effect. The fix converts the
     directory exclude to a glob pattern and adds intermediate un-ignore rules.
     """
     repo = git.Repo.init()
@@ -124,15 +124,13 @@ def test_ensure_path_is_not_ignored_nested(tmp_dir):
     assert result is True
     with open(".gitignore") as f:
         lines = f.read().splitlines()
-    # The plain directory exclude should be replaced with a glob
-    assert "results/" not in lines
-    assert "results/*" in lines
-    # Intermediate directory must be un-ignored so git traverses into it
-    assert "!results/StageName/" in lines
-    # The intermediate directory's other contents must be re-ignored
-    assert "results/StageName/*" in lines
-    # The specific file must be explicitly un-ignored
-    assert "!results/StageName/end.json" in lines
+    # Keep the rules minimal while preserving the required behavior
+    assert lines == [
+        "results/*",
+        "!results/StageName/",
+        "results/StageName/*",
+        "!results/StageName/end.json",
+    ]
     # Verify git no longer considers the target file as ignored
     assert not repo.ignored("results/StageName/end.json")
     # Other files in results/ must still be ignored
@@ -148,3 +146,54 @@ def test_ensure_path_is_not_ignored_nested(tmp_dir):
         repo, path="results/StageName/end.json"
     )
     assert result2 is None
+
+
+def test_ensure_path_is_not_ignored_nested_direct_path_rule(tmp_dir):
+    """Unignoring a directly ignored nested path should only remove that
+    rule.
+    """
+    repo = git.Repo.init()
+    target = "pubs/applied-ocean-research-model/references.bib"
+    sibling = "pubs/applied-ocean-research-model/paper.pdf"
+    with open(".gitignore", "w") as f:
+        f.write(f"{target}\n")
+    os.makedirs("pubs/applied-ocean-research-model", exist_ok=True)
+    with open(target, "w") as f:
+        f.write("@article{test}\n")
+    with open(sibling, "w") as f:
+        f.write("pdf\n")
+    # Only the direct target path should be ignored initially
+    assert repo.ignored(target)
+    assert not repo.ignored(sibling)
+    result = calkit.git.ensure_path_is_not_ignored(repo, path=target)
+    assert result is True
+    with open(".gitignore") as f:
+        lines = f.read().splitlines()
+    # Remove only the direct rule, with no recursive ancestor entries
+    assert target not in lines
+    assert f"!{target}" not in lines
+    assert "!pubs/" not in lines
+    assert "pubs/*" not in lines
+    assert "!pubs/applied-ocean-research-model/" not in lines
+    assert "pubs/applied-ocean-research-model/*" not in lines
+    assert not repo.ignored(target)
+    assert not repo.ignored(sibling)
+
+
+def test_ensure_path_is_not_ignored_nested_gitignore_direct_path_rule(tmp_dir):
+    repo = git.Repo.init()
+    os.makedirs("paper", exist_ok=True)
+    target = "paper/main.pdf"
+    with open("paper/.gitignore", "w") as f:
+        f.write("/main.pdf\n")
+    with open(target, "w") as f:
+        f.write("pdf\n")
+    assert repo.ignored(target)
+    result = calkit.git.ensure_path_is_not_ignored(repo, path=target)
+    assert result is True
+    with open("paper/.gitignore") as f:
+        lines = f.read().splitlines()
+    assert "/main.pdf" not in lines
+    assert "!/main.pdf" not in lines
+    assert not os.path.exists(".gitignore")
+    assert not repo.ignored(target)

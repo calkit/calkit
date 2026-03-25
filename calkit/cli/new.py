@@ -2937,13 +2937,15 @@ def new_release(
     ck_info["releases"] = releases
     # Create CITATION.cff file
     if release_type == "project":
-        typer.echo("Writing CITATION.cff")
         cff = calkit.releases.create_citation_cff(
             ck_info=ck_info, release_name=name, release_date=release_date
         )
-        with open("CITATION.cff", "w") as f:
-            calkit.ryaml.dump(cff, f)
-        if not dry_run:
+        if dry_run:
+            typer.echo(f"Would write CITATION.cff:\n{cff}")
+        else:
+            typer.echo("Writing CITATION.cff")
+            with open("CITATION.cff", "w") as f:
+                calkit.ryaml.dump(cff, f)
             repo.git.add("CITATION.cff")
     # Add to references so it can be cited
     typer.echo("Adding BibTeX entry to references")

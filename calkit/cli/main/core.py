@@ -55,7 +55,7 @@ from calkit.cli.office import office_app
 from calkit.cli.overleaf import overleaf_app
 from calkit.cli.slurm import slurm_app
 from calkit.cli.update import update_app
-from calkit.dvc import register_ck_scheme, run_dvc_command
+from calkit.dvc import get_dvc_repo, run_dvc_command
 from calkit.environments import get_env_lock_fpath
 from calkit.models import Procedure
 
@@ -403,8 +403,7 @@ def add(
             raise_error("Not currently in a Git repo; run `calkit init` first")
         repo = git.Repo()
     try:
-        register_ck_scheme()
-        dvc_repo = dvc.repo.Repo()
+        dvc_repo = get_dvc_repo()
     except NotDvcRepoError:
         warn("DVC not initialized yet; initializing")
         dvc_repo = dvc.repo.Repo.init()
@@ -1139,10 +1138,8 @@ def run(
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Pipeline compilation failed: {e}")
     # Initialize DVC repo if necessary
-    # Register the ck:// scheme before accessing DVC repo
-    register_ck_scheme()
     try:
-        dvc.repo.Repo()
+        get_dvc_repo()
     except Exception:
         if not quiet:
             typer.echo("Initializing DVC repo")
@@ -1203,8 +1200,7 @@ def run(
         git_staged_files_before = calkit.git.get_staged_files(repo=repo)
         git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
         # Get status of DVC repo before running
-        register_ck_scheme()
-        dvc_repo = dvc.repo.Repo()
+        dvc_repo = get_dvc_repo()
         dvc_status_before = dvc_repo.status()
         dvc_data_status_before = dvc_repo.data_status()
         dvc_data_status_before.pop("git", None)  # Remove git status

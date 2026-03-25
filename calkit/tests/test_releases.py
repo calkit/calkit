@@ -4,6 +4,7 @@ import subprocess
 import sys
 import zipfile
 
+import bibtexparser
 import git
 import pytest
 
@@ -11,6 +12,7 @@ import calkit
 from calkit.releases import (
     check_project_release_archive,
     check_release_reproducibility,
+    create_bibtex,
     ls_files,
 )
 
@@ -108,3 +110,33 @@ def test_check_project_release_archive_fails_when_stage_runs(
 
     with pytest.raises(RuntimeError, match="not up-to-date"):
         check_project_release_archive(zip_path)
+
+
+def test_create_bibtex():
+    entry = create_bibtex(
+        authors=[{"first_name": "Alice", "last_name": "Smith"}],
+        release_date="2026-03-25",
+        title="Test title",
+        doi="10.1234/example",
+        record_id="123",
+    )
+    entries = bibtexparser.loads(entry).entries
+    assert len(entries) == 1
+    entry = create_bibtex(
+        authors=[{"first_name": "A", "last_name": "van der Waals"}],
+        release_date="2026-03-25",
+        title="Test title",
+        doi="10.1234/example",
+        record_id="abc-123",
+    )
+    entries = bibtexparser.loads(entry).entries
+    assert len(entries) == 1
+    entry = create_bibtex(
+        authors=[{"first_name": "A", "last_name": "Smith"}],
+        release_date="2026-03-25",
+        title="Test title",
+        doi=None,
+        record_id=None,
+    )
+    entries = bibtexparser.loads(entry).entries
+    assert len(entries) == 1

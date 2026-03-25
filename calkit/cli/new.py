@@ -2906,10 +2906,12 @@ def new_release(
             + new_lines[first_content_line_index:]
         )
         readme_txt = "\n".join(new_lines)
-        with open("README.md", "w") as f:
-            f.write(readme_txt)
         if not dry_run:
-            repo.git.add("README.md")
+            with open("README.md", "w") as f:
+                f.write(readme_txt)
+                repo.git.add("README.md")
+        else:
+            typer.echo(f"Would have updated README.md to:\n{readme_txt}")
     # Create Git tag
     git_tag_message = release_description
     if git_tag_message is None:
@@ -2964,28 +2966,50 @@ def new_release(
                 reflib = bibtexparser.load(f)
         else:
             reflib = bibtexparser.bibdatabase.BibDatabase()
+        bibtex_doi = doi
+        if bibtex_doi is None and dry_run:
+            mock_suffix = "".join(
+                ch if (ch.isalnum() or ch in ".-_") else "-"
+                for ch in name.lower()
+            )
+            bibtex_doi = f"10.0000/calkit-dry-run.{mock_suffix}"
         invenio_bibtex = calkit.releases.create_bibtex(
             authors=authors,
             release_date=release_date,
             title=title,  # type: ignore
-            doi=doi,  # type: ignore
+            doi=bibtex_doi,
             record_id=record_id,  # type: ignore
             service=to,  # type: ignore
         )
-        new_entry = bibtexparser.loads(invenio_bibtex).entries[0]
+        new_entries = bibtexparser.loads(invenio_bibtex).entries
+        if not new_entries:
+            raise ValueError("Failed to parse generated BibTeX entry")
+        new_entry = new_entries[0]
         # Search through entries for one with the same DOI, and replace if
         # there is a match
-        existing_index = None
-        for n, entry in enumerate(reflib.entries):
-            if entry.get("doi") == doi:
-                typer.echo("Found matching DOI in existing references")
-                existing_index = n
-        if existing_index is not None:
-            _ = reflib.entries.pop(existing_index)
+        new_doi = new_entry.get("doi")
+        matching_indices = []
+        if new_doi:
+            matching_indices = [
+                n
+                for n, entry in enumerate(reflib.entries)
+                if entry.get("doi") == new_doi
+            ]
+        if matching_indices:
+            typer.echo(
+                "Found matching DOI in existing references "
+                f"({len(matching_indices)} entr"
+                f"{'y' if len(matching_indices) == 1 else 'ies'}); "
+                "replacing"
+            )
+            for n in reversed(matching_indices):
+                _ = reflib.entries.pop(n)
         reflib.entries.append(new_entry)
-        with open(ref_path, "w") as f:
-            bibtexparser.dump(reflib, f)
-        if not dry_run:
+        if dry_run:
+            typer.echo(f"Would write updated references to {ref_path}")
+        else:
+            with open(ref_path, "w") as f:
+                bibtexparser.dump(reflib, f)
             repo.git.add(ref_path)
     except Exception as e:
         warn(f"Failed to add to references: {e}")

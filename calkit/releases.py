@@ -5,6 +5,7 @@ https://github.com/citation-file-format/citation-file-format
 """
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -21,7 +22,7 @@ SERVICES = {
 }
 
 BIBTEX_TEMPLATE = """
-@misc{{{first_author_last_name}{year}_{record_id},
+@misc{{{entry_key},
   author       = {{{authors}}},
   title        = {{{title}}},
   month        = {month},
@@ -33,12 +34,26 @@ BIBTEX_TEMPLATE = """
 """.strip()
 
 
+def _sanitize_bibtex_key(value: str) -> str:
+    """Return a BibTeX-safe key fragment."""
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "-", value).strip("-")
+    return safe or "release"
+
+
+def _escape_bibtex_value(value: str | int | None) -> str:
+    """Escape braces and backslashes to keep generated entries parseable."""
+    if value is None:
+        return ""
+    value = str(value)
+    return value.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+
+
 def create_bibtex(
     authors: list[dict],
     release_date: str,
-    title: str,
-    doi: str,
-    record_id: int | str,
+    title: str | None,
+    doi: str | None,
+    record_id: int | str | None,
     service: Literal["zenodo", "caltechdata"] = "zenodo",
 ) -> str:
     """Create a BibTeX entry for a release."""
@@ -52,14 +67,21 @@ def create_bibtex(
     year, month, _ = release_date.split("-")
     month = int(month)
     year = int(year)
+    if record_id is None:
+        record_id = "draft"
+    if doi is None:
+        doi = "10.0000/dry-run"
+    entry_key = (
+        f"{_sanitize_bibtex_key(first_author_last_name)}"
+        f"{year}_{_sanitize_bibtex_key(str(record_id))}"
+    )
     return BIBTEX_TEMPLATE.format(
-        first_author_last_name=first_author_last_name,
-        authors=authors_string,
-        title=title,
-        doi=doi,
+        entry_key=entry_key,
+        authors=_escape_bibtex_value(authors_string),
+        title=_escape_bibtex_value(title),
+        doi=_escape_bibtex_value(doi),
         month=month,
         year=year,
-        record_id=record_id,
         service=SERVICES[service]["name"],
     )
 

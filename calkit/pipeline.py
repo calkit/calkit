@@ -368,8 +368,12 @@ def get_status(
             if v != ["always changed"] and not k.endswith(".dvc")
         }
         stages_config = ck_info.get("pipeline", {}).get("stages", {})
-        result["stale_stages"] = {
-            stage_name: StaleStage.from_status_data(
+        ordered_stale_stages = {}
+        for stage_name in stages_config.keys():
+            if stage_name not in raw_stale_stages:
+                continue
+            status_data = raw_stale_stages[stage_name]
+            ordered_stale_stages[stage_name] = StaleStage.from_status_data(
                 status_data=status_data,
                 configured_outputs=[
                     output.get("path", str(output))
@@ -380,8 +384,22 @@ def get_status(
                     )
                 ],
             )
-            for stage_name, status_data in raw_stale_stages.items()
-        }
+        # Keep any stale stages not present in ck_info at the end.
+        for stage_name, status_data in raw_stale_stages.items():
+            if stage_name in ordered_stale_stages:
+                continue
+            ordered_stale_stages[stage_name] = StaleStage.from_status_data(
+                status_data=status_data,
+                configured_outputs=[
+                    output.get("path", str(output))
+                    if isinstance(output, dict)
+                    else str(output)
+                    for output in stages_config.get(stage_name, {}).get(
+                        "outputs", []
+                    )
+                ],
+            )
+        result["stale_stages"] = ordered_stale_stages
         return PipelineStatus.model_validate(result)
     finally:
         if wdir is not None:

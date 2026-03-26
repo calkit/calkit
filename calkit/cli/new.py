@@ -17,6 +17,7 @@ from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 from typing_extensions import Annotated
 
 import calkit
+import calkit.pipeline
 from calkit.cli import raise_error, warn
 from calkit.cli.check import check_environment
 from calkit.cli.update import update_devcontainer
@@ -2646,6 +2647,26 @@ def new_release(
     repo = git.Repo()
     if name in repo.tags:
         raise_error(f"Git tag with name '{name}' already exists")
+    # Check that the pipeline is up-to-date
+    typer.echo("Checking pipeline is up-to-date for release")
+    status = calkit.pipeline.get_status(
+        ck_info=ck_info,
+        check_environments=True,
+        clean_notebooks=True,
+        compile_to_dvc=True,
+    )
+    if status.errors:
+        raise_error("Pipeline checks failed: " + "; ".join(status.errors))
+    if status.failed_environment_checks:
+        raise_error(
+            "Pipeline environment checks failed for: "
+            + ", ".join(status.failed_environment_checks)
+        )
+    if status.is_stale:
+        raise_error(
+            "Pipeline is not up-to-date; out-of-date stages: "
+            + ", ".join(status.stale_stage_names)
+        )
     release_dir = f".calkit/releases/{name}"
     release_files_dir = release_dir + "/files"
     os.makedirs(release_files_dir, exist_ok=True)
@@ -2666,8 +2687,14 @@ def new_release(
         all_paths = calkit.releases.ls_files()
         typer.echo(f"Adding files to {zip_path}")
         with zipfile.ZipFile(zip_path, "w") as zipf:
-            for fpath in all_paths:
-                zipf.write(fpath)
+            calkit.releases.add_paths_to_zip(zipf, all_paths)
+        typer.echo("Checking extracted project release archive")
+        try:
+            calkit.releases.check_project_release_archive(
+                zip_path, verbose=verbose
+            )
+        except Exception as e:
+            raise_error(str(e))
         title = ck_info.get("title")
         if title is None:
             warn("Project has no title")
@@ -3011,10 +3038,12 @@ def new_release(
             + new_lines[first_content_line_index:]
         )
         readme_txt = "\n".join(new_lines)
-        with open("README.md", "w") as f:
-            f.write(readme_txt)
         if not dry_run:
-            repo.git.add("README.md")
+            with open("README.md", "w") as f:
+                f.write(readme_txt)
+                repo.git.add("README.md")
+        else:
+            typer.echo(f"Would have updated README.md to:\n{readme_txt}")
     # Create Git tag
     git_tag_message = release_description
     if git_tag_message is None:
@@ -3042,13 +3071,15 @@ def new_release(
     ck_info["releases"] = releases
     # Create CITATION.cff file
     if release_type == "project":
-        typer.echo("Writing CITATION.cff")
         cff = calkit.releases.create_citation_cff(
             ck_info=ck_info, release_name=name, release_date=release_date
         )
-        with open("CITATION.cff", "w") as f:
-            calkit.ryaml.dump(cff, f)
-        if not dry_run:
+        if dry_run:
+            typer.echo(f"Would write CITATION.cff:\n{cff}")
+        else:
+            typer.echo("Writing CITATION.cff")
+            with open("CITATION.cff", "w") as f:
+                calkit.ryaml.dump(cff, f)
             repo.git.add("CITATION.cff")
     # Add to references so it can be cited
     typer.echo("Adding BibTeX entry to references")
@@ -3067,28 +3098,50 @@ def new_release(
                 reflib = bibtexparser.load(f)
         else:
             reflib = bibtexparser.bibdatabase.BibDatabase()
+        bibtex_doi = doi
+        if bibtex_doi is None and dry_run:
+            mock_suffix = "".join(
+                ch if (ch.isalnum() or ch in ".-_") else "-"
+                for ch in name.lower()
+            )
+            bibtex_doi = f"10.0000/calkit-dry-run.{mock_suffix}"
         invenio_bibtex = calkit.releases.create_bibtex(
             authors=authors,
             release_date=release_date,
             title=title,  # type: ignore
-            doi=doi,  # type: ignore
+            doi=bibtex_doi,
             record_id=record_id,  # type: ignore
             service=to,  # type: ignore
         )
-        new_entry = bibtexparser.loads(invenio_bibtex).entries[0]
+        new_entries = bibtexparser.loads(invenio_bibtex).entries
+        if not new_entries:
+            raise ValueError("Failed to parse generated BibTeX entry")
+        new_entry = new_entries[0]
         # Search through entries for one with the same DOI, and replace if
         # there is a match
-        existing_index = None
-        for n, entry in enumerate(reflib.entries):
-            if entry.get("doi") == doi:
-                typer.echo("Found matching DOI in existing references")
-                existing_index = n
-        if existing_index is not None:
-            _ = reflib.entries.pop(existing_index)
+        new_doi = new_entry.get("doi")
+        matching_indices = []
+        if new_doi:
+            matching_indices = [
+                n
+                for n, entry in enumerate(reflib.entries)
+                if entry.get("doi") == new_doi
+            ]
+        if matching_indices:
+            typer.echo(
+                "Found matching DOI in existing references "
+                f"({len(matching_indices)} entr"
+                f"{'y' if len(matching_indices) == 1 else 'ies'}); "
+                "replacing"
+            )
+            for n in reversed(matching_indices):
+                _ = reflib.entries.pop(n)
         reflib.entries.append(new_entry)
-        with open(ref_path, "w") as f:
-            bibtexparser.dump(reflib, f)
-        if not dry_run:
+        if dry_run:
+            typer.echo(f"Would write updated references to {ref_path}")
+        else:
+            with open(ref_path, "w") as f:
+                bibtexparser.dump(reflib, f)
             repo.git.add(ref_path)
     except Exception as e:
         warn(f"Failed to add to references: {e}")

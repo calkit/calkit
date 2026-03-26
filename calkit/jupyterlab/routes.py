@@ -10,8 +10,6 @@ import sys
 import traceback
 from pathlib import Path
 
-import dvc
-import dvc.repo
 import git
 import tornado
 from dvc.exceptions import NotDvcRepoError
@@ -31,7 +29,7 @@ from calkit.cli.new import (
     new_venv,
 )
 from calkit.cli.notebooks import check_env_kernel
-from calkit.dvc import run_dvc_command
+from calkit.dvc import get_dvc_repo, run_dvc_command
 from calkit.environments import DEFAULT_PYTHON_VERSION
 from calkit.git import ensure_path_is_ignored
 from calkit.models.pipeline import JupyterNotebookStage
@@ -897,7 +895,7 @@ class PipelineStatusRouteHandler(APIHandler):
             calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
             # Clean all notebooks in the pipeline
             calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
-            dvc_repo = dvc.repo.Repo(os.getcwd())
+            dvc_repo = get_dvc_repo(os.getcwd())
             raw_status = dvc_repo.status()
             pipeline_status = {
                 k.split("dvc.yaml:")[-1]: v

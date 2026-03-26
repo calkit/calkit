@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import warnings
 from pathlib import Path
+from typing import cast
 
 import toml
 from packaging.specifiers import SpecifierSet
@@ -123,7 +124,13 @@ def _editable_package_name_from_dir(dir_path: str) -> str:
     elif os.path.isfile(os.path.join(dir_path, "pyproject.toml")):
         # Read pyproject.toml to get the package name
         with open(os.path.join(dir_path, "pyproject.toml")) as f:
-            pyproject = toml.load(f)
+            try:
+                pyproject = toml.load(f)
+            except Exception as e:
+                raise type(e)(
+                    f"Failed to load pyproject.toml from {dir_path}; "
+                    "check that it is valid TOML"
+                ) from e
         if "project" in pyproject:
             if "name" in pyproject["project"]:
                 return pyproject["project"]["name"]
@@ -139,6 +146,7 @@ def _check_single(
     """
     # If this is an editable install it needs to be handled specially
     # It also needs to be relative to the env spec dir
+    editable = False
     if req.startswith("-e ") or req.startswith("--editable "):
         req = req.split(" ", 1)[1]
         if "#" in req:
@@ -147,6 +155,7 @@ def _check_single(
         # Create path relative to env spec dir
         req = os.path.join(env_spec_dir, req)
         req = _editable_package_name_from_dir(req)
+        editable = True
     # If this is a Git version, we can't check it
     # TODO: Clone Git repos to check?
     if "@git" in req:
@@ -182,7 +191,7 @@ def _check_single(
         # TODO: Check exact version only
         return True
     spec = SpecifierSet(req_spec)
-    return spec.contains(version)
+    return spec.contains(version, prereleases=editable)
 
 
 def _check_list(
@@ -193,11 +202,55 @@ def _check_list(
     if "::" in req:
         req = req.split("::", 1)[1]
     for installed in actual:
+        if not isinstance(installed, str):
+            raise ValueError(
+                f"Expected installed package to be a string, got {installed}"
+            )
         if _check_single(
             req, installed, env_spec_dir=env_spec_dir, conda=conda
         ):
             return True
     return False
+
+
+def _split_env_dependencies(
+    dependencies: list[str | dict[str, str | list[str]]],
+) -> tuple[list[str], list[str]]:
+    """Split an environment dependency list into conda and pip deps.
+
+    Conda environment files commonly include both the plain ``"pip"`` package
+    marker and a nested ``{"pip": [...]}`` section. This helper normalizes the
+    latter so callers do not need to assume it is the final list entry or that
+    the pip section is already represented as a list.
+    """
+    conda_deps = []
+    pip_deps = []
+    for dep in dependencies:
+        if isinstance(dep, dict):
+            dep_pip = dep.get("pip", [])
+            if isinstance(dep_pip, str):
+                dep_pip = [dep_pip]
+            elif dep_pip is None:
+                dep_pip = []
+            pip_deps.extend(dep_pip)
+        else:
+            conda_deps.append(dep)
+    return conda_deps, pip_deps
+
+
+def _get_pip_dependency_list(
+    dependencies: list[str | dict[str, str | list[str]]],
+) -> list[str]:
+    """Return a mutable pip dependency list from an env dependency list."""
+    for dep in dependencies:
+        if isinstance(dep, dict) and "pip" in dep:
+            dep_pip = dep["pip"]
+            if isinstance(dep_pip, str):
+                dep["pip"] = [dep_pip]
+            elif dep_pip is None:
+                dep["pip"] = []
+            return cast(list[str], dep["pip"])
+    return []
 
 
 class EnvCheckResult(BaseModel):
@@ -393,18 +446,12 @@ def check_env(
                 ryaml.dump(env_check, f)
         # Determine if the env matches
         env_needs_rebuild = False
-        if isinstance(env_check["dependencies"][-1], dict):
-            existing_conda_deps = env_check["dependencies"][:-1]
-            existing_pip_deps = env_check["dependencies"][-1]["pip"]
-        else:
-            existing_conda_deps = env_check["dependencies"]
-            existing_pip_deps = []
-        if isinstance(env_spec["dependencies"][-1], dict):
-            required_conda_deps = env_spec["dependencies"][:-1]
-            required_pip_deps = env_spec["dependencies"][-1]["pip"]
-        else:
-            required_conda_deps = env_spec["dependencies"]
-            required_pip_deps = []
+        existing_conda_deps, existing_pip_deps = _split_env_dependencies(
+            env_check["dependencies"]
+        )
+        required_conda_deps, required_pip_deps = _split_env_dependencies(
+            env_spec["dependencies"]
+        )
         if relaxed:
             log_func("Running in relaxed mode; combining pip and conda deps")
             for dep in existing_pip_deps:
@@ -516,20 +563,23 @@ def check_env(
         # Note that this needs to be relative to the env lock directory,
         # since that's how pip will interpret it
         editable_pip_deps = {}
-        if isinstance(env_spec["dependencies"][-1], dict):
-            # Map editable install dir to package name we'd see in lock
-            required_pip_deps = env_spec["dependencies"][-1]["pip"]
-            for dep in required_pip_deps:
-                if dep.startswith("-e ") or dep.startswith("--editable "):
-                    dir_path = dep.split(" ", 1)[1]
-                    if "#" in dir_path:
-                        dir_path = dir_path.split("#", 1)[0]
-                    dir_path = dir_path.strip()
-                    dir_path = os.path.join(env_spec_dir, dir_path)
-                    pkg_name = _editable_package_name_from_dir(dir_path)
-                    editable_pip_deps[pkg_name] = dir_path
-        if isinstance(env_export["dependencies"][-1], dict):
-            export_pip_deps = env_export["dependencies"][-1]["pip"]
+        required_pip_deps = _get_pip_dependency_list(env_spec["dependencies"])
+        for dep in required_pip_deps:
+            if dep.startswith("-e ") or dep.startswith("--editable "):
+                dir_path = dep.split(" ", 1)[1]
+                if "#" in dir_path:
+                    dir_path = dir_path.split("#", 1)[0]
+                dir_path = dir_path.strip()
+                dir_path = os.path.join(env_spec_dir, dir_path)
+                pkg_name = _editable_package_name_from_dir(dir_path)
+                if verbose:
+                    log_func(
+                        f"Found editable pip dependency '{pkg_name}' "
+                        f"at '{dir_path}'"
+                    )
+                editable_pip_deps[pkg_name] = dir_path
+        export_pip_deps = _get_pip_dependency_list(env_export["dependencies"])
+        if export_pip_deps:
             for i, dep in enumerate(export_pip_deps):
                 dep_name = re.split("[=<>]+", dep, maxsplit=1)[0]
                 if dep_name in editable_pip_deps:

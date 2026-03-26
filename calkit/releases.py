@@ -5,6 +5,11 @@ https://github.com/citation-file-format/citation-file-format
 """
 
 import os
+import re
+import subprocess
+import sys
+import tempfile
+import zipfile
 from typing import Literal
 
 import git
@@ -17,7 +22,7 @@ SERVICES = {
 }
 
 BIBTEX_TEMPLATE = """
-@misc{{{first_author_last_name}{year}_{record_id},
+@misc{{{entry_key},
   author       = {{{authors}}},
   title        = {{{title}}},
   month        = {month},
@@ -29,12 +34,26 @@ BIBTEX_TEMPLATE = """
 """.strip()
 
 
+def _sanitize_bibtex_key(value: str) -> str:
+    """Return a BibTeX-safe key fragment."""
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "-", value).strip("-")
+    return safe or "release"
+
+
+def _escape_bibtex_value(value: str | int | None) -> str:
+    """Escape braces and backslashes to keep generated entries parseable."""
+    if value is None:
+        return ""
+    value = str(value)
+    return value.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+
+
 def create_bibtex(
     authors: list[dict],
     release_date: str,
-    title: str,
-    doi: str,
-    record_id: int | str,
+    title: str | None,
+    doi: str | None,
+    record_id: int | str | None,
     service: Literal["zenodo", "caltechdata"] = "zenodo",
 ) -> str:
     """Create a BibTeX entry for a release."""
@@ -48,14 +67,21 @@ def create_bibtex(
     year, month, _ = release_date.split("-")
     month = int(month)
     year = int(year)
+    if record_id is None:
+        record_id = "draft"
+    if doi is None:
+        doi = "10.0000/dry-run"
+    entry_key = (
+        f"{_sanitize_bibtex_key(first_author_last_name)}"
+        f"{year}_{_sanitize_bibtex_key(str(record_id))}"
+    )
     return BIBTEX_TEMPLATE.format(
-        first_author_last_name=first_author_last_name,
-        authors=authors_string,
-        title=title,
-        doi=doi,
+        entry_key=entry_key,
+        authors=_escape_bibtex_value(authors_string),
+        title=_escape_bibtex_value(title),
+        doi=_escape_bibtex_value(doi),
         month=month,
         year=year,
-        record_id=record_id,
         service=SERVICES[service]["name"],
     )
 
@@ -131,7 +157,15 @@ def ls_files() -> list[str]:
     repo = git.Repo()
     git_files = repo.git.ls_files(".", recurse_submodules=True).splitlines()
     dvc_files = calkit.dvc.list_paths(recursive=True)
-    return git_files + dvc_files
+    cache_files: list[str] = []
+    cache_root = os.path.join(".dvc", "cache")
+    if os.path.isdir(cache_root):
+        for root, _, files in os.walk(cache_root):
+            for filename in files:
+                fpath = os.path.join(root, filename)
+                if os.path.isfile(fpath):
+                    cache_files.append(fpath)
+    return list(dict.fromkeys(git_files + dvc_files + cache_files))
 
 
 def make_dvc_md5s(
@@ -148,6 +182,18 @@ def make_dvc_md5s(
             continue
         resp[f["md5"]] = dict(path=f["path"], zipfile=zipfile)
     return resp
+
+
+def add_paths_to_zip(zipf: zipfile.ZipFile, paths: list[str]) -> None:
+    """Add files to a zip archive, expanding directories recursively."""
+    for path in paths:
+        if os.path.isdir(path):
+            for root, _, files in os.walk(path):
+                for filename in files:
+                    fpath = os.path.join(root, filename)
+                    zipf.write(fpath)
+        elif os.path.isfile(path):
+            zipf.write(path)
 
 
 def populate_dvc_cache():
@@ -171,3 +217,28 @@ def populate_dvc_cache():
                     print(zip_fpath)
                 # Extract out of ZIP file if necessary
                 # TODO: Check MD5 before inserting into the cache
+
+
+def check_project_release_archive(
+    zip_path: str, verbose: bool = False
+) -> None:
+    """Ensure an extracted project release archive can run cleanly."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with zipfile.ZipFile(zip_path) as zipf:
+            zipf.extractall(tmpdir)
+        ck_info = calkit.load_calkit_info(wdir=tmpdir)
+        has_pipeline = bool(ck_info.get("pipeline")) or os.path.isfile(
+            os.path.join(tmpdir, "dvc.yaml")
+        )
+        if not has_pipeline:
+            return
+        cmd = [sys.executable, "-m", "calkit", "run"]
+        if verbose:
+            cmd.append("--verbose")
+        try:
+            subprocess.run(cmd, cwd=tmpdir, check=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                "Released project archive failed pipeline checks: "
+                "`calkit run` failed."
+            ) from e

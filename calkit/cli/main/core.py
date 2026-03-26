@@ -55,7 +55,7 @@ from calkit.cli.office import office_app
 from calkit.cli.overleaf import overleaf_app
 from calkit.cli.slurm import slurm_app
 from calkit.cli.update import update_app
-from calkit.dvc import register_ck_scheme, run_dvc_command
+from calkit.dvc import get_dvc_repo, run_dvc_command
 from calkit.environments import get_env_lock_fpath
 from calkit.models import Procedure
 
@@ -255,10 +255,12 @@ def get_status(
 ):
     """View status (project, version control, and/or pipeline)."""
     ck_info = calkit.load_calkit_info()
-    try:
-        calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
-    except Exception as e:
-        warn(f"Failed to compile pipeline: {e.__class__.__name__}: {e}")
+    # If there's anything in ck_info and this isn't a Git repo, initialize one
+    if ck_info:
+        try:
+            git.Repo()
+        except InvalidGitRepositoryError:
+            git.Repo.init()
     valid_categories = ["project", "git", "dvc", "pipeline"]
     if categories is not None:
         for category in categories:
@@ -269,11 +271,22 @@ def get_status(
                 )
     else:
         categories = valid_categories
-    # Clean all notebooks in the pipeline
-    try:
-        calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
-    except Exception as e:
-        warn(f"Failed to clean notebooks: {e.__class__.__name__}: {e}")
+    pipeline_status = None
+    if "pipeline" in categories or "dvc" in categories:
+        pipeline_status = calkit.pipeline.get_status(
+            ck_info=ck_info,
+            targets=targets,
+            check_environments=True,
+            clean_notebooks=True,
+            compile_to_dvc=True,
+        )
+        for error in pipeline_status.errors:
+            warn(error)
+        if pipeline_status.failed_environment_checks:
+            warn(
+                "Failed pipeline environment checks for: "
+                + ", ".join(pipeline_status.failed_environment_checks)
+            )
     if as_json:
         status_dict = {}
         if "project" in categories:
@@ -330,10 +343,7 @@ def get_status(
                 status_dict["git"] = {"error": "Not a Git repository"}
         if "dvc" in categories:
             try:
-                import dvc.repo
-
-                register_ck_scheme()
-                dvc_repo = dvc.repo.Repo()
+                dvc_repo = calkit.dvc.get_dvc_repo()
                 data_status = dvc_repo.data_status()
                 if isinstance(data_status, dict):
                     data_status.pop("git", None)
@@ -341,16 +351,12 @@ def get_status(
             except Exception as e:
                 status_dict["dvc"] = {"error": f"{e.__class__.__name__}: {e}"}
         if "pipeline" in categories or "dvc" in categories:
-            try:
-                import dvc.repo
-
-                register_ck_scheme()
-                dvc_repo = dvc.repo.Repo()
-                status_dict["pipeline"] = dvc_repo.status()
-            except Exception as e:
-                status_dict["pipeline"] = {
-                    "error": f"{e.__class__.__name__}: {e}"
-                }
+            if pipeline_status is None:
+                status_dict["pipeline"] = None
+            else:
+                status_dict["pipeline"] = pipeline_status.model_dump(
+                    mode="json"
+                )
         print(json.dumps(status_dict, indent=2, default=str))
         return
     if "project" in categories:
@@ -389,10 +395,32 @@ def get_status(
         typer.echo()
     if "pipeline" in categories or "dvc" in categories:
         print_sep("Pipeline")
-        dvc_pipeline_cmd = ["status"]
-        if targets:
-            dvc_pipeline_cmd += targets
-        run_dvc_command(dvc_pipeline_cmd)
+        # Nicely format the results from pipeline status
+        if pipeline_status and pipeline_status.errors:
+            typer.echo("Pipeline status unavailable due to errors.")
+        elif pipeline_status and pipeline_status.is_stale:
+            for stage_name in pipeline_status.stale_stage_names:
+                stale_stage = pipeline_status.stale_stages.get(stage_name)
+                if stale_stage is None:
+                    continue
+                typer.echo(f"{typer.style(stage_name, fg='yellow')}:")
+                # Show stale outputs for this stage
+                if stale_stage.stale_outputs:
+                    typer.echo("  stale outputs:")
+                    for output_path in stale_stage.stale_outputs:
+                        typer.echo(f"    - {output_path}")
+                # Show modified outputs from this stage
+                if stale_stage.modified_outputs:
+                    typer.echo("  modified outputs:")
+                    for output_path in stale_stage.modified_outputs:
+                        typer.echo(f"    - {output_path}")
+                # Show modified inputs making the stage stale
+                if stale_stage.modified_inputs:
+                    typer.echo("  modified inputs:")
+                    for input_path in stale_stage.modified_inputs:
+                        typer.echo(f"    - {input_path}")
+        elif pipeline_status:
+            typer.echo("Pipeline is up to date.")
 
 
 @app.command(name="diff")
@@ -485,8 +513,7 @@ def add(
             raise_error("Not currently in a Git repo; run `calkit init` first")
         repo = git.Repo()
     try:
-        register_ck_scheme()
-        dvc_repo = dvc.repo.Repo()
+        dvc_repo = get_dvc_repo()
     except NotDvcRepoError:
         warn("DVC not initialized yet; initializing")
         dvc_repo = dvc.repo.Repo.init()
@@ -1221,10 +1248,8 @@ def run(
             os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
             raise_error(f"Pipeline compilation failed: {e}")
     # Initialize DVC repo if necessary
-    # Register the ck:// scheme before accessing DVC repo
-    register_ck_scheme()
     try:
-        dvc.repo.Repo()
+        get_dvc_repo()
     except Exception:
         if not quiet:
             typer.echo("Initializing DVC repo")
@@ -1285,8 +1310,7 @@ def run(
         git_staged_files_before = calkit.git.get_staged_files(repo=repo)
         git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
         # Get status of DVC repo before running
-        register_ck_scheme()
-        dvc_repo = dvc.repo.Repo()
+        dvc_repo = get_dvc_repo()
         dvc_status_before = dvc_repo.status()
         dvc_data_status_before = dvc_repo.data_status()
         dvc_data_status_before.pop("git", None)  # Remove git status

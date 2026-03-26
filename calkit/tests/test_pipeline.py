@@ -1,9 +1,12 @@
 """Tests for ``calkit.pipeline``."""
 
+import os
 import subprocess
 
+import git
 import pytest
 
+import calkit
 import calkit.pipeline
 from calkit.environments import get_env_lock_fpath
 from calkit.pipeline import stages_are_similar
@@ -648,3 +651,177 @@ def test_shell_script_stage_allows_non_composite_slurm_env():
         "calkit slurm batch --name run --environment mycluster "
         "-- scripts/run.sh a b"
     )
+
+
+def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
+    """When a stage output path is renamed, stale .gitignore entries are
+    replaced.
+
+    Use the .gitignore contents for verification because case-only renames can
+    still appear ignored on case-insensitive filesystems like the default macOS
+    setup.
+    """
+    subprocess.check_call(["calkit", "init"])
+    # Stage 1: initial calkit.yaml with output 'b_sparsity_plot.pdf' stored in DVC
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "touch b_sparsity_plot.pdf",
+                    "outputs": [
+                        {
+                            "path": "b_sparsity_plot.pdf",
+                            "storage": "dvc",
+                        }
+                    ],
+                }
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
+    # Verify DVC has added the old output path to .gitignore
+    repo = git.Repo(".")
+    assert repo.ignored("b_sparsity_plot.pdf")
+    with open(".gitignore") as f:
+        lines = f.read().splitlines()
+    assert "/b_sparsity_plot.pdf" in lines
+    # Stage 2: rename output (capitalization change) to 'B_sparsity_plot.pdf'
+    ck_info["pipeline"]["stages"]["plot"]["command"] = (
+        "touch B_sparsity_plot.pdf"
+    )
+    ck_info["pipeline"]["stages"]["plot"]["outputs"] = [
+        {"path": "B_sparsity_plot.pdf", "storage": "dvc"}
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"])
+    with open(".gitignore") as f:
+        lines = f.read().splitlines()
+    assert "/b_sparsity_plot.pdf" not in lines
+    assert "/B_sparsity_plot.pdf" in lines
+    assert repo.ignored("B_sparsity_plot.pdf")
+
+
+def test_gitignore_not_unignored_latex_pdf_output(tmp_dir):
+    repo = git.Repo.init()
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("paper", exist_ok=True)
+    with open("paper/.gitignore", "w") as f:
+        f.write("/main.pdf\n")
+    ck_info = {
+        "environments": {
+            "tex": {
+                "kind": "conda",
+                "path": "environment.yaml",
+            }
+        },
+        "pipeline": {
+            "stages": {
+                "build-paper": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "paper/main.tex",
+                    "force": True,
+                    "inputs": [
+                        "paper/references.bib",
+                        "paper/aasjournal.bst",
+                        "paper/aastex631.cls",
+                        "paper/results.tex",
+                        "paper/diagrams",
+                        "paper/figures",
+                    ],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert not os.path.exists(".gitignore")
+    assert repo.ignored("paper/main.pdf")
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert not os.path.exists(".gitignore")
+    with open("paper/.gitignore") as f:
+        assert f.read().splitlines() == ["/main.pdf"]
+    assert repo.ignored("paper/main.pdf")
+
+
+def test_get_status(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "environments": {
+            "py": {
+                "kind": "uv-venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+            }
+        },
+        "pipeline": {
+            "stages": {
+                "get-data": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "something/my-cool-script.py",
+                    "outputs": [
+                        "my-output.out",
+                    ],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("requirements.txt", "w") as f:
+        f.write("requests\n")
+    os.makedirs("something", exist_ok=True)
+    with open("something/my-cool-script.py", "w") as f:
+        f.write(
+            "with open('my-output.out', 'w') as f:\n"
+            "    f.write('Hello, world!')\n"
+        )
+    status = calkit.pipeline.get_status(ck_info=ck_info)
+    assert not status.failed_environment_checks
+    assert status.is_stale
+    assert "get-data" in status.stale_stage_names
+    assert status.stale_stages["get-data"].stale_outputs == ["my-output.out"]
+    assert status.stale_stages["get-data"].modified_outputs == []
+    # Run the pipeline and check that status updates to up-to-date
+    subprocess.check_call(["calkit", "run"])
+    status = calkit.pipeline.get_status(ck_info=ck_info)
+    assert not status.failed_environment_checks
+    assert not status.is_stale
+    assert not status.stale_stage_names
+    # Now manually modify the output and ensure we have a changed output, but
+    # not a stale output
+    with open("my-output.out", "w") as f:
+        f.write("Goodbye, world!")
+    status = calkit.pipeline.get_status(ck_info=ck_info)
+    assert not status.failed_environment_checks
+    assert status.is_stale
+    assert status.stale_stages["get-data"].modified_outputs == [
+        "my-output.out"
+    ]
+    assert status.stale_stages["get-data"].stale_outputs == []
+    # Now change the output back to the original, but modify the script so we
+    # can check we have stale outputs due to changed dependencies
+    # TODO: Should we distinguish between a changed script and a changed input?
+    # Technically in the stage definition there are no inputs
+    with open("my-output.out", "w") as f:
+        f.write("Hello, world!")
+    with open("something/my-cool-script.py", "w") as f:
+        f.write(
+            "with open('my-output.out', 'w') as f:\n"
+            "    f.write('Hello again, world!')\n"
+        )
+    status = calkit.pipeline.get_status(ck_info=ck_info)
+    assert not status.failed_environment_checks
+    assert status.is_stale
+    assert status.stale_stages["get-data"].modified_inputs == [
+        "something/my-cool-script.py"
+    ]
+    assert status.stale_stages["get-data"].stale_outputs == ["my-output.out"]
+    assert status.stale_stages["get-data"].modified_outputs == []

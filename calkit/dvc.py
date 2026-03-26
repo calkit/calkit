@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+import dvc.repo
 import git
 from dvc.utils.objects import cached_property
 from dvc_objects.fs.base import ObjectFileSystem
@@ -234,6 +235,12 @@ def run_dvc_cli(argv: list[str] | None = None) -> int:
     return dvc_main(argv)
 
 
+def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
+    """Return a DVC repo with ``ck://`` scheme support registered."""
+    register_ck_scheme()
+    return dvc.repo.Repo(wdir)
+
+
 def run_dvc_command(argv: list[str], cwd: str | None = None) -> int:
     """Run a DVC command, optionally in a specific working directory.
 
@@ -367,14 +374,10 @@ def get_remotes(wdir: str | None = None) -> dict[str, str]:
     """Get a dictionary of DVC remotes, keyed by name, with URL as the
     value.
     """
-    import dvc.repo
     from dvc.exceptions import NotDvcRepoError
 
-    # Ensure DVC recognizes ck:// remotes when validating config.
-    register_ck_scheme()
-    repo_path = wdir or "."
     try:
-        repo = dvc.repo.Repo(repo_path)
+        repo = get_dvc_repo(wdir)
     except NotDvcRepoError:
         return {}
     try:
@@ -403,9 +406,7 @@ def list_files(wdir: str | None = None, recursive=True) -> list[dict]:
     """Return a list with all files in DVC, including their path and md5
     checksum.
     """
-    import dvc.repo
-
-    dvc_repo = dvc.repo.Repo(wdir)
+    dvc_repo = get_dvc_repo(wdir)
     return dvc_repo.ls(".", dvc_only=True, recursive=recursive)
 
 

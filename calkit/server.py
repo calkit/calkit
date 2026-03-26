@@ -22,7 +22,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 import calkit
 import calkit.jupyter
-from calkit.dvc import run_dvc_command
+from calkit.dvc import get_dvc_repo, run_dvc_command
 
 logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
@@ -287,7 +287,7 @@ def get_status(
     # If the DVC remote is not configured properly, we might raise a
     # dvc.config.ConfigError here
     try:
-        dvc_repo = dvc.repo.Repo(project.wdir)
+        dvc_repo = get_dvc_repo(project.wdir)
         # Get a dictionary of DVC artifacts that have changed, keyed by the DVC
         # file, where values are a list, which may include a dict with a
         # 'changed outs' key, e.g.,
@@ -450,7 +450,7 @@ def discard_changes(owner_name: str, project_name: str) -> Message:
     # If the DVC remote is not configured properly, we might raise a
     # dvc.config.ConfigError here
     try:
-        dvc_repo = dvc.repo.Repo(project.wdir)
+        dvc_repo = get_dvc_repo(project.wdir)
         dvc_data_status = dvc.repo.data.status(dvc_repo)
         # Get only the changed files since anything will be uncommitted after
         # the git stash

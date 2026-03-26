@@ -1,12 +1,19 @@
 """Tests for the ``conda`` module."""
 
 import os
+import shutil
 import subprocess
 
 import pytest
 
 import calkit
-from calkit.conda import _check_list, _check_single, check_env
+from calkit.conda import (
+    _check_list,
+    _check_single,
+    _get_pip_dependency_list,
+    _split_env_dependencies,
+    check_env,
+)
 
 ENV_NAME = "main"
 
@@ -35,6 +42,25 @@ def test_check_list():
     assert _check_list("python>=3", installed, env_spec_dir=".", conda=False)
     assert _check_list("numpy", installed, env_spec_dir=".", conda=False)
     assert not _check_list("pandas", installed, env_spec_dir=".", conda=False)
+
+
+def test_split_env_dependencies():
+    dependencies = [
+        "python=3.12",
+        "pip",
+        "numpy=2",
+        {"pip": ["sqlalchemy==2.0.39"]},
+    ]
+    conda_deps, pip_deps = _split_env_dependencies(dependencies)
+    assert conda_deps == ["python=3.12", "pip", "numpy=2"]
+    assert pip_deps == ["sqlalchemy==2.0.39"]
+
+
+def test_get_pip_dependency_list():
+    dependencies = ["python=3.12", "pip", {"pip": "sqlalchemy==2.0.39"}]
+    pip_deps = _get_pip_dependency_list(dependencies)
+    assert pip_deps == ["sqlalchemy==2.0.39"]
+    assert dependencies[-1]["pip"] == ["sqlalchemy==2.0.39"]
 
 
 def delete_env(name: str):
@@ -262,7 +288,7 @@ def test_check_prefix_env(tmp_dir, conda_env_prefix):
     )
 
 
-def test_check_editable(tmp_dir, conda_env_name):
+def test_check_env_editable(tmp_dir, conda_env_name):
     subprocess.check_call(["calkit", "init"])
     # Create a dummy package named 'src' to install in editable mode
     os.makedirs("src", exist_ok=True)
@@ -306,6 +332,98 @@ setup(
         lock = calkit.ryaml.load(f)
     pip_deps = lock["dependencies"][-1]["pip"]
     assert "-e ." in pip_deps
+    # Now let's make sure we get proper output if the editable package is
+    # has an invalid pyproject.toml
+    os.remove("setup.py")
+    shutil.rmtree("src.egg-info")
+    toml_txt = """[build-system]
+requires = ["setuptools>=61.0.0", "wheel", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "src-thing"
+dynamic = ["version"]
+authors = [
+  {name = "Someone"}
+]
+description = "Test"
+
+dependencies = [
+    "numpy>=1.21",
+    "scipy>=1.7",
+    "pandas>=1.5",
+    "matplotlib>=3.5",
+    "h5netcdf>=0.12",
+    "h5py>=3.0",
+    "xarray>=2023.0",
+    "streamlit>=1.0"
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["src-thing"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"src-thing" = [] # Explicitly state no package data
+
+[tool.setuptools_scm]
+local_scheme = "no-local-version"
+fallback_version = "0+unknown"
+"""
+    with open("pyproject.toml", "w") as f:
+        f.write(toml_txt)
+    with pytest.raises(Exception, match="Failed to load pyproject.toml"):
+        res = check_env()
+    # Fix it and make sure it runs with relaxed mode
+    toml_txt = """[build-system]
+requires = ["setuptools>=61.0.0", "wheel", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "src-thing"
+dynamic = ["version"]
+authors = [
+  {name = "Someone"}
+]
+description = "Test"
+
+dependencies = []
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.setuptools_scm]
+local_scheme = "no-local-version"
+fallback_version = "0+unknown"
+"""
+    with open("pyproject.toml", "w") as f:
+        f.write(toml_txt)
+    res = check_env(relaxed=True)
+    assert res.env_exists
+    assert res.env_needs_rebuild
+    assert res.env_needs_export
+    # Make sure we can import the editable package
+    os.makedirs("subdir")
+    subprocess.check_call(
+        [
+            "conda",
+            "run",
+            "-n",
+            conda_env_name,
+            "python",
+            "-c",
+            "import src; print('src file:', src.__file__);",
+        ],
+        cwd="subdir",
+    )
+    # Check again and make sure we don't need a rebuild since the editable
+    # package is still valid
+    res = check_env(relaxed=True)
+    assert res.env_exists
+    assert not res.env_needs_rebuild
 
 
 def test_find_conda_exe():

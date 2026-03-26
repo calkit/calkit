@@ -676,7 +676,7 @@ def test_new_release_is_runnable(tmp_dir):
                             "kind": "python-script",
                             "script_path": "get_data.py",
                             "environment": "main",
-                            "outputs": ["data.txt"],
+                            "outputs": ["results"],
                         }
                     }
                 },
@@ -687,7 +687,9 @@ def test_new_release_is_runnable(tmp_dir):
         f.write("requests\n")
     with open("get_data.py", "w") as f:
         f.write("print('running running running')\n")
-        f.write("with open('data.txt', 'w') as f:\n")
+        f.write("import os\n")
+        f.write("os.makedirs('results', exist_ok=True)\n")
+        f.write("with open('results/data.txt', 'w') as f:\n")
         f.write("    f.write('hello world')\n")
     # Add a license
     subprocess.check_call(

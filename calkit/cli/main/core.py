@@ -397,7 +397,9 @@ def get_status(
         print_sep("Pipeline")
         # Nicely format the results from pipeline status
         if pipeline_status and pipeline_status.errors:
-            typer.echo("Pipeline status unavailable due to errors.")
+            warn("Pipeline status unavailable due to errors.")
+        if pipeline_status and not pipeline_status.has_pipeline:
+            typer.echo("This project has no pipeline.")
         elif pipeline_status and pipeline_status.is_stale:
             for stage_name in pipeline_status.stale_stage_names:
                 stale_stage = pipeline_status.stale_stages.get(stage_name)

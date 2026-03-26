@@ -701,7 +701,8 @@ def test_new_release_is_runnable(tmp_dir):
             "Some Person",
         ]
     )
-    subprocess.check_call(["calkit", "run"])
+    out = subprocess.check_output(["calkit", "run"], text=True)
+    assert "running running running" in out
     repo = git.Repo()
     repo.git.add(
         [
@@ -713,6 +714,9 @@ def test_new_release_is_runnable(tmp_dir):
         ]
     )
     repo.git.commit("-m", "Add pipeline for release test")
+    # Run the pipeline again and make sure it's up to date
+    out = subprocess.check_output(["calkit", "run"], text=True)
+    assert "running running running" not in out
     out = subprocess.check_output(
         [
             "calkit",

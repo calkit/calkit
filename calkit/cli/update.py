@@ -12,6 +12,7 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
+import calkit.pipeline
 from calkit.cli import raise_error
 
 update_app = typer.Typer(no_args_is_help=True)
@@ -156,6 +157,26 @@ def update_release(
     record_id = release.get("record_id")
     if record_id is None:
         raise_error("Release has no record ID")
+    if publish or reupload:
+        typer.echo("Checking pipeline is up-to-date for release update")
+        status = calkit.pipeline.get_status(
+            ck_info=ck_info,
+            check_environments=True,
+            clean_notebooks=True,
+            compile_to_dvc=True,
+        )
+        if status.errors:
+            raise_error("Pipeline checks failed: " + "; ".join(status.errors))
+        if status.failed_environment_checks:
+            raise_error(
+                "Pipeline environment checks failed for: "
+                + ", ".join(status.failed_environment_checks)
+            )
+        if status.is_stale:
+            raise_error(
+                "Pipeline is not up-to-date; out-of-date stages: "
+                + ", ".join(status.stale_stage_names)
+            )
     if publish:
         try:
             calkit.invenio.post(
@@ -245,8 +266,12 @@ def update_release(
         all_paths = calkit.releases.ls_files()
         typer.echo(f"Adding files to {zip_path}")
         with zipfile.ZipFile(zip_path, "w") as zipf:
-            for fpath in all_paths:
-                zipf.write(fpath)
+            calkit.releases.add_paths_to_zip(zipf, all_paths)
+        typer.echo("Checking project release archive")
+        try:
+            calkit.releases.check_project_release_archive(zip_path)
+        except Exception as e:
+            raise_error(str(e))
         try:
             files_in_record = [
                 entry["key"]

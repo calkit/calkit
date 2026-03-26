@@ -5,8 +5,10 @@ import os
 
 import git
 import typer
+from pydantic import BaseModel, Field, computed_field, field_validator
 
 import calkit
+import calkit.environments
 from calkit.environments import get_env_lock_fpath
 from calkit.models.iteration import expand_project_parameters
 from calkit.models.pipeline import (
@@ -14,6 +16,184 @@ from calkit.models.pipeline import (
     PathOutput,
     Pipeline,
 )
+
+
+class PipelineStatus(BaseModel):
+    """Current status of the project pipeline."""
+
+    has_pipeline: bool
+    environment_checks: dict[str, dict] = Field(default_factory=dict)
+    cleaned_notebooks: list[str] = Field(default_factory=list)
+    stale_stages: dict[str, "StaleStage"] = Field(default_factory=dict)
+    errors: list[str] = Field(default_factory=list)
+
+    @field_validator("stale_stages", mode="before")
+    @classmethod
+    def _coerce_stale_stages(cls, value):
+        if not isinstance(value, dict):
+            return {}
+        coerced = {}
+        for stage_name, stage_value in value.items():
+            if isinstance(stage_value, StaleStage):
+                coerced[stage_name] = stage_value
+            else:
+                coerced[stage_name] = StaleStage.from_status_data(stage_value)
+        return coerced
+
+    @computed_field
+    @property
+    def stale_stage_names(self) -> list[str]:
+        return list(self.stale_stages.keys())
+
+    @computed_field
+    @property
+    def failed_environment_checks(self) -> list[str]:
+        return sorted(
+            [
+                env_name
+                for env_name, result in self.environment_checks.items()
+                if not result.get("success", False)
+            ]
+        )
+
+    @computed_field
+    @property
+    def is_stale(self) -> bool:
+        return bool(self.stale_stages)
+
+
+class StaleStage(BaseModel):
+    """Structured status information for a stale pipeline stage."""
+
+    raw_status: list | dict | str | None = None
+    stale_outputs: list[str] = Field(default_factory=list)
+    modified_inputs: list[str] = Field(default_factory=list)
+    modified_outputs: list[str] = Field(default_factory=list)
+
+    @staticmethod
+    def _as_path_list(paths: object) -> list[str]:
+        if isinstance(paths, str):
+            return [paths]
+        if isinstance(paths, list):
+            return [str(path) for path in paths]
+        return []
+
+    @classmethod
+    def _collect_paths(cls, change_group: object) -> list[str]:
+        paths = []
+        if isinstance(change_group, list):
+            for item in change_group:
+                paths.extend(cls._collect_paths(item))
+            return list(dict.fromkeys(paths))
+        if not isinstance(change_group, dict):
+            return []
+        for key, values in change_group.items():
+            # DVC may encode path->change_type, e.g. {"foo.txt": "modified"}
+            if isinstance(values, str) and values in {
+                "modified",
+                "new",
+                "deleted",
+            }:
+                paths.append(str(key))
+            else:
+                paths.extend(cls._as_path_list(values))
+
+        return list(dict.fromkeys(paths))
+
+    @classmethod
+    def _collect_output_paths(
+        cls, change_group: object
+    ) -> tuple[list[str], list[str]]:
+        all_paths = []
+        changed_paths = []
+        changed_statuses = {"modified"}
+        known_statuses = changed_statuses | {
+            "new",
+            "deleted",
+            "not in cache",
+            "always changed",
+        }
+        if isinstance(change_group, list):
+            for item in change_group:
+                item_all, item_changed = cls._collect_output_paths(item)
+                all_paths.extend(item_all)
+                changed_paths.extend(item_changed)
+            return list(dict.fromkeys(all_paths)), list(
+                dict.fromkeys(changed_paths)
+            )
+        if not isinstance(change_group, dict):
+            return [], []
+        for key, values in change_group.items():
+            if isinstance(values, str) and values in known_statuses:
+                path = str(key)
+                all_paths.append(path)
+                if values in changed_statuses:
+                    changed_paths.append(path)
+                continue
+            if isinstance(values, list):
+                listed_paths = [str(path) for path in values]
+                if key in known_statuses:
+                    all_paths.extend(listed_paths)
+                    if key in changed_statuses:
+                        changed_paths.extend(listed_paths)
+                else:
+                    all_paths.extend(listed_paths)
+                continue
+            item_all, item_changed = cls._collect_output_paths(values)
+            all_paths.extend(item_all)
+            changed_paths.extend(item_changed)
+
+        return list(dict.fromkeys(all_paths)), list(
+            dict.fromkeys(changed_paths)
+        )
+
+    @classmethod
+    def from_status_data(
+        cls,
+        status_data: list | dict | str,
+        configured_outputs: list[str] | None = None,
+    ) -> "StaleStage":
+        modified_inputs = []
+        output_paths = []
+        modified_outputs = []
+
+        status_blocks = []
+        if isinstance(status_data, dict):
+            status_blocks = [status_data]
+        elif isinstance(status_data, list):
+            status_blocks = [
+                item for item in status_data if isinstance(item, dict)
+            ]
+        for block in status_blocks:
+            modified_inputs.extend(
+                cls._collect_paths(
+                    block.get("changed deps", block.get("deps", {}))
+                )
+            )
+            out_paths, changed_out_paths = cls._collect_output_paths(
+                block.get("changed outs", block.get("outs", {}))
+            )
+            output_paths.extend(out_paths)
+            modified_outputs.extend(changed_out_paths)
+        modified_inputs = list(dict.fromkeys(modified_inputs))
+        output_paths = list(dict.fromkeys(output_paths))
+        modified_outputs = list(dict.fromkeys(modified_outputs))
+        configured_outputs = [str(path) for path in (configured_outputs or [])]
+        stale_outputs = []
+        if modified_inputs:
+            stale_outputs.extend(configured_outputs)
+        stale_outputs.extend(
+            [path for path in output_paths if path not in modified_outputs]
+        )
+        if not stale_outputs and not modified_outputs and configured_outputs:
+            stale_outputs.extend(configured_outputs)
+        stale_outputs = list(dict.fromkeys(stale_outputs))
+        return cls(
+            raw_status=status_data,
+            stale_outputs=stale_outputs,
+            modified_inputs=modified_inputs,
+            modified_outputs=modified_outputs,
+        )
 
 
 def stages_are_similar(stage1: dict, stage2: dict) -> bool:
@@ -99,6 +279,131 @@ def _expand_matrix(input_dict: dict[str, list]) -> list[dict]:
                 vd[key] = val
         final_list.append(vd)
     return final_list
+
+
+def get_status(
+    ck_info: dict | None = None,
+    targets: list[str] | None = None,
+    wdir: str | None = None,
+    check_environments: bool = True,
+    clean_notebooks: bool = True,
+    compile_to_dvc: bool = True,
+    force_env_check: bool = False,
+) -> PipelineStatus:
+    """Get pipeline status after optional prep checks.
+
+    This can compile the Calkit pipeline to DVC, clean notebook outputs,
+    check pipeline environments, then query DVC for out-of-date stages.
+    """
+    prev_cwd = os.getcwd()
+    if wdir is not None:
+        os.chdir(wdir)
+    try:
+        if ck_info is None:
+            ck_info = calkit.load_calkit_info()
+        has_pipeline = bool(ck_info.get("pipeline", {}).get("stages", {}))
+        has_pipeline = has_pipeline or os.path.isfile("dvc.yaml")
+        result = {
+            "has_pipeline": has_pipeline,
+            "environment_checks": {},
+            "cleaned_notebooks": [],
+            "stale_stages": {},
+            "errors": [],
+        }
+        if not has_pipeline:
+            return PipelineStatus.model_validate(result)
+        if check_environments:
+            try:
+                env_checks = calkit.environments.check_all_in_pipeline(
+                    ck_info=ck_info,
+                    targets=targets,
+                    force=force_env_check,
+                )
+                result["environment_checks"] = env_checks
+            except Exception as e:
+                result["errors"].append(
+                    "Failed to check pipeline environments: "
+                    f"{e.__class__.__name__}: {e}"
+                )
+                return PipelineStatus.model_validate(result)
+            failed_env_checks = [
+                env_name
+                for env_name, info in env_checks.items()
+                if not info.get("success", False)
+            ]
+            if failed_env_checks:
+                return PipelineStatus.model_validate(result)
+        if compile_to_dvc and ck_info.get("pipeline", {}).get("stages", {}):
+            try:
+                to_dvc(ck_info=ck_info, write=True)
+            except Exception as e:
+                result["errors"].append(
+                    f"Failed to compile pipeline: {e.__class__.__name__}: {e}"
+                )
+                return PipelineStatus.model_validate(result)
+        if clean_notebooks and ck_info.get("pipeline", {}).get("stages", {}):
+            try:
+                cleaned = calkit.notebooks.clean_all_in_pipeline(
+                    ck_info=ck_info
+                )
+                result["cleaned_notebooks"] = cleaned
+            except Exception as e:
+                result["errors"].append(
+                    "Failed to clean notebooks in pipeline: "
+                    f"{e.__class__.__name__}: {e}"
+                )
+                return PipelineStatus.model_validate(result)
+        try:
+            dvc_repo = calkit.dvc.get_dvc_repo()
+            raw_status = dvc_repo.status(targets=targets)
+        except Exception as e:
+            result["errors"].append(
+                "Failed to get pipeline status from DVC: "
+                f"{e.__class__.__name__}: {e}"
+            )
+            return PipelineStatus.model_validate(result)
+        raw_stale_stages = {
+            k.split("dvc.yaml:")[-1]: v
+            for k, v in raw_status.items()
+            if v != ["always changed"] and not k.endswith(".dvc")
+        }
+        stages_config = ck_info.get("pipeline", {}).get("stages", {})
+        ordered_stale_stages = {}
+        for stage_name in stages_config.keys():
+            if stage_name not in raw_stale_stages:
+                continue
+            status_data = raw_stale_stages[stage_name]
+            ordered_stale_stages[stage_name] = StaleStage.from_status_data(
+                status_data=status_data,
+                configured_outputs=[
+                    output.get("path", str(output))
+                    if isinstance(output, dict)
+                    else str(output)
+                    for output in stages_config.get(stage_name, {}).get(
+                        "outputs", []
+                    )
+                ],
+            )
+        # Keep any stale stages not present in ck_info at the end.
+        for stage_name, status_data in raw_stale_stages.items():
+            if stage_name in ordered_stale_stages:
+                continue
+            ordered_stale_stages[stage_name] = StaleStage.from_status_data(
+                status_data=status_data,
+                configured_outputs=[
+                    output.get("path", str(output))
+                    if isinstance(output, dict)
+                    else str(output)
+                    for output in stages_config.get(stage_name, {}).get(
+                        "outputs", []
+                    )
+                ],
+            )
+        result["stale_stages"] = ordered_stale_stages
+        return PipelineStatus.model_validate(result)
+    finally:
+        if wdir is not None:
+            os.chdir(prev_cwd)
 
 
 def to_dvc(

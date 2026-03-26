@@ -643,3 +643,94 @@ def test_new_release(tmp_dir):
     # subprocess.check_call(
     #     ["calkit", "update", "release", "--name", "v0.1.0", "--delete"]
     # )
+
+
+def test_new_release_is_runnable(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "title": "Test project",
+                "name": "test-project",
+                "owner": "test-user",
+                "git_repo_url": "https://github.com/test-user/test-project",
+                "authors": [
+                    {
+                        "first_name": "Alice",
+                        "last_name": "Smith",
+                        "affiliation": "SomeU",
+                        "orcid": "0000-0001-2345-6789",
+                    }
+                ],
+                "environments": {
+                    "main": {
+                        "kind": "uv-venv",
+                        "path": "requirements.txt",
+                        "prefix": ".venv",
+                        "python": "3.13",
+                    }
+                },
+                "pipeline": {
+                    "stages": {
+                        "get-data": {
+                            "kind": "python-script",
+                            "script_path": "get_data.py",
+                            "environment": "main",
+                            "outputs": ["results"],
+                        }
+                    }
+                },
+            },
+            f,
+        )
+    with open("requirements.txt", "w") as f:
+        f.write("requests\n")
+    with open("get_data.py", "w") as f:
+        f.write("print('running running running')\n")
+        f.write("import os\n")
+        f.write("os.makedirs('results', exist_ok=True)\n")
+        f.write("with open('results/data.txt', 'w') as f:\n")
+        f.write("    f.write('hello world')\n")
+    # Add a license
+    subprocess.check_call(
+        [
+            "calkit",
+            "update",
+            "license",
+            "-c",
+            "Some Person",
+        ]
+    )
+    out = subprocess.check_output(["calkit", "run"], text=True)
+    assert "running running running" in out
+    repo = git.Repo()
+    repo.git.add(
+        [
+            "calkit.yaml",
+            "dvc.yaml",
+            "dvc.lock",
+            "requirements.txt",
+            "get_data.py",
+        ]
+    )
+    repo.git.commit("-m", "Add pipeline for release test")
+    # Run the pipeline again and make sure it's up to date
+    out = subprocess.check_output(["calkit", "run"], text=True)
+    assert "running running running" not in out
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "new",
+            "release",
+            "--name",
+            "v0.1.0",
+            "--dry-run",
+            "--description",
+            "First release.",
+            "--draft",
+            "--no-github",
+        ],
+        text=True,
+    )
+    print(out)
+    assert "running running running" not in out

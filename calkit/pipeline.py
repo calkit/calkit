@@ -43,7 +43,7 @@ class PipelineStatus(BaseModel):
     @computed_field
     @property
     def stale_stage_names(self) -> list[str]:
-        return sorted(self.stale_stages.keys())
+        return list(self.stale_stages.keys())
 
     @computed_field
     @property

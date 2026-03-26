@@ -1,5 +1,6 @@
 """Tests for the ``releases`` module."""
 
+import os
 import subprocess
 import sys
 import zipfile
@@ -8,10 +9,9 @@ import bibtexparser
 import git
 import pytest
 
-import calkit
 from calkit.releases import (
+    add_paths_to_zip,
     check_project_release_archive,
-    check_release_reproducibility,
     create_bibtex,
     ls_files,
 )
@@ -50,50 +50,46 @@ def test_ls_files(tmp_dir):
         check=True,
     )
     subprocess.run(["git", "commit", "-m", "Add submodule"], check=True)
+    # Ensure all .dvc/cache content is included by ls_files.
+    os.makedirs(".dvc/cache/aa", exist_ok=True)
+    os.makedirs(".dvc/cache/files/md5/bb", exist_ok=True)
+    os.makedirs(".dvc/cache/runs/cc/hash", exist_ok=True)
+    (tmp_dir / ".dvc" / "cache" / "aa" / "legacy").write_text("x")
+    (
+        tmp_dir / ".dvc" / "cache" / "files" / "md5" / "bb" / "modern"
+    ).write_text("y")
+    (tmp_dir / ".dvc" / "cache" / "runs" / "cc" / "hash" / "run").write_text(
+        "z"
+    )
     files = ls_files()
     assert "submodule/submodule-file.txt" in files
+    assert ".dvc/cache/aa/legacy" in files
+    assert ".dvc/cache/files/md5/bb/modern" in files
+    assert ".dvc/cache/runs/cc/hash/run" in files
 
 
-def test_check_release_reproducibility_runs_from_project_root(
+def test_check_project_release_archive_passes_when_pipeline_is_current(
     tmp_dir, monkeypatch
 ):
-    subprocess.run(["calkit", "init"], check=True)
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump({"pipeline": {"stages": {}}}, f)
-    with open("dvc.yaml", "w") as f:
-        f.write("stages: {}\n")
+    zip_path = "archive.zip"
+    with zipfile.ZipFile(zip_path, "w") as zipf:
+        zipf.writestr("calkit.yaml", "title: Test\n")
+        zipf.writestr("dvc.yaml", "stages: {}\n")
 
     calls = []
 
-    def fake_run(cmd, check=True):
-        calls.append(cmd)
+    def fake_run(cmd, cwd=None, check=True):
+        calls.append((cmd, cwd, check))
 
     monkeypatch.setattr("calkit.releases.subprocess.run", fake_run)
-
-    check_release_reproducibility(verbose=True)
-
-    assert calls == [[sys.executable, "-m", "calkit", "run", "--verbose"]]
-
-
-def test_check_project_release_archive_passes_when_only_skipped_stages(
-    tmp_dir, monkeypatch
-):
-    zip_path = "archive.zip"
-    with zipfile.ZipFile(zip_path, "w") as zipf:
-        zipf.writestr("calkit.yaml", "title: Test\n")
-        zipf.writestr("dvc.yaml", "stages: {}\n")
-
-    monkeypatch.setattr(
-        "calkit.cli.main.core.run",
-        lambda quiet=False, verbose=False: {
-            "stage_run_info": {"build": {"status": "skipped"}}
-        },
-    )
-
     check_project_release_archive(zip_path)
+    assert len(calls) == 1
+    assert calls[0][0] == [sys.executable, "-m", "calkit", "run"]
+    assert calls[0][2] is True
+    assert calls[0][1] is not None
 
 
-def test_check_project_release_archive_fails_when_stage_runs(
+def test_check_project_release_archive_fails_when_stages_out_of_date(
     tmp_dir, monkeypatch
 ):
     zip_path = "archive.zip"
@@ -101,14 +97,11 @@ def test_check_project_release_archive_fails_when_stage_runs(
         zipf.writestr("calkit.yaml", "title: Test\n")
         zipf.writestr("dvc.yaml", "stages: {}\n")
 
-    monkeypatch.setattr(
-        "calkit.cli.main.core.run",
-        lambda quiet=False, verbose=False: {
-            "stage_run_info": {"build": {"status": "completed"}}
-        },
-    )
+    def fake_run(cmd, cwd=None, check=True):
+        raise subprocess.CalledProcessError(returncode=1, cmd=cmd)
 
-    with pytest.raises(RuntimeError, match="not up-to-date"):
+    monkeypatch.setattr("calkit.releases.subprocess.run", fake_run)
+    with pytest.raises(RuntimeError, match="calkit run` failed"):
         check_project_release_archive(zip_path)
 
 
@@ -140,3 +133,18 @@ def test_create_bibtex():
     )
     entries = bibtexparser.loads(entry).entries
     assert len(entries) == 1
+
+
+def test_add_paths_to_zip_expands_directory_contents(tmp_dir):
+    os.makedirs("data/sub", exist_ok=True)
+    with open("data/sub/file.txt", "w") as f:
+        f.write("hello")
+    with open("root.txt", "w") as f:
+        f.write("root")
+    zip_path = "archive.zip"
+    with zipfile.ZipFile(zip_path, "w") as zipf:
+        add_paths_to_zip(zipf, ["data", "root.txt"])
+    with zipfile.ZipFile(zip_path) as zipf:
+        names = set(zipf.namelist())
+    assert "data/sub/file.txt" in names
+    assert "root.txt" in names

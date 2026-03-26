@@ -315,7 +315,9 @@ def get_status(
     if "pipeline" in categories or "dvc" in categories:
         print_sep("Pipeline")
         # Nicely format the results from pipeline status
-        if pipeline_status and pipeline_status.is_stale:
+        if pipeline_status and pipeline_status.errors:
+            typer.echo("Pipeline status unavailable due to errors.")
+        elif pipeline_status and pipeline_status.is_stale:
             for stage_name in pipeline_status.stale_stage_names:
                 stale_stage = pipeline_status.stale_stages.get(stage_name)
                 if stale_stage is None:

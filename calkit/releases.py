@@ -157,7 +157,15 @@ def ls_files() -> list[str]:
     repo = git.Repo()
     git_files = repo.git.ls_files(".", recurse_submodules=True).splitlines()
     dvc_files = calkit.dvc.list_paths(recursive=True)
-    return git_files + dvc_files
+    cache_files: list[str] = []
+    cache_root = os.path.join(".dvc", "cache")
+    if os.path.isdir(cache_root):
+        for root, _, files in os.walk(cache_root):
+            for filename in files:
+                fpath = os.path.join(root, filename)
+                if os.path.isfile(fpath):
+                    cache_files.append(fpath)
+    return list(dict.fromkeys(git_files + dvc_files + cache_files))
 
 
 def make_dvc_md5s(
@@ -174,6 +182,18 @@ def make_dvc_md5s(
             continue
         resp[f["md5"]] = dict(path=f["path"], zipfile=zipfile)
     return resp
+
+
+def add_paths_to_zip(zipf: zipfile.ZipFile, paths: list[str]) -> None:
+    """Add files to a zip archive, expanding directories recursively."""
+    for path in paths:
+        if os.path.isdir(path):
+            for root, _, files in os.walk(path):
+                for filename in files:
+                    fpath = os.path.join(root, filename)
+                    zipf.write(fpath)
+        elif os.path.isfile(path):
+            zipf.write(path)
 
 
 def populate_dvc_cache():
@@ -199,32 +219,10 @@ def populate_dvc_cache():
                 # TODO: Check MD5 before inserting into the cache
 
 
-def check_release_reproducibility(verbose: bool = False) -> None:
-    """Ensure release content is reproducible from the pipeline.
-
-    This always runs the full project pipeline from the main project root.
-    """
-    ck_info = calkit.load_calkit_info()
-    has_pipeline = bool(ck_info.get("pipeline")) or os.path.isfile("dvc.yaml")
-    if not has_pipeline:
-        return
-    cmd = [sys.executable, "-m", "calkit", "run"]
-    if verbose:
-        cmd.append("--verbose")
-    try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(
-            "Pipeline is not reproducible: `calkit run` failed"
-        ) from e
-
-
 def check_project_release_archive(
     zip_path: str, verbose: bool = False
 ) -> None:
-    """Ensure an extracted project release archive is already up-to-date."""
-    from calkit.cli.main.core import run as run_pipeline
-
+    """Ensure an extracted project release archive can run cleanly."""
     with tempfile.TemporaryDirectory() as tmpdir:
         with zipfile.ZipFile(zip_path) as zipf:
             zipf.extractall(tmpdir)
@@ -234,25 +232,13 @@ def check_project_release_archive(
         )
         if not has_pipeline:
             return
-        cwd = os.getcwd()
+        cmd = [sys.executable, "-m", "calkit", "run"]
+        if verbose:
+            cmd.append("--verbose")
         try:
-            os.chdir(tmpdir)
-            result = run_pipeline(quiet=not verbose, verbose=verbose)
-        except Exception as e:
+            subprocess.run(cmd, cwd=tmpdir, check=True)
+        except subprocess.CalledProcessError as e:
             raise RuntimeError(
-                "Released project archive failed reproducibility check: "
-                f"{e}"
+                "Released project archive failed pipeline checks: "
+                "`calkit run` failed."
             ) from e
-        finally:
-            os.chdir(cwd)
-    stage_run_info = result.get("stage_run_info", {})
-    ran_stages = [
-        name
-        for name, info in stage_run_info.items()
-        if info.get("status") not in [None, "skipped"]
-    ]
-    if ran_stages:
-        raise RuntimeError(
-            "Released project archive is not up-to-date; these stages ran: "
-            + ", ".join(ran_stages)
-        )

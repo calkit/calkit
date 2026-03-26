@@ -17,6 +17,7 @@ from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 from typing_extensions import Annotated
 
 import calkit
+import calkit.pipeline
 from calkit.cli import raise_error, warn
 from calkit.cli.check import check_environment
 from calkit.cli.update import update_devcontainer
@@ -2523,14 +2524,26 @@ def new_release(
     repo = git.Repo()
     if name in repo.tags:
         raise_error(f"Git tag with name '{name}' already exists")
-    typer.echo("Checking pipeline reproducibility for release")
-    if dry_run:
-        typer.echo("Would run: calkit run")
-    else:
-        try:
-            calkit.releases.check_release_reproducibility(verbose=verbose)
-        except Exception as e:
-            raise_error(str(e))
+    # Check that the pipeline is up-to-date
+    typer.echo("Checking pipeline is up-to-date for release")
+    status = calkit.pipeline.get_status(
+        ck_info=ck_info,
+        check_environments=True,
+        clean_notebooks=True,
+        compile_to_dvc=True,
+    )
+    if status.errors:
+        raise_error("Pipeline checks failed: " + "; ".join(status.errors))
+    if status.failed_environment_checks:
+        raise_error(
+            "Pipeline environment checks failed for: "
+            + ", ".join(status.failed_environment_checks)
+        )
+    if status.is_stale:
+        raise_error(
+            "Pipeline is not up-to-date; out-of-date stages: "
+            + ", ".join(status.stale_stage_names)
+        )
     release_dir = f".calkit/releases/{name}"
     release_files_dir = release_dir + "/files"
     os.makedirs(release_files_dir, exist_ok=True)
@@ -2551,18 +2564,14 @@ def new_release(
         all_paths = calkit.releases.ls_files()
         typer.echo(f"Adding files to {zip_path}")
         with zipfile.ZipFile(zip_path, "w") as zipf:
-            for fpath in all_paths:
-                zipf.write(fpath)
-        typer.echo("Validating extracted project release archive")
-        if dry_run:
-            typer.echo(f"Would validate extracted archive: {zip_path}")
-        else:
-            try:
-                calkit.releases.check_project_release_archive(
-                    zip_path, verbose=verbose
-                )
-            except Exception as e:
-                raise_error(str(e))
+            calkit.releases.add_paths_to_zip(zipf, all_paths)
+        typer.echo("Checking extracted project release archive")
+        try:
+            calkit.releases.check_project_release_archive(
+                zip_path, verbose=verbose
+            )
+        except Exception as e:
+            raise_error(str(e))
         title = ck_info.get("title")
         if title is None:
             warn("Project has no title")

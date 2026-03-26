@@ -412,17 +412,17 @@ def get_status(
                 if stale_stage.stale_outputs:
                     typer.echo("  stale outputs:")
                     for output_path in stale_stage.stale_outputs:
-                        typer.echo(f"    - {output_path}")
+                        typer.echo(f"    {output_path}")
                 # Show modified outputs from this stage
                 if stale_stage.modified_outputs:
                     typer.echo("  modified outputs:")
                     for output_path in stale_stage.modified_outputs:
-                        typer.echo(f"    - {output_path}")
+                        typer.echo(f"    {output_path}")
                 # Show modified inputs making the stage stale
                 if stale_stage.modified_inputs:
                     typer.echo("  modified inputs:")
                     for input_path in stale_stage.modified_inputs:
-                        typer.echo(f"    - {input_path}")
+                        typer.echo(f"    {input_path}")
         elif pipeline_status:
             typer.echo("Pipeline is up to date.")
 

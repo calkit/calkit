@@ -398,8 +398,10 @@ def get_status(
         # Nicely format the results from pipeline status
         if pipeline_status and pipeline_status.errors:
             warn("Pipeline status unavailable due to errors.")
+            return
         if pipeline_status and not pipeline_status.has_pipeline:
             typer.echo("This project has no pipeline.")
+            return
         elif pipeline_status and pipeline_status.is_stale:
             for stage_name in pipeline_status.stale_stage_names:
                 stale_stage = pipeline_status.stale_stages.get(stage_name)

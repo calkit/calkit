@@ -252,6 +252,12 @@ def get_status(
 ):
     """View status (project, version control, and/or pipeline)."""
     ck_info = calkit.load_calkit_info()
+    # If there's anything in ck_info and this isn't a Git repo, initialize one
+    if ck_info:
+        try:
+            git.Repo()
+        except InvalidGitRepositoryError:
+            git.Repo.init()
     valid_categories = ["project", "git", "dvc", "pipeline"]
     if categories is not None:
         for category in categories:

@@ -408,6 +408,8 @@ def get_status(
                 if stale_stage is None:
                     continue
                 typer.echo(f"{typer.style(stage_name, fg='yellow')}:")
+                if stale_stage.modified_command:
+                    typer.echo("  modified command")
                 # Show stale outputs for this stage
                 if stale_stage.stale_outputs:
                     typer.echo("  stale outputs:")

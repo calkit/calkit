@@ -1672,6 +1672,41 @@ async function autoSelectEnvironmentForActiveNotebook(
     return;
   }
 
+  // Show the SLURM auto-start confirmation as early as possible when there is
+  // no active session, so users don't wait through kernel checks first.
+  if (
+    configuredCandidate.outerSlurmEnvironment &&
+    !hasRunningServerSession("slurm", notebookUri)
+  ) {
+    if (slurmAutoStartSuppressedThisSession.has(notebookUri)) {
+      log(
+        `Skipping auto-start for '${configuredCandidate.environmentName}' because this notebook's SLURM session was stopped and requires explicit restart.`,
+      );
+      await refreshNotebookToolbarContext(context);
+      return;
+    }
+
+    if (slurmAutoStartDeclinedThisSession.has(notebookUri)) {
+      log(
+        `Skipping auto-start for '${configuredCandidate.environmentName}' because it was declined earlier in this session.`,
+      );
+      await refreshNotebookToolbarContext(context);
+      return;
+    }
+
+    const shouldStart = await confirmAutoStartSlurmNotebookSession(
+      configuredCandidate.environmentName,
+      notebookRelativePath,
+    );
+    if (!shouldStart) {
+      slurmAutoStartDeclinedThisSession.add(notebookUri);
+      await refreshNotebookToolbarContext(context);
+      return;
+    }
+
+    slurmAutoStartDeclinedThisSession.delete(notebookUri);
+  }
+
   const config = await readCalkitConfig(workspaceRoot);
   if (!config) {
     return;
@@ -1745,33 +1780,6 @@ async function autoSelectEnvironmentForActiveNotebook(
         log(
           `Auto-starting SLURM notebook session for '${configuredCandidate.environmentName}'.`,
         );
-        if (slurmAutoStartSuppressedThisSession.has(notebookUri)) {
-          log(
-            `Skipping auto-start for '${configuredCandidate.environmentName}' because this notebook's SLURM session was stopped and requires explicit restart.`,
-          );
-          await refreshNotebookToolbarContext(context);
-          return;
-        }
-
-        if (slurmAutoStartDeclinedThisSession.has(notebookUri)) {
-          log(
-            `Skipping auto-start for '${configuredCandidate.environmentName}' because it was declined earlier in this session.`,
-          );
-          await refreshNotebookToolbarContext(context);
-          return;
-        }
-
-        const shouldStart = await confirmAutoStartSlurmNotebookSession(
-          configuredCandidate.environmentName,
-          notebookRelativePath,
-        );
-        if (!shouldStart) {
-          slurmAutoStartDeclinedThisSession.add(notebookUri);
-          await refreshNotebookToolbarContext(context);
-          return;
-        }
-
-        slurmAutoStartDeclinedThisSession.delete(notebookUri);
         const connected = await startSlurmJobForActiveNotebook(
           context,
           notebookUri,

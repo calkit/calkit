@@ -1,7 +1,7 @@
 dev.ipynb
 *.pyc
 .DS_Store
-.vscode
+.vscode/settings.json
 site
 .env
 .venv

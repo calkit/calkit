@@ -249,6 +249,9 @@ def get_status(
             ),
         ),
     ] = None,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Output status as JSON.")
+    ] = False,
 ):
     """View status (project, version control, and/or pipeline)."""
     ck_info = calkit.load_calkit_info()
@@ -284,6 +287,78 @@ def get_status(
                 "Failed pipeline environment checks for: "
                 + ", ".join(pipeline_status.failed_environment_checks)
             )
+    if as_json:
+        status_dict = {}
+        if "project" in categories:
+            status = calkit.get_latest_project_status()
+            status_dict["project"] = (
+                None
+                if status is None
+                else {
+                    "status": status.status,
+                    "message": status.message,
+                    "timestamp": status.timestamp.isoformat(),
+                }
+            )
+        if "git" in categories:
+            try:
+                repo = git.Repo()
+                changed_files = calkit.git.get_changed_files(repo=repo)
+                staged_files = calkit.git.get_staged_files(repo=repo)
+                untracked_files = calkit.git.get_untracked_files(repo=repo)
+                if targets:
+                    target_prefixes = [
+                        Path(target).as_posix().rstrip("/")
+                        for target in targets
+                    ]
+
+                    def _matches_target(path: str) -> bool:
+                        path = Path(path).as_posix()
+                        return any(
+                            path == prefix or path.startswith(prefix + "/")
+                            for prefix in target_prefixes
+                        )
+
+                    changed_files = [
+                        path for path in changed_files if _matches_target(path)
+                    ]
+                    staged_files = [
+                        path for path in staged_files if _matches_target(path)
+                    ]
+                    untracked_files = [
+                        path
+                        for path in untracked_files
+                        if _matches_target(path)
+                    ]
+                status_dict["git"] = {
+                    "branch": None
+                    if repo.head.is_detached
+                    else repo.active_branch.name,
+                    "is_dirty": repo.is_dirty(untracked_files=True),
+                    "changed_files": changed_files,
+                    "staged_files": staged_files,
+                    "untracked_files": untracked_files,
+                }
+            except InvalidGitRepositoryError:
+                status_dict["git"] = {"error": "Not a Git repository"}
+        if "dvc" in categories:
+            try:
+                dvc_repo = calkit.dvc.get_dvc_repo()
+                data_status = dvc_repo.data_status()
+                if isinstance(data_status, dict):
+                    data_status.pop("git", None)
+                status_dict["dvc"] = data_status
+            except Exception as e:
+                status_dict["dvc"] = {"error": f"{e.__class__.__name__}: {e}"}
+        if "pipeline" in categories or "dvc" in categories:
+            if pipeline_status is None:
+                status_dict["pipeline"] = None
+            else:
+                status_dict["pipeline"] = pipeline_status.model_dump(
+                    mode="json"
+                )
+        print(json.dumps(status_dict, indent=2, default=str))
+        return
     if "project" in categories:
         print_sep("Project")
         # Print latest status
@@ -322,7 +397,11 @@ def get_status(
         print_sep("Pipeline")
         # Nicely format the results from pipeline status
         if pipeline_status and pipeline_status.errors:
-            typer.echo("Pipeline status unavailable due to errors.")
+            warn("Pipeline status unavailable due to errors.")
+            return
+        if pipeline_status and not pipeline_status.has_pipeline:
+            typer.echo("This project has no pipeline.")
+            return
         elif pipeline_status and pipeline_status.is_stale:
             for stage_name in pipeline_status.stale_stage_names:
                 stale_stage = pipeline_status.stale_stages.get(stage_name)
@@ -333,17 +412,17 @@ def get_status(
                 if stale_stage.stale_outputs:
                     typer.echo("  stale outputs:")
                     for output_path in stale_stage.stale_outputs:
-                        typer.echo(f"    - {output_path}")
+                        typer.echo(f"    {output_path}")
                 # Show modified outputs from this stage
                 if stale_stage.modified_outputs:
                     typer.echo("  modified outputs:")
                     for output_path in stale_stage.modified_outputs:
-                        typer.echo(f"    - {output_path}")
+                        typer.echo(f"    {output_path}")
                 # Show modified inputs making the stage stale
                 if stale_stage.modified_inputs:
                     typer.echo("  modified inputs:")
                     for input_path in stale_stage.modified_inputs:
-                        typer.echo(f"    - {input_path}")
+                        typer.echo(f"    {input_path}")
         elif pipeline_status:
             typer.echo("Pipeline is up to date.")
 

@@ -530,6 +530,22 @@ def test_new_julia_env(tmp_dir):
     )
     assert os.path.isfile("envs/my-env/Project.toml")
     assert os.path.isfile("envs/my-env/Manifest.toml")
+    # Test we can create an empty env with just a Project.toml
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "julia-env",
+            "--name",
+            "j3",
+            "--julia",
+            "1.10",
+            "--path",
+            "envs/empty/Project.toml",
+        ]
+    )
+    assert os.path.isfile("envs/empty/Project.toml")
+    assert not os.path.isfile("envs/empty/Manifest.toml")
 
 
 def test_new_release(tmp_dir):

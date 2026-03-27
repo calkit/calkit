@@ -84,6 +84,39 @@ def _parse_params(params: list[str]) -> dict[str, Any]:
     return parameters
 
 
+def _check_ijulia_available(
+    julia_version: str,
+    env_dir: str,
+) -> bool:
+    ijulia_check_cmd = [
+        "julia",
+        f"+{julia_version}",
+        "--project=" + env_dir,
+        "-e",
+        (
+            "import Pkg; "
+            "deps = Pkg.project().dependencies; "
+            'if !haskey(deps, "IJulia"); '
+            'println("IJulia is not in this Julia project environment."); '
+            "exit(3); "
+            "end"
+        ),
+    ]
+    try:
+        ijulia_check_cmd_checked = calkit.julia.check_version_in_command(
+            ijulia_check_cmd
+        )
+    except Exception as e:
+        raise_error(f"Failed to check Julia version: {e}")
+        return False
+    res = subprocess.run(
+        ijulia_check_cmd_checked,
+        capture_output=True,
+        text=True,
+    )
+    return res.returncode == 0
+
+
 @notebooks_app.command("check-kernel")
 def check_env_kernel(
     env_name: Annotated[
@@ -115,10 +148,25 @@ def check_env_kernel(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Output result as JSON."),
+    ] = False,
+    auto_add_deps: Annotated[
+        bool,
+        typer.Option(
+            "--auto-add-deps",
+            help=(
+                "Automatically install missing kernel dependencies "
+                "(e.g., IJulia for Julia environments)."
+            ),
+        ),
+    ] = False,
 ) -> tuple[str, str]:
     """Check that an environment has a registered Jupyter kernel."""
     from calkit.cli.check import check_environment
     from calkit.cli.main import run_in_env
+    from calkit.cli.update import update_environment
     from calkit.environments import language_from_env
 
     def get_env():
@@ -152,14 +200,24 @@ def check_env_kernel(
             "--display-name",
             display_name,
         ]
-        res = run_in_env(
-            cmd=cmd,
-            env_name=env_name,
-            no_check=no_check,
-            verbose=verbose,
-            relaxed_check=True,
-        )
-        return kernel_name, display_name
+        if json_output:
+            # For JSON output, run silently and don't show intermediate
+            # messages
+            res = run_in_env(
+                cmd=cmd,
+                env_name=env_name,
+                no_check=no_check,
+                verbose=False,
+                relaxed_check=True,
+            )
+        else:
+            res = run_in_env(
+                cmd=cmd,
+                env_name=env_name,
+                no_check=no_check,
+                verbose=verbose,
+                relaxed_check=True,
+            )
     elif language == "r":
         cmd = [
             "Rscript",
@@ -176,7 +234,6 @@ def check_env_kernel(
             verbose=verbose,
             relaxed_check=True,
         )
-        return kernel_name, display_name
     elif language == "julia":
         if not no_check:
             check_environment(env_name=env_name, verbose=verbose)
@@ -193,6 +250,43 @@ def check_env_kernel(
         if not env_dir:
             env_dir = "."
         env_dir_abs = os.path.abspath(env_dir)
+        # In reproducible Julia environments we disable global package loading,
+        # so IJulia must exist in the project environment itself.
+        ijulia_ok = _check_ijulia_available(
+            julia_version=julia_version,
+            env_dir=env_dir,
+        )
+        if not ijulia_ok:
+            should_install = auto_add_deps
+            if not should_install and sys.stdin.isatty() and not json_output:
+                should_install = typer.confirm(
+                    (
+                        "IJulia is not installed in this Julia environment. "
+                        "Install now with "
+                        f"'calkit update env --name {env_name} --add IJulia'?"
+                    ),
+                    default=True,
+                )
+            if not should_install:
+                raise_error(
+                    "IJulia is not installed in this Julia environment. "
+                    "Install it and retry, or pass --auto-add-deps to "
+                    "install automatically."
+                )
+            try:
+                update_environment(env_name=env_name, add_packages=["IJulia"])
+            except Exception as e:
+                raise_error(f"Failed to install IJulia: {e}")
+            ijulia_ok = _check_ijulia_available(
+                julia_version=julia_version,
+                env_dir=env_dir,
+            )
+            if not ijulia_ok:
+                raise_error(
+                    "IJulia installation completed but the dependency check "
+                    "still failed."
+                )
+        # Don't include version in display_name; IJulia appends it automatically
         julia_cmd = (
             "import IJulia;"
             "kp=IJulia.installkernel("
@@ -218,13 +312,25 @@ def check_env_kernel(
             raise_error(f"Failed to create kernel:\n{res.stdout}")
         kernel_path = res.stdout.strip()
         kernel_name = os.path.basename(kernel_path)
-        typer.echo(
-            f"Registered IJulia kernel '{kernel_name}' at: {kernel_path}"
-        )
-        return kernel_name, display_name
+        # Update display_name to include version for matching in VS Code
+        # The kernel name format is like: project_-env-X.Y or project_-env-X.Y.Z
+        # Extract version from kernel_name or use julia_version
+        display_name = f"{display_name} {julia_version}"
+        if not json_output:
+            typer.echo(
+                f"Registered IJulia kernel '{kernel_name}' at: {kernel_path}"
+            )
     else:
         raise_error(f"{language} not supported")
         return "", ""  # For typing analysis since raise_error exits
+    # Output result
+    if json_output:
+        result = {
+            "kernel_name": kernel_name,
+            "display_name": display_name,
+        }
+        typer.echo(json.dumps(result))
+    return kernel_name, display_name
 
 
 @notebooks_app.command("exec", help="Alias for 'execute'.")

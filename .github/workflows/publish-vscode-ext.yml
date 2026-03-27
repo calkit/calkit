@@ -1,0 +1,99 @@
+name: Publish VS Code extension
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    name: Build extension package
+    if: startsWith(github.event.release.tag_name, 'vscode-ext/v')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      artifact-name: ${{ steps.artifact.outputs.name }}
+      vsix-path: ${{ steps.artifact.outputs.vsix-path }}
+    defaults:
+      run:
+        working-directory: vscode-ext
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: vscode-ext/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Read extension version
+        id: version
+        run: echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+      - name: Validate release tag matches package version
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          expected_tag="vscode-ext/v${PACKAGE_VERSION}"
+          if [ "$TAG_NAME" != "$expected_tag" ]; then
+            echo "Tag $TAG_NAME does not match package version $PACKAGE_VERSION"
+            echo "Expected tag: $expected_tag"
+            exit 1
+          fi
+      - name: Run extension tests
+        run: npm test
+      - name: Package extension
+        run: |
+          mkdir -p dist
+          npx --yes @vscode/vsce@latest package \
+            --packagePath "dist/calkit-vscode-${{ steps.version.outputs.version }}.vsix"
+      - name: Set artifact metadata
+        id: artifact
+        run: |
+          echo "name=calkit-vscode-${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
+          echo "vsix-path=vscode-ext/dist/calkit-vscode-${{ steps.version.outputs.version }}.vsix" >> "$GITHUB_OUTPUT"
+      - name: Upload extension package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: ${{ steps.artifact.outputs.vsix-path }}
+
+  publish-marketplace:
+    name: Publish to Visual Studio Marketplace
+    needs:
+      - build
+    if: startsWith(github.event.release.tag_name, 'vscode-ext/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download extension package
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: dist
+      - name: Publish extension
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          npx --yes @vscode/vsce@latest publish \
+            --packagePath "dist/calkit-vscode-${{ needs.build.outputs.version }}.vsix" \
+            --pat "$VSCE_PAT"
+
+  publish-open-vsx:
+    name: Publish to Open VSX
+    needs:
+      - build
+    if: startsWith(github.event.release.tag_name, 'vscode-ext/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download extension package
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: dist
+      - name: Publish extension
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          npx --yes ovsx@latest publish \
+            "dist/calkit-vscode-${{ needs.build.outputs.version }}.vsix" \
+            -p "$OVSX_PAT"

@@ -46,7 +46,7 @@ jobs:
         run: |
           mkdir -p dist
           npx --yes @vscode/vsce@latest package \
-            --packagePath "dist/calkit-vscode-${{ steps.version.outputs.version }}.vsix"
+            -o "dist/calkit-vscode-${{ steps.version.outputs.version }}.vsix"
       - name: Set artifact metadata
         id: artifact
         run: |
@@ -75,7 +75,7 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
           npx --yes @vscode/vsce@latest publish \
-            --packagePath "dist/calkit-vscode-${{ needs.build.outputs.version }}.vsix" \
+            "dist/calkit-vscode-${{ needs.build.outputs.version }}.vsix" \
             --pat "$VSCE_PAT"
 
   publish-open-vsx:

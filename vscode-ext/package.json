@@ -70,22 +70,22 @@
       "notebook/toolbar": [
         {
           "command": "calkit-vscode.selectCalkitEnvironment",
-          "when": "notebookType == 'jupyter-notebook'",
+          "when": "notebookType == 'jupyter-notebook' && !calkit.isSettingKernel",
           "group": "navigation@99"
         },
         {
           "command": "calkit-vscode.startCalkitSlurmJob",
-          "when": "notebookType == 'jupyter-notebook' && calkit.hasResumableSlurmSession && !calkit.hasRunningSlurmSession",
+          "when": "notebookType == 'jupyter-notebook' && calkit.hasResumableSlurmSession && !calkit.hasRunningSlurmSession && !calkit.isSettingKernel",
           "group": "navigation@100"
         },
         {
           "command": "calkit-vscode.stopCalkitSlurmJob",
-          "when": "notebookType == 'jupyter-notebook' && calkit.hasRunningSlurmSession",
+          "when": "notebookType == 'jupyter-notebook' && calkit.hasRunningSlurmSession && !calkit.isSettingKernel",
           "group": "navigation@101"
         },
         {
           "command": "calkit-vscode.restartCalkitJob",
-          "when": "notebookType == 'jupyter-notebook' && (calkit.hasRunningSlurmSession || calkit.hasRunningDockerSession)",
+          "when": "notebookType == 'jupyter-notebook' && (calkit.hasRunningSlurmSession || calkit.hasRunningDockerSession) && !calkit.isSettingKernel",
           "group": "navigation@102"
         }
       ],

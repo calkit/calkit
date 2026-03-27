@@ -3166,13 +3166,51 @@ async function stopSlurmJobForActiveNotebook(
 
   // Best effort to break Jupyter's reconnect loop to a dead remote kernel.
   await switchToLocalJupyterServerSilently();
-  // Restarting the kernel aborts VS Code's "Reconnecting to the kernel..."
-  // notification, which would otherwise spin indefinitely after the SLURM job
-  // is killed.
-  try {
-    await vscode.commands.executeCommand("notebook.kernel.restart");
-  } catch {
-    // Not critical; suppress.
+
+  // Actively select the inner environment's local kernel to break the
+  // "Reconnecting to the kernel..." loop. Using the inner environment from the
+  // launch profile gives the best chance of landing on the right kernel.
+  const workspaceRoot = getWorkspaceRoot();
+  const stoppedProfile = stoppedNotebookUri
+    ? getLaunchProfileForNotebookUri(context, stoppedNotebookUri)
+    : undefined;
+
+  let kernelSelected: string | undefined;
+  if (workspaceRoot && stoppedProfile?.innerEnvironment) {
+    const kernelSpec = await getExpectedKernelSpecForEnvironment(
+      workspaceRoot,
+      stoppedProfile.innerEnvironment,
+      "-e",
+    );
+    if (kernelSpec) {
+      kernelSelected = await tryAutoSelectKernel(
+        kernelSpec.kernelName,
+        kernelSpec.displayName,
+        stoppedNotebookUri,
+      );
+    }
+  }
+
+  if (!kernelSelected) {
+    kernelSelected = await tryAutoSelectBestAvailableKernel(
+      stoppedProfile?.innerEnvironment
+        ? { preferredKernelName: stoppedProfile.innerEnvironment }
+        : {},
+    );
+  }
+
+  if (!kernelSelected) {
+    // Couldn't auto-select a kernel; open the kernel picker as a fallback so
+    // the user can choose one and the reconnect loop is broken.
+    const editorId = getActiveNotebookEditorId();
+    try {
+      await vscode.commands.executeCommand(
+        "notebook.selectKernel",
+        editorId ? { notebookEditorId: editorId } : undefined,
+      );
+    } catch {
+      // Not critical; suppress.
+    }
   }
 
   await refreshNotebookToolbarContext(context);

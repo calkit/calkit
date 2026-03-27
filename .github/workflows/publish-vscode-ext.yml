@@ -75,7 +75,7 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
           npx --yes @vscode/vsce@latest publish \
-            "dist/calkit-vscode-${{ needs.build.outputs.version }}.vsix" \
+            --packagePath "dist/calkit-vscode-${{ needs.build.outputs.version }}.vsix" \
             --pat "$VSCE_PAT"
 
   publish-open-vsx:

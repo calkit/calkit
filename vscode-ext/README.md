@@ -1,21 +1,44 @@
-# Calkit VS Code extension
+# Calkit VS Code Extension
 
-In this VS Code extension we want to be able to support this flow:
+Use Calkit environments directly from VS Code Jupyter notebooks.
 
-1. Open notebook
-2. Click "select kernel"
-3. Click "Calkit environments..."
-4. Create new Calkit environment: kind is SLURM --> enter name, host, default options like `--gpus`, `--time`.
-5. Immediately create the inner environment: kind is Julia --> enter name, path to Project.toml, Julia version prefilled with currently detected Julia
-6. The extension applies the nested `slurm:julia` environment to the notebook with SLURM options prefilled from defaults
-7. Do some work
-8. Click a stop button in the notebook toolbar to stop the srun job and free up the resources
-9. Go away and close VS Code
-10. Return and open the notebook, kernel is selected, but push a button in the notebook toolbar to start the slurm job for the kernel and connect to that
+This extension lets you:
 
-When an environment is selected for a notebook, it should either be done
-in the `notebooks` or `pipeline` section of `calkit.yaml`,
-depending on if the notebook has a pipeline stage.
+- Select notebook kernels backed by Calkit environments.
+- Create new Calkit environments from VS Code (Conda, uv, Julia, and SLURM).
+- Use nested environments like `slurm:main` for notebook jobs that, e.g., need to reserve GPUs on a cluster.
+- Start, stop, and restart notebook server sessions for SLURM and Docker-backed workflows.
+- Reopen notebooks and resume SLURM-backed sessions using toolbar actions.
+
+## Features
+
+From a notebook, you can manage both environment selection and kernel setup:
+
+1. Open a Jupyter notebook.
+2. Run **Calkit: Select Notebook Environment**.
+3. Pick an existing environment or create a new one.
+4. If needed, provide SLURM launch options (`--gpus`, `--time`, partition, extra flags).
+5. Let the extension register/select the expected kernel and connect to the session.
+
+For SLURM-backed notebook sessions, the notebook toolbar also provides:
+
+- **Start Jupyter SLURM Job**
+- **Stop Jupyter SLURM Job**
+- **Restart Notebook Server**
+
+## Requirements
+
+- VS Code with the Jupyter extension installed.
+- Calkit CLI available on your `PATH`.
+
+If Calkit is missing or too old, the extension prompts with install/upgrade options.
+
+## Environment mapping in `calkit.yaml`
+
+When you select an environment for a notebook, the extension writes it to `calkit.yaml`.
+It updates either `notebooks` or `pipeline.stages` depending on whether the notebook is part of a pipeline stage.
+
+Example notebook mapping:
 
 ```yaml
 notebooks:
@@ -23,7 +46,7 @@ notebooks:
     environment: my-env
 ```
 
-or
+Example pipeline stage mapping:
 
 ```yaml
 pipeline:
@@ -34,16 +57,10 @@ pipeline:
       environment: my-env
 ```
 
-## Releasing
+## Commands
 
-Publishing is handled by the GitHub Actions workflow at `.github/workflows/publish-vscode-ext.yml`.
-
-1. Bump the version in `vscode-ext/package.json`.
-2. Create a GitHub release whose tag is named `vscode-ext/vX.Y.Z` and matches that version.
-
-The workflow installs dependencies, runs the extension tests, packages a `.vsix`, and publishes it to both the Visual Studio Marketplace and Open VSX.
-
-Required repository secrets:
-
-- `VSCE_PAT` for the Visual Studio Marketplace publisher token
-- `OVSX_PAT` for the Open VSX access token
+- `Calkit: Select Notebook Environment`
+- `Calkit: Create Environment`
+- `Calkit: Start Jupyter SLURM Job`
+- `Calkit: Stop Jupyter SLURM Job`
+- `Calkit: Restart Notebook Server`

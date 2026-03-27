@@ -320,7 +320,7 @@ class PythonScriptStage(Stage):
         cmd = f"{self.xenv_cmd} python {self.script_path}"
         for arg in self.args:
             cmd += f" {arg}"
-        return cmd
+        return cmd.strip()
 
     @property
     def dvc_deps(self) -> list[str]:

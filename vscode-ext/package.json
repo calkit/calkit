@@ -123,7 +123,7 @@
     "prepare:publish": "node ./scripts/set-proposed-api.js off",
     "compile": "tsc -p ./",
     "dev:compile": "npm run prepare:dev && npm run compile",
-    "test": "npm run compile && node --test out/test/**/*.test.js",
+    "test": "npm run compile && node --test out/test/*.test.js",
     "watch": "npm run prepare:dev && tsc -watch -p ./",
     "vscode:prepublish": "npm run prepare:publish && npm run compile"
   },

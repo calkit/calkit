@@ -560,7 +560,7 @@ class ShellCommandStage(Stage):
         else:
             norc_args = "--noprofile --norc"
         cmd += f' {self.shell} {norc_args} -c "{shell_cmd}"'
-        return cmd
+        return cmd.strip()
 
 
 class ShellScriptStage(Stage):
@@ -591,7 +591,6 @@ class ShellScriptStage(Stage):
             if dep_txt in cmd:
                 cmd = cmd.replace(dep_txt, "")
             return cmd
-
         cmd = self.xenv_cmd
         if self.shell == "zsh":
             norc_args = "-f"
@@ -600,7 +599,7 @@ class ShellScriptStage(Stage):
         cmd += f" {self.shell} {norc_args} {self.script_path}"
         for arg in self.args:
             cmd += f" {arg}"
-        return cmd
+        return cmd.strip()
 
 
 class DockerCommandStage(Stage):
@@ -618,7 +617,7 @@ class CommandStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        return f"{self.xenv_cmd} {self.command}"
+        return f"{self.xenv_cmd} {self.command}".strip()
 
 
 class RScriptStage(Stage):

@@ -34,7 +34,6 @@ export interface CalkitEnvironment {
   wdir?: string;
   args?: string[];
   default_options?: string[];
-  default_slurm_options?: SlurmLaunchOptions;
   [key: string]: unknown;
 }
 
@@ -134,12 +133,6 @@ export function getDefaultSlurmOptions(
     if (parsed) {
       return parsed;
     }
-  }
-
-  // Backward compatibility for early extension versions.
-  const fromLegacy = env.default_slurm_options;
-  if (fromLegacy) {
-    return compactSlurmOptions(fromLegacy);
   }
 
   return undefined;

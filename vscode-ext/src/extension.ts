@@ -395,6 +395,14 @@ async function selectCalkitEnvironment(
     return undefined;
   }
 
+  // Re-read config after selection/create flow so SLURM defaults reflect the
+  // latest calkit.yaml state (especially right after creating environments).
+  config = await readCalkitConfig(workspaceRoot);
+  if (!config) {
+    await refreshNotebookToolbarContext(context);
+    return undefined;
+  }
+
   const targetNotebookUri = getActiveNotebookUriKey();
   if (!targetNotebookUri) {
     await refreshNotebookToolbarContext(context);
@@ -502,7 +510,7 @@ async function selectCalkitEnvironment(
   const launchCmd = buildLaunchCommand(
     picked,
     workspaceRoot,
-    config ?? {},
+    config,
     port,
     slurmOptions,
     serverToken,

@@ -1888,10 +1888,13 @@ function buildLaunchCommand(
 ): string {
   const cdPart = `cd ${shQuote(workspaceRoot)}`;
   const checkPart = `calkit check env -n ${shQuote(picked.innerEnvironment)}`;
-  // All non-docker environments use kernel check; docker only needs env check
+  // For non-docker environments, check the kernel (with --no-check to skip
+  // redundant env check since we already do calkit check env above)
   const kernelCheckPart =
     picked.innerKind !== "docker"
-      ? `calkit nb check-kernel -e ${shQuote(picked.innerEnvironment)}`
+      ? `calkit nb check-kernel -e ${shQuote(
+          picked.innerEnvironment,
+        )} --no-check`
       : "";
 
   // Docker and Slurm need ip=0.0.0.0 and token for external access
@@ -1909,11 +1912,11 @@ function buildLaunchCommand(
   )} -- ${jupyterPart}`;
 
   const prefixParts = [cdPart];
-  // Docker only needs env check; all others only need kernel check
+  // Check env first, then check kernel (without redundant env check)
   if (picked.innerKind === "docker") {
     prefixParts.push(checkPart);
   } else {
-    prefixParts.push(kernelCheckPart);
+    prefixParts.push(checkPart, kernelCheckPart);
   }
 
   if (!picked.outerSlurmEnvironment) {

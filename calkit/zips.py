@@ -17,6 +17,15 @@ project.
 
 When looking at project status, anything showing up as modified in ``ZIPS_DIR``
 should be transformed into its path in the project.
+
+Zips should be synced:
+- After a pull
+- After a clone
+- Before computing status
+- Before running the pipeline
+- After running the pipeline (one way, workspace to zip?)
+- Before an add, and then the zip should be added with DVC
+- If we call ``calkit check zips``
 """
 
 import json
@@ -82,7 +91,7 @@ def add_zip(input_path: str):
     write_zip_path_map(pm)
 
 
-def process_zip(path: str):
+def process_single(path: str):
     """Process a single zip."""
     # First get cached information and see if we need to rehash
     # If hashes have changed since last check, we need to synchronize the
@@ -91,6 +100,6 @@ def process_zip(path: str):
     # how we should resolve it (rezip, unzip, unzip+merge+rezip)
 
 
-def process_zips():
+def process_all():
     """Process all project zips."""
     # First get zip metadata

@@ -54,7 +54,7 @@ test("getDefaultSlurmOptions prefers default_options in calkit.yaml format", () 
   assert.equal(parsed?.extra, undefined);
 });
 
-test("getDefaultSlurmOptions falls back to legacy object format", () => {
+test("getDefaultSlurmOptions ignores legacy object format", () => {
   const parsed = getDefaultSlurmOptions({
     kind: "slurm",
     default_slurm_options: {
@@ -63,10 +63,7 @@ test("getDefaultSlurmOptions falls back to legacy object format", () => {
     },
   });
 
-  assert.equal(parsed?.gpus, "2");
-  assert.equal(parsed?.time, "240");
-  assert.equal(parsed?.partition, undefined);
-  assert.equal(parsed?.extra, undefined);
+  assert.equal(parsed, undefined);
 });
 
 test("makeEnvironmentCandidates returns standalone notebook envs and nested slurm combinations", () => {

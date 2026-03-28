@@ -235,12 +235,10 @@ def get_cache_entry(path: str) -> SyncRecord | None:
 
 
 def get_output_path(input_path: str) -> str:
-    fpath = ".calkit/zips/info.json"
-    if os.path.isfile(fpath):
-        with open(fpath, "r") as f:
-            path_map = json.load(f)
-        if input_path in path_map:
-            return path_map[input_path]
+    pm = get_zip_path_map()
+    input_path = Path(input_path).as_posix()
+    if input_path in pm:
+        return pm[input_path]
     raise ValueError(f"No zip output path defined for {input_path}")
 
 

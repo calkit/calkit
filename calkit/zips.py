@@ -34,6 +34,8 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+import calkit
+
 ZIPS_DIR = ".calkit/zips"
 ZIP_CACHE_PATH = ".calkit/local/zip-cache.json"
 ZIP_INFO_PATH = ".calkit/zips/info.json"
@@ -89,6 +91,14 @@ def add_zip(input_path: str):
     if input_path not in pm:
         pm[input_path] = make_zip_path(input_path)
     write_zip_path_map(pm)
+
+
+def hash_path(path: str) -> str:
+    """Hash a path.
+
+    TODO: Use SHA256?
+    """
+    return calkit.get_md5(path)
 
 
 def process_single(path: str):

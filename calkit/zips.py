@@ -102,13 +102,11 @@ def write_zip_path_map(path_map: dict[str, str]):
         json.dump(path_map, f, indent=2)
 
 
-def add_zip(input_path: str, is_stage_output: bool = False):
+def add(input_path: str, is_stage_output: bool = False):
     """Add a zip for a given input path.
 
-    If one already exists, skip.
-
-    This may need to happen during pipeline compilation if there's a stage
-    with an output with dvc-zip storage.
+    This is sort of like a ``git add`` for zips. We should do any DVC staging
+    if it's not a pipeline output.
     """
     pm = get_zip_path_map()
     # Normalize input path as posix
@@ -117,12 +115,8 @@ def add_zip(input_path: str, is_stage_output: bool = False):
         pm[input_path] = make_zip_path(input_path)
     write_zip_path_map(pm)
     if not is_stage_output:
-        # If this is not a stage output, we should create the zip file and add
-        # it to DVC right away, since we want it to be tracked by DVC and have
-        # a hash in the cache for future reference. If it's a stage output, we
-        # will create the zip file and add it to DVC after the stage runs and
-        # produces the output.
-        sync_one(input_path=input_path, direction="to-zip")
+        # If this is not a stage output, it exists, so we should sync it
+        sync_one(input_path=input_path)
 
 
 def hash_path(path: str) -> str:

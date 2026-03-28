@@ -57,6 +57,13 @@ def _check_local_dir():
             f.write("*\n")
 
 
+def get_mtime(path: str) -> float:
+    """Get the modification time of a path."""
+    if os.path.exists(path):
+        return os.path.getmtime(path)
+    return 0
+
+
 class ZipInfoEntry(BaseModel):
     path: str  # Path in the project--should be a folder
     zip_path: str  # Path to the zip file, like .calkit/zips/{uuid}.zip
@@ -73,15 +80,11 @@ class HashCacheEntry(BaseModel):
 
 
 class SyncRecord(BaseModel):
-    input_path: str  # Path in the project--should be a folder
+    input_path: str
     output_path: str
-    last_updated: float
     input_hash: str
-    input_size: int
-    input_mtime: float
     output_hash: str
-    output_mtime: float
-    output_size: int
+    last_updated: float
 
 
 def make_zip_path(input_path: str) -> str:
@@ -149,14 +152,17 @@ def calc_dir_sig(path: str) -> str:
             file_count += 1
             fpath = os.path.join(foldername, filename)
             total_size += os.path.getsize(fpath)
-            mtime = os.path.getmtime(fpath)
+            mtime = get_mtime(fpath)
             if mtime > latest_mtime:
                 latest_mtime = mtime
     return f"{file_count}-{total_size}-{latest_mtime}"
 
 
 def get_hash(path: str) -> str | None:
-    """Get the hash of a path, using/updating the cache if applicable."""
+    """Get the hash of a path, using/updating the cache if applicable.
+
+    TODO: This should use mtime in ns.
+    """
     if not os.path.exists(path):
         return
     if os.path.isfile(HASH_CACHE_PATH):
@@ -169,7 +175,7 @@ def get_hash(path: str) -> str | None:
     path = Path(path).as_posix()
     if path in cache:
         record = HashCacheEntry.model_validate(cache[path])
-    mtime = os.path.getmtime(path)
+    mtime = get_mtime(path)
     size = os.path.getsize(path)
     dir_sig = calc_dir_sig(path)
     if (
@@ -314,19 +320,7 @@ def sync_one(
         output_path=output_path,
         last_updated=float(calkit.utcnow().timestamp()),
         input_hash=input_hash,
-        input_size=os.path.getsize(input_path)
-        if os.path.exists(input_path)
-        else 0,
-        input_mtime=int(os.path.getmtime(input_path))
-        if os.path.exists(input_path)
-        else 0,
         output_hash=output_hash,
-        output_mtime=int(os.path.getmtime(output_path))
-        if os.path.exists(output_path)
-        else 0,
-        output_size=os.path.getsize(output_path)
-        if os.path.exists(output_path)
-        else 0,
     )
     write_sync_record(record)
 

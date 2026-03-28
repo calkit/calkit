@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Literal
 from zipfile import ZipFile
 
+import typer
 from pydantic import BaseModel
 
 import calkit
@@ -68,6 +69,7 @@ class HashCacheEntry(BaseModel):
     hash: str
     mtime: float
     size: int
+    dir_sig: str | None = None  # Only used for directories, to avoid rehashing
 
 
 class SyncRecord(BaseModel):
@@ -133,6 +135,26 @@ def hash_path(path: str) -> str:
     return calkit.get_md5(path)
 
 
+def calc_dir_sig(path: str) -> str:
+    """Calculate a fast signature for a directory to know if we should
+    rehash.
+    """
+    if not os.path.isdir(path):
+        return ""
+    file_count = 0
+    total_size = 0
+    latest_mtime = 0
+    for foldername, subfolders, filenames in os.walk(path):
+        for filename in filenames:
+            file_count += 1
+            fpath = os.path.join(foldername, filename)
+            total_size += os.path.getsize(fpath)
+            mtime = os.path.getmtime(fpath)
+            if mtime > latest_mtime:
+                latest_mtime = mtime
+    return f"{file_count}-{total_size}-{latest_mtime}"
+
+
 def get_hash(path: str) -> str | None:
     """Get the hash of a path, using/updating the cache if applicable."""
     if not os.path.exists(path):
@@ -149,11 +171,23 @@ def get_hash(path: str) -> str | None:
         record = HashCacheEntry.model_validate(cache[path])
     mtime = os.path.getmtime(path)
     size = os.path.getsize(path)
-    if record is not None and record.mtime == mtime and record.size == size:
+    dir_sig = calc_dir_sig(path)
+    if (
+        record is not None
+        and record.mtime == mtime
+        and record.size == size
+        and record.dir_sig == dir_sig
+    ):
         return record.hash
     # If we've made it this far, we need to update the cache
     hash_val = hash_path(path)
-    record = HashCacheEntry(path=path, hash=hash_val, mtime=mtime, size=size)
+    record = HashCacheEntry(
+        path=path,
+        hash=hash_val,
+        mtime=mtime,
+        size=size,
+        dir_sig=dir_sig,
+    )
     cache[path] = record.model_dump(mode="json")
     _check_local_dir()
     with open(HASH_CACHE_PATH, "w") as f:
@@ -246,6 +280,9 @@ def sync_one(
         # i.e., the input or the output path, not both
         input_changed = os.path.exists(input_path)
         output_changed = os.path.exists(output_path)
+    if not input_changed and not output_changed:
+        typer.echo(f"Zip '{input_path}' is up-to-date")
+        return
     # If hashes have changed since last check, we need to synchronize the
     # path with its zip file (unzip if zip is newer, rezip if path is newer)
     # If both have changed, we have a conflict and the user needs to decide
@@ -259,12 +296,14 @@ def sync_one(
         )
     # If we rezip, we need to add the zip file to DVC and update the hash
     if input_changed and (direction in ["to-zip", "both"]):
+        typer.echo(f"Zipping {input_path}")
         # Rezip and add to DVC
         zip_path(input_path=input_path, output_path=output_path)
         subprocess.run(["dvc", "add", output_path], check=True)
         output_hash = get_hash(output_path)
     # If we unzip, we need to update the hash
     if output_changed and (direction in ["to-workspace", "both"]):
+        typer.echo(f"Unzipping to {input_path}")
         # Unzip to path
         unzip_path(input_path=input_path, output_path=output_path)
         input_hash = get_hash(input_path)

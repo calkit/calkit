@@ -115,7 +115,7 @@ def add(input_path: str, is_stage_output: bool = False):
     input_path = Path(input_path).as_posix()
     if input_path not in pm:
         pm[input_path] = make_zip_path(input_path)
-    write_zip_path_map(pm)
+        write_zip_path_map(pm)
     if not is_stage_output:
         # If this is not a stage output, it exists, so we should sync it
         sync_one(input_path=input_path)

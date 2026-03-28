@@ -30,15 +30,30 @@ Zips should be synced:
 
 import json
 import os
+import subprocess
 from pathlib import Path
+from typing import Literal
+from zipfile import ZipFile
 
 from pydantic import BaseModel
 
 import calkit
 
+LOCAL_DIR = ".calkit/local"
 ZIPS_DIR = ".calkit/zips"
+HASH_CACHE_PATH = LOCAL_DIR + "/hash-cache.json"
+SYNC_RECORD_DIR = LOCAL_DIR + "/zip-sync-records"
 ZIP_CACHE_PATH = ".calkit/local/zip-cache.json"
 ZIP_INFO_PATH = ".calkit/zips/info.json"
+
+
+def _check_local_dir():
+    if not os.path.isdir(LOCAL_DIR):
+        os.makedirs(LOCAL_DIR, exist_ok=True)
+    gitignore_path = os.path.join(LOCAL_DIR, ".gitignore")
+    if not os.path.isfile(gitignore_path):
+        with open(gitignore_path, "w") as f:
+            f.write("*\n")
 
 
 class ZipInfoEntry(BaseModel):
@@ -46,14 +61,24 @@ class ZipInfoEntry(BaseModel):
     zip_path: str  # Path to the zip file, like .calkit/zips/{uuid}.zip
 
 
-class ZipCacheEntry(BaseModel):
-    path: str  # Path in the project--should be a folder
-    last_updated: int
+class HashCacheEntry(BaseModel):
+    """Cache entry for a path's hash."""
+
+    path: str
+    hash: str
+    mtime: float
+    size: int
+
+
+class SyncRecord(BaseModel):
+    input_path: str  # Path in the project--should be a folder
+    output_path: str
+    last_updated: float
     input_hash: str
     input_size: int
-    input_mtime: int
+    input_mtime: float
     output_hash: str
-    output_mtime: int
+    output_mtime: float
     output_size: int
 
 
@@ -101,13 +126,158 @@ def hash_path(path: str) -> str:
     return calkit.get_md5(path)
 
 
-def process_single(path: str):
+def get_hash(path: str) -> str:
+    """Get the hash of a path, using/updating the cache if applicable."""
+    if os.path.isfile(HASH_CACHE_PATH):
+        with open(HASH_CACHE_PATH, "r") as f:
+            cache = json.load(f)
+    else:
+        cache = {}
+    # Normalize path as posix
+    record = None
+    path = Path(path).as_posix()
+    if path in cache:
+        record = HashCacheEntry.model_validate(cache[path])
+    mtime = os.path.getmtime(path)
+    size = os.path.getsize(path)
+    if record is not None and record.mtime == mtime and record.size == size:
+        return record.hash
+    # If we've made it this far, we need to update the cache
+    hash_val = hash_path(path)
+    record = HashCacheEntry(path=path, hash=hash_val, mtime=mtime, size=size)
+    cache[path] = record.model_dump(mode="json")
+    _check_local_dir()
+    with open(HASH_CACHE_PATH, "w") as f:
+        json.dump(cache, f, indent=2)
+    return hash_val
+
+
+def get_sync_record(input_path: str) -> SyncRecord | None:
+    """Get a sync record for a given input path."""
+    os.makedirs(SYNC_RECORD_DIR, exist_ok=True)
+    fpath = os.path.join(SYNC_RECORD_DIR, input_path + ".json")
+    if os.path.isfile(fpath):
+        with open(fpath, "r") as f:
+            record = json.load(f)
+        return SyncRecord.model_validate(record)
+
+
+def write_sync_record(record: SyncRecord):
+    """Write a sync record."""
+    os.makedirs(SYNC_RECORD_DIR, exist_ok=True)
+    fpath = os.path.join(SYNC_RECORD_DIR, record.input_path + ".json")
+    with open(fpath, "w") as f:
+        json.dump(record.model_dump(), f, indent=2)
+
+
+def make_cache_entry_path(input_path: str) -> str:
+    """Make a cache entry path for a given input path."""
+    return os.path.join(".calkit/local/zip-cache", input_path + ".json")
+
+
+def get_cache_entry(path: str) -> SyncRecord | None:
+    """Get a cache entry for a given path."""
+    fpath = make_cache_entry_path(path)
+    if os.path.isfile(fpath):
+        with open(fpath, "r") as f:
+            cache = json.load(f)
+        return SyncRecord.model_validate(cache)
+    return None
+
+
+def get_output_path(input_path: str) -> str:
+    fpath = ".calkit/zips/info.json"
+    if os.path.isfile(fpath):
+        with open(fpath, "r") as f:
+            path_map = json.load(f)
+        if input_path in path_map:
+            return path_map[input_path]
+    raise ValueError(f"No zip output path defined for {input_path}")
+
+
+def zip_path(input_path: str, output_path: str):
+    """Zip a path."""
+    output_dir = os.path.dirname(output_path)
+    os.makedirs(output_dir, exist_ok=True)
+    with ZipFile(output_path, "w") as zip_file:
+        for foldername, subfolders, filenames in os.walk(input_path):
+            for filename in filenames:
+                file_path = os.path.join(foldername, filename)
+                zip_file.write(
+                    file_path, os.path.relpath(file_path, input_path)
+                )
+
+
+def unzip_path(input_path: str, output_path: str):
+    """Unzip from output to input."""
+    input_dir = os.path.dirname(input_path)
+    if input_dir:
+        os.makedirs(input_dir, exist_ok=True)
+    with ZipFile(output_path, "r") as zip_file:
+        zip_file.extractall(input_path)
+
+
+def process_single(
+    input_path: str,
+    direction: Literal["to-zip", "to-workspace", "both"] = "both",
+):
     """Process a single zip."""
     # First get cached information and see if we need to rehash
+    input_hash = get_hash(input_path)
+    output_path = get_output_path(input_path)
+    output_hash = get_hash(output_path)
+    last_sync_record = get_sync_record(input_path)
+    if last_sync_record is not None:
+        input_changed = input_hash != last_sync_record.input_hash
+        output_changed = output_hash != last_sync_record.output_hash
+    else:
+        # If we've never synced before, we should only have one or the other,
+        # i.e., the input or the output path, not both
+        input_changed = os.path.exists(input_path)
+        output_changed = os.path.exists(output_path)
     # If hashes have changed since last check, we need to synchronize the
     # path with its zip file (unzip if zip is newer, rezip if path is newer)
     # If both have changed, we have a conflict and the user needs to decide
     # how we should resolve it (rezip, unzip, unzip+merge+rezip)
+    conflict = input_changed and output_changed and direction == "both"
+    if conflict:
+        raise RuntimeError(
+            f"Conflict detected for zip path {input_path}. "
+            "Both input and output have changed since last sync. "
+            "Please resolve the conflict manually."
+        )
+    # If we rezip, we need to add the zip file to DVC and update the hash
+    if input_changed and (direction in ["to-zip", "both"]):
+        # Rezip and add to DVC
+        zip_path(input_path=input_path, output_path=output_path)
+        subprocess.run(["dvc", "add", output_path], check=True)
+        output_hash = get_hash(output_path)
+    # If we unzip, we need to update the hash
+    if output_changed and (direction in ["to-workspace", "both"]):
+        # Unzip to path
+        unzip_path(input_path=input_path, output_path=output_path)
+        input_hash = get_hash(input_path)
+    # Update the sync record
+    record = SyncRecord(
+        input_path=input_path,
+        output_path=output_path,
+        last_updated=float(calkit.utcnow().timestamp()),
+        input_hash=input_hash,
+        input_size=os.path.getsize(input_path)
+        if os.path.exists(input_path)
+        else 0,
+        input_mtime=int(os.path.getmtime(input_path))
+        if os.path.exists(input_path)
+        else 0,
+        output_hash=output_hash,
+        output_mtime=int(os.path.getmtime(output_path))
+        if os.path.exists(output_path)
+        else 0,
+        output_size=os.path.getsize(output_path)
+        if os.path.exists(output_path)
+        else 0,
+    )
+    write_sync_record(record)
 
 
 def process_all():

@@ -271,7 +271,10 @@ def sync_one(
     output_path: str | None = None,
     direction: Literal["to-zip", "to-workspace", "both"] = "both",
 ):
-    """Process a single zip."""
+    """Process a single zip.
+
+    TODO: Handle deletes.
+    """
     # First get cached information and see if we need to rehash
     input_hash = get_hash(input_path)
     if output_path is None:

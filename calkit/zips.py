@@ -107,6 +107,8 @@ def add(input_path: str, is_stage_output: bool = False):
 
     This is sort of like a ``git add`` for zips. We should do any DVC staging
     if it's not a pipeline output.
+
+    TODO: Handle .gitignore.
     """
     pm = get_zip_path_map()
     # Normalize input path as posix

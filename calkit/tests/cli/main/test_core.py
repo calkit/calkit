@@ -508,6 +508,39 @@ def test_add(tmp_dir):
     subprocess.check_call(["calkit", "add", "--to", "dvc", "large.bin"])
 
 
+def test_folder_many_small_files(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # Create a folder with large size overall but filled with many small files
+    # make sure that when it's added to the repo, we get a zipped DVC file
+    os.makedirs("many_small_files")
+    for i in range(10000):
+        with open(f"many_small_files/file_{i}.txt", "w") as f:
+            # Make each file ~100 kB
+            f.write("This is a small file.\n" * 3000)
+    subprocess.check_call(["calkit", "add", "many_small_files"])
+    assert (
+        ".calkit/zip/many_small_files.zip.dvc" in calkit.git.get_staged_files()
+    )
+    repo = git.Repo()
+    assert repo.ignored("many_small_files")
+    assert "many_small_files" not in calkit.dvc.list_paths()
+    subprocess.check_call(["calkit", "commit", "-m", "Initial commit"])
+    # Now let's create a pipeline stage that uses dvc-zip storage for an output
+    stage = {
+        "kind": "command",
+        "environment": "_system",
+        "command": "mkdir -p results && echo 'sup' > results/out.txt",
+        "outputs": [{"path": "results", "storage": "dvc-zip"}],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"pipeline": {"stages": {"stage1": stage}}}, f)
+    subprocess.check_call(["calkit", "run"])
+    assert repo.ignored("results")
+    # TODO: Make sure that if we run a single stage the output is zipped
+    # automatically
+    # TODO: More: checkout, pull, run
+
+
 def test_status(tmp_dir):
     subprocess.check_call(["calkit", "status"])
     subprocess.check_call(["calkit", "init"])

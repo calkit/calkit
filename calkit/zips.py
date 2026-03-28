@@ -1,0 +1,352 @@
+"""Functionality for managing project DVC zips/unzips.
+
+A zip is a collection of files that are zipped for DVC and
+unzipped in the workspace.
+
+A pipeline output can use ``dvc-zip`` for its storage if is a large folder
+consisting of many small files, which makes the DVC transfer much more
+efficient.
+
+There is a CLI command ``calkit check zips`` to make sure all are up-to-date.
+
+If a zip input is modified, it means we need to rezip and add the zip file
+to DVC.
+
+If a zip output is modified, it means we need to unzip to its path in the
+project.
+
+When looking at project status, anything showing up as modified in ``ZIPS_DIR``
+should be transformed into its path in the project.
+
+Zips should be synced:
+- After a pull
+- After a clone
+- Before computing status
+- Before running the pipeline
+- After running the pipeline (one way, workspace to zip?)
+- Before an add, and then the zip should be added with DVC
+- If we call ``calkit check zips``
+"""
+
+import json
+import os
+import subprocess
+from pathlib import Path
+from typing import Literal
+from zipfile import ZipFile
+
+import typer
+from pydantic import BaseModel
+
+import calkit
+
+LOCAL_DIR = ".calkit/local"
+ZIPS_DIR = ".calkit/zips"
+HASH_CACHE_PATH = LOCAL_DIR + "/hash-cache.json"
+SYNC_RECORD_DIR = LOCAL_DIR + "/zip-sync-records"
+ZIP_CACHE_PATH = ".calkit/local/zip-cache.json"
+ZIP_INFO_PATH = ".calkit/zips/info.json"
+
+
+def _check_local_dir():
+    if not os.path.isdir(LOCAL_DIR):
+        os.makedirs(LOCAL_DIR, exist_ok=True)
+    gitignore_path = os.path.join(LOCAL_DIR, ".gitignore")
+    if not os.path.isfile(gitignore_path):
+        with open(gitignore_path, "w") as f:
+            f.write("*\n")
+
+
+def get_mtime(path: str) -> float:
+    """Get the modification time of a path."""
+    if os.path.exists(path):
+        return os.path.getmtime(path)
+    return 0
+
+
+class HashCacheEntry(BaseModel):
+    """Cache entry for a path's hash."""
+
+    path: str
+    hash: str
+    mtime: float
+    size: int
+    dir_sig: str | None = None  # Only used for directories, to avoid rehashing
+
+
+class SyncRecord(BaseModel):
+    input_path: str
+    output_path: str
+    input_hash: str
+    output_hash: str
+    last_updated: float
+
+
+def make_zip_path(input_path: str) -> str:
+    """Make a zip path for a given input path."""
+    return os.path.join(ZIPS_DIR, input_path + ".zip")
+
+
+def get_zip_path_map() -> dict[str, str]:
+    """Get a mapping of input paths to zip paths."""
+    if os.path.isfile(ZIP_INFO_PATH):
+        with open(ZIP_INFO_PATH, "r") as f:
+            return json.load(f)
+    return {}
+
+
+def write_zip_path_map(path_map: dict[str, str]):
+    d = os.path.dirname(ZIP_INFO_PATH)
+    os.makedirs(d, exist_ok=True)
+    with open(ZIP_INFO_PATH, "w") as f:
+        json.dump(path_map, f, indent=2)
+
+
+def add(input_path: str, is_stage_output: bool = False):
+    """Add a zip for a given input path.
+
+    This is sort of like a ``git add`` for zips. We should do any DVC staging
+    if it's not a pipeline output.
+
+    TODO: Handle .gitignore.
+    """
+    pm = get_zip_path_map()
+    # Normalize input path as posix
+    input_path = Path(input_path).as_posix()
+    if input_path not in pm:
+        pm[input_path] = make_zip_path(input_path)
+        write_zip_path_map(pm)
+    if not is_stage_output:
+        # If this is not a stage output, it exists, so we should sync it
+        sync_one(input_path=input_path, output_path=pm[input_path])
+
+
+def hash_path(path: str) -> str:
+    """Hash a path.
+
+    TODO: Use SHA256?
+    """
+    return calkit.get_md5(path)
+
+
+def calc_dir_sig(path: str) -> str:
+    """Calculate a fast signature for a directory to know if we should
+    rehash.
+    """
+    if not os.path.isdir(path):
+        return ""
+    file_count = 0
+    total_size = 0
+    latest_mtime = 0
+    for foldername, subfolders, filenames in os.walk(path):
+        for filename in filenames:
+            file_count += 1
+            fpath = os.path.join(foldername, filename)
+            total_size += os.path.getsize(fpath)
+            mtime = get_mtime(fpath)
+            if mtime > latest_mtime:
+                latest_mtime = mtime
+    return f"{file_count}-{total_size}-{latest_mtime}"
+
+
+def get_hash(path: str) -> str | None:
+    """Get the hash of a path, using/updating the cache if applicable.
+
+    TODO: This should use mtime in ns.
+    """
+    if not os.path.exists(path):
+        return
+    if os.path.isfile(HASH_CACHE_PATH):
+        with open(HASH_CACHE_PATH, "r") as f:
+            cache = json.load(f)
+    else:
+        cache = {}
+    # Normalize path as posix
+    record = None
+    path = Path(path).as_posix()
+    if path in cache:
+        record = HashCacheEntry.model_validate(cache[path])
+    mtime = get_mtime(path)
+    size = os.path.getsize(path)
+    dir_sig = calc_dir_sig(path)
+    if (
+        record is not None
+        and record.mtime == mtime
+        and record.size == size
+        and record.dir_sig == dir_sig
+    ):
+        return record.hash
+    # If we've made it this far, we need to update the cache
+    hash_val = hash_path(path)
+    record = HashCacheEntry(
+        path=path,
+        hash=hash_val,
+        mtime=mtime,
+        size=size,
+        dir_sig=dir_sig,
+    )
+    cache[path] = record.model_dump(mode="json")
+    _check_local_dir()
+    with open(HASH_CACHE_PATH, "w") as f:
+        json.dump(cache, f, indent=2)
+    return hash_val
+
+
+def get_sync_record(input_path: str) -> SyncRecord | None:
+    """Get a sync record for a given input path."""
+    os.makedirs(SYNC_RECORD_DIR, exist_ok=True)
+    fpath = os.path.join(SYNC_RECORD_DIR, input_path + ".json")
+    if os.path.isfile(fpath):
+        with open(fpath, "r") as f:
+            record = json.load(f)
+        return SyncRecord.model_validate(record)
+
+
+def write_sync_record(record: SyncRecord):
+    """Write a sync record."""
+    os.makedirs(SYNC_RECORD_DIR, exist_ok=True)
+    fpath = os.path.join(SYNC_RECORD_DIR, record.input_path + ".json")
+    with open(fpath, "w") as f:
+        json.dump(record.model_dump(), f, indent=2)
+
+
+def make_cache_entry_path(input_path: str) -> str:
+    """Make a cache entry path for a given input path."""
+    return os.path.join(".calkit/local/zip-cache", input_path + ".json")
+
+
+def get_cache_entry(path: str) -> SyncRecord | None:
+    """Get a cache entry for a given path."""
+    fpath = make_cache_entry_path(path)
+    if os.path.isfile(fpath):
+        with open(fpath, "r") as f:
+            cache = json.load(f)
+        return SyncRecord.model_validate(cache)
+    return None
+
+
+def get_output_path(input_path: str) -> str:
+    pm = get_zip_path_map()
+    input_path = Path(input_path).as_posix()
+    if input_path in pm:
+        return pm[input_path]
+    raise ValueError(f"No zip output path defined for {input_path}")
+
+
+def zip_path(input_path: str, output_path: str):
+    """Zip a path."""
+    output_dir = os.path.dirname(output_path)
+    os.makedirs(output_dir, exist_ok=True)
+    with ZipFile(output_path, "w") as zip_file:
+        for foldername, subfolders, filenames in os.walk(input_path):
+            for filename in filenames:
+                file_path = os.path.join(foldername, filename)
+                zip_file.write(
+                    file_path, os.path.relpath(file_path, input_path)
+                )
+
+
+def unzip_path(input_path: str, output_path: str):
+    """Unzip from output to input."""
+    input_dir = os.path.dirname(input_path)
+    if input_dir:
+        os.makedirs(input_dir, exist_ok=True)
+    with ZipFile(output_path, "r") as zip_file:
+        zip_file.extractall(input_path)
+
+
+class SyncStatus(BaseModel):
+    input_path: str
+    output_path: str
+    input_hash: str | None
+    output_hash: str | None
+    input_changed: bool
+    output_changed: bool
+    last_sync_record: SyncRecord | None = None
+
+
+def get_sync_status(
+    input_path: str, output_path: str | None = None
+) -> SyncStatus:
+    # First get cached information and see if we need to rehash
+    input_hash = get_hash(input_path)
+    if output_path is None:
+        output_path = get_output_path(input_path)
+    output_hash = get_hash(output_path)
+    last_sync_record = get_sync_record(input_path)
+    if last_sync_record is not None:
+        input_changed = input_hash != last_sync_record.input_hash
+        output_changed = output_hash != last_sync_record.output_hash
+    else:
+        # If we've never synced before, we should only have one or the other,
+        # i.e., the input or the output path, not both
+        input_changed = os.path.exists(input_path)
+        output_changed = os.path.exists(output_path)
+    return SyncStatus(
+        input_path=input_path,
+        output_path=output_path,
+        input_hash=input_hash,
+        output_hash=output_hash,
+        input_changed=input_changed,
+        output_changed=output_changed,
+        last_sync_record=last_sync_record,
+    )
+
+
+def sync_one(
+    input_path: str,
+    output_path: str | None = None,
+    direction: Literal["to-zip", "to-workspace", "both"] = "both",
+):
+    """Process a single zip.
+
+    TODO: Handle deletes.
+    """
+    status = get_sync_status(input_path, output_path)
+    input_changed = status.input_changed
+    output_changed = status.output_changed
+    input_hash = status.input_hash
+    output_hash = status.output_hash
+    output_path = status.output_path
+    # If hashes have changed since last check, we need to synchronize the
+    # path with its zip file (unzip if zip is newer, rezip if path is newer)
+    # If both have changed, we have a conflict and the user needs to decide
+    # how we should resolve it (rezip, unzip, unzip+merge+rezip)
+    conflict = input_changed and output_changed and direction == "both"
+    if conflict:
+        raise RuntimeError(
+            f"Conflict detected for zip path {input_path}. "
+            "Both input and output have changed since last sync. "
+            "Please resolve the conflict manually."
+        )
+    # If we rezip, we need to add the zip file to DVC and update the hash
+    if input_changed and (direction in ["to-zip", "both"]):
+        typer.echo(f"Zipping {input_path}")
+        # Rezip and add to DVC
+        zip_path(input_path=input_path, output_path=output_path)
+        subprocess.run(["dvc", "add", output_path], check=True)
+        output_hash = get_hash(output_path)
+    # If we unzip, we need to update the hash
+    if output_changed and (direction in ["to-workspace", "both"]):
+        typer.echo(f"Unzipping to {input_path}")
+        # Unzip to path
+        unzip_path(input_path=input_path, output_path=output_path)
+        input_hash = get_hash(input_path)
+    assert input_hash is not None and output_hash is not None
+    # Update the sync record
+    record = SyncRecord(
+        input_path=input_path,
+        output_path=output_path,
+        last_updated=float(calkit.utcnow().timestamp()),
+        input_hash=input_hash,
+        output_hash=output_hash,
+    )
+    write_sync_record(record)
+
+
+def sync_all():
+    """Process all project zips."""
+    for input_path, output_path in get_zip_path_map().items():
+        sync_one(
+            input_path=input_path, output_path=output_path, direction="both"
+        )

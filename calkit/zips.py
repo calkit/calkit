@@ -266,15 +266,19 @@ def unzip_path(input_path: str, output_path: str):
         zip_file.extractall(input_path)
 
 
-def sync_one(
-    input_path: str,
-    output_path: str | None = None,
-    direction: Literal["to-zip", "to-workspace", "both"] = "both",
-):
-    """Process a single zip.
+class SyncStatus(BaseModel):
+    input_path: str
+    output_path: str
+    input_hash: str | None
+    output_hash: str | None
+    input_changed: bool
+    output_changed: bool
+    last_sync_record: SyncRecord | None = None
 
-    TODO: Handle deletes.
-    """
+
+def get_sync_status(
+    input_path: str, output_path: str | None = None
+) -> SyncStatus:
     # First get cached information and see if we need to rehash
     input_hash = get_hash(input_path)
     if output_path is None:
@@ -289,9 +293,32 @@ def sync_one(
         # i.e., the input or the output path, not both
         input_changed = os.path.exists(input_path)
         output_changed = os.path.exists(output_path)
-    if not input_changed and not output_changed:
-        typer.echo(f"Zip '{input_path}' is up-to-date")
-        return
+    return SyncStatus(
+        input_path=input_path,
+        output_path=output_path,
+        input_hash=input_hash,
+        output_hash=output_hash,
+        input_changed=input_changed,
+        output_changed=output_changed,
+        last_sync_record=last_sync_record,
+    )
+
+
+def sync_one(
+    input_path: str,
+    output_path: str | None = None,
+    direction: Literal["to-zip", "to-workspace", "both"] = "both",
+):
+    """Process a single zip.
+
+    TODO: Handle deletes.
+    """
+    status = get_sync_status(input_path, output_path)
+    input_changed = status.input_changed
+    output_changed = status.output_changed
+    input_hash = status.input_hash
+    output_hash = status.output_hash
+    output_path = status.output_path
     # If hashes have changed since last check, we need to synchronize the
     # path with its zip file (unzip if zip is newer, rezip if path is newer)
     # If both have changed, we have a conflict and the user needs to decide

@@ -118,7 +118,7 @@ def add(input_path: str, is_stage_output: bool = False):
         write_zip_path_map(pm)
     if not is_stage_output:
         # If this is not a stage output, it exists, so we should sync it
-        sync_one(input_path=input_path)
+        sync_one(input_path=input_path, output_path=pm[input_path])
 
 
 def hash_path(path: str) -> str:

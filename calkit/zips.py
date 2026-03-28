@@ -64,11 +64,6 @@ def get_mtime(path: str) -> float:
     return 0
 
 
-class ZipInfoEntry(BaseModel):
-    path: str  # Path in the project--should be a folder
-    zip_path: str  # Path to the zip file, like .calkit/zips/{uuid}.zip
-
-
 class HashCacheEntry(BaseModel):
     """Cache entry for a path's hash."""
 

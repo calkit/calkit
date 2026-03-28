@@ -102,7 +102,7 @@ def write_zip_path_map(path_map: dict[str, str]):
         json.dump(path_map, f, indent=2)
 
 
-def add_zip(input_path: str):
+def add_zip(input_path: str, is_stage_output: bool = False):
     """Add a zip for a given input path.
 
     If one already exists, skip.
@@ -116,6 +116,13 @@ def add_zip(input_path: str):
     if input_path not in pm:
         pm[input_path] = make_zip_path(input_path)
     write_zip_path_map(pm)
+    if not is_stage_output:
+        # If this is not a stage output, we should create the zip file and add
+        # it to DVC right away, since we want it to be tracked by DVC and have
+        # a hash in the cache for future reference. If it's a stage output, we
+        # will create the zip file and add it to DVC after the stage runs and
+        # produces the output.
+        sync_one(input_path=input_path, direction="to-zip")
 
 
 def hash_path(path: str) -> str:
@@ -126,8 +133,10 @@ def hash_path(path: str) -> str:
     return calkit.get_md5(path)
 
 
-def get_hash(path: str) -> str:
+def get_hash(path: str) -> str | None:
     """Get the hash of a path, using/updating the cache if applicable."""
+    if not os.path.exists(path):
+        return
     if os.path.isfile(HASH_CACHE_PATH):
         with open(HASH_CACHE_PATH, "r") as f:
             cache = json.load(f)
@@ -217,14 +226,16 @@ def unzip_path(input_path: str, output_path: str):
         zip_file.extractall(input_path)
 
 
-def process_single(
+def sync_one(
     input_path: str,
+    output_path: str | None = None,
     direction: Literal["to-zip", "to-workspace", "both"] = "both",
 ):
     """Process a single zip."""
     # First get cached information and see if we need to rehash
     input_hash = get_hash(input_path)
-    output_path = get_output_path(input_path)
+    if output_path is None:
+        output_path = get_output_path(input_path)
     output_hash = get_hash(output_path)
     last_sync_record = get_sync_record(input_path)
     if last_sync_record is not None:
@@ -257,6 +268,7 @@ def process_single(
         # Unzip to path
         unzip_path(input_path=input_path, output_path=output_path)
         input_hash = get_hash(input_path)
+    assert input_hash is not None and output_hash is not None
     # Update the sync record
     record = SyncRecord(
         input_path=input_path,
@@ -280,6 +292,9 @@ def process_single(
     write_sync_record(record)
 
 
-def process_all():
+def sync_all():
     """Process all project zips."""
-    # First get zip metadata
+    for input_path, output_path in get_zip_path_map().items():
+        sync_one(
+            input_path=input_path, output_path=output_path, direction="both"
+        )

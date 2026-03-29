@@ -36,10 +36,12 @@ from pathlib import Path
 from typing import Literal
 from zipfile import ZipFile
 
+import git
 import typer
 from pydantic import BaseModel
 
 import calkit
+import calkit.git
 from calkit.core import DVC_SIZE_THRESH_BYTES
 
 LOCAL_DIR = ".calkit/local"
@@ -134,15 +136,19 @@ def add(input_path: str, is_stage_output: bool = False):
 
     This is sort of like a ``git add`` for zips. We should do any DVC staging
     if it's not a pipeline output.
-
-    TODO: Handle .gitignore.
     """
+    repo = git.Repo()
     pm = get_zip_path_map()
     # Normalize input path as posix
     input_path = Path(input_path).as_posix()
     if input_path not in pm:
         pm[input_path] = make_zip_path(input_path)
         write_zip_path_map(pm)
+        # Stage the updated info file
+        repo.git.add(ZIP_INFO_PATH)
+    # Ensure the workspace dir is gitignored
+    calkit.git.ensure_path_is_ignored(repo, path=input_path)
+    repo.git.add(".gitignore")
     if not is_stage_output:
         # If this is not a stage output, it exists, so we should sync it
         sync_one(input_path=input_path, output_path=pm[input_path])
@@ -410,9 +416,9 @@ def sync_one(
     return record
 
 
-def sync_all():
+def sync_all(direction: Literal["to-zip", "to-workspace", "both"] = "both"):
     """Process all project zips."""
     for input_path, output_path in get_zip_path_map().items():
         sync_one(
-            input_path=input_path, output_path=output_path, direction="both"
+            input_path=input_path, output_path=output_path, direction=direction
         )

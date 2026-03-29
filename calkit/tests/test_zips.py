@@ -14,6 +14,7 @@ from calkit.zips import (
     get_sync_record,
     get_sync_status,
     get_zip_path_map,
+    is_zip_candidate,
     make_zip_path,
     sync_one,
     unzip_path,
@@ -51,6 +52,34 @@ def test_calc_dir_sig(tmp_dir):
     sig_before = calc_dir_sig(str(d))
     (d / "a.txt").write_text("changed content here")
     assert calc_dir_sig(str(d)) != sig_before
+
+
+def test_is_zip_candidate(tmp_dir):
+    from calkit.core import DVC_SIZE_THRESH_BYTES
+
+    # Non-directory is never a candidate
+    p = tmp_dir / "file.txt"
+    p.write_text("x")
+    assert not is_zip_candidate(str(p))
+    # Directory below the size threshold is not a candidate
+    small_dir = tmp_dir / "small"
+    small_dir.mkdir()
+    (small_dir / "a.txt").write_text("tiny")
+    assert not is_zip_candidate(str(small_dir))
+    # Large directory with small average file size is a candidate
+    large_small = tmp_dir / "large_small"
+    large_small.mkdir()
+    file_size = DVC_SIZE_THRESH_BYTES + 1
+    (large_small / "a.bin").write_bytes(b"x" * file_size)
+    (large_small / "b.bin").write_bytes(b"x" * file_size)
+    assert is_zip_candidate(str(large_small))
+    # Large directory with a single huge file is NOT a candidate
+    # (avg file size exceeds threshold)
+    large_single = tmp_dir / "large_single"
+    large_single.mkdir()
+    huge = calkit.zips.ZIP_CANDIDATE_AVG_FILE_SIZE_BYTES + 1
+    (large_single / "big.bin").write_bytes(b"x" * huge)
+    assert not is_zip_candidate(str(large_single))
 
 
 def test_get_hash(tmp_dir):

@@ -40,6 +40,7 @@ import typer
 from pydantic import BaseModel
 
 import calkit
+from calkit.core import DVC_SIZE_THRESH_BYTES
 
 LOCAL_DIR = ".calkit/local"
 ZIPS_DIR = ".calkit/zips"
@@ -47,6 +48,10 @@ HASH_CACHE_PATH = LOCAL_DIR + "/hash-cache.json"
 SYNC_RECORD_DIR = LOCAL_DIR + "/zip-sync-records"
 ZIP_CACHE_PATH = ".calkit/local/zip-cache.json"
 ZIP_INFO_PATH = ".calkit/zips/info.json"
+# Average file size threshold below which a large directory is considered a
+# zip candidate — files smaller than this are inefficient to track individually
+# in DVC
+ZIP_CANDIDATE_AVG_FILE_SIZE_BYTES = 10_000_000  # 10 MB
 
 
 def _check_local_dir():
@@ -56,6 +61,26 @@ def _check_local_dir():
     if not os.path.isfile(gitignore_path):
         with open(gitignore_path, "w") as f:
             f.write("*\n")
+
+
+def is_zip_candidate(path: str) -> bool:
+    """Detect if a path is a good candidate for dvc-zip storage.
+
+    A zip candidate is a directory whose total size exceeds the DVC tracking
+    threshold but whose average file size is small, meaning DVC would have to
+    track many individual files inefficiently.
+    """
+    if not os.path.isdir(path):
+        return False
+    file_count = 0
+    total_size = 0
+    for foldername, _, filenames in os.walk(path):
+        for filename in filenames:
+            file_count += 1
+            total_size += os.stat(os.path.join(foldername, filename)).st_size
+    if file_count == 0 or total_size <= DVC_SIZE_THRESH_BYTES:
+        return False
+    return (total_size / file_count) < ZIP_CANDIDATE_AVG_FILE_SIZE_BYTES
 
 
 def get_mtime_ns(path: str) -> int:

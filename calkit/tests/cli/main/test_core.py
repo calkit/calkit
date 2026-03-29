@@ -510,17 +510,19 @@ def test_add(tmp_dir):
 
 def test_folder_many_small_files(tmp_dir):
     subprocess.check_call(["calkit", "init"])
-    # Create a folder with large size overall but filled with many small files
-    # make sure that when it's added to the repo, we get a zipped DVC file
+    # Create a folder with large overall size but filled with many small files;
+    # when added it should be detected as a zip candidate and stored as a DVC
+    # zip
     os.makedirs("many_small_files")
-    for i in range(10000):
+    for i in range(100):
         with open(f"many_small_files/file_{i}.txt", "w") as f:
-            # Make each file ~100 kB
+            # Make each file ~100 kB; 100 files = ~10 MB total, well above the
+            # DVC size threshold and with small average file size
             f.write("This is a small file.\n" * 3000)
     subprocess.check_call(["calkit", "add", "many_small_files"])
-    assert (
-        ".calkit/zip/many_small_files.zip.dvc" in calkit.git.get_staged_files()
-    )
+    staged = calkit.git.get_staged_files()
+    assert ".calkit/zips/many_small_files.zip.dvc" in staged
+    assert ".calkit/zips/info.json" in staged
     repo = git.Repo()
     assert repo.ignored("many_small_files")
     assert "many_small_files" not in calkit.dvc.list_paths()
@@ -536,9 +538,8 @@ def test_folder_many_small_files(tmp_dir):
         calkit.ryaml.dump({"pipeline": {"stages": {"stage1": stage}}}, f)
     subprocess.check_call(["calkit", "run"])
     assert repo.ignored("results")
-    # TODO: Make sure that if we run a single stage the output is zipped
-    # automatically
-    # TODO: More: checkout, pull, run
+    # TODO: Test --to dvc-zip explicit flag
+    # TODO: Test checkout/pull round-trip
 
 
 def test_status(tmp_dir):

@@ -27,6 +27,7 @@ from typing_extensions import Annotated, Optional
 import calkit
 import calkit.matlab
 import calkit.pipeline
+import calkit.zips
 from calkit import (
     AUTO_IGNORE_PATHS,
     AUTO_IGNORE_PREFIXES,
@@ -476,7 +477,9 @@ def add(
     to: Annotated[
         str | None,
         typer.Option(
-            "--to", "-t", help="System with which to add (git or dvc)."
+            "--to",
+            "-t",
+            help="System with which to add (git, dvc, or dvc-zip).",
         ),
     ] = None,
 ):
@@ -502,7 +505,7 @@ def add(
             raise_error(
                 "Cannot auto-generate commit message for more than one path"
             )
-    if to is not None and to not in ["git", "dvc"]:
+    if to is not None and to not in ["git", "dvc", "dvc-zip"]:
         raise_error(f"Invalid option for 'to': {to}")
     try:
         repo = git.Repo()
@@ -545,6 +548,10 @@ def add(
             subprocess.call(["git", "add"] + paths)
         elif to == "dvc":
             run_dvc_command(["add"] + paths)
+        elif to == "dvc-zip":
+            for path in paths:
+                typer.echo(f"Adding {path} as a DVC zip")
+                calkit.zips.add(path)
         else:
             raise_error(f"Invalid option for 'to': {to}")
     else:
@@ -609,6 +616,12 @@ def add(
             elif os.path.splitext(path)[-1] in DVC_EXTENSIONS:
                 typer.echo(f"Adding {path} to DVC per its extension")
                 run_dvc_command(["add", path])
+            elif calkit.zips.is_zip_candidate(path):
+                typer.echo(
+                    f"Adding {path} as a DVC zip "
+                    "(large directory of small files)"
+                )
+                calkit.zips.add(path)
             elif calkit.get_size(path) > DVC_SIZE_THRESH_BYTES:
                 typer.echo(
                     f"Adding {path} to DVC since it's greater than 1 MB"

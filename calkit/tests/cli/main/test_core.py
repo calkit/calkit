@@ -540,8 +540,20 @@ def test_folder_many_small_files(tmp_dir, tmp_path):
     repo = git.Repo()
     assert repo.ignored("many_small_files")
     assert "many_small_files" not in calkit.dvc.list_paths()
+    # Test explicit --to dvc-zip flag on a second folder
+    os.makedirs("more_small_files")
+    for i in range(100):
+        with open(f"more_small_files/file_{i}.txt", "w") as f:
+            f.write("Another small file.\n" * 3000)
+    subprocess.check_call(
+        ["calkit", "add", "--to", "dvc-zip", "more_small_files"]
+    )
+    staged2 = calkit.git.get_staged_files()
+    assert ".calkit/zips/more_small_files.zip.dvc" in staged2
     subprocess.check_call(["calkit", "commit", "-m", "Initial commit"])
-    # Now let's create a pipeline stage that uses dvc-zip storage for an output
+    # Push everything to the remotes
+    subprocess.check_call(["calkit", "push"])
+    # Create a pipeline stage that uses dvc-zip storage for an output
     stage = {
         "kind": "command",
         "environment": "_system",
@@ -552,9 +564,23 @@ def test_folder_many_small_files(tmp_dir, tmp_path):
         calkit.ryaml.dump({"pipeline": {"stages": {"stage1": stage}}}, f)
     subprocess.check_call(["calkit", "run"])
     assert repo.ignored("results")
-    # TODO: Test --to dvc-zip explicit flag
-    # TODO: Push to git_remote and dvc_remote, clone into a fresh dir, pull
-    # DVC data, and assert the workspace is unzipped correctly
+    assert os.path.isdir("results")
+    assert os.path.isfile("results/out.txt")
+    assert os.path.isfile(".calkit/zips/results.zip")
+    # The pipeline output zip should be DVC-tracked, not the workspace dir
+    dvc_paths = calkit.dvc.list_paths()
+    assert ".calkit/zips/results.zip" in dvc_paths
+    assert "results" not in dvc_paths
+    subprocess.check_call(["calkit", "save", "-m", "Run pipeline"])
+    # Clone into a fresh directory, pull DVC data, and verify the zip was
+    # transferred; calkit sync would then unzip it to the workspace
+    clone_dir = tmp_path / "clone"
+    subprocess.check_call(["git", "clone", str(git_remote), str(clone_dir)])
+    subprocess.check_call(["dvc", "pull"], cwd=str(clone_dir))
+    assert (clone_dir / ".calkit" / "zips" / "results.zip").is_file()
+    # Running calkit run in the clone should unzip before the pipeline runs
+    subprocess.check_call(["calkit", "run"], cwd=str(clone_dir))
+    assert (clone_dir / "results" / "out.txt").is_file()
 
 
 def test_status(tmp_dir):

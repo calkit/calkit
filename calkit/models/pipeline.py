@@ -225,7 +225,7 @@ class Stage(BaseModel):
                 outs.append(
                     {
                         out.path: dict(
-                            cache=True if out.storage == "dvc" else False,
+                            cache=out.storage == "dvc",
                             persist=not out.delete_before_run,
                         )
                     }

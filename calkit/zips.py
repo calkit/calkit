@@ -30,6 +30,7 @@ Zips should be synced:
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Literal
@@ -213,6 +214,13 @@ def write_sync_record(record: SyncRecord):
         json.dump(record.model_dump(), f, indent=2)
 
 
+def delete_sync_record(input_path: str):
+    """Delete a sync record."""
+    fpath = os.path.join(SYNC_RECORD_DIR, input_path + ".json")
+    if os.path.isfile(fpath):
+        os.remove(fpath)
+
+
 def make_cache_entry_path(input_path: str) -> str:
     """Make a cache entry path for a given input path."""
     return os.path.join(".calkit/local/zip-cache", input_path + ".json")
@@ -300,23 +308,55 @@ def sync_one(
     input_path: str,
     output_path: str | None = None,
     direction: Literal["to-zip", "to-workspace", "both"] = "both",
-) -> SyncRecord:
-    """Process a single zip.
-
-    TODO: Handle deletes.
-    """
+) -> SyncRecord | None:
+    """Process a single zip."""
     status = get_sync_status(input_path, output_path)
     input_changed = status.input_changed
     output_changed = status.output_changed
     input_hash = status.input_hash
     output_hash = status.output_hash
     output_path = status.output_path
+    last_sync_record = status.last_sync_record
+    # A deletion is when the path no longer exists but did at last sync
+    input_deleted = input_hash is None and last_sync_record is not None
+    output_deleted = output_hash is None and last_sync_record is not None
+    # Both deleted — clear the stale sync record so a future recreated side
+    # is treated as a fresh first sync rather than a spurious conflict
+    if input_deleted and output_deleted:
+        delete_sync_record(input_path)
+        return None
+    # Deletion + change on the other side is a conflict
+    if input_deleted and output_changed and direction == "both":
+        raise RuntimeError(
+            f"Conflict detected for zip path {input_path}. "
+            "Workspace was deleted but zip has also changed since last sync. "
+            "Please resolve the conflict manually."
+        )
+    if output_deleted and input_changed and direction == "both":
+        raise RuntimeError(
+            f"Conflict detected for zip path {input_path}. "
+            "Zip was deleted but workspace has also changed since last sync. "
+            "Please resolve the conflict manually."
+        )
+    # Propagate workspace deletion to zip
+    if input_deleted and direction in ["to-zip", "both"]:
+        if os.path.exists(output_path):
+            typer.echo(f"Deleting {output_path} (workspace was deleted)")
+            os.remove(output_path)
+        delete_sync_record(input_path)
+        return None
+    # Propagate zip deletion to workspace
+    if output_deleted and direction in ["to-workspace", "both"]:
+        if os.path.exists(input_path):
+            typer.echo(f"Deleting {input_path} (zip was deleted)")
+            shutil.rmtree(input_path)
+        delete_sync_record(input_path)
+        return None
     # If hashes have changed since last check, we need to synchronize the
     # path with its zip file (unzip if zip is newer, rezip if path is newer)
     # If both have changed, we have a conflict and the user needs to decide
     # how we should resolve it (rezip, unzip, unzip+merge+rezip)
-    conflict = input_changed and output_changed and direction == "both"
-    if conflict:
+    if input_changed and output_changed and direction == "both":
         raise RuntimeError(
             f"Conflict detected for zip path {input_path}. "
             "Both input and output have changed since last sync. "
@@ -325,18 +365,15 @@ def sync_one(
     # If we rezip, we need to add the zip file to DVC and update the hash
     if input_changed and (direction in ["to-zip", "both"]):
         typer.echo(f"Zipping {input_path}")
-        # Rezip and add to DVC
         zip_path(input_path=input_path, output_path=output_path)
         subprocess.run(["dvc", "add", output_path], check=True)
         output_hash = get_hash(output_path)
     # If we unzip, we need to update the hash
     if output_changed and (direction in ["to-workspace", "both"]):
         typer.echo(f"Unzipping to {input_path}")
-        # Unzip to path
         unzip_path(input_path=input_path, output_path=output_path)
         input_hash = get_hash(input_path)
     assert input_hash is not None and output_hash is not None
-    # Update the sync record
     record = SyncRecord(
         input_path=input_path,
         output_path=output_path,

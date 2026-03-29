@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 
 import pytest
 
@@ -171,3 +172,42 @@ def test_sync_one(tmp_dir, monkeypatch):
     zip_path(str(src2), zip_out2)
     with pytest.raises(RuntimeError, match="Conflict"):
         sync_one(str(src2), zip_out2, direction="both")
+    # Workspace deleted: zip is removed and sync record cleared
+    src3 = tmp_dir / "src3"
+    src3.mkdir()
+    (src3 / "a.txt").write_text("hello")
+    zip_out3 = str(tmp_dir / calkit.zips.ZIPS_DIR / "src3.zip")
+    write_zip_path_map({str(src3.as_posix()): zip_out3})
+    sync_one(str(src3), zip_out3, direction="to-zip")
+    assert os.path.isfile(zip_out3)
+    shutil.rmtree(str(src3))
+    result = sync_one(str(src3), zip_out3, direction="to-zip")
+    assert result is None
+    assert not os.path.exists(zip_out3)
+    assert get_sync_record(str(src3.as_posix())) is None
+    # Zip deleted: workspace is removed and sync record cleared
+    src4 = tmp_dir / "src4"
+    src4.mkdir()
+    (src4 / "a.txt").write_text("hello")
+    zip_out4 = str(tmp_dir / calkit.zips.ZIPS_DIR / "src4.zip")
+    write_zip_path_map({str(src4.as_posix()): zip_out4})
+    sync_one(str(src4), zip_out4, direction="to-zip")
+    assert os.path.isfile(zip_out4)
+    os.remove(zip_out4)
+    result = sync_one(str(src4), zip_out4, direction="to-workspace")
+    assert result is None
+    assert not os.path.exists(str(src4))
+    assert get_sync_record(str(src4.as_posix())) is None
+    # Both deleted: sync record is cleared so future recreated side is a fresh
+    # sync
+    src5 = tmp_dir / "src5"
+    src5.mkdir()
+    (src5 / "a.txt").write_text("hello")
+    zip_out5 = str(tmp_dir / calkit.zips.ZIPS_DIR / "src5.zip")
+    write_zip_path_map({str(src5.as_posix()): zip_out5})
+    sync_one(str(src5), zip_out5, direction="to-zip")
+    shutil.rmtree(str(src5))
+    os.remove(zip_out5)
+    result = sync_one(str(src5), zip_out5, direction="both")
+    assert result is None
+    assert get_sync_record(str(src5.as_posix())) is None

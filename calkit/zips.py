@@ -57,11 +57,12 @@ def _check_local_dir():
             f.write("*\n")
 
 
-def get_mtime(path: str) -> float:
-    """Get the modification time of a path."""
-    if os.path.exists(path):
-        return os.path.getmtime(path)
-    return 0
+def get_mtime_ns(path: str) -> int:
+    """Get the modification time of a path in nanoseconds."""
+    try:
+        return os.stat(path).st_mtime_ns
+    except OSError:
+        return 0
 
 
 class HashCacheEntry(BaseModel):
@@ -69,7 +70,7 @@ class HashCacheEntry(BaseModel):
 
     path: str
     hash: str
-    mtime: float
+    mtime: int  # nanoseconds
     size: int
     dir_sig: str | None = None  # Only used for directories, to avoid rehashing
 
@@ -142,20 +143,19 @@ def calc_dir_sig(path: str) -> str:
         for filename in filenames:
             file_count += 1
             fpath = os.path.join(foldername, filename)
-            total_size += os.path.getsize(fpath)
-            mtime = get_mtime(fpath)
-            if mtime > latest_mtime:
-                latest_mtime = mtime
+            st = os.stat(fpath)
+            total_size += st.st_size
+            if st.st_mtime_ns > latest_mtime:
+                latest_mtime = st.st_mtime_ns
     return f"{file_count}-{total_size}-{latest_mtime}"
 
 
 def get_hash(path: str) -> str | None:
-    """Get the hash of a path, using/updating the cache if applicable.
-
-    TODO: This should use mtime in ns.
-    """
-    if not os.path.exists(path):
-        return
+    """Get the hash of a path, using/updating the cache if applicable."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
     if os.path.isfile(HASH_CACHE_PATH):
         with open(HASH_CACHE_PATH, "r") as f:
             cache = json.load(f)
@@ -165,9 +165,12 @@ def get_hash(path: str) -> str | None:
     record = None
     path = Path(path).as_posix()
     if path in cache:
-        record = HashCacheEntry.model_validate(cache[path])
-    mtime = get_mtime(path)
-    size = os.path.getsize(path)
+        try:
+            record = HashCacheEntry.model_validate(cache[path])
+        except Exception:
+            record = None
+    mtime = st.st_mtime_ns
+    size = st.st_size
     dir_sig = calc_dir_sig(path)
     if (
         record is not None
@@ -297,7 +300,7 @@ def sync_one(
     input_path: str,
     output_path: str | None = None,
     direction: Literal["to-zip", "to-workspace", "both"] = "both",
-):
+) -> SyncRecord:
     """Process a single zip.
 
     TODO: Handle deletes.
@@ -342,6 +345,7 @@ def sync_one(
         output_hash=output_hash,
     )
     write_sync_record(record)
+    return record
 
 
 def sync_all():

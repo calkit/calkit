@@ -508,8 +508,22 @@ def test_add(tmp_dir):
     subprocess.check_call(["calkit", "add", "--to", "dvc", "large.bin"])
 
 
-def test_folder_many_small_files(tmp_dir):
+def test_folder_many_small_files(tmp_dir, tmp_path):
     subprocess.check_call(["calkit", "init"])
+    # Set up a bare git remote and a local DVC remote as siblings of the
+    # project dir so we can exercise push/pull in this test
+    git_remote = tmp_path / "git_remote"
+    dvc_remote = tmp_path / "dvc_remote"
+    git_remote.mkdir()
+    dvc_remote.mkdir()
+    subprocess.check_call(["git", "init", "--bare", str(git_remote)])
+    repo = git.Repo()
+    repo.create_remote("origin", str(git_remote))
+    subprocess.check_call(
+        ["dvc", "remote", "add", "-d", "origin", str(dvc_remote)]
+    )
+    subprocess.check_call(["git", "add", ".dvc/config"])
+    subprocess.check_call(["git", "commit", "-m", "Add remotes"])
     # Create a folder with large overall size but filled with many small files;
     # when added it should be detected as a zip candidate and stored as a DVC
     # zip
@@ -539,7 +553,8 @@ def test_folder_many_small_files(tmp_dir):
     subprocess.check_call(["calkit", "run"])
     assert repo.ignored("results")
     # TODO: Test --to dvc-zip explicit flag
-    # TODO: Test checkout/pull round-trip
+    # TODO: Push to git_remote and dvc_remote, clone into a fresh dir, pull
+    # DVC data, and assert the workspace is unzipped correctly
 
 
 def test_status(tmp_dir):

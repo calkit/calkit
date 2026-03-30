@@ -25,6 +25,7 @@ from git.exc import InvalidGitRepositoryError
 from typing_extensions import Annotated, Optional
 
 import calkit
+import calkit.dvc.zip
 import calkit.matlab
 import calkit.pipeline
 from calkit import (
@@ -225,6 +226,69 @@ def clone(
                 raise_error("Failed to pull from DVC remote(s)")
         except Exception as e:
             raise_error(f"Failed to pull from DVC remote(s): {e}")
+        calkit.dvc.zip.sync_all(direction="to-workspace")
+
+
+def _format_dvc_data_status(status: dict, zip_path_map: dict) -> str:
+    """Format DVC data status, substituting zip paths with workspace paths."""
+    reverse_zip = {zip_p: ws for ws, zip_p in zip_path_map.items()}
+    color_map = {
+        "added": typer.colors.GREEN,
+        "modified": typer.colors.YELLOW,
+        "deleted": typer.colors.RED,
+        "renamed": typer.colors.CYAN,
+    }
+
+    def transform(path: str) -> str | None:
+        if path in reverse_zip:
+            return reverse_zip[path] + " (zipped)"
+        return path
+
+    def format_section(changes: dict, title: str) -> list[str]:
+        entries = []
+        for change_type, color in color_map.items():
+            for item in changes.get(change_type, []):
+                if isinstance(item, dict):
+                    old = transform(item.get("old", ""))
+                    new = transform(item.get("new", ""))
+                    if old is not None and new is not None:
+                        line = typer.style(
+                            f"        {change_type}: {old} -> {new}", fg=color
+                        )
+                        entries.append(line)
+                else:
+                    display = transform(item)
+                    if display is not None:
+                        line = typer.style(
+                            f"        {change_type}: {display}", fg=color
+                        )
+                        entries.append(line)
+        if not entries:
+            return []
+        return [title] + entries
+
+    lines = []
+    lines += format_section(
+        status.get("committed", {}), "DVC committed changes:"
+    )
+    lines += format_section(
+        status.get("uncommitted", {}), "DVC uncommitted changes:"
+    )
+    not_in_cache = [transform(p) for p in status.get("not_in_cache", [])]
+    not_in_cache = [p for p in not_in_cache if p is not None]
+    if not_in_cache:
+        lines.append(typer.style("Files not in cache:", bold=True))
+        for p in not_in_cache:
+            lines.append(f"        {p}")
+    not_in_remote = [transform(p) for p in status.get("not_in_remote", [])]
+    not_in_remote = [p for p in not_in_remote if p is not None]
+    if not_in_remote:
+        lines.append(typer.style("Files not in remote:", bold=True))
+        for p in not_in_remote:
+            lines.append(f"        {p}")
+    if not lines:
+        return "No changes.\n"
+    return "\n".join(lines) + "\n"
 
 
 @app.command(name="status")
@@ -273,6 +337,9 @@ def get_status(
         categories = valid_categories
     pipeline_status = None
     if "pipeline" in categories or "dvc" in categories:
+        # Sync zips so the zip files reflect current workspace state before
+        # reporting status
+        calkit.dvc.zip.sync_all(direction="to-zip")
         pipeline_status = calkit.pipeline.get_status(
             ck_info=ck_info,
             targets=targets,
@@ -388,11 +455,16 @@ def get_status(
         typer.echo()
     if "dvc" in categories:
         print_sep("DVC")
-        dvc_data_cmd = ["data", "status"]
-        if targets:
-            dvc_data_cmd += targets
-        run_dvc_command(dvc_data_cmd)
-        typer.echo()
+        try:
+            get_dvc_repo()
+        except Exception:
+            typer.echo("This is not a DVC repository.\n")
+        else:
+            zip_path_map = calkit.dvc.zip.get_zip_path_map()
+            dvc_repo = get_dvc_repo()
+            raw = dict(dvc_repo.data_status())
+            raw.pop("git", None)
+            typer.echo(_format_dvc_data_status(raw, zip_path_map))
     if "pipeline" in categories or "dvc" in categories:
         print_sep("Pipeline")
         # Nicely format the results from pipeline status
@@ -403,26 +475,29 @@ def get_status(
             typer.echo("This project has no pipeline.")
             return
         elif pipeline_status and pipeline_status.is_stale:
+            typer.echo("Stale stages:")
             for stage_name in pipeline_status.stale_stage_names:
                 stale_stage = pipeline_status.stale_stages.get(stage_name)
                 if stale_stage is None:
                     continue
-                typer.echo(f"{typer.style(stage_name, fg='yellow')}:")
+                typer.echo(f"        {typer.style(stage_name, fg='yellow')}:")
+                if stale_stage.modified_command:
+                    typer.echo("            modified command")
                 # Show stale outputs for this stage
                 if stale_stage.stale_outputs:
-                    typer.echo("  stale outputs:")
+                    typer.echo("          stale outputs:")
                     for output_path in stale_stage.stale_outputs:
-                        typer.echo(f"    {output_path}")
+                        typer.echo(f"            {output_path}")
                 # Show modified outputs from this stage
                 if stale_stage.modified_outputs:
-                    typer.echo("  modified outputs:")
+                    typer.echo("          modified outputs:")
                     for output_path in stale_stage.modified_outputs:
-                        typer.echo(f"    {output_path}")
+                        typer.echo(f"            {output_path}")
                 # Show modified inputs making the stage stale
                 if stale_stage.modified_inputs:
-                    typer.echo("  modified inputs:")
+                    typer.echo("          modified inputs:")
                     for input_path in stale_stage.modified_inputs:
-                        typer.echo(f"    {input_path}")
+                        typer.echo(f"            {input_path}")
         elif pipeline_status:
             typer.echo("Pipeline is up to date.")
 
@@ -474,7 +549,9 @@ def add(
     to: Annotated[
         str | None,
         typer.Option(
-            "--to", "-t", help="System with which to add (git or dvc)."
+            "--to",
+            "-t",
+            help="System with which to add (git, dvc, or dvc-zip).",
         ),
     ] = None,
 ):
@@ -500,7 +577,7 @@ def add(
             raise_error(
                 "Cannot auto-generate commit message for more than one path"
             )
-    if to is not None and to not in ["git", "dvc"]:
+    if to is not None and to not in ["git", "dvc", "dvc-zip"]:
         raise_error(f"Invalid option for 'to': {to}")
     try:
         repo = git.Repo()
@@ -543,6 +620,10 @@ def add(
             subprocess.call(["git", "add"] + paths)
         elif to == "dvc":
             run_dvc_command(["add"] + paths)
+        elif to == "dvc-zip":
+            for path in paths:
+                typer.echo(f"Adding {path} as a DVC zip")
+                calkit.dvc.zip.add(path)
         else:
             raise_error(f"Invalid option for 'to': {to}")
     else:
@@ -591,7 +672,14 @@ def add(
                 d.a_path for d in repo.index.diff(None) if d.a_path is not None
             ]:
                 paths.append(changed_file)
+        zip_path_map = calkit.dvc.zip.get_zip_path_map()
         for path in paths:
+            # Check if this path is already registered as a zip
+            posix_path = Path(path).as_posix()
+            if posix_path in zip_path_map:
+                typer.echo(f"Adding {path} via DVC zip")
+                calkit.dvc.zip.add(path)
+                continue
             # Detect if this file should be tracked with Git or DVC
             # First see if it's in Git
             if repo.git.ls_files(path):
@@ -607,6 +695,12 @@ def add(
             elif os.path.splitext(path)[-1] in DVC_EXTENSIONS:
                 typer.echo(f"Adding {path} to DVC per its extension")
                 run_dvc_command(["add", path])
+            elif calkit.dvc.zip.is_zip_candidate(path):
+                typer.echo(
+                    f"Adding {path} as a DVC zip "
+                    "(large directory of small files)"
+                )
+                calkit.dvc.zip.add(path)
             elif calkit.get_size(path) > DVC_SIZE_THRESH_BYTES:
                 typer.echo(
                     f"Adding {path} to DVC since it's greater than 1 MB"
@@ -842,6 +936,7 @@ def pull(
     result = run_dvc_command(["pull"] + dvc_args)
     if result != 0:
         raise_error("DVC pull failed")
+    calkit.dvc.zip.sync_all(direction="to-workspace")
 
 
 @app.command(name="push")
@@ -1177,6 +1272,7 @@ def run(
     import dvc.ui
     from dvc.cli import main as dvc_cli_main
 
+    import calkit.dvc.zip
     import calkit.environments
     import calkit.pipeline
     from calkit.cli.overleaf import sync as overleaf_sync
@@ -1376,10 +1472,38 @@ def run(
     dvc.ui.ui.write = lambda *args, **kwargs: None
     res = dvc_cli_main(["repro"] + args)
     failed = res != 0
-    # Parse log to get timing
+    # Parse log to get timing and which stages ran
     with open(log_fpath, "r") as f:
         log_content = f.read()
         stage_run_info = _stage_run_info_from_log_content(log_content)
+    # Zip dvc-zip outputs for stages that actually ran
+    if stage_run_info:
+        from calkit.models.io import PathOutput
+        from calkit.models.pipeline import Pipeline
+
+        ck_info = calkit.load_calkit_info()
+        pipeline_cfg = ck_info.get("pipeline", {})
+        if pipeline_cfg:
+            try:
+                ck_pipeline = Pipeline.model_validate(pipeline_cfg)
+                zip_input_paths = []
+                for stage_name in stage_run_info:
+                    stage = ck_pipeline.stages.get(stage_name)
+                    if stage is None:
+                        continue
+                    for out in stage.outputs:
+                        if (
+                            isinstance(out, PathOutput)
+                            and out.storage == "dvc-zip"
+                        ):
+                            zip_input_paths.append(out.path)
+                if zip_input_paths:
+                    calkit.dvc.zip.sync_some(
+                        zip_input_paths, direction="to-zip"
+                    )
+            except Exception:
+                # Fall back to syncing all zips if pipeline parsing fails
+                calkit.dvc.zip.sync_all(direction="to-zip")
     # Close logger file handler to prevent permissions issues if deleting
     dvc.log.logger.removeHandler(file_handler)
     file_handler.close()
@@ -2245,6 +2369,39 @@ def switch_branch(name: Annotated[str, typer.Argument(help="Branch name.")]):
     else:
         cmd = [name]
     repo.git.checkout(cmd)
+    # After switching branches, DVC-tracked zips may have changed; check out
+    # the new branch's DVC data and unzip to the workspace
+    run_dvc_command(["checkout"])
+    calkit.dvc.zip.sync_all(direction="to-workspace")
+
+
+@app.command(name="stash")
+def stash(
+    pop: Annotated[
+        bool, typer.Option("--pop", help="Pop the most recent stash.")
+    ] = False,
+):
+    """Stash or restore workspace changes including dvc-zip tracked dirs.
+
+    Without --pop: zips any modified workspace dirs into the DVC cache, then
+    git-stashes (saving the updated .dvc files), checks out the committed DVC
+    state, and unzips it to the workspace.
+
+    With --pop: pops the git stash (restoring the saved .dvc files), checks
+    out the stashed DVC state, and unzips it to the workspace.
+    """
+    if pop:
+        subprocess.check_call(["git", "stash", "pop"])
+        run_dvc_command(["checkout"])
+        calkit.dvc.zip.sync_all(direction="to-workspace")
+    else:
+        # Zip any modified workspace dirs so their current state is in the DVC
+        # cache (the updated .dvc file will be captured by git stash)
+        calkit.dvc.zip.sync_all(direction="to-zip")
+        subprocess.check_call(["git", "stash"])
+        # Restore the committed zip versions and unzip them
+        run_dvc_command(["checkout"])
+        calkit.dvc.zip.sync_all(direction="to-workspace")
 
 
 @app.command(

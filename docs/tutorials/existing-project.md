@@ -119,7 +119,7 @@ the files should always be downloaded back to the main project folder.
 
 !!! tip
 
-    Don't be afraid to repeat yourself in code.
+    Don't be afraid to repeat yourself a few times in code.
     There is a software engineering principle
     "don't repeat yourself," (DRY), which if applied too aggressively,
     can make it very difficult to track dependencies,
@@ -194,12 +194,12 @@ it's time to add files to version control.
 If you run `calkit status`,
 you'll see an output like:
 
-```sh
+```
 $ calkit status
 ---------------------------- Project -----------------------------
 Project status not set. Use "calkit new status" to update.
 
---------------------------- Code (Git) ---------------------------
+------------------------------ Git -------------------------------
 On branch main
 Your branch is up to date with 'origin/main'.
 
@@ -216,12 +216,11 @@ Untracked files:
 
 nothing added to commit but untracked files present (use "git add" to track)
 
---------------------------- Data (DVC) ---------------------------
+------------------------------ DVC -------------------------------
 No changes.
 
-------------------------- Pipeline (DVC) -------------------------
-There are no data or pipelines tracked in this project yet.
-See <https://dvc.org/doc/start> to get started!
+---------------------------- Pipeline ----------------------------
+This project has no pipeline.
 ```
 
 We have a list of files and folders that are untracked,

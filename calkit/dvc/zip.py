@@ -156,6 +156,7 @@ def add(input_path: str, is_stage_output: bool = False):
     # Ensure the workspace dir is gitignored
     calkit.git.ensure_path_is_ignored(repo, path=input_path)
     repo.git.add(".gitignore")
+    cleanup_sync_records()
     if not is_stage_output:
         # If this is not a stage output, it exists, so we should sync it
         # Always zip from workspace — it's the source of truth on an explicit add

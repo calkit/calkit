@@ -146,6 +146,17 @@ def ensure_path_is_ignored(
         lines = gitignore_txt.splitlines()
         if target_path in lines:
             return
+        # Remove any stale negations for this path so the ignore rule takes
+        # effect cleanly without accumulating contradictory entries.
+        negation_variants = [f"!{target_path}", f"!/{target_path}"]
+        stale = [n for n in negation_variants if n in lines]
+        if stale:
+            for n in stale:
+                lines.remove(n)
+            lines.append(target_path)
+            with open(gitignore_path, "w") as f:
+                f.write(os.linesep.join(lines))
+            return True
     with open(gitignore_path, "a") as f:
         if (
             os.path.isfile(gitignore_path)
@@ -294,4 +305,9 @@ def ensure_path_is_not_ignored(
             lines.append(no_ignore_line)
     with open(gitignore_path, "w") as f:
         f.write(os.linesep.join(lines))
+    # If the path is still ignored after updating this gitignore file (e.g.,
+    # because a subdirectory .gitignore also contains a matching rule), fix
+    # that file as well by calling recursively.
+    if target_repo.ignored(target_path):
+        ensure_path_is_not_ignored(target_repo, target_path)
     return True

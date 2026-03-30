@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import subprocess
+import zipfile
 from pathlib import Path
 from typing import Literal
 from zipfile import ZipFile
@@ -290,7 +291,9 @@ def zip_path(input_path: str, output_path: str):
     """Zip a path."""
     output_dir = os.path.dirname(output_path)
     os.makedirs(output_dir, exist_ok=True)
-    with ZipFile(output_path, "w") as zip_file:
+    with ZipFile(
+        output_path, "w", compression=zipfile.ZIP_DEFLATED
+    ) as zip_file:
         for foldername, subfolders, filenames in os.walk(input_path):
             for filename in filenames:
                 file_path = os.path.join(foldername, filename)

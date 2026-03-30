@@ -576,7 +576,7 @@ def test_large_folder_many_small_files(tmp_dir, tmp_path):
     clone_dir = tmp_path / "clone"
     subprocess.check_call(["git", "clone", str(git_remote), str(clone_dir)])
     subprocess.check_call(["dvc", "pull"], cwd=str(clone_dir))
-    assert (clone_dir / ".calkit" / "zips" / "results.zip").is_file()
+    assert (clone_dir / ".calkit" / "zip" / "files" / "results.zip").is_file()
     # Running calkit run in the clone should unzip before the pipeline runs
     subprocess.check_call(["calkit", "run"], cwd=str(clone_dir))
     assert (clone_dir / "results" / "out.txt").is_file()

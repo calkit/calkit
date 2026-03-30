@@ -600,7 +600,14 @@ def add(
                 d.a_path for d in repo.index.diff(None) if d.a_path is not None
             ]:
                 paths.append(changed_file)
+        zip_path_map = calkit.zips.get_zip_path_map()
         for path in paths:
+            # Check if this path is already registered as a zip
+            posix_path = Path(path).as_posix()
+            if posix_path in zip_path_map:
+                typer.echo(f"Adding {path} via DVC zip")
+                calkit.zips.add(path)
+                continue
             # Detect if this file should be tracked with Git or DVC
             # First see if it's in Git
             if repo.git.ls_files(path):

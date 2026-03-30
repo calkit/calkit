@@ -190,7 +190,7 @@ Options:
   Only compatible when adding one path.
 - `--push`: Push to the Git or DVC remote after committing.
 
-### Large folders of many small files
+## Large folders of many small files
 
 DVC is designed to track individual files efficiently,
 but some workflows produce directories containing many small files,

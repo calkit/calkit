@@ -337,6 +337,9 @@ def get_status(
         categories = valid_categories
     pipeline_status = None
     if "pipeline" in categories or "dvc" in categories:
+        # Sync zips so the zip files reflect current workspace state before
+        # reporting status
+        calkit.dvc.zip.sync_all(direction="to-zip")
         pipeline_status = calkit.pipeline.get_status(
             ck_info=ck_info,
             targets=targets,
@@ -457,9 +460,6 @@ def get_status(
         except Exception:
             typer.echo("This is not a DVC repository.\n")
         else:
-            # Sync zips so the zip files reflect current workspace state before
-            # reporting status
-            calkit.dvc.zip.sync_all(direction="to-zip")
             zip_path_map = calkit.dvc.zip.get_zip_path_map()
             dvc_repo = get_dvc_repo()
             raw = dict(dvc_repo.data_status())

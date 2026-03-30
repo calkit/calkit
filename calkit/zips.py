@@ -1,31 +1,10 @@
-"""Functionality for managing project DVC zips/unzips.
+"""Functionality for managing project folders zipped for DVC.
 
-A zip is a collection of files that are zipped for DVC and
-unzipped in the workspace.
+These are are zipped for DVC and unzipped in the workspace.
 
 A pipeline output can use ``dvc-zip`` for its storage if is a large folder
 consisting of many small files, which makes the DVC transfer much more
 efficient.
-
-There is a CLI command ``calkit check zips`` to make sure all are up-to-date.
-
-If a zip input is modified, it means we need to rezip and add the zip file
-to DVC.
-
-If a zip output is modified, it means we need to unzip to its path in the
-project.
-
-When looking at project status, anything showing up as modified in ``ZIPS_DIR``
-should be transformed into its path in the project.
-
-Zips should be synced:
-- After a pull
-- After a clone
-- Before computing status
-- Before running the pipeline
-- After running the pipeline (one way, workspace to zip?)
-- Before an add, and then the zip should be added with DVC
-- If we call ``calkit check zips``
 """
 
 import json

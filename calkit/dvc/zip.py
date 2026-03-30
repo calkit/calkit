@@ -19,6 +19,7 @@ from zipfile import ZipFile
 import git
 import typer
 from pydantic import BaseModel
+from sqlitedict import SqliteDict
 
 import calkit
 import calkit.git
@@ -26,8 +27,8 @@ from calkit.core import DVC_SIZE_THRESH_BYTES
 
 LOCAL_DIR = ".calkit/local"
 ZIPS_DIR = ".calkit/zip"
-HASH_CACHE_PATH = LOCAL_DIR + "/hash-cache.json"
-SYNC_RECORD_DIR = LOCAL_DIR + "/zip-sync-records"
+HASH_CACHE_PATH = LOCAL_DIR + "/hash-cache.sqlite"
+SYNC_RECORDS_PATH = LOCAL_DIR + "/zip-sync-records.sqlite"
 PATH_MAP_PATH = ZIPS_DIR + "/paths.json"
 # Average file size threshold below which a large directory is considered a
 # zip candidate — files smaller than this are inefficient to track individually
@@ -198,85 +199,79 @@ def get_hash(path: str) -> str | None:
         st = os.stat(path)
     except OSError:
         return None
-    if os.path.isfile(HASH_CACHE_PATH):
-        with open(HASH_CACHE_PATH, "r") as f:
-            cache = json.load(f)
-    else:
-        cache = {}
+    _check_local_dir()
     # Normalize path as posix
-    record = None
     path = Path(path).as_posix()
-    if path in cache:
-        try:
-            record = HashCacheEntry.model_validate(cache[path])
-        except Exception:
-            record = None
     mtime = st.st_mtime_ns
     size = st.st_size
     dir_sig = calc_dir_sig(path)
-    if (
-        record is not None
-        and record.mtime == mtime
-        and record.size == size
-        and record.dir_sig == dir_sig
-    ):
-        return record.hash
-    # If we've made it this far, we need to update the cache
-    hash_alg = "md5"
-    hash_val = hash_path(path, alg=hash_alg)
-    record = HashCacheEntry(
-        path=path,
-        hash=hash_val,
-        mtime=mtime,
-        size=size,
-        dir_sig=dir_sig,
-        alg=hash_alg,
-    )
-    cache[path] = record.model_dump(mode="json")
-    _check_local_dir()
-    with open(HASH_CACHE_PATH, "w") as f:
-        json.dump(cache, f, indent=2)
+    with SqliteDict(HASH_CACHE_PATH) as cache:
+        record = None
+        raw = cache.get(path)
+        if raw is not None:
+            try:
+                record = HashCacheEntry.model_validate(raw)
+            except Exception:
+                record = None
+        if (
+            record is not None
+            and record.mtime == mtime
+            and record.size == size
+            and record.dir_sig == dir_sig
+        ):
+            return record.hash
+        # Cache miss — compute and store
+        hash_alg = "md5"
+        hash_val = hash_path(path, alg=hash_alg)
+        cache[path] = HashCacheEntry(
+            path=path,
+            hash=hash_val,
+            mtime=mtime,
+            size=size,
+            dir_sig=dir_sig,
+            alg=hash_alg,
+        ).model_dump(mode="json")
+        cache.commit()
     return hash_val
 
 
 def get_sync_record(input_path: str) -> SyncRecord | None:
     """Get a sync record for a given input path."""
-    os.makedirs(SYNC_RECORD_DIR, exist_ok=True)
-    fpath = os.path.join(SYNC_RECORD_DIR, input_path + ".json")
-    if os.path.isfile(fpath):
-        with open(fpath, "r") as f:
-            record = json.load(f)
-        return SyncRecord.model_validate(record)
+    _check_local_dir()
+    with SqliteDict(SYNC_RECORDS_PATH) as db:
+        raw = db.get(input_path)
+    if raw is not None:
+        return SyncRecord.model_validate(raw)
+    return None
 
 
 def write_sync_record(record: SyncRecord):
     """Write a sync record."""
-    os.makedirs(SYNC_RECORD_DIR, exist_ok=True)
-    fpath = os.path.join(SYNC_RECORD_DIR, record.input_path + ".json")
-    with open(fpath, "w") as f:
-        json.dump(record.model_dump(), f, indent=2)
+    _check_local_dir()
+    with SqliteDict(SYNC_RECORDS_PATH) as db:
+        db[record.input_path] = record.model_dump()
+        db.commit()
 
 
 def delete_sync_record(input_path: str):
     """Delete a sync record."""
-    fpath = os.path.join(SYNC_RECORD_DIR, input_path + ".json")
-    if os.path.isfile(fpath):
-        os.remove(fpath)
+    _check_local_dir()
+    with SqliteDict(SYNC_RECORDS_PATH) as db:
+        if input_path in db:
+            del db[input_path]
+            db.commit()
 
 
-def make_cache_entry_path(input_path: str) -> str:
-    """Make a cache entry path for a given input path."""
-    return os.path.join(".calkit/local/zip-cache", input_path + ".json")
-
-
-def get_cache_entry(path: str) -> SyncRecord | None:
-    """Get a cache entry for a given path."""
-    fpath = make_cache_entry_path(path)
-    if os.path.isfile(fpath):
-        with open(fpath, "r") as f:
-            cache = json.load(f)
-        return SyncRecord.model_validate(cache)
-    return None
+def cleanup_sync_records():
+    """Remove sync records for paths no longer in the path map."""
+    _check_local_dir()
+    pm = get_zip_path_map()
+    with SqliteDict(SYNC_RECORDS_PATH) as db:
+        stale = [k for k in db if k not in pm]
+        if stale:
+            for k in stale:
+                del db[k]
+            db.commit()
 
 
 def get_output_path(input_path: str) -> str:

@@ -1,10 +1,10 @@
 """Tests for ``calkit.dvc.zip``."""
 
-import json
 import os
 import shutil
 
 import pytest
+from sqlitedict import SqliteDict
 
 import calkit.dvc.zip
 from calkit.dvc.zip import (
@@ -104,8 +104,8 @@ def test_get_hash(tmp_dir):
     assert get_hash(str(p)) == h
     assert os.path.isfile(calkit.dvc.zip.HASH_CACHE_PATH)
     # Cache entry stores mtime as int (nanoseconds)
-    with open(calkit.dvc.zip.HASH_CACHE_PATH) as f:
-        entry = list(json.load(f).values())[0]
+    with SqliteDict(calkit.dvc.zip.HASH_CACHE_PATH) as cache:
+        entry = list(cache.values())[0]
     assert isinstance(entry["mtime"], int)
     # Modifying the file invalidates the cache
     p.write_text("version 2 with more content")
@@ -122,17 +122,15 @@ def test_get_hash(tmp_dir):
     p2 = tmp_dir / "other.txt"
     p2.write_text("hello")
     os.makedirs(calkit.dvc.zip.LOCAL_DIR, exist_ok=True)
-    stale = {
-        str(p2.as_posix()): {
+    with SqliteDict(calkit.dvc.zip.HASH_CACHE_PATH) as cache:
+        cache[str(p2.as_posix())] = {
             "path": str(p2.as_posix()),
             "hash": "stale-hash",
             "mtime": 1234567890.123,
             "size": 5,
             "dir_sig": None,
         }
-    }
-    with open(calkit.dvc.zip.HASH_CACHE_PATH, "w") as f:
-        json.dump(stale, f)
+        cache.commit()
     h2 = get_hash(str(p2))
     assert h2 is not None and h2 != "stale-hash"
 

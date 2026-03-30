@@ -539,7 +539,7 @@ def test_folder_many_small_files(tmp_dir, tmp_path):
     assert ".calkit/zips/info.json" in staged
     repo = git.Repo()
     assert repo.ignored("many_small_files")
-    assert "many_small_files" not in calkit.dvc.list_paths()
+    assert not os.path.isfile("many_small_files.dvc")
     # Test explicit --to dvc-zip flag on a second folder
     os.makedirs("more_small_files")
     for i in range(100):
@@ -568,10 +568,9 @@ def test_folder_many_small_files(tmp_dir, tmp_path):
     assert os.path.isfile("results/out.txt")
     assert os.path.isfile(".calkit/zips/results.zip")
     # The pipeline output zip should be DVC-tracked, not the workspace dir
-    dvc_paths = calkit.dvc.list_paths()
-    assert ".calkit/zips/results.zip" in dvc_paths
-    assert "results" not in dvc_paths
-    subprocess.check_call(["calkit", "save", "-m", "Run pipeline"])
+    assert os.path.isfile(".calkit/zips/results.zip.dvc")
+    assert not os.path.isfile("results.dvc")
+    subprocess.check_call(["calkit", "save", "-am", "Run pipeline"])
     # Clone into a fresh directory, pull DVC data, and verify the zip was
     # transferred; calkit sync would then unzip it to the workspace
     clone_dir = tmp_path / "clone"

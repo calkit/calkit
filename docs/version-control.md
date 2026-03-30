@@ -136,15 +136,18 @@ For example:
 
 ```sh
 $ calkit status
---------------------------- Code (Git) ---------------------------
+---------------------------- Project -----------------------------
+Project status not set. Use "calkit new status" to update.
+
+------------------------------ Git -------------------------------
 On branch main
 nothing to commit, working tree clean
 
---------------------------- Data (DVC) ---------------------------
+------------------------------ DVC -------------------------------
 No changes.
 
-------------------------- Pipeline (DVC) -------------------------
-Data and pipelines are up to date.
+---------------------------- Pipeline ----------------------------
+Pipeline is up to date.
 ```
 
 ### `save`
@@ -179,9 +182,52 @@ with Git or DVC and act accordingly.
 
 Options:
 
-- `--to`, `-t`: Manually specify `git` or `dvc` as the tracking mechanism.
+- `--to`, `-t`: Manually specify `git`, `dvc`, or `dvc-zip` as the tracking
+  mechanism.
 - `--commit-message`, `-m`: Create a commit after adding
   and use the provided message.
 - `--auto-commit-message`, `-M`: Commit with an automatically-generated message.
   Only compatible when adding one path.
 - `--push`: Push to the Git or DVC remote after committing.
+
+### Large folders of many small files
+
+DVC is designed to track individual files efficiently,
+but some workflows produce directories containing many small files,
+e.g., a simulation that writes thousands of timestep output files.
+Tracking each file individually in DVC creates overhead and slows down
+transfers significantly.
+
+For these cases, Calkit supports a `dvc-zip` storage mode,
+where the entire directory is zipped into a single archive,
+tracked by DVC, and automatically unzipped to its workspace location
+as needed.
+Calkit will automatically detect a directory as a `dvc-zip` candidate
+when it contains at least 10 files, exceeds the DVC size threshold,
+and has a small average file size (under 10 MB per file).
+You can also specify it explicitly:
+
+```sh
+calkit add my-output-folder --to dvc-zip
+```
+
+The zip archive is stored in `.calkit/zip/` and tracked by DVC.
+The workspace directory is gitignored and kept out of DVC,
+so only the zip moves between machines.
+After a `calkit pull` or `calkit clone`,
+the directory is automatically unzipped to its original location.
+
+`dvc-zip` can also be used as the storage type for a pipeline stage output
+in `calkit.yaml`:
+
+```yaml
+pipeline:
+  stages:
+    my-stage:
+      kind: python-script
+      script_path: run.py
+      environment: main
+      outputs:
+        - path: results
+          storage: dvc-zip
+```

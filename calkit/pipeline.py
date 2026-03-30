@@ -8,6 +8,7 @@ import typer
 from pydantic import BaseModel, Field, computed_field, field_validator
 
 import calkit
+import calkit.dvc.zip
 import calkit.environments
 from calkit.environments import get_env_lock_fpath
 from calkit.models.iteration import expand_project_parameters
@@ -69,6 +70,7 @@ class StaleStage(BaseModel):
     stale_outputs: list[str] = Field(default_factory=list)
     modified_inputs: list[str] = Field(default_factory=list)
     modified_outputs: list[str] = Field(default_factory=list)
+    modified_command: bool = False
 
     @staticmethod
     def _as_path_list(paths: object) -> list[str]:
@@ -97,7 +99,6 @@ class StaleStage(BaseModel):
                 paths.append(str(key))
             else:
                 paths.extend(cls._as_path_list(values))
-
         return list(dict.fromkeys(paths))
 
     @classmethod
@@ -142,7 +143,6 @@ class StaleStage(BaseModel):
             item_all, item_changed = cls._collect_output_paths(values)
             all_paths.extend(item_all)
             changed_paths.extend(item_changed)
-
         return list(dict.fromkeys(all_paths)), list(
             dict.fromkeys(changed_paths)
         )
@@ -156,15 +156,29 @@ class StaleStage(BaseModel):
         modified_inputs = []
         output_paths = []
         modified_outputs = []
-
         status_blocks = []
+        modified_command = False
         if isinstance(status_data, dict):
             status_blocks = [status_data]
         elif isinstance(status_data, list):
             status_blocks = [
                 item for item in status_data if isinstance(item, dict)
             ]
+            # DVC may return plain markers like ["changed command"].
+            if "changed command" in status_data:
+                modified_command = True
+        elif isinstance(status_data, str):
+            modified_command = status_data == "changed command"
         for block in status_blocks:
+            if "changed command" in block:
+                changed_command_value = block.get("changed command")
+                # Any explicit non-false value indicates the stage command
+                # changed and outputs should be considered stale.
+                modified_command = modified_command or (
+                    changed_command_value is None
+                    or changed_command_value is True
+                    or bool(changed_command_value)
+                )
             modified_inputs.extend(
                 cls._collect_paths(
                     block.get("changed deps", block.get("deps", {}))
@@ -180,7 +194,7 @@ class StaleStage(BaseModel):
         modified_outputs = list(dict.fromkeys(modified_outputs))
         configured_outputs = [str(path) for path in (configured_outputs or [])]
         stale_outputs = []
-        if modified_inputs:
+        if modified_inputs or modified_command:
             stale_outputs.extend(configured_outputs)
         stale_outputs.extend(
             [path for path in output_paths if path not in modified_outputs]
@@ -193,6 +207,7 @@ class StaleStage(BaseModel):
             stale_outputs=stale_outputs,
             modified_inputs=modified_inputs,
             modified_outputs=modified_outputs,
+            modified_command=modified_command,
         )
 
 
@@ -384,7 +399,7 @@ def get_status(
                     )
                 ],
             )
-        # Keep any stale stages not present in ck_info at the end.
+        # Keep any stale stages not present in ck_info at the end
         for stage_name, status_data in raw_stale_stages.items():
             if stage_name in ordered_stale_stages:
                 continue
@@ -561,9 +576,11 @@ def to_dvc(
             for out in outputs:
                 if isinstance(out, PathOutput) and out.storage is None:
                     calkit.git.ensure_path_is_ignored(repo, path=out.path)
-                # Unignore path if necessary
                 elif isinstance(out, PathOutput) and out.storage == "git":
                     calkit.git.ensure_path_is_not_ignored(repo, path=out.path)
+                elif isinstance(out, PathOutput) and out.storage == "dvc-zip":
+                    calkit.git.ensure_path_is_ignored(repo, path=out.path)
+                    calkit.dvc.zip.add(out.path, is_stage_output=True)
     # Now process any inputs from stage outputs
     for stage_name, stage in pipeline.stages.items():
         for i in stage.inputs:

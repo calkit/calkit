@@ -40,7 +40,7 @@ class DatabaseTableInput(Input):
 
 class PathOutput(BaseModel):
     path: str
-    storage: Literal["git", "dvc"] | None = "dvc"
+    storage: Literal["git", "dvc", "dvc-zip"] | None = "dvc"
     delete_before_run: bool = True
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")

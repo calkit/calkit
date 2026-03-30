@@ -508,6 +508,80 @@ def test_add(tmp_dir):
     subprocess.check_call(["calkit", "add", "--to", "dvc", "large.bin"])
 
 
+def test_large_folder_many_small_files(tmp_dir, tmp_path):
+    subprocess.check_call(["calkit", "init"])
+    # Set up a bare git remote and a local DVC remote as siblings of the
+    # project dir so we can exercise push/pull in this test
+    git_remote = tmp_path / "git_remote"
+    dvc_remote = tmp_path / "dvc_remote"
+    git_remote.mkdir()
+    dvc_remote.mkdir()
+    subprocess.check_call(["git", "init", "--bare", str(git_remote)])
+    repo = git.Repo()
+    repo.create_remote("origin", str(git_remote))
+    subprocess.check_call(
+        ["dvc", "remote", "add", "-d", "origin", str(dvc_remote)]
+    )
+    subprocess.check_call(["git", "add", ".dvc/config"])
+    subprocess.check_call(["git", "commit", "-m", "Add remotes"])
+    # Create a folder with large overall size but filled with many small files;
+    # when added it should be detected as a zip candidate and stored as a DVC
+    # zip
+    os.makedirs("many_small_files")
+    for i in range(100):
+        with open(f"many_small_files/file_{i}.txt", "w") as f:
+            # Make each file ~100 kB; 100 files = ~10 MB total, well above the
+            # DVC size threshold and with small average file size
+            f.write("This is a small file.\n" * 3000)
+    subprocess.check_call(["calkit", "add", "many_small_files"])
+    staged = calkit.git.get_staged_files()
+    assert ".calkit/zip/files/many_small_files.zip.dvc" in staged
+    assert ".calkit/zip/paths.json" in staged
+    repo = git.Repo()
+    assert repo.ignored("many_small_files")
+    assert not os.path.isfile("many_small_files.dvc")
+    # Test explicit --to dvc-zip flag on a second folder
+    os.makedirs("more_small_files")
+    for i in range(100):
+        with open(f"more_small_files/file_{i}.txt", "w") as f:
+            f.write("Another small file.\n" * 3000)
+    subprocess.check_call(
+        ["calkit", "add", "--to", "dvc-zip", "more_small_files"]
+    )
+    staged2 = calkit.git.get_staged_files()
+    assert ".calkit/zip/files/more_small_files.zip.dvc" in staged2
+    subprocess.check_call(["calkit", "commit", "-m", "Initial commit"])
+    # Push everything to the remotes
+    subprocess.check_call(["calkit", "push"])
+    # Create a pipeline stage that uses dvc-zip storage for an output
+    stage = {
+        "kind": "command",
+        "environment": "_system",
+        "command": "mkdir -p results && echo 'sup' > results/out.txt",
+        "outputs": [{"path": "results", "storage": "dvc-zip"}],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"pipeline": {"stages": {"stage1": stage}}}, f)
+    subprocess.check_call(["calkit", "run"])
+    assert repo.ignored("results")
+    assert os.path.isdir("results")
+    assert os.path.isfile("results/out.txt")
+    assert os.path.isfile(".calkit/zip/files/results.zip")
+    # The pipeline output zip should be DVC-tracked, not the workspace dir
+    assert os.path.isfile(".calkit/zip/files/results.zip.dvc")
+    assert not os.path.isfile("results.dvc")
+    subprocess.check_call(["calkit", "save", "-am", "Run pipeline"])
+    # Clone into a fresh directory, pull DVC data, and verify the zip was
+    # transferred; calkit sync would then unzip it to the workspace
+    clone_dir = tmp_path / "clone"
+    subprocess.check_call(["git", "clone", str(git_remote), str(clone_dir)])
+    subprocess.check_call(["dvc", "pull"], cwd=str(clone_dir))
+    assert (clone_dir / ".calkit" / "zip" / "files" / "results.zip").is_file()
+    # Running calkit run in the clone should unzip before the pipeline runs
+    subprocess.check_call(["calkit", "run"], cwd=str(clone_dir))
+    assert (clone_dir / "results" / "out.txt").is_file()
+
+
 def test_status(tmp_dir):
     subprocess.check_call(["calkit", "status"])
     subprocess.check_call(["calkit", "init"])

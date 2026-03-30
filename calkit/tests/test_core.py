@@ -106,3 +106,22 @@ def test_check_system_deps(tmp_dir):
     )
     with pytest.raises(ValueError):
         calkit.check_system_deps()
+
+
+def test_get_md5(tmp_dir):
+    with open("file1.txt", "w") as f:
+        f.write("Hello world")
+    with open("file2.txt", "w") as f:
+        f.write("Hello world")
+    assert calkit.get_md5("file1.txt") == calkit.get_md5("file2.txt")
+    assert calkit.get_md5("file1.txt") == "3e25960a79dbc69b674cd4ec67a72c62"
+    # Try a directory
+    os.makedirs("mydir")
+    with open("mydir/file3.txt", "w") as f:
+        f.write("Hello again")
+    with open("mydir/file4.txt", "w") as f:
+        f.write("And again")
+    dir_hash = calkit.get_md5("mydir")
+    assert dir_hash == "edfc5cb4a1b7c90d07bca687716a75cd"
+    dir_hash2 = calkit.get_md5("mydir", exclude_files=["file4.txt"])
+    assert dir_hash2 == "f06b4641c3014439f44382db77164354"

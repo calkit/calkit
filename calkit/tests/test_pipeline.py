@@ -825,3 +825,14 @@ def test_get_status(tmp_dir):
     ]
     assert status.stale_stages["get-data"].stale_outputs == ["my-output.out"]
     assert status.stale_stages["get-data"].modified_outputs == []
+
+
+def test_stale_stage_detects_changed_command():
+    stale_stage = calkit.pipeline.StaleStage.from_status_data(
+        status_data=[{"changed command": "python src/new-script.py"}],
+        configured_outputs=["my-output.out"],
+    )
+    assert stale_stage.modified_command
+    assert stale_stage.stale_outputs == ["my-output.out"]
+    assert stale_stage.modified_inputs == []
+    assert stale_stage.modified_outputs == []

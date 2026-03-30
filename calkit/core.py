@@ -647,10 +647,12 @@ def get_system_info() -> dict:
 def get_md5(path: str, exclude_files: list[str] | None = None) -> str:
     if os.path.isdir(path):
         return checksumdir.dirhash(path, excluded_files=exclude_files)
-    else:
-        with open(path) as f:
-            content = f.read()
-        return hashlib.md5(content.encode()).hexdigest()
+    hasher = hashlib.md5()
+    with open(path, "rb") as f:
+        # Read the file in chunks to avoid memory issues with large files
+        for chunk in iter(lambda: f.read(4096), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
 
 
 def set_env_vars(ck_info: dict, cli: bool = True) -> None:

@@ -197,3 +197,191 @@ def test_ensure_path_is_not_ignored_nested_gitignore_direct_path_rule(tmp_dir):
     assert "!/main.pdf" not in lines
     assert not os.path.exists(".gitignore")
     assert not repo.ignored(target)
+
+
+def test_ensure_path_is_not_ignored_both_root_and_subdir_gitignore(tmp_dir):
+    """Un-ignoring a path blocked by BOTH the root gitignore AND a subdirectory
+    gitignore should fix both files so the path truly becomes unignored.
+
+    When the root .gitignore excludes a directory (e.g. ``pubs/``) and a
+    nested .gitignore (e.g. created by DVC) also excludes the same file, the
+    function must recursively remove every blocking rule.
+    """
+    repo = git.Repo.init()
+    os.makedirs("pubs", exist_ok=True)
+    target = "pubs/references.bib"
+    sibling = "pubs/other.pdf"
+    with open(target, "w") as f:
+        f.write("@article{test}\n")
+    with open(sibling, "w") as f:
+        f.write("pdf\n")
+    # Root gitignore excludes the whole pubs/ directory
+    with open(".gitignore", "w") as f:
+        f.write("pubs/\n")
+    # Subdirectory .gitignore (e.g. managed by DVC) also excludes the file
+    with open("pubs/.gitignore", "w") as f:
+        f.write("references.bib\n")
+    assert repo.ignored(target)
+    result = calkit.git.ensure_path_is_not_ignored(repo, path=target)
+    assert result is True
+    # The file must no longer be ignored
+    assert not repo.ignored(target)
+    # Other files in pubs/ should still be ignored
+    assert repo.ignored(sibling)
+    # references.bib should be gone from the subdirectory gitignore
+    with open("pubs/.gitignore") as f:
+        sub_lines = f.read().splitlines()
+    assert "references.bib" not in sub_lines
+
+
+def test_ensure_path_is_not_ignored_glob_in_parent_subdir_gitignore(tmp_dir):
+    """Un-ignoring a nested path matched by a glob in a parent subdirectory's
+    .gitignore should add an appropriate negation.
+    """
+    repo = git.Repo.init()
+    os.makedirs("pubs/output", exist_ok=True)
+    target = "pubs/output/paper.pdf"
+    sibling = "pubs/output/other.pdf"
+    with open(target, "w") as f:
+        f.write("pdf\n")
+    with open(sibling, "w") as f:
+        f.write("pdf\n")
+    with open("pubs/.gitignore", "w") as f:
+        f.write("*.pdf\n")
+    assert repo.ignored(target)
+    result = calkit.git.ensure_path_is_not_ignored(repo, path=target)
+    assert result is True
+    assert not repo.ignored(target)
+    # Other pdfs under pubs/ should still be ignored
+    assert repo.ignored(sibling)
+
+
+def test_ensure_path_is_ignored_removes_stale_negation(tmp_dir):
+    """Re-ignoring a path that was previously un-ignored with a negation should
+    remove the stale negation entry so the .gitignore stays clean.
+    """
+    repo = git.Repo.init()
+    os.makedirs("results", exist_ok=True)
+    target = "results/output.json"
+    other = "results/other.json"
+    with open(target, "w") as f:
+        f.write("{}")
+    with open(other, "w") as f:
+        f.write("{}")
+    # State after a previous ensure_path_is_not_ignored on target
+    with open(".gitignore", "w") as f:
+        f.write("results/*\n!results/output.json\n")
+    assert not repo.ignored(target)
+    # Now re-ignore it (e.g. moving back to DVC tracking)
+    result = calkit.git.ensure_path_is_ignored(repo, path=target)
+    assert result is True
+    assert repo.ignored(target)
+    with open(".gitignore") as f:
+        lines = f.read().splitlines()
+    # Stale negation must be removed
+    assert "!results/output.json" not in lines
+    # Other files in results/ should still be ignored
+    assert repo.ignored(other)
+
+
+def test_ensure_path_is_ignored_nested_no_complex_patterns(tmp_dir):
+    """Ignoring a nested path whose parent directory is NOT ignored should just
+    add the direct path rule without any recursive ancestor patterns.
+    """
+    repo = git.Repo.init()
+    os.makedirs("pubs/paper", exist_ok=True)
+    target = "pubs/paper/main.pdf"
+    sibling = "pubs/paper/other.pdf"
+    with open(target, "w") as f:
+        f.write("pdf\n")
+    with open(sibling, "w") as f:
+        f.write("pdf\n")
+    result = calkit.git.ensure_path_is_ignored(repo, path=target)
+    assert result is True
+    with open(".gitignore") as f:
+        lines = f.read().splitlines()
+    # Should only contain the direct path, no complex recursive patterns
+    assert target in lines
+    assert "!pubs/" not in lines
+    assert "pubs/*" not in lines
+    assert "!pubs/paper/" not in lines
+    assert "pubs/paper/*" not in lines
+    assert repo.ignored(target)
+    assert not repo.ignored(sibling)
+
+
+def test_ensure_path_is_not_ignored_multiple_files_excluded_dir(tmp_dir):
+    """Un-ignoring multiple files in the same excluded directory should produce
+    clean, non-duplicated rules and keep other files ignored.
+    """
+    repo = git.Repo.init()
+    os.makedirs("results", exist_ok=True)
+    for name in ["a.json", "b.json", "c.json"]:
+        with open(f"results/{name}", "w") as f:
+            f.write("{}")
+    with open(".gitignore", "w") as f:
+        f.write("results/\n")
+    # Un-ignore two files
+    calkit.git.ensure_path_is_not_ignored(repo, path="results/a.json")
+    calkit.git.ensure_path_is_not_ignored(repo, path="results/b.json")
+    assert not repo.ignored("results/a.json")
+    assert not repo.ignored("results/b.json")
+    # Third file must remain ignored
+    assert repo.ignored("results/c.json")
+    with open(".gitignore") as f:
+        lines = f.read().splitlines()
+    # The glob rule for the directory should appear only once
+    assert lines.count("results/*") == 1
+
+
+def test_ensure_path_is_not_ignored_dvc_subdir_gitignore(tmp_dir):
+    """When DVC manages a .gitignore in a subdirectory (e.g. outputs/.gitignore
+    with '/model.fig'), un-ignoring model.fig should remove just that entry,
+    leaving other DVC-tracked files (model.mat) still ignored.
+    """
+    repo = git.Repo.init()
+    os.makedirs("outputs", exist_ok=True)
+    with open("outputs/model.fig", "w") as f:
+        f.write("fig")
+    with open("outputs/model.mat", "w") as f:
+        f.write("mat")
+    # DVC creates anchored entries in the directory's .gitignore
+    with open("outputs/.gitignore", "w") as f:
+        f.write("/model.fig\n/model.mat\n")
+    assert repo.ignored("outputs/model.fig")
+    assert repo.ignored("outputs/model.mat")
+    result = calkit.git.ensure_path_is_not_ignored(
+        repo, path="outputs/model.fig"
+    )
+    assert result is True
+    assert not repo.ignored("outputs/model.fig")
+    # model.mat must still be ignored
+    assert repo.ignored("outputs/model.mat")
+    with open("outputs/.gitignore") as f:
+        sub_lines = f.read().splitlines()
+    assert "/model.fig" not in sub_lines
+    assert "/model.mat" in sub_lines
+
+
+def test_ensure_path_is_ignored_stale_negation_after_direct_rule(tmp_dir):
+    """Re-ignoring a path where the .gitignore has both the direct rule AND a
+    stale negation *after* it (so the negation wins and the path is currently
+    unignored) must remove the negation so the direct rule takes effect.
+    """
+    repo = git.Repo.init()
+    os.makedirs("results", exist_ok=True)
+    target = "results/output.json"
+    with open(target, "w") as f:
+        f.write("{}")
+    # The direct rule comes first, but the negation after it wins, so the
+    # path is currently NOT ignored.
+    with open(".gitignore", "w") as f:
+        f.write("results/output.json\n!results/output.json\n")
+    assert not repo.ignored(target)
+    result = calkit.git.ensure_path_is_ignored(repo, path=target)
+    assert result is True
+    assert repo.ignored(target)
+    with open(".gitignore") as f:
+        lines = f.read().splitlines()
+    assert "!results/output.json" not in lines
+    assert "results/output.json" in lines

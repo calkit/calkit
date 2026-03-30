@@ -362,6 +362,10 @@ def sync_one(
     if input_deleted and output_deleted:
         delete_sync_record(input_path)
         return None
+    # Neither side exists and no sync record — nothing to do (e.g., a
+    # pipeline output that hasn't been produced yet on a fresh run)
+    if input_hash is None and output_hash is None:
+        return None
     # Deletion + change on the other side is a conflict
     if input_deleted and output_changed and direction == "both":
         raise RuntimeError(

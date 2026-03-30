@@ -226,6 +226,7 @@ def clone(
                 raise_error("Failed to pull from DVC remote(s)")
         except Exception as e:
             raise_error(f"Failed to pull from DVC remote(s): {e}")
+        calkit.zips.sync_all(direction="to-workspace")
 
 
 def _format_dvc_data_status(status: dict, zip_path_map: dict) -> str:
@@ -286,7 +287,7 @@ def _format_dvc_data_status(status: dict, zip_path_map: dict) -> str:
         for p in not_in_remote:
             lines.append(f"        {p}")
     if not lines:
-        return "No changes."
+        return "No changes.\n"
     return "\n".join(lines) + "\n"
 
 
@@ -451,14 +452,19 @@ def get_status(
         typer.echo()
     if "dvc" in categories:
         print_sep("DVC")
-        # Sync zips so the zip files reflect current workspace state before
-        # reporting status
-        calkit.zips.sync_all(direction="to-zip")
-        zip_path_map = calkit.zips.get_zip_path_map()
-        dvc_repo = get_dvc_repo()
-        raw = dict(dvc_repo.data_status())
-        raw.pop("git", None)
-        typer.echo(_format_dvc_data_status(raw, zip_path_map))
+        try:
+            get_dvc_repo()
+        except Exception:
+            typer.echo("This is not a DVC repository.\n")
+        else:
+            # Sync zips so the zip files reflect current workspace state before
+            # reporting status
+            calkit.zips.sync_all(direction="to-zip")
+            zip_path_map = calkit.zips.get_zip_path_map()
+            dvc_repo = get_dvc_repo()
+            raw = dict(dvc_repo.data_status())
+            raw.pop("git", None)
+            typer.echo(_format_dvc_data_status(raw, zip_path_map))
     if "pipeline" in categories or "dvc" in categories:
         print_sep("Pipeline")
         # Nicely format the results from pipeline status

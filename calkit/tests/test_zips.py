@@ -249,3 +249,9 @@ def test_sync_one(tmp_dir, monkeypatch):
     result = sync_one(str(src5), zip_out5, direction="both")
     assert result is None
     assert get_sync_record(str(src5.as_posix())) is None
+    # Neither side exists and no sync record: skip silently (e.g., pipeline
+    # output not yet produced on first run)
+    result = sync_one(
+        str(tmp_dir / "nonexistent"), str(tmp_dir / "nonexistent.zip")
+    )
+    assert result is None

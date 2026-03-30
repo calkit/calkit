@@ -54,6 +54,9 @@ ZIP_INFO_PATH = ".calkit/zips/info.json"
 # zip candidate — files smaller than this are inefficient to track individually
 # in DVC
 ZIP_CANDIDATE_AVG_FILE_SIZE_BYTES = 10_000_000  # 10 MB
+# Minimum number of files a directory must contain to be a zip candidate;
+# a single large file is better tracked directly by DVC
+ZIP_CANDIDATE_MIN_FILE_COUNT = 10
 
 
 def _check_local_dir():
@@ -80,7 +83,10 @@ def is_zip_candidate(path: str) -> bool:
         for filename in filenames:
             file_count += 1
             total_size += os.stat(os.path.join(foldername, filename)).st_size
-    if file_count == 0 or total_size <= DVC_SIZE_THRESH_BYTES:
+    if (
+        file_count < ZIP_CANDIDATE_MIN_FILE_COUNT
+        or total_size <= DVC_SIZE_THRESH_BYTES
+    ):
         return False
     return (total_size / file_count) < ZIP_CANDIDATE_AVG_FILE_SIZE_BYTES
 

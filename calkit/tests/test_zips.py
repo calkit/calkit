@@ -66,13 +66,22 @@ def test_is_zip_candidate(tmp_dir):
     small_dir.mkdir()
     (small_dir / "a.txt").write_text("tiny")
     assert not is_zip_candidate(str(small_dir))
-    # Large directory with small average file size is a candidate
+    # Large directory with many small files is a candidate
     large_small = tmp_dir / "large_small"
     large_small.mkdir()
-    file_size = DVC_SIZE_THRESH_BYTES + 1
-    (large_small / "a.bin").write_bytes(b"x" * file_size)
-    (large_small / "b.bin").write_bytes(b"x" * file_size)
+    file_size = (
+        DVC_SIZE_THRESH_BYTES // calkit.zips.ZIP_CANDIDATE_MIN_FILE_COUNT
+    ) + 1
+    for i in range(calkit.zips.ZIP_CANDIDATE_MIN_FILE_COUNT):
+        (large_small / f"f{i}.bin").write_bytes(b"x" * file_size)
     assert is_zip_candidate(str(large_small))
+    # Large directory with too few files is NOT a candidate
+    few_files = tmp_dir / "few_files"
+    few_files.mkdir()
+    big_file_size = DVC_SIZE_THRESH_BYTES + 1
+    for i in range(calkit.zips.ZIP_CANDIDATE_MIN_FILE_COUNT - 1):
+        (few_files / f"f{i}.bin").write_bytes(b"x" * big_file_size)
+    assert not is_zip_candidate(str(few_files))
     # Large directory with a single huge file is NOT a candidate
     # (avg file size exceeds threshold)
     large_single = tmp_dir / "large_single"

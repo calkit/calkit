@@ -535,8 +535,8 @@ def test_large_folder_many_small_files(tmp_dir, tmp_path):
             f.write("This is a small file.\n" * 3000)
     subprocess.check_call(["calkit", "add", "many_small_files"])
     staged = calkit.git.get_staged_files()
-    assert ".calkit/zips/many_small_files.zip.dvc" in staged
-    assert ".calkit/zips/info.json" in staged
+    assert ".calkit/zip/many_small_files.zip.dvc" in staged
+    assert ".calkit/zip/info.json" in staged
     repo = git.Repo()
     assert repo.ignored("many_small_files")
     assert not os.path.isfile("many_small_files.dvc")
@@ -549,7 +549,7 @@ def test_large_folder_many_small_files(tmp_dir, tmp_path):
         ["calkit", "add", "--to", "dvc-zip", "more_small_files"]
     )
     staged2 = calkit.git.get_staged_files()
-    assert ".calkit/zips/more_small_files.zip.dvc" in staged2
+    assert ".calkit/zip/more_small_files.zip.dvc" in staged2
     subprocess.check_call(["calkit", "commit", "-m", "Initial commit"])
     # Push everything to the remotes
     subprocess.check_call(["calkit", "push"])
@@ -566,9 +566,9 @@ def test_large_folder_many_small_files(tmp_dir, tmp_path):
     assert repo.ignored("results")
     assert os.path.isdir("results")
     assert os.path.isfile("results/out.txt")
-    assert os.path.isfile(".calkit/zips/results.zip")
+    assert os.path.isfile(".calkit/zip/results.zip")
     # The pipeline output zip should be DVC-tracked, not the workspace dir
-    assert os.path.isfile(".calkit/zips/results.zip.dvc")
+    assert os.path.isfile(".calkit/zip/results.zip.dvc")
     assert not os.path.isfile("results.dvc")
     subprocess.check_call(["calkit", "save", "-am", "Run pipeline"])
     # Clone into a fresh directory, pull DVC data, and verify the zip was

@@ -25,9 +25,9 @@ from git.exc import InvalidGitRepositoryError
 from typing_extensions import Annotated, Optional
 
 import calkit
+import calkit.dvc.zip
 import calkit.matlab
 import calkit.pipeline
-import calkit.zips
 from calkit import (
     AUTO_IGNORE_PATHS,
     AUTO_IGNORE_PREFIXES,
@@ -226,7 +226,7 @@ def clone(
                 raise_error("Failed to pull from DVC remote(s)")
         except Exception as e:
             raise_error(f"Failed to pull from DVC remote(s): {e}")
-        calkit.zips.sync_all(direction="to-workspace")
+        calkit.dvc.zip.sync_all(direction="to-workspace")
 
 
 def _format_dvc_data_status(status: dict, zip_path_map: dict) -> str:
@@ -459,8 +459,8 @@ def get_status(
         else:
             # Sync zips so the zip files reflect current workspace state before
             # reporting status
-            calkit.zips.sync_all(direction="to-zip")
-            zip_path_map = calkit.zips.get_zip_path_map()
+            calkit.dvc.zip.sync_all(direction="to-zip")
+            zip_path_map = calkit.dvc.zip.get_zip_path_map()
             dvc_repo = get_dvc_repo()
             raw = dict(dvc_repo.data_status())
             raw.pop("git", None)
@@ -623,7 +623,7 @@ def add(
         elif to == "dvc-zip":
             for path in paths:
                 typer.echo(f"Adding {path} as a DVC zip")
-                calkit.zips.add(path)
+                calkit.dvc.zip.add(path)
         else:
             raise_error(f"Invalid option for 'to': {to}")
     else:
@@ -672,13 +672,13 @@ def add(
                 d.a_path for d in repo.index.diff(None) if d.a_path is not None
             ]:
                 paths.append(changed_file)
-        zip_path_map = calkit.zips.get_zip_path_map()
+        zip_path_map = calkit.dvc.zip.get_zip_path_map()
         for path in paths:
             # Check if this path is already registered as a zip
             posix_path = Path(path).as_posix()
             if posix_path in zip_path_map:
                 typer.echo(f"Adding {path} via DVC zip")
-                calkit.zips.add(path)
+                calkit.dvc.zip.add(path)
                 continue
             # Detect if this file should be tracked with Git or DVC
             # First see if it's in Git
@@ -695,12 +695,12 @@ def add(
             elif os.path.splitext(path)[-1] in DVC_EXTENSIONS:
                 typer.echo(f"Adding {path} to DVC per its extension")
                 run_dvc_command(["add", path])
-            elif calkit.zips.is_zip_candidate(path):
+            elif calkit.dvc.zip.is_zip_candidate(path):
                 typer.echo(
                     f"Adding {path} as a DVC zip "
                     "(large directory of small files)"
                 )
-                calkit.zips.add(path)
+                calkit.dvc.zip.add(path)
             elif calkit.get_size(path) > DVC_SIZE_THRESH_BYTES:
                 typer.echo(
                     f"Adding {path} to DVC since it's greater than 1 MB"
@@ -936,7 +936,7 @@ def pull(
     result = run_dvc_command(["pull"] + dvc_args)
     if result != 0:
         raise_error("DVC pull failed")
-    calkit.zips.sync_all(direction="to-workspace")
+    calkit.dvc.zip.sync_all(direction="to-workspace")
 
 
 @app.command(name="push")
@@ -1272,9 +1272,9 @@ def run(
     import dvc.ui
     from dvc.cli import main as dvc_cli_main
 
+    import calkit.dvc.zip
     import calkit.environments
     import calkit.pipeline
-    import calkit.zips
     from calkit.cli.overleaf import sync as overleaf_sync
 
     if (target_inputs or target_outputs) and targets:
@@ -1498,10 +1498,12 @@ def run(
                         ):
                             zip_input_paths.append(out.path)
                 if zip_input_paths:
-                    calkit.zips.sync_some(zip_input_paths, direction="to-zip")
+                    calkit.dvc.zip.sync_some(
+                        zip_input_paths, direction="to-zip"
+                    )
             except Exception:
                 # Fall back to syncing all zips if pipeline parsing fails
-                calkit.zips.sync_all(direction="to-zip")
+                calkit.dvc.zip.sync_all(direction="to-zip")
     # Close logger file handler to prevent permissions issues if deleting
     dvc.log.logger.removeHandler(file_handler)
     file_handler.close()
@@ -2370,7 +2372,7 @@ def switch_branch(name: Annotated[str, typer.Argument(help="Branch name.")]):
     # After switching branches, DVC-tracked zips may have changed; check out
     # the new branch's DVC data and unzip to the workspace
     run_dvc_command(["checkout"])
-    calkit.zips.sync_all(direction="to-workspace")
+    calkit.dvc.zip.sync_all(direction="to-workspace")
 
 
 @app.command(name="stash")
@@ -2391,15 +2393,15 @@ def stash(
     if pop:
         subprocess.check_call(["git", "stash", "pop"])
         run_dvc_command(["checkout"])
-        calkit.zips.sync_all(direction="to-workspace")
+        calkit.dvc.zip.sync_all(direction="to-workspace")
     else:
         # Zip any modified workspace dirs so their current state is in the DVC
         # cache (the updated .dvc file will be captured by git stash)
-        calkit.zips.sync_all(direction="to-zip")
+        calkit.dvc.zip.sync_all(direction="to-zip")
         subprocess.check_call(["git", "stash"])
         # Restore the committed zip versions and unzip them
         run_dvc_command(["checkout"])
-        calkit.zips.sync_all(direction="to-workspace")
+        calkit.dvc.zip.sync_all(direction="to-workspace")
 
 
 @app.command(

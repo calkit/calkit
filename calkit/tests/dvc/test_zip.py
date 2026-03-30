@@ -1,4 +1,4 @@
-"""Tests for ``calkit.zips``."""
+"""Tests for ``calkit.dvc.zip``."""
 
 import json
 import os
@@ -6,8 +6,8 @@ import shutil
 
 import pytest
 
-import calkit.zips
-from calkit.zips import (
+import calkit.dvc.zip
+from calkit.dvc.zip import (
     calc_dir_sig,
     check_overlap,
     get_hash,
@@ -71,23 +71,23 @@ def test_is_zip_candidate(tmp_dir):
     large_small = tmp_dir / "large_small"
     large_small.mkdir()
     file_size = (
-        DVC_SIZE_THRESH_BYTES // calkit.zips.ZIP_CANDIDATE_MIN_FILE_COUNT
+        DVC_SIZE_THRESH_BYTES // calkit.dvc.zip.ZIP_CANDIDATE_MIN_FILE_COUNT
     ) + 1
-    for i in range(calkit.zips.ZIP_CANDIDATE_MIN_FILE_COUNT):
+    for i in range(calkit.dvc.zip.ZIP_CANDIDATE_MIN_FILE_COUNT):
         (large_small / f"f{i}.bin").write_bytes(b"x" * file_size)
     assert is_zip_candidate(str(large_small))
     # Large directory with too few files is NOT a candidate
     few_files = tmp_dir / "few_files"
     few_files.mkdir()
     big_file_size = DVC_SIZE_THRESH_BYTES + 1
-    for i in range(calkit.zips.ZIP_CANDIDATE_MIN_FILE_COUNT - 1):
+    for i in range(calkit.dvc.zip.ZIP_CANDIDATE_MIN_FILE_COUNT - 1):
         (few_files / f"f{i}.bin").write_bytes(b"x" * big_file_size)
     assert not is_zip_candidate(str(few_files))
     # Large directory with a single huge file is NOT a candidate
     # (avg file size exceeds threshold)
     large_single = tmp_dir / "large_single"
     large_single.mkdir()
-    huge = calkit.zips.ZIP_CANDIDATE_AVG_FILE_SIZE_BYTES + 1
+    huge = calkit.dvc.zip.ZIP_CANDIDATE_AVG_FILE_SIZE_BYTES + 1
     (large_single / "big.bin").write_bytes(b"x" * huge)
     assert not is_zip_candidate(str(large_single))
 
@@ -102,9 +102,9 @@ def test_get_hash(tmp_dir):
     assert h is not None and len(h) > 0
     # Second call returns same hash and cache file is written
     assert get_hash(str(p)) == h
-    assert os.path.isfile(calkit.zips.HASH_CACHE_PATH)
+    assert os.path.isfile(calkit.dvc.zip.HASH_CACHE_PATH)
     # Cache entry stores mtime as int (nanoseconds)
-    with open(calkit.zips.HASH_CACHE_PATH) as f:
+    with open(calkit.dvc.zip.HASH_CACHE_PATH) as f:
         entry = list(json.load(f).values())[0]
     assert isinstance(entry["mtime"], int)
     # Modifying the file invalidates the cache
@@ -121,7 +121,7 @@ def test_get_hash(tmp_dir):
     # Stale cache entry (float mtime, old format) is ignored and rehashed
     p2 = tmp_dir / "other.txt"
     p2.write_text("hello")
-    os.makedirs(calkit.zips.LOCAL_DIR, exist_ok=True)
+    os.makedirs(calkit.dvc.zip.LOCAL_DIR, exist_ok=True)
     stale = {
         str(p2.as_posix()): {
             "path": str(p2.as_posix()),
@@ -131,7 +131,7 @@ def test_get_hash(tmp_dir):
             "dir_sig": None,
         }
     }
-    with open(calkit.zips.HASH_CACHE_PATH, "w") as f:
+    with open(calkit.dvc.zip.HASH_CACHE_PATH, "w") as f:
         json.dump(stale, f)
     h2 = get_hash(str(p2))
     assert h2 is not None and h2 != "stale-hash"
@@ -202,12 +202,12 @@ def test_get_sync_status(tmp_dir):
 
 
 def test_sync_one(tmp_dir, monkeypatch):
-    monkeypatch.setattr("calkit.zips.subprocess.run", lambda *_, **__: None)
+    monkeypatch.setattr("calkit.dvc.zip.subprocess.run", lambda *_, **__: None)
     # to-zip: zips input and writes sync record
     src = tmp_dir / "src"
     src.mkdir()
     (src / "a.txt").write_text("hello")
-    zip_out = str(tmp_dir / calkit.zips.ZIPS_DIR / "src.zip")
+    zip_out = str(tmp_dir / calkit.dvc.zip.ZIPS_DIR / "src.zip")
     write_zip_path_map({str(src.as_posix()): zip_out})
     sync_one(str(src), zip_out, direction="to-zip")
     assert os.path.isfile(zip_out)
@@ -232,7 +232,7 @@ def test_sync_one(tmp_dir, monkeypatch):
     src3 = tmp_dir / "src3"
     src3.mkdir()
     (src3 / "a.txt").write_text("hello")
-    zip_out3 = str(tmp_dir / calkit.zips.ZIPS_DIR / "src3.zip")
+    zip_out3 = str(tmp_dir / calkit.dvc.zip.ZIPS_DIR / "src3.zip")
     write_zip_path_map({str(src3.as_posix()): zip_out3})
     sync_one(str(src3), zip_out3, direction="to-zip")
     assert os.path.isfile(zip_out3)
@@ -245,7 +245,7 @@ def test_sync_one(tmp_dir, monkeypatch):
     src4 = tmp_dir / "src4"
     src4.mkdir()
     (src4 / "a.txt").write_text("hello")
-    zip_out4 = str(tmp_dir / calkit.zips.ZIPS_DIR / "src4.zip")
+    zip_out4 = str(tmp_dir / calkit.dvc.zip.ZIPS_DIR / "src4.zip")
     write_zip_path_map({str(src4.as_posix()): zip_out4})
     sync_one(str(src4), zip_out4, direction="to-zip")
     assert os.path.isfile(zip_out4)
@@ -259,7 +259,7 @@ def test_sync_one(tmp_dir, monkeypatch):
     src5 = tmp_dir / "src5"
     src5.mkdir()
     (src5 / "a.txt").write_text("hello")
-    zip_out5 = str(tmp_dir / calkit.zips.ZIPS_DIR / "src5.zip")
+    zip_out5 = str(tmp_dir / calkit.dvc.zip.ZIPS_DIR / "src5.zip")
     write_zip_path_map({str(src5.as_posix()): zip_out5})
     sync_one(str(src5), zip_out5, direction="to-zip")
     shutil.rmtree(str(src5))
@@ -277,7 +277,7 @@ def test_sync_one(tmp_dir, monkeypatch):
     src6 = tmp_dir / "src6"
     src6.mkdir()
     (src6 / "a.txt").write_text("hello")
-    zip_out6 = str(tmp_dir / calkit.zips.ZIPS_DIR / "src6.zip")
+    zip_out6 = str(tmp_dir / calkit.dvc.zip.ZIPS_DIR / "src6.zip")
     write_zip_path_map({str(src6.as_posix()): zip_out6})
     sync_one(str(src6), zip_out6, direction="to-zip")
     assert os.path.isfile(zip_out6)
@@ -290,7 +290,7 @@ def test_sync_one(tmp_dir, monkeypatch):
     src7 = tmp_dir / "src7"
     src7.mkdir()
     (src7 / "a.txt").write_text("hello")
-    zip_out7 = str(tmp_dir / calkit.zips.ZIPS_DIR / "src7.zip")
+    zip_out7 = str(tmp_dir / calkit.dvc.zip.ZIPS_DIR / "src7.zip")
     write_zip_path_map({str(src7.as_posix()): zip_out7})
     sync_one(str(src7), zip_out7, direction="to-zip")
     shutil.rmtree(str(src7))

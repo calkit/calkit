@@ -211,7 +211,7 @@ You can also specify it explicitly:
 calkit add my-output-folder --to dvc-zip
 ```
 
-The zip archive is stored in `.calkit/zips/` and tracked by DVC.
+The zip archive is stored in `.calkit/zip/` and tracked by DVC.
 The workspace directory is gitignored and kept out of DVC,
 so only the zip moves between machines.
 After a `calkit pull` or `calkit clone`,

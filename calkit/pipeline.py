@@ -8,8 +8,8 @@ import typer
 from pydantic import BaseModel, Field, computed_field, field_validator
 
 import calkit
+import calkit.dvc.zip
 import calkit.environments
-import calkit.zips
 from calkit.environments import get_env_lock_fpath
 from calkit.models.iteration import expand_project_parameters
 from calkit.models.pipeline import (
@@ -580,7 +580,7 @@ def to_dvc(
                     calkit.git.ensure_path_is_not_ignored(repo, path=out.path)
                 elif isinstance(out, PathOutput) and out.storage == "dvc-zip":
                     calkit.git.ensure_path_is_ignored(repo, path=out.path)
-                    calkit.zips.add(out.path, is_stage_output=True)
+                    calkit.dvc.zip.add(out.path, is_stage_output=True)
     # Now process any inputs from stage outputs
     for stage_name, stage in pipeline.stages.items():
         for i in stage.inputs:

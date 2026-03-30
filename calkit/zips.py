@@ -48,7 +48,7 @@ LOCAL_DIR = ".calkit/local"
 ZIPS_DIR = ".calkit/zips"
 HASH_CACHE_PATH = LOCAL_DIR + "/hash-cache.json"
 SYNC_RECORD_DIR = LOCAL_DIR + "/zip-sync-records"
-ZIP_INFO_PATH = ".calkit/zips/info.json"
+PATH_MAP_PATH = ZIPS_DIR + "/info.json"
 # Average file size threshold below which a large directory is considered a
 # zip candidate — files smaller than this are inefficient to track individually
 # in DVC
@@ -58,13 +58,14 @@ ZIP_CANDIDATE_AVG_FILE_SIZE_BYTES = 10_000_000  # 10 MB
 ZIP_CANDIDATE_MIN_FILE_COUNT = 10
 
 
-def _check_local_dir():
+def _check_local_dir() -> Path:
     if not os.path.isdir(LOCAL_DIR):
         os.makedirs(LOCAL_DIR, exist_ok=True)
     gitignore_path = os.path.join(LOCAL_DIR, ".gitignore")
     if not os.path.isfile(gitignore_path):
         with open(gitignore_path, "w") as f:
             f.write("*\n")
+    return Path(LOCAL_DIR)
 
 
 def is_zip_candidate(path: str) -> bool:
@@ -123,16 +124,16 @@ def make_zip_path(input_path: str) -> str:
 
 def get_zip_path_map() -> dict[str, str]:
     """Get a mapping of input paths to zip paths."""
-    if os.path.isfile(ZIP_INFO_PATH):
-        with open(ZIP_INFO_PATH, "r") as f:
+    if os.path.isfile(PATH_MAP_PATH):
+        with open(PATH_MAP_PATH, "r") as f:
             return json.load(f)
     return {}
 
 
 def write_zip_path_map(path_map: dict[str, str]):
-    d = os.path.dirname(ZIP_INFO_PATH)
+    d = os.path.dirname(PATH_MAP_PATH)
     os.makedirs(d, exist_ok=True)
-    with open(ZIP_INFO_PATH, "w") as f:
+    with open(PATH_MAP_PATH, "w") as f:
         json.dump(path_map, f, indent=2)
 
 
@@ -169,7 +170,7 @@ def add(input_path: str, is_stage_output: bool = False):
         pm[input_path] = make_zip_path(input_path)
         write_zip_path_map(pm)
         # Stage the updated info file
-        repo.git.add(ZIP_INFO_PATH)
+        repo.git.add(PATH_MAP_PATH)
     # Ensure the workspace dir is gitignored
     calkit.git.ensure_path_is_ignored(repo, path=input_path)
     repo.git.add(".gitignore")

@@ -45,7 +45,7 @@ import calkit.git
 from calkit.core import DVC_SIZE_THRESH_BYTES
 
 LOCAL_DIR = ".calkit/local"
-ZIPS_DIR = ".calkit/zips"
+ZIPS_DIR = ".calkit/zip"
 HASH_CACHE_PATH = LOCAL_DIR + "/hash-cache.json"
 SYNC_RECORD_DIR = LOCAL_DIR + "/zip-sync-records"
 PATH_MAP_PATH = ZIPS_DIR + "/paths.json"

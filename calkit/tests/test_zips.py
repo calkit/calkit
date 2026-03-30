@@ -138,22 +138,22 @@ def test_get_hash(tmp_dir):
 
 
 def test_make_zip_path():
-    assert make_zip_path("data/mydir") == ".calkit/zips/files/data/mydir.zip"
+    assert make_zip_path("data/mydir") == ".calkit/zip/files/data/mydir.zip"
 
 
 def test_get_write_zip_path_map(tmp_dir):
     # Missing info file returns empty dict
     assert get_zip_path_map() == {}
     # Write and read back
-    pm = {"data/mydir": ".calkit/zips/data/mydir.zip"}
+    pm = {"data/mydir": ".calkit/zip/data/mydir.zip"}
     write_zip_path_map(pm)
     assert get_zip_path_map() == pm
 
 
 def test_check_overlap():
     pm = {
-        "data": ".calkit/zips/data.zip",
-        "results": ".calkit/zips/results.zip",
+        "data": ".calkit/zip/data.zip",
+        "results": ".calkit/zip/results.zip",
     }
     # Non-overlapping path is fine
     check_overlap("other", pm)

@@ -864,6 +864,7 @@ def pull(
     result = run_dvc_command(["pull"] + dvc_args)
     if result != 0:
         raise_error("DVC pull failed")
+    calkit.zips.sync_all(direction="to-workspace")
 
 
 @app.command(name="push")

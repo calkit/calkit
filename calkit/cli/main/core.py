@@ -228,6 +228,68 @@ def clone(
             raise_error(f"Failed to pull from DVC remote(s): {e}")
 
 
+def _format_dvc_data_status(status: dict, zip_path_map: dict) -> str:
+    """Format DVC data status, substituting zip paths with workspace paths."""
+    reverse_zip = {zip_p: ws for ws, zip_p in zip_path_map.items()}
+    color_map = {
+        "added": typer.colors.GREEN,
+        "modified": typer.colors.YELLOW,
+        "deleted": typer.colors.RED,
+        "renamed": typer.colors.CYAN,
+    }
+
+    def transform(path: str) -> str | None:
+        if path in reverse_zip:
+            return reverse_zip[path] + " (zipped)"
+        return path
+
+    def format_section(changes: dict, title: str) -> list[str]:
+        entries = []
+        for change_type, color in color_map.items():
+            for item in changes.get(change_type, []):
+                if isinstance(item, dict):
+                    old = transform(item.get("old", ""))
+                    new = transform(item.get("new", ""))
+                    if old is not None and new is not None:
+                        line = typer.style(
+                            f"        {change_type}: {old} -> {new}", fg=color
+                        )
+                        entries.append(line)
+                else:
+                    display = transform(item)
+                    if display is not None:
+                        line = typer.style(
+                            f"        {change_type}: {display}", fg=color
+                        )
+                        entries.append(line)
+        if not entries:
+            return []
+        return [title] + entries
+
+    lines = []
+    lines += format_section(
+        status.get("committed", {}), "DVC committed changes:"
+    )
+    lines += format_section(
+        status.get("uncommitted", {}), "DVC uncommitted changes:"
+    )
+    not_in_cache = [transform(p) for p in status.get("not_in_cache", [])]
+    not_in_cache = [p for p in not_in_cache if p is not None]
+    if not_in_cache:
+        lines.append(typer.style("Files not in cache:", bold=True))
+        for p in not_in_cache:
+            lines.append(f"        {p}")
+    not_in_remote = [transform(p) for p in status.get("not_in_remote", [])]
+    not_in_remote = [p for p in not_in_remote if p is not None]
+    if not_in_remote:
+        lines.append(typer.style("Files not in remote:", bold=True))
+        for p in not_in_remote:
+            lines.append(f"        {p}")
+    if not lines:
+        return "No changes."
+    return "\n".join(lines) + "\n"
+
+
 @app.command(name="status")
 def get_status(
     targets: Annotated[
@@ -389,11 +451,14 @@ def get_status(
         typer.echo()
     if "dvc" in categories:
         print_sep("DVC")
-        dvc_data_cmd = ["data", "status"]
-        if targets:
-            dvc_data_cmd += targets
-        run_dvc_command(dvc_data_cmd)
-        typer.echo()
+        # Sync zips so the zip files reflect current workspace state before
+        # reporting status
+        calkit.zips.sync_all(direction="to-zip")
+        zip_path_map = calkit.zips.get_zip_path_map()
+        dvc_repo = get_dvc_repo()
+        raw = dict(dvc_repo.data_status())
+        raw.pop("git", None)
+        typer.echo(_format_dvc_data_status(raw, zip_path_map))
     if "pipeline" in categories or "dvc" in categories:
         print_sep("Pipeline")
         # Nicely format the results from pipeline status

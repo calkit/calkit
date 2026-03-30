@@ -48,7 +48,7 @@ LOCAL_DIR = ".calkit/local"
 ZIPS_DIR = ".calkit/zips"
 HASH_CACHE_PATH = LOCAL_DIR + "/hash-cache.json"
 SYNC_RECORD_DIR = LOCAL_DIR + "/zip-sync-records"
-PATH_MAP_PATH = ZIPS_DIR + "/info.json"
+PATH_MAP_PATH = ZIPS_DIR + "/paths.json"
 # Average file size threshold below which a large directory is considered a
 # zip candidate — files smaller than this are inefficient to track individually
 # in DVC
@@ -119,7 +119,7 @@ class SyncRecord(BaseModel):
 
 def make_zip_path(input_path: str) -> str:
     """Make a zip path for a given input path."""
-    return os.path.join(ZIPS_DIR, input_path + ".zip")
+    return os.path.join(ZIPS_DIR, "files", input_path + ".zip")
 
 
 def get_zip_path_map() -> dict[str, str]:

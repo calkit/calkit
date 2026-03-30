@@ -136,6 +136,24 @@ def write_zip_path_map(path_map: dict[str, str]):
         json.dump(path_map, f, indent=2)
 
 
+def check_overlap(input_path: str, path_map: dict[str, str] | None = None):
+    """Raise ValueError if input_path overlaps (is parent/child of) any
+    existing zip path in path_map.
+    """
+    if path_map is None:
+        path_map = get_zip_path_map()
+    new = Path(input_path)
+    for existing in path_map:
+        ex = Path(existing)
+        if new == ex:
+            continue
+        if new.is_relative_to(ex) or ex.is_relative_to(new):
+            raise ValueError(
+                f"Zip path {input_path!r} overlaps with existing zip "
+                f"path {existing!r}"
+            )
+
+
 def add(input_path: str, is_stage_output: bool = False):
     """Add a zip for a given input path.
 
@@ -147,6 +165,7 @@ def add(input_path: str, is_stage_output: bool = False):
     # Normalize input path as posix
     input_path = Path(input_path).as_posix()
     if input_path not in pm:
+        check_overlap(input_path, pm)
         pm[input_path] = make_zip_path(input_path)
         write_zip_path_map(pm)
         # Stage the updated info file

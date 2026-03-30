@@ -9,6 +9,7 @@ import pytest
 import calkit.zips
 from calkit.zips import (
     calc_dir_sig,
+    check_overlap,
     get_hash,
     get_mtime_ns,
     get_sync_record,
@@ -147,6 +148,23 @@ def test_get_write_zip_path_map(tmp_dir):
     pm = {"data/mydir": ".calkit/zips/data/mydir.zip"}
     write_zip_path_map(pm)
     assert get_zip_path_map() == pm
+
+
+def test_check_overlap():
+    pm = {
+        "data": ".calkit/zips/data.zip",
+        "results": ".calkit/zips/results.zip",
+    }
+    # Non-overlapping path is fine
+    check_overlap("other", pm)
+    # Exact match (re-adding same path) is fine
+    check_overlap("data", pm)
+    # Child of existing path raises
+    with pytest.raises(ValueError, match="overlaps"):
+        check_overlap("data/subdir", pm)
+    # Parent of existing path raises
+    with pytest.raises(ValueError, match="overlaps"):
+        check_overlap("results/output", pm)
 
 
 def test_zip_unzip(tmp_dir):

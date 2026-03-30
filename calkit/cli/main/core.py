@@ -469,28 +469,29 @@ def get_status(
             typer.echo("This project has no pipeline.")
             return
         elif pipeline_status and pipeline_status.is_stale:
+            typer.echo("Stale stages:")
             for stage_name in pipeline_status.stale_stage_names:
                 stale_stage = pipeline_status.stale_stages.get(stage_name)
                 if stale_stage is None:
                     continue
-                typer.echo(f"{typer.style(stage_name, fg='yellow')}:")
+                typer.echo(f"        {typer.style(stage_name, fg='yellow')}:")
                 if stale_stage.modified_command:
-                    typer.echo("  modified command")
+                    typer.echo("            modified command")
                 # Show stale outputs for this stage
                 if stale_stage.stale_outputs:
-                    typer.echo("  stale outputs:")
+                    typer.echo("          stale outputs:")
                     for output_path in stale_stage.stale_outputs:
-                        typer.echo(f"    {output_path}")
+                        typer.echo(f"            {output_path}")
                 # Show modified outputs from this stage
                 if stale_stage.modified_outputs:
-                    typer.echo("  modified outputs:")
+                    typer.echo("          modified outputs:")
                     for output_path in stale_stage.modified_outputs:
-                        typer.echo(f"    {output_path}")
+                        typer.echo(f"            {output_path}")
                 # Show modified inputs making the stage stale
                 if stale_stage.modified_inputs:
-                    typer.echo("  modified inputs:")
+                    typer.echo("          modified inputs:")
                     for input_path in stale_stage.modified_inputs:
-                        typer.echo(f"    {input_path}")
+                        typer.echo(f"            {input_path}")
         elif pipeline_status:
             typer.echo("Pipeline is up to date.")
 

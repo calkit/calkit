@@ -361,3 +361,27 @@ def test_ensure_path_is_not_ignored_dvc_subdir_gitignore(tmp_dir):
         sub_lines = f.read().splitlines()
     assert "/model.fig" not in sub_lines
     assert "/model.mat" in sub_lines
+
+
+def test_ensure_path_is_ignored_stale_negation_after_direct_rule(tmp_dir):
+    """Re-ignoring a path where the .gitignore has both the direct rule AND a
+    stale negation *after* it (so the negation wins and the path is currently
+    unignored) must remove the negation so the direct rule takes effect.
+    """
+    repo = git.Repo.init()
+    os.makedirs("results", exist_ok=True)
+    target = "results/output.json"
+    with open(target, "w") as f:
+        f.write("{}")
+    # The direct rule comes first, but the negation after it wins, so the
+    # path is currently NOT ignored.
+    with open(".gitignore", "w") as f:
+        f.write("results/output.json\n!results/output.json\n")
+    assert not repo.ignored(target)
+    result = calkit.git.ensure_path_is_ignored(repo, path=target)
+    assert result is True
+    assert repo.ignored(target)
+    with open(".gitignore") as f:
+        lines = f.read().splitlines()
+    assert "!results/output.json" not in lines
+    assert "results/output.json" in lines

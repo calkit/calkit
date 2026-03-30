@@ -350,7 +350,9 @@ def test_ensure_path_is_not_ignored_dvc_subdir_gitignore(tmp_dir):
         f.write("/model.fig\n/model.mat\n")
     assert repo.ignored("outputs/model.fig")
     assert repo.ignored("outputs/model.mat")
-    result = calkit.git.ensure_path_is_not_ignored(repo, path="outputs/model.fig")
+    result = calkit.git.ensure_path_is_not_ignored(
+        repo, path="outputs/model.fig"
+    )
     assert result is True
     assert not repo.ignored("outputs/model.fig")
     # model.mat must still be ignored

@@ -18,9 +18,9 @@ from calkit.dvc.zip import (
     is_zip_candidate,
     make_zip_path,
     sync_one,
-    unzip_path,
+    unzip,
     write_zip_path_map,
-    zip_path,
+    zip_,
 )
 
 
@@ -172,10 +172,10 @@ def test_zip_unzip(tmp_dir):
     (src / "sub").mkdir()
     (src / "sub" / "b.txt").write_text("world")
     zip_out = str(tmp_dir / "out.zip")
-    zip_path(str(src), zip_out)
+    zip_(str(src), zip_out)
     assert os.path.isfile(zip_out)
     dest = tmp_dir / "dest"
-    unzip_path(str(dest), zip_out)
+    unzip(str(dest), zip_out)
     assert (dest / "a.txt").read_text() == "hello"
     assert (dest / "sub" / "b.txt").read_text() == "world"
 
@@ -187,15 +187,15 @@ def test_get_sync_status(tmp_dir):
     zip_out = str(tmp_dir / "out.zip")
     # Only input exists: input changed, output not changed
     status = get_sync_status(str(src), zip_out)
-    assert status.input_changed is True
-    assert status.output_changed is False
+    assert status.workspace_changed is True
+    assert status.zip_changed is False
     assert status.last_sync_record is None
     # Both exist and no sync record: both marked changed
-    zip_path(str(src), zip_out)
+    zip_(str(src), zip_out)
     write_zip_path_map({str(src.as_posix()): zip_out})
     status = get_sync_status(str(src), zip_out)
-    assert status.input_changed is True
-    assert status.output_changed is True
+    assert status.workspace_changed is True
+    assert status.zip_changed is True
     assert status.last_sync_record is None
 
 
@@ -211,7 +211,7 @@ def test_sync_one(tmp_dir, monkeypatch):
     assert os.path.isfile(zip_out)
     record = get_sync_record(str(src.as_posix()))
     assert record is not None
-    assert record.input_hash is not None and record.output_hash is not None
+    assert record.workspace_hash is not None and record.zip_hash is not None
     # to-workspace: unzips output to dest and writes sync record
     dest = tmp_dir / "dest"
     write_zip_path_map({str(dest.as_posix()): zip_out})
@@ -223,7 +223,7 @@ def test_sync_one(tmp_dir, monkeypatch):
     src2.mkdir()
     (src2 / "a.txt").write_text("hello")
     zip_out2 = str(tmp_dir / "out2.zip")
-    zip_path(str(src2), zip_out2)
+    zip_(str(src2), zip_out2)
     with pytest.raises(RuntimeError, match="Conflict"):
         sync_one(str(src2), zip_out2, direction="both")
     # Workspace deleted: zip is removed and sync record cleared

@@ -177,7 +177,12 @@ def add(input_path: str, is_stage_output: bool = False):
     repo.git.add(".gitignore")
     if not is_stage_output:
         # If this is not a stage output, it exists, so we should sync it
-        sync_one(input_path=input_path, output_path=pm[input_path])
+        # Always zip from workspace — it's the source of truth on an explicit add
+        sync_one(
+            input_path=input_path,
+            output_path=pm[input_path],
+            direction="to-zip",
+        )
 
 
 def hash_path(path: str, alg="md5") -> str:

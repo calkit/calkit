@@ -508,7 +508,7 @@ def test_add(tmp_dir):
     subprocess.check_call(["calkit", "add", "--to", "dvc", "large.bin"])
 
 
-def test_folder_many_small_files(tmp_dir, tmp_path):
+def test_large_folder_many_small_files(tmp_dir, tmp_path):
     subprocess.check_call(["calkit", "init"])
     # Set up a bare git remote and a local DVC remote as siblings of the
     # project dir so we can exercise push/pull in this test

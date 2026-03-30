@@ -2267,6 +2267,39 @@ def switch_branch(name: Annotated[str, typer.Argument(help="Branch name.")]):
     else:
         cmd = [name]
     repo.git.checkout(cmd)
+    # After switching branches, DVC-tracked zips may have changed; check out
+    # the new branch's DVC data and unzip to the workspace
+    run_dvc_command(["checkout"])
+    calkit.zips.sync_all(direction="to-workspace")
+
+
+@app.command(name="stash")
+def stash(
+    pop: Annotated[
+        bool, typer.Option("--pop", help="Pop the most recent stash.")
+    ] = False,
+):
+    """Stash or restore workspace changes including dvc-zip tracked dirs.
+
+    Without --pop: zips any modified workspace dirs into the DVC cache, then
+    git-stashes (saving the updated .dvc files), checks out the committed DVC
+    state, and unzips it to the workspace.
+
+    With --pop: pops the git stash (restoring the saved .dvc files), checks
+    out the stashed DVC state, and unzips it to the workspace.
+    """
+    if pop:
+        subprocess.check_call(["git", "stash", "pop"])
+        run_dvc_command(["checkout"])
+        calkit.zips.sync_all(direction="to-workspace")
+    else:
+        # Zip any modified workspace dirs so their current state is in the DVC
+        # cache (the updated .dvc file will be captured by git stash)
+        calkit.zips.sync_all(direction="to-zip")
+        subprocess.check_call(["git", "stash"])
+        # Restore the committed zip versions and unzip them
+        run_dvc_command(["checkout"])
+        calkit.zips.sync_all(direction="to-workspace")
 
 
 @app.command(

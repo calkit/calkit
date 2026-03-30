@@ -416,6 +416,18 @@ def sync_one(
     return record
 
 
+def sync_some(
+    input_paths: list[str],
+    direction: Literal["to-zip", "to-workspace", "both"] = "both",
+):
+    """Process a subset of project zips by their workspace input paths."""
+    pm = get_zip_path_map()
+    for input_path in input_paths:
+        norm = Path(input_path).as_posix()
+        output_path = pm.get(norm)
+        sync_one(input_path=norm, output_path=output_path, direction=direction)
+
+
 def sync_all(direction: Literal["to-zip", "to-workspace", "both"] = "both"):
     """Process all project zips."""
     for input_path, output_path in get_zip_path_map().items():

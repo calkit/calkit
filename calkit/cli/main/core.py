@@ -1267,6 +1267,7 @@ def run(
 
     import calkit.environments
     import calkit.pipeline
+    import calkit.zips
     from calkit.cli.overleaf import sync as overleaf_sync
 
     if (target_inputs or target_outputs) and targets:
@@ -1464,10 +1465,36 @@ def run(
     dvc.ui.ui.write = lambda *args, **kwargs: None
     res = dvc_cli_main(["repro"] + args)
     failed = res != 0
-    # Parse log to get timing
+    # Parse log to get timing and which stages ran
     with open(log_fpath, "r") as f:
         log_content = f.read()
         stage_run_info = _stage_run_info_from_log_content(log_content)
+    # Zip dvc-zip outputs for stages that actually ran
+    if stage_run_info:
+        from calkit.models.io import PathOutput
+        from calkit.models.pipeline import Pipeline
+
+        ck_info = calkit.load_calkit_info()
+        pipeline_cfg = ck_info.get("pipeline", {})
+        if pipeline_cfg:
+            try:
+                ck_pipeline = Pipeline.model_validate(pipeline_cfg)
+                zip_input_paths = []
+                for stage_name in stage_run_info:
+                    stage = ck_pipeline.stages.get(stage_name)
+                    if stage is None:
+                        continue
+                    for out in stage.outputs:
+                        if (
+                            isinstance(out, PathOutput)
+                            and out.storage == "dvc-zip"
+                        ):
+                            zip_input_paths.append(out.path)
+                if zip_input_paths:
+                    calkit.zips.sync_some(zip_input_paths, direction="to-zip")
+            except Exception:
+                # Fall back to syncing all zips if pipeline parsing fails
+                calkit.zips.sync_all(direction="to-zip")
     # Close logger file handler to prevent permissions issues if deleting
     dvc.log.logger.removeHandler(file_handler)
     file_handler.close()

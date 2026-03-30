@@ -48,7 +48,6 @@ LOCAL_DIR = ".calkit/local"
 ZIPS_DIR = ".calkit/zips"
 HASH_CACHE_PATH = LOCAL_DIR + "/hash-cache.json"
 SYNC_RECORD_DIR = LOCAL_DIR + "/zip-sync-records"
-ZIP_CACHE_PATH = ".calkit/local/zip-cache.json"
 ZIP_INFO_PATH = ".calkit/zips/info.json"
 # Average file size threshold below which a large directory is considered a
 # zip candidate — files smaller than this are inefficient to track individually

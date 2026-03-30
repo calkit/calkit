@@ -104,9 +104,10 @@ class HashCacheEntry(BaseModel):
 
     path: str
     hash: str
-    mtime: int  # nanoseconds
+    mtime: int  # Nanoseconds
     size: int
     dir_sig: str | None = None  # Only used for directories, to avoid rehashing
+    alg: str = "md5"
 
 
 class SyncRecord(BaseModel):
@@ -179,12 +180,11 @@ def add(input_path: str, is_stage_output: bool = False):
         sync_one(input_path=input_path, output_path=pm[input_path])
 
 
-def hash_path(path: str) -> str:
-    """Hash a path.
-
-    TODO: Use SHA256?
-    """
-    return calkit.get_md5(path)
+def hash_path(path: str, alg="md5") -> str:
+    """Hash a path."""
+    if alg == "md5":
+        return calkit.get_md5(path)
+    raise ValueError(f"Unsupported hash algorithm: {alg}")
 
 
 def calc_dir_sig(path: str) -> str:
@@ -237,13 +237,15 @@ def get_hash(path: str) -> str | None:
     ):
         return record.hash
     # If we've made it this far, we need to update the cache
-    hash_val = hash_path(path)
+    hash_alg = "md5"
+    hash_val = hash_path(path, alg=hash_alg)
     record = HashCacheEntry(
         path=path,
         hash=hash_val,
         mtime=mtime,
         size=size,
         dir_sig=dir_sig,
+        alg=hash_alg,
     )
     cache[path] = record.model_dump(mode="json")
     _check_local_dir()
@@ -412,6 +414,19 @@ def sync_one(
             shutil.rmtree(input_path)
         delete_sync_record(input_path)
         return None
+    # Zip was deleted but workspace exists and direction is to-zip:
+    # restore zip
+    if output_deleted and direction == "to-zip":
+        typer.echo(f"Rezipping {input_path} (zip was deleted)")
+        zip_path(input_path=input_path, output_path=output_path)
+        subprocess.run(["dvc", "add", output_path], check=True)
+        output_hash = get_hash(output_path)
+    # Workspace was deleted but zip exists and direction is to-workspace:
+    # restore workspace
+    if input_deleted and direction == "to-workspace":
+        typer.echo(f"Unzipping to {input_path} (workspace was deleted)")
+        unzip_path(input_path=input_path, output_path=output_path)
+        input_hash = get_hash(input_path)
     # If hashes have changed since last check, we need to synchronize the
     # path with its zip file (unzip if zip is newer, rezip if path is newer)
     # If both have changed, we have a conflict and the user needs to decide

@@ -138,7 +138,7 @@ def test_get_hash(tmp_dir):
 
 
 def test_make_zip_path():
-    assert make_zip_path("data/mydir") == ".calkit/zips/data/mydir.zip"
+    assert make_zip_path("data/mydir") == ".calkit/zips/files/data/mydir.zip"
 
 
 def test_get_write_zip_path_map(tmp_dir):
@@ -273,3 +273,28 @@ def test_sync_one(tmp_dir, monkeypatch):
         str(tmp_dir / "nonexistent"), str(tmp_dir / "nonexistent.zip")
     )
     assert result is None
+    # Zip deleted but direction=to-zip: restore zip from workspace
+    src6 = tmp_dir / "src6"
+    src6.mkdir()
+    (src6 / "a.txt").write_text("hello")
+    zip_out6 = str(tmp_dir / calkit.zips.ZIPS_DIR / "src6.zip")
+    write_zip_path_map({str(src6.as_posix()): zip_out6})
+    sync_one(str(src6), zip_out6, direction="to-zip")
+    assert os.path.isfile(zip_out6)
+    os.remove(zip_out6)
+    result = sync_one(str(src6), zip_out6, direction="to-zip")
+    assert result is not None
+    assert os.path.isfile(zip_out6)
+    assert get_sync_record(str(src6.as_posix())) is not None
+    # Workspace deleted but direction=to-workspace: restore workspace from zip
+    src7 = tmp_dir / "src7"
+    src7.mkdir()
+    (src7 / "a.txt").write_text("hello")
+    zip_out7 = str(tmp_dir / calkit.zips.ZIPS_DIR / "src7.zip")
+    write_zip_path_map({str(src7.as_posix()): zip_out7})
+    sync_one(str(src7), zip_out7, direction="to-zip")
+    shutil.rmtree(str(src7))
+    result = sync_one(str(src7), zip_out7, direction="to-workspace")
+    assert result is not None
+    assert (src7 / "a.txt").read_text() == "hello"
+    assert get_sync_record(str(src7.as_posix())) is not None

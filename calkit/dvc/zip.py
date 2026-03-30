@@ -20,6 +20,7 @@ import git
 import typer
 from pydantic import BaseModel
 from sqlitedict import SqliteDict
+from tqdm import tqdm
 
 import calkit
 import calkit.git
@@ -194,7 +195,7 @@ def calc_dir_sig(path: str) -> str:
     return f"{file_count}-{total_size}-{latest_mtime}"
 
 
-def get_hash(path: str) -> str | None:
+def get_hash(path: str, alg="md5") -> str | None:
     """Get the hash of a path, using/updating the cache if applicable."""
     try:
         st = os.stat(path)
@@ -219,18 +220,19 @@ def get_hash(path: str) -> str | None:
             and record.mtime == mtime
             and record.size == size
             and record.dir_sig == dir_sig
+            and record.alg == alg
         ):
             return record.hash
         # Cache miss — compute and store
-        hash_alg = "md5"
-        hash_val = hash_path(path, alg=hash_alg)
+        typer.echo(f"Computing {alg} for '{path}'")
+        hash_val = hash_path(path, alg=alg)
         cache[path] = HashCacheEntry(
             path=path,
             hash=hash_val,
             mtime=mtime,
             size=size,
             dir_sig=dir_sig,
-            alg=hash_alg,
+            alg=alg,
         ).model_dump(mode="json")
         cache.commit()
     return hash_val
@@ -287,15 +289,16 @@ def zip_path(input_path: str, output_path: str):
     """Zip a path."""
     output_dir = os.path.dirname(output_path)
     os.makedirs(output_dir, exist_ok=True)
+    all_files = [
+        os.path.join(foldername, filename)
+        for foldername, _, filenames in os.walk(input_path)
+        for filename in filenames
+    ]
     with ZipFile(
         output_path, "w", compression=zipfile.ZIP_DEFLATED
     ) as zip_file:
-        for foldername, subfolders, filenames in os.walk(input_path):
-            for filename in filenames:
-                file_path = os.path.join(foldername, filename)
-                zip_file.write(
-                    file_path, os.path.relpath(file_path, input_path)
-                )
+        for file_path in tqdm(all_files, desc="Zipping", unit="file"):
+            zip_file.write(file_path, os.path.relpath(file_path, input_path))
 
 
 def unzip_path(input_path: str, output_path: str):
@@ -304,7 +307,9 @@ def unzip_path(input_path: str, output_path: str):
     if input_dir:
         os.makedirs(input_dir, exist_ok=True)
     with ZipFile(output_path, "r") as zip_file:
-        zip_file.extractall(input_path)
+        members = zip_file.namelist()
+        for member in tqdm(members, desc="Unzipping", unit="file"):
+            zip_file.extract(member, input_path)
 
 
 class SyncStatus(BaseModel):
@@ -373,41 +378,41 @@ def sync_one(
     # Deletion + change on the other side is a conflict
     if input_deleted and output_changed and direction == "both":
         raise RuntimeError(
-            f"Conflict detected for zip path {input_path}. "
+            f"Conflict detected for zip path '{input_path}'. "
             "Workspace was deleted but zip has also changed since last sync. "
             "Please resolve the conflict manually."
         )
     if output_deleted and input_changed and direction == "both":
         raise RuntimeError(
-            f"Conflict detected for zip path {input_path}. "
+            f"Conflict detected for zip path '{input_path}'. "
             "Zip was deleted but workspace has also changed since last sync. "
             "Please resolve the conflict manually."
         )
     # Propagate workspace deletion to zip
     if input_deleted and direction in ["to-zip", "both"]:
         if os.path.exists(output_path):
-            typer.echo(f"Deleting {output_path} (workspace was deleted)")
+            typer.echo(f"Deleting '{output_path}' (workspace was deleted)")
             os.remove(output_path)
         delete_sync_record(input_path)
         return None
     # Propagate zip deletion to workspace
     if output_deleted and direction in ["to-workspace", "both"]:
         if os.path.exists(input_path):
-            typer.echo(f"Deleting {input_path} (zip was deleted)")
+            typer.echo(f"Deleting '{input_path}' (zip was deleted)")
             shutil.rmtree(input_path)
         delete_sync_record(input_path)
         return None
     # Zip was deleted but workspace exists and direction is to-zip:
     # restore zip
     if output_deleted and direction == "to-zip":
-        typer.echo(f"Rezipping {input_path} (zip was deleted)")
+        typer.echo(f"Rezipping '{input_path}' (zip was deleted)")
         zip_path(input_path=input_path, output_path=output_path)
         subprocess.run(["dvc", "add", output_path], check=True)
         output_hash = get_hash(output_path)
     # Workspace was deleted but zip exists and direction is to-workspace:
     # restore workspace
     if input_deleted and direction == "to-workspace":
-        typer.echo(f"Unzipping to {input_path} (workspace was deleted)")
+        typer.echo(f"Unzipping to '{input_path}' (workspace was deleted)")
         unzip_path(input_path=input_path, output_path=output_path)
         input_hash = get_hash(input_path)
     # If hashes have changed since last check, we need to synchronize the
@@ -416,19 +421,19 @@ def sync_one(
     # how we should resolve it (rezip, unzip, unzip+merge+rezip)
     if input_changed and output_changed and direction == "both":
         raise RuntimeError(
-            f"Conflict detected for zip path {input_path}. "
+            f"Conflict detected for zip path '{input_path}'. "
             "Both input and output have changed since last sync. "
             "Please resolve the conflict manually."
         )
     # If we rezip, we need to add the zip file to DVC and update the hash
     if input_changed and (direction in ["to-zip", "both"]):
-        typer.echo(f"Zipping {input_path}")
+        typer.echo(f"Zipping '{input_path}' (workspace has changed)")
         zip_path(input_path=input_path, output_path=output_path)
         subprocess.run(["dvc", "add", output_path], check=True)
         output_hash = get_hash(output_path)
     # If we unzip, we need to update the hash
     if output_changed and (direction in ["to-workspace", "both"]):
-        typer.echo(f"Unzipping to {input_path}")
+        typer.echo(f"Unzipping to '{input_path}' (zip has changed)")
         unzip_path(input_path=input_path, output_path=output_path)
         input_hash = get_hash(input_path)
     assert input_hash is not None and output_hash is not None

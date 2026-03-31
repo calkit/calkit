@@ -383,10 +383,31 @@ def get_status(
             if v != ["always changed"] and not k.endswith(".dvc")
         }
         stages_config = ck_info.get("pipeline", {}).get("stages", {})
+        # Build an ordered list of stage names from dvc.yaml to preserve
+        # pipeline order, since dvc_repo.status() returns stages alphabetically
+        dvc_yaml_stages: list[str] = []
+        if os.path.isfile("dvc.yaml"):
+            try:
+                with open("dvc.yaml") as f:
+                    dvc_yaml = calkit.ryaml.load(f)
+                dvc_yaml_stages = list(
+                    (dvc_yaml or {}).get("stages", {}).keys()
+                )
+            except Exception:
+                pass
         ordered_stale_stages = {}
-        for stage_name in stages_config.keys():
-            if stage_name not in raw_stale_stages:
-                continue
+        # First, add stages in dvc.yaml order, matching expanded stage names
+        # (e.g. benchmark-boom@1-3-1) against their base template name
+        # (benchmark-boom) using the position in dvc.yaml
+        dvc_yaml_stage_order = {
+            name: i for i, name in enumerate(dvc_yaml_stages)
+        }
+
+        def _stage_sort_key(stage_name: str) -> int:
+            base = stage_name.split("@")[0]
+            return dvc_yaml_stage_order.get(base, len(dvc_yaml_stages))
+
+        for stage_name in sorted(raw_stale_stages.keys(), key=_stage_sort_key):
             status_data = raw_stale_stages[stage_name]
             ordered_stale_stages[stage_name] = StaleStage.from_status_data(
                 status_data=status_data,
@@ -399,23 +420,14 @@ def get_status(
                     )
                 ],
             )
-        # Keep any stale stages not present in ck_info at the end
-        for stage_name, status_data in raw_stale_stages.items():
-            if stage_name in ordered_stale_stages:
-                continue
-            ordered_stale_stages[stage_name] = StaleStage.from_status_data(
-                status_data=status_data,
-                configured_outputs=[
-                    output.get("path", str(output))
-                    if isinstance(output, dict)
-                    else str(output)
-                    for output in stages_config.get(stage_name, {}).get(
-                        "outputs", []
-                    )
-                ],
-            )
         result["stale_stages"] = ordered_stale_stages
-        return PipelineStatus.model_validate(result)
+        return PipelineStatus(
+            has_pipeline=result["has_pipeline"],
+            environment_checks=result["environment_checks"],
+            cleaned_notebooks=result["cleaned_notebooks"],
+            stale_stages=result["stale_stages"],
+            errors=result["errors"],
+        )
     finally:
         if wdir is not None:
             os.chdir(prev_cwd)

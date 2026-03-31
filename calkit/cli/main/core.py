@@ -347,8 +347,6 @@ def get_status(
             clean_notebooks=True,
             compile_to_dvc=True,
         )
-        for error in pipeline_status.errors:
-            warn(error)
         if pipeline_status.failed_environment_checks:
             warn(
                 "Failed pipeline environment checks for: "
@@ -469,7 +467,9 @@ def get_status(
         print_sep("Pipeline")
         # Nicely format the results from pipeline status
         if pipeline_status and pipeline_status.errors:
-            warn("Pipeline status unavailable due to errors.")
+            warn("Pipeline status unavailable due to errors:")
+            for error in pipeline_status.errors:
+                warn(error)
             return
         if pipeline_status and not pipeline_status.has_pipeline:
             typer.echo("This project has no pipeline.")

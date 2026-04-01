@@ -70,6 +70,13 @@ def unset_config_value(key: str):
 @config_app.command(name="setup-remote", help="Alias for 'remote'.")
 @config_app.command(name="remote")
 def setup_remote(
+    ck: Annotated[
+        bool,
+        typer.Option(
+            "--ck",
+            help="Use a ck:// URL for the 'calkit' DVC remote.",
+        ),
+    ] = False,
     no_commit: Annotated[
         bool,
         typer.Option(
@@ -81,7 +88,7 @@ def setup_remote(
     the local config.
     """
     try:
-        configure_remote()
+        configure_remote(use_ck=ck)
         set_remote_auth()
     except subprocess.CalledProcessError:
         if not os.path.isfile(".dvc/config"):

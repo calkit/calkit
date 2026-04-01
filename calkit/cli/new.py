@@ -7,7 +7,6 @@ import os
 import pathlib
 import shutil
 import subprocess
-import zipfile
 from enum import Enum
 
 import dotenv
@@ -2686,8 +2685,7 @@ def new_release(
         zip_path = release_files_dir + "/archive.zip"
         all_paths = calkit.releases.ls_files()
         typer.echo(f"Adding files to {zip_path}")
-        with zipfile.ZipFile(zip_path, "w") as zipf:
-            calkit.releases.add_paths_to_zip(zipf, all_paths)
+        calkit.releases.zip_paths(zip_path, all_paths)
         typer.echo("Checking extracted project release archive")
         try:
             calkit.releases.check_project_release_archive(

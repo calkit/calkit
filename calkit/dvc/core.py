@@ -11,6 +11,7 @@ from typing import Any
 
 import dvc.repo
 import git
+from configobj import ConfigObj
 from dvc.utils.objects import cached_property
 from dvc_objects.fs.base import ObjectFileSystem
 from fsspec import Callback
@@ -251,10 +252,10 @@ def run_dvc_command(argv: list[str], cwd: str | None = None) -> int:
     return run_dvc_cli(argv)
 
 
-def configure_remote(wdir: str | None = None) -> str:
+def configure_remote(wdir: str | None = None, use_ck: bool = False) -> str:
     """Configure a DVC remote for the current project.
 
-    TODO: Use the ck:// scheme.
+    TODO: Use the ck:// scheme by default once it's deemed stable.
     """
     try:
         project_name = calkit.detect_project_name(wdir=wdir)
@@ -275,8 +276,12 @@ def configure_remote(wdir: str | None = None) -> str:
         if not url.endswith(".git"):
             url += ".git"
         repo.git.remote(["add", "origin", url])
-    base_url = calkit.cloud.get_base_url()
-    remote_url = f"{base_url}/projects/{project_name}/dvc"
+    if use_ck:
+        clear_remote_local_http_auth(wdir=wdir)
+        remote_url = f"ck://{project_name}"
+    else:
+        base_url = calkit.cloud.get_base_url()
+        remote_url = f"{base_url}/projects/{project_name}/dvc"
     remote_name = get_app_name()
     result = run_dvc_command(
         ["remote", "add", "-d", "-f", remote_name, remote_url],
@@ -284,15 +289,45 @@ def configure_remote(wdir: str | None = None) -> str:
     )
     if result != 0:
         raise RuntimeError(f"Failed to add DVC remote {remote_name}")
-    result = run_dvc_command(
-        ["remote", "modify", remote_name, "auth", "custom"],
-        cwd=wdir,
-    )
-    if result != 0:
-        raise RuntimeError(
-            f"Failed to configure auth for DVC remote {remote_name}"
+    if not use_ck:
+        result = run_dvc_command(
+            ["remote", "modify", remote_name, "auth", "custom"],
+            cwd=wdir,
         )
+        if result != 0:
+            raise RuntimeError(
+                f"Failed to configure auth for DVC remote {remote_name}"
+            )
     return remote_name
+
+
+def clear_remote_local_http_auth(
+    remote_name: str | None = None, wdir: str | None = None
+) -> None:
+    """Remove HTTP-specific local auth settings for a DVC remote.
+
+    This clears values written to ``.dvc/config.local`` by HTTP auth setup.
+    """
+    if remote_name is None:
+        remote_name = get_app_name()
+    config_local = Path(wdir or ".") / ".dvc" / "config.local"
+    if not config_local.is_file():
+        return
+    cfg = ConfigObj(str(config_local), encoding="utf-8")
+    section_name = f'remote "{remote_name}"'
+    remote = cfg.get(section_name)
+    if not isinstance(remote, dict):
+        return
+    changed = False
+    for option in ("custom_auth_header", "password", "auth"):
+        if option in remote:
+            remote.pop(option)
+            changed = True
+    if not changed:
+        return
+    if not remote:
+        cfg.pop(section_name, None)
+    cfg.write()
 
 
 def set_remote_auth(
@@ -312,6 +347,7 @@ def set_remote_auth(
     remotes = get_remotes(wdir=wdir)
     remote_url = remotes.get(remote_name, "")
     if remote_url.startswith("ck://"):
+        clear_remote_local_http_auth(remote_name=remote_name, wdir=wdir)
         logger.info(
             f"Remote {remote_name} uses ck:// scheme; skipping HTTP auth setup"
         )

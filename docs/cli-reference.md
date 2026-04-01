@@ -126,9 +126,10 @@ calkit config remote [OPTIONS]
 
 Options:
 
-| Option        | Type    | Required | Default | Description                          |
-| ------------- | ------- | -------- | ------- | ------------------------------------ |
-| `--no-commit` | boolean | no       | False   | Do not commit changes to DVC config. |
+| Option        | Type    | Required | Default | Description                                  |
+| ------------- | ------- | -------- | ------- | -------------------------------------------- |
+| `--ck`        | boolean | no       | False   | Use a ck:// URL for the 'calkit' DVC remote. |
+| `--no-commit` | boolean | no       | False   | Do not commit changes to DVC config.         |
 
 #### `calkit config setup-remote`
 
@@ -142,9 +143,10 @@ calkit config setup-remote [OPTIONS]
 
 Options:
 
-| Option        | Type    | Required | Default | Description                          |
-| ------------- | ------- | -------- | ------- | ------------------------------------ |
-| `--no-commit` | boolean | no       | False   | Do not commit changes to DVC config. |
+| Option        | Type    | Required | Default | Description                                  |
+| ------------- | ------- | -------- | ------- | -------------------------------------------- |
+| `--ck`        | boolean | no       | False   | Use a ck:// URL for the 'calkit' DVC remote. |
+| `--no-commit` | boolean | no       | False   | Do not commit changes to DVC config.         |
 
 #### `calkit config remote-auth`
 

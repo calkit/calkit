@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -12,17 +13,53 @@ import typer
 from calkit.cli.main.core import app
 
 
+def _command_text(cmd: click.Command) -> str:
+    """Return help text for a command."""
+    return (cmd.help or cmd.short_help or "").strip()
+
+
 def _command_desc(cmd: click.Command) -> str:
-    """Return a concise, single-line command description."""
-    desc = (cmd.short_help or cmd.help or "").strip()
-    desc = " ".join(desc.split())
-    return desc
+    """Return a concise summary description (first sentence only)."""
+    text = _command_text(cmd)
+    if not text:
+        return ""
+    first_para = re.split(r"\n\s*\n", text, maxsplit=1)[0]
+    first_para = " ".join(first_para.split())
+    m = re.match(r"^(.+?[.!?])(?:\s|$)", first_para)
+    return m.group(1) if m else first_para
+
+
+def _command_desc_full(cmd: click.Command) -> str:
+    """Return full command description, preserving paragraph breaks."""
+    text = _command_text(cmd)
+    if not text:
+        return ""
+    paragraphs = [
+        " ".join(para.split())
+        for para in re.split(r"\n\s*\n", text)
+        if para.strip()
+    ]
+    return "\n\n".join(paragraphs)
 
 
 def _list_commands(group: click.Group) -> list[tuple[str, click.Command]]:
     """Get commands in display order for a Click/Typer group."""
     names = list(group.commands.keys())
     return [(name, group.commands[name]) for name in names]
+
+
+def _list_unique_commands(
+    group: click.Group,
+) -> list[tuple[list[str], click.Command]]:
+    """Get canonical commands, excluding aliases."""
+    alias_re = re.compile(r"\balias for ['\"]([^'\"]+)['\"]", re.IGNORECASE)
+    commands: list[tuple[list[str], click.Command]] = []
+    for name, cmd in _list_commands(group):
+        desc = _command_text(cmd)
+        if alias_re.search(desc):
+            continue
+        commands.append(([name], cmd))
+    return commands
 
 
 def _type_name(param_type: click.ParamType) -> str:
@@ -70,6 +107,9 @@ def _usage(command_path: str, cmd_obj: click.Command) -> str:
         if not param.required:
             arg_name = f"[{arg_name}]"
         parts.append(arg_name)
+
+    if isinstance(cmd_obj, click.Group) and cmd_obj.commands:
+        parts.extend(["COMMAND", "[ARGS]..."])
 
     return " ".join(parts)
 
@@ -140,6 +180,80 @@ def _has_visible_options(cmd_obj: click.Command) -> bool:
     return False
 
 
+def _append_command_details(
+    lines: list[str],
+    command_path: str,
+    cmd_obj: click.Command,
+    heading: str = "###",
+    anchor: str | None = None,
+) -> None:
+    """Append command detail markdown (usage, args, options)."""
+    if anchor:
+        lines.append(f'<a id="{anchor}"></a>')
+        lines.append("")
+    lines.append(f"{heading} `{command_path}`")
+    lines.append("")
+    cmd_desc = _command_desc_full(cmd_obj)
+    if cmd_desc:
+        lines.append(cmd_desc)
+        lines.append("")
+    lines.append("Usage:")
+    lines.append("")
+    lines.append("```text")
+    lines.append(_usage(command_path, cmd_obj))
+    lines.append("```")
+    lines.append("")
+    if _has_args(cmd_obj):
+        lines.append("Arguments:")
+        lines.append("")
+        lines.append(_args_table(cmd_obj).rstrip())
+        lines.append("")
+    if _has_visible_options(cmd_obj):
+        lines.append("Options:")
+        lines.append("")
+        lines.append(_opts_table(cmd_obj).rstrip())
+        lines.append("")
+
+
+def _command_label(names: list[str]) -> str:
+    """Render a canonical command name for display in docs."""
+    return f"`{names[0]}`"
+
+
+def _command_path_label(prefix: str, names: list[str]) -> str:
+    """Render a canonical full command path for a section header."""
+    return f"{prefix} {names[0]}"
+
+
+def _slug(text: str) -> str:
+    """Generate a stable, URL-friendly slug."""
+    lowered = text.lower()
+    cleaned = re.sub(r"[^a-z0-9]+", "-", lowered).strip("-")
+    return cleaned or "command"
+
+
+def _top_command_anchor(names: list[str]) -> str:
+    """Build anchor ID for a top-level command detail section."""
+    return "top-command-" + _slug(names[0])
+
+
+def _group_anchor(names: list[str]) -> str:
+    """Build anchor ID for a top-level command-group section."""
+    return "command-group-" + _slug(names[0])
+
+
+def _subcommand_anchor(group_names: list[str], sub_names: list[str]) -> str:
+    """Build anchor ID for a subcommand detail section within a group."""
+    group_part = _slug(group_names[0])
+    sub_part = _slug(sub_names[0])
+    return f"subcommand-{group_part}-{sub_part}"
+
+
+def _command_link_label(names: list[str], anchor: str) -> str:
+    """Render one or more command names as a link label."""
+    return f"[{_command_label(names)}](#{anchor})"
+
+
 def make_table(rows: list[tuple[Any, ...]], header: list[str]) -> str:
     if not rows:
         return "(none)\n"
@@ -174,7 +288,8 @@ def generate_markdown() -> str:
         raise TypeError("Expected root CLI command to be a Click Group")
     top_summary = _command_desc(root_cmd)
     top_commands = [
-        (name, _command_desc(cmd)) for name, cmd in _list_commands(root_cmd)
+        (names, cmd_obj, _command_desc(cmd_obj))
+        for names, cmd_obj in _list_unique_commands(root_cmd)
     ]
     lines: list[str] = []
     lines.append("# CLI reference")
@@ -184,25 +299,57 @@ def generate_markdown() -> str:
         lines.append("")
     lines.append("## Top-level commands")
     lines.append("")
+
+    def _top_table_anchor(names: list[str], cmd_obj: click.Command) -> str:
+        is_group_with_subcommands = isinstance(cmd_obj, click.Group) and bool(
+            cmd_obj.commands
+        )
+        return (
+            _group_anchor(names)
+            if is_group_with_subcommands
+            else _top_command_anchor(names)
+        )
+
     lines.append(
         make_table(
-            [(f"`{name}`", desc) for name, desc in top_commands],
+            [
+                (
+                    _command_link_label(
+                        names, _top_table_anchor(names, cmd_obj)
+                    ),
+                    desc,
+                )
+                for names, cmd_obj, desc in top_commands
+            ],
             ["Command", "Description"],
         ).rstrip()
     )
     lines.append("")
+    lines.append("## Top-level command details")
+    lines.append("")
+    for cmd_names, cmd_obj, _ in top_commands:
+        if isinstance(cmd_obj, click.Group) and cmd_obj.commands:
+            continue
+        _append_command_details(
+            lines,
+            _command_path_label("calkit", cmd_names),
+            cmd_obj,
+            heading="###",
+            anchor=_top_command_anchor(cmd_names),
+        )
     lines.append("## Command groups")
     lines.append("")
     found_group = False
-    for cmd_name, cmd_desc in top_commands:
-        cmd_obj = root_cmd.commands[cmd_name]
+    for cmd_names, cmd_obj, cmd_desc in top_commands:
         if not isinstance(cmd_obj, click.Group):
             continue
-        subcommands = _list_commands(cmd_obj)
+        subcommands = _list_unique_commands(cmd_obj)
         if not subcommands:
             continue
         found_group = True
-        lines.append(f"### `calkit {cmd_name}`")
+        lines.append(f'<a id="{_group_anchor(cmd_names)}"></a>')
+        lines.append("")
+        lines.append(f"### `{_command_path_label('calkit', cmd_names)}`")
         lines.append("")
         if cmd_desc:
             lines.append(cmd_desc)
@@ -210,37 +357,28 @@ def generate_markdown() -> str:
         lines.append(
             make_table(
                 [
-                    (f"`{name}`", _command_desc(sub_cmd))
-                    for name, sub_cmd in subcommands
+                    (
+                        _command_link_label(
+                            names, _subcommand_anchor(cmd_names, names)
+                        ),
+                        _command_desc(sub_cmd),
+                    )
+                    for names, sub_cmd in subcommands
                 ],
                 ["Command", "Description"],
             ).rstrip()
         )
         lines.append("")
-        for sub_name, sub_obj in subcommands:
-            command_path = f"calkit {cmd_name} {sub_name}"
-            lines.append(f"#### `{command_path}`")
-            lines.append("")
-            sub_desc = _command_desc(sub_obj)
-            if sub_desc:
-                lines.append(sub_desc)
-                lines.append("")
-            lines.append("Usage:")
-            lines.append("")
-            lines.append("```text")
-            lines.append(_usage(command_path, sub_obj))
-            lines.append("```")
-            lines.append("")
-            if _has_args(sub_obj):
-                lines.append("Arguments:")
-                lines.append("")
-                lines.append(_args_table(sub_obj).rstrip())
-                lines.append("")
-            if _has_visible_options(sub_obj):
-                lines.append("Options:")
-                lines.append("")
-                lines.append(_opts_table(sub_obj).rstrip())
-                lines.append("")
+        for sub_names, sub_obj in subcommands:
+            _append_command_details(
+                lines,
+                _command_path_label(
+                    _command_path_label("calkit", cmd_names), sub_names
+                ),
+                sub_obj,
+                heading="####",
+                anchor=_subcommand_anchor(cmd_names, sub_names),
+            )
     if not found_group:
         lines.append("No command groups were detected.")
         lines.append("")

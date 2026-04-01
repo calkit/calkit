@@ -101,7 +101,6 @@ def test_configure_remote_ck_uses_ck_scheme_and_skips_http_auth(monkeypatch):
             return "origin"
 
     monkeypatch.setattr(git, "Repo", lambda wdir=None: DummyRepo())
-
     calls = []
     events = []
 
@@ -116,9 +115,7 @@ def test_configure_remote_ck_uses_ck_scheme_and_skips_http_auth(monkeypatch):
         "clear_remote_local_http_auth",
         lambda remote_name=None, wdir=None: events.append("clear"),
     )
-
     out = calkit.dvc.configure_remote(use_ck=True)
-
     assert out == calkit.config.get_app_name()
     assert events and events[0] == "clear"
     assert calls == [
@@ -155,11 +152,9 @@ def test_set_remote_auth_ck_remote_clears_local_http_auth(
             "    password = Bearer token\n"
             "    url = https://example.com\n"
         )
-
     calkit.dvc.set_remote_auth(wdir=str(tmp_path))
-
     cfg = ConfigObj(str(fpath), encoding="utf-8")
     section = cfg[f'remote "{remote_name}"']
     assert "custom_auth_header" not in section
     assert "password" not in section
-    assert section["url"] == "https://example.com"
+    assert section["url"] == "https://example.com"  # type: ignore

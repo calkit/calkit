@@ -10,10 +10,10 @@ import git
 import pytest
 
 from calkit.releases import (
-    add_paths_to_zip,
     check_project_release_archive,
     create_bibtex,
     ls_files,
+    zip_paths,
 )
 
 
@@ -135,16 +135,16 @@ def test_create_bibtex():
     assert len(entries) == 1
 
 
-def test_add_paths_to_zip_expands_directory_contents(tmp_dir):
+def test_zip_paths(tmp_dir):
     os.makedirs("data/sub", exist_ok=True)
     with open("data/sub/file.txt", "w") as f:
         f.write("hello")
     with open("root.txt", "w") as f:
         f.write("root")
     zip_path = "archive.zip"
-    with zipfile.ZipFile(zip_path, "w") as zipf:
-        add_paths_to_zip(zipf, ["data", "root.txt"])
+    zip_paths(zip_path, ["data", "root.txt"])
     with zipfile.ZipFile(zip_path) as zipf:
         names = set(zipf.namelist())
-    assert "data/sub/file.txt" in names
-    assert "root.txt" in names
+        assert "data/sub/file.txt" in names
+        assert "root.txt" in names
+        assert zipf.getinfo("root.txt").compress_type == zipfile.ZIP_DEFLATED

@@ -184,16 +184,21 @@ def make_dvc_md5s(
     return resp
 
 
-def add_paths_to_zip(zipf: zipfile.ZipFile, paths: list[str]) -> None:
-    """Add files to a zip archive, expanding directories recursively."""
-    for path in paths:
-        if os.path.isdir(path):
-            for root, _, files in os.walk(path):
-                for filename in files:
-                    fpath = os.path.join(root, filename)
-                    zipf.write(fpath)
-        elif os.path.isfile(path):
-            zipf.write(path)
+def zip_paths(zip_path: str, paths: list[str]) -> None:
+    """Create a compressed ZIP from a list of file or directory paths."""
+    with zipfile.ZipFile(
+        zip_path,
+        "w",
+        compression=zipfile.ZIP_DEFLATED,
+    ) as zipf:
+        for path in paths:
+            if os.path.isdir(path):
+                for root, _, files in os.walk(path):
+                    for filename in files:
+                        fpath = os.path.join(root, filename)
+                        zipf.write(fpath)
+            elif os.path.isfile(path):
+                zipf.write(path)
 
 
 def populate_dvc_cache():

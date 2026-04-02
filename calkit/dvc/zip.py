@@ -25,6 +25,7 @@ from tqdm import tqdm
 import calkit
 import calkit.git
 from calkit.core import DVC_SIZE_THRESH_BYTES
+from calkit.dvc.core import run_dvc_command
 
 LOCAL_DIR = ".calkit/local"
 ZIPS_DIR = ".calkit/zip"
@@ -470,7 +471,7 @@ def sync_one(
     if zip_deleted and direction == "to-zip":
         typer.echo(f"Rezipping '{workspace_path}' (zip was deleted)")
         zip_(workspace_path=workspace_path, zip_path=zip_path)
-        subprocess.run(["dvc", "add", zip_path], check=True)
+        run_dvc_command(["add", zip_path])
         zip_hash = get_hash(zip_path)
     # Workspace was deleted but zip exists and direction is to-workspace:
     # restore workspace
@@ -492,7 +493,7 @@ def sync_one(
     if workspace_changed and (direction in ["to-zip", "both"]):
         typer.echo(f"Zipping '{workspace_path}' (workspace has changed)")
         zip_(workspace_path=workspace_path, zip_path=zip_path)
-        subprocess.run(["dvc", "add", zip_path], check=True)
+        run_dvc_command(["add", zip_path])
         zip_hash = get_hash(zip_path)
     # If we unzip, we need to update the hash
     if zip_changed and (direction in ["to-workspace", "both"]):

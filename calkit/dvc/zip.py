@@ -42,8 +42,9 @@ ZIP_CANDIDATE_MIN_FILE_COUNT = 10
 # Favor speed for dvc-zip by default; users can tune 0..9 via env var
 # CALKIT_DVC_ZIP_COMPRESS_LEVEL
 ZIP_COMPRESS_LEVEL = 1
-# Prefer system zip/unzip tools when available for better performance
-ZIP_USE_SYSTEM_CLI = True
+# Use Python zipfile by default; set CALKIT_DVC_ZIP_USE_SYSTEM=1 to try
+# the system zip/unzip tools instead (may be faster for very large files)
+ZIP_USE_SYSTEM_CLI = False
 
 
 def _check_local_dir() -> Path:
@@ -337,15 +338,14 @@ def zip_(workspace_path: str, zip_path: str):
                 "System zip failed; falling back to Python zipfile.",
                 err=True,
             )
+    all_files = list(_iter_files(workspace_path))
     with ZipFile(
         zip_path,
         "w",
         compression=zipfile.ZIP_DEFLATED,
         compresslevel=compress_level,
     ) as zip_file:
-        for file_path in tqdm(
-            _iter_files(workspace_path), desc="Zipping", unit="file"
-        ):
+        for file_path in tqdm(all_files, desc="Zipping", unit="file"):
             zip_file.write(
                 file_path, os.path.relpath(file_path, workspace_path)
             )

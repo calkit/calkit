@@ -200,7 +200,14 @@ def test_get_sync_status(tmp_dir):
 
 
 def test_sync_one(tmp_dir, monkeypatch):
-    monkeypatch.setattr("calkit.dvc.zip.subprocess.run", lambda *_, **__: None)
+    real_run = calkit.dvc.zip.subprocess.run
+
+    def _run(cmd, *args, **kwargs):
+        if cmd and cmd[0] == "dvc":
+            return None
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr("calkit.dvc.zip.subprocess.run", _run)
     # to-zip: zips input and writes sync record
     src = tmp_dir / "src"
     src.mkdir()

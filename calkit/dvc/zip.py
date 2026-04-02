@@ -38,6 +38,11 @@ ZIP_CANDIDATE_AVG_FILE_SIZE_BYTES = 10_000_000  # 10 MB
 # Minimum number of files a directory must contain to be a zip candidate;
 # a single large file is better tracked directly by DVC
 ZIP_CANDIDATE_MIN_FILE_COUNT = 10
+# Favor speed for dvc-zip by default; users can tune 0..9 via env var
+# CALKIT_DVC_ZIP_COMPRESS_LEVEL
+ZIP_COMPRESS_LEVEL = 1
+# Prefer system zip/unzip tools when available for better performance
+ZIP_USE_SYSTEM_CLI = True
 
 
 def _check_local_dir() -> Path:
@@ -285,17 +290,61 @@ def get_zip_path(workspace_path: str) -> str:
     raise ValueError(f"No zip path defined for {workspace_path}")
 
 
+def _get_zip_compress_level() -> int:
+    raw = os.getenv("CALKIT_DVC_ZIP_COMPRESS_LEVEL", str(ZIP_COMPRESS_LEVEL))
+    try:
+        level = int(raw)
+    except ValueError:
+        typer.echo(
+            "Invalid CALKIT_DVC_ZIP_COMPRESS_LEVEL value; "
+            f"using default {ZIP_COMPRESS_LEVEL}.",
+            err=True,
+        )
+        return ZIP_COMPRESS_LEVEL
+    return min(max(level, 0), 9)
+
+
+def _should_use_system_zip_cli() -> bool:
+    raw = os.getenv("CALKIT_DVC_ZIP_USE_SYSTEM")
+    if raw is None:
+        return ZIP_USE_SYSTEM_CLI
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _iter_files(path: str):
+    for foldername, _, filenames in os.walk(path):
+        for filename in filenames:
+            yield os.path.join(foldername, filename)
+
+
 def zip_(workspace_path: str, zip_path: str):
     """Zip a path."""
+    zip_path = os.path.abspath(zip_path)
     output_dir = os.path.dirname(zip_path)
     os.makedirs(output_dir, exist_ok=True)
-    all_files = [
-        os.path.join(foldername, filename)
-        for foldername, _, filenames in os.walk(workspace_path)
-        for filename in filenames
-    ]
-    with ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
-        for file_path in tqdm(all_files, desc="Zipping", unit="file"):
+    compress_level = _get_zip_compress_level()
+    if _should_use_system_zip_cli() and shutil.which("zip"):
+        try:
+            subprocess.run(
+                ["zip", "-q", f"-{compress_level}", "-r", zip_path, "."],
+                check=True,
+                cwd=workspace_path,
+            )
+            return
+        except Exception:
+            typer.echo(
+                "System zip failed; falling back to Python zipfile.",
+                err=True,
+            )
+    with ZipFile(
+        zip_path,
+        "w",
+        compression=zipfile.ZIP_DEFLATED,
+        compresslevel=compress_level,
+    ) as zip_file:
+        for file_path in tqdm(
+            _iter_files(workspace_path), desc="Zipping", unit="file"
+        ):
             zip_file.write(
                 file_path, os.path.relpath(file_path, workspace_path)
             )
@@ -303,11 +352,25 @@ def zip_(workspace_path: str, zip_path: str):
 
 def unzip(workspace_path: str, zip_path: str):
     """Unzip from zip to workspace."""
+    zip_path = os.path.abspath(zip_path)
     input_dir = os.path.dirname(workspace_path)
     if input_dir:
         os.makedirs(input_dir, exist_ok=True)
+    if _should_use_system_zip_cli() and shutil.which("unzip"):
+        try:
+            os.makedirs(workspace_path, exist_ok=True)
+            subprocess.run(
+                ["unzip", "-oq", zip_path, "-d", workspace_path],
+                check=True,
+            )
+            return
+        except Exception:
+            typer.echo(
+                "System unzip failed; falling back to Python zipfile.",
+                err=True,
+            )
     with ZipFile(zip_path, "r") as zip_file:
-        members = zip_file.namelist()
+        members = zip_file.infolist()
         for member in tqdm(members, desc="Unzipping", unit="file"):
             zip_file.extract(member, workspace_path)
 

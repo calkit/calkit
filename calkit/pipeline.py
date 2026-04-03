@@ -4,9 +4,9 @@ import itertools
 import os
 
 import git
+import ruamel.yaml
 import typer
 from pydantic import BaseModel, Field, computed_field, field_validator
-from ruamel.yaml.scalarstring import FoldedScalarString
 
 import calkit
 import calkit.dvc.zip
@@ -18,6 +18,15 @@ from calkit.models.pipeline import (
     PathOutput,
     Pipeline,
 )
+
+# A dedicated YAML instance for reading/writing dvc.yaml files.
+# Uses a very large width to prevent plain scalar folding, which would
+# otherwise produce trailing spaces that vary between ruamel.yaml versions
+# and cause spurious cross-platform diffs (e.g., macOS vs. Linux).
+_dvc_ryaml = ruamel.yaml.YAML()
+_dvc_ryaml.indent(mapping=2, sequence=4, offset=2)
+_dvc_ryaml.preserve_quotes = True
+_dvc_ryaml.width = 2**31 - 1
 
 
 class PipelineStatus(BaseModel):
@@ -456,7 +465,7 @@ def to_dvc(
         dvc_yaml_path = os.path.join(wdir, "dvc.yaml") if wdir else "dvc.yaml"
         if os.path.isfile(dvc_yaml_path):
             with open(dvc_yaml_path) as f:
-                existing_dvc_yaml = calkit.ryaml.load(f)
+                existing_dvc_yaml = _dvc_ryaml.load(f)
         else:
             existing_dvc_yaml = {}
         if existing_dvc_yaml is None:
@@ -559,10 +568,7 @@ def to_dvc(
             dvc_stage["outs"] = formatted_outs
             dvc_stage["matrix"] = dvc_matrix
         # Add a description to the DVC stage
-        # Use FoldedScalarString to ensure consistent cross-platform YAML
-        # output, avoiding trailing spaces that plain scalar folding can
-        # introduce in some ruamel.yaml versions
-        desc = FoldedScalarString(
+        desc = (
             f"Automatically generated from the '{stage_name}' stage "
             "in calkit.yaml. Changes made here will be overwritten."
         )
@@ -648,5 +654,5 @@ def to_dvc(
         with open("dvc.yaml", "w") as f:
             if verbose:
                 typer.echo("Writing to dvc.yaml")
-            calkit.ryaml.dump(dvc_yaml, f)
+            _dvc_ryaml.dump(dvc_yaml, f)
     return dvc_stages

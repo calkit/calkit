@@ -6,6 +6,7 @@ import os
 import git
 import typer
 from pydantic import BaseModel, Field, computed_field, field_validator
+from ruamel.yaml.scalarstring import FoldedScalarString
 
 import calkit
 import calkit.dvc.zip
@@ -558,7 +559,10 @@ def to_dvc(
             dvc_stage["outs"] = formatted_outs
             dvc_stage["matrix"] = dvc_matrix
         # Add a description to the DVC stage
-        desc = (
+        # Use FoldedScalarString to ensure consistent cross-platform YAML
+        # output, avoiding trailing spaces that plain scalar folding can
+        # introduce in some ruamel.yaml versions
+        desc = FoldedScalarString(
             f"Automatically generated from the '{stage_name}' stage "
             "in calkit.yaml. Changes made here will be overwritten."
         )

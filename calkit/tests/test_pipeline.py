@@ -1,10 +1,12 @@
 """Tests for ``calkit.pipeline``."""
 
+import io
 import os
 import subprocess
 
 import git
 import pytest
+from ruamel.yaml.scalarstring import FoldedScalarString
 
 import calkit
 import calkit.pipeline
@@ -72,6 +74,45 @@ def test_stages_are_similar():
     assert stages_are_similar(command1, command2)
     command3 = {"kind": "command", "command": "-i other.mmd -o other.svg"}
     assert not stages_are_similar(command1, command3)
+
+
+def test_to_dvc_desc_is_cross_platform():
+    """Test that the desc field uses FoldedScalarString for consistent
+    cross-platform YAML output without trailing spaces in plain scalar folds.
+    """
+    ck_info = {
+        "environments": {
+            "py": {
+                "kind": "venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+            }
+        },
+        "pipeline": {
+            "stages": {
+                "my-stage": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "scripts/run.py",
+                    "outputs": ["output.csv"],
+                }
+            }
+        },
+    }
+    stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    desc = stages["my-stage"]["desc"]
+    # desc should be a FoldedScalarString for cross-platform portability
+    assert isinstance(desc, FoldedScalarString)
+    # The desc value should start with the expected text
+    assert desc.startswith("Automatically generated")
+    # Dumping the YAML should not produce trailing spaces before line breaks
+    data = {"stages": stages}
+    s = io.StringIO()
+    calkit.ryaml.dump(data, s)
+    for line in s.getvalue().splitlines():
+        assert not line.endswith(" "), (
+            f"Line has trailing space: {line!r}"
+        )
 
 
 def test_to_dvc():

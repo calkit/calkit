@@ -40,7 +40,8 @@ def get_content_without_title(doc_path: Path) -> str:
 def convert_relative_links(content: str) -> str:
     """Convert relative markdown links to absolute URLs for docs.calkit.org.
 
-    Converts links like [text](relative-path.md) to [text](https://docs.calkit.org/relative-path)
+    Converts links like [text](relative-path.md) to
+    [text](https://docs.calkit.org/relative-path)
     but only if they're not already absolute URLs or anchor links.
 
     Parameters
@@ -53,7 +54,8 @@ def convert_relative_links(content: str) -> str:
     str
         Content with converted links
     """
-    # Match markdown links [text](url) where url doesn't start with http, https, #, or /
+    # Match markdown links [text](url) where url doesn't start with http,
+    # https, #, or /
     pattern = r"\[([^\]]+)\]\((?!https?:|#|/)([^\)]+)\)"
 
     def replace_link(match: Match[str]) -> str:
@@ -126,8 +128,12 @@ def process_readme(readme_path: Path, docs_dir: Path) -> str:
         Processed README content
     """
     content = readme_path.read_text(encoding="utf-8")
-    # Find include blocks - format: <!-- INCLUDE: docs/file.md [+shift] -->...<!-- END INCLUDE -->
-    pattern = r"<!-- INCLUDE: docs/([^\s\]]+)(?:\s\+(\d+))? -->(.*?)<!-- END INCLUDE -->"
+    # Find include blocks - format: <!-- INCLUDE: docs/file.md [+shift]
+    # -->...<!-- END INCLUDE -->
+    pattern = (
+        r"<!-- INCLUDE: docs/([^\s\]]+)(?:\s\+(\d+))? "
+        r"-->(.*?)<!-- END INCLUDE -->"
+    )
 
     def replace_include(match: Match[str]) -> str:
         doc_file = match.group(1).strip()
@@ -140,7 +146,11 @@ def process_readme(readme_path: Path, docs_dir: Path) -> str:
             # Convert relative links to absolute URLs
             doc_content = convert_relative_links(doc_content)
             # Return just the content, preserving the markers
-            return f"<!-- INCLUDE: docs/{doc_file}{' +' + str(shift) if shift else ''} -->\n\n{doc_content}\n\n<!-- END INCLUDE -->"
+            return (
+                f"<!-- INCLUDE: docs/{doc_file}"
+                f"{' +' + str(shift) if shift else ''} "
+                f"-->\n\n{doc_content}\n\n<!-- END INCLUDE -->"
+            )
         except FileNotFoundError as e:
             print(f"Error: {e}", file=sys.stderr)
             return match.group(0)

@@ -50,7 +50,3 @@ while guiding users away from common reproducibility pitfalls.
 - [Overleaf integration](https://docs.calkit.org/overleaf/), so code,
   data, and LaTeX documents can all live in the same repo and be part of a
   single pipeline (no more manual uploads!)
-
-## Installation
-
-See [installation](installation.md).

@@ -17,6 +17,8 @@
   </a>
 </p>
 
+<!-- INCLUDE: docs/index.md -->
+
 Calkit makes it easy to create
 ["single button"](https://doi.org/10.1190/1.1822162)
 reproducible research projects.
@@ -43,7 +45,7 @@ while guiding users away from common reproducibility pitfalls.
 
 ## Features
 
-- A declarative pipeline that guides users to define an environment
+- A declarative pipeline that forces users to define an environment
   for every stage, so long lists of instructions in a README and
   "but it works on my machine" are things of the past.
 - A CLI to run the project's pipeline to verify it's reproducible,
@@ -67,6 +69,8 @@ while guiding users away from common reproducibility pitfalls.
 - [Overleaf integration](https://docs.calkit.org/overleaf/), so code,
   data, and LaTeX documents can all live in the same repo and be part of a
   single pipeline (no more manual uploads!)
+
+<!-- END INCLUDE -->
 
 ## Installation
 

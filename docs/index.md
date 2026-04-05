@@ -1,6 +1,6 @@
 # Home
 
-Calkit helps you manage and automate your research projects like a software
+Calkit helps you manage and automate research projects like a software
 engineer.
 
 Define computational environments,

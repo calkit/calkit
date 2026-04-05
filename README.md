@@ -35,9 +35,8 @@ and build upon the results.
 
 ## Guiding principles
 
-- Quality comes from iteration. Automation helps reduce the time and effort
-  needed to iterate, thereby increasing the number of iterations done on
-  any given project.
+- Quality comes from iteration. Automation reduces the time and effort
+  needed to iterate, thereby increasing iteration and quality.
 - Automating a step usually takes the same amount of time as doing it once
   manually, therefore it's almost always worth it.
 

@@ -50,7 +50,7 @@ calkit config set token YOUR_TOKEN_HERE
 Next, clone the repo to your local machine with (filling in your username):
 
 ```sh
-calkit clone https://github.com/YOUR_USERNAME/rans-boundary-layer-validation.git
+calkit clone YOUR_USERNAME/rans-boundary-layer-validation
 ```
 
 Note you can modify the URL above to use SSH if that's how you interact with
@@ -129,7 +129,7 @@ the Docker image build be built and we'll see the help output from
 Running this command again will not kick off a rebuild
 unless the Dockerfile is modified.
 
-You'll notice there is a new `Dockerfile-lock.json` file
+You'll notice there is a new `.calkit/env-locks` folder
 in the repo,
 which is how Calkit determines if the image needs to be rebuilt.
 We should now
@@ -138,7 +138,7 @@ collaborators.
 We can do this with the `calkit save` command:
 
 ```sh
-calkit save Dockerfile-lock.json -m "Add Docker lock file"
+calkit save .calkit/env-locks -m "Add Docker lock file"
 ```
 
 which does the `add`, `commit`, `push` steps all in one,

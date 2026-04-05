@@ -5,20 +5,16 @@ change is pushed, either to the main branch or on a pull request,
 using GitHub Actions.
 The latter allows for inspection of outputs before merging into main.
 
-To get started, generate a DVC token and set it in your GitHub Actions
-secrets as `CALKIT_DVC_TOKEN`,
-either at your account or project level.
-On calkit.io, there are shortcuts on the project page for managing both
-Calkit tokens and GitHub Actions secrets:
+Add a Calkit GitHub Actions workflow to the project with:
 
-![Project quick actions links](img/quick-actions.png)
+```sh
+calkit update github-actions
+```
 
-![DVC token](img/latex-codespaces/new-token.png)
+Note that this command can be run at any time to update to the latest
+recommended workflow configuration.
 
-![Actions repo secrets](img/actions-repo-secrets.png)
-
-Next, add a workflow to the project in the `.github/workflows` folder.
-For example, we can put the content below into `.github/workflows/run.yml`:
+Inside `.github/workflows/run-calkit.yml` you'll then see something like:
 
 ```yaml
 name: Run pipeline
@@ -28,9 +24,11 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: write
+  id-token: write
 
 # Make sure we only ever run one per branch so we don't have issues pushing
 # after running the pipeline
@@ -57,9 +55,7 @@ jobs:
       - name: Install Calkit
         run: uv tool install calkit-python
       - name: Run Calkit
-        uses: calkit/run-action@v1
-        with:
-          dvc_token: ${{ secrets.CALKIT_DVC_TOKEN }}
+        uses: calkit/run-action@v2
 ```
 
 This particular example installs Calkit with uv,

@@ -65,8 +65,8 @@ You can check the kernel is actually running in a SLURM job by printing the
 
 ![SLURM job running](img/vscode-slurm-notebook/slurm-job-running.png)
 
-The job will be cancelled as soon as the notebook is closed.
-Alternatively, it can be cancelled with the "Stop Jupyter SLURM Job" button
+The job will be canceled as soon as the notebook is closed.
+Alternatively, it can be canceled with the "Stop Jupyter SLURM Job" button
 in the notebook toolbar.
 
 Next time you open the notebook,

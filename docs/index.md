@@ -18,8 +18,11 @@ and build upon the results.
 
 - Quality comes from iteration. Automation reduces the time and effort
   needed to iterate, thereby increasing iteration and quality.
-- Automating a step usually takes the same amount of time as doing it once
-  manually, therefore it's almost always worth it.
+- Automating a step can and should take roughly
+  the same amount of time as doing it once manually,
+  therefore it's almost always worth it.
+- Working in a "quick and dirty" way can easily become _not quick_ when
+  the dirtiness results in mistakes and/or discourages working in small steps.
 
 ## Features
 

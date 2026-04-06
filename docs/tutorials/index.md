@@ -12,3 +12,4 @@
 - [A reproducible workflow using Microsoft Office (Word and Excel)](office.md)
 - [Using Calkit with MATLAB](matlab.md)
 - [Automation with GitHub Actions](github-actions.md)
+- [Connect a Jupyter Notebook to a SLURM environment in VS Code](vscode-slurm-notebook.md)

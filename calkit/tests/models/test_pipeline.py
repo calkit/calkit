@@ -68,7 +68,7 @@ def test_latexstage():
     s.verbose = True
     assert " --verbose " in s.dvc_cmd
     assert "my-paper.tex" in s.dvc_deps
-    assert {"my-paper.pdf": {"cache": True}} in s.dvc_outs
+    assert "my-paper.pdf" in s.dvc_outs
     s = LatexStage(
         name="something",
         environment="tex",

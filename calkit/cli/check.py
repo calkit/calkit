@@ -309,6 +309,13 @@ def check_environment(
             quiet=not verbose,
         )
     elif env["kind"] == "conda":
+        project_name = ck_info.get("name")
+        if project_name is None:
+            project_name = os.path.basename(os.getcwd())
+        expected_conda_name = calkit.conda.default_conda_env_name(
+            env_name,
+            project_name,
+        )
         lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=False
         )
@@ -323,6 +330,7 @@ def check_environment(
             output_fpath=lock_fpath,
             alt_lock_fpaths_delete=[str(legacy_lock_fpath)],
             alt_lock_fpaths=alt_lock_fpaths,
+            expected_name=expected_conda_name,
             relaxed=True,  # TODO: Add option?
             quiet=not verbose,
         )
@@ -984,6 +992,17 @@ def check_conda_env(
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Be quiet.")
     ] = False,
+    auto_sync_name: Annotated[
+        bool,
+        typer.Option(
+            "--auto-sync-name/--no-auto-sync-name",
+            help=(
+                "Automatically update the 'name' in the conda spec file "
+                "to the expected canonical name when they differ."
+            ),
+        ),
+    ] = True,
+    expected_name: str | None = None,
 ) -> None:
     log_func: Callable[..., None]
     if quiet:
@@ -999,6 +1018,8 @@ def check_conda_env(
             log_func=log_func,
             relaxed=relaxed,
             verbose=not quiet,
+            expected_name=expected_name,
+            auto_sync_name=auto_sync_name,
         )
     except Exception as e:
         raise_error(f"Failed to check conda environment: {e}")

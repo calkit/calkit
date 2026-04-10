@@ -1061,17 +1061,16 @@ Arguments:
 
 Options:
 
-| Option              | Type    | Required | Default         | Description                                                                                                                                                                                     |
-| ------------------- | ------- | -------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`      | text    | yes      |                 | Environment name.                                                                                                                                                                               |
-| `--conda-name`      | text    | no       |                 | Name to use in the Conda environment file, if desired. Will be automatically generated if not provided. Note that these should be unique since Conda environments are a system-wide collection. |
-| `--path`            | text    | no       | environment.yml | Environment YAML file path.                                                                                                                                                                     |
-| `--pip`             | text    | no       |                 | Packages to install with pip.                                                                                                                                                                   |
-| `--prefix`          | text    | no       |                 | Prefix for environment location.                                                                                                                                                                |
-| `--description`     | text    | no       |                 | Description.                                                                                                                                                                                    |
-| `--overwrite`, `-f` | boolean | no       | False           | Overwrite any existing environment with this name.                                                                                                                                              |
-| `--no-commit`       | boolean | no       | False           | Do not commit changes.                                                                                                                                                                          |
-| `--no-check`        | boolean | no       | False           | Do not check environment is up-to-date after creation.                                                                                                                                          |
+| Option              | Type    | Required | Default         | Description                                            |
+| ------------------- | ------- | -------- | --------------- | ------------------------------------------------------ |
+| `--name`, `-n`      | text    | yes      |                 | Environment name.                                      |
+| `--path`            | text    | no       | environment.yml | Environment YAML file path.                            |
+| `--pip`             | text    | no       |                 | Packages to install with pip.                          |
+| `--prefix`          | text    | no       |                 | Prefix for environment location.                       |
+| `--description`     | text    | no       |                 | Description.                                           |
+| `--overwrite`, `-f` | boolean | no       | False           | Overwrite any existing environment with this name.     |
+| `--no-commit`       | boolean | no       | False           | Do not commit changes.                                 |
+| `--no-check`        | boolean | no       | False           | Do not check environment is up-to-date after creation. |
 
 <a id="subcommand-new-uv-env"></a>
 
@@ -2311,14 +2310,16 @@ calkit check conda-env [OPTIONS]
 
 Options:
 
-| Option           | Type    | Required | Default         | Description                                                                                                                                                   |
-| ---------------- | ------- | -------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--file`, `-f`   | text    | no       | environment.yml | Path to conda environment YAML file.                                                                                                                          |
-| `--output`, `-o` | text    | no       |                 | Path to which existing environment should be exported. If not specified, will have the same filename with '-lock' appended to it, keeping the same extension. |
-| `--input`        | text    | no       |                 | Alternative lock file input paths.                                                                                                                            |
-| `--input-delete` | text    | no       |                 | Alternative lock file input paths to delete after use.                                                                                                        |
-| `--relaxed`      | boolean | no       | False           | Treat conda and pip dependencies as equivalent.                                                                                                               |
-| `--quiet`, `-q`  | boolean | no       | False           | Be quiet.                                                                                                                                                     |
+| Option                                    | Type    | Required | Default         | Description                                                                                                                                                   |
+| ----------------------------------------- | ------- | -------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--file`, `-f`                            | text    | no       | environment.yml | Path to conda environment YAML file.                                                                                                                          |
+| `--output`, `-o`                          | text    | no       |                 | Path to which existing environment should be exported. If not specified, will have the same filename with '-lock' appended to it, keeping the same extension. |
+| `--input`                                 | text    | no       |                 | Alternative lock file input paths.                                                                                                                            |
+| `--input-delete`                          | text    | no       |                 | Alternative lock file input paths to delete after use.                                                                                                        |
+| `--relaxed`                               | boolean | no       | False           | Treat conda and pip dependencies as equivalent.                                                                                                               |
+| `--quiet`, `-q`                           | boolean | no       | False           | Be quiet.                                                                                                                                                     |
+| `--auto-sync-name`, `--no-auto-sync-name` | boolean | no       | True            | Automatically update the 'name' in the conda spec file to the expected canonical name when they differ.                                                       |
+| `--expected-name`                         | text    | no       |                 |                                                                                                                                                               |
 
 <a id="subcommand-check-venv"></a>
 

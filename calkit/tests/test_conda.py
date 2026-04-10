@@ -13,6 +13,7 @@ from calkit.conda import (
     _get_pip_dependency_list,
     _split_env_dependencies,
     check_env,
+    default_conda_env_name,
 )
 
 ENV_NAME = "main"
@@ -61,6 +62,34 @@ def test_get_pip_dependency_list():
     pip_deps = _get_pip_dependency_list(dependencies)
     assert pip_deps == ["sqlalchemy==2.0.39"]
     assert dependencies[-1]["pip"] == ["sqlalchemy==2.0.39"]
+
+
+def test_default_conda_env_name():
+    assert default_conda_env_name("pubs", "MDOcean") == "mdocean-pubs"
+
+
+def test_check_env_auto_syncs_name_mismatch_before_conda_calls(
+    tmp_dir, monkeypatch
+):
+    with open("environment.yml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "name": "mdocean-pyxdsm-env",
+                "channels": ["conda-forge"],
+                "dependencies": ["python"],
+            },
+            f,
+        )
+    monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: None)
+    with pytest.raises(RuntimeError, match="Cannot find Conda executable"):
+        check_env(
+            env_fpath="environment.yml",
+            expected_name="mdocean-pubs",
+            verbose=False,
+        )
+    with open("environment.yml") as f:
+        synced = calkit.ryaml.load(f)
+    assert synced["name"] == "mdocean-pubs"
 
 
 def delete_env(name: str):

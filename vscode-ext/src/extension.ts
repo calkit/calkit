@@ -1380,7 +1380,7 @@ async function askForSlurmOptionsWizard(
     if (step === 1) {
       const result = await showInputBoxStep({
         title: "Slurm option: --time",
-        prompt: "Optional time (e.g. 60 or 01:00:00)",
+        prompt: "Optional time (e.g., 60 or 01:00:00)",
         value: values.time ?? "",
         placeHolder: "leave blank to skip",
         canGoBack: true,
@@ -1399,7 +1399,7 @@ async function askForSlurmOptionsWizard(
 
     const result = await showInputBoxStep({
       title: "Additional srun options",
-      prompt: "Optional raw options appended as-is (e.g. --cpus-per-task=8)",
+      prompt: "Optional raw options appended as-is (e.g., --cpus-per-task=8)",
       value: values.extra ?? "",
       placeHolder: "leave blank to skip",
       canGoBack: true,
@@ -1463,7 +1463,7 @@ async function runCreateCondaEnvironmentWizard(
       title: "Conda environment.yml path",
       prompt: "Path to conda environment file, relative to the repo root",
       value: envPath,
-      placeHolder: "e.g. environment.yml or env/conda-env.yml",
+      placeHolder: "e.g., environment.yml or env/conda-env.yml",
       canGoBack: true,
       validateInput: (value) => {
         const trimmed = value.trim();
@@ -1558,7 +1558,7 @@ async function runCreateUvEnvironmentWizard(
       title: "uv pyproject.toml path",
       prompt: "Path to pyproject.toml, relative to the repo root",
       value: pyprojectPath,
-      placeHolder: "e.g. pyproject.toml or .calkit/envs/my-uv/pyproject.toml",
+      placeHolder: "e.g., pyproject.toml or .calkit/envs/my-uv/pyproject.toml",
       canGoBack: true,
       validateInput: (value) => {
         const trimmed = value.trim();
@@ -1890,7 +1890,7 @@ async function askForSlurmOptions(
   const effectiveDefaults = getNotebookSlurmOptionsWithDefaults(defaults);
   const gpus = await vscode.window.showInputBox({
     title: "Slurm option: --gpus",
-    prompt: "Optional GPU count or value (e.g. 1 or a100:1)",
+    prompt: "Optional GPU count or value (e.g., 1 or a100:1)",
     value: effectiveDefaults.gpus ?? "",
     placeHolder: "leave blank to skip",
   });
@@ -1900,7 +1900,7 @@ async function askForSlurmOptions(
 
   const time = await vscode.window.showInputBox({
     title: "Slurm option: --time",
-    prompt: "Optional time (e.g. 60 or 01:00:00)",
+    prompt: "Optional time (e.g., 60 or 01:00:00)",
     value: effectiveDefaults.time ?? "",
     placeHolder: "leave blank to skip",
   });
@@ -1910,7 +1910,7 @@ async function askForSlurmOptions(
 
   const extra = await vscode.window.showInputBox({
     title: "Additional srun options",
-    prompt: "Optional raw options appended as-is (e.g. --cpus-per-task=8)",
+    prompt: "Optional raw options appended as-is (e.g., --cpus-per-task=8)",
     value: effectiveDefaults.extra ?? "",
     placeHolder: "leave blank to skip",
   });

@@ -401,7 +401,7 @@ def check_julia_env(
         str | None,
         typer.Option(
             "--julia",
-            help="Julia version to enforce (e.g. 1.11).",
+            help="Julia version to enforce (e.g., 1.11).",
         ),
     ] = None,
     verbose: Annotated[

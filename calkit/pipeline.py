@@ -90,7 +90,7 @@ class StaleStage(BaseModel):
         if not isinstance(change_group, dict):
             return []
         for key, values in change_group.items():
-            # DVC may encode path->change_type, e.g. {"foo.txt": "modified"}
+            # DVC may encode path->change_type, e.g., {"foo.txt": "modified"}
             if isinstance(values, str) and values in {
                 "modified",
                 "new",
@@ -397,7 +397,7 @@ def get_status(
                 pass
         ordered_stale_stages = {}
         # First, add stages in dvc.yaml order, matching expanded stage names
-        # (e.g. benchmark-boom@1-3-1) against their base template name
+        # (e.g., benchmark-boom@1-3-1) against their base template name
         # (benchmark-boom) using the position in dvc.yaml
         dvc_yaml_stage_order = {
             name: i for i, name in enumerate(dvc_yaml_stages)

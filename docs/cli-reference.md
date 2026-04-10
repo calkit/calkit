@@ -2198,10 +2198,10 @@ Arguments:
 
 Options:
 
-| Option      | Type    | Required | Default | Description                           |
-| ----------- | ------- | -------- | ------- | ------------------------------------- |
-| `--julia`   | text    | no       |         | Julia version to enforce (e.g. 1.11). |
-| `--verbose` | boolean | no       | False   | Print verbose output.                 |
+| Option      | Type    | Required | Default | Description                            |
+| ----------- | ------- | -------- | ------- | -------------------------------------- |
+| `--julia`   | text    | no       |         | Julia version to enforce (e.g., 1.11). |
+| `--verbose` | boolean | no       | False   | Print verbose output.                  |
 
 <a id="subcommand-check-environments"></a>
 

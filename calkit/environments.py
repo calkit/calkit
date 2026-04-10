@@ -286,7 +286,7 @@ def get_all_venv_lock_fpaths(
     return fpaths
 
 
-def _julia_manifest_fpath(
+def _get_julia_manifest_fpath(
     env_dir: str, julia_version: str | None, wdir: str | None = None
 ) -> str:
     """Return the Manifest path for a Julia env, preferring versioned names.
@@ -375,7 +375,7 @@ def get_env_lock_fpath(
                 "Julia environments require a path pointing to Project.toml"
             )
         env_dir = os.path.dirname(env_path)
-        lock_fpath = _julia_manifest_fpath(
+        lock_fpath = _get_julia_manifest_fpath(
             env_dir, env.get("julia"), wdir=wdir
         )
     elif env_kind == "renv":

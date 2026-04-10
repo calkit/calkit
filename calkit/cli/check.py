@@ -31,6 +31,190 @@ from calkit.environments import (
 check_app = typer.Typer(no_args_is_help=True)
 
 
+def _juliaup_version_installed(julia_version: str) -> bool:
+    """Return True if juliaup already has the given channel installed locally."""
+    try:
+        result = subprocess.run(
+            ["juliaup", "status"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return False
+    if result.returncode != 0:
+        return False
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        # Columns: [Default?] Channel Version [Update?]
+        # Default column is either empty or "*", so channel is parts[0] or parts[1]
+        for col in parts[:2]:
+            if col == julia_version:
+                return True
+    return False
+
+
+def _check_julia_env(
+    env_path: str,
+    julia_version: str | None = None,
+    verbose: bool = False,
+    cache_key: str | None = None,
+) -> str:
+    """Check a Julia environment and instantiate only when needed."""
+    env_fname = os.path.basename(env_path)
+    if env_fname != "Project.toml":
+        raise_error(
+            "Julia environments require a path pointing to Project.toml"
+        )
+    env_dir = os.path.dirname(env_path)
+    if not env_dir:
+        env_dir = "."
+    env = {
+        "kind": "julia",
+        "path": env_path,
+        "julia": julia_version or "",
+    }
+    cache_env_name = cache_key or (
+        f"julia::{os.path.abspath(env_path)}::{julia_version or ''}"
+    )
+    if calkit.environments.check_cache(
+        env_name=cache_env_name,
+        env=env,
+        respect_ttl=False,
+    ):
+        if verbose:
+            typer.echo(
+                "Julia environment cache is valid; skipping Pkg.instantiate()"
+            )
+        return os.path.join(env_dir, "Manifest.toml")
+    if julia_version:
+        if shutil.which("juliaup") is not None:
+            if _juliaup_version_installed(julia_version):
+                if verbose:
+                    typer.echo(
+                        f"Julia {julia_version} is already installed; "
+                        "skipping juliaup add"
+                    )
+            else:
+                cmd = ["juliaup", "add", julia_version]
+                if verbose:
+                    typer.echo(f"Running command: {cmd}")
+                try:
+                    subprocess.run(cmd, check=True)
+                except subprocess.CalledProcessError:
+                    raise_error(
+                        f"Failed to install Julia version {julia_version}"
+                    )
+        else:
+            try:
+                compatible = calkit.julia.current_version_is_compatible(
+                    julia_version
+                )
+            except ValueError as e:
+                raise_error(str(e))
+            if not compatible:
+                raise_error(
+                    "Current Julia version is not compatible with required "
+                    f"version ({julia_version}), and juliaup is not "
+                    "available to install it"
+                )
+    deps_to_add: list[str] = []
+    try:
+        with open(env_path, "r") as f:
+            content = f.read()
+        lines = [line.rstrip() for line in content.splitlines()]
+        deps_section = False
+        deps_found = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped == "[deps]":
+                deps_section = True
+                continue
+            if deps_section:
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    break
+                if stripped and not stripped.startswith("#"):
+                    if "=" in stripped:
+                        deps_found = True
+                        break
+        if not deps_found:
+            for idx, line in enumerate(lines):
+                marker = "# Dependencies (add with Julia's Pkg.add):"
+                if line.strip() == marker and idx + 1 < len(lines):
+                    dep_line = lines[idx + 1].strip()
+                    if dep_line.startswith("#"):
+                        dep_line = dep_line.lstrip("#").strip()
+                    deps_to_add = [
+                        dep.strip()
+                        for dep in dep_line.split(",")
+                        if dep.strip()
+                    ]
+                    break
+    except OSError:
+        deps_to_add = []
+    if deps_to_add:
+        pkg_list = ", ".join(f'"{dep}"' for dep in deps_to_add)
+        cmd = ["julia"]
+        if julia_version:
+            cmd.append(f"+{julia_version}")
+        cmd += [
+            f"--project={env_dir}",
+            "-e",
+            f"using Pkg; Pkg.add([{pkg_list}]);",
+        ]
+        if julia_version:
+            try:
+                cmd = calkit.julia.check_version_in_command(cmd)
+            except Exception as e:
+                raise_error(f"Failed to check Julia version: {e}")
+        cmd = calkit.julia.ensure_startup_file_disabled_in_command(cmd)
+        try:
+            subprocess.check_call(
+                cmd,
+                env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"},
+            )
+        except subprocess.CalledProcessError:
+            calkit.environments.save_cache(
+                env_name=cache_env_name,
+                env=env,
+                success=False,
+            )
+            raise_error("Failed to add Julia dependencies")
+    cmd = ["julia"]
+    if julia_version:
+        cmd.append(f"+{julia_version}")
+    cmd += [
+        f"--project={env_dir}",
+        "-e",
+        "using Pkg; Pkg.instantiate();",
+    ]
+    if julia_version:
+        try:
+            cmd = calkit.julia.check_version_in_command(cmd)
+        except Exception as e:
+            raise_error(f"Failed to check Julia version: {e}")
+    cmd = calkit.julia.ensure_startup_file_disabled_in_command(cmd)
+    try:
+        subprocess.check_call(
+            cmd, env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"}
+        )
+    except subprocess.CalledProcessError:
+        calkit.environments.save_cache(
+            env_name=cache_env_name,
+            env=env,
+            success=False,
+        )
+        raise_error("Failed to check julia environment")
+    calkit.environments.save_cache(
+        env_name=cache_env_name,
+        env=env,
+        success=True,
+    )
+    return os.path.join(env_dir, "Manifest.toml")
+
+
 @check_app.command(name="repro")
 def check_repro(
     wdir: Annotated[
@@ -190,116 +374,45 @@ def check_environment(
         julia_version = env.get("julia")
         if julia_version is None:
             raise_error("Julia environments require a Julia version")
-        env_fname = os.path.basename(env_path)
-        if not env_fname == "Project.toml":
-            raise_error(
-                "Julia environments require a path pointing to Project.toml"
-            )
-        # First ensure the Julia version exists
-        if shutil.which("juliaup") is not None:
-            cmd = ["juliaup", "add", julia_version]
-            if verbose:
-                typer.echo(f"Running command: {cmd}")
-            try:
-                subprocess.run(cmd, check=True)
-            except subprocess.CalledProcessError:
-                raise_error(f"Failed to install Julia version {julia_version}")
-        else:
-            try:
-                compatible = calkit.julia.current_version_is_compatible(
-                    julia_version
-                )
-            except ValueError as e:
-                raise_error(str(e))
-            if not compatible:
-                raise_error(
-                    f"Current Julia version is not compatible with required "
-                    f"version ({julia_version}), and juliaup is not "
-                    "available to install it"
-                )
-        env_dir = os.path.dirname(env_path)
-        if not env_dir:
-            env_dir = "."
-        # If auto-detection couldn't resolve UUIDs, Project.toml includes a
-        # commented dependency list
-        # In that case, add those packages with
-        # Pkg.add before instantiating so the env is usable at run time
-        deps_to_add: list[str] = []
-        try:
-            with open(env_path, "r") as f:
-                content = f.read()
-            lines = [line.rstrip() for line in content.splitlines()]
-            deps_section = False
-            deps_found = False
-            for line in lines:
-                stripped = line.strip()
-                if stripped == "[deps]":
-                    deps_section = True
-                    continue
-                if deps_section:
-                    if stripped.startswith("[") and stripped.endswith("]"):
-                        break
-                    if stripped and not stripped.startswith("#"):
-                        if "=" in stripped:
-                            deps_found = True
-                            break
-            if not deps_found:
-                for idx, line in enumerate(lines):
-                    marker = "# Dependencies (add with Julia's Pkg.add):"
-                    if line.strip() == marker and idx + 1 < len(lines):
-                        dep_line = lines[idx + 1].strip()
-                        if dep_line.startswith("#"):
-                            dep_line = dep_line.lstrip("#").strip()
-                        deps_to_add = [
-                            dep.strip()
-                            for dep in dep_line.split(",")
-                            if dep.strip()
-                        ]
-                        break
-        except OSError:
-            deps_to_add = []
-        if deps_to_add:
-            pkg_list = ", ".join(f'"{dep}"' for dep in deps_to_add)
-            cmd = [
-                "julia",
-                f"+{julia_version}",
-                f"--project={env_dir}",
-                "-e",
-                f"using Pkg; Pkg.add([{pkg_list}]);",
-            ]
-            try:
-                cmd = calkit.julia.check_version_in_command(cmd)
-            except Exception as e:
-                raise_error(f"Failed to check Julia version: {e}")
-            cmd = calkit.julia.ensure_startup_file_disabled_in_command(cmd)
-            try:
-                subprocess.check_call(
-                    cmd,
-                    env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"},
-                )
-            except subprocess.CalledProcessError:
-                raise_error("Failed to add Julia dependencies")
-        cmd = [
-            "julia",
-            f"+{julia_version}",
-            f"--project={env_dir}",
-            "-e",
-            "using Pkg; Pkg.instantiate();",
-        ]
-        try:
-            cmd = calkit.julia.check_version_in_command(cmd)
-        except Exception as e:
-            raise_error(f"Failed to check Julia version: {e}")
-        cmd = calkit.julia.ensure_startup_file_disabled_in_command(cmd)
-        try:
-            subprocess.check_call(
-                cmd, env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"}
-            )
-        except subprocess.CalledProcessError:
-            raise_error("Failed to check julia environment")
+        _check_julia_env(
+            env_path=env_path,
+            julia_version=julia_version,
+            verbose=verbose,
+            cache_key=env_name,
+        )
     else:
         raise_error(f"Environment kind '{env['kind']}' not supported")
     return get_env_lock_fpath(env=env, env_name=env_name, as_posix=False)
+
+
+@check_app.command(
+    name="julia-env",
+    help=(
+        "Check a Julia environment and instantiate only when project, "
+        "manifest, and package cache state have changed."
+    ),
+)
+def check_julia_env(
+    env_path: Annotated[
+        str,
+        typer.Argument(help="Path to Julia Project.toml file."),
+    ] = "Project.toml",
+    julia_version: Annotated[
+        str | None,
+        typer.Option(
+            "--julia",
+            help="Julia version to enforce (e.g. 1.11).",
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Print verbose output.")
+    ] = False,
+) -> str:
+    return _check_julia_env(
+        env_path=env_path,
+        julia_version=julia_version,
+        verbose=verbose,
+    )
 
 
 @check_app.command(

@@ -42,6 +42,40 @@ COMPOSITE_ENV_SEP = ":"
 VALID_OUTER_ENV_KINDS = ["slurm"]
 
 
+def calc_dir_sig(path: str) -> str:
+    """Calculate a fast directory signature for cache invalidation.
+
+    The signature includes file count, total size, and latest mtime in
+    nanoseconds over all files in the directory tree.
+    """
+    if not os.path.isdir(path):
+        return ""
+    file_count = 0
+    total_size = 0
+    latest_mtime = 0
+    for foldername, _, filenames in os.walk(path):
+        for filename in filenames:
+            fpath = os.path.join(foldername, filename)
+            try:
+                st = os.stat(fpath)
+            except OSError:
+                continue
+            file_count += 1
+            total_size += st.st_size
+            if st.st_mtime_ns > latest_mtime:
+                latest_mtime = st.st_mtime_ns
+    return f"{file_count}-{total_size}-{latest_mtime}"
+
+
+def get_julia_packages_dir() -> str:
+    """Return the Julia packages directory for the current environment."""
+    depot_env = os.getenv("JULIA_DEPOT_PATH", "")
+    first_depot = depot_env.split(os.pathsep)[0].strip() if depot_env else ""
+    if not first_depot:
+        first_depot = os.path.join("~", ".julia")
+    return os.path.join(os.path.expanduser(first_depot), "packages")
+
+
 def language_from_env(env: dict) -> str | None:
     kind = env.get("kind")
     if kind == "julia":
@@ -323,21 +357,33 @@ def calc_data_for_env(
     """
 
     def get_cached_md5(path: str) -> str | None:
-        """Get a cached MD5 hash for a path, recalculating if mtime doesn't
-        match the cached mtime.
+        """Get a cached MD5 hash for a path.
+
+        For files, use mtime as a fast invalidation check. For directories,
+        use a lightweight directory signature, since directory mtimes can be
+        unreliable across filesystems and operations.
         """
         key = os.path.abspath(path)
         cached_data = {}
         with get_cache_db(name="md5s") as db:
             if key in db:
                 cached_data = db[key]
-                if os.path.exists(path):
-                    mtime = os.path.getmtime(path)
-                    if mtime == cached_data.get("mtime"):
-                        return cached_data.get("md5")
+        if not os.path.exists(path):
+            return None
+        if os.path.isdir(path):
+            dir_sig = calc_dir_sig(path)
+            if dir_sig == cached_data.get("dir_sig"):
+                return cached_data.get("md5")
+            md5 = calkit.get_md5(path)
+            with get_cache_db(name="md5s") as db:
+                db[key] = {"md5": md5, "dir_sig": dir_sig}
+                db.commit()
+            return md5
+        mtime = os.path.getmtime(path)
+        if mtime == cached_data.get("mtime"):
+            return cached_data.get("md5")
         if os.path.exists(path):
             md5 = calkit.get_md5(path)
-            mtime = os.path.getmtime(path)
             with get_cache_db(name="md5s") as db:
                 db[key] = {"md5": md5, "mtime": mtime}
                 db.commit()
@@ -362,6 +408,20 @@ def calc_data_for_env(
             env_prefix_hash = get_cached_md5(env_prefix_full)
         else:
             env_prefix_hash = None
+    env_dir_sig = None
+    julia_packages_sig = None
+    if env.get("kind") == "julia":
+        env_path_for_dir = env.get("path", "")
+        if env_path_for_dir:
+            env_dir = os.path.dirname(env_path_for_dir)
+            if not env_dir:
+                env_dir = "."
+            env_dir_full = os.path.join(wdir, env_dir)
+            sig = calc_dir_sig(env_dir_full)
+            env_dir_sig = sig if sig else None
+        packages_dir = get_julia_packages_dir()
+        sig = calc_dir_sig(packages_dir)
+        julia_packages_sig = sig if sig else None
     env_lock_hash = None
     env_lock_fpath = get_env_lock_fpath(env_name=env_name, env=env, wdir=wdir)
     if env_lock_fpath is not None:
@@ -373,13 +433,20 @@ def calc_data_for_env(
             "env_hash": env_hash,
             "env_path_hash": env_path_hash,
             "env_prefix_hash": env_prefix_hash,
+            "env_dir_sig": env_dir_sig,
+            "julia_packages_sig": julia_packages_sig,
             "env_lock_hash": env_lock_hash,
         },
         "checked_at": calkit.utcnow(),
     }
 
 
-def check_cache(env_name: str, env: dict, wdir: str | None = None) -> bool:
+def check_cache(
+    env_name: str,
+    env: dict,
+    wdir: str | None = None,
+    respect_ttl: bool = True,
+) -> bool:
     """Check if the environment is up-to-date based on cached data."""
     if wdir is None:
         wdir = os.getcwd()
@@ -395,12 +462,17 @@ def check_cache(env_name: str, env: dict, wdir: str | None = None) -> bool:
         return False
     # Check if this environment is up-to-date
     current_data = calc_data_for_env(env_name=env_name, env=env, wdir=wdir)
-    time_diff = current_data["checked_at"] - cached_data.get("checked_at")
-    if time_diff.total_seconds() > ENV_CHECK_CACHE_TTL_SECONDS:
-        return False
+    if respect_ttl:
+        time_diff = current_data["checked_at"] - cached_data.get("checked_at")
+        if time_diff.total_seconds() > ENV_CHECK_CACHE_TTL_SECONDS:
+            return False
     if env.get("path") and not current_data["hashes"]["env_path_hash"]:
         return False
     if env.get("prefix") and not current_data["hashes"]["env_prefix_hash"]:
+        return False
+    if env.get("kind") == "julia" and not current_data["hashes"].get(
+        "env_dir_sig"
+    ):
         return False
     if (
         get_env_lock_fpath(env=env, env_name=env_name, wdir=wdir)

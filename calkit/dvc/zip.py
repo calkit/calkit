@@ -185,17 +185,23 @@ def hash_path(path: str, alg="md5") -> str:
 def calc_dir_sig(path: str) -> str:
     """Calculate a fast signature for a directory to know if we should
     rehash.
+
+    The signature includes file count, total size, and latest mtime in
+    nanoseconds over all files in the directory tree.
     """
     if not os.path.isdir(path):
         return ""
     file_count = 0
     total_size = 0
     latest_mtime = 0
-    for foldername, subfolders, filenames in os.walk(path):
+    for foldername, _, filenames in os.walk(path):
         for filename in filenames:
-            file_count += 1
             fpath = os.path.join(foldername, filename)
-            st = os.stat(fpath)
+            try:
+                st = os.stat(fpath)
+            except OSError:
+                continue
+            file_count += 1
             total_size += st.st_size
             if st.st_mtime_ns > latest_mtime:
                 latest_mtime = st.st_mtime_ns

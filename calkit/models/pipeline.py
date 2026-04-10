@@ -464,11 +464,11 @@ class LatexStage(Stage):
                 out_paths.append(list(out.keys())[0])
         if out_path in out_paths:
             return outs
-        if self.pdf_storage == "dvc":
-            out_dict = {out_path: {"cache": True}}
-        else:
+        if self.pdf_storage != "dvc":
             out_dict = {out_path: {"cache": False}}
-        outs.append(out_dict)
+            outs.append(out_dict)
+        else:
+            outs.append(out_path)
         return outs
 
 

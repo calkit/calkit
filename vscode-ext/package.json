@@ -134,5 +134,8 @@
   },
   "dependencies": {
     "yaml": "^2.5.1"
-  }
+  },
+  "enabledApiProposals": [
+    "notebookKernelSource"
+  ]
 }

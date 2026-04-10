@@ -170,7 +170,11 @@ async function ensureCalkitCliReady(): Promise<void> {
     const installedVersion = extractFirstSemver(output);
 
     if (!installedVersion) {
-      log("Could not parse Calkit CLI version from 'calkit --version' output");
+      log(
+        `Could not parse Calkit CLI version from 'calkit --version' output:\n  stdout: ${JSON.stringify(
+          stdout,
+        )}\n  stderr: ${JSON.stringify(stderr)}`,
+      );
       return;
     }
 
@@ -209,7 +213,13 @@ async function ensureCalkitCliReady(): Promise<void> {
 }
 
 function extractFirstSemver(input: string): string | undefined {
-  const match = input.match(/\b(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?\b/);
+  // Prefer "Calkit X.Y.Z..." label (what `calkit --version` outputs)
+  const labelMatch = input.match(/calkit\s+(\d+)\.(\d+)\.(\d+)/i);
+  if (labelMatch?.[1] && labelMatch?.[2] && labelMatch?.[3]) {
+    return `${labelMatch[1]}.${labelMatch[2]}.${labelMatch[3]}`;
+  }
+  // Fallback: any bare semver pattern in the output
+  const match = input.match(/\b(\d+)\.(\d+)\.(\d+)/);
   return match?.[1] && match?.[2] && match?.[3]
     ? `${match[1]}.${match[2]}.${match[3]}`
     : undefined;
@@ -958,9 +968,22 @@ async function runCreateSlurmEnvironmentWizard(
     }
     defaults = optionsStep.value;
 
+    const setupStep = await askForSlurmSetupCommandsStep();
+    if (setupStep.kind === "cancel") {
+      return undefined;
+    }
+    if (setupStep.kind === "back") {
+      step = 2;
+      continue;
+    }
+    const setupCommands = setupStep.value;
+
     const args = ["new", "slurm-env", "--name", name, "--host", host];
     for (const option of slurmOptionsToOptionList(defaults)) {
       args.push("--default-option", option);
+    }
+    for (const cmd of setupCommands) {
+      args.push("--default-setup", cmd);
     }
     args.push("--no-commit");
 
@@ -1284,6 +1307,46 @@ function summarizeSlurmOptions(options: SlurmLaunchOptions): string {
     parts.push(options.extra);
   }
   return parts.length > 0 ? parts.join(" ") : "No extra options";
+}
+
+async function askForSlurmSetupCommandsStep(): Promise<
+  WizardStepResult<string[]>
+> {
+  const setupCommands: string[] = [];
+  let addMore = true;
+
+  while (addMore) {
+    const result = await showInputBoxStep({
+      title: "SLURM setup command",
+      prompt:
+        "Enter a shell command to run before SLURM jobs (e.g., 'module load julia/1.11')",
+      value: "",
+      placeHolder: "leave blank to skip",
+      canGoBack: setupCommands.length > 0,
+    });
+
+    if (result.kind === "cancel") {
+      return result;
+    }
+
+    if (result.kind === "back") {
+      if (setupCommands.length === 0) {
+        return { kind: "back" };
+      }
+      // Remove the last command
+      setupCommands.pop();
+      continue;
+    }
+
+    const trimmedCmd = result.value.trim();
+    if (trimmedCmd.length > 0) {
+      setupCommands.push(trimmedCmd);
+    } else {
+      addMore = false;
+    }
+  }
+
+  return { kind: "value", value: setupCommands };
 }
 
 async function askForSlurmOptionsWizard(

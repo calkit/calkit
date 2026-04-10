@@ -71,12 +71,14 @@ from __future__ import annotations
 
 import base64
 import io
+import os
 import xml.etree.ElementTree as ET
 from typing import Any
 from urllib.parse import urlparse
 
 import requests
 from fsspec import AbstractFileSystem
+from fsspec.callbacks import DEFAULT_CALLBACK
 from fsspec.spec import AbstractBufferedFile
 from fsspec.utils import stringify_path
 from requests.exceptions import HTTPError
@@ -297,6 +299,7 @@ class CalkitFileSystem(AbstractFileSystem):
         operation: str,
         data: bytes | None = None,
         headers: dict | None = None,
+        callback=DEFAULT_CALLBACK,
     ) -> requests.Response:
         """Execute a file operation using the provided operation info."""
         # Extract access info from the operation info
@@ -319,7 +322,7 @@ class CalkitFileSystem(AbstractFileSystem):
             if headers:
                 request_headers.update(headers)
             params = access.get("params")
-            return self._session.request(
+            resp = self._session.request(
                 method=http_method.upper(),
                 url=url,
                 headers=request_headers,
@@ -327,6 +330,9 @@ class CalkitFileSystem(AbstractFileSystem):
                 data=data,
                 timeout=120,
             )
+            if data is not None and operation == "put":
+                callback.relative_update(len(data))
+            return resp
         elif kind == "http-request":
             # Generic HTTP request with custom headers
             url = access.get("url")
@@ -339,7 +345,7 @@ class CalkitFileSystem(AbstractFileSystem):
             if headers:
                 request_headers.update(headers)
             params = access.get("params")
-            return self._session.request(
+            resp = self._session.request(
                 method=http_method.upper(),
                 url=url,
                 headers=request_headers,
@@ -347,6 +353,9 @@ class CalkitFileSystem(AbstractFileSystem):
                 data=data,
                 timeout=120,
             )
+            if data is not None and operation == "put":
+                callback.relative_update(len(data))
+            return resp
         elif kind == "presigned-multipart":
             # S3 multipart upload using server-provided part URLs
             if data is None:
@@ -401,6 +410,7 @@ class CalkitFileSystem(AbstractFileSystem):
                         f"Missing ETag for uploaded multipart part {part_num}"
                     )
                 uploaded_parts.append((part_num, etag.strip()))
+                callback.relative_update(len(part_data))
             complete_root = ET.Element("CompleteMultipartUpload")
             for part_num, etag in uploaded_parts:
                 part_el = ET.SubElement(complete_root, "Part")
@@ -544,6 +554,7 @@ class CalkitFileSystem(AbstractFileSystem):
                                 "Chunked upload acknowledged full payload with "
                                 "status 308 instead of final success"
                             )
+                        callback.relative_update(next_offset - offset)
                         offset = next_offset
                     elif chunk_resp.status_code in (200, 201):
                         # Final success is only valid when sending the final
@@ -553,6 +564,7 @@ class CalkitFileSystem(AbstractFileSystem):
                                 "Chunked upload returned success before all "
                                 "bytes were sent"
                             )
+                        callback.relative_update(chunk_end - offset)
                         return chunk_resp
                     else:
                         # Unexpected status
@@ -884,6 +896,45 @@ class CalkitFileSystem(AbstractFileSystem):
         TODO: Handle other backends when they are supported.
         """
         pass
+
+    def put_file(
+        self,
+        lpath,
+        rpath,
+        callback=DEFAULT_CALLBACK,
+        mode="overwrite",
+        **kwargs,
+    ):
+        """Upload a local file to Calkit cloud storage.
+
+        Overrides the default fsspec implementation to report progress based
+        on actual bytes uploaded rather than bytes written to the local buffer.
+        """
+        if mode == "create" and self.exists(rpath):
+            raise FileExistsError
+        if os.path.isdir(lpath):
+            self.makedirs(rpath, exist_ok=True)
+            return None
+        with open(lpath, "rb") as f:
+            size = f.seek(0, 2)
+            callback.set_size(size)
+            f.seek(0)
+            data = f.read()
+        owner, project, file_path = _parse_path(rpath)
+        operation_info = self._get_fs_op_info(
+            owner,
+            project,
+            file_path,
+            "put",
+            content_length=size,
+        )
+        resp = self._execute_operation(
+            operation_info,
+            "put",
+            data=data,
+            callback=callback,
+        )
+        resp.raise_for_status()
 
 
 class CalkitFile(AbstractBufferedFile):

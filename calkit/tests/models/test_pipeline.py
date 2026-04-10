@@ -280,6 +280,18 @@ def test_sbatchstage():
     assert "--name job2@{input_file}" in sd["cmd"]
 
 
+def test_sbatchstage_with_setup_commands():
+    s = SBatchStage(
+        name="job-setup",
+        script_path="scripts/run_job.sh",
+        environment="slurm-env",
+        slurm={"setup": ["module purge", "module load python/3.11"]},
+    )
+    sd = s.to_dvc()
+    assert "--setup 'module purge'" in sd["cmd"]
+    assert "--setup 'module load python/3.11'" in sd["cmd"]
+
+
 def test_mappathsstage():
     s = MapPathsStage(
         name="map1",

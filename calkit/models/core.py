@@ -69,9 +69,12 @@ class Environment(BaseModel):
     kind: Literal[
         "conda",
         "docker",
+        "julia",
+        "matlab",
         "poetry",
         "npm",
         "yarn",
+        "slurm",
         "ssh",
         "uv",
         "pixi",
@@ -93,6 +96,10 @@ class CondaEnvironment(Environment):
 class VenvEnvironment(Environment):
     kind: Literal["venv"] = "venv"
     prefix: str
+
+
+class UvEnvironment(Environment):
+    kind: Literal["uv"] = "uv"
 
 
 class UvVenvEnvironment(Environment):
@@ -117,6 +124,24 @@ class DockerEnvironment(Environment):
 class REnvironment(Environment):
     kind: Literal["renv"] = "renv"
     prefix: str
+
+
+class JuliaEnvironment(Environment):
+    kind: Literal["julia"] = "julia"
+    julia: str
+
+
+class MatlabEnvironment(Environment):
+    kind: Literal["matlab"] = "matlab"
+    version: str | None = None
+    products: list[str] | None = None
+
+
+class SlurmEnvironment(Environment):
+    kind: Literal["slurm"] = "slurm"
+    host: str = "localhost"
+    default_options: list[str] | None = None
+    default_setup: list[str] | None = None
 
 
 class SSHEnvironment(BaseModel):
@@ -287,7 +312,11 @@ class ProjectInfo(BaseModel):
         str,
         Environment
         | DockerEnvironment
+        | JuliaEnvironment
+        | MatlabEnvironment
+        | SlurmEnvironment
         | VenvEnvironment
+        | UvEnvironment
         | UvVenvEnvironment
         | SSHEnvironment,
     ] = {}

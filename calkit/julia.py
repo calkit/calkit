@@ -4,6 +4,33 @@ import shutil
 import subprocess
 
 
+def ensure_startup_file_disabled_in_command(cmd: list[str]) -> list[str]:
+    """Ensure Julia startup files are disabled for deterministic execution.
+
+    Removes any existing --startup-file arguments and ensures --startup-file=no
+    is present in the correct position.
+    """
+    if not cmd:
+        raise ValueError("Command list is empty")
+    if cmd[0] != "julia":
+        raise ValueError("This doesn't appear to be a Julia command")
+
+    # Remove any existing --startup-file arguments (e.g., --startup-file=yes)
+    filtered_cmd = [arg for arg in cmd if not arg.startswith("--startup-file")]
+
+    # Determine insertion position (after juliaup version specifier if present)
+    insert_idx = (
+        2 if len(filtered_cmd) > 1 and filtered_cmd[1].startswith("+") else 1
+    )
+
+    # Insert --startup-file=no at the correct position
+    return (
+        filtered_cmd[:insert_idx]
+        + ["--startup-file=no"]
+        + filtered_cmd[insert_idx:]
+    )
+
+
 def check_version_in_command(cmd: list[str]) -> list[str]:
     """Whether to include the version in the command.
 
@@ -33,10 +60,11 @@ def check_version_in_command(cmd: list[str]) -> list[str]:
 
 
 def get_version() -> str:
-    """Get the current Julia version."""
+    """Get the current Julia version with startup files disabled."""
     try:
+        cmd = ensure_startup_file_disabled_in_command(["julia", "--version"])
         result = subprocess.run(
-            ["julia", "--version"],
+            cmd,
             capture_output=True,
             text=True,
             check=False,

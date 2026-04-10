@@ -214,8 +214,8 @@ def check_environment(
             if not compatible:
                 raise_error(
                     f"Current Julia version is not compatible with required "
-                    f"version ({julia_version}), and juliaup is not available to "
-                    "install it"
+                    f"version ({julia_version}), and juliaup is not "
+                    "available to install it"
                 )
         env_dir = os.path.dirname(env_path)
         if not env_dir:
@@ -271,6 +271,7 @@ def check_environment(
                 cmd = calkit.julia.check_version_in_command(cmd)
             except Exception as e:
                 raise_error(f"Failed to check Julia version: {e}")
+            cmd = calkit.julia.ensure_startup_file_disabled_in_command(cmd)
             try:
                 subprocess.check_call(
                     cmd,
@@ -289,6 +290,7 @@ def check_environment(
             cmd = calkit.julia.check_version_in_command(cmd)
         except Exception as e:
             raise_error(f"Failed to check Julia version: {e}")
+        cmd = calkit.julia.ensure_startup_file_disabled_in_command(cmd)
         try:
             subprocess.check_call(
                 cmd, env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"}

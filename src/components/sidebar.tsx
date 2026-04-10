@@ -576,10 +576,9 @@ export const CalkitSidebar: React.FC<ICalkitSidebarProps> = ({
 
   /**
    * Check if project has a name, and if not, prompt user to set one
-   * @returns true if project has a name (or user just set one), false if user cancelled
+   * @returns true if project has a name (or user just set one), false if user
+   * canceled
    */
-  // Removed ensureProjectName gating; operations should proceed without requiring a name
-
   const handleSaveProjectInfo = useCallback(async () => {
     // Use suggested values if project has no name
     const suggestedInfo = { ...projectInfo };

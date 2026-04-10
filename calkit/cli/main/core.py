@@ -1910,6 +1910,9 @@ def run_in_env(
             julia_cmd = calkit.julia.check_version_in_command(julia_cmd)
         except Exception as e:
             raise_error(f"Failed to check Julia version: {e}")
+        julia_cmd = calkit.julia.ensure_startup_file_disabled_in_command(
+            julia_cmd
+        )
         if verbose:
             typer.echo(f"Running command: {julia_cmd}")
         try:

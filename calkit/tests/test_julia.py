@@ -2,7 +2,12 @@
 
 from unittest import mock
 
-from calkit.julia import check_version_in_command
+import pytest
+
+from calkit.julia import (
+    check_version_in_command,
+    ensure_startup_file_disabled_in_command,
+)
 
 
 def test_check_version_in_command():
@@ -29,3 +34,64 @@ def test_check_version_in_command():
         assert "+1.11" not in cmd_without_juliaup
         # Ensure the base julia command is still present.
         assert "julia" in cmd_without_juliaup
+
+
+def test_disable_startup_file_with_version_flag():
+    cmd = ["julia", "+1.11", "--project", "whatever"]
+    updated = ensure_startup_file_disabled_in_command(cmd)
+    assert updated == [
+        "julia",
+        "+1.11",
+        "--startup-file=no",
+        "--project",
+        "whatever",
+    ]
+
+
+def test_disable_startup_file_without_version_flag():
+    cmd = ["julia", "--project", "whatever"]
+    updated = ensure_startup_file_disabled_in_command(cmd)
+    assert updated == [
+        "julia",
+        "--startup-file=no",
+        "--project",
+        "whatever",
+    ]
+
+
+def test_disable_startup_file_idempotent():
+    cmd = ["julia", "--startup-file=no", "--project", "whatever"]
+    assert ensure_startup_file_disabled_in_command(cmd) == cmd
+
+
+def test_disable_startup_file_non_julia_raises():
+    with pytest.raises(ValueError, match="Julia command"):
+        ensure_startup_file_disabled_in_command(["python", "-V"])
+
+
+def test_disable_startup_file_removes_conflicting_startup_file_yes():
+    """Test that existing --startup-file=yes is removed and replaced."""
+    cmd = ["julia", "--startup-file=yes", "--project", "whatever"]
+    updated = ensure_startup_file_disabled_in_command(cmd)
+    assert "--startup-file=yes" not in updated
+    assert "--startup-file=no" in updated
+    assert updated == [
+        "julia",
+        "--startup-file=no",
+        "--project",
+        "whatever",
+    ]
+
+
+def test_disable_startup_file_removes_conflicting_startup_file_with_version():
+    """Test removal works when version specifier and conflicting flag present."""
+    cmd = ["julia", "+1.11", "--startup-file=yes", "--project", "whatever"]
+    updated = ensure_startup_file_disabled_in_command(cmd)
+    assert "--startup-file=yes" not in updated
+    assert updated == [
+        "julia",
+        "+1.11",
+        "--startup-file=no",
+        "--project",
+        "whatever",
+    ]

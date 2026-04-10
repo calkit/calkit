@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import shlex
 from pathlib import Path
 from typing import Any, Literal
 
@@ -139,6 +140,8 @@ class StageSlurmOptions(BaseModel):
 
     options: list[str] | None = None
     use_default_options_from_env: bool = True
+    setup: list[str] | None = None
+    use_default_setup_from_env: bool = True
     log_path: str | None = None
     log_storage: Literal["git", "dvc"] | None = "git"
 
@@ -288,6 +291,9 @@ class Stage(BaseModel):
         if self.slurm.options is not None:
             for opt in self.slurm.options:
                 cmd += f" -s {opt}"
+        if self.slurm.setup is not None:
+            for setup_cmd in self.slurm.setup:
+                cmd += f" --setup {shlex.quote(setup_cmd)}"
         return cmd
 
     def to_dvc(self) -> dict:
@@ -752,17 +758,8 @@ class JupyterNotebookStage(Stage):
     """A stage that runs a Jupyter notebook.
 
     Notebooks need to be cleaned of outputs so they can be used as DVC
-    dependencies. This means we will have two DVC stages:
-
-    1. Notebook cleaning.
-    2. Notebook running, depending on the cleaned notebook, and optionally
-       producing HTML output.
-
-    Alternatively, we could force the use of ``nbstripout`` so the cleaned
-    notebook is saved at the notebook path.
-
-    With this paradigm, we want to force users treat their notebooks as
-    needing to be run from top to bottom every time they change.
+    dependencies. The ``status`` and ``run`` commands handle this
+    automatically.
     """
 
     kind: Literal["jupyter-notebook"] = "jupyter-notebook"
@@ -1008,6 +1005,12 @@ class Pipeline(BaseModel):
                     # default options if there are any conflicts
                     orig_options = stage.slurm.options or []
                     stage.slurm.options = slurm_options + orig_options
+                slurm_setup = env.get("default_setup", [])
+                if slurm_setup and stage.slurm.use_default_setup_from_env:
+                    # Setup commands run in order, so environment defaults run
+                    # before any stage-specific setup.
+                    orig_setup = stage.slurm.setup or []
+                    stage.slurm.setup = slurm_setup + orig_setup
 
     def ensure_env_lock_paths_are_inputs(
         self, env_lock_fpaths: dict[str, str]

@@ -109,6 +109,11 @@ def _check_ijulia_available(
     except Exception as e:
         raise_error(f"Failed to check Julia version: {e}")
         return False
+    ijulia_check_cmd_checked = (
+        calkit.julia.ensure_startup_file_disabled_in_command(
+            ijulia_check_cmd_checked
+        )
+    )
     res = subprocess.run(
         ijulia_check_cmd_checked,
         capture_output=True,
@@ -292,6 +297,7 @@ def check_env_kernel(
             "kp=IJulia.installkernel("
             f'"{display_name}",'
             f'"--project={env_dir_abs}",'
+            '"--startup-file=no",'
             'env=Dict("JULIA_LOAD_PATH" => "@:@stdlib")'
             ");"
             "println(kp);"
@@ -307,6 +313,7 @@ def check_env_kernel(
             cmd = calkit.julia.check_version_in_command(cmd)
         except Exception as e:
             raise_error(f"Failed to check Julia version: {e}")
+        cmd = calkit.julia.ensure_startup_file_disabled_in_command(cmd)
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:
             raise_error(f"Failed to create kernel:\n{res.stdout}")

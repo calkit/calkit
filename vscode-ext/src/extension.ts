@@ -27,7 +27,7 @@ const COMMAND_STOP_SLURM = "calkit-vscode.stopCalkitSlurmJob";
 const COMMAND_RESTART_JOB = "calkit-vscode.restartCalkitJob";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
 const execFileAsync = promisify(execFile);
-const DEFAULT_MIN_CALKIT_VERSION = "0.36.0";
+const DEFAULT_MIN_CALKIT_VERSION = "0.37.3";
 const DEFAULT_NOTEBOOK_SLURM_TIME = "120";
 const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
 const MISSING_IJULIA_ERROR_TEXT =
@@ -170,7 +170,11 @@ async function ensureCalkitCliReady(): Promise<void> {
     const installedVersion = extractFirstSemver(output);
 
     if (!installedVersion) {
-      log("Could not parse Calkit CLI version from 'calkit --version' output");
+      log(
+        `Could not parse Calkit CLI version from 'calkit --version' output:\n  stdout: ${JSON.stringify(
+          stdout,
+        )}\n  stderr: ${JSON.stringify(stderr)}`,
+      );
       return;
     }
 
@@ -209,7 +213,13 @@ async function ensureCalkitCliReady(): Promise<void> {
 }
 
 function extractFirstSemver(input: string): string | undefined {
-  const match = input.match(/\b(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?\b/);
+  // Prefer "Calkit X.Y.Z..." label (what `calkit --version` outputs)
+  const labelMatch = input.match(/calkit\s+(\d+)\.(\d+)\.(\d+)/i);
+  if (labelMatch?.[1] && labelMatch?.[2] && labelMatch?.[3]) {
+    return `${labelMatch[1]}.${labelMatch[2]}.${labelMatch[3]}`;
+  }
+  // Fallback: any bare semver pattern in the output
+  const match = input.match(/\b(\d+)\.(\d+)\.(\d+)/);
   return match?.[1] && match?.[2] && match?.[3]
     ? `${match[1]}.${match[2]}.${match[3]}`
     : undefined;
@@ -516,6 +526,7 @@ async function selectCalkitEnvironment(
     serverToken,
     dockerContainerName,
     expectedKernel?.kernelName,
+    notebookRelativePath,
   );
 
   startServerInBackground(launchCmd, workspaceRoot, {
@@ -957,9 +968,22 @@ async function runCreateSlurmEnvironmentWizard(
     }
     defaults = optionsStep.value;
 
+    const setupStep = await askForSlurmSetupCommandsStep();
+    if (setupStep.kind === "cancel") {
+      return undefined;
+    }
+    if (setupStep.kind === "back") {
+      step = 2;
+      continue;
+    }
+    const setupCommands = setupStep.value;
+
     const args = ["new", "slurm-env", "--name", name, "--host", host];
     for (const option of slurmOptionsToOptionList(defaults)) {
       args.push("--default-option", option);
+    }
+    for (const cmd of setupCommands) {
+      args.push("--default-setup", cmd);
     }
     args.push("--no-commit");
 
@@ -1283,6 +1307,46 @@ function summarizeSlurmOptions(options: SlurmLaunchOptions): string {
     parts.push(options.extra);
   }
   return parts.length > 0 ? parts.join(" ") : "No extra options";
+}
+
+async function askForSlurmSetupCommandsStep(): Promise<
+  WizardStepResult<string[]>
+> {
+  const setupCommands: string[] = [];
+  let addMore = true;
+
+  while (addMore) {
+    const result = await showInputBoxStep({
+      title: "SLURM setup command",
+      prompt:
+        "Enter a shell command to run before SLURM jobs (e.g., 'module load julia/1.11')",
+      value: "",
+      placeHolder: "leave blank to skip",
+      canGoBack: setupCommands.length > 0,
+    });
+
+    if (result.kind === "cancel") {
+      return result;
+    }
+
+    if (result.kind === "back") {
+      if (setupCommands.length === 0) {
+        return { kind: "back" };
+      }
+      // Remove the last command
+      setupCommands.pop();
+      continue;
+    }
+
+    const trimmedCmd = result.value.trim();
+    if (trimmedCmd.length > 0) {
+      setupCommands.push(trimmedCmd);
+    } else {
+      addMore = false;
+    }
+  }
+
+  return { kind: "value", value: setupCommands };
 }
 
 async function askForSlurmOptionsWizard(
@@ -1901,6 +1965,7 @@ function buildLaunchCommand(
   serverToken?: string,
   dockerContainerName?: string,
   defaultKernelName?: string,
+  notebookRelativePath?: string,
 ): string {
   const cdPart = `cd ${shQuote(workspaceRoot)}`;
   const checkPart = `calkit check env -n ${shQuote(picked.innerEnvironment)}`;
@@ -1955,6 +2020,11 @@ function buildLaunchCommand(
     return `${prefixParts.join(" && ")} && ${xenvPart}`;
   }
 
+  const slurmSetupCommands = getEffectiveSlurmSetupCommands(
+    config,
+    picked,
+    notebookRelativePath,
+  );
   const opts: string[] = [];
   if (slurmOptions?.gpus?.trim()) {
     opts.push(`--gpus=${slurmOptions.gpus.trim()}`);
@@ -1970,15 +2040,89 @@ function buildLaunchCommand(
   }
 
   // For a SLURM outer environment, run jupyter directly under srun.
-  // No need for calkit xenv wrapper - srun provides the environment context.
-  // Use --kill-on-bad-exit to ensure cleanup when srun is interrupted.
+  // Run checks and launch in the same remote shell so setup side effects
+  // (e.g., module loads) apply to both kernel checks and Jupyter startup.
   const rawJupyterCmd = `calkit jupyter lab --ip=0.0.0.0 --no-browser --port=${port}${
     serverToken ? ` --IdentityProvider.token=${shQuote(serverToken)}` : ""
   }${defaultKernelFlag}`;
-  const srunPart = `srun --kill-on-bad-exit ${opts.join(
-    " ",
-  )} ${rawJupyterCmd}`.trim();
-  return `${prefixParts.join(" && ")} && ${srunPart}`;
+  const remoteParts = [
+    ...slurmSetupCommands,
+    checkPart,
+    ...(picked.innerKind === "docker" ? [] : [kernelCheckPart]),
+    rawJupyterCmd,
+  ];
+  const remoteCmd = remoteParts.join(" && ");
+  const srunOptions = opts.join(" ");
+  const srunPart =
+    `srun -J ckvscode --kill-on-bad-exit ${srunOptions} bash -lc ${shQuote(
+      remoteCmd,
+    )}`.trim();
+  return `${cdPart} && ${srunPart}`;
+}
+
+function getEffectiveSlurmSetupCommands(
+  config: CalkitInfo,
+  picked: CalkitEnvNotebookKernelSource,
+  notebookRelativePath?: string,
+): string[] {
+  if (!picked.outerSlurmEnvironment) {
+    return [];
+  }
+  const env = config.environments?.[picked.outerSlurmEnvironment];
+  const envSetup = Array.isArray(env?.default_setup)
+    ? env.default_setup
+        .map((cmd) => (typeof cmd === "string" ? cmd.trim() : ""))
+        .filter((cmd) => cmd.length > 0)
+    : [];
+  const stageSetup = getNotebookStageSlurmSetupCommands(
+    config,
+    notebookRelativePath,
+    picked.environmentName,
+  );
+  const merged = [...envSetup, ...stageSetup];
+  return merged.filter((cmd, idx) => merged.indexOf(cmd) === idx);
+}
+
+function getNotebookStageSlurmSetupCommands(
+  config: CalkitInfo,
+  notebookRelativePath: string | undefined,
+  environmentName: string,
+): string[] {
+  if (!notebookRelativePath) {
+    return [];
+  }
+  const targetPath = normalizeConfigPath(notebookRelativePath);
+  const stages = config.pipeline?.stages;
+  if (!stages) {
+    return [];
+  }
+  for (const stage of Object.values(stages)) {
+    if (stage.kind !== "jupyter-notebook") {
+      continue;
+    }
+    if (stage.environment !== environmentName) {
+      continue;
+    }
+    const stagePath =
+      typeof stage.notebook_path === "string"
+        ? normalizeConfigPath(stage.notebook_path)
+        : undefined;
+    if (stagePath !== targetPath) {
+      continue;
+    }
+    const setup = stage.slurm?.setup;
+    if (!Array.isArray(setup)) {
+      return [];
+    }
+    return setup
+      .map((cmd) => (typeof cmd === "string" ? cmd.trim() : ""))
+      .filter((cmd) => cmd.length > 0);
+  }
+  return [];
+}
+
+function normalizeConfigPath(pathText: string): string {
+  return pathText.replace(/\\/g, "/");
 }
 
 function buildDefaultKernelFlag(kernelName?: string): string {
@@ -2186,7 +2330,7 @@ async function waitForServerReady(
     sessionKind?: ActiveJupyterServerSession["kind"];
     notebookUri?: string;
   },
-  timeoutMs = 45_000,
+  timeoutMs = 300_000,
   pollMs = 1_000,
 ): Promise<boolean> {
   const started = Date.now();
@@ -3086,6 +3230,7 @@ async function startSlurmJobForActiveNotebook(
         serverToken,
         undefined,
         expectedKernel?.kernelName,
+        getNotebookRelativePathForUri(workspaceRoot, profile.notebookUri),
       );
 
       startServerInBackground(launchCmd, workspaceRoot, {

@@ -37,14 +37,11 @@ test-docs: sync-docs ## Test if documentation can be built without warnings or e
 	@uv run mkdocs build -s
 
 .PHONY: sync-docs
-sync-docs: cli-reference ## Sync documentation content from docs/*.md into README.md.
+sync-docs: ## Sync documentation content from docs/*.md into README.md.
+	@echo "🚀 Generating docs references"
+	@uv run python scripts/generate-docs-references.py
 	@echo "🚀 Syncing documentation"
 	@uv run python scripts/sync-docs.py
-
-.PHONY: cli-reference
-cli-reference: ## Generate docs/cli-reference.md from CLI help output.
-	@echo "🚀 Generating CLI reference"
-	@uv run python scripts/generate-cli-reference.py
 
 .PHONY: docs
 docs: sync-docs ## Build and serve the documentation.

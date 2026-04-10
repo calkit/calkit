@@ -278,3 +278,183 @@ At a high level, `xr` chooses environments in this order:
 
 If you want to inspect what `xr` would do without changing project files,
 use the `--dry-run` option.
+
+<!-- AUTO-GENERATED: PIPELINE-STAGE-KINDS:START -->
+
+## Pipeline stage kind reference
+
+Stage definitions belong in `pipeline.stages` in `calkit.yaml`.
+
+Common stage parameters:
+
+| Parameter      | Type                                | Required | Default |
+| -------------- | ----------------------------------- | -------- | ------- |
+| `environment`  | str                                 | yes      |         |
+| `wdir`         | str \| None                         | no       | null    |
+| `inputs`       | list[str \| InputsFromStageOutputs] | no       |         |
+| `outputs`      | list[str \| PathOutput]             | no       |         |
+| `always_run`   | bool                                | no       | False   |
+| `iterate_over` | list[StageIteration] \| None        | no       | null    |
+| `description`  | str \| None                         | no       | null    |
+| `slurm`        | StageSlurmOptions \| None           | no       | null    |
+
+### `command`
+
+Model class: `CommandStage`
+
+| Kind-specific parameter | Type | Required | Default |
+| ----------------------- | ---- | -------- | ------- |
+| `command`               | str  | yes      |         |
+
+### `docker-command`
+
+Model class: `DockerCommandStage`
+
+| Kind-specific parameter | Type | Required | Default |
+| ----------------------- | ---- | -------- | ------- |
+| `command`               | str  | yes      |         |
+
+### `json-to-latex`
+
+Model class: `JsonToLatexStage`
+
+| Kind-specific parameter | Type                   | Required | Default    |
+| ----------------------- | ---------------------- | -------- | ---------- |
+| `environment`           | str                    | no       | '\_system' |
+| `command_name`          | str \| None            | no       | null       |
+| `format`                | dict[str, str] \| None | no       | null       |
+
+### `julia-command`
+
+Model class: `JuliaCommandStage`
+
+| Kind-specific parameter | Type | Required | Default |
+| ----------------------- | ---- | -------- | ------- |
+| `command`               | str  | yes      |         |
+
+### `julia-script`
+
+Model class: `JuliaScriptStage`
+
+| Kind-specific parameter | Type      | Required | Default |
+| ----------------------- | --------- | -------- | ------- |
+| `script_path`           | str       | yes      |         |
+| `args`                  | list[str] | no       |         |
+
+### `jupyter-notebook`
+
+Model class: `JupyterNotebookStage`
+
+A stage that runs a Jupyter notebook.
+
+Notebooks need to be cleaned of outputs so they can be used as DVC
+dependencies. The `status` and `run` commands handle this
+automatically.
+
+| Kind-specific parameter  | Type                                         | Required | Default |
+| ------------------------ | -------------------------------------------- | -------- | ------- |
+| `notebook_path`          | str                                          | yes      |         |
+| `cleaned_ipynb_storage`  | Literal['git', 'dvc'] \| None                | no       | null    |
+| `executed_ipynb_storage` | Literal['git', 'dvc'] \| None                | no       | 'dvc'   |
+| `html_storage`           | Literal['git', 'dvc'] \| None                | no       | 'dvc'   |
+| `parameters`             | dict[str, Any]                               | no       |         |
+| `language`               | Literal['python', 'matlab', 'julia'] \| None | no       | null    |
+
+### `latex`
+
+Model class: `LatexStage`
+
+| Kind-specific parameter | Type                          | Required | Default |
+| ----------------------- | ----------------------------- | -------- | ------- |
+| `target_path`           | str                           | yes      |         |
+| `latexmkrc_path`        | str \| None                   | no       | null    |
+| `pdf_storage`           | Literal['git', 'dvc'] \| None | no       | 'dvc'   |
+| `verbose`               | bool                          | no       | False   |
+| `force`                 | bool                          | no       | False   |
+| `synctex`               | bool                          | no       | True    |
+
+### `map-paths`
+
+Model class: `MapPathsStage`
+
+| Kind-specific parameter | Type                                                                                                                                                                                                                                                                                                                                                        | Required | Default    |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------- |
+| `environment`           | str                                                                                                                                                                                                                                                                                                                                                         | no       | '\_system' |
+| `paths`                 | list[Annotated[calkit.models.pipeline.MapPathsStage.CopyFileToFile \| calkit.models.pipeline.MapPathsStage.CopyFileToDir \| calkit.models.pipeline.MapPathsStage.DirToDirMerge \| calkit.models.pipeline.MapPathsStage.DirToDirReplace, Discriminator(discriminator='kind', custom_error_type=None, custom_error_message=None, custom_error_context=None)]] | yes      |            |
+
+### `matlab-command`
+
+Model class: `MatlabCommandStage`
+
+| Kind-specific parameter | Type | Required | Default |
+| ----------------------- | ---- | -------- | ------- |
+| `command`               | str  | yes      |         |
+
+### `matlab-script`
+
+Model class: `MatlabScriptStage`
+
+| Kind-specific parameter | Type                                                                                          | Required | Default |
+| ----------------------- | --------------------------------------------------------------------------------------------- | -------- | ------- |
+| `script_path`           | str                                                                                           | yes      |         |
+| `matlab_path`           | Annotated[str, AfterValidator(func=<function _check_path_relative_and_child_of_cwd>)] \| None | no       | null    |
+
+### `python-script`
+
+Model class: `PythonScriptStage`
+
+| Kind-specific parameter | Type      | Required | Default |
+| ----------------------- | --------- | -------- | ------- |
+| `script_path`           | str       | yes      |         |
+| `args`                  | list[str] | no       |         |
+
+### `r-script`
+
+Model class: `RScriptStage`
+
+| Kind-specific parameter | Type      | Required | Default |
+| ----------------------- | --------- | -------- | ------- |
+| `script_path`           | str       | yes      |         |
+| `args`                  | list[str] | no       |         |
+
+### `sbatch`
+
+Model class: `SBatchStage`
+
+| Kind-specific parameter | Type                          | Required | Default |
+| ----------------------- | ----------------------------- | -------- | ------- |
+| `script_path`           | str                           | yes      |         |
+| `args`                  | list[str]                     | no       |         |
+| `sbatch_options`        | list[str]                     | no       |         |
+| `log_path`              | str \| None                   | no       | null    |
+| `log_storage`           | Literal['git', 'dvc'] \| None | no       | 'git'   |
+
+### `shell-command`
+
+Model class: `ShellCommandStage`
+
+| Kind-specific parameter | Type                         | Required | Default |
+| ----------------------- | ---------------------------- | -------- | ------- |
+| `command`               | str                          | yes      |         |
+| `shell`                 | Literal['sh', 'bash', 'zsh'] | no       | 'bash'  |
+
+### `shell-script`
+
+Model class: `ShellScriptStage`
+
+| Kind-specific parameter | Type                         | Required | Default |
+| ----------------------- | ---------------------------- | -------- | ------- |
+| `script_path`           | str                          | yes      |         |
+| `args`                  | list[str]                    | no       |         |
+| `shell`                 | Literal['sh', 'bash', 'zsh'] | no       | 'bash'  |
+
+### `word-to-pdf`
+
+Model class: `WordToPdfStage`
+
+| Kind-specific parameter | Type | Required | Default    |
+| ----------------------- | ---- | -------- | ---------- |
+| `environment`           | str  | no       | '\_system' |
+| `word_doc_path`         | str  | yes      |            |
+
+<!-- AUTO-GENERATED: PIPELINE-STAGE-KINDS:END -->

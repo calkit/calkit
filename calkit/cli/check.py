@@ -39,10 +39,21 @@ def _juliaup_version_installed(julia_version: str) -> bool:
             capture_output=True,
             text=True,
             check=False,
+            timeout=10,
         )
     except FileNotFoundError:
         return False
+    except subprocess.TimeoutExpired:
+        warn("Timed out while running `juliaup status`.")
+        return False
     if result.returncode != 0:
+        err_output = (result.stderr or result.stdout or "").strip()
+        if err_output:
+            warn(f"`juliaup status` failed: {err_output}")
+        else:
+            warn(
+                f"`juliaup status` failed with exit code {result.returncode}."
+            )
         return False
     for line in result.stdout.splitlines():
         parts = line.split()

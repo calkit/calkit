@@ -42,31 +42,6 @@ COMPOSITE_ENV_SEP = ":"
 VALID_OUTER_ENV_KINDS = ["slurm"]
 
 
-def calc_dir_sig(path: str) -> str:
-    """Calculate a fast directory signature for cache invalidation.
-
-    The signature includes file count, total size, and latest mtime in
-    nanoseconds over all files in the directory tree.
-    """
-    if not os.path.isdir(path):
-        return ""
-    file_count = 0
-    total_size = 0
-    latest_mtime = 0
-    for foldername, _, filenames in os.walk(path):
-        for filename in filenames:
-            fpath = os.path.join(foldername, filename)
-            try:
-                st = os.stat(fpath)
-            except OSError:
-                continue
-            file_count += 1
-            total_size += st.st_size
-            if st.st_mtime_ns > latest_mtime:
-                latest_mtime = st.st_mtime_ns
-    return f"{file_count}-{total_size}-{latest_mtime}"
-
-
 def get_julia_packages_dir() -> str:
     """Return the Julia packages directory for the current environment."""
     depot_env = os.getenv("JULIA_DEPOT_PATH", "")
@@ -448,12 +423,14 @@ def calc_data_for_env(
         if not os.path.exists(path):
             return None
         if os.path.isdir(path):
-            dir_sig = calc_dir_sig(path)
-            if dir_sig == cached_data.get("dir_sig"):
+            # Avoid deep recursive walks on every cache check. A shallow
+            # signature is enough to decide whether to recompute full MD5.
+            shallow_sig = _calc_dir_sig_shallow(path, max_depth=2)
+            if shallow_sig == cached_data.get("shallow_sig"):
                 return cached_data.get("md5")
             md5 = calkit.get_md5(path)
             with get_cache_db(name="md5s") as db:
-                db[key] = {"md5": md5, "dir_sig": dir_sig}
+                db[key] = {"md5": md5, "shallow_sig": shallow_sig}
                 db.commit()
             return md5
         mtime = os.path.getmtime(path)

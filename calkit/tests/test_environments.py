@@ -111,7 +111,7 @@ def test_cache_uses_dir_signature_for_conda_prefix(tmp_dir, monkeypatch):
 
     monkeypatch.setattr(os.path, "getmtime", _fake_getmtime)
     with open(".conda/marker.txt", "w") as f:
-        f.write("two")
+        f.write("three")
     assert not calkit.environments.check_cache(env_name="myenv", env=env)
 
 
@@ -209,7 +209,7 @@ def test_cache_includes_julia_packages_directory_changes(tmp_dir, monkeypatch):
     calkit.environments.save_cache(env_name="jl-pkgs", env=env, success=True)
     assert calkit.environments.check_cache(env_name="jl-pkgs", env=env)
     with open(pkg_file, "w") as f:
-        f.write("two")
+        f.write("three")
     assert not calkit.environments.check_cache(env_name="jl-pkgs", env=env)
 
 

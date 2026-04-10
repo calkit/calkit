@@ -161,7 +161,6 @@ def test_execute_notebook_julia(tmp_dir):
             "main",
             "--julia",
             "1.11",
-            "--no-check",
             "IJulia",
         ]
     )

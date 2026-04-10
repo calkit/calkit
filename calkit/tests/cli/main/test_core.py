@@ -276,7 +276,6 @@ def test_run_in_julia_env(tmp_dir):
             "my-julia",
             "--julia=1.11",
             "--no-commit",
-            "--no-check",
             "Revise",
             "PkgVersion",
         ]

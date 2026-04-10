@@ -510,7 +510,15 @@ def test_new_matlab_script_stage(tmp_dir):
 def test_new_julia_env(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
-        ["calkit", "new", "julia-env", "--name", "j1", "WaterLily"]
+        [
+            "calkit",
+            "new",
+            "julia-env",
+            "--name",
+            "j1",
+            "--no-check",
+            "WaterLily",
+        ]
     )
     assert os.path.isfile("Project.toml")
     assert os.path.isfile("Manifest.toml")
@@ -523,6 +531,7 @@ def test_new_julia_env(tmp_dir):
             "j2",
             "--julia",
             "1.10",
+            "--no-check",
             "Revise",
             "--path",
             "envs/my-env/Project.toml",

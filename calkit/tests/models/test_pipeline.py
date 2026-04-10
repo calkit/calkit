@@ -285,7 +285,7 @@ def test_sbatchstage_with_setup_commands():
         name="job-setup",
         script_path="scripts/run_job.sh",
         environment="slurm-env",
-        slurm={"setup": ["module purge", "module load python/3.11"]},
+        slurm={"setup": ["module purge", "module load python/3.11"]},  # type: ignore
     )
     sd = s.to_dvc()
     assert "--setup 'module purge'" in sd["cmd"]

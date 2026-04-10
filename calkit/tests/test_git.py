@@ -203,8 +203,8 @@ def test_ensure_path_is_not_ignored_both_root_and_subdir_gitignore(tmp_dir):
     """Un-ignoring a path blocked by BOTH the root gitignore AND a subdirectory
     gitignore should fix both files so the path truly becomes unignored.
 
-    When the root .gitignore excludes a directory (e.g. ``pubs/``) and a
-    nested .gitignore (e.g. created by DVC) also excludes the same file, the
+    When the root .gitignore excludes a directory (e.g., ``pubs/``) and a
+    nested .gitignore (e.g., created by DVC) also excludes the same file, the
     function must recursively remove every blocking rule.
     """
     repo = git.Repo.init()
@@ -218,7 +218,7 @@ def test_ensure_path_is_not_ignored_both_root_and_subdir_gitignore(tmp_dir):
     # Root gitignore excludes the whole pubs/ directory
     with open(".gitignore", "w") as f:
         f.write("pubs/\n")
-    # Subdirectory .gitignore (e.g. managed by DVC) also excludes the file
+    # Subdirectory .gitignore (e.g., managed by DVC) also excludes the file
     with open("pubs/.gitignore", "w") as f:
         f.write("references.bib\n")
     assert repo.ignored(target)
@@ -272,7 +272,7 @@ def test_ensure_path_is_ignored_removes_stale_negation(tmp_dir):
     with open(".gitignore", "w") as f:
         f.write("results/*\n!results/output.json\n")
     assert not repo.ignored(target)
-    # Now re-ignore it (e.g. moving back to DVC tracking)
+    # Now re-ignore it (e.g., moving back to DVC tracking)
     result = calkit.git.ensure_path_is_ignored(repo, path=target)
     assert result is True
     assert repo.ignored(target)
@@ -335,7 +335,7 @@ def test_ensure_path_is_not_ignored_multiple_files_excluded_dir(tmp_dir):
 
 
 def test_ensure_path_is_not_ignored_dvc_subdir_gitignore(tmp_dir):
-    """When DVC manages a .gitignore in a subdirectory (e.g. outputs/.gitignore
+    """When DVC manages a .gitignore in a subdirectory (e.g., outputs/.gitignore
     with '/model.fig'), un-ignoring model.fig should remove just that entry,
     leaving other DVC-tracked files (model.mat) still ignored.
     """

@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+from datetime import timedelta
 
 import pytest
 
@@ -78,6 +79,160 @@ def test_check_all_in_pipeline(tmp_dir):
     print(res)
     assert res["py1"]["success"]
     assert res["py1"]["cached"]
+
+
+def test_cache_uses_dir_signature_for_conda_prefix(tmp_dir, monkeypatch):
+    env = {
+        "kind": "conda",
+        "path": "environment.yml",
+        "prefix": ".conda",
+    }
+    with open("environment.yml", "w") as f:
+        calkit.ryaml.dump({"name": "myenv", "dependencies": ["python"]}, f)
+    os.makedirs(".conda", exist_ok=True)
+    with open(".conda/marker.txt", "w") as f:
+        f.write("one")
+    lock_fpath = calkit.environments.get_env_lock_fpath(
+        env=env, env_name="myenv", as_posix=False
+    )
+    assert lock_fpath is not None
+    os.makedirs(os.path.dirname(lock_fpath), exist_ok=True)
+    with open(lock_fpath, "w") as f:
+        f.write("lock")
+    calkit.environments.save_cache(env_name="myenv", env=env, success=True)
+    assert calkit.environments.check_cache(env_name="myenv", env=env)
+    real_getmtime = os.path.getmtime
+    prefix_mtime = real_getmtime(".conda")
+
+    def _fake_getmtime(path):
+        if os.path.abspath(path) == os.path.abspath(".conda"):
+            return prefix_mtime
+        return real_getmtime(path)
+
+    monkeypatch.setattr(os.path, "getmtime", _fake_getmtime)
+    with open(".conda/marker.txt", "w") as f:
+        f.write("three")
+    assert not calkit.environments.check_cache(env_name="myenv", env=env)
+
+
+def test_cache_tracks_julia_manifest(tmp_dir):
+    os.makedirs("juliaenv", exist_ok=True)
+    with open("juliaenv/Project.toml", "w") as f:
+        f.write('name = "demo"\n')
+    with open("juliaenv/Manifest.toml", "w") as f:
+        f.write("# manifest v1\n")
+    env = {
+        "kind": "julia",
+        "path": "juliaenv/Project.toml",
+        "julia": "1.11",
+    }
+    calkit.environments.save_cache(env_name="jl", env=env, success=True)
+    assert calkit.environments.check_cache(env_name="jl", env=env)
+    # Unrelated file change should NOT invalidate the cache
+    with open("juliaenv/extra.txt", "w") as f:
+        f.write("irrelevant")
+    assert calkit.environments.check_cache(env_name="jl", env=env)
+    # Changing Manifest.toml SHOULD invalidate
+    with open("juliaenv/Manifest.toml", "w") as f:
+        f.write("# manifest v2\n")
+    assert not calkit.environments.check_cache(env_name="jl", env=env)
+
+
+def test_cache_prefers_versioned_manifest(tmp_dir):
+    os.makedirs("juliaenv", exist_ok=True)
+    with open("juliaenv/Project.toml", "w") as f:
+        f.write('name = "demo"\n')
+    # Both Manifest.toml and Manifest-v1.11.toml exist; the versioned one wins
+    with open("juliaenv/Manifest.toml", "w") as f:
+        f.write("# plain manifest\n")
+    with open("juliaenv/Manifest-v1.11.toml", "w") as f:
+        f.write("# versioned manifest v1\n")
+    env = {
+        "kind": "julia",
+        "path": "juliaenv/Project.toml",
+        "julia": "1.11",
+    }
+    lock_fpath = calkit.environments.get_env_lock_fpath(
+        env=env, env_name="jl", as_posix=False
+    )
+    assert lock_fpath is not None
+    assert os.path.basename(lock_fpath) == "Manifest-v1.11.toml"
+    calkit.environments.save_cache(env_name="jl", env=env, success=True)
+    assert calkit.environments.check_cache(env_name="jl", env=env)
+    # Touching the plain Manifest should NOT invalidate (versioned is tracked)
+    with open("juliaenv/Manifest.toml", "w") as f:
+        f.write("# plain manifest changed\n")
+    assert calkit.environments.check_cache(env_name="jl", env=env)
+    # Touching the versioned Manifest SHOULD invalidate
+    with open("juliaenv/Manifest-v1.11.toml", "w") as f:
+        f.write("# versioned manifest v2\n")
+    assert not calkit.environments.check_cache(env_name="jl", env=env)
+
+
+def test_versioned_manifest_uses_major_minor_only(tmp_dir):
+    os.makedirs("juliaenv", exist_ok=True)
+    with open("juliaenv/Project.toml", "w") as f:
+        f.write('name = "demo"\n')
+    # julia = "1.11.7" should still look for Manifest-v1.11.toml
+    with open("juliaenv/Manifest-v1.11.toml", "w") as f:
+        f.write("# versioned manifest\n")
+    env = {
+        "kind": "julia",
+        "path": "juliaenv/Project.toml",
+        "julia": "1.11.7",
+    }
+    lock_fpath = calkit.environments.get_env_lock_fpath(
+        env=env, env_name="jl", as_posix=False
+    )
+    assert lock_fpath is not None
+    assert os.path.basename(lock_fpath) == "Manifest-v1.11.toml"
+
+
+def test_cache_includes_julia_packages_directory_changes(tmp_dir, monkeypatch):
+    os.makedirs("juliaenv", exist_ok=True)
+    with open("juliaenv/Project.toml", "w") as f:
+        f.write('name = "demo"\n')
+    with open("juliaenv/Manifest.toml", "w") as f:
+        f.write("# manifest\n")
+    depot = os.path.abspath(".test-julia-depot")
+    packages_dir = os.path.join(depot, "packages")
+    os.makedirs(packages_dir, exist_ok=True)
+    pkg_file = os.path.join(packages_dir, "Example.txt")
+    with open(pkg_file, "w") as f:
+        f.write("one")
+    monkeypatch.setenv("JULIA_DEPOT_PATH", depot)
+    env = {
+        "kind": "julia",
+        "path": "juliaenv/Project.toml",
+        "julia": "1.11",
+    }
+    calkit.environments.save_cache(env_name="jl-pkgs", env=env, success=True)
+    assert calkit.environments.check_cache(env_name="jl-pkgs", env=env)
+    with open(pkg_file, "w") as f:
+        f.write("three")
+    assert not calkit.environments.check_cache(env_name="jl-pkgs", env=env)
+
+
+def test_check_cache_can_bypass_ttl(tmp_dir):
+    with open("pyproject.toml", "w") as f:
+        f.write('[project]\nname = "demo"\nversion = "0.1.0"\n')
+    with open("uv.lock", "w") as f:
+        f.write("version = 1\n")
+    env = {"kind": "uv", "path": "pyproject.toml"}
+    env_name = "ttl-test"
+    data = calkit.environments.save_cache(
+        env_name=env_name, env=env, success=True
+    )
+    key = calkit.environments.make_cache_key(env_name=env_name)
+    with calkit.environments.get_cache_db() as db:
+        stale = dict(data)
+        stale["checked_at"] = stale["checked_at"] - timedelta(hours=2)
+        db[key] = stale
+        db.commit()
+    assert not calkit.environments.check_cache(env_name=env_name, env=env)
+    assert calkit.environments.check_cache(
+        env_name=env_name, env=env, respect_ttl=False
+    )
 
 
 def test_env_from_name_or_path(tmp_dir):

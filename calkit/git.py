@@ -218,7 +218,7 @@ def ensure_path_is_not_ignored(
     def ancestor_requires_recursive_unignore() -> bool:
         """Return True if any ancestor-level ignore rule would block this path.
 
-        This includes explicit directory ignores (e.g. 'dir/' or '/dir/')
+        This includes explicit directory ignores (e.g., 'dir/' or '/dir/')
         as well as ancestor-based glob patterns like 'dir/*' or '/dir/*',
         i.e., any rule that would prevent reaching the nested path without
         adding recursive unignore patterns.

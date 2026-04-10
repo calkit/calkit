@@ -42,6 +42,70 @@ COMPOSITE_ENV_SEP = ":"
 VALID_OUTER_ENV_KINDS = ["slurm"]
 
 
+def get_julia_packages_dir() -> str:
+    """Return the Julia packages directory for the current environment."""
+    depot_env = os.getenv("JULIA_DEPOT_PATH", "")
+    first_depot = depot_env.split(os.pathsep)[0].strip() if depot_env else ""
+    if not first_depot:
+        first_depot = os.path.join("~", ".julia")
+    return os.path.join(os.path.expanduser(first_depot), "packages")
+
+
+def _calc_dir_sig_shallow(path: str, max_depth: int = 1) -> str:
+    """Calculate a lightweight signature by scanning only a few levels.
+
+    This avoids deep recursive walks of large directories while still
+    detecting practical state changes like added/removed packages or
+    artifacts.
+    """
+    if not os.path.isdir(path):
+        return ""
+    try:
+        root_stat = os.stat(path)
+        latest_mtime = root_stat.st_mtime_ns
+    except OSError:
+        return ""
+    entry_count = 0
+    total_size = 0
+    stack: list[tuple[str, int]] = [(path, 0)]
+    while stack:
+        current, depth = stack.pop()
+        try:
+            with os.scandir(current) as it:
+                for entry in it:
+                    try:
+                        st = entry.stat(follow_symlinks=False)
+                    except OSError:
+                        continue
+                    entry_count += 1
+                    total_size += st.st_size
+                    if st.st_mtime_ns > latest_mtime:
+                        latest_mtime = st.st_mtime_ns
+                    if depth < max_depth and entry.is_dir(
+                        follow_symlinks=False
+                    ):
+                        stack.append((entry.path, depth + 1))
+        except OSError:
+            continue
+    return f"{entry_count}-{total_size}-{latest_mtime}"
+
+
+def calc_julia_depot_sig() -> str | None:
+    """Calculate a cheap machine-state signature for Julia depot changes."""
+    packages_dir = get_julia_packages_dir()
+    depot_root = os.path.dirname(packages_dir)
+    packages_sig = _calc_dir_sig_shallow(packages_dir, max_depth=1)
+    artifacts_sig = _calc_dir_sig_shallow(
+        os.path.join(depot_root, "artifacts"), max_depth=1
+    )
+    registries_sig = _calc_dir_sig_shallow(
+        os.path.join(depot_root, "registries"), max_depth=1
+    )
+    if not any([packages_sig, artifacts_sig, registries_sig]):
+        return None
+    return "|".join([packages_sig, artifacts_sig, registries_sig])
+
+
 def language_from_env(env: dict) -> str | None:
     kind = env.get("kind")
     if kind == "julia":
@@ -197,6 +261,27 @@ def get_all_venv_lock_fpaths(
     return fpaths
 
 
+def _get_julia_manifest_fpath(
+    env_dir: str, julia_version: str | None, wdir: str | None = None
+) -> str:
+    """Return the Manifest path for a Julia env, preferring versioned names.
+
+    Julia 1.9+ writes ``Manifest-vMAJOR.MINOR.toml`` (e.g.
+    ``Manifest-v1.11.toml``) alongside the default ``Manifest.toml``.
+    We prefer the versioned file when it exists.
+    """
+    base_dir = env_dir or "."
+    full_dir = os.path.join(wdir, base_dir) if wdir else base_dir
+    if julia_version:
+        parts = julia_version.split(".")
+        if len(parts) >= 2:
+            major_minor = f"{parts[0]}.{parts[1]}"
+            versioned_name = f"Manifest-v{major_minor}.toml"
+            if os.path.isfile(os.path.join(full_dir, versioned_name)):
+                return os.path.join(base_dir, versioned_name)
+    return os.path.join(base_dir, "Manifest.toml")
+
+
 def get_env_lock_fpath(
     env: dict,
     env_name: str,
@@ -264,9 +349,10 @@ def get_env_lock_fpath(
             raise ValueError(
                 "Julia environments require a path pointing to Project.toml"
             )
-        # Simply replace Project.toml with Manifest.toml
         env_dir = os.path.dirname(env_path)
-        lock_fpath = os.path.join(env_dir, "Manifest.toml")
+        lock_fpath = _get_julia_manifest_fpath(
+            env_dir, env.get("julia"), wdir=wdir
+        )
     elif env_kind == "renv":
         env_path = env.get("path")
         if env_path is None:
@@ -323,21 +409,35 @@ def calc_data_for_env(
     """
 
     def get_cached_md5(path: str) -> str | None:
-        """Get a cached MD5 hash for a path, recalculating if mtime doesn't
-        match the cached mtime.
+        """Get a cached MD5 hash for a path.
+
+        For files, use mtime as a fast invalidation check. For directories,
+        use a lightweight directory signature, since directory mtimes can be
+        unreliable across filesystems and operations.
         """
         key = os.path.abspath(path)
         cached_data = {}
         with get_cache_db(name="md5s") as db:
             if key in db:
                 cached_data = db[key]
-                if os.path.exists(path):
-                    mtime = os.path.getmtime(path)
-                    if mtime == cached_data.get("mtime"):
-                        return cached_data.get("md5")
+        if not os.path.exists(path):
+            return None
+        if os.path.isdir(path):
+            # Avoid deep recursive walks on every cache check. A shallow
+            # signature is enough to decide whether to recompute full MD5.
+            shallow_sig = _calc_dir_sig_shallow(path, max_depth=2)
+            if shallow_sig == cached_data.get("shallow_sig"):
+                return cached_data.get("md5")
+            md5 = calkit.get_md5(path)
+            with get_cache_db(name="md5s") as db:
+                db[key] = {"md5": md5, "shallow_sig": shallow_sig}
+                db.commit()
+            return md5
+        mtime = os.path.getmtime(path)
+        if mtime == cached_data.get("mtime"):
+            return cached_data.get("md5")
         if os.path.exists(path):
             md5 = calkit.get_md5(path)
-            mtime = os.path.getmtime(path)
             with get_cache_db(name="md5s") as db:
                 db[key] = {"md5": md5, "mtime": mtime}
                 db.commit()
@@ -362,6 +462,9 @@ def calc_data_for_env(
             env_prefix_hash = get_cached_md5(env_prefix_full)
         else:
             env_prefix_hash = None
+    julia_packages_sig = None
+    if env.get("kind") == "julia":
+        julia_packages_sig = calc_julia_depot_sig()
     env_lock_hash = None
     env_lock_fpath = get_env_lock_fpath(env_name=env_name, env=env, wdir=wdir)
     if env_lock_fpath is not None:
@@ -373,13 +476,19 @@ def calc_data_for_env(
             "env_hash": env_hash,
             "env_path_hash": env_path_hash,
             "env_prefix_hash": env_prefix_hash,
+            "julia_packages_sig": julia_packages_sig,
             "env_lock_hash": env_lock_hash,
         },
         "checked_at": calkit.utcnow(),
     }
 
 
-def check_cache(env_name: str, env: dict, wdir: str | None = None) -> bool:
+def check_cache(
+    env_name: str,
+    env: dict,
+    wdir: str | None = None,
+    respect_ttl: bool = True,
+) -> bool:
     """Check if the environment is up-to-date based on cached data."""
     if wdir is None:
         wdir = os.getcwd()
@@ -393,11 +502,15 @@ def check_cache(env_name: str, env: dict, wdir: str | None = None) -> bool:
     # If our last check failed, we're definitely not up-to-date
     if not cached_data.get("success", False):
         return False
+    if respect_ttl:
+        cached_checked_at = cached_data.get("checked_at")
+        if cached_checked_at is None:
+            return False
+        time_diff = calkit.utcnow() - cached_checked_at
+        if time_diff.total_seconds() > ENV_CHECK_CACHE_TTL_SECONDS:
+            return False
     # Check if this environment is up-to-date
     current_data = calc_data_for_env(env_name=env_name, env=env, wdir=wdir)
-    time_diff = current_data["checked_at"] - cached_data.get("checked_at")
-    if time_diff.total_seconds() > ENV_CHECK_CACHE_TTL_SECONDS:
-        return False
     if env.get("path") and not current_data["hashes"]["env_path_hash"]:
         return False
     if env.get("prefix") and not current_data["hashes"]["env_prefix_hash"]:

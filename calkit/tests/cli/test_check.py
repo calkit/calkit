@@ -87,3 +87,38 @@ def test_check_env_vars(tmp_dir):
             ["calkit", "check", "env-vars"],
             env=os.environ.copy() | {"MY_ENV_VAR": "value1"},
         )
+
+
+@pytest.mark.skipif(
+    shutil.which("julia") is None, reason="Julia not installed"
+)
+def test_check_julia_env_caches_second_run(tmp_dir):
+    """Second run of ``calkit check julia-env`` should skip Pkg.instantiate."""
+    with open("Project.toml", "w") as f:
+        f.write('[deps]\n\n[compat]\njulia = "1"\n')
+    # First run — should actually call Pkg.instantiate
+    result1 = subprocess.run(
+        ["calkit", "check", "julia-env", "Project.toml", "--verbose"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "skipping Pkg.instantiate" not in result1.stdout
+    # Second run — nothing has changed, so instantiate should be skipped
+    result2 = subprocess.run(
+        ["calkit", "check", "julia-env", "Project.toml", "--verbose"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "skipping Pkg.instantiate" in result2.stdout
+    # Modify Project.toml — cache should be invalidated
+    with open("Project.toml", "a") as f:
+        f.write("# touched\n")
+    result3 = subprocess.run(
+        ["calkit", "check", "julia-env", "Project.toml", "--verbose"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "skipping Pkg.instantiate" not in result3.stdout

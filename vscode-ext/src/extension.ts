@@ -2053,9 +2053,10 @@ function buildLaunchCommand(
   ];
   const remoteCmd = remoteParts.join(" && ");
   const srunOptions = opts.join(" ");
-  const srunPart = `srun --kill-on-bad-exit ${srunOptions} bash -lc ${shQuote(
-    remoteCmd,
-  )}`.trim();
+  const srunPart =
+    `srun -J ckvscode --kill-on-bad-exit ${srunOptions} bash -lc ${shQuote(
+      remoteCmd,
+    )}`.trim();
   return `${cdPart} && ${srunPart}`;
 }
 

@@ -4,6 +4,18 @@ import shutil
 import subprocess
 
 
+def ensure_startup_file_disabled_in_command(cmd: list[str]) -> list[str]:
+    """Ensure Julia startup files are disabled for deterministic execution."""
+    if not cmd:
+        raise ValueError("Command list is empty")
+    if cmd[0] != "julia":
+        raise ValueError("This doesn't appear to be a Julia command")
+    if "--startup-file=no" in cmd:
+        return cmd
+    insert_idx = 2 if len(cmd) > 1 and cmd[1].startswith("+") else 1
+    return cmd[:insert_idx] + ["--startup-file=no"] + cmd[insert_idx:]
+
+
 def check_version_in_command(cmd: list[str]) -> list[str]:
     """Whether to include the version in the command.
 

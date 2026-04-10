@@ -2329,7 +2329,7 @@ async function waitForServerReady(
     sessionKind?: ActiveJupyterServerSession["kind"];
     notebookUri?: string;
   },
-  timeoutMs = 45_000,
+  timeoutMs = 300_000,
   pollMs = 1_000,
 ): Promise<boolean> {
   const started = Date.now();

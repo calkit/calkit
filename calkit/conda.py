@@ -259,6 +259,11 @@ class EnvCheckResult(BaseModel):
     env_needs_rebuild: bool | None = None
 
 
+def default_conda_env_name(calkit_env_name: str, project_name: str) -> str:
+    """Create the default conda env name from project + Calkit env name."""
+    return calkit.to_kebab_case(project_name) + "-" + calkit_env_name
+
+
 def check_env(
     env_fpath: str = "environment.yml",
     log_func=None,
@@ -267,6 +272,8 @@ def check_env(
     alt_lock_fpaths_delete: list[str] = [],
     relaxed: bool = False,
     verbose: bool = True,
+    expected_name: str | None = None,
+    auto_sync_name: bool = True,
 ) -> EnvCheckResult:
     """Check that a conda environment matches its spec.
 
@@ -305,6 +312,33 @@ def check_env(
     elif output_fpath and os.path.isfile(output_fpath):
         lock_to_use_for_creation = output_fpath
         log_func(f"Using existing lock file for creation: {output_fpath}")
+    with open(env_fpath) as f:
+        env_spec = ryaml.load(f)
+    env_name = env_spec["name"]
+    prefix = env_spec.get("prefix")
+    if (
+        expected_name is not None
+        and prefix is None
+        and env_name != expected_name
+    ):
+        if auto_sync_name:
+            old_name = env_name
+            env_spec["name"] = expected_name
+            with open(env_fpath, "w") as f:
+                ryaml.dump(env_spec, f)
+            env_name = expected_name
+            log_func(
+                "Updated conda env spec name from "
+                f"'{old_name}' to '{expected_name}' in {env_fpath}"
+            )
+        else:
+            raise ValueError(
+                "Conda environment name mismatch: "
+                f"spec file has '{env_name}' but Calkit expects "
+                f"'{expected_name}'. "
+                "Update the 'name' in the conda env spec to match the "
+                "Calkit naming convention."
+            )
     res = EnvCheckResult()
     if verbose:
         log_func("Getting conda info")
@@ -331,10 +365,6 @@ def check_env(
     ]
     # Get a list of environments defined by prefix instead of name
     env_prefixes = [e for e in envs if not e.startswith(root_prefix)]
-    with open(env_fpath) as f:
-        env_spec = ryaml.load(f)
-    env_name = env_spec["name"]
-    prefix = env_spec.get("prefix")
     prefix_orig = prefix
     if prefix is not None:
         prefix = os.path.abspath(prefix)
@@ -363,6 +393,25 @@ def check_env(
     create_file = (
         lock_to_use_for_creation if lock_to_use_for_creation else env_fpath
     )
+    if (
+        create_file != env_fpath
+        and expected_name is not None
+        and prefix is None
+    ):
+        try:
+            with open(create_file) as f:
+                lock_spec = ryaml.load(f)
+            lock_name = (
+                lock_spec.get("name") if isinstance(lock_spec, dict) else None
+            )
+        except Exception:
+            lock_name = None
+        if lock_name and lock_name != expected_name:
+            log_func(
+                "Ignoring lock file for environment creation because lock name "
+                f"'{lock_name}' does not match expected '{expected_name}'"
+            )
+            create_file = env_fpath
     create_cmd = [conda_exe, "env", "create", "-y", "-f", create_file]
     if prefix is not None:
         export_cmd += ["--prefix", prefix]

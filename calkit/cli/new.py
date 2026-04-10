@@ -1141,18 +1141,6 @@ def new_conda_env(
         list[str] | None,
         typer.Argument(help="Packages to include in the environment."),
     ] = None,
-    conda_name: Annotated[
-        str | None,
-        typer.Option(
-            "--conda-name",
-            help=(
-                "Name to use in the Conda environment file, if desired. "
-                "Will be automatically generated if not provided. "
-                "Note that these should be unique since Conda environments are "
-                "a system-wide collection."
-            ),
-        ),
-    ] = None,
     path: Annotated[
         str, typer.Option("--path", help="Environment YAML file path.")
     ] = "environment.yml",
@@ -1203,11 +1191,10 @@ def new_conda_env(
             f"Environment with name {name} already exists "
             "(use -f to overwrite)"
         )
-    if conda_name is None:
-        project_name = ck_info.get("name")
-        if project_name is None:
-            project_name = os.path.basename(os.getcwd())
-        conda_name = calkit.to_kebab_case(project_name) + "-" + name
+    project_name = ck_info.get("name")
+    if project_name is None:
+        project_name = os.path.basename(os.getcwd())
+    conda_name = calkit.conda.default_conda_env_name(name, project_name)
     if packages is not None:
         assert isinstance(packages, list)
         # Write environment to path

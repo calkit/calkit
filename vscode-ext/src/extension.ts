@@ -516,6 +516,7 @@ async function selectCalkitEnvironment(
     serverToken,
     dockerContainerName,
     expectedKernel?.kernelName,
+    notebookRelativePath,
   );
 
   startServerInBackground(launchCmd, workspaceRoot, {
@@ -1901,6 +1902,7 @@ function buildLaunchCommand(
   serverToken?: string,
   dockerContainerName?: string,
   defaultKernelName?: string,
+  notebookRelativePath?: string,
 ): string {
   const cdPart = `cd ${shQuote(workspaceRoot)}`;
   const checkPart = `calkit check env -n ${shQuote(picked.innerEnvironment)}`;
@@ -1955,6 +1957,11 @@ function buildLaunchCommand(
     return `${prefixParts.join(" && ")} && ${xenvPart}`;
   }
 
+  const slurmSetupCommands = getEffectiveSlurmSetupCommands(
+    config,
+    picked,
+    notebookRelativePath,
+  );
   const opts: string[] = [];
   if (slurmOptions?.gpus?.trim()) {
     opts.push(`--gpus=${slurmOptions.gpus.trim()}`);
@@ -1970,15 +1977,88 @@ function buildLaunchCommand(
   }
 
   // For a SLURM outer environment, run jupyter directly under srun.
-  // No need for calkit xenv wrapper - srun provides the environment context.
-  // Use --kill-on-bad-exit to ensure cleanup when srun is interrupted.
+  // Run checks and launch in the same remote shell so setup side effects
+  // (e.g., module loads) apply to both kernel checks and Jupyter startup.
   const rawJupyterCmd = `calkit jupyter lab --ip=0.0.0.0 --no-browser --port=${port}${
     serverToken ? ` --IdentityProvider.token=${shQuote(serverToken)}` : ""
   }${defaultKernelFlag}`;
-  const srunPart = `srun --kill-on-bad-exit ${opts.join(
-    " ",
-  )} ${rawJupyterCmd}`.trim();
-  return `${prefixParts.join(" && ")} && ${srunPart}`;
+  const remoteParts = [
+    ...slurmSetupCommands,
+    checkPart,
+    ...(picked.innerKind === "docker" ? [] : [kernelCheckPart]),
+    rawJupyterCmd,
+  ];
+  const remoteCmd = remoteParts.join(" && ");
+  const srunOptions = opts.join(" ");
+  const srunPart = `srun --kill-on-bad-exit ${srunOptions} bash -lc ${shQuote(
+    remoteCmd,
+  )}`.trim();
+  return `${cdPart} && ${srunPart}`;
+}
+
+function getEffectiveSlurmSetupCommands(
+  config: CalkitInfo,
+  picked: CalkitEnvNotebookKernelSource,
+  notebookRelativePath?: string,
+): string[] {
+  if (!picked.outerSlurmEnvironment) {
+    return [];
+  }
+  const env = config.environments?.[picked.outerSlurmEnvironment];
+  const envSetup = Array.isArray(env?.default_setup)
+    ? env.default_setup
+        .map((cmd) => (typeof cmd === "string" ? cmd.trim() : ""))
+        .filter((cmd) => cmd.length > 0)
+    : [];
+  const stageSetup = getNotebookStageSlurmSetupCommands(
+    config,
+    notebookRelativePath,
+    picked.environmentName,
+  );
+  const merged = [...envSetup, ...stageSetup];
+  return merged.filter((cmd, idx) => merged.indexOf(cmd) === idx);
+}
+
+function getNotebookStageSlurmSetupCommands(
+  config: CalkitInfo,
+  notebookRelativePath: string | undefined,
+  environmentName: string,
+): string[] {
+  if (!notebookRelativePath) {
+    return [];
+  }
+  const targetPath = normalizeConfigPath(notebookRelativePath);
+  const stages = config.pipeline?.stages;
+  if (!stages) {
+    return [];
+  }
+  for (const stage of Object.values(stages)) {
+    if (stage.kind !== "jupyter-notebook") {
+      continue;
+    }
+    if (stage.environment !== environmentName) {
+      continue;
+    }
+    const stagePath =
+      typeof stage.notebook_path === "string"
+        ? normalizeConfigPath(stage.notebook_path)
+        : undefined;
+    if (stagePath !== targetPath) {
+      continue;
+    }
+    const setup = stage.slurm?.setup;
+    if (!Array.isArray(setup)) {
+      return [];
+    }
+    return setup
+      .map((cmd) => (typeof cmd === "string" ? cmd.trim() : ""))
+      .filter((cmd) => cmd.length > 0);
+  }
+  return [];
+}
+
+function normalizeConfigPath(pathText: string): string {
+  return pathText.replace(/\\/g, "/");
 }
 
 function buildDefaultKernelFlag(kernelName?: string): string {
@@ -3086,6 +3166,7 @@ async function startSlurmJobForActiveNotebook(
         serverToken,
         undefined,
         expectedKernel?.kernelName,
+        getNotebookRelativePathForUri(workspaceRoot, profile.notebookUri),
       );
 
       startServerInBackground(launchCmd, workspaceRoot, {

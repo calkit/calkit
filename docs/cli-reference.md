@@ -1115,14 +1115,15 @@ calkit new slurm-env [OPTIONS]
 
 Options:
 
-| Option              | Type    | Required | Default   | Description                                                                            |
-| ------------------- | ------- | -------- | --------- | -------------------------------------------------------------------------------------- |
-| `--name`, `-n`      | text    | yes      |           | Environment name.                                                                      |
-| `--host`            | text    | no       | localhost | Host where SLURM commands should run.                                                  |
-| `--default-option`  | text    | no       |           | Default sbatch/srun option string (for example --gpus=1). Repeat for multiple options. |
-| `--description`     | text    | no       |           | Description.                                                                           |
-| `--overwrite`, `-f` | boolean | no       | False     | Overwrite any existing environment with this name.                                     |
-| `--no-commit`       | boolean | no       | False     | Do not commit changes.                                                                 |
+| Option              | Type    | Required | Default   | Description                                                                                                                |
+| ------------------- | ------- | -------- | --------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`      | text    | yes      |           | Environment name.                                                                                                          |
+| `--host`            | text    | no       | localhost | Host where SLURM commands should run.                                                                                      |
+| `--default-option`  | text    | no       |           | Default sbatch/srun option string (for example --gpus=1). Repeat for multiple options.                                     |
+| `--default-setup`   | text    | no       |           | Default shell setup command to run before SLURM jobs (for example 'module load julia/1.11'). Repeat for multiple commands. |
+| `--description`     | text    | no       |           | Description.                                                                                                               |
+| `--overwrite`, `-f` | boolean | no       | False     | Overwrite any existing environment with this name.                                                                         |
+| `--no-commit`       | boolean | no       | False     | Do not commit changes.                                                                                                     |
 
 <a id="subcommand-new-uv-venv"></a>
 
@@ -2673,6 +2674,7 @@ Options:
 | `--dep`, `-d`           | text    | no       |         | Additional dependencies to track, which if changed signify a job is invalid.                                       |
 | `--out`, `-o`           | text    | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job. |
 | `--sbatch-option`, `-s` | text    | no       |         | Additional options to pass to sbatch (no spaces allowed).                                                          |
+| `--setup`               | text    | no       |         | Shell setup command to run before launching the target (repeat for multiple commands).                             |
 | `--log-path`            | text    | no       |         | Output log path.                                                                                                   |
 | `--command`             | boolean | no       |         | Whether the target is a command instead of a script.                                                               |
 

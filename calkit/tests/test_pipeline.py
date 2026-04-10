@@ -576,6 +576,44 @@ def test_sbatch_stage_to_dvc():
     assert "data/notebook_output.txt" in stage3["outs"]
 
 
+def test_slurm_setup_commands_propagate_to_nested_stage_cmd():
+    envs = {
+        "slurm-env": {
+            "kind": "slurm",
+            "default_setup": ["module purge", "module load julia/1.11"],
+        },
+        "julia1": {
+            "kind": "julia",
+            "julia": "1.11",
+            "path": "Project.toml",
+        },
+    }
+    pipeline = {
+        "stages": {
+            "job1": {
+                "kind": "julia-script",
+                "script_path": "something.jl",
+                "environment": "slurm-env:julia1",
+                "slurm": {
+                    "setup": ["module load gcc/12"],
+                },
+            },
+        },
+    }
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": envs,
+            "pipeline": pipeline,
+        },
+        write=False,
+    )
+    cmd = stages["job1"]["cmd"]
+    assert "--setup 'module purge'" in cmd
+    assert "--setup 'module load julia/1.11'" in cmd
+    assert "--setup 'module load gcc/12'" in cmd
+    assert "--command -- calkit xenv -n julia1 --no-check --" in cmd
+
+
 def test_non_sbatch_stage_requires_composite_slurm_env():
     envs = {
         "mycluster": {"kind": "slurm"},

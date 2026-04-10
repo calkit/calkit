@@ -34,6 +34,7 @@ export interface CalkitEnvironment {
   wdir?: string;
   args?: string[];
   default_options?: string[];
+  default_setup?: string[];
   [key: string]: unknown;
 }
 

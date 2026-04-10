@@ -6,6 +6,10 @@ export interface PipelineStage {
   script_path?: string;
   path?: string;
   environment?: string;
+  slurm?: {
+    setup?: string[];
+    [key: string]: unknown;
+  };
   [key: string]: unknown;
 }
 

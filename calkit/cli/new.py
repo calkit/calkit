@@ -1351,6 +1351,17 @@ def new_slurm_env(
             ),
         ),
     ] = [],
+    default_setup: Annotated[
+        list[str],
+        typer.Option(
+            "--default-setup",
+            help=(
+                "Default shell setup command to run before SLURM jobs "
+                "(for example 'module load julia/1.11'). Repeat for "
+                "multiple commands."
+            ),
+        ),
+    ] = [],
     description: Annotated[
         str | None, typer.Option("--description", help="Description.")
     ] = None,
@@ -1383,9 +1394,14 @@ def new_slurm_env(
     normalized_default_options = [
         opt.strip() for opt in default_options if opt.strip()
     ]
+    normalized_default_setup = [
+        cmd.strip() for cmd in default_setup if cmd.strip()
+    ]
     env = {"kind": "slurm", "host": host}
     if normalized_default_options:
         env["default_options"] = normalized_default_options  # type: ignore
+    if normalized_default_setup:
+        env["default_setup"] = normalized_default_setup  # type: ignore
     if description is not None:
         env["description"] = description
     envs[name] = env

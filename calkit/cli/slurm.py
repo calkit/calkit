@@ -81,6 +81,16 @@ def run_sbatch(
             help="Additional options to pass to sbatch (no spaces allowed).",
         ),
     ] = [],
+    setup_cmds: Annotated[
+        list[str],
+        typer.Option(
+            "--setup",
+            help=(
+                "Shell setup command to run before launching the target "
+                "(repeat for multiple commands)."
+            ),
+        ),
+    ] = [],
     log_path: Annotated[
         str | None, typer.Option("--log-path", help="Output log path.")
     ] = None,
@@ -132,13 +142,6 @@ def run_sbatch(
     ] + sbatch_opts
     if is_command is None:
         is_command = not os.path.isfile(target)
-    if is_command:
-        # Use shlex.join to properly escape target and args for shell execution
-        cmd += ["--wrap", shlex.join([target] + args)]
-    else:
-        cmd += [target] + args
-        if target not in deps:
-            deps = [target] + deps
     if environment != "_system":
         ck_info = calkit.load_calkit_info()
         env = ck_info.get("environments", {}).get(environment, {})
@@ -163,6 +166,26 @@ def run_sbatch(
                     f"Environment '{environment}' is for host '{env_host}', but "
                     f"this is '{current_host}'"
                 )
+        env_setup_cmds = env.get("default_setup", [])
+        if env_setup_cmds:
+            setup_cmds = [
+                s for s in [*env_setup_cmds, *setup_cmds] if s.strip()
+            ]
+    if setup_cmds:
+        # Run setup and target in the same shell so setup side effects (like
+        # module loads) persist for the target command.
+        wrapped_target = shlex.join([target] + args)
+        setup_chain = " && ".join([*setup_cmds, wrapped_target])
+        cmd += ["--wrap", setup_chain]
+        if not is_command and target not in deps:
+            deps = [target] + deps
+    elif is_command:
+        # Use shlex.join to properly escape target and args for shell execution
+        cmd += ["--wrap", shlex.join([target] + args)]
+    else:
+        cmd += [target] + args
+        if target not in deps:
+            deps = [target] + deps
     slurm_dir = os.path.join(".calkit", "slurm")
     os.makedirs(slurm_dir, exist_ok=True)
     logs_dir = os.path.dirname(log_path)

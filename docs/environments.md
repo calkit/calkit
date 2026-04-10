@@ -515,3 +515,146 @@ Version: 0.0.1
 Title: Auto-generated R environment
 Imports: tidyverse
 ```
+
+<!-- AUTO-GENERATED: ENV-KINDS:START -->
+
+### Environment kind reference
+
+Environment definitions belong in the `environments` section of `calkit.yaml`.
+
+#### `conda`
+
+Model class: `CondaEnvironment`
+
+| Parameter   | Type             | Required |
+| ----------- | ---------------- | -------- |
+| kind        | Literal['conda'] | yes      |
+| path        | str              | yes      |
+| prefix      | str              | no       |
+| description | str              | no       |
+
+#### `uv`
+
+Model class: `UvEnvironment`
+
+| Parameter   | Type          | Required |
+| ----------- | ------------- | -------- |
+| kind        | Literal['uv'] | yes      |
+| path        | str           | yes      |
+| description | str           | no       |
+
+#### `venv`
+
+Model class: `VenvEnvironment`
+
+| Parameter   | Type            | Required |
+| ----------- | --------------- | -------- |
+| kind        | Literal['venv'] | yes      |
+| path        | str             | yes      |
+| prefix      | str             | yes      |
+| python      | str             | no       |
+| description | str             | no       |
+
+#### `uv-venv`
+
+Model class: `UvVenvEnvironment`
+
+| Parameter   | Type               | Required |
+| ----------- | ------------------ | -------- |
+| kind        | Literal['uv-venv'] | yes      |
+| path        | str                | yes      |
+| prefix      | str                | yes      |
+| python      | str                | no       |
+| description | str                | no       |
+
+#### `pixi`
+
+Model class: `PixiEnvironment`
+
+| Parameter   | Type            | Required |
+| ----------- | --------------- | -------- |
+| kind        | Literal['pixi'] | yes      |
+| path        | str             | yes      |
+| name        | str             | no       |
+| description | str             | no       |
+
+#### `docker`
+
+Model class: `DockerEnvironment`
+
+| Parameter    | Type                           | Required |
+| ------------ | ------------------------------ | -------- |
+| kind         | Literal['docker']              | yes      |
+| image        | str                            | yes      |
+| path         | str                            | no       |
+| platform     | str                            | no       |
+| command_mode | Literal['shell'\|'entrypoint'] | no       |
+| shell        | str                            | no       |
+| deps         | list[str]                      | no       |
+| env_vars     | dict[str, str]                 | no       |
+| ports        | list[str]                      | no       |
+| gpus         | str                            | no       |
+| user         | str                            | no       |
+| wdir         | str                            | no       |
+| args         | list[str]                      | no       |
+| description  | str                            | no       |
+
+#### `renv`
+
+Model class: `REnvironment`
+
+| Parameter   | Type            | Required |
+| ----------- | --------------- | -------- |
+| kind        | Literal['renv'] | yes      |
+| path        | str             | yes      |
+| description | str             | no       |
+
+#### `julia`
+
+Model class: `JuliaEnvironment`
+
+| Parameter   | Type             | Required |
+| ----------- | ---------------- | -------- |
+| kind        | Literal['julia'] | yes      |
+| path        | str              | yes      |
+| julia       | str              | yes      |
+| description | str              | no       |
+
+#### `matlab`
+
+Model class: `MatlabEnvironment`
+
+| Parameter   | Type              | Required |
+| ----------- | ----------------- | -------- |
+| kind        | Literal['matlab'] | yes      |
+| products    | list[str]         | no       |
+| description | str               | no       |
+
+#### `slurm`
+
+Model class: `SlurmEnvironment`
+
+| Parameter       | Type             | Required |
+| --------------- | ---------------- | -------- |
+| kind            | Literal['slurm'] | yes      |
+| host            | str              | no       |
+| default_options | list[str]        | no       |
+| default_setup   | list[str]        | no       |
+| description     | str              | no       |
+
+#### `ssh`
+
+Model class: `SSHEnvironment`
+
+| Parameter   | Type           | Required |
+| ----------- | -------------- | -------- |
+| kind        | Literal['ssh'] | yes      |
+| host        | str            | yes      |
+| user        | str            | yes      |
+| wdir        | str            | yes      |
+| key         | str            | no       |
+| send_paths  | list[str]      | no       |
+| get_paths   | list[str]      | no       |
+| description | str            | no       |
+
+<!-- AUTO-GENERATED: ENV-KINDS:END -->

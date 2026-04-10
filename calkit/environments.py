@@ -231,6 +231,27 @@ def get_all_venv_lock_fpaths(
     return fpaths
 
 
+def _julia_manifest_fpath(
+    env_dir: str, julia_version: str | None, wdir: str | None = None
+) -> str:
+    """Return the Manifest path for a Julia env, preferring versioned names.
+
+    Julia 1.9+ writes ``Manifest-vMAJOR.MINOR.toml`` (e.g.
+    ``Manifest-v1.11.toml``) alongside the default ``Manifest.toml``.
+    We prefer the versioned file when it exists.
+    """
+    base_dir = env_dir or "."
+    full_dir = os.path.join(wdir, base_dir) if wdir else base_dir
+    if julia_version:
+        parts = julia_version.split(".")
+        if len(parts) >= 2:
+            major_minor = f"{parts[0]}.{parts[1]}"
+            versioned_name = f"Manifest-v{major_minor}.toml"
+            if os.path.isfile(os.path.join(full_dir, versioned_name)):
+                return os.path.join(base_dir, versioned_name)
+    return os.path.join(base_dir, "Manifest.toml")
+
+
 def get_env_lock_fpath(
     env: dict,
     env_name: str,
@@ -298,9 +319,10 @@ def get_env_lock_fpath(
             raise ValueError(
                 "Julia environments require a path pointing to Project.toml"
             )
-        # Simply replace Project.toml with Manifest.toml
         env_dir = os.path.dirname(env_path)
-        lock_fpath = os.path.join(env_dir, "Manifest.toml")
+        lock_fpath = _julia_manifest_fpath(
+            env_dir, env.get("julia"), wdir=wdir
+        )
     elif env_kind == "renv":
         env_path = env.get("path")
         if env_path is None:
@@ -408,17 +430,8 @@ def calc_data_for_env(
             env_prefix_hash = get_cached_md5(env_prefix_full)
         else:
             env_prefix_hash = None
-    env_dir_sig = None
     julia_packages_sig = None
     if env.get("kind") == "julia":
-        env_path_for_dir = env.get("path", "")
-        if env_path_for_dir:
-            env_dir = os.path.dirname(env_path_for_dir)
-            if not env_dir:
-                env_dir = "."
-            env_dir_full = os.path.join(wdir, env_dir)
-            sig = calc_dir_sig(env_dir_full)
-            env_dir_sig = sig if sig else None
         packages_dir = get_julia_packages_dir()
         sig = calc_dir_sig(packages_dir)
         julia_packages_sig = sig if sig else None
@@ -433,7 +446,6 @@ def calc_data_for_env(
             "env_hash": env_hash,
             "env_path_hash": env_path_hash,
             "env_prefix_hash": env_prefix_hash,
-            "env_dir_sig": env_dir_sig,
             "julia_packages_sig": julia_packages_sig,
             "env_lock_hash": env_lock_hash,
         },
@@ -469,10 +481,6 @@ def check_cache(
     if env.get("path") and not current_data["hashes"]["env_path_hash"]:
         return False
     if env.get("prefix") and not current_data["hashes"]["env_prefix_hash"]:
-        return False
-    if env.get("kind") == "julia" and not current_data["hashes"].get(
-        "env_dir_sig"
-    ):
         return False
     if (
         get_env_lock_fpath(env=env, env_name=env_name, wdir=wdir)

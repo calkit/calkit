@@ -115,14 +115,12 @@ def test_cache_uses_dir_signature_for_conda_prefix(tmp_dir, monkeypatch):
     assert not calkit.environments.check_cache(env_name="myenv", env=env)
 
 
-def test_cache_includes_julia_env_directory_changes(tmp_dir):
+def test_cache_tracks_julia_manifest(tmp_dir):
     os.makedirs("juliaenv", exist_ok=True)
     with open("juliaenv/Project.toml", "w") as f:
         f.write('name = "demo"\n')
     with open("juliaenv/Manifest.toml", "w") as f:
-        f.write("# manifest\n")
-    with open("juliaenv/extra.txt", "w") as f:
-        f.write("one")
+        f.write("# manifest v1\n")
     env = {
         "kind": "julia",
         "path": "juliaenv/Project.toml",
@@ -130,9 +128,64 @@ def test_cache_includes_julia_env_directory_changes(tmp_dir):
     }
     calkit.environments.save_cache(env_name="jl", env=env, success=True)
     assert calkit.environments.check_cache(env_name="jl", env=env)
+    # Unrelated file change should NOT invalidate the cache
     with open("juliaenv/extra.txt", "w") as f:
-        f.write("two")
+        f.write("irrelevant")
+    assert calkit.environments.check_cache(env_name="jl", env=env)
+    # Changing Manifest.toml SHOULD invalidate
+    with open("juliaenv/Manifest.toml", "w") as f:
+        f.write("# manifest v2\n")
     assert not calkit.environments.check_cache(env_name="jl", env=env)
+
+
+def test_cache_prefers_versioned_manifest(tmp_dir):
+    os.makedirs("juliaenv", exist_ok=True)
+    with open("juliaenv/Project.toml", "w") as f:
+        f.write('name = "demo"\n')
+    # Both Manifest.toml and Manifest-v1.11.toml exist; the versioned one wins
+    with open("juliaenv/Manifest.toml", "w") as f:
+        f.write("# plain manifest\n")
+    with open("juliaenv/Manifest-v1.11.toml", "w") as f:
+        f.write("# versioned manifest v1\n")
+    env = {
+        "kind": "julia",
+        "path": "juliaenv/Project.toml",
+        "julia": "1.11",
+    }
+    lock_fpath = calkit.environments.get_env_lock_fpath(
+        env=env, env_name="jl", as_posix=False
+    )
+    assert lock_fpath is not None
+    assert os.path.basename(lock_fpath) == "Manifest-v1.11.toml"
+    calkit.environments.save_cache(env_name="jl", env=env, success=True)
+    assert calkit.environments.check_cache(env_name="jl", env=env)
+    # Touching the plain Manifest should NOT invalidate (versioned is tracked)
+    with open("juliaenv/Manifest.toml", "w") as f:
+        f.write("# plain manifest changed\n")
+    assert calkit.environments.check_cache(env_name="jl", env=env)
+    # Touching the versioned Manifest SHOULD invalidate
+    with open("juliaenv/Manifest-v1.11.toml", "w") as f:
+        f.write("# versioned manifest v2\n")
+    assert not calkit.environments.check_cache(env_name="jl", env=env)
+
+
+def test_versioned_manifest_uses_major_minor_only(tmp_dir):
+    os.makedirs("juliaenv", exist_ok=True)
+    with open("juliaenv/Project.toml", "w") as f:
+        f.write('name = "demo"\n')
+    # julia = "1.11.7" should still look for Manifest-v1.11.toml
+    with open("juliaenv/Manifest-v1.11.toml", "w") as f:
+        f.write("# versioned manifest\n")
+    env = {
+        "kind": "julia",
+        "path": "juliaenv/Project.toml",
+        "julia": "1.11.7",
+    }
+    lock_fpath = calkit.environments.get_env_lock_fpath(
+        env=env, env_name="jl", as_posix=False
+    )
+    assert lock_fpath is not None
+    assert os.path.basename(lock_fpath) == "Manifest-v1.11.toml"
 
 
 def test_cache_includes_julia_packages_directory_changes(tmp_dir, monkeypatch):

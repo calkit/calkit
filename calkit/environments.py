@@ -76,6 +76,61 @@ def get_julia_packages_dir() -> str:
     return os.path.join(os.path.expanduser(first_depot), "packages")
 
 
+def _calc_dir_sig_shallow(path: str, max_depth: int = 1) -> str:
+    """Calculate a lightweight signature by scanning only a few levels.
+
+    This avoids deep recursive walks of large directories while still
+    detecting practical state changes like added/removed packages or
+    artifacts.
+    """
+    if not os.path.isdir(path):
+        return ""
+    try:
+        root_stat = os.stat(path)
+        latest_mtime = root_stat.st_mtime_ns
+    except OSError:
+        return ""
+    entry_count = 0
+    total_size = 0
+    stack: list[tuple[str, int]] = [(path, 0)]
+    while stack:
+        current, depth = stack.pop()
+        try:
+            with os.scandir(current) as it:
+                for entry in it:
+                    try:
+                        st = entry.stat(follow_symlinks=False)
+                    except OSError:
+                        continue
+                    entry_count += 1
+                    total_size += st.st_size
+                    if st.st_mtime_ns > latest_mtime:
+                        latest_mtime = st.st_mtime_ns
+                    if depth < max_depth and entry.is_dir(
+                        follow_symlinks=False
+                    ):
+                        stack.append((entry.path, depth + 1))
+        except OSError:
+            continue
+    return f"{entry_count}-{total_size}-{latest_mtime}"
+
+
+def calc_julia_depot_sig() -> str | None:
+    """Calculate a cheap machine-state signature for Julia depot changes."""
+    packages_dir = get_julia_packages_dir()
+    depot_root = os.path.dirname(packages_dir)
+    packages_sig = _calc_dir_sig_shallow(packages_dir, max_depth=1)
+    artifacts_sig = _calc_dir_sig_shallow(
+        os.path.join(depot_root, "artifacts"), max_depth=1
+    )
+    registries_sig = _calc_dir_sig_shallow(
+        os.path.join(depot_root, "registries"), max_depth=1
+    )
+    if not any([packages_sig, artifacts_sig, registries_sig]):
+        return None
+    return "|".join([packages_sig, artifacts_sig, registries_sig])
+
+
 def language_from_env(env: dict) -> str | None:
     kind = env.get("kind")
     if kind == "julia":
@@ -432,9 +487,7 @@ def calc_data_for_env(
             env_prefix_hash = None
     julia_packages_sig = None
     if env.get("kind") == "julia":
-        packages_dir = get_julia_packages_dir()
-        sig = calc_dir_sig(packages_dir)
-        julia_packages_sig = sig if sig else None
+        julia_packages_sig = calc_julia_depot_sig()
     env_lock_hash = None
     env_lock_fpath = get_env_lock_fpath(env_name=env_name, env=env, wdir=wdir)
     if env_lock_fpath is not None:
@@ -472,12 +525,15 @@ def check_cache(
     # If our last check failed, we're definitely not up-to-date
     if not cached_data.get("success", False):
         return False
-    # Check if this environment is up-to-date
-    current_data = calc_data_for_env(env_name=env_name, env=env, wdir=wdir)
     if respect_ttl:
-        time_diff = current_data["checked_at"] - cached_data.get("checked_at")
+        cached_checked_at = cached_data.get("checked_at")
+        if cached_checked_at is None:
+            return False
+        time_diff = calkit.utcnow() - cached_checked_at
         if time_diff.total_seconds() > ENV_CHECK_CACHE_TTL_SECONDS:
             return False
+    # Check if this environment is up-to-date
+    current_data = calc_data_for_env(env_name=env_name, env=env, wdir=wdir)
     if env.get("path") and not current_data["hashes"]["env_path_hash"]:
         return False
     if env.get("prefix") and not current_data["hashes"]["env_prefix_hash"]:

@@ -63,32 +63,39 @@ def _check_julia_env(
     cache_key: str | None = None,
 ) -> str:
     """Check a Julia environment and instantiate only when needed."""
-    env_fname = os.path.basename(env_path)
+    abs_env_path = os.path.abspath(env_path)
+    env_fname = os.path.basename(abs_env_path)
     if env_fname != "Project.toml":
         raise_error(
             "Julia environments require a path pointing to Project.toml"
         )
-    env_dir = os.path.dirname(env_path)
-    if not env_dir:
-        env_dir = "."
+    env_dir = os.path.dirname(abs_env_path) or "."
+    env_path_for_cache = os.path.basename(abs_env_path)
     env = {
         "kind": "julia",
-        "path": env_path,
+        "path": env_path_for_cache,
         "julia": julia_version or "",
     }
     cache_env_name = cache_key or (
-        f"julia::{os.path.abspath(env_path)}::{julia_version or ''}"
+        f"julia::{abs_env_path}::{julia_version or ''}"
     )
     if calkit.environments.check_cache(
         env_name=cache_env_name,
         env=env,
+        wdir=env_dir,
         respect_ttl=False,
     ):
         if verbose:
             typer.echo(
                 "Julia environment cache is valid; skipping Pkg.instantiate()"
             )
-        return os.path.join(env_dir, "Manifest.toml")
+        lock_fpath = calkit.environments.get_env_lock_fpath(
+            env=env,
+            env_name=cache_env_name,
+            wdir=env_dir,
+            as_posix=False,
+        )
+        return lock_fpath or os.path.join(env_dir, "Manifest.toml")
     if julia_version:
         if shutil.which("juliaup") is not None:
             if _juliaup_version_installed(julia_version):
@@ -122,7 +129,7 @@ def _check_julia_env(
                 )
     deps_to_add: list[str] = []
     try:
-        with open(env_path, "r") as f:
+        with open(abs_env_path, "r") as f:
             content = f.read()
         lines = [line.rstrip() for line in content.splitlines()]
         deps_section = False
@@ -179,6 +186,7 @@ def _check_julia_env(
             calkit.environments.save_cache(
                 env_name=cache_env_name,
                 env=env,
+                wdir=env_dir,
                 success=False,
             )
             raise_error("Failed to add Julia dependencies")
@@ -204,15 +212,23 @@ def _check_julia_env(
         calkit.environments.save_cache(
             env_name=cache_env_name,
             env=env,
+            wdir=env_dir,
             success=False,
         )
         raise_error("Failed to check julia environment")
     calkit.environments.save_cache(
         env_name=cache_env_name,
         env=env,
+        wdir=env_dir,
         success=True,
     )
-    return os.path.join(env_dir, "Manifest.toml")
+    lock_fpath = calkit.environments.get_env_lock_fpath(
+        env=env,
+        env_name=cache_env_name,
+        wdir=env_dir,
+        as_posix=False,
+    )
+    return lock_fpath or os.path.join(env_dir, "Manifest.toml")
 
 
 @check_app.command(name="repro")

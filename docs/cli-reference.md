@@ -2650,7 +2650,7 @@ Work with SLURM.
 
 Submit a SLURM batch job for the project.
 
-Duplicates are not allowed, so if one is already running or queued with the same name, we'll wait for it to finish. The only exception is if the dependencies have changed, in which case any queued or running jobs will be cancelled and a new one submitted.
+Duplicates are not allowed, so if one is already running or queued with the same name, we'll wait for it to finish. The only exception is if the dependencies have changed, in which case any queued or running jobs will be canceled and a new one submitted.
 
 Usage:
 

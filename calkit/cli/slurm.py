@@ -107,7 +107,7 @@ def run_sbatch(
     Duplicates are not allowed, so if one is already running or queued with
     the same name, we'll wait for it to finish. The only exception is if the
     dependencies have changed, in which case any queued or running jobs will
-    be cancelled and a new one submitted.
+    be canceled and a new one submitted.
     """
 
     def check_job_running_or_queued(job_id: str) -> bool:
@@ -210,6 +210,7 @@ def run_sbatch(
         job_deps = job_info["deps"]
         job_target = job_info.get("target")
         job_args = job_info.get("args", [])
+        job_setup = job_info.get("setup", [])
         running_or_queued = check_job_running_or_queued(job_id)
         should_wait = True
         if running_or_queued:
@@ -229,6 +230,13 @@ def run_sbatch(
                 cancel_job(
                     job_id=job_id,
                     reason=f"Arguments for job '{name}' have changed",
+                )
+            # Check if setup commands have changed
+            if job_setup != setup_cmds:
+                should_wait = False
+                cancel_job(
+                    job_id=job_id,
+                    reason=f"Setup commands for job '{name}' have changed",
                 )
             # Check if dependency paths have changed
             if set(job_deps) != set(deps):
@@ -281,6 +289,7 @@ def run_sbatch(
         "deps": deps,
         "target": target,
         "args": args,
+        "setup": setup_cmds,
         "dep_md5s": current_dep_md5s,
     }
     jobs[name] = new_job
@@ -359,7 +368,7 @@ def cancel_jobs(
         )
         if p.returncode != 0:
             raise_error(f"Failed to cancel job ID {job_id}: {p.stderr}")
-        typer.echo(f"Cancelled job '{name}' with ID {job_id}")
+        typer.echo(f"Canceled job '{name}' with ID {job_id}")
 
 
 @slurm_app.command(name="logs")

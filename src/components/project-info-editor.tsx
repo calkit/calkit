@@ -213,6 +213,6 @@ export async function showProjectInfoEditor(
     return data;
   }
 
-  console.log("User cancelled or rejected");
+  console.log("User canceled or rejected");
   return null;
 }

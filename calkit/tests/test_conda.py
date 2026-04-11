@@ -69,7 +69,7 @@ def delete_env(name: str):
 
 @pytest.fixture
 def conda_env_name():
-    name = calkit.to_kebab_case(os.path.basename(os.getcwd())) + "-" + ENV_NAME
+    name = calkit.to_kebab_case(os.path.basename(os.getcwd())) + "." + ENV_NAME
     yield name
     # Teardown code
     delete_env(name)

@@ -191,7 +191,7 @@ def check_env_kernel(
     project_name = calkit.detect_project_name(prepend_owner=False)
     if not project_name:
         raise_error("Project name cannot be empty")
-    kernel_name = calkit.to_kebab_case(f"{project_name}-{env_name}")
+    kernel_name = calkit.to_kebab_case(f"{project_name}.{env_name}")
     display_name = f"{project_name}: {env_name}"
     if language == "python":
         cmd = [

@@ -993,7 +993,7 @@ def check_conda_env(
     try:
         calkit.conda.check_env(
             env_fpath=env_fpath,
-            output_fpath=output_fpath,
+            lock_fpath=output_fpath,
             alt_lock_fpaths=alt_lock_fpaths,
             alt_lock_fpaths_delete=alt_lock_fpaths_delete,
             log_func=log_func,

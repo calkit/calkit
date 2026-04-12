@@ -958,10 +958,9 @@ def push(
 ):
     """Push with both Git and DVC."""
     if not no_dvc:
-        typer.echo("Pushing to DVC remote")
+        remotes = calkit.dvc.get_remotes()
         if not no_check_auth:
             # Check that our dvc remotes all have our DVC token set for them
-            remotes = calkit.dvc.get_remotes()
             ck_remote_name = calkit.config.get_app_name()
             for name, url in remotes.items():
                 if (
@@ -972,9 +971,13 @@ def push(
                         f"Checking authentication for DVC remote: {name}"
                     )
                     calkit.dvc.set_remote_auth(remote_name=name)
-        result = run_dvc_command(["push"] + dvc_args)
-        if result != 0:
-            raise_error("DVC push failed")
+        if remotes:
+            typer.echo("Pushing to DVC remote")
+            result = run_dvc_command(["push"] + dvc_args)
+            if result != 0:
+                raise_error("DVC push failed")
+        else:
+            warn("No DVC remotes configured; skipping DVC push")
     if not no_git:
         typer.echo("Pushing to Git remote")
         try:

@@ -321,8 +321,11 @@ def check_env(
                 log_func(
                     f"Lock file {lock_to_use_for_creation} has env name "
                     f"{lock_env_name}, which does not match env spec "
-                    f"name {env_spec_env_name}; ignoring lock file for creation"
+                    f"name {env_spec_env_name}; deleting mismatched lock file "
+                    "and ignoring it for creation"
                 )
+                if os.path.isfile(lock_to_use_for_creation):
+                    os.remove(lock_to_use_for_creation)
                 lock_to_use_for_creation = None
     res = EnvCheckResult()
     if verbose:

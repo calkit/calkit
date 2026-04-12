@@ -882,15 +882,15 @@ def check_docker_env(
             os.remove(lock_fpath)
 
     if fpath is not None and rebuild_or_pull:
-        wdir, fname = os.path.split(fpath)
-        if not wdir:
-            wdir = None
-        cmd = ["docker", "build", "-t", tag, "-f", fname]
+        dockerfile_dir, dockerfile_name = os.path.split(fpath)
+        if not dockerfile_dir:
+            dockerfile_dir = None
+        cmd = ["docker", "build", "-t", tag, "-f", dockerfile_name]
         if platform is not None:
             cmd += ["--platform", platform]
         cmd.append(".")
         try:
-            subprocess.check_output(cmd, cwd=wdir)
+            subprocess.check_output(cmd, cwd=dockerfile_dir)
         except subprocess.CalledProcessError:
             delete_lock_on_failure()
             raise_error(

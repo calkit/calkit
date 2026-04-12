@@ -124,7 +124,7 @@ def test_check_julia_env_caches_second_run(tmp_dir):
     assert "skipping Pkg.instantiate" not in result3.stdout
 
 
-def test_check_docker_env():
+def test_check_docker_env(tmp_dir):
     # First create a Dockerfile with a known base image
     with open("Dockerfile", "w") as f:
         f.write("FROM python:3.9-slim\n")

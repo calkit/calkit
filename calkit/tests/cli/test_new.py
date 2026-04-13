@@ -277,7 +277,7 @@ def test_new_conda_env(tmp_dir):
     )
     with open("environment.yml") as f:
         env = calkit.ryaml.load(f)
-    assert env["name"] == "test-e1"
+    assert env["name"] == "test.e1"
     assert env["dependencies"] == ["python", "requests"]
 
 

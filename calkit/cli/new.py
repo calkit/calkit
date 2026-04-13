@@ -1204,10 +1204,8 @@ def new_conda_env(
             "(use -f to overwrite)"
         )
     if conda_name is None:
-        project_name = ck_info.get("name")
-        if project_name is None:
-            project_name = os.path.basename(os.getcwd())
-        conda_name = calkit.to_kebab_case(project_name) + "-" + name
+        project_name = calkit.detect_project_name(prepend_owner=False)
+        conda_name = calkit.to_kebab_case(project_name) + "." + name
     if packages is not None:
         assert isinstance(packages, list)
         # Write environment to path

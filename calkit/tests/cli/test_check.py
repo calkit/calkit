@@ -122,3 +122,39 @@ def test_check_julia_env_caches_second_run(tmp_dir):
         check=True,
     )
     assert "skipping Pkg.instantiate" not in result3.stdout
+
+
+def test_check_docker_env(tmp_dir):
+    # First create a Dockerfile with a known base image
+    with open("Dockerfile", "w") as f:
+        f.write("FROM python:3.9-slim\n")
+    # Now check the environment
+    subprocess.check_call(
+        [
+            "calkit",
+            "check",
+            "docker-env",
+            "python-3.9-slim",
+            "-i",
+            "Dockerfile",
+            "-o",
+            "Dockerfile-lock.json",
+        ]
+    )
+    # Now modify the image to fail to build and ensure the lock file is deleted
+    with open("Dockerfile", "w") as f:
+        f.write("FROM non-existent-image:latest\n")
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(
+            [
+                "calkit",
+                "check",
+                "docker-env",
+                "python-3.9-slim",
+                "-i",
+                "Dockerfile",
+                "-o",
+                "Dockerfile-lock.json",
+            ]
+        )
+    assert not os.path.exists("Dockerfile-lock.json")

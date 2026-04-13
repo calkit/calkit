@@ -876,15 +876,26 @@ def check_docker_env(
                     typer.echo(f"Found modified dependency: {dep}")
                     rebuild_or_pull = True
                     break
+
+    def delete_lock_on_failure() -> None:
+        if lock_fpath and os.path.exists(lock_fpath):
+            os.remove(lock_fpath)
+
     if fpath is not None and rebuild_or_pull:
-        wdir, fname = os.path.split(fpath)
-        if not wdir:
-            wdir = None
-        cmd = ["docker", "build", "-t", tag, "-f", fname]
+        dockerfile_dir, dockerfile_name = os.path.split(fpath)
+        if not dockerfile_dir:
+            dockerfile_dir = None
+        cmd = ["docker", "build", "-t", tag, "-f", dockerfile_name]
         if platform is not None:
             cmd += ["--platform", platform]
         cmd.append(".")
-        subprocess.check_output(cmd, cwd=wdir)
+        try:
+            subprocess.check_output(cmd, cwd=dockerfile_dir)
+        except subprocess.CalledProcessError:
+            delete_lock_on_failure()
+            raise_error(
+                f"Failed to build Docker image with tag {tag} from {fpath}"
+            )
     elif fpath is None and rebuild_or_pull:
         # First try to pull by repo digest
         pulled = False
@@ -901,6 +912,7 @@ def check_docker_env(
                     subprocess.check_output(tag_cmd)
                     pulled = True
                 except subprocess.CalledProcessError:
+                    delete_lock_on_failure()
                     warn(
                         f"Failed to pull image by digest: {image_with_digest}; "
                         "falling back to pulling by tag"
@@ -912,6 +924,7 @@ def check_docker_env(
             try:
                 subprocess.check_output(cmd)
             except subprocess.CalledProcessError:
+                delete_lock_on_failure()
                 raise_error(f"Failed to pull image: {tag}")
     # Write the lock file
     inspect = get_docker_inspect()
@@ -993,7 +1006,7 @@ def check_conda_env(
     try:
         calkit.conda.check_env(
             env_fpath=env_fpath,
-            output_fpath=output_fpath,
+            lock_fpath=output_fpath,
             alt_lock_fpaths=alt_lock_fpaths,
             alt_lock_fpaths_delete=alt_lock_fpaths_delete,
             log_func=log_func,

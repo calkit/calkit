@@ -262,7 +262,7 @@ class EnvCheckResult(BaseModel):
 def check_env(
     env_fpath: str = "environment.yml",
     log_func=None,
-    output_fpath: str | None = None,
+    lock_fpath: str | None = None,
     alt_lock_fpaths: list[str] = [],
     alt_lock_fpaths_delete: list[str] = [],
     relaxed: bool = False,
@@ -284,7 +284,7 @@ def check_env(
     # Determine which lock file to use for creating the environment
     lock_to_use_for_creation = None
     used_legacy_lock = None
-    if output_fpath and not os.path.isfile(output_fpath):
+    if lock_fpath and not os.path.isfile(lock_fpath):
         # Try alternative lock files first
         for alt_fpath in alt_lock_fpaths:
             if os.path.isfile(alt_fpath):
@@ -302,9 +302,31 @@ def check_env(
                     f"Using legacy lock file for creation: {legacy_fpath}"
                 )
                 break
-    elif output_fpath and os.path.isfile(output_fpath):
-        lock_to_use_for_creation = output_fpath
-        log_func(f"Using existing lock file for creation: {output_fpath}")
+    elif lock_fpath and os.path.isfile(lock_fpath):
+        lock_to_use_for_creation = lock_fpath
+        log_func(f"Using existing lock file for creation: {lock_fpath}")
+    # Make sure the lock file has the correct env name in it
+    if lock_to_use_for_creation:
+        with open(lock_to_use_for_creation) as f:
+            lock_spec = ryaml.load(f)
+        lock_env_name = lock_spec.get("name")
+        if lock_env_name is not None:
+            with open(env_fpath) as f:
+                env_spec = ryaml.load(f)
+            env_spec_env_name = env_spec.get("name")
+            if (
+                env_spec_env_name is not None
+                and lock_env_name != env_spec_env_name
+            ):
+                log_func(
+                    f"Lock file {lock_to_use_for_creation} has env name "
+                    f"{lock_env_name}, which does not match env spec "
+                    f"name {env_spec_env_name}; deleting mismatched lock file "
+                    "and ignoring it for creation"
+                )
+                if os.path.isfile(lock_to_use_for_creation):
+                    os.remove(lock_to_use_for_creation)
+                lock_to_use_for_creation = None
     res = EnvCheckResult()
     if verbose:
         log_func("Getting conda info")
@@ -538,15 +560,15 @@ def check_env(
         )
         with open(env_check_fpath, "w") as f:
             ryaml.dump(env_check, f)
-    if output_fpath is None:
+    if lock_fpath is None:
         fname, ext = os.path.splitext(env_fpath)
-        output_fpath = fname + "-lock" + ext
+        lock_fpath = fname + "-lock" + ext
     if (
         not res.env_exists
         or res.env_needs_rebuild
-        or not os.path.isfile(output_fpath)
+        or not os.path.isfile(lock_fpath)
     ):
-        log_func(f"Exporting lock file to {output_fpath}")
+        log_func(f"Exporting lock file to {lock_fpath}")
         env_export = json.loads(
             subprocess.check_output(
                 [a for a in export_cmd if a != "--no-builds"]
@@ -584,16 +606,16 @@ def check_env(
                 dep_name = re.split("[=<>]+", dep, maxsplit=1)[0]
                 if dep_name in editable_pip_deps:
                     path_rel_to_project_root = editable_pip_deps[dep_name]
-                    lock_dir = os.path.dirname(output_fpath)
+                    lock_dir = os.path.dirname(lock_fpath)
                     path_rel_to_lock = os.path.relpath(
                         path_rel_to_project_root, start=lock_dir
                     )
                     export_pip_deps[i] = (
                         "-e " + Path(path_rel_to_lock).as_posix()
                     )
-        out_dir = os.path.dirname(output_fpath)
+        out_dir = os.path.dirname(lock_fpath)
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
-        with open(output_fpath, "w") as f:
+        with open(lock_fpath, "w") as f:
             ryaml.dump(env_export, f)
     return res

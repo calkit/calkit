@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -122,6 +123,17 @@ def _check_ijulia_available(
     return res.returncode == 0
 
 
+def _sanitize_kernel_name_component(name: str, label: str) -> str:
+    """Keep readable names while removing kernelspec-unfriendly characters."""
+    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("._-")
+    if not sanitized:
+        raise_error(
+            f"{label} cannot be empty after sanitizing for kernel name"
+        )
+        return ""  # For typing analysis since raise_error exits
+    return sanitized
+
+
 @notebooks_app.command("check-kernel")
 def check_env_kernel(
     env_name: Annotated[
@@ -191,8 +203,14 @@ def check_env_kernel(
     project_name = calkit.detect_project_name(prepend_owner=False)
     if not project_name:
         raise_error("Project name cannot be empty")
-    kernel_name = calkit.to_kebab_case(f"{project_name}-{env_name}")
+    kernel_name = (
+        f"{_sanitize_kernel_name_component(project_name, 'Project name')}"
+        f".{_sanitize_kernel_name_component(env_name, 'Environment name')}"
+    )
     display_name = f"{project_name}: {env_name}"
+    if verbose and not json_output:
+        typer.echo(f"Using kernel name: {kernel_name}")
+        typer.echo(f"Using display name: {display_name}")
     if language == "python":
         cmd = [
             "python",
@@ -295,9 +313,10 @@ def check_env_kernel(
         julia_cmd = (
             "import IJulia;"
             "kp=IJulia.installkernel("
-            f'"{display_name}",'
+            f'"{kernel_name}",'
             f'"--project={env_dir_abs}",'
             '"--startup-file=no",'
+            f'displayname="{display_name}",'
             'env=Dict("JULIA_LOAD_PATH" => "@:@stdlib")'
             ");"
             "println(kp);"
@@ -316,7 +335,7 @@ def check_env_kernel(
         cmd = calkit.julia.ensure_startup_file_disabled_in_command(cmd)
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:
-            raise_error(f"Failed to create kernel:\n{res.stdout}")
+            raise_error(f"Failed to create kernel:\n{res.stderr}")
         kernel_path = res.stdout.strip()
         kernel_name = os.path.basename(kernel_path)
         # Update display_name to include version for matching in VS Code

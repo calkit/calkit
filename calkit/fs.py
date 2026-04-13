@@ -298,10 +298,25 @@ class CalkitFileSystem(AbstractFileSystem):
         operation_info: dict[str, Any],
         operation: str,
         data: bytes | None = None,
+        file_obj: Any = None,
+        file_size: int | None = None,
         headers: dict | None = None,
         callback=DEFAULT_CALLBACK,
     ) -> requests.Response:
-        """Execute a file operation using the provided operation info."""
+        """Execute a file operation using the provided operation info.
+
+        Exactly one of ``data`` or ``file_obj`` should be provided for put
+        operations. When ``file_obj`` is given it must be a seekable binary
+        file-like object and ``file_size`` must be set; part/chunk bodies are
+        streamed from it instead of being held in memory, which keeps memory
+        bounded for large uploads.
+        """
+        # Total payload size when streaming from a file handle.
+        payload_size = (
+            len(data)
+            if data is not None
+            else (file_size if file_size is not None else 0)
+        )
         # Extract access info from the operation info
         access = operation_info.get("access")
         if not access:
@@ -322,16 +337,26 @@ class CalkitFileSystem(AbstractFileSystem):
             if headers:
                 request_headers.update(headers)
             params = access.get("params")
+            body: Any = data
+            if body is None and file_obj is not None:
+                file_obj.seek(0)
+                body = file_obj
+                # Explicit length avoids chunked transfer-encoding, which
+                # presigned URL signatures typically don't allow.
+                if file_size is not None:
+                    request_headers.setdefault(
+                        "Content-Length", str(file_size)
+                    )
             resp = self._session.request(
                 method=http_method.upper(),
                 url=url,
                 headers=request_headers,
                 params=params,
-                data=data,
+                data=body,
                 timeout=120,
             )
-            if data is not None and operation == "put":
-                callback.relative_update(len(data))
+            if operation == "put" and payload_size:
+                callback.relative_update(payload_size)
             return resp
         elif kind == "http-request":
             # Generic HTTP request with custom headers
@@ -345,20 +370,28 @@ class CalkitFileSystem(AbstractFileSystem):
             if headers:
                 request_headers.update(headers)
             params = access.get("params")
+            body = data
+            if body is None and file_obj is not None:
+                file_obj.seek(0)
+                body = file_obj
+                if file_size is not None:
+                    request_headers.setdefault(
+                        "Content-Length", str(file_size)
+                    )
             resp = self._session.request(
                 method=http_method.upper(),
                 url=url,
                 headers=request_headers,
                 params=params,
-                data=data,
+                data=body,
                 timeout=120,
             )
-            if data is not None and operation == "put":
-                callback.relative_update(len(data))
+            if operation == "put" and payload_size:
+                callback.relative_update(payload_size)
             return resp
         elif kind == "presigned-multipart":
             # S3 multipart upload using server-provided part URLs
-            if data is None:
+            if data is None and file_obj is None:
                 raise ValueError("Data required for multipart upload")
             upload_id = access.get("upload_id")
             part_urls = access.get("part_urls")
@@ -382,7 +415,10 @@ class CalkitFileSystem(AbstractFileSystem):
                     "presigned-multipart"
                 )
             content_type = access.get("content_type")
-            total_parts_needed = (len(data) + part_size - 1) // part_size
+            total_bytes = (
+                len(data) if data is not None else int(file_size or 0)
+            )
+            total_parts_needed = (total_bytes + part_size - 1) // part_size
             if total_parts_needed > len(part_urls):
                 raise ValueError(
                     "Insufficient part URLs for multipart upload "
@@ -391,8 +427,12 @@ class CalkitFileSystem(AbstractFileSystem):
             uploaded_parts: list[tuple[int, str]] = []
             for part_num in range(1, total_parts_needed + 1):
                 start = (part_num - 1) * part_size
-                end = min(start + part_size, len(data))
-                part_data = data[start:end]
+                end = min(start + part_size, total_bytes)
+                if data is not None:
+                    part_data = data[start:end]
+                else:
+                    file_obj.seek(start)
+                    part_data = file_obj.read(end - start)
                 part_url = part_urls[part_num - 1]
                 part_headers = {}
                 if content_type:
@@ -429,7 +469,7 @@ class CalkitFileSystem(AbstractFileSystem):
             return complete_resp
         elif kind == "presigned-chunked":
             # GCS resumable upload - requires multiple requests
-            if data is None:
+            if data is None and file_obj is None:
                 raise ValueError("Data required for chunked upload")
             init_url = access.get("init_url")
             if not init_url:
@@ -477,7 +517,7 @@ class CalkitFileSystem(AbstractFileSystem):
                         pass
 
             # Step 2: Upload data in chunks
-            total_size = len(data)
+            total_size = len(data) if data is not None else int(file_size or 0)
             offset = 0
             chunk_headers_base = dict(
                 access.get("chunk_headers") or access.get("headers") or {}
@@ -510,7 +550,11 @@ class CalkitFileSystem(AbstractFileSystem):
             try:
                 while offset < total_size:
                     chunk_end = min(offset + chunk_size, total_size)
-                    chunk_data = data[offset:chunk_end]
+                    if data is not None:
+                        chunk_data = data[offset:chunk_end]
+                    else:
+                        file_obj.seek(offset)
+                        chunk_data = file_obj.read(chunk_end - offset)
                     # Set Content-Range header for the chunk
                     chunk_headers = {
                         **chunk_headers_base,
@@ -915,12 +959,9 @@ class CalkitFileSystem(AbstractFileSystem):
         if os.path.isdir(lpath):
             self.makedirs(rpath, exist_ok=True)
             return None
-        with open(lpath, "rb") as f:
-            size = f.seek(0, 2)
-            callback.set_size(size)
-            f.seek(0)
-            data = f.read()
         owner, project, file_path = _parse_path(rpath)
+        size = os.path.getsize(lpath)
+        callback.set_size(size)
         operation_info = self._get_fs_op_info(
             owner,
             project,
@@ -928,12 +969,17 @@ class CalkitFileSystem(AbstractFileSystem):
             "put",
             content_length=size,
         )
-        resp = self._execute_operation(
-            operation_info,
-            "put",
-            data=data,
-            callback=callback,
-        )
+        # Stream the file from disk rather than loading it into memory. This
+        # keeps RAM bounded when DVC pushes many (or very large) files in
+        # parallel via its worker pool.
+        with open(lpath, "rb") as f:
+            resp = self._execute_operation(
+                operation_info,
+                "put",
+                file_obj=f,
+                file_size=size,
+                callback=callback,
+            )
         resp.raise_for_status()
 
 

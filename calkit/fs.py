@@ -311,12 +311,32 @@ class CalkitFileSystem(AbstractFileSystem):
         streamed from it instead of being held in memory, which keeps memory
         bounded for large uploads.
         """
-        # Total payload size when streaming from a file handle.
-        payload_size = (
-            len(data)
-            if data is not None
-            else (file_size if file_size is not None else 0)
-        )
+        if data is not None and file_obj is not None:
+            raise ValueError("Provide data or file_obj, not both")
+        if file_obj is not None:
+            if not callable(getattr(file_obj, "seek", None)):
+                raise TypeError(
+                    "file_obj must be a seekable binary file-like object"
+                )
+            if file_size is None:
+                raise ValueError(
+                    "file_size must be provided when file_obj is given"
+                )
+        # Total payload size for progress reporting.
+        payload_size = len(data) if data is not None else (file_size or 0)
+
+        def _prepare_stream(request_headers: dict) -> Any:
+            """Return the request body, setting Content-Length if streaming."""
+            if data is not None:
+                return data
+            if file_obj is None:
+                return None
+            file_obj.seek(0)
+            # Explicit Content-Length avoids chunked transfer-encoding, which
+            # presigned URL signatures typically reject.
+            request_headers.setdefault("Content-Length", str(file_size))
+            return file_obj
+
         # Extract access info from the operation info
         access = operation_info.get("access")
         if not access:
@@ -337,16 +357,7 @@ class CalkitFileSystem(AbstractFileSystem):
             if headers:
                 request_headers.update(headers)
             params = access.get("params")
-            body: Any = data
-            if body is None and file_obj is not None:
-                file_obj.seek(0)
-                body = file_obj
-                # Explicit length avoids chunked transfer-encoding, which
-                # presigned URL signatures typically don't allow.
-                if file_size is not None:
-                    request_headers.setdefault(
-                        "Content-Length", str(file_size)
-                    )
+            body: Any = _prepare_stream(request_headers)
             resp = self._session.request(
                 method=http_method.upper(),
                 url=url,
@@ -370,14 +381,7 @@ class CalkitFileSystem(AbstractFileSystem):
             if headers:
                 request_headers.update(headers)
             params = access.get("params")
-            body = data
-            if body is None and file_obj is not None:
-                file_obj.seek(0)
-                body = file_obj
-                if file_size is not None:
-                    request_headers.setdefault(
-                        "Content-Length", str(file_size)
-                    )
+            body = _prepare_stream(request_headers)
             resp = self._session.request(
                 method=http_method.upper(),
                 url=url,
@@ -415,9 +419,7 @@ class CalkitFileSystem(AbstractFileSystem):
                     "presigned-multipart"
                 )
             content_type = access.get("content_type")
-            total_bytes = (
-                len(data) if data is not None else int(file_size or 0)
-            )
+            total_bytes = len(data) if data is not None else int(file_size)
             total_parts_needed = (total_bytes + part_size - 1) // part_size
             if total_parts_needed > len(part_urls):
                 raise ValueError(
@@ -517,7 +519,7 @@ class CalkitFileSystem(AbstractFileSystem):
                         pass
 
             # Step 2: Upload data in chunks
-            total_size = len(data) if data is not None else int(file_size or 0)
+            total_size = len(data) if data is not None else int(file_size)
             offset = 0
             chunk_headers_base = dict(
                 access.get("chunk_headers") or access.get("headers") or {}

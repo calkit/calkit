@@ -328,23 +328,8 @@ class CalkitFileSystem(AbstractFileSystem):
         payload_size = len(data) if data is not None else (file_size or 0)
 
         # Retries are intentionally narrow: only transient transport errors.
-        try:
-            max_retries = max(
-                int(os.environ.get("CALKIT_FS_TRANSFER_RETRIES", "2")), 0
-            )
-        except ValueError:
-            max_retries = 2
-        try:
-            retry_backoff = max(
-                float(
-                    os.environ.get(
-                        "CALKIT_FS_TRANSFER_RETRY_BACKOFF_SECONDS", "1.0"
-                    )
-                ),
-                0.0,
-            )
-        except ValueError:
-            retry_backoff = 1.0
+        max_retries = 2
+        retry_backoff = 1.0
 
         def _request_with_retry(func):
             delay = retry_backoff

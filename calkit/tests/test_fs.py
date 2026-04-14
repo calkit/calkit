@@ -7,6 +7,7 @@ from typing import Literal
 from unittest.mock import MagicMock, patch
 
 import pytest
+from requests.exceptions import Timeout
 
 import calkit
 from calkit import fs as ckfs
@@ -153,6 +154,90 @@ def test_put_file_uses_callback(tmp_path):
     callback.set_size.assert_called_once_with(len(data))
     calls = [c.args[0] for c in callback.relative_update.call_args_list]
     assert sum(calls) == len(data)
+
+
+def test_execute_operation_retries_transient_timeout_across_upload_paths():
+    """Retries transient timeout for both simple and chunked upload flows."""
+    import io
+
+    with patch("calkit.fs.time.sleep", return_value=None):
+        # Use case 1: simple presigned-url upload retries and rewinds stream.
+        payload_simple = b"R" * 8
+        start_positions = []
+        session_simple = MagicMock()
+
+        def _simple_side_effect(**kwargs):
+            body = kwargs["data"]
+            start_positions.append(body.tell())
+            if len(start_positions) == 1:
+                raise Timeout("read timeout")
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            return resp
+
+        session_simple.request.side_effect = _simple_side_effect
+        fs_simple = ckfs.CalkitFileSystem.__new__(ckfs.CalkitFileSystem)
+        fs_simple._session = session_simple
+        op_simple = {
+            "access": {
+                "kind": "presigned-url",
+                "url": "https://storage.example.com/upload",
+                "http_method": "PUT",
+            }
+        }
+        fs_simple._execute_operation(
+            op_simple,
+            "put",
+            file_obj=io.BytesIO(payload_simple),
+            file_size=len(payload_simple),
+        )
+        assert start_positions == [0, 0]
+        # Use case 2: chunked upload retries a timed-out chunk and continues.
+        chunk_size = 5
+        payload_chunked = b"T" * 13
+        session_chunked = MagicMock()
+        init_resp = MagicMock()
+        init_resp.raise_for_status = MagicMock()
+        init_resp.headers = {"Location": "https://example.com/session"}
+        resp1 = MagicMock()
+        resp1.status_code = 308
+        resp1.headers = {"Range": "bytes=0-4"}
+        resp2 = MagicMock()
+        resp2.status_code = 308
+        resp2.headers = {"Range": "bytes=0-9"}
+        resp3 = MagicMock()
+        resp3.status_code = 200
+        resp3.headers = {}
+        session_chunked.request.side_effect = [
+            init_resp,
+            Timeout("read timeout"),
+            resp1,
+            resp2,
+            resp3,
+        ]
+        fs_chunked = ckfs.CalkitFileSystem.__new__(ckfs.CalkitFileSystem)
+        fs_chunked._session = session_chunked
+        op_chunked = {
+            "access": {
+                "kind": "presigned-chunked",
+                "init_url": "https://example.com/initiate",
+                "chunk_size_bytes": chunk_size,
+                "http_method": "POST",
+                "chunk_http_method": "PUT",
+                "headers": {"x-goog-resumable": "start"},
+            }
+        }
+        callback = MagicMock()
+        callback.relative_update = MagicMock()
+        fs_chunked._execute_operation(
+            op_chunked,
+            "put",
+            file_obj=io.BytesIO(payload_chunked),
+            file_size=len(payload_chunked),
+            callback=callback,
+        )
+        calls = [c.args[0] for c in callback.relative_update.call_args_list]
+        assert calls == [5, 5, 3]
 
 
 def _calkit_cloud_available(

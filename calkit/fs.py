@@ -72,6 +72,7 @@ from __future__ import annotations
 import base64
 import io
 import os
+import time
 import xml.etree.ElementTree as ET
 from typing import Any
 from urllib.parse import urlparse
@@ -81,7 +82,8 @@ from fsspec import AbstractFileSystem
 from fsspec.callbacks import DEFAULT_CALLBACK
 from fsspec.spec import AbstractBufferedFile
 from fsspec.utils import stringify_path
-from requests.exceptions import HTTPError
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import HTTPError, Timeout
 
 import calkit
 
@@ -325,6 +327,37 @@ class CalkitFileSystem(AbstractFileSystem):
         # Total payload size for progress reporting.
         payload_size = len(data) if data is not None else (file_size or 0)
 
+        # Retries are intentionally narrow: only transient transport errors.
+        try:
+            max_retries = max(
+                int(os.environ.get("CALKIT_FS_TRANSFER_RETRIES", "2")), 0
+            )
+        except ValueError:
+            max_retries = 2
+        try:
+            retry_backoff = max(
+                float(
+                    os.environ.get(
+                        "CALKIT_FS_TRANSFER_RETRY_BACKOFF_SECONDS", "1.0"
+                    )
+                ),
+                0.0,
+            )
+        except ValueError:
+            retry_backoff = 1.0
+
+        def _request_with_retry(func):
+            delay = retry_backoff
+            for attempt in range(max_retries + 1):
+                try:
+                    return func()
+                except (Timeout, RequestsConnectionError):
+                    if attempt >= max_retries:
+                        raise
+                    if delay > 0:
+                        time.sleep(delay)
+                        delay *= 2
+
         def _prepare_stream(request_headers: dict) -> Any:
             """Return the request body, setting Content-Length if streaming."""
             if data is not None:
@@ -357,14 +390,15 @@ class CalkitFileSystem(AbstractFileSystem):
             if headers:
                 request_headers.update(headers)
             params = access.get("params")
-            body: Any = _prepare_stream(request_headers)
-            resp = self._session.request(
-                method=http_method.upper(),
-                url=url,
-                headers=request_headers,
-                params=params,
-                data=body,
-                timeout=120,
+            resp = _request_with_retry(
+                lambda: self._session.request(
+                    method=http_method.upper(),
+                    url=url,
+                    headers=request_headers,
+                    params=params,
+                    data=_prepare_stream(request_headers),
+                    timeout=120,
+                )
             )
             if operation == "put" and payload_size:
                 callback.relative_update(payload_size)
@@ -381,14 +415,15 @@ class CalkitFileSystem(AbstractFileSystem):
             if headers:
                 request_headers.update(headers)
             params = access.get("params")
-            body = _prepare_stream(request_headers)
-            resp = self._session.request(
-                method=http_method.upper(),
-                url=url,
-                headers=request_headers,
-                params=params,
-                data=body,
-                timeout=120,
+            resp = _request_with_retry(
+                lambda: self._session.request(
+                    method=http_method.upper(),
+                    url=url,
+                    headers=request_headers,
+                    params=params,
+                    data=_prepare_stream(request_headers),
+                    timeout=120,
+                )
             )
             if operation == "put" and payload_size:
                 callback.relative_update(payload_size)
@@ -439,11 +474,13 @@ class CalkitFileSystem(AbstractFileSystem):
                 part_headers = {}
                 if content_type:
                     part_headers["Content-Type"] = str(content_type)
-                part_resp = self._session.put(
-                    part_url,
-                    headers=part_headers,
-                    data=part_data,
-                    timeout=120,
+                part_resp = _request_with_retry(
+                    lambda: self._session.put(
+                        part_url,
+                        headers=part_headers,
+                        data=part_data,
+                        timeout=120,
+                    )
                 )
                 part_resp.raise_for_status()
                 etag = part_resp.headers.get("ETag")
@@ -493,12 +530,14 @@ class CalkitFileSystem(AbstractFileSystem):
             if content_type:
                 init_headers["Content-Type"] = str(content_type)
             init_headers["Content-Length"] = "0"  # Init request has no body
-            init_resp = self._session.request(
-                method=init_method.upper(),
-                url=init_url,
-                headers=init_headers,
-                params=init_params,
-                timeout=30,
+            init_resp = _request_with_retry(
+                lambda: self._session.request(
+                    method=init_method.upper(),
+                    url=init_url,
+                    headers=init_headers,
+                    params=init_params,
+                    timeout=30,
+                )
             )
             init_resp.raise_for_status()
             # Get the session URI from the Location header
@@ -565,13 +604,15 @@ class CalkitFileSystem(AbstractFileSystem):
                             f"bytes {offset}-{chunk_end - 1}/{total_size}"
                         ),
                     }
-                    chunk_resp = self._session.request(
-                        method=chunk_upload_method.upper(),
-                        url=session_uri,
-                        headers=chunk_headers,
-                        params=access.get("chunk_params"),
-                        data=chunk_data,
-                        timeout=120,
+                    chunk_resp = _request_with_retry(
+                        lambda: self._session.request(
+                            method=chunk_upload_method.upper(),
+                            url=session_uri,
+                            headers=chunk_headers,
+                            params=access.get("chunk_params"),
+                            data=chunk_data,
+                            timeout=120,
+                        )
                     )
                     # Check response
                     if chunk_resp.status_code == 308:

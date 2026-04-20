@@ -167,10 +167,9 @@ def run_sbatch(
                     f"but this is '{current_host}'"
                 )
         env_setup_cmds = env.get("default_setup", [])
-        if env_setup_cmds:
-            setup_cmds = [
-                s for s in [*env_setup_cmds, *setup_cmds] if s.strip()
-            ]
+        # Use environment default setup commands if user didn't provide any
+        if env_setup_cmds and not setup_cmds:
+            setup_cmds = [s for s in env_setup_cmds if s.strip()]
     if setup_cmds:
         # Run setup and target in the same shell so setup side effects (like
         # module loads) persist for the target command.

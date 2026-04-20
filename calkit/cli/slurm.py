@@ -163,8 +163,8 @@ def run_sbatch(
                 and current_fqdn != env_host
             ):
                 raise_error(
-                    f"Environment '{environment}' is for host '{env_host}', but "
-                    f"this is '{current_host}'"
+                    f"Environment '{environment}' is for host '{env_host}', "
+                    f"but this is '{current_host}'"
                 )
         env_setup_cmds = env.get("default_setup", [])
         if env_setup_cmds:

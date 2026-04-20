@@ -87,7 +87,8 @@ def run_sbatch(
             "--setup",
             help=(
                 "Shell setup command to run before launching the target "
-                "(repeat for multiple commands)."
+                "(repeat for multiple commands). Will ignore environment's "
+                "default setup commands."
             ),
         ),
     ] = [],

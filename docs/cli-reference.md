@@ -2767,7 +2767,20 @@ Developer tools.
 
 | Command                              | Description                                     |
 | ------------------------------------ | ----------------------------------------------- |
+| [`python`](#subcommand-dev-python)   | Start an Python shell in Calkit's environment.  |
 | [`ipython`](#subcommand-dev-ipython) | Start an IPython shell in Calkit's environment. |
+
+<a id="subcommand-dev-python"></a>
+
+#### `calkit dev python`
+
+Start an Python shell in Calkit's environment.
+
+Usage:
+
+```text
+calkit dev python [OPTIONS]
+```
 
 <a id="subcommand-dev-ipython"></a>
 

@@ -2,15 +2,31 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from typing import Annotated
 
 import typer
 
 import calkit
-import calkit.invenio
 
 dev_app = typer.Typer(no_args_is_help=True)
+
+
+@dev_app.command(
+    name="python",
+    add_help_option=False,
+    context_settings={
+        "ignore_unknown_options": True,
+        "allow_extra_args": True,
+    },
+)
+def run_python(
+    ctx: typer.Context,
+    help: Annotated[bool, typer.Option("-h", "--help")] = False,
+):
+    """Start an Python shell in Calkit's environment."""
+    subprocess.run([sys.executable] + sys.argv[3:])
 
 
 @dev_app.command(
@@ -21,11 +37,11 @@ dev_app = typer.Typer(no_args_is_help=True)
         "allow_extra_args": True,
     },
 )
-def ipython(
+def run_ipython(
     ctx: typer.Context,
     help: Annotated[bool, typer.Option("-h", "--help")] = False,
 ):
     """Start an IPython shell in Calkit's environment."""
     from IPython import start_ipython
 
-    start_ipython(argv=sys.argv[2:], user_ns={"calkit": calkit})
+    start_ipython(argv=sys.argv[3:], user_ns={"calkit": calkit})

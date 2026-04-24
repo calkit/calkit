@@ -42,6 +42,7 @@
 | [`overleaf`](#command-group-overleaf)         | Interact with Overleaf.                                            |
 | [`cloud`](#command-group-cloud)               | Interact with a Calkit Cloud.                                      |
 | [`slurm`](#command-group-slurm)               | Work with SLURM.                                                   |
+| [`dev`](#command-group-dev)                   | Developer tools.                                                   |
 
 ## Top-level command details
 
@@ -2757,3 +2758,25 @@ Options:
 | Option           | Type    | Required | Default | Description                         |
 | ---------------- | ------- | -------- | ------- | ----------------------------------- |
 | `--follow`, `-f` | boolean | no       | False   | Follow the log output like tail -f. |
+
+<a id="command-group-dev"></a>
+
+### `calkit dev`
+
+Developer tools.
+
+| Command                              | Description                                     |
+| ------------------------------------ | ----------------------------------------------- |
+| [`ipython`](#subcommand-dev-ipython) | Start an IPython shell in Calkit's environment. |
+
+<a id="subcommand-dev-ipython"></a>
+
+#### `calkit dev ipython`
+
+Start an IPython shell in Calkit's environment.
+
+Usage:
+
+```text
+calkit dev ipython [OPTIONS]
+```

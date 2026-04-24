@@ -47,6 +47,7 @@ from calkit.cli.check import (
 from calkit.cli.cloud import cloud_app
 from calkit.cli.config import config_app
 from calkit.cli.describe import describe_app
+from calkit.cli.dev import dev_app
 from calkit.cli.import_ import import_app
 from calkit.cli.latex import latex_app
 from calkit.cli.list import list_app
@@ -84,6 +85,7 @@ app.add_typer(latex_app, name="latex", help="Work with LaTeX.")
 app.add_typer(overleaf_app, name="overleaf", help="Interact with Overleaf.")
 app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
 app.add_typer(slurm_app, name="slurm", help="Work with SLURM.")
+app.add_typer(dev_app, name="dev", help="Developer tools.", hidden=True)
 
 
 def _to_shell_cmd(cmd: list[str]) -> str:

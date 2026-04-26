@@ -2694,16 +2694,16 @@ Arguments:
 
 Options:
 
-| Option                  | Type    | Required | Default | Description                                                                                                        |
-| ----------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------ |
-| `--name`, `-n`          | text    | yes      |         | Job name.                                                                                                          |
-| `--environment`, `-e`   | text    | yes      |         | Calkit (slurm) environment to use for the job.                                                                     |
-| `--dep`, `-d`           | text    | no       |         | Additional dependencies to track, which if changed signify a job is invalid.                                       |
-| `--out`, `-o`           | text    | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job. |
-| `--sbatch-option`, `-s` | text    | no       |         | Additional options to pass to sbatch (no spaces allowed).                                                          |
-| `--setup`               | text    | no       |         | Shell setup command to run before launching the target (repeat for multiple commands).                             |
-| `--log-path`            | text    | no       |         | Output log path.                                                                                                   |
-| `--command`             | boolean | no       |         | Whether the target is a command instead of a script.                                                               |
+| Option                  | Type    | Required | Default | Description                                                                                                                              |
+| ----------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | text    | yes      |         | Job name.                                                                                                                                |
+| `--environment`, `-e`   | text    | yes      |         | Calkit (slurm) environment to use for the job.                                                                                           |
+| `--dep`, `-d`           | text    | no       |         | Additional dependencies to track, which if changed signify a job is invalid.                                                             |
+| `--out`, `-o`           | text    | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job.                       |
+| `--sbatch-option`, `-s` | text    | no       |         | Additional options to pass to sbatch (no spaces allowed).                                                                                |
+| `--setup`               | text    | no       |         | Shell setup command to run before launching the target (repeat for multiple commands). Will ignore environment's default setup commands. |
+| `--log-path`            | text    | no       |         | Output log path.                                                                                                                         |
+| `--command`             | boolean | no       |         | Whether the target is a command instead of a script.                                                                                     |
 
 <a id="subcommand-slurm-queue"></a>
 

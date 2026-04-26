@@ -87,7 +87,8 @@ def run_sbatch(
             "--setup",
             help=(
                 "Shell setup command to run before launching the target "
-                "(repeat for multiple commands)."
+                "(repeat for multiple commands). Will ignore environment's "
+                "default setup commands."
             ),
         ),
     ] = [],
@@ -163,18 +164,36 @@ def run_sbatch(
                 and current_fqdn != env_host
             ):
                 raise_error(
-                    f"Environment '{environment}' is for host '{env_host}', but "
-                    f"this is '{current_host}'"
+                    f"Environment '{environment}' is for host '{env_host}', "
+                    f"but this is '{current_host}'"
                 )
         env_setup_cmds = env.get("default_setup", [])
-        if env_setup_cmds:
-            setup_cmds = [
-                s for s in [*env_setup_cmds, *setup_cmds] if s.strip()
-            ]
+        # Use environment default setup commands if user didn't provide any
+        if env_setup_cmds and not setup_cmds:
+            setup_cmds = [s for s in env_setup_cmds if s.strip()]
     if setup_cmds:
         # Run setup and target in the same shell so setup side effects (like
         # module loads) persist for the target command.
-        wrapped_target = shlex.join([target] + args)
+        wrapped_target_parts = [target] + args
+        if not is_command and os.path.isfile(target):
+            # `sbatch <script>` can run a non-executable script file, but
+            # `--wrap '<script>'` requires execute permission. For wrapped
+            # execution, invoke through the script interpreter when needed.
+            if not os.access(target, os.X_OK):
+                interpreter = None
+                try:
+                    with open(target, "r", encoding="utf-8") as f:
+                        first_line = f.readline().strip()
+                    if first_line.startswith("#!"):
+                        shebang = first_line[2:].strip()
+                        if shebang:
+                            interpreter = shlex.split(shebang)
+                except OSError:
+                    interpreter = None
+                if interpreter is None:
+                    interpreter = ["bash"]
+                wrapped_target_parts = interpreter + [target] + args
+        wrapped_target = shlex.join(wrapped_target_parts)
         setup_chain = " && ".join([*setup_cmds, wrapped_target])
         cmd += ["--wrap", setup_chain]
         if not is_command and target not in deps:

@@ -1,0 +1,49 @@
+{
+  "image": "ghcr.io/calkit/devcontainer:latest",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/julialang/devcontainer-features/julia:1": {
+      "channel": "release"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "james-yu.latex-workshop",
+        "iterative.dvc",
+        "esbenp.pretter-vscode",
+        "ms-python.vscode-pylance",
+        "streetsidesoftware.code-spell-checker",
+        "redhat.vscode-yaml",
+        "akamud.vscode-theme-onedark",
+        "mechatroner.rainbow-csv",
+        "julialang.language-julia",
+        "ms-toolsai.jupyter"
+      ],
+      "settings": {
+        "latex-workshop.bibtex-format.tab": "4 spaces",
+        "latex-workshop.latex.autoBuild.run": "onSave",
+        "latex-workshop.docker.image.latex": "texlive/texlive:latest-full",
+        "latex-workshop.docker.enabled": true,
+        "dvc.doNotShowSetupAfterInstall": true,
+        "workbench.editorAssociations": {
+          "*.pdf": "latex-workshop-pdf-hook"
+        },
+        "git.autofetch": true,
+        "redhat.telemetry.enabled": true,
+        "window.menuBarVisibility": "classic",
+        "workbench.colorTheme": "Atom One Dark",
+        "editor.minimap.enabled": false,
+        "cSpell.userWords": [
+          "calkit",
+          "Calkit"
+        ]
+      }
+    }
+  },
+  "mounts": [
+    "source=${localEnv:HOME}/.calkit,target=/home/vscode/.calkit,type=bind,consistency=cached"
+  ],
+  "updateContentCommand": "while ! docker info > /dev/null 2>&1; do sleep 1; done && conda init bash && . /opt/conda/bin/activate && calkit check envs",
+  "postStartCommand": ". /opt/conda/bin/activate; mkdir -p $HOME/.cache; calkit config github-codespace > $HOME/.cache/calkit-config.log 2>&1 || true; calkit pull > $HOME/.cache/calkit-pull.log 2>&1 || true"
+}

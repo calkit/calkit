@@ -34,6 +34,9 @@ def get_token(service: ServiceName = DEFAULT_SERVICE) -> str:
 
 
 def get_base_url(service: ServiceName = DEFAULT_SERVICE) -> str:
+    override = os.getenv(f"CALKIT_INVENIO_BASE_URL_{service.upper()}")
+    if override:
+        return override
     current_env = calkit.config.get_env()
     if service == "zenodo":
         if (

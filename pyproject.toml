@@ -85,6 +85,7 @@ dev = [
   "mkdocs-material",
   "mkdocs-mermaid2-plugin",
   "pytest-env>=1.1.5",
+  "pytest-httpserver>=1.0.0",
   "pytest-xdist>=3.8.0",
   "pypdf>=6.4.2",
   "mkdocs-glightbox>=0.5.2",

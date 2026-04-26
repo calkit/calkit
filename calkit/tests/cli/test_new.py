@@ -1,6 +1,7 @@
 """Tests for ``cli.new``."""
 
 import os
+import re
 import subprocess
 
 import git
@@ -548,7 +549,69 @@ def test_new_julia_env(tmp_dir):
     assert not os.path.isfile("envs/empty/Manifest.toml")
 
 
-def test_new_release(tmp_dir):
+def test_new_release(tmp_dir, monkeypatch, httpserver):
+    # Set up a mock Zenodo API so the test doesn't depend on the real sandbox
+    record_id = "test-record-abc123"
+    doi = "10.5072/zenodo.test123"
+    # Point the Zenodo base URL at the local mock server and provide a dummy
+    # token so no real credentials are needed.  Both env vars are inherited
+    # by every subprocess started by this test.
+    monkeypatch.setenv(
+        "CALKIT_INVENIO_BASE_URL_ZENODO",
+        httpserver.url_for("").rstrip("/"),
+    )
+    monkeypatch.setenv("ZENODO_TOKEN", "test-token")
+    # POST /records – create a new draft record
+    httpserver.expect_request(
+        re.compile(r"^/records$"), method="POST"
+    ).respond_with_json({"id": record_id, "pids": {}})
+    # POST /records/{id}/draft/files – initiate a file upload slot
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/files$"), method="POST"
+    ).respond_with_json({"entries": []})
+    # PUT /records/{id}/draft/files/{filename}/content – stream file bytes
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/files/.+/content$"),
+        method="PUT",
+    ).respond_with_data("", status=200)
+    # POST /records/{id}/draft/files/{filename}/commit – finalise upload
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/files/.+/commit$"),
+        method="POST",
+    ).respond_with_json({"key": "file", "status": "completed"})
+    # POST /records/{id}/draft/pids/doi – reserve a DOI for a draft
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/pids/doi$"), method="POST"
+    ).respond_with_json({"pids": {"doi": {"identifier": doi}}})
+    # GET /records/{id}/draft/files – list files already in the draft
+    # (used by --reupload to decide which files to delete first)
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/files$"), method="GET"
+    ).respond_with_json({"entries": []})
+    # POST /records/{id}/draft/actions/publish – publish the draft
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/actions/publish$"),
+        method="POST",
+    ).respond_with_json(
+        {"id": record_id, "pids": {"doi": {"identifier": doi}}}
+    )
+    # GET /records/{id} – fetch the published record for post-test assertions
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}$"), method="GET"
+    ).respond_with_json(
+        {
+            "metadata": {
+                "license": {"id": "cc-by-4.0"},
+                "related_identifiers": [
+                    {
+                        "identifier": (
+                            "https://github.com/calkit/test-project"
+                        )
+                    }
+                ],
+            }
+        }
+    )
     subprocess.check_call(
         [
             "calkit",
@@ -661,7 +724,11 @@ def test_new_release(tmp_dir):
     # )
 
 
-def test_new_release_is_runnable(tmp_dir):
+
+def test_new_release_is_runnable(tmp_dir, monkeypatch):
+    # Provide a dummy Zenodo token so `new_release` can pass its early
+    # token-validation step even in dry-run mode.
+    monkeypatch.setenv("ZENODO_TOKEN", "test-token")
     subprocess.check_call(["calkit", "init"])
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(

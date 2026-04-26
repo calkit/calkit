@@ -603,11 +603,7 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
             "metadata": {
                 "license": {"id": "cc-by-4.0"},
                 "related_identifiers": [
-                    {
-                        "identifier": (
-                            "https://github.com/calkit/test-project"
-                        )
-                    }
+                    {"identifier": ("https://github.com/calkit/test-project")}
                 ],
             }
         }
@@ -722,7 +718,6 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     # subprocess.check_call(
     #     ["calkit", "update", "release", "--name", "v0.1.0", "--delete"]
     # )
-
 
 
 def test_new_release_is_runnable(tmp_dir, monkeypatch):

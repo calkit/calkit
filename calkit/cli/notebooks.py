@@ -586,9 +586,9 @@ def execute_notebook(
         run_in_env(cmd, env_name=env_name, no_check=no_check, verbose=verbose)
     if not no_replace:
         # Replace original notebook outputs with those from executed version
-        with open(fpath_out_exec, "r") as f:
+        with open(fpath_out_exec, "r", encoding="utf-8") as f:
             executed_nb = json.load(f)
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             original_nb = json.load(f)
         for orig_cell, exec_cell in zip(
             original_nb.get("cells", []), executed_nb.get("cells", [])
@@ -600,7 +600,7 @@ def execute_notebook(
                 and "execution_count" in exec_cell
             ):
                 orig_cell["execution_count"] = exec_cell["execution_count"]
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(original_nb, f, indent=1)
     for to_fmt in to:
         if to_fmt != "notebook":

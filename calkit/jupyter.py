@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 
 from pydantic import BaseModel
 
@@ -15,7 +16,9 @@ class Server(BaseModel):
 
 def get_servers() -> list[Server]:
     out = (
-        subprocess.check_output(["jupyter", "server", "list"])
+        subprocess.check_output(
+            [sys.executable, "-m", "jupyter", "server", "list"]
+        )
         .decode()
         .strip()
         .split("\n")
@@ -33,6 +36,8 @@ def start_server(wdir=None, no_browser=False):
     """Start a Jupyter server."""
     subprocess.Popen(
         [
+            sys.executable,
+            "-m",
             "jupyter",
             "lab",
             "-y",
@@ -45,4 +50,4 @@ def start_server(wdir=None, no_browser=False):
 def stop_server(url: str):
     # Extract the port from the URL
     port = url.split(":")[2][:4]
-    subprocess.call(["jupyter", "server", "stop", port])
+    subprocess.call([sys.executable, "-m", "jupyter", "server", "stop", port])

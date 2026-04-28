@@ -8,6 +8,7 @@ import webbrowser
 from typing import Annotated
 
 import typer
+from requests.exceptions import HTTPError
 
 import calkit
 from calkit.cli import raise_error
@@ -36,7 +37,7 @@ def login(
             "-f",
             help=(
                 "Force logging in again even if already authenticated. "
-                "Will store a new token in the Cloud."
+                "Will store a new token in your local config."
             ),
         ),
     ] = False,
@@ -51,8 +52,9 @@ def login(
         calkit.echo("Authenticated successfully ✅")
         if not force:
             return
-    except Exception:
-        pass
+    except (ValueError, HTTPError) as e:
+        if isinstance(e, HTTPError) and "401" not in str(e):
+            raise_error(str(e))
     # Now perform the OAuth device flow
     try:
         hostname = socket.gethostname()
@@ -104,7 +106,8 @@ def login(
             try:
                 cfg = calkit.config.read()
                 cfg.access_token = access_token
-                cfg.refresh_token = refresh_token
+                if refresh_token:
+                    cfg.refresh_token = refresh_token
                 cfg.write()
                 calkit.cloud._tokens[calkit.cloud.get_base_url()] = (
                     access_token

@@ -2675,9 +2675,9 @@ calkit cloud login [OPTIONS]
 
 Options:
 
-| Option          | Type    | Required | Default | Description                                                                                |
-| --------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------ |
-| `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in the Cloud. |
+| Option          | Type    | Required | Default | Description                                                                                        |
+| --------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------- |
+| `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config. |
 
 <a id="command-group-slurm"></a>
 

@@ -2636,9 +2636,10 @@ Arguments:
 
 Interact with a Calkit Cloud.
 
-| Command                        | Description                        |
-| ------------------------------ | ---------------------------------- |
-| [`get`](#subcommand-cloud-get) | Get a resource from the Cloud API. |
+| Command                            | Description                        |
+| ---------------------------------- | ---------------------------------- |
+| [`get`](#subcommand-cloud-get)     | Get a resource from the Cloud API. |
+| [`login`](#subcommand-cloud-login) | Login to the Calkit Cloud.         |
 
 <a id="subcommand-cloud-get"></a>
 
@@ -2657,6 +2658,26 @@ Arguments:
 | Argument   | Type | Required | Default | Description  |
 | ---------- | ---- | -------- | ------- | ------------ |
 | `endpoint` | text | yes      |         | API endpoint |
+
+<a id="subcommand-cloud-login"></a>
+
+#### `calkit cloud login`
+
+Login to the Calkit Cloud.
+
+First try a GET request to the /user endpoint to check if the user is already logged in. If not, perform OAuth device flow.
+
+Usage:
+
+```text
+calkit cloud login [OPTIONS]
+```
+
+Options:
+
+| Option          | Type    | Required | Default | Description                                                                                |
+| --------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------ |
+| `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in the Cloud. |
 
 <a id="command-group-slurm"></a>
 

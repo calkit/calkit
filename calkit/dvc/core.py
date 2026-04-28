@@ -282,7 +282,9 @@ def configure_remote(wdir: str | None = None, use_ck: bool = False) -> str:
     else:
         base_url = calkit.cloud.get_base_url()
         remote_url = f"{base_url}/projects/{project_name}/dvc"
-    remote_name = get_app_name()
+    # ck remotes don't need different URLs for different endpoints, since we
+    # select with an environment variable
+    remote_name = get_app_name() if not use_ck else "calkit"
     result = run_dvc_command(
         ["remote", "add", "-d", "-f", remote_name, remote_url],
         cwd=wdir,

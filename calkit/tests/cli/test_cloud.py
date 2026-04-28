@@ -2,6 +2,7 @@
 
 import pytest
 import typer
+from requests.exceptions import HTTPError
 
 import calkit.cli.cloud as cloud_cli
 
@@ -14,7 +15,7 @@ def test_cloud_login_already_logged_in(monkeypatch, capsys):
     monkeypatch.setattr(cloud_cli.calkit.cloud, "get", _get)
     cloud_cli.login()
     out = capsys.readouterr().out
-    assert "Device is already authenticated" in out
+    assert "Authenticated successfully" in out
 
 
 def test_cloud_login_device_flow_success(monkeypatch, capsys):
@@ -35,7 +36,7 @@ def test_cloud_login_device_flow_success(monkeypatch, capsys):
 
     def _get(path):
         assert path == "/user"
-        raise RuntimeError("401: Not authenticated")
+        raise HTTPError("401: Not authenticated")
 
     def _post(path, **kwargs):
         post_calls.append((path, kwargs))
@@ -125,7 +126,7 @@ def test_cloud_login_device_code_expired(monkeypatch):
     """Expired device code during polling should raise Exit."""
 
     def _get(path):
-        raise RuntimeError("Not authenticated")
+        raise HTTPError("401: Not authenticated")
 
     def _post(path, **kwargs):
         if path == "/login/device":
@@ -149,7 +150,7 @@ def test_cloud_login_device_code_not_found(monkeypatch):
     """Not-found device code during polling should raise Exit."""
 
     def _get(path):
-        raise RuntimeError("Not authenticated")
+        raise HTTPError("401: Not authenticated")
 
     def _post(path, **kwargs):
         if path == "/login/device":

@@ -48,7 +48,7 @@ def login(
     """
     try:
         calkit.cloud.get("/user")
-        typer.echo("Device is already authenticated")
+        calkit.echo("Authenticated successfully ✅")
         if not force:
             return
     except Exception:
@@ -59,7 +59,7 @@ def login(
     except Exception:
         hostname = None
     try:
-        typer.echo("Initiating device login flow")
+        calkit.echo("Initiating device login flow")
         resp = calkit.cloud.post(
             "/login/device",
             json={"hostname": hostname},
@@ -71,9 +71,9 @@ def login(
         interval = int(resp["interval"])
     except Exception as e:
         raise_error(f"Failed to initiate device login flow: {e}")
-    typer.echo("Authorize this device by opening this URL:")
-    typer.echo(verification_uri)
-    typer.echo("Waiting for authorization")
+    calkit.echo("Authorize this device by opening this URL:")
+    calkit.echo(verification_uri)
+    calkit.echo("Waiting for authorization")
     try:
         webbrowser.open(verification_uri)
     except Exception:
@@ -111,7 +111,7 @@ def login(
                 )
             except Exception as e:
                 raise_error(f"Failed to save token in config: {e}")
-            typer.echo("Logged in successfully")
+            calkit.echo("Logged in successfully ✅")
             return
         sleep_seconds = min(interval, max(0.0, deadline - time.monotonic()))
         if sleep_seconds > 0:

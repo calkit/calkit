@@ -18,7 +18,7 @@ from . import config
 _tokens = {}
 
 # Single lock guarding all token-refresh operations to prevent thundering herds
-# (e.g. many concurrent fsspec threads all attempting to refresh at once).
+# (e.g., many concurrent fsspec threads all attempting to refresh at once).
 _refresh_lock = threading.Lock()
 
 # Seconds before JWT expiry at which we proactively refresh.

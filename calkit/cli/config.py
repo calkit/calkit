@@ -120,7 +120,7 @@ def setup_remote_auth():
         remotes = get_remotes()
     except Exception:
         raise_error("Cannot list DVC remotes; check DVC config for errors")
-    ck_remote_name = calkit.config.get_app_name()
+    ck_remote_name = calkit.dvc.make_remote_name()
     for name, url in remotes.items():
         if name == ck_remote_name or name.startswith(f"{ck_remote_name}:"):
             typer.echo(f"Setting up authentication for DVC remote: {name}")

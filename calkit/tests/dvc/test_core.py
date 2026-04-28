@@ -116,7 +116,7 @@ def test_configure_remote_ck_uses_ck_scheme_and_skips_http_auth(monkeypatch):
         lambda remote_name=None, wdir=None: events.append("clear"),
     )
     out = calkit.dvc.configure_remote(use_ck=True)
-    assert out == calkit.config.get_app_name()
+    assert out == calkit.dvc.make_remote_name(use_ck=True)
     assert events and events[0] == "clear"
     assert calls == [
         (
@@ -125,7 +125,7 @@ def test_configure_remote_ck_uses_ck_scheme_and_skips_http_auth(monkeypatch):
                 "add",
                 "-d",
                 "-f",
-                calkit.config.get_app_name(),
+                calkit.dvc.make_remote_name(use_ck=True),
                 "ck://o/p",
             ],
             None,
@@ -136,7 +136,7 @@ def test_configure_remote_ck_uses_ck_scheme_and_skips_http_auth(monkeypatch):
 def test_set_remote_auth_ck_remote_clears_local_http_auth(
     monkeypatch, tmp_path
 ):
-    remote_name = calkit.config.get_app_name()
+    remote_name = calkit.dvc.make_remote_name()
     monkeypatch.setattr(
         calkit.dvc.core,
         "get_remotes",

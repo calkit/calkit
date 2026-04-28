@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import threading
 import time
 from functools import partial
@@ -13,6 +14,8 @@ import requests
 from requests.exceptions import HTTPError
 
 from . import config
+
+logger = logging.getLogger(__name__)
 
 # A dictionary of tokens keyed by base URL
 _tokens = {}
@@ -136,7 +139,8 @@ def _do_refresh() -> str | None:
         cfg.write()
         _tokens[base_url] = new_access
         return new_access
-    except Exception:
+    except Exception as exc:
+        logger.debug("Token refresh failed: %s", exc)
         return None
 
 
@@ -194,7 +198,9 @@ def _request(
             time.sleep(wait)
             continue
         # On 401, attempt a token refresh once (only for access_token sessions,
-        # not PATs — _try_refresh returns None when no refresh_token is stored)
+        # not PATs — _try_refresh returns None when no refresh_token is stored).
+        # get_headers() re-calls get_token() on the next iteration, so it will
+        # automatically pick up the new token stored in _tokens by _try_refresh.
         if resp.status_code == 401 and auth and not refresh_attempted:
             refresh_attempted = True
             new_token = _try_refresh()

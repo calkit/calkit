@@ -34,7 +34,10 @@ def test_jwt_exp_returns_none_for_opaque_token():
 
 
 def test_jwt_exp_returns_none_for_malformed():
+    # Too many segments — payload is not valid JSON
     assert cloud._jwt_exp("not.a.jwt.at.all.with.too.many.parts") is None
+    # No dots at all — split(".")[1] raises IndexError, caught → None
+    assert cloud._jwt_exp("notajwt") is None
 
 
 def test_token_is_expiring_false_when_far_in_future():
@@ -116,6 +119,112 @@ def test_get_token_raises_when_no_credentials(monkeypatch):
     monkeypatch.setattr(cloud.config, "read", lambda: DummyCfg())
     with pytest.raises(ValueError, match="calkit cloud login"):
         cloud.get_token()
+
+
+def test_do_refresh_returns_new_token(monkeypatch):
+    base_url = cloud.get_base_url()
+
+    class DummyCfg:
+        refresh_token = "old-refresh"
+        access_token = "old-access"
+
+        def write(self):
+            pass
+
+    fresh = _make_jwt(time.time() + 3600)
+
+    class DummyResp:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"access_token": fresh, "refresh_token": "new-refresh"}
+
+    monkeypatch.setattr(cloud.config, "read", lambda: DummyCfg())
+    monkeypatch.setattr(cloud.requests, "post", lambda *_a, **_kw: DummyResp())
+    with cloud._refresh_lock:
+        result = cloud._do_refresh()
+    assert result == fresh
+    assert cloud._tokens[base_url] == fresh
+
+
+def test_do_refresh_returns_none_on_http_error(monkeypatch):
+    class DummyCfg:
+        refresh_token = "old-refresh"
+        access_token = "old-access"
+
+        def write(self):
+            pass
+
+    class FailResp:
+        status_code = 401
+
+        def raise_for_status(self):
+            raise Exception("401 Unauthorized")
+
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(cloud.config, "read", lambda: DummyCfg())
+    monkeypatch.setattr(cloud.requests, "post", lambda *_a, **_kw: FailResp())
+    with cloud._refresh_lock:
+        result = cloud._do_refresh()
+    assert result is None
+
+
+def test_do_refresh_returns_none_when_no_refresh_token(monkeypatch):
+    class DummyCfg:
+        refresh_token = None
+        access_token = None
+
+        def write(self):
+            pass
+
+    monkeypatch.setattr(cloud.config, "read", lambda: DummyCfg())
+    with cloud._refresh_lock:
+        result = cloud._do_refresh()
+    assert result is None
+
+
+def test_request_retries_on_401_with_refresh(monkeypatch):
+    base_url = cloud.get_base_url()
+    fresh = _make_jwt(time.time() + 3600)
+    call_count = {"n": 0}
+
+    class Resp401:
+        status_code = 401
+
+        def raise_for_status(self):
+            from requests.exceptions import HTTPError
+
+            raise HTTPError("401")
+
+        def json(self):
+            return {"detail": "Unauthorized"}
+
+    class Resp200:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"ok": True}
+
+    def _fake_get(url, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return Resp401()
+        return Resp200()
+
+    monkeypatch.setattr(cloud.requests, "get", _fake_get)
+    monkeypatch.setitem(cloud._tokens, base_url, fresh)
+    monkeypatch.setattr(cloud, "_try_refresh", lambda: fresh)
+    result = cloud._request("get", "/test", base_url=base_url)
+    assert result == {"ok": True}
+    assert call_count["n"] == 2
 
 
 def test_concurrent_refresh_fires_only_once(monkeypatch):

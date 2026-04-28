@@ -14,6 +14,7 @@ import platform
 import re
 import socket
 import subprocess
+import sys
 import uuid
 import warnings
 from os import PathLike
@@ -91,6 +92,16 @@ DVC_EXTENSIONS = [
     ".zarr",
 ]
 DVC_SIZE_THRESH_BYTES = 5_000_000
+
+
+def echo(message: str) -> None:
+    """Print a message safely, replacing unencodable characters
+    (e.g., emoji).
+    """
+    import typer
+
+    enc = sys.stdout.encoding or "utf-8"
+    typer.echo(message.encode(enc, errors="replace").decode(enc))
 
 
 def find_project_dirs(relative=False, max_depth=3) -> list[str]:

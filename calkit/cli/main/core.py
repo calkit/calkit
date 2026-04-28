@@ -1564,12 +1564,7 @@ def run(
     if failed:
         raise_error("Pipeline failed")
     else:
-        _enc = sys.stdout.encoding or "utf-8"
-        typer.echo(
-            "Pipeline completed successfully ✅".encode(
-                _enc, errors="replace"
-            ).decode(_enc)
-        )
+        calkit.echo("Pipeline completed successfully ✅")
     if save_after_run or save_message is not None:
         if save_message is None:
             save_message = "Run pipeline"

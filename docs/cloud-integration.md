@@ -5,14 +5,14 @@ management interface and a DVC remote for easily storing all versions of your
 data/code/figures/publications, interacting with your collaborators,
 reusing others' research artifacts, etc.
 
-After signing up, visit the
-[settings](https://calkit.io/settings?tab=tokens)
-page and create a token for use with the API.
-Then execute:
+To authenticate the CLI, execute:
 
 ```sh
-calkit config set token ${YOUR_TOKEN_HERE}
+calkit cloud login
 ```
+
+Note this will need to be done once per machine, e.g., once on your
+personal laptop and once on an HPC cluster.
 
 Like the rest of Calkit, the Cloud platform is free and open source,
 so [you can host your own](https://github.com/calkit/calkit-cloud).

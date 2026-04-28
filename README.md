@@ -115,7 +115,11 @@ You may also want to install [Docker](https://docker.com),
 since that is the default method by which LaTeX environments are created.
 If you want to use the [Calkit Cloud](https://calkit.io)
 for collaboration and backup as a DVC remote,
-you can [set up cloud integration](https://docs.calkit.org/cloud-integration).
+you can [set up cloud integration](https://docs.calkit.org/cloud-integration) with:
+
+```sh
+calkit cloud login
+```
 
 ### Use without installing
 

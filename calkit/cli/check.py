@@ -250,7 +250,7 @@ def check_repro(
 ) -> None:
     """Check the reproducibility of a project."""
     res = check_reproducibility(wdir=wdir, log_func=typer.echo)
-    typer.echo(res.to_pretty().encode("utf-8", errors="replace"))
+    calkit.echo(res.to_pretty())
 
 
 @check_app.command(
@@ -1251,7 +1251,7 @@ def check_dependencies(
     except Exception as e:
         raise_error(str(e))
     message = "✅ All set!"
-    typer.echo(message.encode("utf-8", errors="replace"))
+    calkit.echo(message)
 
 
 @check_app.command(name="env-vars")
@@ -1296,7 +1296,7 @@ def check_env_vars(
         with open(".gitignore", "a") as f:
             f.write("\n.env\n")
     message = "✅ All set!"
-    typer.echo(message.encode("utf-8", errors="replace"))
+    calkit.echo(message)
 
 
 @check_app.command(name="pipeline")
@@ -1326,7 +1326,7 @@ def check_pipeline(
         if stage_name.startswith("_"):
             raise_error("Stage names cannot start with an underscore")
     message = "✅ This project's pipeline is defined correctly!"
-    typer.echo(message.encode("utf-8", errors="replace"))
+    calkit.echo(message)
     if compile_to_dvc:
         typer.echo("Attempting to compile to DVC stages")
         try:

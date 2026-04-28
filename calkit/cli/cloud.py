@@ -21,4 +21,4 @@ def get(endpoint: Annotated[str, typer.Argument(help="API endpoint")]):
         resp = calkit.cloud.get(endpoint)
         typer.echo(resp)
     except Exception as e:
-        raise_error(e)
+        raise_error(str(e))

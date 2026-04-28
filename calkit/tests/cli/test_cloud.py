@@ -11,7 +11,7 @@ def test_cloud_login_already_logged_in(monkeypatch, capsys):
     monkeypatch.setattr(cloud_cli.calkit.cloud, "get", _get)
     cloud_cli.login()
     out = capsys.readouterr().out
-    assert "Device is already authenticated." in out
+    assert "Device is already authenticated" in out
 
 
 def test_cloud_login_device_flow_success(monkeypatch, capsys):
@@ -58,8 +58,8 @@ def test_cloud_login_device_flow_success(monkeypatch, capsys):
     cloud_cli.login()
     out = capsys.readouterr().out
     assert "Authorize this device by opening this URL:" in out
-    assert "Waiting for authorization..." in out
-    assert "Logged in successfully." in out
+    assert "Waiting for authorization" in out
+    assert "Logged in successfully" in out
     assert cfg.token == "ckp_test_token"
     assert cfg.written is True
     assert post_calls[0][0] == "/login/device"

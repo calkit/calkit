@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-import warnings
 from functools import partial
 from typing import Literal
 
@@ -30,7 +29,7 @@ def get_base_url() -> str:
 def get_token() -> str:
     """Get a token.
 
-    Automatically reauthenticate if the token doesn't exist or has expired.
+    Automatically load from config when not cached.
     """
     token = _tokens.get(get_base_url())
     if token is None:
@@ -38,8 +37,9 @@ def get_token() -> str:
         _tokens[get_base_url()] = token
     # TODO: Check for expiration
     if token is None:
-        warnings.warn("No token found; attempting email+password auth")
-        return auth()
+        raise ValueError(
+            "No token found; Run 'calkit cloud login' to authenticate"
+        )
     return token
 
 
@@ -52,21 +52,6 @@ def get_headers(headers: dict | None = None, auth: bool = True) -> dict:
         return base_headers | headers
     else:
         return base_headers
-
-
-def auth() -> str:
-    """Authenticate with the server and save a token."""
-    cfg = config.read()
-    if cfg.email is None or cfg.password is None:
-        raise ValueError("Config is missing email or password")
-    base_url = get_base_url()
-    resp = requests.post(
-        base_url + "/login/access-token",
-        data=dict(username=cfg.email, password=cfg.password),
-    )
-    token = resp.json()["access_token"]
-    _tokens[base_url] = token
-    return token
 
 
 def _request(

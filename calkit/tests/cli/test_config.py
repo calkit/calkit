@@ -16,29 +16,29 @@ def test_get_set():
     if os.path.isfile(fpath):
         os.remove(fpath)
     out = (
-        subprocess.check_output(["calkit", "config", "get", "username"])
+        subprocess.check_output(["calkit", "config", "get", "email"])
         .decode()
         .strip()
     )
     assert not out
-    username = str(uuid.uuid4())
+    email = f"{uuid.uuid4()}@example.com"
     subprocess.check_call(
-        ["calkit", "config", "set", "username", username],
+        ["calkit", "config", "set", "email", email],
     )
     out = (
-        subprocess.check_output(["calkit", "config", "get", "username"])
+        subprocess.check_output(["calkit", "config", "get", "email"])
         .decode()
         .strip()
     )
-    assert out == username
+    assert out == email
     out = (
-        subprocess.check_output(["calkit", "config", "unset", "username"])
+        subprocess.check_output(["calkit", "config", "unset", "email"])
         .decode()
         .strip()
     )
     assert not out
     out = (
-        subprocess.check_output(["calkit", "config", "get", "username"])
+        subprocess.check_output(["calkit", "config", "get", "email"])
         .decode()
         .strip()
     )

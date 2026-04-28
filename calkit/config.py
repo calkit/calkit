@@ -165,9 +165,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
     )
-    username: str | None = None
     email: str | None = None
-    password: KeyringOptionalSecret | None = None
     token: KeyringOptionalSecret | None = None
     dvc_token: KeyringOptionalSecret | None = None
     dataframe_engine: Literal["pandas", "polars"] = "pandas"

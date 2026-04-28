@@ -142,7 +142,10 @@ def config_github_ssh():
     # First check if we can already connect to GitHub
     ssh_test_cmd = ["ssh", "-T", "git@github.com"]
     p = subprocess.run(ssh_test_cmd, capture_output=True, text=True)
-    if "successfully authenticated" in p.stderr:
+    if (
+        "successfully authenticated" in p.stdout
+        or "successfully authenticated" in p.stderr
+    ):
         typer.echo("You can already connect to GitHub via SSH")
         go_on = typer.confirm("Do you want to add a new SSH key anyway?")
         if not go_on:

@@ -19,3 +19,4 @@ calk9
 dist
 *.vsix
 vscode-ext/out
+.claude

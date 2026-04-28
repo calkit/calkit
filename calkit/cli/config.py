@@ -70,11 +70,14 @@ def unset_config_value(key: str):
 @config_app.command(name="setup-remote", help="Alias for 'remote'.")
 @config_app.command(name="remote")
 def setup_remote(
-    ck: Annotated[
+    http: Annotated[
         bool,
         typer.Option(
-            "--ck",
-            help="Use a ck:// URL for the 'calkit' DVC remote.",
+            "--http",
+            help=(
+                "Use the legacy HTTP URL for the Calkit DVC remote instead "
+                "of ck://."
+            ),
         ),
     ] = False,
     no_commit: Annotated[
@@ -88,7 +91,7 @@ def setup_remote(
     the local config.
     """
     try:
-        configure_remote(use_ck=ck)
+        configure_remote(use_ck=not http)
         set_remote_auth()
     except subprocess.CalledProcessError:
         if not os.path.isfile(".dvc/config"):
@@ -120,9 +123,8 @@ def setup_remote_auth():
         remotes = get_remotes()
     except Exception:
         raise_error("Cannot list DVC remotes; check DVC config for errors")
-    ck_remote_name = calkit.dvc.make_remote_name()
     for name, url in remotes.items():
-        if name == ck_remote_name or name.startswith(f"{ck_remote_name}:"):
+        if calkit.dvc.detect_calkit_remote_type(name, url) is not None:
             typer.echo(f"Setting up authentication for DVC remote: {name}")
             set_remote_auth(remote_name=name)
 

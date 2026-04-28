@@ -93,6 +93,44 @@ def test_list_files_paths(tmp_dir):
     assert "file1.txt" in calkit.dvc.list_paths()
 
 
+def test_detect_calkit_remote_type():
+    http_name = calkit.dvc.make_remote_name(use_ck=False)
+    ck_name = calkit.dvc.make_remote_name(use_ck=True)
+    # Default-named HTTP remote
+    assert (
+        calkit.dvc.detect_calkit_remote_type(http_name, "https://example.com")
+        == "http"
+    )
+    # Default-named ck remote
+    assert (
+        calkit.dvc.detect_calkit_remote_type(ck_name, "ck://owner/proj")
+        == "ck"
+    )
+    # External-project remote with ":" suffix
+    assert (
+        calkit.dvc.detect_calkit_remote_type(
+            f"{http_name}:owner/proj", "https://example.com/o/p/dvc"
+        )
+        == "http"
+    )
+    assert (
+        calkit.dvc.detect_calkit_remote_type(
+            f"{ck_name}:owner/proj", "ck://owner/proj"
+        )
+        == "ck"
+    )
+    # Unrelated remote name
+    assert (
+        calkit.dvc.detect_calkit_remote_type("something", "https://sup.com")
+        is None
+    )
+    # Matching name but unknown URL scheme
+    assert (
+        calkit.dvc.detect_calkit_remote_type(http_name, "ssh://git@host/repo")
+        is None
+    )
+
+
 def test_configure_remote_ck_uses_ck_scheme_and_skips_http_auth(monkeypatch):
     monkeypatch.setattr(calkit, "detect_project_name", lambda wdir=None: "o/p")
 
@@ -131,6 +169,55 @@ def test_configure_remote_ck_uses_ck_scheme_and_skips_http_auth(monkeypatch):
             None,
         )
     ]
+
+
+def test_add_external_remote(monkeypatch):
+    calls = []
+    auth_calls = []
+    monkeypatch.setattr(
+        calkit.dvc.core,
+        "run_dvc_command",
+        lambda argv, cwd=None: calls.append((argv, cwd)) or 0,
+    )
+    monkeypatch.setattr(
+        calkit.dvc.core,
+        "set_remote_auth",
+        lambda name: auth_calls.append(name),
+    )
+    # HTTP case: builds URL from cloud base, sets custom auth
+    monkeypatch.setattr(
+        calkit.cloud, "get_base_url", lambda: "https://example.com"
+    )
+    out = calkit.dvc.add_external_remote("o", "p", use_ck=False)
+    http_name = f"{calkit.dvc.make_remote_name(use_ck=False)}:o/p"
+    assert out == {
+        "name": http_name,
+        "url": "https://example.com/projects/o/p/dvc",
+    }
+    assert calls == [
+        (
+            [
+                "remote",
+                "add",
+                "-f",
+                http_name,
+                "https://example.com/projects/o/p/dvc",
+            ],
+            None,
+        ),
+        (["remote", "modify", http_name, "auth", "custom"], None),
+    ]
+    assert auth_calls == [http_name]
+    # ck case: builds ck:// URL, skips HTTP auth modify and set_remote_auth
+    calls.clear()
+    auth_calls.clear()
+    out = calkit.dvc.add_external_remote("o", "p", use_ck=True)
+    ck_name = f"{calkit.dvc.make_remote_name(use_ck=True)}:o/p"
+    assert out == {"name": ck_name, "url": "ck://o/p"}
+    assert calls == [
+        (["remote", "add", "-f", ck_name, "ck://o/p"], None),
+    ]
+    assert auth_calls == []
 
 
 def test_set_remote_auth_ck_remote_clears_local_http_auth(

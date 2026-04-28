@@ -91,8 +91,8 @@ def setup_remote(
     the local config.
     """
     try:
-        configure_remote(use_ck=not http)
-        set_remote_auth()
+        remote_name = configure_remote(use_ck=not http)
+        set_remote_auth(remote_name=remote_name)
     except subprocess.CalledProcessError:
         if not os.path.isfile(".dvc/config"):
             raise_error(

@@ -307,15 +307,13 @@ def configure_remote(
         if not url.endswith(".git"):
             url += ".git"
         repo.git.remote(["add", "origin", url])
+    remote_name = make_remote_name(use_ck=use_ck)
     if use_ck:
-        clear_remote_local_http_auth(wdir=wdir)
+        clear_remote_local_http_auth(remote_name=remote_name, wdir=wdir)
         remote_url = f"ck://{project_name}"
     else:
         base_url = calkit.cloud.get_base_url()
         remote_url = f"{base_url}/projects/{project_name}/dvc"
-    # ck remotes don't need different URLs for different endpoints, since we
-    # select with an environment variable
-    remote_name = make_remote_name(use_ck=use_ck)
     result = run_dvc_command(
         ["remote", "add", "-d", "-f", remote_name, remote_url],
         cwd=wdir,

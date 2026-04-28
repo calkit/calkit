@@ -9,3 +9,5 @@
 ## Working
 
 See `CONTRIBUTING.md` for tool usage, style guidelines, etc.
+
+To run tests, use `uv run pytest`.

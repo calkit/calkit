@@ -167,6 +167,8 @@ class Settings(BaseSettings):
     )
     email: str | None = None
     token: KeyringOptionalSecret | None = None
+    access_token: KeyringOptionalSecret | None = None
+    refresh_token: KeyringOptionalSecret | None = None
     dvc_token: KeyringOptionalSecret | None = None
     dataframe_engine: Literal["pandas", "polars"] = "pandas"
     github_token: KeyringOptionalSecret | None = None

@@ -98,13 +98,17 @@ def login(
                     "Device code not found; Run 'calkit cloud login' again"
                 )
             raise_error(f"Error while polling for device authorization: {e}")
-        token = token_resp.get("access_token")
-        if token:
+        access_token = token_resp.get("access_token")
+        if access_token:
+            refresh_token = token_resp.get("refresh_token")
             try:
                 cfg = calkit.config.read()
-                cfg.token = token
+                cfg.access_token = access_token
+                cfg.refresh_token = refresh_token
                 cfg.write()
-                calkit.cloud._tokens[calkit.cloud.get_base_url()] = token
+                calkit.cloud._tokens[calkit.cloud.get_base_url()] = (
+                    access_token
+                )
             except Exception as e:
                 raise_error(f"Failed to save token in config: {e}")
             typer.echo("Logged in successfully")

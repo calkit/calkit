@@ -21,6 +21,8 @@ def test_cloud_login_device_flow_success(monkeypatch, capsys):
     class DummyConfig:
         def __init__(self):
             self.token = None
+            self.access_token = None
+            self.refresh_token = None
             self.written = False
 
         def write(self):
@@ -47,7 +49,10 @@ def test_cloud_login_device_flow_success(monkeypatch, capsys):
             call_counts["token_polls"] += 1
             if call_counts["token_polls"] < 2:
                 return {"detail": "Authorization pending"}
-            return {"access_token": "ckp_test_token"}
+            return {
+                "access_token": "ckp_test_access",
+                "refresh_token": "ckp_test_refresh",
+            }
         raise AssertionError(f"Unexpected path: {path}")
 
     monkeypatch.setattr(cloud_cli.calkit.cloud, "get", _get)
@@ -60,7 +65,9 @@ def test_cloud_login_device_flow_success(monkeypatch, capsys):
     assert "Authorize this device by opening this URL:" in out
     assert "Waiting for authorization" in out
     assert "Logged in successfully" in out
-    assert cfg.token == "ckp_test_token"
+    assert cfg.access_token == "ckp_test_access"
+    assert cfg.refresh_token == "ckp_test_refresh"
+    assert cfg.token is None  # PAT field must not be touched by device login
     assert cfg.written is True
     assert post_calls[0][0] == "/login/device"
     assert post_calls[0][1].get("auth") is False

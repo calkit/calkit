@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 from datetime import datetime
+from importlib import resources
 
 import git
 import requests
@@ -17,7 +18,6 @@ import calkit.pipeline
 from calkit.cli import raise_error
 
 update_app = typer.Typer(no_args_is_help=True)
-AGENT_INSTRUCTIONS_REQUEST_TIMEOUT = 10
 
 
 @update_app.command(name="devcontainer")
@@ -508,19 +508,8 @@ def update_notebook(
         raise_error(f"Failed to update notebook: {e}")
 
 
-@update_app.command(name="agent-instructions")
-def update_agent_instructions(
-    tool: Annotated[
-        str,
-        typer.Option(
-            "--tool",
-            "-t",
-            help=(
-                "Agent tool to write instructions for. "
-                "Choices: copilot, cursor, codex, gemini, auto, all."
-            ),
-        ),
-    ] = "auto",
+@update_app.command(name="agent-skills")
+def update_agent_skills(
     quiet: Annotated[
         bool,
         typer.Option(
@@ -530,179 +519,41 @@ def update_agent_instructions(
         ),
     ] = False,
 ):
-    """Update agent instructions for AI tools working on Calkit projects.
-
-    Downloads the latest Calkit conventions document and writes it to each
-    tool's global (user-level) instructions location.
-
-    --tool auto (default): always updates the Codex skills directory and
-    updates tools detected as in use on this machine (or that already contain
-    the Calkit block). Safe for upgrades and avoids creating config for tools
-    you do not use.
-
-    --tool all: writes to every supported tool, creating directories as needed.
-    Use this for initial setup.
-
-    --tool <name>: writes to one specific tool (copilot, cursor, codex, gemini).
-
-    Existing user content is always preserved—Calkit manages a clearly
-    delimited block and only replaces that block on updates.
-    """
-    url = (
-        "https://raw.githubusercontent.com/calkit/calkit/"
-        "refs/heads/main/agent-plugin/agents/AGENTS.md"
+    """Copy packaged Calkit agent skills to ``~/.agents/skills``."""
+    source = resources.files("calkit").joinpath("agent_skills")
+    source_repo = os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "..",
+            "agent-plugin",
+            "skills",
+        )
     )
-    named_tools = ["copilot", "cursor", "codex", "gemini"]
-    block_start = "<!-- CALKIT-CONVENTIONS:START -->"
-    block_end = "<!-- CALKIT-CONVENTIONS:END -->"
-    home = os.path.expanduser("~")
-
-    def tool_path(t: str) -> str:
-        return {
-            "copilot": os.path.join(
-                home, ".github", "copilot-instructions.md"
-            ),
-            "cursor": os.path.join(home, ".cursor", "rules", "calkit.mdc"),
-            "codex": os.path.join(home, ".agents", "skills"),
-            "gemini": os.path.join(home, ".gemini", "GEMINI.md"),
-        }[t]
-
-    def has_block(t: str) -> bool:
-        if t == "codex":
-            return False
-        path = tool_path(t)
-        if not os.path.exists(path):
-            return False
-        with open(path) as f:
-            return block_start in f.read()
-
-    def is_configured(t: str) -> bool:
-        if t == "copilot":
-            return os.path.isdir(os.path.join(home, ".github"))
-        if t == "cursor":
-            return os.path.isdir(os.path.join(home, ".cursor"))
-        if t == "gemini":
-            return os.path.isdir(os.path.join(home, ".gemini"))
-        if t == "codex":
-            return shutil.which("codex") is not None or os.path.isdir(
-                os.path.join(home, ".agents", "skills")
-            )
-        return False
-
-    def copy_codex_skills(*, strict: bool) -> None:
-        source = os.path.abspath(
-            os.path.join(
-                os.path.dirname(__file__),
-                "..",
-                "..",
-                "agent-plugin",
-                "skills",
-            )
-        )
-        if not os.path.isdir(source):
-            msg = f"Calkit skills source not found: {source}"
-            if strict:
-                raise_error(msg)
-            if not quiet:
-                typer.echo(f"Warning: {msg}")
-            return
-        dest_root = tool_path("codex")
-        os.makedirs(dest_root, exist_ok=True)
-        for entry in os.listdir(source):
-            src = os.path.join(source, entry)
-            if not os.path.isdir(src):
+    use_packaged = source.is_dir()
+    if not use_packaged and not os.path.isdir(source_repo):
+        raise_error("Bundled agent skills are missing from this installation")
+    dest_root = os.path.join(os.path.expanduser("~"), ".agents", "skills")
+    os.makedirs(dest_root, exist_ok=True)
+    copied = 0
+    if use_packaged:
+        for entry in source.iterdir():
+            if not entry.is_dir():
                 continue
-            dest = os.path.join(dest_root, entry)
-            shutil.copytree(src, dest, dirs_exist_ok=True)
-        typer.echo(f"Updated: {dest_root}")
-
-    def write_block(path: str, content: str) -> None:
-        block = f"{block_start}\n{content.rstrip()}\n{block_end}\n"
-        parent = os.path.dirname(path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        if os.path.exists(path):
-            with open(path) as f:
-                existing = f.read()
-            has_start = block_start in existing
-            has_end = block_end in existing
-            if has_start and has_end:
-                s = existing.index(block_start)
-                e = existing.index(block_end) + len(block_end)
-                updated = existing[:s] + block + existing[e:].lstrip("\n")
-            elif has_start:
-                s = existing.index(block_start)
-                updated = existing[:s] + block
-            else:
-                updated = existing.rstrip("\n") + "\n\n" + block
-        else:
-            updated = block
-        with open(path, "w") as f:
-            f.write(updated)
-
-    def refresh() -> None:
-        """Update tools already installed or detected as in use."""
-        all_targets = [
-            t
-            for t in named_tools
-            if t == "codex" or has_block(t) or is_configured(t)
-        ]
-        if "codex" in all_targets:
-            copy_codex_skills(strict=False)
-        targets = [t for t in all_targets if t != "codex"]
-        if not targets:
-            return
-        try:
-            resp = requests.get(
-                url, timeout=AGENT_INSTRUCTIONS_REQUEST_TIMEOUT
-            )
-            resp.raise_for_status()
-        except Exception as e:
-            if not quiet:
-                typer.echo(
-                    f"Warning: failed to refresh agent instructions: {e}"
-                )
-            return
-        _write(targets, resp.text)
-
-    def _write(targets: list[str], content: str) -> None:
-        for t in targets:
-            path = tool_path(t)
-            c = (
-                "---\ndescription: Calkit pipeline conventions\n"
-                "alwaysApply: true\n---\n\n" + content
-                if t == "cursor"
-                else content
-            )
-            write_block(path, c)
-            typer.echo(f"Updated: {path}")
-
-    valid = named_tools + ["auto", "all"]
-    if tool not in valid:
-        raise_error(f"Unknown tool '{tool}'. Choose from: {', '.join(valid)}")
-    if tool == "auto":
-        refresh()
+            dest = os.path.join(dest_root, entry.name)
+            with resources.as_file(entry) as source_dir:
+                shutil.copytree(source_dir, dest, dirs_exist_ok=True)
+            copied += 1
     else:
-        all_targets = named_tools if tool == "all" else [tool]
-        if "codex" in all_targets:
-            copy_codex_skills(strict=True)
-        targets = [t for t in all_targets if t != "codex"]
-        if targets:
-            if not quiet:
-                typer.echo(f"Downloading agent instructions from {url}")
-            try:
-                resp = requests.get(
-                    url, timeout=AGENT_INSTRUCTIONS_REQUEST_TIMEOUT
-                )
-                resp.raise_for_status()
-            except Exception as e:
-                raise_error(f"Failed to download agent instructions: {e}")
-            _write(targets, resp.text)
-    if shutil.which("claude") and not quiet:
-        typer.echo(
-            "Claude Code detected. To update the Calkit plugin, run inside"
-            " Claude: /plugin marketplace update"
-        )
+        for name in os.listdir(source_repo):
+            source_dir = os.path.join(source_repo, name)
+            if not os.path.isdir(source_dir):
+                continue
+            dest = os.path.join(dest_root, name)
+            shutil.copytree(source_dir, dest, dirs_exist_ok=True)
+            copied += 1
+    if not quiet:
+        typer.echo(f"Updated {copied} skills in {dest_root}")
 
 
 @update_app.command(name="environment")

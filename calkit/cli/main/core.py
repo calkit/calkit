@@ -2316,7 +2316,11 @@ def set_env_var(
 
 
 @app.command(name="upgrade")
-def upgrade():
+def upgrade(
+    skills: Annotated[
+        bool, typer.Option("--skills", help="Upgrade agent skills as well.")
+    ] = False,
+):
     """Upgrade Calkit."""
     # First detect how Calkit is installed
     # If installed with uv tool, calkit will be located at something like
@@ -2353,9 +2357,10 @@ def upgrade():
     if res.returncode != 0:
         raise_error("Upgrade failed")
     typer.echo("Success!")
-    from calkit.cli.update import update_agent_instructions
+    if skills:
+        from calkit.cli.update import update_agent_skills
 
-    update_agent_instructions(tool="auto", quiet=True)
+        update_agent_skills()
 
 
 @app.command(name="switch-branch")

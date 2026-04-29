@@ -107,6 +107,9 @@ calk9 = "calkit.cli:run"
 [tool.hatch.build.targets.wheel]
 packages = ["calkit"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"agent-plugin/skills" = "calkit/agent_skills"
+
 [tool.hatch.build.targets.sdist]
 artifacts = ["calkit/labextension"]
 exclude = [".github"]

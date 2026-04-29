@@ -495,8 +495,14 @@ Upgrade Calkit.
 Usage:
 
 ```text
-calkit upgrade
+calkit upgrade [OPTIONS]
 ```
+
+Options:
+
+| Option     | Type    | Required | Default | Description                   |
+| ---------- | ------- | -------- | ------- | ----------------------------- |
+| `--skills` | boolean | no       | False   | Upgrade agent skills as well. |
 
 <a id="top-command-switch-branch"></a>
 
@@ -1939,17 +1945,17 @@ Options:
 
 Update objects.
 
-| Command                                                       | Description                                                                         |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [`devcontainer`](#subcommand-update-devcontainer)             | Update a project's devcontainer to match the latest Calkit spec.                    |
-| [`license`](#subcommand-update-license)                       | Update license with a reasonable default (MIT for code, CC-BY-4.0 for other files). |
-| [`release`](#subcommand-update-release)                       | Update a release.                                                                   |
-| [`vscode-config`](#subcommand-update-vscode-config)           | Update a project's VS Code config to match the latest Calkit recommendations.       |
-| [`github-actions`](#subcommand-update-github-actions)         | Update a project's GitHub Actions to match the latest Calkit recommendations.       |
-| [`notebook`](#subcommand-update-notebook)                     | Update notebook information.                                                        |
-| [`agent-instructions`](#subcommand-update-agent-instructions) | Update agent instructions for AI tools working on Calkit projects.                  |
-| [`env`](#subcommand-update-env)                               | Update an environment.                                                              |
-| [`environment`](#subcommand-update-environment)               | Update an environment.                                                              |
+| Command                                               | Description                                                                         |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| [`devcontainer`](#subcommand-update-devcontainer)     | Update a project's devcontainer to match the latest Calkit spec.                    |
+| [`license`](#subcommand-update-license)               | Update license with a reasonable default (MIT for code, CC-BY-4.0 for other files). |
+| [`release`](#subcommand-update-release)               | Update a release.                                                                   |
+| [`vscode-config`](#subcommand-update-vscode-config)   | Update a project's VS Code config to match the latest Calkit recommendations.       |
+| [`github-actions`](#subcommand-update-github-actions) | Update a project's GitHub Actions to match the latest Calkit recommendations.       |
+| [`notebook`](#subcommand-update-notebook)             | Update notebook information.                                                        |
+| [`agent-skills`](#subcommand-update-agent-skills)     | Copy packaged Calkit agent skills to `~/.agents/skills`.                            |
+| [`env`](#subcommand-update-env)                       | Update an environment.                                                              |
+| [`environment`](#subcommand-update-environment)       | Update an environment.                                                              |
 
 <a id="subcommand-update-devcontainer"></a>
 
@@ -2078,33 +2084,17 @@ Options:
 | `--set-env` | text    | no       |         | Environment name to associate with the notebook |
 | `--json`    | boolean | no       | False   | Output result as JSON.                          |
 
-<a id="subcommand-update-agent-instructions"></a>
+<a id="subcommand-update-agent-skills"></a>
 
-#### `calkit update agent-instructions`
+#### `calkit update agent-skills`
 
-Update agent instructions for AI tools working on Calkit projects.
-
-Downloads the latest Calkit conventions document and writes it to each tool's global (user-level) instructions location.
-
---tool auto (default): always updates the Codex skills directory and updates tools detected as in use on this machine (or that already contain the Calkit block). Safe for upgrades and avoids creating config for tools you do not use.
-
---tool all: writes to every supported tool, creating directories as needed. Use this for initial setup.
-
---tool <name>: writes to one specific tool (copilot, cursor, codex, gemini).
-
-Existing user content is always preserved—Calkit manages a clearly delimited block and only replaces that block on updates.
+Copy packaged Calkit agent skills to `~/.agents/skills`.
 
 Usage:
 
 ```text
-calkit update agent-instructions [OPTIONS]
+calkit update agent-skills
 ```
-
-Options:
-
-| Option         | Type | Required | Default | Description                                                                               |
-| -------------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------- |
-| `--tool`, `-t` | text | no       | auto    | Agent tool to write instructions for. Choices: copilot, cursor, codex, gemini, auto, all. |
 
 <a id="subcommand-update-env"></a>
 

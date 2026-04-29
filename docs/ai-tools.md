@@ -72,35 +72,20 @@ Calkit ships a conventions document covering
 Install it once after installing Calkit:
 
 ```bash
-calkit update agent-instructions --tool all
+calkit update agent-skills
 ```
 
-This downloads the latest conventions from the Calkit GitHub repo
-and writes them to the global instructions location for each supported
-tool—in your home directory, not in the project.
+This copies bundled Calkit skills from your local Calkit installation
+into a universal skills directory in your home folder:
+`~/.agents/skills`.
 For regular refreshes after upgrading Calkit, run:
 
 ```bash
-calkit update agent-instructions
+calkit update agent-skills
 ```
 
-This uses `--tool auto` by default and always updates Codex skills
-in `~/.agents/skills`, plus tools detected as in use on your machine
-(or tools that already contain the Calkit-managed block).
-
-To update instructions for one tool only:
-
-```bash
-calkit update agent-instructions --tool cursor
-```
-
-For the full and current list of `--tool` values and behavior,
-see the
-[CLI reference for `calkit update agent-instructions`](cli-reference.md#subcommand-update-agent-instructions).
-
-Existing content in destination files is preserved.
-Calkit manages a clearly delimited section
-and only replaces that section on updates.
+For command details, see the
+[CLI reference for `calkit update agent-skills`](cli-reference.md#subcommand-update-agent-skills).
 
 ## Tool-specific notes
 
@@ -128,40 +113,17 @@ Update after a Calkit release:
 /plugin marketplace update
 ```
 
-### GitHub Copilot
+### OpenAI Codex (and compatible skill-based agents)
 
-`calkit update agent-instructions --tool copilot` writes to `~/.github/copilot-instructions.md`,
-which Copilot loads for every repo.
-No per-project files needed.
+`calkit update agent-skills` copies bundled Calkit skills into
+`~/.agents/skills`.
 
-### Cursor
-
-`calkit update agent-instructions --tool cursor` writes to `~/.cursor/rules/calkit.mdc`
-with `alwaysApply: true`.
-Cursor loads this rule file in every workspace automatically.
-
-### OpenAI Codex
-
-`calkit update agent-instructions --tool codex` copies bundled Calkit
-skills into `~/.agents/skills`.
-
-### Gemini CLI
-
-`calkit update agent-instructions --tool gemini` writes to `~/.gemini/GEMINI.md`.
-Gemini CLI loads this as global context for all projects.
-
-### Any other agent
-
-For agents not listed here:
-most support either a global instructions file or reading `AGENTS.md` from
-the repo.
-Point your tool at the Calkit skills installed in `~/.agents/skills`
-by `calkit update agent-instructions --tool codex`
-or consult that tool's docs for its global instructions path.
+For other agents, check whether they can load skills from
+`~/.agents/skills` and configure them accordingly.
 
 ## What the Calkit conventions cover
 
-The document installed by `calkit update agent-instructions`
+The skills installed by `calkit update agent-skills`
 (or loaded by the Claude Code plugin) includes:
 
 - The `calkit.yaml` schema—all top-level sections and their purpose

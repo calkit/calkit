@@ -519,7 +519,7 @@ def update_agent_skills(
         ),
     ] = False,
 ):
-    """Copy packaged Calkit agent skills to ``~/.agents/skills``."""
+    """Copy packaged Calkit agent skills to `~/.agents/skills`."""
     source = resources.files("calkit").joinpath("agent_skills")
     source_repo = os.path.abspath(
         os.path.join(

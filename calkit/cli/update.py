@@ -506,43 +506,77 @@ def update_notebook(
         raise_error(f"Failed to update notebook: {e}")
 
 
-_AGENT_INSTRUCTIONS_URL = (
-    "https://raw.githubusercontent.com/calkit/calkit/"
-    "refs/heads/main/agent-plugin/agents/AGENTS.md"
-)
-_AGENT_TOOL_CHOICES = ["copilot", "cursor", "codex", "gemini", "all"]
-_CALKIT_BLOCK_START = "<!-- CALKIT-CONVENTIONS:START -->"
-_CALKIT_BLOCK_END = "<!-- CALKIT-CONVENTIONS:END -->"
+def refresh_agent_instructions(home: str | None = None) -> None:
+    """Refresh agent instructions for any tools that already have the block.
 
-
-def _write_calkit_block(full_path: str, content: str) -> None:
-    """Write content into a Calkit-managed block in a file.
-
-    If the file already contains a Calkit block (delimited by the start/end
-    markers), replace just that block. Otherwise append the block. Preserves
-    any user-written content outside the block. Creates the file if it does
-    not exist.
+    Called automatically after ``calkit upgrade``. Does nothing for tools
+    that have not been set up with ``calkit update agent-instructions``.
     """
-    block = f"{_CALKIT_BLOCK_START}\n{content.rstrip()}\n{_CALKIT_BLOCK_END}\n"
-    parent = os.path.dirname(full_path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    if os.path.exists(full_path):
-        with open(full_path) as f:
-            existing = f.read()
-        if _CALKIT_BLOCK_START in existing:
-            start = existing.index(_CALKIT_BLOCK_START)
-            end = existing.index(_CALKIT_BLOCK_END) + len(_CALKIT_BLOCK_END)
-            updated = existing[:start] + block + existing[end:].lstrip("\n")
+    url = (
+        "https://raw.githubusercontent.com/calkit/calkit/"
+        "refs/heads/main/agent-plugin/agents/AGENTS.md"
+    )
+    tools = ["copilot", "cursor", "codex", "gemini"]
+    block_start = "<!-- CALKIT-CONVENTIONS:START -->"
+    block_end = "<!-- CALKIT-CONVENTIONS:END -->"
+    home = home or os.path.expanduser("~")
+
+    def tool_path(t: str) -> str:
+        return {
+            "copilot": os.path.join(
+                home, ".github", "copilot-instructions.md"
+            ),
+            "cursor": os.path.join(home, ".cursor", "rules", "calkit.mdc"),
+            "codex": os.path.join(home, "AGENTS.md"),
+            "gemini": os.path.join(home, ".gemini", "GEMINI.md"),
+        }[t]
+
+    def has_block(path: str) -> bool:
+        if not os.path.exists(path):
+            return False
+        with open(path) as f:
+            return block_start in f.read()
+
+    def write_block(path: str, content: str) -> None:
+        block = f"{block_start}\n{content.rstrip()}\n{block_end}\n"
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        if os.path.exists(path):
+            with open(path) as f:
+                existing = f.read()
+            if block_start in existing:
+                s = existing.index(block_start)
+                e = existing.index(block_end) + len(block_end)
+                updated = existing[:s] + block + existing[e:].lstrip("\n")
+            else:
+                updated = existing.rstrip("\n") + "\n\n" + block
         else:
-            updated = existing.rstrip("\n") + "\n\n" + block
-    else:
-        updated = block
-    with open(full_path, "w") as f:
-        f.write(updated)
+            updated = block
+        with open(path, "w") as f:
+            f.write(updated)
+
+    targets = [(t, tool_path(t)) for t in tools if has_block(tool_path(t))]
+    if not targets:
+        return
+    try:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+    except Exception:
+        return
+    content = resp.text
+    for t, path in targets:
+        c = (
+            "---\ndescription: Calkit pipeline conventions\nalwaysApply: true\n---\n\n"
+            + content
+            if t == "cursor"
+            else content
+        )
+        write_block(path, c)
+        typer.echo(f"Updated agent instructions: {path}")
 
 
-@update_app.command(name="agents")
+@update_app.command(name="agent-instructions")
 def update_agent_instructions(
     tool: Annotated[
         str,
@@ -551,55 +585,96 @@ def update_agent_instructions(
             "-t",
             help=(
                 "Agent tool to write instructions for. "
-                f"Choices: {', '.join(_AGENT_TOOL_CHOICES)}."
+                "Choices: copilot, cursor, codex, gemini, all."
             ),
         ),
     ] = "all",
 ):
-    """Update Calkit agent instructions for AI coding tools.
+    """Update agent instructions for AI tools working on Calkit projects.
 
     Downloads the latest Calkit conventions document and writes it to each
     tool's global (user-level) instructions location. Run once after
     installing Calkit, and again after upgrading.
 
-    Existing user content in destination files is preserved — Calkit manages
+    Only writes for tools that appear to be installed (configuration directory
+    or file already exists). Existing user content is preserved—Calkit manages
     a clearly delimited section and only replaces that section on updates.
 
     Supported tools: copilot, cursor, codex, gemini (or 'all').
     """
-    if tool not in _AGENT_TOOL_CHOICES:
-        raise_error(
-            f"Unknown tool '{tool}'. "
-            f"Choose from: {', '.join(_AGENT_TOOL_CHOICES)}"
-        )
-    typer.echo(
-        f"Downloading agent instructions from {_AGENT_INSTRUCTIONS_URL}"
+    url = (
+        "https://raw.githubusercontent.com/calkit/calkit/"
+        "refs/heads/main/agent-plugin/agents/AGENTS.md"
     )
-    resp = requests.get(_AGENT_INSTRUCTIONS_URL)
+    tools = ["copilot", "cursor", "codex", "gemini"]
+    block_start = "<!-- CALKIT-CONVENTIONS:START -->"
+    block_end = "<!-- CALKIT-CONVENTIONS:END -->"
+
+    def tool_path(t: str) -> str:
+        return {
+            "copilot": os.path.join(
+                home, ".github", "copilot-instructions.md"
+            ),
+            "cursor": os.path.join(home, ".cursor", "rules", "calkit.mdc"),
+            "codex": os.path.join(home, "AGENTS.md"),
+            "gemini": os.path.join(home, ".gemini", "GEMINI.md"),
+        }[t]
+
+    def is_configured(t: str) -> bool:
+        return {
+            "copilot": os.path.isdir(os.path.join(home, ".github")),
+            "cursor": os.path.isdir(os.path.join(home, ".cursor")),
+            "codex": os.path.isfile(os.path.join(home, "AGENTS.md")),
+            "gemini": os.path.isdir(os.path.join(home, ".gemini")),
+        }[t]
+
+    def write_block(path: str, content: str) -> None:
+        block = f"{block_start}\n{content.rstrip()}\n{block_end}\n"
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        if os.path.exists(path):
+            with open(path) as f:
+                existing = f.read()
+            if block_start in existing:
+                s = existing.index(block_start)
+                e = existing.index(block_end) + len(block_end)
+                updated = existing[:s] + block + existing[e:].lstrip("\n")
+            else:
+                updated = existing.rstrip("\n") + "\n\n" + block
+        else:
+            updated = block
+        with open(path, "w") as f:
+            f.write(updated)
+
+    valid = tools + ["all"]
+    if tool not in valid:
+        raise_error(f"Unknown tool '{tool}'. Choose from: {', '.join(valid)}")
+    home = os.path.expanduser("~")
+    targets = (
+        [t for t in tools if is_configured(t)] if tool == "all" else [tool]
+    )
+    if not targets:
+        typer.echo("No configured agent tools found; nothing to update.")
+        return
+    typer.echo(f"Downloading agent instructions from {url}")
+    resp = requests.get(url)
     resp.raise_for_status()
     content = resp.text
-    cursor_content = (
-        "---\n"
-        "description: Calkit pipeline conventions\n"
-        "alwaysApply: true\n"
-        "---\n\n"
-    ) + content
-    home = os.path.expanduser("~")
-    if tool in ("copilot", "all"):
-        path = os.path.join(home, ".github", "copilot-instructions.md")
-        _write_calkit_block(path, content)
-        typer.echo(f"Updated: {path}")
-    if tool in ("cursor", "all"):
-        path = os.path.join(home, ".cursor", "rules", "calkit.mdc")
-        _write_calkit_block(path, cursor_content)
-        typer.echo(f"Updated: {path}")
-    if tool in ("codex", "all"):
-        path = os.path.join(home, "AGENTS.md")
-        _write_calkit_block(path, content)
-        typer.echo(f"Updated: {path}")
-    if tool in ("gemini", "all"):
-        path = os.path.join(home, ".gemini", "GEMINI.md")
-        _write_calkit_block(path, content)
+    for t in targets:
+        path = tool_path(t)
+        c = (
+            (
+                "---\n"
+                "description: Calkit pipeline conventions\n"
+                "alwaysApply: true\n"
+                "---\n\n"
+            )
+            + content
+            if t == "cursor"
+            else content
+        )
+        write_block(path, c)
         typer.echo(f"Updated: {path}")
 
 

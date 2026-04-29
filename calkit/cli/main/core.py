@@ -2353,6 +2353,9 @@ def upgrade():
     if res.returncode != 0:
         raise_error("Upgrade failed")
     typer.echo("Success!")
+    from calkit.cli.update import refresh_agent_instructions
+
+    refresh_agent_instructions()
 
 
 @app.command(name="switch-branch")

@@ -1939,17 +1939,17 @@ Options:
 
 Update objects.
 
-| Command                                               | Description                                                                         |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [`devcontainer`](#subcommand-update-devcontainer)     | Update a project's devcontainer to match the latest Calkit spec.                    |
-| [`license`](#subcommand-update-license)               | Update license with a reasonable default (MIT for code, CC-BY-4.0 for other files). |
-| [`release`](#subcommand-update-release)               | Update a release.                                                                   |
-| [`vscode-config`](#subcommand-update-vscode-config)   | Update a project's VS Code config to match the latest Calkit recommendations.       |
-| [`github-actions`](#subcommand-update-github-actions) | Update a project's GitHub Actions to match the latest Calkit recommendations.       |
-| [`notebook`](#subcommand-update-notebook)             | Update notebook information.                                                        |
-| [`agents`](#subcommand-update-agents)                 | Update Calkit agent instructions for AI coding tools.                               |
-| [`env`](#subcommand-update-env)                       | Update an environment.                                                              |
-| [`environment`](#subcommand-update-environment)       | Update an environment.                                                              |
+| Command                                                       | Description                                                                         |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| [`devcontainer`](#subcommand-update-devcontainer)             | Update a project's devcontainer to match the latest Calkit spec.                    |
+| [`license`](#subcommand-update-license)                       | Update license with a reasonable default (MIT for code, CC-BY-4.0 for other files). |
+| [`release`](#subcommand-update-release)                       | Update a release.                                                                   |
+| [`vscode-config`](#subcommand-update-vscode-config)           | Update a project's VS Code config to match the latest Calkit recommendations.       |
+| [`github-actions`](#subcommand-update-github-actions)         | Update a project's GitHub Actions to match the latest Calkit recommendations.       |
+| [`notebook`](#subcommand-update-notebook)                     | Update notebook information.                                                        |
+| [`agent-instructions`](#subcommand-update-agent-instructions) | Update agent instructions for AI tools working on Calkit projects.                  |
+| [`env`](#subcommand-update-env)                               | Update an environment.                                                              |
+| [`environment`](#subcommand-update-environment)               | Update an environment.                                                              |
 
 <a id="subcommand-update-devcontainer"></a>
 
@@ -2078,22 +2078,22 @@ Options:
 | `--set-env` | text    | no       |         | Environment name to associate with the notebook |
 | `--json`    | boolean | no       | False   | Output result as JSON.                          |
 
-<a id="subcommand-update-agents"></a>
+<a id="subcommand-update-agent-instructions"></a>
 
-#### `calkit update agents`
+#### `calkit update agent-instructions`
 
-Update Calkit agent instructions for AI coding tools.
+Update agent instructions for AI tools working on Calkit projects.
 
 Downloads the latest Calkit conventions document and writes it to each tool's global (user-level) instructions location. Run once after installing Calkit, and again after upgrading.
 
-Existing user content in destination files is preserved — Calkit manages a clearly delimited section and only replaces that section on updates.
+Only writes for tools that appear to be installed (configuration directory or file already exists). Existing user content is preserved—Calkit manages a clearly delimited section and only replaces that section on updates.
 
 Supported tools: copilot, cursor, codex, gemini (or 'all').
 
 Usage:
 
 ```text
-calkit update agents [OPTIONS]
+calkit update agent-instructions [OPTIONS]
 ```
 
 Options:

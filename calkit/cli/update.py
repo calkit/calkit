@@ -658,8 +658,11 @@ def update_agent_instructions(
         typer.echo("No configured agent tools found; nothing to update.")
         return
     typer.echo(f"Downloading agent instructions from {url}")
-    resp = requests.get(url)
-    resp.raise_for_status()
+    try:
+        resp = requests.get(url)
+        resp.raise_for_status()
+    except Exception as e:
+        raise_error(f"Failed to download agent instructions: {e}")
     content = resp.text
     for t in targets:
         path = tool_path(t)

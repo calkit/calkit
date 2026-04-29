@@ -707,10 +707,10 @@ calkit config remote [OPTIONS]
 
 Options:
 
-| Option        | Type    | Required | Default | Description                                  |
-| ------------- | ------- | -------- | ------- | -------------------------------------------- |
-| `--ck`        | boolean | no       | False   | Use a ck:// URL for the 'calkit' DVC remote. |
-| `--no-commit` | boolean | no       | False   | Do not commit changes to DVC config.         |
+| Option        | Type    | Required | Default | Description                                                         |
+| ------------- | ------- | -------- | ------- | ------------------------------------------------------------------- |
+| `--http`      | boolean | no       | False   | Use the legacy HTTP URL for the Calkit DVC remote instead of ck://. |
+| `--no-commit` | boolean | no       | False   | Do not commit changes to DVC config.                                |
 
 <a id="subcommand-config-remote-auth"></a>
 
@@ -1808,12 +1808,13 @@ Arguments:
 
 Options:
 
-| Option              | Type    | Required | Default | Description                                         |
-| ------------------- | ------- | -------- | ------- | --------------------------------------------------- |
-| `--filter-paths`    | text    | no       |         | Filter paths in target dataset if it's a folder.    |
-| `--no-commit`       | boolean | no       | False   | Do not commit changes to repo.                      |
-| `--no-dvc-pull`     | boolean | no       | False   | Do not pull imported dataset with DVC.              |
-| `--overwrite`, `-f` | boolean | no       | False   | Force adding the dataset even if it already exists. |
+| Option              | Type    | Required | Default | Description                                                                     |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------- |
+| `--filter-paths`    | text    | no       |         | Filter paths in target dataset if it's a folder.                                |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes to repo.                                                  |
+| `--no-dvc-pull`     | boolean | no       | False   | Do not pull imported dataset with DVC.                                          |
+| `--overwrite`, `-f` | boolean | no       | False   | Force adding the dataset even if it already exists.                             |
+| `--http`            | boolean | no       | False   | Use the legacy HTTP URL for the imported project's DVC remote instead of ck://. |
 
 <a id="subcommand-import-environment"></a>
 

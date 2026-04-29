@@ -7,7 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import dvc.repo
 import git
@@ -23,6 +23,8 @@ from calkit.config import get_app_name
 
 logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
+
+USE_CK_REMOTE_BY_DEFAULT = True
 
 
 class CalkitDVCFileSystem(ObjectFileSystem):
@@ -252,11 +254,40 @@ def run_dvc_command(argv: list[str], cwd: str | None = None) -> int:
     return run_dvc_cli(argv)
 
 
-def configure_remote(wdir: str | None = None, use_ck: bool = False) -> str:
-    """Configure a DVC remote for the current project.
+def make_remote_name(use_ck: bool = USE_CK_REMOTE_BY_DEFAULT) -> str:
+    """Generate a DVC remote name based on the app name or a default."""
+    return get_app_name() if not use_ck else "calkit"
 
-    TODO: Use the ck:// scheme by default once it's deemed stable.
+
+def detect_calkit_remote_type(
+    name: str, url: str
+) -> Literal["ck", "http"] | None:
+    """Detect whether a DVC remote is a Calkit remote, and its scheme.
+
+    Returns ``"ck"`` or ``"http"`` for recognized Calkit remotes (including
+    external project remotes named like ``"<base>:<owner>/<project>"``), or
+    ``None`` if the remote isn't a Calkit remote we recognize.
     """
+    candidates = {
+        make_remote_name(use_ck=False),
+        make_remote_name(use_ck=True),
+    }
+    name_matches = any(
+        name == c or name.startswith(f"{c}:") for c in candidates
+    )
+    if not name_matches:
+        return None
+    if url.startswith("ck://"):
+        return "ck"
+    if url.startswith("http"):
+        return "http"
+    return None
+
+
+def configure_remote(
+    wdir: str | None = None, use_ck: bool = USE_CK_REMOTE_BY_DEFAULT
+) -> str:
+    """Configure a DVC remote for the current project."""
     try:
         project_name = calkit.detect_project_name(wdir=wdir)
     except ValueError as e:
@@ -276,13 +307,13 @@ def configure_remote(wdir: str | None = None, use_ck: bool = False) -> str:
         if not url.endswith(".git"):
             url += ".git"
         repo.git.remote(["add", "origin", url])
+    remote_name = make_remote_name(use_ck=use_ck)
     if use_ck:
-        clear_remote_local_http_auth(wdir=wdir)
+        clear_remote_local_http_auth(remote_name=remote_name, wdir=wdir)
         remote_url = f"ck://{project_name}"
     else:
         base_url = calkit.cloud.get_base_url()
         remote_url = f"{base_url}/projects/{project_name}/dvc"
-    remote_name = get_app_name()
     result = run_dvc_command(
         ["remote", "add", "-d", "-f", remote_name, remote_url],
         cwd=wdir,
@@ -309,7 +340,7 @@ def clear_remote_local_http_auth(
     This clears values written to ``.dvc/config.local`` by HTTP auth setup.
     """
     if remote_name is None:
-        remote_name = get_app_name()
+        remote_name = make_remote_name()
     config_local = Path(wdir or ".") / ".dvc" / "config.local"
     if not config_local.is_file():
         return
@@ -342,7 +373,7 @@ def set_remote_auth(
     HTTP auth configuration.
     """
     if remote_name is None:
-        remote_name = get_app_name()
+        remote_name = make_remote_name()
     # Check if this is a ck:// remote (doesn't need HTTP auth)
     remotes = get_remotes(wdir=wdir)
     remote_url = remotes.get(remote_name, "")
@@ -388,13 +419,23 @@ def set_remote_auth(
         )
 
 
-def add_external_remote(owner_name: str, project_name: str) -> dict:
-    base_url = calkit.cloud.get_base_url()
-    remote_url = f"{base_url}/projects/{owner_name}/{project_name}/dvc"
-    remote_name = f"{get_app_name()}:{owner_name}/{project_name}"
+def add_external_remote(
+    owner_name: str,
+    project_name: str,
+    use_ck: bool = USE_CK_REMOTE_BY_DEFAULT,
+) -> dict:
+    if use_ck:
+        remote_url = f"ck://{owner_name}/{project_name}"
+    else:
+        base_url = calkit.cloud.get_base_url()
+        remote_url = f"{base_url}/projects/{owner_name}/{project_name}/dvc"
+    remote_name = (
+        f"{make_remote_name(use_ck=use_ck)}:{owner_name}/{project_name}"
+    )
     run_dvc_command(["remote", "add", "-f", remote_name, remote_url])
-    run_dvc_command(["remote", "modify", remote_name, "auth", "custom"])
-    set_remote_auth(remote_name)
+    if not use_ck:
+        run_dvc_command(["remote", "modify", remote_name, "auth", "custom"])
+        set_remote_auth(remote_name)
     return {"name": remote_name, "url": remote_url}
 
 

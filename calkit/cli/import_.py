@@ -63,6 +63,16 @@ def import_dataset(
             help="Force adding the dataset even if it already exists.",
         ),
     ] = False,
+    http: Annotated[
+        bool,
+        typer.Option(
+            "--http",
+            help=(
+                "Use the legacy HTTP URL for the imported project's DVC "
+                "remote instead of ck://."
+            ),
+        ),
+    ] = not calkit.dvc.USE_CK_REMOTE_BY_DEFAULT,
 ):
     """Import a dataset.
 
@@ -111,7 +121,9 @@ def import_dataset(
         # have a token set for that remote
         typer.echo("Adding new DVC remote")
         remote = calkit.dvc.add_external_remote(
-            owner_name=owner_name, project_name=project_name
+            owner_name=owner_name,
+            project_name=project_name,
+            use_ck=not http,
         )
         repo.git.add(".dvc/config")
         # Import this data with DVC

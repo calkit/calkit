@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from datetime import datetime
 
 import git
@@ -506,76 +507,6 @@ def update_notebook(
         raise_error(f"Failed to update notebook: {e}")
 
 
-def refresh_agent_instructions(home: str | None = None) -> None:
-    """Refresh agent instructions for any tools that already have the block.
-
-    Called automatically after ``calkit upgrade``. Does nothing for tools
-    that have not been set up with ``calkit update agent-instructions``.
-    """
-    url = (
-        "https://raw.githubusercontent.com/calkit/calkit/"
-        "refs/heads/main/agent-plugin/agents/AGENTS.md"
-    )
-    tools = ["copilot", "cursor", "codex", "gemini"]
-    block_start = "<!-- CALKIT-CONVENTIONS:START -->"
-    block_end = "<!-- CALKIT-CONVENTIONS:END -->"
-    home = home or os.path.expanduser("~")
-
-    def tool_path(t: str) -> str:
-        return {
-            "copilot": os.path.join(
-                home, ".github", "copilot-instructions.md"
-            ),
-            "cursor": os.path.join(home, ".cursor", "rules", "calkit.mdc"),
-            "codex": os.path.join(home, "AGENTS.md"),
-            "gemini": os.path.join(home, ".gemini", "GEMINI.md"),
-        }[t]
-
-    def has_block(path: str) -> bool:
-        if not os.path.exists(path):
-            return False
-        with open(path) as f:
-            return block_start in f.read()
-
-    def write_block(path: str, content: str) -> None:
-        block = f"{block_start}\n{content.rstrip()}\n{block_end}\n"
-        parent = os.path.dirname(path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        if os.path.exists(path):
-            with open(path) as f:
-                existing = f.read()
-            if block_start in existing:
-                s = existing.index(block_start)
-                e = existing.index(block_end) + len(block_end)
-                updated = existing[:s] + block + existing[e:].lstrip("\n")
-            else:
-                updated = existing.rstrip("\n") + "\n\n" + block
-        else:
-            updated = block
-        with open(path, "w") as f:
-            f.write(updated)
-
-    targets = [(t, tool_path(t)) for t in tools if has_block(tool_path(t))]
-    if not targets:
-        return
-    try:
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
-    except Exception:
-        return
-    content = resp.text
-    for t, path in targets:
-        c = (
-            "---\ndescription: Calkit pipeline conventions\nalwaysApply: true\n---\n\n"
-            + content
-            if t == "cursor"
-            else content
-        )
-        write_block(path, c)
-        typer.echo(f"Updated agent instructions: {path}")
-
-
 @update_app.command(name="agent-instructions")
 def update_agent_instructions(
     tool: Annotated[
@@ -585,30 +516,35 @@ def update_agent_instructions(
             "-t",
             help=(
                 "Agent tool to write instructions for. "
-                "Choices: copilot, cursor, codex, gemini, all."
+                "Choices: copilot, cursor, codex, gemini, auto, all."
             ),
         ),
-    ] = "all",
+    ] = "auto",
 ):
     """Update agent instructions for AI tools working on Calkit projects.
 
     Downloads the latest Calkit conventions document and writes it to each
-    tool's global (user-level) instructions location. Run once after
-    installing Calkit, and again after upgrading.
+    tool's global (user-level) instructions location.
 
-    Only writes for tools that appear to be installed (configuration directory
-    or file already exists). Existing user content is preserved—Calkit manages
-    a clearly delimited section and only replaces that section on updates.
+    --tool auto (default): only updates tools that already have the Calkit
+    block installed. Safe to run on every upgrade—touches nothing new.
 
-    Supported tools: copilot, cursor, codex, gemini (or 'all').
+    --tool all: writes to every supported tool, creating directories as needed.
+    Use this for initial setup.
+
+    --tool <name>: writes to one specific tool (copilot, cursor, codex, gemini).
+
+    Existing user content is always preserved—Calkit manages a clearly
+    delimited block and only replaces that block on updates.
     """
     url = (
         "https://raw.githubusercontent.com/calkit/calkit/"
         "refs/heads/main/agent-plugin/agents/AGENTS.md"
     )
-    tools = ["copilot", "cursor", "codex", "gemini"]
+    named_tools = ["copilot", "cursor", "codex", "gemini"]
     block_start = "<!-- CALKIT-CONVENTIONS:START -->"
     block_end = "<!-- CALKIT-CONVENTIONS:END -->"
+    home = os.path.expanduser("~")
 
     def tool_path(t: str) -> str:
         return {
@@ -619,6 +555,13 @@ def update_agent_instructions(
             "codex": os.path.join(home, "AGENTS.md"),
             "gemini": os.path.join(home, ".gemini", "GEMINI.md"),
         }[t]
+
+    def has_block(t: str) -> bool:
+        path = tool_path(t)
+        if not os.path.exists(path):
+            return False
+        with open(path) as f:
+            return block_start in f.read()
 
     def is_configured(t: str) -> bool:
         return {
@@ -647,38 +590,56 @@ def update_agent_instructions(
         with open(path, "w") as f:
             f.write(updated)
 
-    valid = tools + ["all"]
+    def refresh() -> None:
+        """Update tools that already have the block (safe for upgrade)."""
+        targets = [t for t in named_tools if has_block(t)]
+        if not targets:
+            return
+        try:
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+        except Exception:
+            return
+        _write(targets, resp.text)
+
+    def _write(targets: list[str], content: str) -> None:
+        for t in targets:
+            path = tool_path(t)
+            c = (
+                "---\ndescription: Calkit pipeline conventions\n"
+                "alwaysApply: true\n---\n\n" + content
+                if t == "cursor"
+                else content
+            )
+            write_block(path, c)
+            typer.echo(f"Updated: {path}")
+
+    valid = named_tools + ["auto", "all"]
     if tool not in valid:
         raise_error(f"Unknown tool '{tool}'. Choose from: {', '.join(valid)}")
-    home = os.path.expanduser("~")
-    targets = (
-        [t for t in tools if is_configured(t)] if tool == "all" else [tool]
-    )
-    if not targets:
-        typer.echo("No configured agent tools found; nothing to update.")
-        return
-    typer.echo(f"Downloading agent instructions from {url}")
-    try:
-        resp = requests.get(url)
-        resp.raise_for_status()
-    except Exception as e:
-        raise_error(f"Failed to download agent instructions: {e}")
-    content = resp.text
-    for t in targets:
-        path = tool_path(t)
-        c = (
-            (
-                "---\n"
-                "description: Calkit pipeline conventions\n"
-                "alwaysApply: true\n"
-                "---\n\n"
-            )
-            + content
-            if t == "cursor"
-            else content
+    if tool == "auto":
+        refresh()
+    else:
+        targets = named_tools if tool == "all" else [tool]
+        if tool == "all":
+            targets = [t for t in named_tools if is_configured(t)]
+            if not targets:
+                typer.echo(
+                    "No configured agent tools found; nothing to update."
+                )
+                return
+        typer.echo(f"Downloading agent instructions from {url}")
+        try:
+            resp = requests.get(url)
+            resp.raise_for_status()
+        except Exception as e:
+            raise_error(f"Failed to download agent instructions: {e}")
+        _write(targets, resp.text)
+    if shutil.which("claude"):
+        typer.echo(
+            "Claude Code detected. To update the Calkit plugin, run inside"
+            " Claude: /plugin marketplace update"
         )
-        write_block(path, c)
-        typer.echo(f"Updated: {path}")
 
 
 @update_app.command(name="environment")

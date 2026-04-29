@@ -72,18 +72,18 @@ Calkit ships a conventions document covering
 Install it once after installing Calkit:
 
 ```bash
-calkit update agents
+calkit update agent-instructions
 ```
 
 This downloads the latest conventions from the Calkit GitHub repo
-and writes them to the global instructions location for each supported tool —
-**in your home directory, not in the project**.
+and writes them to the global instructions location for each supported
+tool—in your home directory, not in the project.
 Run it again after upgrading Calkit to get updated instructions.
 
 To update instructions for one tool only:
 
 ```bash
-calkit update agents --tool cursor
+calkit update agent-instructions --tool cursor
 ```
 
 Supported `--tool` values:
@@ -96,7 +96,7 @@ Supported `--tool` values:
 | `gemini`  | `~/.gemini/GEMINI.md`               |
 | `all`     | All of the above (default)          |
 
-Existing content in destination files is preserved —
+Existing content in destination files is preserved.
 Calkit manages a clearly delimited section
 and only replaces that section on updates.
 
@@ -128,25 +128,25 @@ Update after a Calkit release:
 
 ### GitHub Copilot
 
-`calkit update agents --tool copilot` writes to `~/.github/copilot-instructions.md`,
+`calkit update agent-instructions --tool copilot` writes to `~/.github/copilot-instructions.md`,
 which Copilot loads for every repo.
 No per-project files needed.
 
 ### Cursor
 
-`calkit update agents --tool cursor` writes to `~/.cursor/rules/calkit.mdc`
+`calkit update agent-instructions --tool cursor` writes to `~/.cursor/rules/calkit.mdc`
 with `alwaysApply: true`.
 Cursor loads this rule file in every workspace automatically.
 
 ### OpenAI Codex
 
-`calkit update agents --tool codex` writes to `~/AGENTS.md`.
+`calkit update agent-instructions --tool codex` writes to `~/AGENTS.md`.
 Codex reads `AGENTS.md` from the project root and all parent directories up to `~`,
 so this covers every Calkit project on the machine.
 
 ### Gemini CLI
 
-`calkit update agents --tool gemini` writes to `~/.gemini/GEMINI.md`.
+`calkit update agent-instructions --tool gemini` writes to `~/.gemini/GEMINI.md`.
 Gemini CLI loads this as global context for all projects.
 
 ### Any other agent
@@ -154,12 +154,12 @@ Gemini CLI loads this as global context for all projects.
 For agents not listed here:
 most support either a global instructions file or reading `AGENTS.md` from the repo.
 Point your tool at `~/AGENTS.md`
-(installed by `calkit update agents --tool codex`)
+(installed by `calkit update agent-instructions --tool codex`)
 or consult that tool's docs for its global instructions path.
 
 ## What the Calkit conventions cover
 
-The document installed by `calkit update agents`
+The document installed by `calkit update agent-instructions`
 (or loaded by the Claude Code plugin) includes:
 
 - The `calkit.yaml` schema—all top-level sections and their purpose

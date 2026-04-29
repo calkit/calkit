@@ -89,22 +89,43 @@ def test_update_agent_instructions_cursor(fake_home):
 
 
 def test_update_agent_instructions_all_skips_unconfigured(fake_home):
-    # Only copilot is configured (~/.github exists); others absent.
+    # --tool all only writes for tools whose config dir/file already exists.
     github_dir = fake_home / ".github"
     github_dir.mkdir()
     with patch("calkit.cli.update.requests.get", return_value=_mock_get()):
-        result = runner.invoke(update_app, ["agent-instructions"])
+        result = runner.invoke(
+            update_app, ["agent-instructions", "--tool", "all"]
+        )
     assert result.exit_code == 0
     copilot_file = github_dir / "copilot-instructions.md"
     assert copilot_file.exists()
     assert _BLOCK_START in copilot_file.read_text()
-    # No other tool dirs should be created.
     assert not (fake_home / ".cursor").exists()
     assert not (fake_home / ".gemini").exists()
     assert not (fake_home / "AGENTS.md").exists()
 
 
-def test_update_agent_instructions_all_nothing_configured(fake_home):
+def test_update_agent_instructions_auto_only_updates_existing_blocks(
+    fake_home,
+):
+    # --tool auto (default) only touches files that already have the block.
+    # Set up copilot with the block and cursor with config dir but no block.
+    github_dir = fake_home / ".github"
+    github_dir.mkdir()
+    copilot_file = github_dir / "copilot-instructions.md"
+    copilot_file.write_text(
+        f"# My instructions\n\n{_BLOCK_START}\nold content\n{_BLOCK_END}\n"
+    )
+    (fake_home / ".cursor").mkdir()
+    with patch("calkit.cli.update.requests.get", return_value=_mock_get()):
+        result = runner.invoke(update_app, ["agent-instructions"])
+    assert result.exit_code == 0
+    assert _MOCK_CONTENT.strip() in copilot_file.read_text()
+    assert not (fake_home / ".cursor" / "rules").exists()
+
+
+def test_update_agent_instructions_auto_nothing_to_update(fake_home):
+    # --tool auto with no existing blocks makes no HTTP request.
     with patch(
         "calkit.cli.update.requests.get", return_value=_mock_get()
     ) as mock_get:

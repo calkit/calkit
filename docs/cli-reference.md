@@ -2084,11 +2084,15 @@ Options:
 
 Update agent instructions for AI tools working on Calkit projects.
 
-Downloads the latest Calkit conventions document and writes it to each tool's global (user-level) instructions location. Run once after installing Calkit, and again after upgrading.
+Downloads the latest Calkit conventions document and writes it to each tool's global (user-level) instructions location.
 
-Only writes for tools that appear to be installed (configuration directory or file already exists). Existing user content is preserved—Calkit manages a clearly delimited section and only replaces that section on updates.
+--tool auto (default): only updates tools that already have the Calkit block installed. Safe to run on every upgrade—touches nothing new.
 
-Supported tools: copilot, cursor, codex, gemini (or 'all').
+--tool all: writes to every supported tool, creating directories as needed. Use this for initial setup.
+
+--tool <name>: writes to one specific tool (copilot, cursor, codex, gemini).
+
+Existing user content is always preserved—Calkit manages a clearly delimited block and only replaces that block on updates.
 
 Usage:
 
@@ -2098,9 +2102,9 @@ calkit update agent-instructions [OPTIONS]
 
 Options:
 
-| Option         | Type | Required | Default | Description                                                                         |
-| -------------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------- |
-| `--tool`, `-t` | text | no       | all     | Agent tool to write instructions for. Choices: copilot, cursor, codex, gemini, all. |
+| Option         | Type | Required | Default | Description                                                                               |
+| -------------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------- |
+| `--tool`, `-t` | text | no       | auto    | Agent tool to write instructions for. Choices: copilot, cursor, codex, gemini, auto, all. |
 
 <a id="subcommand-update-env"></a>
 

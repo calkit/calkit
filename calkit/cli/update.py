@@ -514,8 +514,8 @@ def update_agent_skills(
         bool,
         typer.Option(
             "--quiet",
+            "-q",
             help="Suppress non-essential output.",
-            hidden=True,
         ),
     ] = False,
 ):

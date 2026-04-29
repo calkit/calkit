@@ -11,3 +11,5 @@
 See `CONTRIBUTING.md` for tool usage, style guidelines, etc.
 
 To run tests, use `uv run pytest`.
+
+To sync the docs and format all the code run `make format`.

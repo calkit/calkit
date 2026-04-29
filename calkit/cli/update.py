@@ -506,6 +506,80 @@ def update_notebook(
         raise_error(f"Failed to update notebook: {e}")
 
 
+_AGENT_INSTRUCTIONS_URL = (
+    "https://raw.githubusercontent.com/calkit/calkit/"
+    "refs/heads/main/agent-plugin/agents/AGENTS.md"
+)
+_AGENT_TOOL_CHOICES = ["copilot", "cursor", "codex", "gemini", "all"]
+
+
+@update_app.command(name="agents")
+def update_agent_instructions(
+    tool: Annotated[
+        str,
+        typer.Option(
+            "--tool",
+            "-t",
+            help=(
+                "Agent tool to write instructions for. "
+                f"Choices: {', '.join(_AGENT_TOOL_CHOICES)}."
+            ),
+        ),
+    ] = "all",
+):
+    """Update Calkit agent instructions for AI coding tools.
+
+    Downloads the latest Calkit conventions document and writes it to each
+    tool's global (user-level) instructions location. Run once after
+    installing Calkit, and again after upgrading.
+
+    Supported tools: copilot, cursor, codex, gemini (or 'all').
+    """
+    if tool not in _AGENT_TOOL_CHOICES:
+        raise_error(
+            f"Unknown tool '{tool}'. "
+            f"Choose from: {', '.join(_AGENT_TOOL_CHOICES)}"
+        )
+    typer.echo(
+        f"Downloading agent instructions from {_AGENT_INSTRUCTIONS_URL}"
+    )
+    resp = requests.get(_AGENT_INSTRUCTIONS_URL)
+    resp.raise_for_status()
+    content = resp.text
+    cursor_content = (
+        "---\n"
+        "description: Calkit pipeline conventions\n"
+        "alwaysApply: true\n"
+        "---\n\n"
+    ) + content
+    home = os.path.expanduser("~")
+    destinations: list[tuple[str, str]] = []
+    if tool in ("copilot", "all"):
+        destinations.append(
+            (os.path.join(home, ".github", "copilot-instructions.md"), content)
+        )
+    if tool in ("cursor", "all"):
+        destinations.append(
+            (
+                os.path.join(home, ".cursor", "rules", "calkit.mdc"),
+                cursor_content,
+            )
+        )
+    if tool in ("codex", "all"):
+        destinations.append((os.path.join(home, "AGENTS.md"), content))
+    if tool in ("gemini", "all"):
+        destinations.append(
+            (os.path.join(home, ".gemini", "GEMINI.md"), content)
+        )
+    for full_path, file_content in destinations:
+        parent = os.path.dirname(full_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(full_path, "w") as f:
+            f.write(file_content)
+        typer.echo(f"Written: {full_path}")
+
+
 @update_app.command(name="environment")
 @update_app.command(name="env")
 def update_environment(

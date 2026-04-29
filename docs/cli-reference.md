@@ -1947,6 +1947,7 @@ Update objects.
 | [`vscode-config`](#subcommand-update-vscode-config)   | Update a project's VS Code config to match the latest Calkit recommendations.       |
 | [`github-actions`](#subcommand-update-github-actions) | Update a project's GitHub Actions to match the latest Calkit recommendations.       |
 | [`notebook`](#subcommand-update-notebook)             | Update notebook information.                                                        |
+| [`agents`](#subcommand-update-agents)                 | Update Calkit agent instructions for AI coding tools.                               |
 | [`env`](#subcommand-update-env)                       | Update an environment.                                                              |
 | [`environment`](#subcommand-update-environment)       | Update an environment.                                                              |
 
@@ -2076,6 +2077,28 @@ Options:
 | ----------- | ------- | -------- | ------- | ----------------------------------------------- |
 | `--set-env` | text    | no       |         | Environment name to associate with the notebook |
 | `--json`    | boolean | no       | False   | Output result as JSON.                          |
+
+<a id="subcommand-update-agents"></a>
+
+#### `calkit update agents`
+
+Update Calkit agent instructions for AI coding tools.
+
+Downloads the latest Calkit conventions document and writes it to each tool's global (user-level) instructions location. Run once after installing Calkit, and again after upgrading.
+
+Supported tools: copilot, cursor, codex, gemini (or 'all').
+
+Usage:
+
+```text
+calkit update agents [OPTIONS]
+```
+
+Options:
+
+| Option         | Type | Required | Default | Description                                                                         |
+| -------------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------- |
+| `--tool`, `-t` | text | no       | all     | Agent tool to write instructions for. Choices: copilot, cursor, codex, gemini, all. |
 
 <a id="subcommand-update-env"></a>
 

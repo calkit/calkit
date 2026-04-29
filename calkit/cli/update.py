@@ -511,6 +511,35 @@ _AGENT_INSTRUCTIONS_URL = (
     "refs/heads/main/agent-plugin/agents/AGENTS.md"
 )
 _AGENT_TOOL_CHOICES = ["copilot", "cursor", "codex", "gemini", "all"]
+_CALKIT_BLOCK_START = "<!-- CALKIT-CONVENTIONS:START -->"
+_CALKIT_BLOCK_END = "<!-- CALKIT-CONVENTIONS:END -->"
+
+
+def _write_calkit_block(full_path: str, content: str) -> None:
+    """Write content into a Calkit-managed block in a file.
+
+    If the file already contains a Calkit block (delimited by the start/end
+    markers), replace just that block. Otherwise append the block. Preserves
+    any user-written content outside the block. Creates the file if it does
+    not exist.
+    """
+    block = f"{_CALKIT_BLOCK_START}\n{content.rstrip()}\n{_CALKIT_BLOCK_END}\n"
+    parent = os.path.dirname(full_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    if os.path.exists(full_path):
+        with open(full_path) as f:
+            existing = f.read()
+        if _CALKIT_BLOCK_START in existing:
+            start = existing.index(_CALKIT_BLOCK_START)
+            end = existing.index(_CALKIT_BLOCK_END) + len(_CALKIT_BLOCK_END)
+            updated = existing[:start] + block + existing[end:].lstrip("\n")
+        else:
+            updated = existing.rstrip("\n") + "\n\n" + block
+    else:
+        updated = block
+    with open(full_path, "w") as f:
+        f.write(updated)
 
 
 @update_app.command(name="agents")
@@ -533,6 +562,9 @@ def update_agent_instructions(
     tool's global (user-level) instructions location. Run once after
     installing Calkit, and again after upgrading.
 
+    Existing user content in destination files is preserved — Calkit manages
+    a clearly delimited section and only replaces that section on updates.
+
     Supported tools: copilot, cursor, codex, gemini (or 'all').
     """
     if tool not in _AGENT_TOOL_CHOICES:
@@ -553,31 +585,22 @@ def update_agent_instructions(
         "---\n\n"
     ) + content
     home = os.path.expanduser("~")
-    destinations: list[tuple[str, str]] = []
     if tool in ("copilot", "all"):
-        destinations.append(
-            (os.path.join(home, ".github", "copilot-instructions.md"), content)
-        )
+        path = os.path.join(home, ".github", "copilot-instructions.md")
+        _write_calkit_block(path, content)
+        typer.echo(f"Updated: {path}")
     if tool in ("cursor", "all"):
-        destinations.append(
-            (
-                os.path.join(home, ".cursor", "rules", "calkit.mdc"),
-                cursor_content,
-            )
-        )
+        path = os.path.join(home, ".cursor", "rules", "calkit.mdc")
+        _write_calkit_block(path, cursor_content)
+        typer.echo(f"Updated: {path}")
     if tool in ("codex", "all"):
-        destinations.append((os.path.join(home, "AGENTS.md"), content))
+        path = os.path.join(home, "AGENTS.md")
+        _write_calkit_block(path, content)
+        typer.echo(f"Updated: {path}")
     if tool in ("gemini", "all"):
-        destinations.append(
-            (os.path.join(home, ".gemini", "GEMINI.md"), content)
-        )
-    for full_path, file_content in destinations:
-        parent = os.path.dirname(full_path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        with open(full_path, "w") as f:
-            f.write(file_content)
-        typer.echo(f"Written: {full_path}")
+        path = os.path.join(home, ".gemini", "GEMINI.md")
+        _write_calkit_block(path, content)
+        typer.echo(f"Updated: {path}")
 
 
 @update_app.command(name="environment")

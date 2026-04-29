@@ -2,7 +2,7 @@
 
 **Trigger:** `/calkit:add-pipeline-stage`
 
-Add a single new stage to an existing Calkit pipeline correctly — wiring up the right environment, inputs, outputs, and storage mode.
+Add a single new stage to an existing Calkit pipeline correctly—wiring up the right environment, inputs, outputs, and storage mode.
 
 ## Before you start
 
@@ -31,7 +31,7 @@ cat calkit.yaml
 ## Option A: Add with `calkit xr`
 
 ```bash
-# Dry run first — see what xr would create without changing anything
+# Dry run first—see what xr would create without changing anything
 calkit xr scripts/new-stage.py --dry-run
 
 # Run for real when the dry run looks correct
@@ -112,8 +112,8 @@ inputs:
 
 For each output:
 
-- `git` — small or text files that collaborators should see without `calkit pull`. Examples: PDFs, summary CSVs, HTML reports.
-- `dvc` (default) — large or binary files that go into the DVC cache.
+- `git`—small or text files that collaborators should see without `calkit pull`. Examples: PDFs, summary CSVs, HTML reports.
+- `dvc` (default)—large or binary files that go into the DVC cache.
 
 ```yaml
 outputs:

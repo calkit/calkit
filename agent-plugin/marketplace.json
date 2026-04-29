@@ -4,7 +4,7 @@
   "plugins": [
     {
       "name": "calkit",
-      "description": "Skills for working with Calkit research projects.",
+      "description": "Skills for working with Calkit projects.",
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/calkit/calkit.git",

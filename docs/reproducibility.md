@@ -77,6 +77,19 @@ Barring misconduct,
 provenance can be verified with a single command
 (`calkit status` for a Calkit project).
 
+## AI agents and provenance
+
+AI coding agents can accelerate research workflows, but they must be used carefully to preserve provenance. The key rule: **agents create primary artifacts, the pipeline creates secondary ones**.
+
+An agent should write or modify source code, configuration, and `calkit.yaml`—inputs that humans could also produce. It must not run scripts in its own session and commit the results. If an agent executes a script and saves the output figure directly, there is no reproducible record of the environment or inputs used, and `calkit status` will not flag the output as stale when those inputs change.
+
+The correct pattern is identical to what a human should do:
+
+1. The agent writes or edits code and defines pipeline stages in `calkit.yaml`
+2. `calkit run` executes the pipeline and produces all derived outputs with full provenance
+
+See [Use with AI tools](ai-tools.md) for setup instructions for specific tools.
+
 ## Consequences of poor reproducibility
 
 On obvious consequence of poor reproducibility is that

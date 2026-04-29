@@ -2086,6 +2086,8 @@ Update Calkit agent instructions for AI coding tools.
 
 Downloads the latest Calkit conventions document and writes it to each tool's global (user-level) instructions location. Run once after installing Calkit, and again after upgrading.
 
+Existing user content in destination files is preserved — Calkit manages a clearly delimited section and only replaces that section on updates.
+
 Supported tools: copilot, cursor, codex, gemini (or 'all').
 
 Usage:

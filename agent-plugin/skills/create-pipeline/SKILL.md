@@ -12,7 +12,7 @@ Use this when:
 - There is no `pipeline` section in `calkit.yaml` yet (or no `calkit.yaml` at all)
 - The goal is to make the project reproducible end-to-end
 
-## Step 1 — Understand the existing repo
+## Step 1—Understand the existing repo
 
 Before writing any YAML, map out what's already there.
 
@@ -23,7 +23,7 @@ Before writing any YAML, map out what's already there.
 
 Ask the user if the order or dependencies are unclear. Do not guess at data flow.
 
-## Step 2 — Check or initialize the project
+## Step 2—Check or initialize the project
 
 If there is no `calkit.yaml`, initialize the project first:
 
@@ -37,9 +37,9 @@ This sets up Git (if needed) and DVC. Check the result:
 ls calkit.yaml dvc.yaml .dvc/ 2>/dev/null
 ```
 
-If `calkit.yaml` already exists but has no `pipeline` section, that's fine — you will add one.
+If `calkit.yaml` already exists but has no `pipeline` section, that's fine—you will add one.
 
-## Step 3 — Define environments
+## Step 3—Define environments
 
 Every stage must reference a named environment. Identify the distinct environments needed:
 
@@ -61,7 +61,7 @@ environments:
 
 If there is only one Python environment needed, name it `main`. If there are multiple (e.g., one for analysis and one for paper-building), give them descriptive names.
 
-## Step 4 — Try `calkit xr` for the fast path
+## Step 4—Try `calkit xr` for the fast path
 
 For each script or notebook, try `calkit xr` first before writing YAML by hand. It auto-detects stage kind, environment, and I/O:
 
@@ -84,7 +84,7 @@ calkit xr scripts/train.py \
   --output models/model.pkl
 ```
 
-## Step 5 — Write stages manually when `xr` isn't suitable
+## Step 5—Write stages manually when `xr` isn't suitable
 
 Write stages directly in `calkit.yaml` when:
 
@@ -126,11 +126,11 @@ pipeline:
 
 **Rules:**
 
-- Stage names should be short, lowercase, hyphenated — they appear in CLI output and DVC stage names.
+- Stage names should be short, lowercase, hyphenated—they appear in CLI output and DVC stage names.
 - Every file that one stage writes and another stage reads must be declared as both an output and an input. If you skip a dependency, stages may run in the wrong order or not re-run when they should.
 - Prefer `from_stage_outputs: stage-name` when a stage consumes everything from a prior stage, rather than listing individual files.
 
-## Step 6 — Decide output storage
+## Step 6—Decide output storage
 
 For each output, decide: Git or DVC?
 
@@ -139,7 +139,7 @@ For each output, decide: Git or DVC?
 
 ```yaml
 outputs:
-  - data/raw.csv # DVC (default — large/binary)
+  - data/raw.csv # DVC (default—large/binary)
   - path: data/meta.json
     storage: git # small metadata, commit to Git
   - path: paper/paper.pdf
@@ -148,7 +148,7 @@ outputs:
 
 When in doubt, ask the user. Storage mode affects whether collaborators can see the file without `calkit pull`.
 
-## Step 7 — Run the pipeline
+## Step 7—Run the pipeline
 
 Run the full pipeline to verify everything works:
 
@@ -174,7 +174,7 @@ Force re-run even if nothing changed:
 calkit run --force
 ```
 
-## Step 8 — Commit
+## Step 8—Commit
 
 Once the pipeline runs successfully:
 

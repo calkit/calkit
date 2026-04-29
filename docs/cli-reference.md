@@ -2086,7 +2086,7 @@ Update agent instructions for AI tools working on Calkit projects.
 
 Downloads the latest Calkit conventions document and writes it to each tool's global (user-level) instructions location.
 
---tool auto (default): only updates tools that already have the Calkit block installed. Safe to run on every upgrade—touches nothing new.
+--tool auto (default): always updates the Codex skills directory and updates tools detected as in use on this machine (or that already contain the Calkit block). Safe for upgrades and avoids creating config for tools you do not use.
 
 --tool all: writes to every supported tool, creating directories as needed. Use this for initial setup.
 

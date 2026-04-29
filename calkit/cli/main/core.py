@@ -2355,7 +2355,7 @@ def upgrade():
     typer.echo("Success!")
     from calkit.cli.update import update_agent_instructions
 
-    update_agent_instructions(tool="auto")
+    update_agent_instructions(tool="auto", quiet=True)
 
 
 @app.command(name="switch-branch")

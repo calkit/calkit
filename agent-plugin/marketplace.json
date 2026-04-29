@@ -4,10 +4,10 @@
   "plugins": [
     {
       "name": "calkit",
-      "description": "Skills for working with Calkit reproducible research pipelines",
+      "description": "Skills for working with Calkit research projects.",
       "source": {
         "source": "git-subdir",
-        "url": "https://github.com/calkit-org/calkit.git",
+        "url": "https://github.com/calkit/calkit.git",
         "path": "agent-plugin"
       }
     }

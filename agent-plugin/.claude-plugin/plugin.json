@@ -1,5 +1,5 @@
 {
   "name": "calkit",
-  "description": "Agent skills for working with Calkit reproducible research pipelines",
+  "description": "Agent skills for working with Calkit research projects.",
   "version": "0.1.0"
 }

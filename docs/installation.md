@@ -38,6 +38,10 @@ you can [set up cloud integration](cloud-integration.md) with:
 calkit cloud login
 ```
 
+If you use AI agents like Claude, Copilot, or Codex,
+see [AI tools](ai-tools.md)
+to learn how to install agent skills for working with Calkit.
+
 ## Use without installing
 
 If you want to use Calkit without installing it,

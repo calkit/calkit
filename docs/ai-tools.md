@@ -71,21 +71,7 @@ For Claude Code, create a `CLAUDE.md` at the repo root with the same content
 ## Step 2: Install Calkit skills globally
 
 Calkit ships agent skills covering `calkit.yaml` structure, stage
-kinds, environment types, and CLI commands. Install it once after installing
-Calkit:
-
-```bash
-calkit update agent-skills
-```
-
-This copies skills into `~/.agents/skills`.
-Run the same command again after
-upgrading Calkit to pick up any updates.
-
-For command details, see the
-[CLI reference for `calkit update agent-skills`](cli-reference.md#subcommand-update-agent-skills).
-
-## Tool-specific notes
+kinds, environment types, and CLI commands.
 
 ### Claude Code
 
@@ -113,11 +99,20 @@ the calkit marketplace, and toggle auto-update on. Or update manually:
 /plugin marketplace update
 ```
 
-### OpenAI Codex and other skill-based agents
+### Other AI agents like OpenCode and OpenAI Codex
 
-`calkit update agent-skills` copies skills into `~/.agents/skills`.
-Check whether your agent loads skills from that directory and configure
-accordingly.
+Simply run:
+
+```bash
+calkit update agent-skills
+```
+
+This copies skills into `~/.agents/skills`.
+Run the same command again after
+upgrading Calkit to pick up any updates.
+
+For command details, see the
+[CLI reference for `calkit update agent-skills`](cli-reference.md#subcommand-update-agent-skills).
 
 ## What the Calkit conventions cover
 

@@ -106,13 +106,8 @@ This gives you two action skills:
 Calkit conventions are loaded automatically whenever you work in a Calkit
 project.
 
-To stay current automatically, enable auto-update for the plugin:
-
-```
-/plugin auto-update calkit@calkit enable
-```
-
-Or update manually after a Calkit release:
+To enable auto-update, open `/plugin`, go to the Marketplaces tab, select
+the calkit marketplace, and toggle auto-update on. Or update manually:
 
 ```
 /plugin marketplace update

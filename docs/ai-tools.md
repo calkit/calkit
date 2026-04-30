@@ -93,7 +93,7 @@ Claude Code supports a plugin system that loads skills on demand.
 Install the Calkit plugin with:
 
 ```
-/plugin marketplace add calkit/calkit/agent-plugin
+/plugin marketplace add calkit/calkit
 /plugin install calkit@calkit
 ```
 

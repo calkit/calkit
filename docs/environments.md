@@ -4,6 +4,16 @@ A computational environment describes the
 necessary conditions for code to run properly.
 Ensuring that every stage in your pipeline is run within a
 defined environment is a great way to improve reproducibility.
+Typically these will be created inside the global system environment,
+where the system environment has an environment manager installed.
+Because the system environment itself is somewhat of a "primary artifact"
+(cf. [reproducibility](./reproducibility.md)), i.e.,
+it is manually manipulated by the user,
+we want to minimize its uniqueness or changes to it,
+since there's a risk we may not properly document its state.
+This means we want to limit foundational dependencies to very common tools
+like Git, common shells like Bash, and environment managers.
+
 There are many different environment management tools out there to choose
 from, and Calkit attempts to provide a similar interface for all of them.
 Calkit also attempts to enforce

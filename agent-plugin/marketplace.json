@@ -1,0 +1,15 @@
+{
+  "name": "calkit",
+  "owner": { "name": "Calkit" },
+  "plugins": [
+    {
+      "name": "calkit",
+      "description": "Skills for working with Calkit projects.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/calkit/calkit.git",
+        "path": "agent-plugin"
+      }
+    }
+  ]
+}

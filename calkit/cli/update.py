@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from datetime import datetime
+from importlib import resources
 
 import git
 import requests
@@ -504,6 +506,77 @@ def update_notebook(
             )
     except Exception as e:
         raise_error(f"Failed to update notebook: {e}")
+
+
+@update_app.command(name="agent-skills")
+def update_agent_skills(
+    quiet: Annotated[
+        bool,
+        typer.Option(
+            "--quiet",
+            "-q",
+            help="Suppress non-essential output.",
+        ),
+    ] = False,
+):
+    """Copy packaged Calkit agent skills to `~/.agents/skills`."""
+    source = resources.files("calkit").joinpath("agent_skills")
+    source_repo = os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "..",
+            "agent-plugin",
+            "skills",
+        )
+    )
+    use_packaged = source.is_dir()
+    if not use_packaged and not os.path.isdir(source_repo):
+        raise_error("Bundled agent skills are missing from this installation")
+    dest_root = os.path.join(os.path.expanduser("~"), ".agents", "skills")
+    os.makedirs(dest_root, exist_ok=True)
+
+    def _fix_skill_name(dest_dir: str, prefixed_name: str) -> None:
+        skill_md = os.path.join(dest_dir, "SKILL.md")
+        if not os.path.isfile(skill_md):
+            return
+        with open(skill_md) as f:
+            content = f.read()
+        import re
+
+        content = re.sub(
+            r"^(name:\s*)(.+)$",
+            f"\\g<1>{prefixed_name}",
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        with open(skill_md, "w") as f:
+            f.write(content)
+
+    copied = 0
+    if use_packaged:
+        for entry in source.iterdir():
+            if not entry.is_dir():
+                continue
+            prefixed = f"calkit-{entry.name}"
+            dest = os.path.join(dest_root, prefixed)
+            with resources.as_file(entry) as source_dir:
+                shutil.copytree(source_dir, dest, dirs_exist_ok=True)
+            _fix_skill_name(dest, prefixed)
+            copied += 1
+    else:
+        for name in os.listdir(source_repo):
+            source_dir = os.path.join(source_repo, name)
+            if not os.path.isdir(source_dir):
+                continue
+            prefixed = f"calkit-{name}"
+            dest = os.path.join(dest_root, prefixed)
+            shutil.copytree(source_dir, dest, dirs_exist_ok=True)
+            _fix_skill_name(dest, prefixed)
+            copied += 1
+    if not quiet:
+        typer.echo(f"Updated {copied} skills in {dest_root}")
 
 
 @update_app.command(name="environment")

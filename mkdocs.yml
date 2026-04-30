@@ -38,6 +38,7 @@ nav:
   - Installation: installation.md
   - Quickstart: quickstart.md
   - Cloud integration: cloud-integration.md
+  - Use with AI tools: ai-tools.md
   - Version control: version-control.md
   - The calkit.yaml file: calkit-yaml.md
   - Dependencies, configuration, and secrets: dependencies.md
@@ -91,7 +92,7 @@ markdown_extensions:
       custom_fences:
         - name: mermaid
           class: mermaid
-          format: !!python/name:mermaid2.fence_mermaid_custom
+          format: !!python/name:mermaid2.fence_mermaid_custom ""
 plugins:
   - search
   - mermaid2

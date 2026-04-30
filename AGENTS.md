@@ -11,3 +11,8 @@
 See `CONTRIBUTING.md` for tool usage, style guidelines, etc.
 
 To run tests, use `uv run pytest`.
+
+To sync the docs and format all the code, run `make format`.
+
+Wrap prose at natural breakpoints in phrases or punctuation to keep max
+line length below 80 characters.

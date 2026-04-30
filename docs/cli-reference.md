@@ -495,8 +495,14 @@ Upgrade Calkit.
 Usage:
 
 ```text
-calkit upgrade
+calkit upgrade [OPTIONS]
 ```
+
+Options:
+
+| Option     | Type    | Required | Default | Description                   |
+| ---------- | ------- | -------- | ------- | ----------------------------- |
+| `--skills` | boolean | no       | False   | Upgrade agent skills as well. |
 
 <a id="top-command-switch-branch"></a>
 
@@ -1947,6 +1953,7 @@ Update objects.
 | [`vscode-config`](#subcommand-update-vscode-config)   | Update a project's VS Code config to match the latest Calkit recommendations.       |
 | [`github-actions`](#subcommand-update-github-actions) | Update a project's GitHub Actions to match the latest Calkit recommendations.       |
 | [`notebook`](#subcommand-update-notebook)             | Update notebook information.                                                        |
+| [`agent-skills`](#subcommand-update-agent-skills)     | Copy packaged Calkit agent skills to `~/.agents/skills`.                            |
 | [`env`](#subcommand-update-env)                       | Update an environment.                                                              |
 | [`environment`](#subcommand-update-environment)       | Update an environment.                                                              |
 
@@ -2076,6 +2083,24 @@ Options:
 | ----------- | ------- | -------- | ------- | ----------------------------------------------- |
 | `--set-env` | text    | no       |         | Environment name to associate with the notebook |
 | `--json`    | boolean | no       | False   | Output result as JSON.                          |
+
+<a id="subcommand-update-agent-skills"></a>
+
+#### `calkit update agent-skills`
+
+Copy packaged Calkit agent skills to `~/.agents/skills`.
+
+Usage:
+
+```text
+calkit update agent-skills [OPTIONS]
+```
+
+Options:
+
+| Option          | Type    | Required | Default | Description                    |
+| --------------- | ------- | -------- | ------- | ------------------------------ |
+| `--quiet`, `-q` | boolean | no       | False   | Suppress non-essential output. |
 
 <a id="subcommand-update-env"></a>
 

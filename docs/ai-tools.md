@@ -107,7 +107,13 @@ This gives you two action skills:
 Calkit conventions are loaded automatically as a background reference skill
 whenever you work in a Calkit project.
 
-Update after a Calkit release:
+To stay current automatically, enable auto-update for the plugin:
+
+```
+/plugin auto-update calkit@calkit enable
+```
+
+Or update manually after a Calkit release:
 
 ```
 /plugin marketplace update

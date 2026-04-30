@@ -108,7 +108,7 @@ Stages live under `pipeline.stages` in `calkit.yaml`. Every stage requires
 
 ### Stage kinds and their required fields
 
-**`python-script`**—run a Python script
+**`python-script`**: Run a Python script
 
 ```yaml
 kind: python-script
@@ -116,7 +116,7 @@ script_path: scripts/run.py
 args: ["--flag", "value"] # optional
 ```
 
-**`jupyter-notebook`**—execute a Jupyter notebook
+**`jupyter-notebook`**: Execute a Jupyter notebook
 
 ```yaml
 kind: jupyter-notebook
@@ -126,7 +126,7 @@ executed_ipynb_storage: git # optional, default: dvc
 parameters: { key: value } # optional, papermill parameters
 ```
 
-**`shell-command`**—run an arbitrary shell command
+**`shell-command`**: Run an arbitrary shell command
 
 ```yaml
 kind: shell-command
@@ -134,14 +134,14 @@ command: "python -m mymodule --arg val"
 shell: bash # optional, default: bash
 ```
 
-**`shell-script`**—run a shell script file
+**`shell-script`**: Run a shell script file
 
 ```yaml
 kind: shell-script
 script_path: scripts/run.sh
 ```
 
-**`latex`**—compile a LaTeX document to PDF
+**`latex`**: Compile a LaTeX document to PDF
 
 ```yaml
 kind: latex
@@ -149,35 +149,35 @@ target_path: paper/paper.tex
 pdf_storage: git # optional, default: dvc
 ```
 
-**`r-script`**—run an R script
+**`r-script`**: Run an R script
 
 ```yaml
 kind: r-script
 script_path: scripts/analysis.R
 ```
 
-**`julia-script`** / **`julia-command`**—run Julia code
+**`julia-script`** / **`julia-command`**: Run Julia code
 
 ```yaml
 kind: julia-script
 script_path: scripts/run.jl
 ```
 
-**`matlab-script`** / **`matlab-command`**—run MATLAB code
+**`matlab-script`** / **`matlab-command`**: Run MATLAB code
 
 ```yaml
 kind: matlab-script
 script_path: scripts/run.m
 ```
 
-**`docker-command`**—run a command inside a Docker container
+**`docker-command`**: Run a command inside a Docker container
 
 ```yaml
 kind: docker-command
 command: "docker run --rm myimage mycommand"
 ```
 
-**`command`**—generic command (for tools that don't fit other kinds)
+**`command`**: Generic command (for tools that don't fit other kinds)
 
 ```yaml
 kind: command

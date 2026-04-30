@@ -129,7 +129,7 @@ Code plugin) include:
 - Environment types (Python, R, Julia, Docker, MATLAB, etc.) and how to
   declare them
 - Output storage (Git vs. DVC) and when to use each
-- How Calkit relates to DVC: Why you should usually not need ton edit `dvc.
-yaml` directly
+- How Calkit relates to DVC: Why you usually don't need to edit
+  `dvc.yaml` directly
 - The `calkit xr` command for auto-detecting stage type, environment, and I/O
 - Key CLI commands for running, checking, and committing

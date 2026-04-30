@@ -7,7 +7,7 @@ description: Add a single new stage to an existing Calkit pipeline. Use when
 
 # Add a pipeline stage
 
-Add a single new stage to an existing Calkit pipeline — wiring up the right
+Add a single new stage to an existing Calkit pipeline—wiring up the right
 environment, inputs, outputs, and storage mode.
 
 ## Before you start
@@ -16,7 +16,7 @@ Read `calkit.yaml` to understand what environments are already defined (you
 will reuse one if it fits) and what stages already exist and what they output
 (your new stage may depend on them).
 
-## Option A — Add with `calkit xr`
+## Option A: Add with `calkit xr`
 
 Use `xr` when the stage is a script or notebook file (`.py`, `.ipynb`, `.R`,
 `.jl`, `.m`, `.sh`, `.tex`) and you want auto-detection of I/O and
@@ -40,7 +40,7 @@ calkit xr scripts/new-stage.py \
 After running, inspect the new stage in `calkit.yaml` to confirm I/O is
 correct.
 
-## Option B — Write the stage manually
+## Option B: Write the stage manually
 
 Write YAML directly when the stage is a shell command, or when you need
 `iterate_over`, specific storage modes, or other fine-grained control.
@@ -88,9 +88,9 @@ stage's inputs too.
 
 ## Output storage
 
-- `git` — small or text files collaborators should see without `calkit pull`
+- `git`—small or text files collaborators should see without `calkit pull`
   (PDFs, summary CSVs, HTML reports)
-- `dvc` (default) — large or binary files
+- `dvc` (default)—large or binary files
 
 ```yaml
 outputs:
@@ -108,15 +108,15 @@ outputs:
 calkit run                                    # run full pipeline
 calkit run new-stage-name                     # run only this stage
 calkit status                                 # check what's stale
-calkit commit -m "Add new-stage-name stage"
+calkit commit -am "Add new-stage-name stage"
 ```
 
 ## Common mistakes
 
-- **Wrong environment name**: must exactly match a key in `environments`. Run
+- **Wrong environment name**: Must exactly match a key in `environments`. Run
   `calkit check env --name <env>` to verify.
-- **Two stages claiming the same output**: each file can only be the output of
+- **Two stages claiming the same output**: Each file can only be the output of
   one stage.
-- **Missing inputs**: if a stage reads a file but doesn't declare it, DVC
+- **Missing inputs**: If a stage reads a file but doesn't declare it, DVC
   won't re-run the stage when that file changes.
-- **Editing `dvc.yaml`**: don't — it's auto-generated from `calkit.yaml`.
+- **Editing `dvc.yaml`**: Don't—it's auto-generated from `calkit.yaml`.

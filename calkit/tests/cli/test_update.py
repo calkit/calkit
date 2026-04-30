@@ -42,9 +42,23 @@ def test_update_agent_skills_copies_bundled_skills(fake_home):
     skills_dir = fake_home / ".agents" / "skills"
     result = runner.invoke(update_app, ["agent-skills"])
     assert result.exit_code == 0
-    assert (skills_dir / "add-pipeline-stage" / "SKILL.md").exists()
+    assert (skills_dir / "calkit-add-pipeline-stage" / "SKILL.md").exists()
     assert (skills_dir / "calkit-conventions" / "SKILL.md").exists()
-    assert (skills_dir / "create-pipeline" / "SKILL.md").exists()
+    assert (skills_dir / "calkit-create-pipeline" / "SKILL.md").exists()
+
+
+def test_update_agent_skills_renames_skill_name_in_frontmatter(fake_home):
+    skills_dir = fake_home / ".agents" / "skills"
+    result = runner.invoke(update_app, ["agent-skills"])
+    assert result.exit_code == 0
+    # Each installed SKILL.md should have its name updated to the calkit- prefixed folder name.
+    for skill_name in (
+        "calkit-conventions",
+        "calkit-create-pipeline",
+        "calkit-add-pipeline-stage",
+    ):
+        content = (skills_dir / skill_name / "SKILL.md").read_text()
+        assert f"name: {skill_name}" in content
 
 
 def test_update_agent_skills_preserves_custom_skill(fake_home):

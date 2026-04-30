@@ -1,6 +1,9 @@
-# Create a Calkit pipeline
+---
+name: create-pipeline
+description: Convert an existing repo with ad hoc scripts into a fully reproducible Calkit pipeline. Use when the user invokes `/calkit:create-pipeline` or asks to make a project reproducible end-to-end.
+---
 
-**Trigger:** `/calkit:create-pipeline`
+# Create a Calkit pipeline
 
 Convert an existing repo with ad hoc scripts and manual steps into a fully reproducible Calkit pipeline. After this skill completes, running `calkit run` should reproduce all important outputs from scratch.
 

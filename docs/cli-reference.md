@@ -2093,8 +2093,14 @@ Copy packaged Calkit agent skills to `~/.agents/skills`.
 Usage:
 
 ```text
-calkit update agent-skills
+calkit update agent-skills [OPTIONS]
 ```
+
+Options:
+
+| Option          | Type    | Required | Default | Description                    |
+| --------------- | ------- | -------- | ------- | ------------------------------ |
+| `--quiet`, `-q` | boolean | no       | False   | Suppress non-essential output. |
 
 <a id="subcommand-update-env"></a>
 

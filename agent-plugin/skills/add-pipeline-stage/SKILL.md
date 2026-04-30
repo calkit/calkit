@@ -1,6 +1,9 @@
-# Add a pipeline stage
+---
+name: add-pipeline-stage
+description: Add a single new stage to an existing Calkit pipeline. Use when the user invokes `/calkit:add-pipeline-stage` or asks to add a script, notebook, or command to the pipeline.
+---
 
-**Trigger:** `/calkit:add-pipeline-stage`
+# Add a pipeline stage
 
 Add a single new stage to an existing Calkit pipeline correctly—wiring up the right environment, inputs, outputs, and storage mode.
 

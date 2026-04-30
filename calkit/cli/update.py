@@ -535,22 +535,45 @@ def update_agent_skills(
         raise_error("Bundled agent skills are missing from this installation")
     dest_root = os.path.join(os.path.expanduser("~"), ".agents", "skills")
     os.makedirs(dest_root, exist_ok=True)
+
+    def _fix_skill_name(dest_dir: str, prefixed_name: str) -> None:
+        skill_md = os.path.join(dest_dir, "SKILL.md")
+        if not os.path.isfile(skill_md):
+            return
+        with open(skill_md) as f:
+            content = f.read()
+        import re
+
+        content = re.sub(
+            r"^(name:\s*)(.+)$",
+            f"\\g<1>{prefixed_name}",
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        with open(skill_md, "w") as f:
+            f.write(content)
+
     copied = 0
     if use_packaged:
         for entry in source.iterdir():
             if not entry.is_dir():
                 continue
-            dest = os.path.join(dest_root, entry.name)
+            prefixed = f"calkit-{entry.name}"
+            dest = os.path.join(dest_root, prefixed)
             with resources.as_file(entry) as source_dir:
                 shutil.copytree(source_dir, dest, dirs_exist_ok=True)
+            _fix_skill_name(dest, prefixed)
             copied += 1
     else:
         for name in os.listdir(source_repo):
             source_dir = os.path.join(source_repo, name)
             if not os.path.isdir(source_dir):
                 continue
-            dest = os.path.join(dest_root, name)
+            prefixed = f"calkit-{name}"
+            dest = os.path.join(dest_root, prefixed)
             shutil.copytree(source_dir, dest, dirs_exist_ok=True)
+            _fix_skill_name(dest, prefixed)
             copied += 1
     if not quiet:
         typer.echo(f"Updated {copied} skills in {dest_root}")

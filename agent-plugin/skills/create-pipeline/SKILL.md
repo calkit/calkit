@@ -1,56 +1,52 @@
 ---
 name: create-pipeline
-description: Convert an existing repo with ad hoc scripts into a fully reproducible Calkit pipeline. Use when the user invokes `/calkit:create-pipeline` or asks to make a project reproducible end-to-end.
+description: Convert an existing repo with ad hoc scripts into a fully
+  reproducible Calkit pipeline. Use when the user invokes
+  `/calkit:create-pipeline` or asks to make a project reproducible end-to-end.
 ---
 
 # Create a Calkit pipeline
 
-Convert an existing repo with ad hoc scripts and manual steps into a fully reproducible Calkit pipeline. After this skill completes, running `calkit run` should reproduce all important outputs from scratch.
+Convert an existing repo with ad hoc scripts and manual steps into a fully
+reproducible Calkit pipeline. When complete, `calkit run` should reproduce all
+important outputs from scratch.
 
-## When to use this skill
-
-Use this when:
-
-- The project has scripts or notebooks that are run manually, in no enforced order
-- There is no `pipeline` section in `calkit.yaml` yet (or no `calkit.yaml` at all)
-- The goal is to make the project reproducible end-to-end
-
-## Step 1—Understand the existing repo
+## Step 1 — Understand the existing repo
 
 Before writing any YAML, map out what's already there.
 
-1. List all scripts and notebooks: look in common locations (`scripts/`, `notebooks/`, `src/`, root `.py`/`.R`/`.jl`/`.m`/`.ipynb` files)
-2. Read each script to understand what it reads and writes
-3. Identify the dependency order: which outputs of script A become inputs to script B?
-4. Note which environment each script needs (Python version, packages, R, Julia, MATLAB, Docker, etc.)
+1. List all scripts and notebooks: look in `scripts/`, `notebooks/`, `src/`,
+   and the repo root for `.py`, `.R`, `.jl`, `.m`, `.ipynb` files.
+2. Read each script to understand what it reads and writes.
+3. Identify the dependency order: which outputs of script A become inputs to
+   script B?
+4. Note which environment each script needs (Python version, packages, R,
+   Julia, MATLAB, Docker, etc.).
 
-Ask the user if the order or dependencies are unclear. Do not guess at data flow.
+Ask the user if the order or dependencies are unclear. Do not guess at data
+flow.
 
-## Step 2—Check or initialize the project
+## Step 2 — Initialize the project
 
-If there is no `calkit.yaml`, initialize the project first:
+If there is no `calkit.yaml`, run:
 
 ```bash
 calkit init
 ```
 
-This sets up Git (if needed) and DVC. Check the result:
+This sets up Git (if needed) and DVC. If `calkit.yaml` already exists but has
+no `pipeline` section, skip this — you will add one.
 
-```bash
-ls calkit.yaml dvc.yaml .dvc/ 2>/dev/null
-```
+## Step 3 — Define environments
 
-If `calkit.yaml` already exists but has no `pipeline` section, that's fine—you will add one.
+Every stage must reference a named environment. Identify what's needed:
 
-## Step 3—Define environments
-
-Every stage must reference a named environment. Identify the distinct environments needed:
-
-- **Python projects**: does the repo have `requirements.txt`, `pyproject.toml`, or `environment.yml`? Use `uv-venv` or `conda`.
-- **R projects**: does it have `renv.lock` or `DESCRIPTION`? Use `renv`.
-- **Julia projects**: does it have `Project.toml`? Use `julia`.
-- **LaTeX**: use `docker` with `texlive/texlive:latest-full` unless the user has a preference.
-- **MATLAB**: use `matlab`.
+- **Python**: `requirements.txt` or `pyproject.toml` → `uv-venv`;
+  `environment.yml` → `conda`
+- **R**: `renv.lock` → `renv`
+- **Julia**: `Project.toml` → `julia`
+- **LaTeX**: `docker` with `texlive/texlive:latest-full`
+- **MATLAB**: `matlab`
 
 Add environments to `calkit.yaml`:
 
@@ -62,23 +58,21 @@ environments:
     python: "3.13"
 ```
 
-If there is only one Python environment needed, name it `main`. If there are multiple (e.g., one for analysis and one for paper-building), give them descriptive names.
+Name a single Python environment `main`. With multiple environments, use
+descriptive names (e.g., `analysis`, `paper`).
 
-## Step 4—Try `calkit xr` for the fast path
+## Step 4 — Try `calkit xr` first
 
-For each script or notebook, try `calkit xr` first before writing YAML by hand. It auto-detects stage kind, environment, and I/O:
+For each script or notebook, try `xr` before writing YAML by hand. It
+auto-detects stage kind, environment, and I/O:
 
 ```bash
-# Dry run first to see what it would do
-calkit xr scripts/collect-data.py --dry-run
-
-# If the dry run looks correct, run for real
-calkit xr scripts/collect-data.py
+calkit xr scripts/collect-data.py --dry-run   # preview first
+calkit xr scripts/collect-data.py             # run for real
 ```
 
-Work through scripts in dependency order (inputs before outputs). After each `xr` call, verify the stage was added to `calkit.yaml` correctly and that detected I/O matches what you found in Step 1.
-
-If `xr` misses inputs or outputs, add them explicitly:
+Work through scripts in dependency order. After each call, verify the new
+stage in `calkit.yaml`. Override detected I/O if needed:
 
 ```bash
 calkit xr scripts/train.py \
@@ -87,15 +81,13 @@ calkit xr scripts/train.py \
   --output models/model.pkl
 ```
 
-## Step 5—Write stages manually when `xr` isn't suitable
+## Step 5 — Write stages manually when `xr` isn't suitable
 
 Write stages directly in `calkit.yaml` when:
 
-- The script is a shell command or compound command, not a standalone file
-- You need fine control over storage modes, `always_run`, `iterate_over`, etc.
+- The stage is a shell command or compound command, not a standalone file
+- You need fine control over `always_run`, `iterate_over`, storage modes, etc.
 - `xr` does not support the stage kind
-
-Add a `pipeline.stages` block to `calkit.yaml`:
 
 ```yaml
 pipeline:
@@ -127,69 +119,63 @@ pipeline:
       outputs: []
 ```
 
-**Rules:**
+Rules:
 
-- Stage names should be short, lowercase, hyphenated—they appear in CLI output and DVC stage names.
-- Every file that one stage writes and another stage reads must be declared as both an output and an input. If you skip a dependency, stages may run in the wrong order or not re-run when they should.
-- Prefer `from_stage_outputs: stage-name` when a stage consumes everything from a prior stage, rather than listing individual files.
+- Stage names should be short, lowercase, hyphenated.
+- Every file one stage writes and another reads must be declared as both an
+  output and an input — otherwise stages may run out of order or miss re-runs.
+- Use `from_stage_outputs: stage-name` when a stage consumes all outputs of a
+  prior stage.
 
-## Step 6—Decide output storage
+## Step 6 — Choose output storage
 
-For each output, decide: Git or DVC?
+For each output:
 
-- **Git**: small files (< a few MB), text-based, human-readable. Examples: summary CSVs, JSON metadata, PDFs, HTML reports.
-- **DVC**: large files, binary files, datasets that change frequently. Examples: raw data downloads, model weights, large matrices.
+- **Git**: small, text-based files (summary CSVs, JSON metadata, PDFs, HTML
+  reports)
+- **DVC** (default): large or binary files (raw data, model weights, matrices)
 
 ```yaml
 outputs:
-  - data/raw.csv # DVC (default—large/binary)
+  - data/raw.csv # DVC (default)
   - path: data/meta.json
-    storage: git # small metadata, commit to Git
+    storage: git
   - path: paper/paper.pdf
-    storage: git # PDF, commit to Git
+    storage: git
 ```
 
-When in doubt, ask the user. Storage mode affects whether collaborators can see the file without `calkit pull`.
+When in doubt, ask the user. Storage mode affects whether collaborators can
+see the file without `calkit pull`.
 
-## Step 7—Run the pipeline
-
-Run the full pipeline to verify everything works:
+## Step 7 — Run and verify
 
 ```bash
 calkit run
 ```
 
-Watch for errors:
+Common errors:
 
-- Missing inputs: a stage lists an input that doesn't exist and isn't produced by an earlier stage
-- Environment errors: `calkit check env --name <env>` to diagnose
-- Script errors: fix in the script, then re-run
+- **Missing inputs**: a stage lists an input that no earlier stage produces
+- **Environment errors**: run `calkit check env --name <env>` to diagnose
+- **Script errors**: fix the script, then re-run
 
-If a specific stage fails, re-run just that stage:
+Run a single stage: `calkit run <stage-name>`
+Force re-run everything: `calkit run --force`
 
-```bash
-calkit run <stage-name>
-```
-
-Force re-run even if nothing changed:
-
-```bash
-calkit run --force
-```
-
-## Step 8—Commit
-
-Once the pipeline runs successfully:
+## Step 8 — Commit
 
 ```bash
 calkit commit -m "Add reproducible pipeline"
 ```
 
-This commits both Git-tracked files and DVC-tracked metadata.
+## Common mistakes
 
-## Common mistakes to avoid
-
-- **Missing intermediate files in inputs/outputs**: if `process.py` reads `data/raw.csv` but that file isn't declared as an output of the `collect-data` stage, DVC won't know the dependency exists.
-- **Hard-coded absolute paths in scripts**: scripts should use relative paths from the repo root (or from `wdir` if set).
-- **Editing `dvc.yaml` directly**: always edit `calkit.yaml`. `dvc.yaml` is regenerated by Calkit.
-- **Forgetting `environment`**: every stage needs one. If the script uses system tools only, use `_system` as the environment name.
+- **Missing intermediate files**: if `process.py` reads `data/raw.csv` but
+  that file isn't declared as an output of `collect-data`, DVC won't track the
+  dependency.
+- **Absolute paths in scripts**: use paths relative to the repo root (or
+  `wdir` if set).
+- **Editing `dvc.yaml` directly**: always edit `calkit.yaml` — `dvc.yaml` is
+  regenerated by Calkit.
+- **Missing `environment`**: every stage needs one. Use `_system` for stages
+  that only use system tools.

@@ -1,26 +1,29 @@
 ---
 name: conventions
-description: Calkit conventions and foundational context. Load whenever working in a Calkit project — defines calkit.yaml structure, environments, pipeline stages, CLI commands, and version control conventions.
+description: Calkit conventions and foundational context. Load whenever working
+  in a Calkit project — defines calkit.yaml structure, environments, pipeline
+  stages, CLI commands, and version control conventions.
 ---
 
 # Calkit conventions
 
-This is a reference skill that provides foundational context about Calkit. Load it whenever working in a Calkit project.
-
-## What Calkit is
-
-Calkit is a tool for research project management, with a focus on automation and reproducibility—like continuous delivery for research. It provides a unified interface over Git (source control) and DVC (data versioning) and adds a layer of environment management and pipeline orchestration on top. The central artifact is `calkit.yaml`, which is the project's metadata database.
+Calkit is a tool for research project management focused on automation and
+reproducibility — like continuous delivery for research. It provides a unified
+interface over Git (source control) and DVC (data versioning), and adds
+environment management and pipeline orchestration on top. The central artifact
+is `calkit.yaml`, the project's metadata database.
 
 ## The `calkit.yaml` file
 
 `calkit.yaml` lives at the repo root and contains:
 
-- `environments`—computational environments (Python venvs, Conda, Docker, R, Julia, MATLAB, etc.)
-- `pipeline.stages`—the reproducible pipeline
-- `notebooks`—registered Jupyter notebooks
-- `datasets`, `figures`, `publications`—versioned project outputs
-- `procedures`, `calculations`, `references`—supporting metadata
-- `showcase`—elements shown on the project's Calkit Cloud homepage
+- `environments` — computational environments (Python venvs, Conda, Docker,
+  R, Julia, MATLAB, etc.)
+- `pipeline.stages` — the reproducible pipeline
+- `notebooks` — registered Jupyter notebooks
+- `datasets`, `figures`, `publications` — versioned project outputs
+- `procedures`, `calculations`, `references` — supporting metadata
+- `showcase` — elements shown on the project's Calkit Cloud homepage
 
 A minimal example:
 
@@ -45,7 +48,9 @@ pipeline:
 
 ## Environments
 
-Every pipeline stage must reference a named environment defined in `environments`. Calkit enforces this to ensure reproducibility. Supported kinds:
+Every pipeline stage must reference a named environment defined in
+`environments`. Calkit enforces this to ensure reproducibility. Supported
+kinds:
 
 | Kind      | Spec file                               |
 | --------- | --------------------------------------- |
@@ -78,11 +83,14 @@ environments:
     path: renv.lock
 ```
 
-Calkit generates a lock file for each environment under `.calkit/env-locks/` and uses it as a DVC dependency. If the environment changes, affected stages are automatically flagged for re-run.
+Calkit generates a lock file for each environment under `.calkit/env-locks/`
+and uses it as a DVC dependency. If the environment changes, affected stages
+are automatically flagged for re-run.
 
 ## Pipeline stages
 
-Stages live under `pipeline.stages` in `calkit.yaml`. Every stage requires `kind` and `environment`. Most stages also declare `inputs` and `outputs`.
+Stages live under `pipeline.stages` in `calkit.yaml`. Every stage requires
+`kind` and `environment`. Most stages also declare `inputs` and `outputs`.
 
 ### Common parameters (all stage kinds)
 
@@ -99,7 +107,7 @@ Stages live under `pipeline.stages` in `calkit.yaml`. Every stage requires `kind
 
 ### Stage kinds and their required fields
 
-**`python-script`**—run a Python script
+**`python-script`** — run a Python script
 
 ```yaml
 kind: python-script
@@ -107,7 +115,7 @@ script_path: scripts/run.py
 args: ["--flag", "value"] # optional
 ```
 
-**`jupyter-notebook`**—execute a Jupyter notebook
+**`jupyter-notebook`** — execute a Jupyter notebook
 
 ```yaml
 kind: jupyter-notebook
@@ -117,7 +125,7 @@ executed_ipynb_storage: git # optional, default: dvc
 parameters: { key: value } # optional, papermill parameters
 ```
 
-**`shell-command`**—run an arbitrary shell command
+**`shell-command`** — run an arbitrary shell command
 
 ```yaml
 kind: shell-command
@@ -125,14 +133,14 @@ command: "python -m mymodule --arg val"
 shell: bash # optional, default: bash
 ```
 
-**`shell-script`**—run a shell script file
+**`shell-script`** — run a shell script file
 
 ```yaml
 kind: shell-script
 script_path: scripts/run.sh
 ```
 
-**`latex`**—compile a LaTeX document to PDF
+**`latex`** — compile a LaTeX document to PDF
 
 ```yaml
 kind: latex
@@ -140,35 +148,35 @@ target_path: paper/paper.tex
 pdf_storage: git # optional, default: dvc
 ```
 
-**`r-script`**—run an R script
+**`r-script`** — run an R script
 
 ```yaml
 kind: r-script
 script_path: scripts/analysis.R
 ```
 
-**`julia-script`** / **`julia-command`**—run Julia code
+**`julia-script`** / **`julia-command`** — run Julia code
 
 ```yaml
 kind: julia-script
 script_path: scripts/run.jl
 ```
 
-**`matlab-script`** / **`matlab-command`**—run MATLAB code
+**`matlab-script`** / **`matlab-command`** — run MATLAB code
 
 ```yaml
 kind: matlab-script
 script_path: scripts/run.m
 ```
 
-**`docker-command`**—run a command inside a Docker container
+**`docker-command`** — run a command inside a Docker container
 
 ```yaml
 kind: docker-command
 command: "docker run --rm myimage mycommand"
 ```
 
-**`command`**—generic command (for tools that don't fit other kinds)
+**`command`** — generic command (for tools that don't fit other kinds)
 
 ```yaml
 kind: command
@@ -177,7 +185,8 @@ command: "mytool --input data/raw.csv --output data/out.csv"
 
 ### Outputs: Git vs. DVC storage
 
-By default, outputs are stored with DVC (large file storage). Use `storage: git` for small files that belong in version control:
+By default, outputs are stored with DVC (large file storage). Use
+`storage: git` for small files that belong in version control:
 
 ```yaml
 outputs:
@@ -191,7 +200,8 @@ outputs:
 
 ### Declaring dependencies between stages
 
-Use `from_stage_outputs` to declare that a stage depends on another stage's outputs (rather than listing individual files):
+Use `from_stage_outputs` to declare that a stage depends on another stage's
+outputs rather than listing individual files:
 
 ```yaml
 stages:
@@ -207,7 +217,7 @@ stages:
     script_path: scripts/process.py
     environment: main
     inputs:
-      - from_stage_outputs: collect-data # depend on all outputs of collect-data
+      - from_stage_outputs: collect-data
     outputs:
       - data/processed.csv
 ```
@@ -235,61 +245,61 @@ stages:
 
 ## Relationship to DVC
 
-Calkit compiles `calkit.yaml` into `dvc.yaml` when `calkit run` is called. You should not edit `dvc.yaml` directly—treat it as a generated file. The authoritative pipeline definition is always `calkit.yaml`.
+Calkit compiles `calkit.yaml` into `dvc.yaml` when `calkit run` is called.
+Do not edit `dvc.yaml` directly — it is a generated file. The authoritative
+pipeline definition is always `calkit.yaml`.
 
 DVC handles:
 
 - Caching: stages that haven't changed since last run are skipped
 - Remote storage: large files pushed/pulled with `calkit push` / `calkit pull`
-- Dependency graph: Calkit/DVC computes run order from declared inputs/outputs
+- Dependency graph: run order is computed from declared inputs/outputs
 
 ## Key CLI commands
 
-| Command                         | What it does                                                          |
-| ------------------------------- | --------------------------------------------------------------------- |
-| `calkit run`                    | Run the pipeline (skips unchanged stages)                             |
-| `calkit run --force`            | Force re-run all stages                                               |
-| `calkit status`                 | Show which stages are stale                                           |
-| `calkit xr <file>`              | Execute-and-record: auto-detect stage type, env, I/O, add to pipeline |
-| `calkit xenv -n <env> -- <cmd>` | Run a command in a named environment                                  |
-| `calkit push`                   | Push Git commits and DVC-tracked files to remotes                     |
-| `calkit pull`                   | Pull latest code and data                                             |
-| `calkit sync`                   | Pull then push                                                        |
-| `calkit commit -m "msg"`        | Commit all tracked changes (Git + DVC)                                |
-| `calkit add <file>`             | Add a file to version control                                         |
-| `calkit check env --name <env>` | Verify an environment matches its spec                                |
-| `calkit new`                    | Create new project objects (notebook, dataset, etc.)                  |
+| Command                         | What it does                                         |
+| ------------------------------- | ---------------------------------------------------- |
+| `calkit run`                    | Run the pipeline (skips unchanged stages)            |
+| `calkit run --force`            | Force re-run all stages                              |
+| `calkit status`                 | Show which stages are stale                          |
+| `calkit xr <file>`              | Auto-detect stage type, env, I/O, add to pipeline    |
+| `calkit xenv -n <env> -- <cmd>` | Run a command in a named environment                 |
+| `calkit push`                   | Push Git commits and DVC-tracked files to remotes    |
+| `calkit pull`                   | Pull latest code and data                            |
+| `calkit sync`                   | Pull then push                                       |
+| `calkit commit -m "msg"`        | Commit all tracked changes (Git + DVC)               |
+| `calkit add <file>`             | Add a file to version control                        |
+| `calkit check env --name <env>` | Verify an environment matches its spec               |
+| `calkit new`                    | Create new project objects (notebook, dataset, etc.) |
 
-## `calkit xr`—the fastest path to a reproducible stage
+## `calkit xr` — the fastest path to a reproducible stage
 
-`xr` ("execute and record") is the recommended way to add scripts and notebooks to the pipeline for the first time. It:
+`xr` ("execute and record") is the recommended way to add scripts and
+notebooks to the pipeline for the first time. It:
 
-1. Detects the stage kind from the file extension (`.py`, `.ipynb`, `.R`, `.jl`, `.m`, `.sh`, `.tex`)
+1. Detects the stage kind from the file extension (`.py`, `.ipynb`, `.R`,
+   `.jl`, `.m`, `.sh`, `.tex`)
 2. Detects or creates the right environment
 3. Heuristically detects inputs and outputs from the script's file I/O calls
 4. Adds the stage to `calkit.yaml` and `dvc.yaml`
 5. Runs the stage
 
 ```bash
-calkit xr scripts/run.py          # Python script
-calkit xr notebooks/analysis.ipynb  # Jupyter notebook
-calkit xr paper/paper.tex         # LaTeX document
-calkit xr scripts/run.R           # R script
+calkit xr scripts/run.py              # Python script
+calkit xr notebooks/analysis.ipynb    # Jupyter notebook
+calkit xr paper/paper.tex             # LaTeX document
+calkit xr scripts/run.R               # R script
 
-# Override detected I/O
 calkit xr scripts/run.py --input data/raw.csv --output results/out.csv
-
-# Specify environment explicitly
 calkit xr scripts/run.py --environment main
-
-# Dry run—see what would happen without changing anything
-calkit xr scripts/run.py --dry-run
+calkit xr scripts/run.py --dry-run    # see what would happen without running
 ```
 
 ## Version control conventions
 
 - Source code and small outputs: tracked with Git
-- Large binary files, datasets, model weights: tracked with DVC (listed in `.dvcignore` equivalents, cached in `.dvc/cache`)
+- Large binary files, datasets, model weights: tracked with DVC
 - Lock files (`.calkit/env-locks/`): committed to Git, act as DVC dependencies
-- `dvc.yaml`: generated by Calkit—don't edit manually
-- `.calkit/`: Calkit's internal directory—commit its contents unless they are large generated files
+- `dvc.yaml`: generated by Calkit — don't edit manually
+- `.calkit/`: Calkit's internal directory — commit its contents unless they
+  are large generated files

@@ -195,13 +195,13 @@ def ls_files() -> list[str]:
                 "not a directory; this may indicate a bug or tampering with "
                 ".calkit/zip/paths.json"
             )
-    zip_files = set(zip_path_map.values())
+    zip_files = {Path(p).as_posix() for p in zip_path_map.values()}
     return [
         f
         for f in dict.fromkeys(
             git_files + dvc_files + cache_files + dvc_zip_files
         )
-        if f not in zip_files
+        if Path(f).as_posix() not in zip_files
     ]
 
 

@@ -384,7 +384,7 @@ def unzip(workspace_path: str, zip_path: str):
             target = os.path.normpath(
                 os.path.join(workspace_abs, member.filename)
             )
-            if not target.startswith(workspace_abs + os.sep):
+            if not os.path.realpath(target).startswith(workspace_abs + os.sep):
                 raise ValueError(
                     f"Zip entry {member.filename!r} would extract outside "
                     "the workspace directory"

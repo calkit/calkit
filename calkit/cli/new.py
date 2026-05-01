@@ -16,7 +16,6 @@ from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 from typing_extensions import Annotated
 
 import calkit
-import calkit.dvc.zip
 import calkit.pipeline
 from calkit.cli import raise_error, warn
 from calkit.cli.check import check_environment
@@ -2698,7 +2697,6 @@ def new_release(
     # Gather up the list of files to upload
     if path == ".":
         zip_path = release_files_dir + "/archive.zip"
-        calkit.dvc.zip.sync_all(direction="to-workspace")
         all_paths = calkit.releases.ls_files()
         typer.echo(f"Adding files to {zip_path}")
         calkit.releases.zip_paths(zip_path, all_paths)

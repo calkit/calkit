@@ -14,7 +14,6 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
-import calkit.dvc.zip
 import calkit.pipeline
 from calkit.cli import raise_error
 
@@ -266,7 +265,6 @@ def update_release(
         with open(readme_path, "w") as f:
             f.write(readme_txt)
         zip_path = release_files_dir + "/archive.zip"
-        calkit.dvc.zip.sync_all(direction="to-workspace")
         all_paths = calkit.releases.ls_files()
         typer.echo(f"Adding files to {zip_path}")
         calkit.releases.zip_paths(zip_path, all_paths)

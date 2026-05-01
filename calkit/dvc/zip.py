@@ -10,6 +10,7 @@ efficient.
 import json
 import os
 import shutil
+import stat
 import subprocess
 import zipfile
 from pathlib import Path
@@ -376,9 +377,25 @@ def unzip(workspace_path: str, zip_path: str):
                 "System unzip failed; falling back to Python zipfile.",
                 err=True,
             )
+    workspace_abs = os.path.realpath(workspace_path)
     with ZipFile(zip_path, "r") as zip_file:
         members = zip_file.infolist()
         for member in tqdm(members, desc="Unzipping", unit="file"):
+            target = os.path.normpath(
+                os.path.join(workspace_abs, member.filename)
+            )
+            if not os.path.realpath(target).startswith(workspace_abs + os.sep):
+                raise ValueError(
+                    f"Zip entry {member.filename!r} would extract outside "
+                    "the workspace directory"
+                )
+            if os.path.isfile(target) and not os.access(target, os.W_OK):
+                # File may be read-only (e.g. created by Docker as root or by
+                # DVC). Try chmod first; if that fails, remove and re-extract.
+                try:
+                    os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
+                except OSError:
+                    os.remove(target)
             zip_file.extract(member, workspace_path)
 
 

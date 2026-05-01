@@ -15,6 +15,7 @@ from typing import Literal
 import git
 
 import calkit
+import calkit.dvc.zip
 
 SERVICES = {
     "caltechdata": {"name": "CaltechDATA", "url": "https://data.caltech.edu"},
@@ -165,7 +166,21 @@ def ls_files() -> list[str]:
                 fpath = os.path.join(root, filename)
                 if os.path.isfile(fpath):
                     cache_files.append(fpath)
-    return list(dict.fromkeys(git_files + dvc_files + cache_files))
+    # Include files from unzipped dvc-zip workspace folders, which are
+    # ignored by both Git and DVC and would otherwise be missing from the
+    # release archive
+    dvc_zip_files: list[str] = []
+    zip_path_map = calkit.dvc.zip.get_zip_path_map()
+    for workspace_path in zip_path_map:
+        if os.path.isdir(workspace_path):
+            for root, _, files in os.walk(workspace_path):
+                for filename in files:
+                    fpath = os.path.join(root, filename)
+                    if os.path.isfile(fpath):
+                        dvc_zip_files.append(fpath)
+    return list(
+        dict.fromkeys(git_files + dvc_files + cache_files + dvc_zip_files)
+    )
 
 
 def make_dvc_md5s(

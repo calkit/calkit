@@ -9,6 +9,7 @@ import bibtexparser
 import git
 import pytest
 
+from calkit.dvc.zip import write_zip_path_map
 from calkit.releases import (
     check_project_release_archive,
     create_bibtex,
@@ -66,6 +67,17 @@ def test_ls_files(tmp_dir):
     assert ".dvc/cache/aa/legacy" in files
     assert ".dvc/cache/files/md5/bb/modern" in files
     assert ".dvc/cache/runs/cc/hash/run" in files
+    # Ensure files from unzipped dvc-zip workspace folders are included;
+    # these folders are ignored by both Git and DVC
+    os.makedirs("my-zip-workspace/sub", exist_ok=True)
+    (tmp_dir / "my-zip-workspace" / "data.txt").write_text("data")
+    (tmp_dir / "my-zip-workspace" / "sub" / "nested.txt").write_text("nested")
+    write_zip_path_map(
+        {"my-zip-workspace": ".calkit/zip/files/my-zip-workspace.zip"}
+    )
+    files = ls_files()
+    assert "my-zip-workspace/data.txt" in files
+    assert "my-zip-workspace/sub/nested.txt" in files
 
 
 def test_check_project_release_archive_passes_when_pipeline_is_current(

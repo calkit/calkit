@@ -78,6 +78,7 @@ def test_ls_files(tmp_dir):
     files = ls_files()
     assert "my-zip-workspace/data.txt" in files
     assert "my-zip-workspace/sub/nested.txt" in files
+    assert ".calkit/zip/files/my-zip-workspace.zip" not in files
 
 
 def test_check_project_release_archive_passes_when_pipeline_is_current(

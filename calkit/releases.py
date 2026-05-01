@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from pathlib import Path
 from typing import Literal
 
 import git
@@ -170,14 +171,20 @@ def ls_files() -> list[str]:
     # ignored by both Git and DVC and would otherwise be missing from the
     # release archive
     dvc_zip_files: list[str] = []
+    repo_root = Path(repo.working_tree_dir).resolve()
     zip_path_map = calkit.dvc.zip.get_zip_path_map()
     for workspace_path in zip_path_map:
-        if os.path.isdir(workspace_path):
-            for root, _, files in os.walk(workspace_path):
+        abs_workspace = (repo_root / workspace_path).resolve()
+        if not abs_workspace.is_relative_to(repo_root):
+            continue
+        if abs_workspace.is_dir():
+            for root, _, files in os.walk(abs_workspace):
                 for filename in files:
-                    fpath = os.path.join(root, filename)
-                    if os.path.isfile(fpath):
-                        dvc_zip_files.append(fpath)
+                    abs_fpath = Path(root) / filename
+                    if abs_fpath.is_file():
+                        dvc_zip_files.append(
+                            str(abs_fpath.relative_to(repo_root))
+                        )
     return list(
         dict.fromkeys(git_files + dvc_files + cache_files + dvc_zip_files)
     )

@@ -2,7 +2,7 @@
   "name": "calkit-vscode",
   "displayName": "Calkit",
   "description": "An extension for working with Calkit projects.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "calkit",
   "license": "MIT",
   "repository": {

@@ -10,6 +10,7 @@ import {
   compactSlurmOptions,
   findCalkitEnvKernelSourceCandidate,
   getDefaultSlurmOptions,
+  kernelRegistrationKinds,
   makeCalkitEnvKernelSourceCandidates,
   slurmOptionsToOptionList,
   type CalkitEnvNotebookKernelSource,
@@ -440,6 +441,7 @@ async function selectCalkitEnvironment(
       picked.innerEnvironment,
       "-e",
       targetNotebookUri,
+      picked.innerKind,
     );
     await refreshNotebookToolbarContext(context);
     return kernelId;
@@ -472,7 +474,7 @@ async function selectCalkitEnvironment(
     slurmAutoStartSuppressedThisSession.delete(targetNotebookUri);
   }
 
-  // For uv/julia in a non-nested setup, only register/check the kernel and
+  // For local/non-nested environments, only register/check the kernel and
   // then select it in VS Code. No server launch is needed here.
   if (
     !picked.outerSlurmEnvironment &&
@@ -483,6 +485,7 @@ async function selectCalkitEnvironment(
       picked.innerEnvironment,
       "-e",
       targetNotebookUri,
+      picked.innerKind,
     );
     await refreshNotebookToolbarContext(context);
     return kernelId;
@@ -1870,6 +1873,7 @@ async function autoSelectEnvironmentForActiveNotebook(
       configuredCandidate.innerEnvironment,
       "-e",
       notebookUri,
+      configuredCandidate.innerKind,
     );
     if (kernelId) {
       log(
@@ -2225,7 +2229,7 @@ function buildDockerRunCommand(
 }
 
 function needsKernelRegistration(kind: EnvKind): boolean {
-  return kind === "uv" || kind === "julia";
+  return kernelRegistrationKinds.has(kind);
 }
 
 function createServerToken(): string {
@@ -2389,8 +2393,9 @@ async function registerAndSelectKernel(
   envName: string,
   envFlag: "-n" | "-e",
   expectedNotebookUri?: string,
+  kind?: EnvKind,
 ): Promise<string | undefined> {
-  log(`Registering and selecting kernel for env: ${envName}`);
+  log(`Registering and selecting kernel for env: ${envName} (kind=${kind})`);
 
   return await withKernelProgress(
     "Checking environment and setting kernel...",

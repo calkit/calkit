@@ -223,3 +223,14 @@ export function findCalkitEnvKernelSourceCandidate(
     (candidate) => candidate.environmentName === environmentName,
   );
 }
+
+// Environment kinds that can have their Jupyter kernel registered and selected
+// natively in VS Code — no Jupyter server launch required.
+export const kernelRegistrationKinds: ReadonlySet<EnvKind> = new Set<EnvKind>([
+  "uv",
+  "uv-venv",
+  "venv",
+  "conda",
+  "pixi",
+  "julia",
+]);

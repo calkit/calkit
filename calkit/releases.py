@@ -171,12 +171,16 @@ def ls_files() -> list[str]:
     # ignored by both Git and DVC and would otherwise be missing from the
     # release archive
     dvc_zip_files: list[str] = []
-    repo_root = Path(repo.working_tree_dir).resolve()
+    repo_root = Path(repo.working_dir).resolve()
     zip_path_map = calkit.dvc.zip.get_zip_path_map()
     for workspace_path in zip_path_map:
         abs_workspace = (repo_root / workspace_path).resolve()
         if not abs_workspace.is_relative_to(repo_root):
-            continue
+            raise ValueError(
+                f"dvc-zip workspace path {workspace_path!r} is not within "
+                "the repository root; this may indicate a bug or tampering "
+                "with .calkit/zip/paths.json"
+            )
         if abs_workspace.is_dir():
             for root, _, files in os.walk(abs_workspace):
                 for filename in files:
@@ -185,6 +189,12 @@ def ls_files() -> list[str]:
                         dvc_zip_files.append(
                             str(abs_fpath.relative_to(repo_root))
                         )
+        else:
+            raise ValueError(
+                f"dvc-zip workspace path {workspace_path!r} is not a "
+                "directory; this may indicate a bug or tampering with "
+                ".calkit/zip/paths.json"
+            )
     return list(
         dict.fromkeys(git_files + dvc_files + cache_files + dvc_zip_files)
     )
@@ -227,7 +237,7 @@ def populate_dvc_cache():
     """Populate DVC cache from releases."""
     ck_info = calkit.load_calkit_info()
     releases = ck_info.get("releases", {})
-    for name, release in releases.items():
+    for name, _ in releases.items():
         md5s_fpath = f".calkit/releases/{name}/dvc-md5s.yaml"
         with open(md5s_fpath) as f:
             md5s = calkit.ryaml.load(f)

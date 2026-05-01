@@ -2400,8 +2400,6 @@ async function registerAndSelectKernel(
   return await withKernelProgress(
     "Checking environment and setting kernel...",
     async () => {
-      // For local venv-based environments, still register the kernel for CLI
-      // use (calkit nb run etc.), but select in VS Code via interpreter path
       const kernelSpec = await getExpectedKernelSpecForEnvironment(
         workspaceRoot,
         envName,

@@ -10,6 +10,7 @@ efficient.
 import json
 import os
 import shutil
+import stat
 import subprocess
 import zipfile
 from pathlib import Path
@@ -379,6 +380,14 @@ def unzip(workspace_path: str, zip_path: str):
     with ZipFile(zip_path, "r") as zip_file:
         members = zip_file.infolist()
         for member in tqdm(members, desc="Unzipping", unit="file"):
+            target = os.path.join(workspace_path, member.filename)
+            if os.path.exists(target) and not os.access(target, os.W_OK):
+                # File may be read-only (e.g. created by Docker as root or by
+                # DVC). Try chmod first; if that fails, remove and re-extract.
+                try:
+                    os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
+                except PermissionError:
+                    os.remove(target)
             zip_file.extract(member, workspace_path)
 
 

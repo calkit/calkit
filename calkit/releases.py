@@ -189,10 +189,10 @@ def ls_files() -> list[str]:
                         dvc_zip_files.append(
                             str(abs_fpath.relative_to(repo_root))
                         )
-        else:
+        elif abs_workspace.exists():
             raise ValueError(
-                f"dvc-zip workspace path {workspace_path!r} is not a "
-                "directory; this may indicate a bug or tampering with "
+                f"dvc-zip workspace path {workspace_path!r} exists but is "
+                "not a directory; this may indicate a bug or tampering with "
                 ".calkit/zip/paths.json"
             )
     return list(

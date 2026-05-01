@@ -195,9 +195,14 @@ def ls_files() -> list[str]:
                 "not a directory; this may indicate a bug or tampering with "
                 ".calkit/zip/paths.json"
             )
-    return list(
-        dict.fromkeys(git_files + dvc_files + cache_files + dvc_zip_files)
-    )
+    zip_files = set(zip_path_map.values())
+    return [
+        f
+        for f in dict.fromkeys(
+            git_files + dvc_files + cache_files + dvc_zip_files
+        )
+        if f not in zip_files
+    ]
 
 
 def make_dvc_md5s(

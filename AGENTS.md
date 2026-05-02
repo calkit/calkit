@@ -20,4 +20,4 @@ line length below 80 characters.
 Agents should never make commits to Git.
 
 Prefer tests that include multiple scenarios to comprehensively test
-a feature over many different test functions.
+a feature in one function over many different test functions.

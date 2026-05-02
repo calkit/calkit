@@ -201,7 +201,19 @@ def new_project(
                 ),
             )
         except Exception as e:
-            raise_error(f"Posting new project to cloud failed: {e}")
+            msg = f"Posting new project to cloud failed: {e}"
+            if (
+                git_repo_url is not None
+                and "Can only create projects for yourself" in str(e)
+            ):
+                detected_owner = git_repo_url.rstrip("/").split("/")[-2]
+                msg += (
+                    f"\n\nThe owner '{detected_owner}' was detected from "
+                    "your Git remote. If this is a GitHub organization, make "
+                    "sure the organization exists in Calkit Cloud and that you "
+                    "have write access to it."
+                )
+            raise_error(msg)
         # Now clone here
         if not os.path.isdir(abs_path):
             subprocess.run(["git", "clone", resp["git_repo_url"], abs_path])
@@ -278,6 +290,13 @@ def new_project(
         try:
             remote_name = calkit.dvc.configure_remote(wdir=abs_path)
             calkit.dvc.set_remote_auth(remote_name=remote_name, wdir=abs_path)
+            if not no_commit and repo is not None:
+                dvc_config = os.path.join(abs_path, ".dvc", "config")
+                if os.path.isfile(dvc_config) and repo.git.diff(dvc_config):
+                    repo.git.add(dvc_config)
+                    repo.git.commit(
+                        [dvc_config, "-m", "Configure Calkit DVC remote"]
+                    )
         except Exception:
             warn("Failed to setup Calkit DVC remote")
         prj = calkit.detect_project_name(wdir=abs_path)

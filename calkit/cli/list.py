@@ -140,3 +140,23 @@ def list_stages(
         if kinds is not None and stage.get("kind") not in kinds:
             continue
         typer.echo(name)
+
+
+@list_app.command(name="remotes")
+def list_remotes():
+    """List Git and DVC remotes."""
+    import git
+
+    try:
+        repo = git.Repo()
+        for remote in repo.remotes:
+            typer.echo(f"(Git) {remote.name}: {remote.url}")
+    except Exception as e:
+        warn(f"Could not list Git remotes: {e}")
+    # Now DVC remotes
+    try:
+        dvc_remotes = calkit.dvc.get_remotes()
+        for name, url in dvc_remotes.items():
+            typer.echo(f"(DVC) {name}: {url}")
+    except Exception as e:
+        warn(f"Could not list DVC remotes: {e}")

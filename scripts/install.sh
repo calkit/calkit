@@ -22,4 +22,11 @@ if ! uv tool install --upgrade calkit-python --python=3.14; then
     exit 1
 fi
 
+echo "Installing shell completion"
+if ! calkit --install-completion; then
+    echo "⚠️  Failed to install shell completion; run 'calkit --install-completion' manually"
+else
+    echo "✅ Shell completion installed"
+fi
+
 echo "✅ Success! 🚀"

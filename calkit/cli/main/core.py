@@ -35,7 +35,7 @@ from calkit import (
     DVC_EXTENSIONS,
     DVC_SIZE_THRESH_BYTES,
 )
-from calkit.cli import print_sep, raise_error, run_cmd, warn
+from calkit.cli import complete_stage_names, print_sep, raise_error, run_cmd, warn
 from calkit.cli.check import (
     check_app,
     check_conda_env,
@@ -1121,7 +1121,11 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
 @app.command(name="run")
 def run(
     targets: Annotated[
-        list[str] | None, typer.Argument(help="Stages to run.")
+        list[str] | None,
+        typer.Argument(
+            help="Stages to run.",
+            shell_complete=complete_stage_names,
+        ),
     ] = None,
     quiet: Annotated[
         bool, typer.Option("-q", "--quiet", help="Be quiet.")
@@ -1173,6 +1177,7 @@ def run(
         typer.Option(
             "--downstream",
             help="Start from the specified stage and run all downstream.",
+            shell_complete=complete_stage_names,
         ),
     ] = None,
     force_downstream: Annotated[

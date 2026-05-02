@@ -103,6 +103,9 @@ def new_project(
             help="Overwrite project if one already exists.",
         ),
     ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Print verbose output.")
+    ] = False,
 ):
     """Create a new project."""
     docs_url = "https://docs.calkit.org"
@@ -119,6 +122,8 @@ def new_project(
     except (InvalidGitRepositoryError, NoSuchPathError):
         repo = None
     if repo is not None and git_repo_url is None:
+        if verbose:
+            typer.echo("Detecting Git repo URL from existing repo")
         try:
             git_repo_url = repo.remotes.origin.url
             # Convert to HTTPS if it's SSH
@@ -140,6 +145,8 @@ def new_project(
         # If this isn't a DVC repo, run `dvc init`
         if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
             typer.echo("Initializing DVC repository")
+            if verbose:
+                typer.echo("Running 'dvc init'")
             try:
                 result = run_dvc_command(
                     ["init", "-q"],
@@ -251,6 +258,23 @@ def new_project(
                     repo.git.commit(
                         ["calkit.yaml", "-m", "Update calkit.yaml"]
                     )
+            # Set Git remote URL to match the one used in the cloud repo
+            if repo.remotes:
+                typer.echo("Updating Git remote URL to match cloud repo")
+                # Check if this one uses SSH and make the new one use SSH
+                # as well if so
+                current_url = repo.remotes.origin.url
+                new_url = resp["git_repo_url"]
+                if current_url.startswith("git@") and not new_url.startswith(
+                    "git@"
+                ):
+                    new_url = resp["git_repo_url"].replace(
+                        "https://github.com/", "git@github.com:"
+                    )
+                repo.git.remote(["set-url", "origin", new_url])
+            else:
+                typer.echo("Adding Git remote URL for cloud repo")
+                repo.git.remote(["add", "origin", resp["git_repo_url"]])
         try:
             remote_name = calkit.dvc.configure_remote(wdir=abs_path)
             calkit.dvc.set_remote_auth(remote_name=remote_name, wdir=abs_path)

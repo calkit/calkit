@@ -335,7 +335,7 @@ def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
     monkeypatch.setenv(
         "CALKIT_CLOUD_BASE_URL", httpserver.url_for("").rstrip("/")
     )
-    monkeypatch.setenv("CALKIT_TOKEN", "test-token")
+    monkeypatch.setenv("CALKIT_TEST_TOKEN", "test-token")
     project_resp = {
         "id": "00000000-0000-0000-0000-000000000001",
         "owner_account_id": "00000000-0000-0000-0000-000000000002",

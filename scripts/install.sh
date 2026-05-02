@@ -24,7 +24,7 @@ fi
 
 echo "Installing shell completion"
 if ! calkit --install-completion; then
-    echo "⚠️  Failed to install shell completion; run 'calkit --install-completion' manually"
+    echo "⚠️ Failed to install shell completion; run 'calkit --install-completion' manually"
 else
     echo "✅ Shell completion installed"
 fi

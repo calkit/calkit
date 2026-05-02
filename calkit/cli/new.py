@@ -210,13 +210,15 @@ def new_project(
                 git_repo_url is not None
                 and "Can only create projects for yourself" in str(e)
             ):
-                detected_owner = git_repo_url.rstrip("/").split("/")[-2]
-                msg += (
-                    f"\n\nThe owner '{detected_owner}' was detected from "
-                    "your Git remote. If this is a GitHub organization, make "
-                    "sure the organization exists in Calkit Cloud and that you "
-                    "have write access to it."
-                )
+                parts = git_repo_url.rstrip("/").split("/")
+                if len(parts) >= 2:
+                    detected_owner = parts[-2]
+                    msg += (
+                        f"\n\nThe owner '{detected_owner}' was detected from "
+                        "your Git remote. If this is a GitHub organization, "
+                        "make sure the organization exists in Calkit Cloud "
+                        "and that you have write access to it."
+                    )
             raise_error(msg)
         # Now clone here
         if not os.path.isdir(abs_path):

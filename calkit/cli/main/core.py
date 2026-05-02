@@ -626,7 +626,7 @@ def add(
             ]
         )
         repo.git.add(".dvc/config")
-    dvc_paths = calkit.dvc.list_paths()
+    dvc_paths = [] if dvc_repo is None else calkit.dvc.list_paths()
     untracked_git_files = repo.untracked_files
     if auto_commit_message:
         # See if this path is in the repo already

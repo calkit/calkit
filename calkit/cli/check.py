@@ -353,8 +353,8 @@ def check_environment(
             raise_error("venv environments require a prefix")
         if "path" not in env:
             raise_error("venv environments require a path")
-        prefix = env["prefix"]
-        path = env["path"]
+        prefix = os.path.expandvars(env["prefix"])
+        path = os.path.expandvars(env["path"])
         lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=False
         )

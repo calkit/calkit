@@ -19,9 +19,8 @@ def test_get_base_url_env_override(monkeypatch):
 
 def test_get_base_url_no_override(monkeypatch):
     monkeypatch.delenv("CALKIT_CLOUD_BASE_URL", raising=False)
-    # Should return the test-env URL (CALKIT_ENV=test is set by pytest config)
-    url = cloud.get_base_url()
-    assert url.startswith("http")
+    # CALKIT_ENV=test is set by pytest config → should return the test-env URL
+    assert cloud.get_base_url() == "http://api.localhost"
 
 
 def _make_jwt(exp: float) -> str:

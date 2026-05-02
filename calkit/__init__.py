@@ -22,7 +22,6 @@ from . import licenses  # noqa: F401
 from . import overleaf  # noqa: F401
 from . import julia  # noqa: F401
 from .notebooks import declare_notebook  # noqa: F401
-from .jupyterlab.routes import setup_route_handlers
 
 
 def _jupyter_labextension_paths():
@@ -43,6 +42,8 @@ def _load_jupyter_server_extension(server_app):
         JupyterLab application instance
     """
     import os
+
+    from .jupyterlab.routes import setup_route_handlers  # deferred to avoid heavy tornado/jupyter_server import at CLI startup
 
     # Change to root_dir so all handlers work in the correct directory context
     root_dir = server_app.root_dir

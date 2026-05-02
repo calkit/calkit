@@ -18,14 +18,17 @@ def complete_stage_names(
     incomplete: str,
 ) -> list:
     """Return pipeline stage names for shell tab-completion."""
-    from click.shell_completion import CompletionItem
-
+    if not os.path.isfile("calkit.yaml"):
+        return []
     try:
-        import calkit
+        import ruamel.yaml
 
-        stages = (
-            calkit.load_calkit_info().get("pipeline", {}).get("stages", {})
-        )
+        from click.shell_completion import CompletionItem
+
+        ryaml = ruamel.yaml.YAML()
+        with open("calkit.yaml") as f:
+            info = ryaml.load(f) or {}
+        stages = info.get("pipeline", {}).get("stages", {})
         return [
             CompletionItem(name)
             for name in stages

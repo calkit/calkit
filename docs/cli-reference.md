@@ -159,13 +159,14 @@ Arguments:
 
 Options:
 
-| Option                   | Type    | Required | Default | Description                                      |
-| ------------------------ | ------- | -------- | ------- | ------------------------------------------------ |
-| `-m`, `--commit-message` | text    | no       |         | Automatically commit and use this as a message.  |
-| `--auto-message`, `-M`   | boolean | no       | False   | Commit with an automatically-generated message.  |
-| `--no-auto-ignore`       | boolean | no       | False   | Disable auto-ignore.                             |
-| `--push`                 | boolean | no       | False   | Push after committing.                           |
-| `--to`, `-t`             | text    | no       |         | System with which to add (git, dvc, or dvc-zip). |
+| Option                   | Type    | Required | Default | Description                                          |
+| ------------------------ | ------- | -------- | ------- | ---------------------------------------------------- |
+| `-m`, `--commit-message` | text    | no       |         | Automatically commit and use this as a message.      |
+| `--auto-message`, `-M`   | boolean | no       | False   | Commit with an automatically-generated message.      |
+| `--no-auto-ignore`       | boolean | no       | False   | Disable auto-ignore.                                 |
+| `--push`                 | boolean | no       | False   | Push after committing.                               |
+| `--to`, `-t`             | text    | no       |         | System with which to add (git, dvc, or dvc-zip).     |
+| `--dry-run`, `--dry`     | boolean | no       | False   | Show what would be added without actually adding it. |
 
 <a id="top-command-commit"></a>
 
@@ -355,7 +356,7 @@ Options:
 | `--force-downstream`    | boolean | no       | False   | Force downstream stages to run even if they are still up-to-date.         |
 | `--pull`                | boolean | no       | False   | Try automatically pulling missing data.                                   |
 | `--allow-missing`       | boolean | no       | False   | Skip stages with missing data.                                            |
-| `--dry`                 | boolean | no       | False   | Only print commands that would execute.                                   |
+| `--dry`, `--dry-run`    | boolean | no       | False   | Only print commands that would execute.                                   |
 | `--keep-going`, `-k`    | boolean | no       | False   | Continue executing, skipping stages with failed inputs from other stages. |
 | `--ignore-errors`       | boolean | no       | False   | Ignore errors from stages.                                                |
 | `--glob`                | boolean | no       | False   | Match stages with glob-style patterns.                                    |

@@ -833,6 +833,7 @@ Options:
 | `--template`, `-t`  | text    | no       |         | Template from which to derive the project, e.g., 'calkit/example-basic'.      |
 | `--no-commit`       | boolean | no       |         | Do not commit changes to Git.                                                 |
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite project if one already exists.                                      |
+| `--verbose`         | boolean | no       | False   | Print verbose output.                                                         |
 
 <a id="subcommand-new-figure"></a>
 
@@ -1632,6 +1633,7 @@ List Calkit objects.
 | [`procedures`](#subcommand-list-procedures)     |                                   |
 | [`releases`](#subcommand-list-releases)         | List releases.                    |
 | [`stages`](#subcommand-list-stages)             | List stages.                      |
+| [`remotes`](#subcommand-list-remotes)           | List Git and DVC remotes.         |
 
 <a id="subcommand-list-notebooks"></a>
 
@@ -1756,6 +1758,18 @@ Options:
 | Option         | Type | Required | Default | Description            |
 | -------------- | ---- | -------- | ------- | ---------------------- |
 | `--kind`, `-k` | text | no       |         | Filter stages by kind. |
+
+<a id="subcommand-list-remotes"></a>
+
+#### `calkit list remotes`
+
+List Git and DVC remotes.
+
+Usage:
+
+```text
+calkit list remotes
+```
 
 <a id="command-group-describe"></a>
 

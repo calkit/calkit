@@ -556,6 +556,14 @@ def add(
             help="System with which to add (git, dvc, or dvc-zip).",
         ),
     ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            "--dry",
+            help="Show what would be added without actually adding it.",
+        ),
+    ] = False,
 ):
     """Add paths to the repo.
 
@@ -567,6 +575,8 @@ def add(
     import dvc.repo
     from dvc.exceptions import NotDvcRepoError
 
+    if dry_run:
+        typer.echo("Dry run: No files will be added")
     if auto_commit_message:
         if commit_message is not None:
             raise_error(
@@ -598,18 +608,25 @@ def add(
     try:
         dvc_repo = get_dvc_repo()
     except NotDvcRepoError:
-        warn("DVC not initialized yet; initializing")
-        dvc_repo = dvc.repo.Repo.init()
-    # Ensure autostage is enabled for DVC
-    run_dvc_command(
-        [
-            "config",
-            "core.autostage",
-            "true",
-        ]
-    )
-    subprocess.call(["git", "add", ".dvc/config"])
-    dvc_paths = calkit.dvc.list_paths()
+        if dry_run:
+            dvc_repo = None
+            typer.echo(
+                "This is not a DVC repository; would initialize DVC here"
+            )
+        else:
+            warn("DVC not initialized yet; initializing")
+            dvc_repo = dvc.repo.Repo.init()
+    if not dry_run:
+        # Ensure autostage is enabled for DVC
+        run_dvc_command(
+            [
+                "config",
+                "core.autostage",
+                "true",
+            ]
+        )
+        repo.git.add(".dvc/config")
+    dvc_paths = [] if dvc_repo is None else calkit.dvc.list_paths()
     untracked_git_files = repo.untracked_files
     if auto_commit_message:
         # See if this path is in the repo already
@@ -618,7 +635,10 @@ def add(
         else:
             commit_message = f"Add {paths[0]}"
     if to is not None:
-        if to == "git":
+        if dry_run:
+            for path in paths:
+                typer.echo(f"Would add {path} to {to}")
+        elif to == "git":
             subprocess.call(["git", "add"] + paths)
         elif to == "dvc":
             run_dvc_command(["add"] + paths)
@@ -631,18 +651,24 @@ def add(
     else:
         if "." in paths:
             paths.remove(".")
-            dvc_status = dvc_repo.data_status()
-            for dvc_uncommitted in dvc_status["uncommitted"].get(
-                "modified", []
-            ):
-                if os.path.exists(dvc_uncommitted):
-                    typer.echo(f"Adding {dvc_uncommitted} to DVC")
-                    dvc_repo.commit(dvc_uncommitted, force=True)
-                else:
-                    warn(
-                        f"DVC uncommitted '{dvc_uncommitted}' does not exist; "
-                        "skipping"
-                    )
+            if dvc_repo is not None:
+                dvc_status = dvc_repo.data_status()
+                for dvc_uncommitted in dvc_status["uncommitted"].get(
+                    "modified", []
+                ):
+                    if os.path.exists(dvc_uncommitted):
+                        if dry_run:
+                            typer.echo(
+                                f"Would commit {dvc_uncommitted} to DVC"
+                            )
+                        else:
+                            typer.echo(f"Adding {dvc_uncommitted} to DVC")
+                            dvc_repo.commit(dvc_uncommitted, force=True)
+                    else:
+                        warn(
+                            f"DVC uncommitted '{dvc_uncommitted}' does not "
+                            "exist; skipping"
+                        )
             if not disable_auto_ignore:
                 for untracked_file in untracked_git_files:
                     if (
@@ -660,11 +686,16 @@ def add(
                         )
                         or untracked_file in AUTO_IGNORE_PATHS
                     ):
-                        typer.echo(f"Automatically ignoring {untracked_file}")
-                        with open(".gitignore", "a") as f:
-                            f.write("\n" + untracked_file + "\n")
-                        if ".gitignore" not in paths:
-                            paths.append(".gitignore")
+                        if dry_run:
+                            typer.echo(f"Would ignore {untracked_file}")
+                        else:
+                            typer.echo(
+                                f"Automatically ignoring {untracked_file}"
+                            )
+                            with open(".gitignore", "a") as f:
+                                f.write("\n" + untracked_file + "\n")
+                            if ".gitignore" not in paths:
+                                paths.append(".gitignore")
             # TODO: Figure out if we should group large folders for dvc
             # Now add untracked files automatically
             for untracked_file in repo.untracked_files:
@@ -679,42 +710,77 @@ def add(
             # Check if this path is already registered as a zip
             posix_path = Path(path).as_posix()
             if posix_path in zip_path_map:
-                typer.echo(f"Adding {path} via DVC zip")
-                calkit.dvc.zip.add(path)
+                if dry_run:
+                    typer.echo(f"Would add {path} via DVC zip")
+                else:
+                    typer.echo(f"Adding {path} via DVC zip")
+                    calkit.dvc.zip.add(path)
                 continue
             # Detect if this file should be tracked with Git or DVC
             # First see if it's in Git
             if repo.git.ls_files(path):
-                typer.echo(
-                    f"Adding {path} to Git since it's already in the repo"
-                )
-                subprocess.call(["git", "add", path])
+                if dry_run:
+                    typer.echo(
+                        f"Would add {path} to Git (already tracked in repo)"
+                    )
+                else:
+                    typer.echo(
+                        f"Adding {path} to Git since it's already in the repo"
+                    )
+                    subprocess.call(["git", "add", path])
             elif path in dvc_paths:
-                typer.echo(
-                    f"Adding {path} to DVC since it's already tracked with DVC"
-                )
-                run_dvc_command(["add", path])
+                if dry_run:
+                    typer.echo(
+                        f"Would add {path} to DVC (already tracked with DVC)"
+                    )
+                else:
+                    typer.echo(
+                        f"Adding {path} to DVC since it's already tracked "
+                        "with DVC"
+                    )
+                    run_dvc_command(["add", path])
             elif os.path.splitext(path)[-1] in DVC_EXTENSIONS:
-                typer.echo(f"Adding {path} to DVC per its extension")
-                run_dvc_command(["add", path])
+                if dry_run:
+                    typer.echo(f"Would add {path} to DVC (per extension)")
+                else:
+                    typer.echo(f"Adding {path} to DVC per its extension")
+                    run_dvc_command(["add", path])
             elif calkit.dvc.zip.is_zip_candidate(path):
-                typer.echo(
-                    f"Adding {path} as a DVC zip "
-                    "(large directory of small files)"
-                )
-                calkit.dvc.zip.add(path)
+                if dry_run:
+                    typer.echo(
+                        f"Would add {path} as a DVC zip "
+                        "(large directory of small files)"
+                    )
+                else:
+                    typer.echo(
+                        f"Adding {path} as a DVC zip "
+                        "(large directory of small files)"
+                    )
+                    calkit.dvc.zip.add(path)
             elif calkit.get_size(path) > DVC_SIZE_THRESH_BYTES:
-                typer.echo(
-                    f"Adding {path} to DVC since it's greater than 1 MB"
-                )
-                run_dvc_command(["add", path])
+                if dry_run:
+                    typer.echo(f"Would add {path} to DVC (>1 MB)")
+                else:
+                    typer.echo(
+                        f"Adding {path} to DVC since it's greater than 1 MB"
+                    )
+                    run_dvc_command(["add", path])
             else:
-                typer.echo(f"Adding {path} to Git")
-                subprocess.call(["git", "add", path])
-    if commit_message is not None:
-        subprocess.call(["git", "commit", "-m", commit_message])
-    if push_commit:
-        push()
+                if dry_run:
+                    typer.echo(f"Would add {path} to Git")
+                else:
+                    typer.echo(f"Adding {path} to Git")
+                    subprocess.call(["git", "add", path])
+    if not dry_run:
+        if commit_message is not None:
+            subprocess.call(["git", "commit", "-m", commit_message])
+        if push_commit:
+            push()
+    else:
+        if commit_message is not None:
+            typer.echo(f"Would commit with message: {commit_message}")
+        if push_commit:
+            typer.echo("Would push to Git and DVC after committing")
 
 
 @app.command(name="commit")
@@ -1195,7 +1261,11 @@ def run(
     ] = False,
     dry: Annotated[
         bool,
-        typer.Option("--dry", help="Only print commands that would execute."),
+        typer.Option(
+            "--dry",
+            "--dry-run",
+            help="Only print commands that would execute.",
+        ),
     ] = False,
     keep_going: Annotated[
         bool,

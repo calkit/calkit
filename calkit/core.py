@@ -669,6 +669,8 @@ def get_md5(path: str, exclude_files: list[str] | None = None) -> str:
 def set_env_vars(ck_info: dict, cli: bool = True) -> None:
     """Set environmental variables according to the values read from
     ``calkit.yaml``.
+
+    TODO: This should also handle ``dotenv``.
     """
     env_vars = ck_info.get("env_vars", {})
     if not isinstance(env_vars, dict):

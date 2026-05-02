@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import threading
 import time
 from functools import partial
@@ -30,6 +31,9 @@ _REFRESH_BUFFER_SECONDS = 60
 
 def get_base_url() -> str:
     """Get the API base URL."""
+    override = os.environ.get("CALKIT_CLOUD_BASE_URL")
+    if override:
+        return override
     urls = {
         "local": "http://api.localhost",
         "staging": "https://api.staging.calkit.io",

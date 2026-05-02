@@ -457,6 +457,10 @@ def check_environments(
     if not envs:
         typer.echo("No environments defined in calkit.yaml")
         return
+    # Set any project-level environmental variables before checking
+    # environments
+    dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    calkit.set_env_vars(ck_info=ck_info, cli=True)
     failures = []
     for env_name, env in envs.items():
         if env.get("kind") in calkit.environments.KINDS_NO_CHECK:

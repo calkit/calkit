@@ -103,6 +103,9 @@ def new_project(
             help="Overwrite project if one already exists.",
         ),
     ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Print verbose output.")
+    ] = False,
 ):
     """Create a new project."""
     docs_url = "https://docs.calkit.org"
@@ -119,8 +122,14 @@ def new_project(
     except (InvalidGitRepositoryError, NoSuchPathError):
         repo = None
     if repo is not None and git_repo_url is None:
+        if verbose:
+            typer.echo("Detecting Git repo URL from existing repo")
         try:
-            git_repo_url = repo.remotes.origin.url
+            remote_names = [r.name for r in repo.remotes]
+            remote = repo.remotes[
+                remote_names.index("origin") if "origin" in remote_names else 0
+            ]
+            git_repo_url = remote.url
             # Convert to HTTPS if it's SSH
             if git_repo_url.startswith("git@"):
                 git_repo_url = git_repo_url.replace(
@@ -140,6 +149,8 @@ def new_project(
         # If this isn't a DVC repo, run `dvc init`
         if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
             typer.echo("Initializing DVC repository")
+            if verbose:
+                typer.echo("Running 'dvc init'")
             try:
                 result = run_dvc_command(
                     ["init", "-q"],
@@ -194,7 +205,21 @@ def new_project(
                 ),
             )
         except Exception as e:
-            raise_error(f"Posting new project to cloud failed: {e}")
+            msg = f"Posting new project to cloud failed: {e}"
+            if (
+                git_repo_url is not None
+                and "Can only create projects for yourself" in str(e)
+            ):
+                parts = git_repo_url.rstrip("/").split("/")
+                if len(parts) >= 2:
+                    detected_owner = parts[-2]
+                    msg += (
+                        f"\n\nThe owner '{detected_owner}' was detected from "
+                        "your Git remote. If this is a GitHub organization, "
+                        "make sure the organization exists in Calkit Cloud "
+                        "and that you have write access to it."
+                    )
+            raise_error(msg)
         # Now clone here
         if not os.path.isdir(abs_path):
             subprocess.run(["git", "clone", resp["git_repo_url"], abs_path])
@@ -251,9 +276,38 @@ def new_project(
                     repo.git.commit(
                         ["calkit.yaml", "-m", "Update calkit.yaml"]
                     )
+            # Set Git remote URL to match the one used in the cloud repo
+            if repo.remotes:
+                typer.echo("Updating Git remote URL to match cloud repo")
+                # Use origin if present, otherwise fall back to the first remote
+                remote_names = [r.name for r in repo.remotes]
+                existing_remote = repo.remotes[
+                    remote_names.index("origin")
+                    if "origin" in remote_names
+                    else 0
+                ]
+                current_url = existing_remote.url
+                new_url = resp["git_repo_url"]
+                if current_url.startswith("git@") and not new_url.startswith(
+                    "git@"
+                ):
+                    new_url = resp["git_repo_url"].replace(
+                        "https://github.com/", "git@github.com:"
+                    )
+                repo.git.remote(["set-url", existing_remote.name, new_url])
+            else:
+                typer.echo("Adding Git remote URL for cloud repo")
+                repo.git.remote(["add", "origin", resp["git_repo_url"]])
         try:
             remote_name = calkit.dvc.configure_remote(wdir=abs_path)
             calkit.dvc.set_remote_auth(remote_name=remote_name, wdir=abs_path)
+            if not no_commit and repo is not None:
+                dvc_config = os.path.join(abs_path, ".dvc", "config")
+                if os.path.isfile(dvc_config) and repo.git.diff(dvc_config):
+                    repo.git.add(dvc_config)
+                    repo.git.commit(
+                        [dvc_config, "-m", "Configure Calkit DVC remote"]
+                    )
         except Exception:
             warn("Failed to setup Calkit DVC remote")
         prj = calkit.detect_project_name(wdir=abs_path)

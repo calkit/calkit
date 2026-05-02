@@ -331,6 +331,120 @@ def test_new_project_existing_files(tmp_dir):
     assert ck_info["title"] == "My new project"
 
 
+def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
+    monkeypatch.setenv(
+        "CALKIT_CLOUD_BASE_URL", httpserver.url_for("").rstrip("/")
+    )
+    monkeypatch.setenv("CALKIT_TEST_TOKEN", "test-token")
+    project_resp = {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "owner_account_id": "00000000-0000-0000-0000-000000000002",
+        "owner_account_name": "test-user",
+        "owner_account_display_name": "Test User",
+        "owner_account_type": "user",
+        "name": "my-project",
+        "title": "My Project",
+        "description": None,
+        "is_public": False,
+        "git_repo_url": "https://github.com/test-user/my-project",
+        "created": "2024-01-01T00:00:00",
+        "updated": "2024-01-01T00:00:00",
+        "latest_git_rev": None,
+        "status": None,
+        "status_updated": None,
+        "status_message": None,
+        "current_user_access": "owner",
+    }
+    # Test `new project .` in an existing git repo with a remote
+    httpserver.expect_ordered_request(
+        "/projects", method="POST"
+    ).respond_with_json(project_resp)
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["git", "config", "user.name", "Test User"])
+    subprocess.check_call(["git", "config", "user.email", "test@example.com"])
+    subprocess.check_call(
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/test-user/my-project.git",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "project",
+            ".",
+            "--title",
+            "My Project",
+            "--cloud",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["title"] == "My Project"
+    assert ck_info["owner"] == "test-user"
+    assert ck_info["name"] == "my-project"
+    assert ck_info["git_repo_url"] == "https://github.com/test-user/my-project"
+    repo = git.Repo()
+    assert repo.remotes.origin.url == "https://github.com/test-user/my-project"
+    assert not repo.is_dirty(untracked_files=True)
+    # Test 403: remote owner is an org not in Calkit Cloud; error should
+    # surface the detected org name and a helpful hint
+    httpserver.expect_ordered_request(
+        "/projects", method="POST"
+    ).respond_with_json(
+        {
+            "detail": (
+                "Can only create projects for yourself or organizations "
+                "you belong to"
+            )
+        },
+        status=403,
+    )
+    result = subprocess.run(
+        [
+            "calkit",
+            "new",
+            "project",
+            ".",
+            "--title",
+            "My Project",
+            "--cloud",
+            "--overwrite",
+            "--git-url",
+            "https://github.com/some-org/some-project",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "some-org" in result.stderr
+    assert "organization exists in Calkit Cloud" in result.stderr
+    # Test that a non-'origin' remote name is handled correctly
+    httpserver.expect_ordered_request(
+        "/projects", method="POST"
+    ).respond_with_json(project_resp)
+    subprocess.check_call(["git", "remote", "rename", "origin", "upstream"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "project",
+            ".",
+            "--title",
+            "My Project",
+            "--cloud",
+            "--overwrite",
+        ]
+    )
+    repo = git.Repo()
+    assert (
+        repo.remotes.upstream.url == "https://github.com/test-user/my-project"
+    )
+
+
 def test_new_python_script_stage(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     with open("script.py", "w") as f:

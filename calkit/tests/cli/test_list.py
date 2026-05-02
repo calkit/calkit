@@ -34,3 +34,23 @@ def test_list_stages(tmp_dir):
     )
     assert "stage1" in out
     assert "stage2" not in out
+
+
+def test_list_remotes(tmp_dir):
+    # Outside a repo: should warn but not fail
+    result = subprocess.run(
+        ["calkit", "list", "remotes"], capture_output=True, text=True
+    )
+    assert result.returncode == 0
+    # Inside a repo with a Git remote and a DVC remote
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(
+        ["git", "remote", "add", "origin", "https://github.com/test/repo.git"]
+    )
+    subprocess.check_call(["dvc", "init", "-q"])
+    subprocess.check_call(
+        ["dvc", "remote", "add", "myremote", "s3://my-bucket/dvc"]
+    )
+    out = subprocess.check_output(["calkit", "list", "remotes"], text=True)
+    assert "(Git) origin: https://github.com/test/repo.git" in out
+    assert "(DVC) myremote: s3://my-bucket/dvc" in out

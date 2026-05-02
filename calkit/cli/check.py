@@ -353,8 +353,8 @@ def check_environment(
             raise_error("venv environments require a prefix")
         if "path" not in env:
             raise_error("venv environments require a path")
-        prefix = env["prefix"]
-        path = env["path"]
+        prefix = os.path.expandvars(env["prefix"])
+        path = os.path.expandvars(env["path"])
         lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=False
         )
@@ -457,6 +457,10 @@ def check_environments(
     if not envs:
         typer.echo("No environments defined in calkit.yaml")
         return
+    # Set any project-level environmental variables before checking
+    # environments
+    dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    calkit.set_env_vars(ck_info=ck_info, cli=True)
     failures = []
     for env_name, env in envs.items():
         if env.get("kind") in calkit.environments.KINDS_NO_CHECK:

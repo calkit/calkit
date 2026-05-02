@@ -506,6 +506,39 @@ def test_add(tmp_dir):
     subprocess.check_call(["calkit", "add", "data2", "-M"])
     assert repo.head.commit.message.strip() == "Add data2"
     subprocess.check_call(["calkit", "add", "--to", "dvc", "large.bin"])
+    # Test dry run: verify nothing is staged and output describes what would happen
+    subprocess.check_call(["git", "reset"])
+    with open("dry_small.txt", "w") as f:
+        f.write("small")
+    with open("dry_large.bin", "wb") as f:
+        f.write(os.urandom(binary_size))
+    with open("dry_data.parquet", "w") as f:
+        f.write("fake parquet")
+    staged_before = set(calkit.git.get_staged_files())
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "add",
+            "--dry-run",
+            "dry_small.txt",
+            "dry_large.bin",
+            "dry_data.parquet",
+        ],
+        text=True,
+    )
+    assert "dry_small.txt" in out and "Git" in out
+    assert "dry_large.bin" in out and "DVC" in out
+    assert "dry_data.parquet" in out and "DVC" in out
+    # Nothing should have been staged
+    assert set(calkit.git.get_staged_files()) == staged_before
+    assert "dry_small.txt" not in calkit.dvc.list_paths()
+    # Test --dry-run with --to
+    out = subprocess.check_output(
+        ["calkit", "add", "--dry-run", "--to", "git", "dry_small.txt"],
+        text=True,
+    )
+    assert "dry_small.txt" in out and "git" in out
+    assert set(calkit.git.get_staged_files()) == staged_before
 
 
 def test_large_folder_many_small_files(tmp_dir, tmp_path):

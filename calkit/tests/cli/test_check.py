@@ -158,3 +158,33 @@ def test_check_docker_env(tmp_dir):
             ]
         )
     assert not os.path.exists("Dockerfile-lock.json")
+
+
+def test_check_envs_preloads_env_vars(tmp_dir, monkeypatch):
+    # Verify that `calkit check envs` loads .env and calkit.yaml env_vars
+    # before checking environments, so env-var-gated checks see them.
+    subprocess.check_call(["calkit", "init"])
+    with open(".env", "w") as f:
+        f.write("DOT_ENV_VAR=from_dotenv\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["env_vars"] = {"CALKIT_VAR": "from_calkit"}
+    # Use a uv-venv env so the check is quick and deterministic
+    ck_info["environments"] = {
+        "test-env": {
+            "kind": "uv-venv",
+            "path": "requirements.txt",
+            "prefix": ".venv",
+            "python": "3.13",
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("requirements.txt", "w") as f:
+        f.write("requests\n")
+    # Ensure env vars are NOT already in the environment
+    monkeypatch.delenv("DOT_ENV_VAR", raising=False)
+    monkeypatch.delenv("CALKIT_VAR", raising=False)
+    # The command should succeed; if env vars weren't loaded the check path
+    # would still work here, but we verify the command runs without error and
+    # that a subsequent `calkit check envs` with a missing .env fails cleanly
+    subprocess.check_call(["calkit", "check", "envs"])

@@ -125,7 +125,11 @@ def new_project(
         if verbose:
             typer.echo("Detecting Git repo URL from existing repo")
         try:
-            git_repo_url = repo.remotes.origin.url
+            remote_names = [r.name for r in repo.remotes]
+            remote = repo.remotes[
+                remote_names.index("origin") if "origin" in remote_names else 0
+            ]
+            git_repo_url = remote.url
             # Convert to HTTPS if it's SSH
             if git_repo_url.startswith("git@"):
                 git_repo_url = git_repo_url.replace(
@@ -273,9 +277,14 @@ def new_project(
             # Set Git remote URL to match the one used in the cloud repo
             if repo.remotes:
                 typer.echo("Updating Git remote URL to match cloud repo")
-                # Check if this one uses SSH and make the new one use SSH
-                # as well if so
-                current_url = repo.remotes.origin.url
+                # Use origin if present, otherwise fall back to the first remote
+                remote_names = [r.name for r in repo.remotes]
+                existing_remote = repo.remotes[
+                    remote_names.index("origin")
+                    if "origin" in remote_names
+                    else 0
+                ]
+                current_url = existing_remote.url
                 new_url = resp["git_repo_url"]
                 if current_url.startswith("git@") and not new_url.startswith(
                     "git@"
@@ -283,7 +292,7 @@ def new_project(
                     new_url = resp["git_repo_url"].replace(
                         "https://github.com/", "git@github.com:"
                     )
-                repo.git.remote(["set-url", "origin", new_url])
+                repo.git.remote(["set-url", existing_remote.name, new_url])
             else:
                 typer.echo("Adding Git remote URL for cloud repo")
                 repo.git.remote(["add", "origin", resp["git_repo_url"]])

@@ -422,6 +422,27 @@ def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
     assert result.returncode != 0
     assert "some-org" in result.stderr
     assert "organization exists in Calkit Cloud" in result.stderr
+    # Test that a non-'origin' remote name is handled correctly
+    httpserver.expect_ordered_request(
+        "/projects", method="POST"
+    ).respond_with_json(project_resp)
+    subprocess.check_call(["git", "remote", "rename", "origin", "upstream"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "project",
+            ".",
+            "--title",
+            "My Project",
+            "--cloud",
+            "--overwrite",
+        ]
+    )
+    repo = git.Repo()
+    assert (
+        repo.remotes.upstream.url == "https://github.com/test-user/my-project"
+    )
 
 
 def test_new_python_script_stage(tmp_dir):

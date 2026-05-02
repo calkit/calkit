@@ -12,6 +12,18 @@ import pytest
 import calkit.cloud as cloud
 
 
+def test_get_base_url_env_override(monkeypatch):
+    monkeypatch.setenv("CALKIT_CLOUD_BASE_URL", "http://localhost:9999")
+    assert cloud.get_base_url() == "http://localhost:9999"
+
+
+def test_get_base_url_no_override(monkeypatch):
+    monkeypatch.delenv("CALKIT_CLOUD_BASE_URL", raising=False)
+    # Should return the test-env URL (CALKIT_ENV=test is set by pytest config)
+    url = cloud.get_base_url()
+    assert url.startswith("http")
+
+
 def _make_jwt(exp: float) -> str:
     """Build a minimal unsigned JWT with the given ``exp`` claim."""
     header = base64.urlsafe_b64encode(

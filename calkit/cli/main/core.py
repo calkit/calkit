@@ -35,7 +35,13 @@ from calkit import (
     DVC_EXTENSIONS,
     DVC_SIZE_THRESH_BYTES,
 )
-from calkit.cli import complete_stage_names, print_sep, raise_error, run_cmd, warn
+from calkit.cli import (
+    complete_stage_names,
+    print_sep,
+    raise_error,
+    run_cmd,
+    warn,
+)
 from calkit.cli.check import (
     check_app,
     check_conda_env,

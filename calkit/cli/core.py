@@ -24,9 +24,7 @@ def complete_stage_names(
         import calkit
 
         stages = (
-            calkit.load_calkit_info()
-            .get("pipeline", {})
-            .get("stages", {})
+            calkit.load_calkit_info().get("pipeline", {}).get("stages", {})
         )
         return [
             CompletionItem(name)

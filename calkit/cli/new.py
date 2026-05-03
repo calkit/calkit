@@ -9,22 +9,12 @@ import shutil
 import subprocess
 from enum import Enum
 
-import dotenv
-import git
 import typer
-from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 from typing_extensions import Annotated
 
 import calkit
-import calkit.pipeline
 from calkit.cli import raise_error, warn
-from calkit.cli.check import check_environment
-from calkit.cli.update import update_devcontainer
 from calkit.core import ryaml
-from calkit.docker import LAYERS
-from calkit.dvc import run_dvc_command
-from calkit.environments import DEFAULT_PYTHON_VERSION
-from calkit.models.pipeline import LatexStage, StageIteration
 
 new_app = typer.Typer(no_args_is_help=True)
 
@@ -108,6 +98,16 @@ def new_project(
     ] = False,
 ):
     """Create a new project."""
+    import git
+    from git.exc import (
+        GitCommandError,
+        InvalidGitRepositoryError,
+        NoSuchPathError,
+    )
+
+    from calkit.cli.update import update_devcontainer
+    from calkit.dvc import run_dvc_command
+
     docs_url = "https://docs.calkit.org"
     success_message = (
         "\nCongrats on creating your new Calkit project!\n\n"
@@ -504,6 +504,10 @@ def new_figure(
     ] = False,
 ):
     """Create a new figure."""
+    import git
+
+    from calkit.dvc import run_dvc_command
+
     ck_info = calkit.load_calkit_info()
     figures = ck_info.get("figures", [])
     paths = [f.get("path") for f in figures]
@@ -576,6 +580,8 @@ def new_question(
     commit: Annotated[bool, typer.Option("--commit")] = False,
 ):
     """Add a new question."""
+    import git
+
     ck_info = calkit.load_calkit_info()
     questions = ck_info.get("questions", [])
     if question in questions:
@@ -607,6 +613,8 @@ def new_notebook(
     commit: Annotated[bool, typer.Option("--commit")] = False,
 ):
     """Add a new notebook."""
+    import git
+
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
     if not os.path.isfile(path):
@@ -758,6 +766,11 @@ def new_docker_env(
     ] = False,
 ):
     """Create a new Docker environment."""
+    import git
+
+    from calkit.cli.check import check_environment
+    from calkit.docker import LAYERS
+
     if base is not None and path is None:
         path = "Dockerfile"
     if path is not None and base and os.path.isfile(path) and not overwrite:
@@ -873,6 +886,8 @@ def new_foreach_stage(
     The list of values must be a simple list. For more complex objects,
     edit dvc.yaml directly.
     """
+    import git
+
     pipeline = calkit.dvc.read_pipeline()
     if name in pipeline and not overwrite:
         raise_error("Stage already exists; use -f to overwrite")
@@ -943,6 +958,10 @@ def new_dataset(
     ] = False,
 ):
     """Create a new dataset."""
+    import git
+
+    from calkit.dvc import run_dvc_command
+
     ck_info = calkit.load_calkit_info()
     datasets = ck_info.get("datasets", [])
     paths = [f.get("path") for f in datasets]
@@ -1085,6 +1104,10 @@ def new_publication(
         ),
     ] = False,
 ) -> None:
+    import git
+
+    from calkit.models.pipeline import LatexStage
+
     ck_info = calkit.load_calkit_info(process_includes=False)
     pubs = ck_info.get("publications", [])
     envs = ck_info.get("environments", {})
@@ -1240,6 +1263,10 @@ def new_conda_env(
     ] = False,
 ):
     """Create a new Conda environment."""
+    import git
+
+    from calkit.cli.check import check_environment
+
     if packages is not None and os.path.isfile(path) and not overwrite:
         raise_error("Output path already exists (use -f to overwrite)")
     elif packages is None and not os.path.isfile(path):
@@ -1339,6 +1366,8 @@ def new_uv_env(
     ] = False,
 ):
     """Create a new uv project environment."""
+    import git
+
     if path is not None and not path.endswith("pyproject.toml"):
         raise_error("Environment path must end with 'pyproject.toml'")
     ck_info = calkit.load_calkit_info()
@@ -1430,6 +1459,8 @@ def new_slurm_env(
     ] = False,
 ):
     """Create a new SLURM environment."""
+    import git
+
     host = host.strip()
     if not host:
         raise_error("Host is required")
@@ -1486,7 +1517,7 @@ def new_uv_venv(
     ] = ".venv",
     python_version: Annotated[
         str | None, typer.Option("--python", "-p", help="Python version.")
-    ] = DEFAULT_PYTHON_VERSION,
+    ] = "3.14",
     description: Annotated[
         str | None, typer.Option("--description", help="Description.")
     ] = None,
@@ -1510,6 +1541,10 @@ def new_uv_venv(
     ] = False,
 ):
     """Create a new uv virtual environment."""
+    import git
+
+    from calkit.cli.check import check_environment
+
     if os.path.isfile(path) and packages and not overwrite:
         raise_error("Output path already exists (use -f to overwrite)")
     elif packages is None and not os.path.isfile(path):
@@ -1600,6 +1635,10 @@ def new_venv(
     ] = False,
 ):
     """Create a new Python virtual environment with venv."""
+    import git
+
+    from calkit.cli.check import check_environment
+
     if os.path.isfile(path) and not overwrite:
         raise_error("Output path already exists (use -f to overwrite)")
     repo = git.Repo()
@@ -1684,6 +1723,10 @@ def new_pixi_env(
     ] = False,
 ):
     """Create a new pixi virtual environment."""
+    import git
+
+    from calkit.cli.check import check_environment
+
     repo = git.Repo()
     # Add environment to Calkit info
     ck_info = calkit.load_calkit_info()
@@ -1794,6 +1837,10 @@ def new_julia_env(
     ] = False,
 ):
     """Create a new Julia environment or add an existing one to calkit.yaml."""
+    import git
+
+    from calkit.cli.check import check_environment
+
     if path is None:
         path = "Project.toml"
     if not os.path.basename(path) == "Project.toml":
@@ -1933,6 +1980,8 @@ def new_renv(
     ] = False,
 ):
     """Create a new R environment with renv."""
+    import git
+
     from calkit.environments import create_r_description_content
 
     if path is not None and not path.endswith("DESCRIPTION"):
@@ -2072,6 +2121,8 @@ def new_status(
     ] = False,
 ):
     """Add a new project status to the log."""
+    import git
+
     typer.echo(f"Adding {status.value} status log entry")
     fpath = os.path.join(".calkit", "status.csv")
     os.makedirs(".calkit", exist_ok=True)
@@ -2202,6 +2253,9 @@ def _save_stage(
     no_commit: bool = False,
 ) -> None:
     """Save a Calkit pipeline stage."""
+    import git
+    from git.exc import InvalidGitRepositoryError
+
     ck_info = calkit.load_calkit_info()
     if "pipeline" not in ck_info:
         ck_info["pipeline"] = {}
@@ -2317,6 +2371,8 @@ def new_python_script_stage(
     no_commit: StageArgs.no_commit = False,
 ) -> None:
     """Add a stage to the pipeline that runs a Python script."""
+    from calkit.models.pipeline import StageIteration
+
     ck_outs = _to_ck_outs(
         outputs=outputs,
         outs_git=outs_git,
@@ -2378,6 +2434,8 @@ def new_julia_script_stage(
     no_commit: StageArgs.no_commit = False,
 ) -> None:
     """Add a stage to the pipeline that runs a Julia script."""
+    from calkit.models.pipeline import StageIteration
+
     ck_outs = _to_ck_outs(
         outputs=outputs,
         outs_git=outs_git,
@@ -2682,6 +2740,10 @@ def new_release(
 ):
     """Create a new release."""
     import bibtexparser
+    import dotenv
+    import git
+
+    import calkit.pipeline
 
     to = to.lower()
     if to not in calkit.releases.SERVICES:

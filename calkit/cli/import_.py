@@ -9,16 +9,10 @@ import os
 from copy import deepcopy
 from typing import Annotated
 
-import git
-import requests
 import typer
-from tqdm import tqdm
 
 import calkit
-import calkit.invenio
 from calkit.cli import raise_error
-from calkit.dvc import run_dvc_command
-from calkit.models.core import _ImportedFromProject
 
 import_app = typer.Typer(no_args_is_help=True)
 
@@ -72,12 +66,19 @@ def import_dataset(
                 "remote instead of ck://."
             ),
         ),
-    ] = not calkit.dvc.USE_CK_REMOTE_BY_DEFAULT,
+    ] = False,
 ):
     """Import a dataset.
 
     Currently only supports datasets kept in DVC, not Git.
     """
+    import git
+    import requests
+    from tqdm import tqdm
+
+    from calkit.dvc import run_dvc_command
+    from calkit.models.core import _ImportedFromProject
+
     # Ensure we don't already have a dataset at this path
     path_split = src_path.split("/")
     owner_name = path_split[0]
@@ -260,6 +261,8 @@ def import_environment(
     ] = False,
 ) -> None:
     """Import an environment from another project."""
+    import git
+
     raise_error(
         "This command is not yet implemented; "
         "please thumbs-up this issue if you'd like to see "
@@ -368,6 +371,11 @@ def import_from_zenodo(
     ] = False,
 ):
     """Import files from a Zenodo record."""
+    import git
+    import requests
+
+    from calkit.dvc import run_dvc_command
+
     # Ensure destination directory either doesn't exist or is empty
     if os.path.isdir(dest_dir):
         if os.listdir(dest_dir):

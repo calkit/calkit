@@ -3,14 +3,9 @@
 import itertools
 import os
 
-import git
 import typer
 from pydantic import BaseModel, Field, computed_field, field_validator
 
-import calkit
-import calkit.dvc.zip
-import calkit.environments
-from calkit.environments import get_env_lock_fpath
 from calkit.models.iteration import expand_project_parameters
 from calkit.models.pipeline import (
     InputsFromStageOutputs,
@@ -310,6 +305,8 @@ def get_status(
     This can compile the Calkit pipeline to DVC, clean notebook outputs,
     check pipeline environments, then query DVC for out-of-date stages.
     """
+    import calkit.environments
+
     prev_cwd = os.getcwd()
     if wdir is not None:
         os.chdir(wdir)
@@ -440,6 +437,11 @@ def to_dvc(
     verbose: bool = False,
 ) -> dict:
     """Compile a Calkit pipeline to a DVC pipeline."""
+    import git
+
+    import calkit.dvc.zip
+    from calkit.environments import get_env_lock_fpath
+
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
     if "pipeline" not in ck_info:

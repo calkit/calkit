@@ -22,7 +22,6 @@ def complete_stage_names(
         return []
     try:
         import ruamel.yaml
-
         from click.shell_completion import CompletionItem
 
         ryaml = ruamel.yaml.YAML()

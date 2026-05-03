@@ -19,15 +19,7 @@ import uuid
 import warnings
 from os import PathLike
 
-# See https://github.com/calkit/calkit/issues/346
-with warnings.catch_warnings():
-    warnings.filterwarnings("ignore", category=UserWarning)
-    import checksumdir
-import psutil
-import requests
-
 import calkit
-from calkit.models import ProjectStatus
 
 try:
     from datetime import UTC
@@ -37,13 +29,12 @@ except ImportError:
     UTC = _timezone.utc
 
 from datetime import datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from calkit.models import ProjectStatus
 
 import ruamel.yaml
-from git import Repo
-from git.exc import InvalidGitRepositoryError
-
-from calkit.models import ProjectInfo
 
 logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
@@ -119,13 +110,15 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
             start, "*", "GitHub", *["*"] * (i + 1), "calkit.yaml"
         )
         res += glob.glob(pattern)
+    import git
+
     final_res = []
     for ck_fpath in res:
         path = os.path.dirname(ck_fpath)
         # Make sure this path is a Git repo
         try:
-            Repo(path)
-        except InvalidGitRepositoryError:
+            git.Repo(path)
+        except git.exc.InvalidGitRepositoryError:
             continue
         final_res.append(path)
     return final_res
@@ -183,8 +176,10 @@ def load_calkit_info(
 def load_calkit_info_object(
     wdir: str | None = None,
     process_includes: bool | str | list[str] = False,
-) -> ProjectInfo:
+):
     """Load Calkit project information as a ``ProjectInfo`` object."""
+    from calkit.models import ProjectInfo
+
     return ProjectInfo.model_validate(
         load_calkit_info(wdir=wdir, process_includes=process_includes)
     )
@@ -461,6 +456,8 @@ def read_file(path: str, as_bytes: bool | None = None) -> str | bytes:
                 return content_bytes.decode()
         # If the response has a URL, we can fetch from that directly
         elif (url := resp.get("url")) is not None:
+            import requests
+
             resp2 = requests.get(url)
             resp2.raise_for_status()
             if as_bytes:
@@ -497,9 +494,9 @@ def to_kebab_case(str) -> str:
     return re.sub(r"[-_/,\.\ ]", "-", str.lower())
 
 
-def get_project_status_history(
-    wdir: str | None = None, as_pydantic=True
-) -> list[ProjectStatus] | list[dict]:
+def get_project_status_history(wdir: str | None = None, as_pydantic=True):
+    from calkit.models import ProjectStatus
+
     statuses = []
     fpath = os.path.join(".calkit", "status.csv")
     if wdir is not None:
@@ -542,9 +539,11 @@ def detect_project_name(
         return name
     owner = ck_info.get("owner")
     if name is None or owner is None:
+        import git
+
         try:
-            url = Repo(path=wdir).remote().url
-        except (ValueError, InvalidGitRepositoryError):
+            url = git.Repo(path=wdir).remote().url
+        except (ValueError, git.exc.InvalidGitRepositoryError):
             if name is not None and not prepend_owner:
                 return name
             if not prepend_owner:
@@ -565,8 +564,10 @@ def detect_project_name(
 
 def detect_project_github_url(wdir: str | None = None) -> str | None:
     """Detect the GitHub URL for the current project."""
+    import git
+
     try:
-        url = Repo(path=wdir).remote().url
+        url = git.Repo(path=wdir).remote().url
     except ValueError:
         warnings.warn("No Git remote set with name 'origin'")
         return None
@@ -593,6 +594,9 @@ def get_dep_version(dep_name: str) -> str | None:
 
 def get_system_info() -> dict:
     """Get information about the system on which we're currently running."""
+    import git
+    import psutil
+
     os_name = platform.system()
     system_info = {
         "os": os_name,
@@ -620,7 +624,7 @@ def get_system_info() -> dict:
     system_info["node_id"] = node_id
     # See if we can detect Calkit Git rev
     try:
-        repo = Repo(
+        repo = git.Repo(
             path=os.path.dirname(calkit.__file__),
             search_parent_directories=True,
         )
@@ -657,6 +661,10 @@ def get_system_info() -> dict:
 
 def get_md5(path: str, exclude_files: list[str] | None = None) -> str:
     if os.path.isdir(path):
+        # See https://github.com/calkit/calkit/issues/346
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            import checksumdir
         return checksumdir.dirhash(path, excluded_files=exclude_files)
     hasher = hashlib.md5()
     with open(path, "rb") as f:

@@ -19,15 +19,10 @@ from datetime import datetime
 from pathlib import Path
 
 import dotenv
-import git
 import typer
-from git.exc import InvalidGitRepositoryError
 from typing_extensions import Annotated, Optional
 
 import calkit
-import calkit.dvc.zip
-import calkit.matlab
-import calkit.pipeline
 from calkit import (
     AUTO_IGNORE_PATHS,
     AUTO_IGNORE_PREFIXES,
@@ -63,9 +58,6 @@ from calkit.cli.office import office_app
 from calkit.cli.overleaf import overleaf_app
 from calkit.cli.slurm import slurm_app
 from calkit.cli.update import update_app
-from calkit.dvc import get_dvc_repo, run_dvc_command
-from calkit.environments import get_env_lock_fpath
-from calkit.models import Procedure
 
 app = typer.Typer(
     invoke_without_command=True,
@@ -134,12 +126,16 @@ def init(
     ] = False,
 ):
     """Initialize the current working directory."""
+    import git
+
     subprocess.run(["git", "init"])
-    result = run_dvc_command(["init"] + (["--force"] if force else []))
+    result = calkit.dvc.run_dvc_command(
+        ["init"] + (["--force"] if force else [])
+    )
     if result != 0:
         raise_error("Failed to initialize DVC")
     # Ensure autostage is enabled for DVC
-    result = run_dvc_command(["config", "core.autostage", "true"])
+    result = calkit.dvc.run_dvc_command(["config", "core.autostage", "true"])
     if result != 0:
         raise_error("Failed to configure DVC autostage")
     # Commit the newly created .dvc directory
@@ -229,7 +225,7 @@ def clone(
     # DVC pull
     if not no_dvc_pull:
         try:
-            result = run_dvc_command(["pull"])
+            result = calkit.dvc.run_dvc_command(["pull"])
             if result != 0:
                 raise_error("Failed to pull from DVC remote(s)")
         except Exception as e:
@@ -326,6 +322,9 @@ def get_status(
     ] = False,
 ):
     """View status (project, version control, and/or pipeline)."""
+    import git
+    from git.exc import InvalidGitRepositoryError
+
     ck_info = calkit.load_calkit_info()
     # If there's anything in ck_info and this isn't a Git repo, initialize one
     if ck_info:
@@ -462,12 +461,12 @@ def get_status(
     if "dvc" in categories:
         print_sep("DVC")
         try:
-            get_dvc_repo()
+            calkit.dvc.get_dvc_repo()
         except Exception:
             typer.echo("This is not a DVC repository.\n")
         else:
             zip_path_map = calkit.dvc.zip.get_zip_path_map()
-            dvc_repo = get_dvc_repo()
+            dvc_repo = calkit.dvc.get_dvc_repo()
             raw = dict(dvc_repo.data_status())
             raw.pop("git", None)
             typer.echo(_format_dvc_data_status(raw, zip_path_map))
@@ -526,7 +525,7 @@ def diff(
         git_cmd.append("--staged")
     run_cmd(git_cmd)
     print_sep("Pipeline (DVC)")
-    run_dvc_command(["diff"])
+    calkit.dvc.run_dvc_command(["diff"])
 
 
 @app.command(name="add")
@@ -579,7 +578,9 @@ def add(
     adding any .dvc files to Git when adding to DVC.
     """
     import dvc.repo
+    import git
     from dvc.exceptions import NotDvcRepoError
+    from git.exc import InvalidGitRepositoryError
 
     if dry_run:
         typer.echo("Dry run: No files will be added")
@@ -612,7 +613,7 @@ def add(
             raise_error("Not currently in a Git repo; run `calkit init` first")
         repo = git.Repo()
     try:
-        dvc_repo = get_dvc_repo()
+        dvc_repo = calkit.dvc.get_dvc_repo()
     except NotDvcRepoError:
         if dry_run:
             dvc_repo = None
@@ -624,7 +625,7 @@ def add(
             dvc_repo = dvc.repo.Repo.init()
     if not dry_run:
         # Ensure autostage is enabled for DVC
-        run_dvc_command(
+        calkit.dvc.run_dvc_command(
             [
                 "config",
                 "core.autostage",
@@ -647,7 +648,7 @@ def add(
         elif to == "git":
             subprocess.call(["git", "add"] + paths)
         elif to == "dvc":
-            run_dvc_command(["add"] + paths)
+            calkit.dvc.run_dvc_command(["add"] + paths)
         elif to == "dvc-zip":
             for path in paths:
                 typer.echo(f"Adding {path} as a DVC zip")
@@ -744,13 +745,13 @@ def add(
                         f"Adding {path} to DVC since it's already tracked "
                         "with DVC"
                     )
-                    run_dvc_command(["add", path])
+                    calkit.dvc.run_dvc_command(["add", path])
             elif os.path.splitext(path)[-1] in DVC_EXTENSIONS:
                 if dry_run:
                     typer.echo(f"Would add {path} to DVC (per extension)")
                 else:
                     typer.echo(f"Adding {path} to DVC per its extension")
-                    run_dvc_command(["add", path])
+                    calkit.dvc.run_dvc_command(["add", path])
             elif calkit.dvc.zip.is_zip_candidate(path):
                 if dry_run:
                     typer.echo(
@@ -770,7 +771,7 @@ def add(
                     typer.echo(
                         f"Adding {path} to DVC since it's greater than 1 MB"
                     )
-                    run_dvc_command(["add", path])
+                    calkit.dvc.run_dvc_command(["add", path])
             else:
                 if dry_run:
                     typer.echo(f"Would add {path} to Git")
@@ -1004,7 +1005,7 @@ def pull(
             if calkit.dvc.detect_calkit_remote_type(name, url) == "http":
                 typer.echo(f"Checking authentication for DVC remote: {name}")
                 calkit.dvc.set_remote_auth(remote_name=name)
-    result = run_dvc_command(["pull"] + dvc_args)
+    result = calkit.dvc.run_dvc_command(["pull"] + dvc_args)
     if result != 0:
         raise_error("DVC pull failed")
     calkit.dvc.zip.sync_all(direction="to-workspace")
@@ -1040,7 +1041,7 @@ def push(
                     calkit.dvc.set_remote_auth(remote_name=name)
         if remotes:
             typer.echo("Pushing to DVC remote")
-            result = run_dvc_command(["push"] + dvc_args)
+            result = calkit.dvc.run_dvc_command(["push"] + dvc_args)
             if result != 0:
                 raise_error("DVC push failed")
         else:
@@ -1077,6 +1078,8 @@ def ignore(
     ] = False,
 ):
     """Ignore a file, i.e., keep it out of version control."""
+    import git
+
     repo = git.Repo()
     # Ensure path makes it into .gitignore as a POSIX path
     path = Path(path).as_posix()
@@ -1349,7 +1352,9 @@ def run(
     import dvc.repo
     import dvc.repo.reproduce
     import dvc.ui
+    import git
     from dvc.cli import main as dvc_cli_main
+    from git.exc import InvalidGitRepositoryError
 
     import calkit.dvc.zip
     import calkit.environments
@@ -1428,11 +1433,11 @@ def run(
             raise_error(f"Pipeline compilation failed: {e}")
     # Initialize DVC repo if necessary
     try:
-        get_dvc_repo()
+        calkit.dvc.get_dvc_repo()
     except Exception:
         if not quiet:
             typer.echo("Initializing DVC repo")
-        result = run_dvc_command(["init"])
+        result = calkit.dvc.run_dvc_command(["init"])
         if result != 0:
             raise_error("Failed to initialize DVC repo")
     # Convert deps into target stage names
@@ -1489,7 +1494,7 @@ def run(
         git_staged_files_before = calkit.git.get_staged_files(repo=repo)
         git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
         # Get status of DVC repo before running
-        dvc_repo = get_dvc_repo()
+        dvc_repo = calkit.dvc.get_dvc_repo()
         dvc_status_before = dvc_repo.status()
         dvc_data_status_before = dvc_repo.data_status()
         dvc_data_status_before.pop("git", None)  # Remove git status
@@ -1752,7 +1757,10 @@ def run_in_env(
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
 ):
-    from calkit.environments import env_from_name_and_or_path
+    from calkit.environments import (
+        env_from_name_and_or_path,
+        get_env_lock_fpath,
+    )
 
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info(process_includes="environments")
@@ -2232,6 +2240,10 @@ def run_procedure(
             return bool(value)
         return value
 
+    import git
+
+    from calkit.models import Procedure
+
     ck_info = calkit.load_calkit_info(process_includes="procedures")
     calkit.set_env_vars(ck_info=ck_info)
     procs = ck_info.get("procedures", {})
@@ -2387,6 +2399,8 @@ def set_env_var(
     value: Annotated[str, typer.Argument(help="Value of the variable.")],
 ):
     """Set an environmental variable for the project in its '.env' file."""
+    import git
+
     # Ensure that .env is ignored by git
     repo = git.Repo()
     if not repo.ignored(".env"):
@@ -2447,6 +2461,8 @@ def upgrade(
 @app.command(name="switch-branch")
 def switch_branch(name: Annotated[str, typer.Argument(help="Branch name.")]):
     """Switch to a different branch."""
+    import git
+
     repo = git.Repo()
     if name not in repo.heads:
         typer.echo(f"Branch '{name}' does not exist; creating")
@@ -2456,7 +2472,7 @@ def switch_branch(name: Annotated[str, typer.Argument(help="Branch name.")]):
     repo.git.checkout(cmd)
     # After switching branches, DVC-tracked zips may have changed; check out
     # the new branch's DVC data and unzip to the workspace
-    run_dvc_command(["checkout"])
+    calkit.dvc.run_dvc_command(["checkout"])
     calkit.dvc.zip.sync_all(direction="to-workspace")
 
 
@@ -2477,7 +2493,7 @@ def stash(
     """
     if pop:
         subprocess.check_call(["git", "stash", "pop"])
-        run_dvc_command(["checkout"])
+        calkit.dvc.run_dvc_command(["checkout"])
         calkit.dvc.zip.sync_all(direction="to-workspace")
     else:
         # Zip any modified workspace dirs so their current state is in the DVC
@@ -2485,7 +2501,7 @@ def stash(
         calkit.dvc.zip.sync_all(direction="to-zip")
         subprocess.check_call(["git", "stash"])
         # Restore the committed zip versions and unzip them
-        run_dvc_command(["checkout"])
+        calkit.dvc.run_dvc_command(["checkout"])
         calkit.dvc.zip.sync_all(direction="to-workspace")
 
 
@@ -2506,7 +2522,7 @@ def call_dvc(
     Useful if Calkit is installed as a tool, e.g., with `uv tool` or `pipx`,
     and DVC is not installed.
     """
-    result = run_dvc_command(sys.argv[2:])
+    result = calkit.dvc.run_dvc_command(sys.argv[2:])
     sys.exit(result)
 
 
@@ -2576,6 +2592,8 @@ def map_paths(
     Currently this is done with copying. Outputs are ensured to be ignored by
     Git.
     """
+    import git
+
     repo = git.Repo()
 
     def validate_and_split(mapping: str) -> tuple[str, str]:

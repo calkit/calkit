@@ -638,15 +638,22 @@ def update_conda_env(
     ],
     add: Annotated[
         list[str],
-        typer.Option("--add", help="Add a package."),
+        typer.Option("--add", help="Add a conda package."),
     ] = [],
     remove: Annotated[
         list[str],
-        typer.Option("--remove", "--rm", help="Remove a package."),
+        typer.Option("--remove", "--rm", help="Remove a conda package."),
+    ] = [],
+    add_pip: Annotated[
+        list[str],
+        typer.Option("--add-pip", help="Add a pip package."),
+    ] = [],
+    remove_pip: Annotated[
+        list[str],
+        typer.Option("--remove-pip", "--rm-pip", help="Remove a pip package."),
     ] = [],
 ) -> None:
     """Update a conda environment spec file."""
-
     ck_info, env = _load_env(env_name)
     if env.get("kind") != "conda":
         raise_error(f"Environment '{env_name}' is not a conda environment")
@@ -655,17 +662,35 @@ def update_conda_env(
         spec = calkit.ryaml.load(f)
     if spec is None:
         spec = {}
-    deps = spec.get("dependencies") or []
+    deps = list(spec.get("dependencies") or [])
+    # Edit conda (string) deps
     for pkg in remove:
         deps = [
             d
             for d in deps
-            if d != pkg
-            and not (isinstance(d, str) and d.startswith(pkg + "="))
+            if not isinstance(d, str)
+            or (d != pkg and not d.startswith(pkg + "="))
         ]
     for pkg in add:
         if pkg not in deps:
             deps.append(pkg)
+    # Edit pip sublist
+    if add_pip or remove_pip:
+        pip_dict = next(
+            (d for d in deps if isinstance(d, dict) and "pip" in d), None
+        )
+        pip_list = list(pip_dict["pip"] if pip_dict else [])
+        for pkg in remove_pip:
+            pip_list = [
+                p for p in pip_list if p != pkg and not p.startswith(pkg + "=")
+            ]
+        for pkg in add_pip:
+            if pkg not in pip_list:
+                pip_list.append(pkg)
+        if pip_dict is not None:
+            deps.remove(pip_dict)
+        if pip_list:
+            deps.append({"pip": pip_list})
     if deps:
         spec["dependencies"] = deps
     elif "dependencies" in spec:

@@ -289,7 +289,16 @@ export class CalkitSidebarProvider
         );
       }
       if (typeof calkitStage.environment === "string") {
-        prop("Environment", calkitStage.environment, "package");
+        const envItem = new SidebarItem(
+          "Environment",
+          vscode.TreeItemCollapsibleState.None,
+          "stage-env-prop",
+          calkitStage.environment,
+        );
+        envItem.description = calkitStage.environment;
+        envItem.iconPath = new vscode.ThemeIcon("package");
+        envItem.contextValue = "stage-env-prop";
+        items.push(envItem);
       }
     }
 

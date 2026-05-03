@@ -2189,11 +2189,13 @@ calkit update conda-env [OPTIONS]
 
 Options:
 
-| Option             | Type | Required | Default | Description       |
-| ------------------ | ---- | -------- | ------- | ----------------- |
-| `--name`, `-n`     | text | yes      |         | Environment name. |
-| `--add`            | text | no       |         | Add a package.    |
-| `--remove`, `--rm` | text | no       |         | Remove a package. |
+| Option                     | Type | Required | Default | Description             |
+| -------------------------- | ---- | -------- | ------- | ----------------------- |
+| `--name`, `-n`             | text | yes      |         | Environment name.       |
+| `--add`                    | text | no       |         | Add a conda package.    |
+| `--remove`, `--rm`         | text | no       |         | Remove a conda package. |
+| `--add-pip`                | text | no       |         | Add a pip package.      |
+| `--remove-pip`, `--rm-pip` | text | no       |         | Remove a pip package.   |
 
 <a id="subcommand-update-docker-env"></a>
 

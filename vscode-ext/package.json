@@ -73,6 +73,12 @@
         "icon": "$(edit)"
       },
       {
+        "command": "calkit-vscode.openStageFile",
+        "title": "Open File",
+        "category": "Calkit",
+        "icon": "$(go-to-file)"
+      },
+      {
         "command": "calkit-vscode.startCalkitSlurmJob",
         "title": "Start Jupyter SLURM Job",
         "category": "Calkit",
@@ -197,6 +203,11 @@
           "group": "inline"
         },
         {
+          "command": "calkit-vscode.openStageFile",
+          "when": "view == calkit-sidebar && viewItem == stage",
+          "group": "inline"
+        },
+        {
           "command": "calkit-vscode.editStage",
           "when": "view == calkit-sidebar && viewItem == stage",
           "group": "inline"
@@ -204,6 +215,11 @@
         {
           "command": "calkit-vscode.runStage",
           "when": "view == calkit-sidebar && viewItem == stage",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.editEnvironment",
+          "when": "view == calkit-sidebar && viewItem == stage-env-prop",
           "group": "inline"
         }
       ],
@@ -284,6 +300,9 @@
         },
         {
           "command": "calkit-vscode.editEnvironment"
+        },
+        {
+          "command": "calkit-vscode.openStageFile"
         },
         {
           "command": "calkit-vscode.startCalkitSlurmJob"

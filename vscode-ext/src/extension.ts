@@ -25,6 +25,7 @@ import { CalkitSidebarProvider } from "./sidebar";
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
 const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
 const COMMAND_EDIT_ENV = "calkit-vscode.editEnvironment";
+const COMMAND_OPEN_STAGE_FILE = "calkit-vscode.openStageFile";
 const COMMAND_START_SLURM = "calkit-vscode.startCalkitSlurmJob";
 const COMMAND_STOP_SLURM = "calkit-vscode.stopCalkitSlurmJob";
 const COMMAND_RESTART_JOB = "calkit-vscode.restartCalkitJob";
@@ -166,6 +167,42 @@ export function activate(context: vscode.ExtensionContext): void {
           envName,
           env,
           specPath,
+        );
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_OPEN_STAGE_FILE,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const stageName = item?.nodeId;
+        if (!stageName) {
+          return;
+        }
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
+        const filePath =
+          (typeof stage?.notebook_path === "string"
+            ? stage.notebook_path
+            : undefined) ??
+          (typeof stage?.script_path === "string"
+            ? stage.script_path
+            : undefined) ??
+          (typeof stage?.target_path === "string"
+            ? stage.target_path
+            : undefined);
+        if (!filePath) {
+          void vscode.window.showErrorMessage(
+            `No source file found for stage '${stageName}'.`,
+          );
+          return;
+        }
+        await vscode.window.showTextDocument(
+          vscode.Uri.file(path.join(workspaceRoot, filePath)),
         );
       },
     ),
@@ -2066,6 +2103,33 @@ async function runCreateEnvironmentWizard(
   }
 }
 
+async function readCondaPackages(
+  workspaceRoot: string,
+  specPath: string,
+): Promise<{ conda: string[]; pip: string[] }> {
+  try {
+    const absPath = path.join(workspaceRoot, specPath);
+    const raw = (
+      await vscode.workspace.fs.readFile(vscode.Uri.file(absPath))
+    ).toString();
+    const parsed = (await import("yaml")).parse(raw) as {
+      dependencies?: unknown[];
+    } | null;
+    const deps = parsed?.dependencies ?? [];
+    const conda = deps.filter((d): d is string => typeof d === "string");
+    const pipDict = deps.find(
+      (d): d is { pip: string[] } =>
+        typeof d === "object" && d !== null && "pip" in d,
+    );
+    const pip = Array.isArray(pipDict?.pip)
+      ? pipDict.pip.filter((p): p is string => typeof p === "string")
+      : [];
+    return { conda, pip };
+  } catch {
+    return { conda: [], pip: [] };
+  }
+}
+
 async function showEnvCreatorWebview(
   context: vscode.ExtensionContext,
   workspaceRoot: string,
@@ -2074,6 +2138,14 @@ async function showEnvCreatorWebview(
   specPath?: string,
 ): Promise<void> {
   const isEdit = editEnvName !== undefined;
+  const kind = typeof existingEnv?.kind === "string" ? existingEnv.kind : "uv";
+  let condaPackages: { conda: string[]; pip: string[] } = {
+    conda: [],
+    pip: [],
+  };
+  if (isEdit && kind === "conda" && specPath) {
+    condaPackages = await readCondaPackages(workspaceRoot, specPath);
+  }
   const nonce = getNonce();
   const panel = vscode.window.createWebviewPanel(
     "calkit.envCreator",
@@ -2087,6 +2159,8 @@ async function showEnvCreatorWebview(
     editEnvName,
     existingEnv,
     specPath,
+    condaPackages.conda,
+    condaPackages.pip,
   );
   panel.webview.onDidReceiveMessage(
     (msg: {
@@ -2094,6 +2168,9 @@ async function showEnvCreatorWebview(
       name: string;
       kind: string;
       packages: string[];
+      pipPackages: string[];
+      origPackages: string[];
+      origPipPackages: string[];
       pythonVersion: string;
       condaPath: string;
       image: string;
@@ -2108,7 +2185,33 @@ async function showEnvCreatorWebview(
       }
       const args: string[] = [];
       if (msg.command === "save") {
-        if (msg.kind === "docker") {
+        if (msg.kind === "conda") {
+          args.push("update", "conda-env", "-n", msg.name);
+          const origSet = new Set(msg.origPackages);
+          const newSet = new Set(msg.packages);
+          for (const p of msg.packages) {
+            if (!origSet.has(p)) {
+              args.push("--add", p);
+            }
+          }
+          for (const p of msg.origPackages) {
+            if (!newSet.has(p)) {
+              args.push("--rm", p);
+            }
+          }
+          const origPipSet = new Set(msg.origPipPackages);
+          const newPipSet = new Set(msg.pipPackages);
+          for (const p of msg.pipPackages) {
+            if (!origPipSet.has(p)) {
+              args.push("--add-pip", p);
+            }
+          }
+          for (const p of msg.origPipPackages) {
+            if (!newPipSet.has(p)) {
+              args.push("--rm-pip", p);
+            }
+          }
+        } else if (msg.kind === "docker") {
           args.push("update", "docker-env", "-n", msg.name);
           if (msg.image) {
             args.push("--image", msg.image);
@@ -2214,6 +2317,8 @@ function buildEnvCreatorHtml(
   editEnvName?: string,
   existingEnv?: import("./environments").CalkitEnvironment,
   specPath?: string,
+  editCondaPackages: string[] = [],
+  editPipPackages: string[] = [],
 ): string {
   const isEdit = editEnvName !== undefined;
   const kind = typeof existingEnv?.kind === "string" ? existingEnv.kind : "uv";
@@ -2288,19 +2393,37 @@ ${
 }
 </div>`;
 
+  const condaPackagesJson = JSON.stringify(editCondaPackages);
+  const pipPackagesJson = JSON.stringify(editPipPackages);
+
   const condaSection =
     isEdit && kind !== "conda"
       ? ""
       : `
 <div id="section-conda"${!isEdit ? ' style="display:none"' : ""}>
 ${
-  isEdit && specPath
-    ? `  <div class="field"><label>Spec file</label><div class="info-row">${escHtml(
-        specPath,
-      )}</div></div>
-  <div class="field info-note">Edit <code>${escHtml(
-    specPath,
-  )}</code> directly to add or remove packages.</div>`
+  isEdit
+    ? `${
+        specPath
+          ? `  <div class="field"><label>Spec file</label><div class="info-row">${escHtml(
+              specPath,
+            )}</div></div>`
+          : ""
+      }
+  <div class="field">
+    <label>Conda packages</label>
+    <div class="list-section">
+      <div id="conda-packages-list"></div>
+      <button class="add-btn" id="add-conda-package">+ Add package</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>pip packages</label>
+    <div class="list-section">
+      <div id="pip-packages-list"></div>
+      <button class="add-btn" id="add-pip-package">+ Add pip package</button>
+    </div>
+  </div>`
     : `  <div class="field">
     <label>Packages</label>
     <div class="list-section">
@@ -2462,6 +2585,16 @@ ${slurmSection}
     return Array.from(listEl.querySelectorAll('input')).map(function(i) { return i.value.trim(); }).filter(Boolean);
   }
 
+  // Pre-populate conda package lists
+  const condaPkgList = document.getElementById('conda-packages-list');
+  const pipPkgList = document.getElementById('pip-packages-list');
+  if (condaPkgList) {
+    for (const v of ${condaPackagesJson}) { makeListItem(condaPkgList, v, 'e.g. numpy'); }
+  }
+  if (pipPkgList) {
+    for (const v of ${pipPackagesJson}) { makeListItem(pipPkgList, v, 'e.g. requests'); }
+  }
+
   // Pre-populate slurm lists
   const slurmOptList = document.getElementById('slurm-options-list');
   const slurmSetupList = document.getElementById('slurm-setup-list');
@@ -2476,7 +2609,6 @@ ${slurmSection}
     !isEdit
       ? `
   const pkgList = document.getElementById('packages-list');
-  const condaPkgList = document.getElementById('conda-packages-list');
   const dockerBaseEl = document.getElementById('docker-base');
   const dockerfilePathField = document.getElementById('dockerfile-path-field');
 
@@ -2492,7 +2624,18 @@ ${slurmSection}
     });
   }
   `
-      : ""
+      : `
+  if (document.getElementById('add-conda-package')) {
+    document.getElementById('add-conda-package').addEventListener('click', function() {
+      makeListItem(condaPkgList, '', 'e.g. numpy').focus();
+    });
+  }
+  if (document.getElementById('add-pip-package')) {
+    document.getElementById('add-pip-package').addEventListener('click', function() {
+      makeListItem(pipPkgList, '', 'e.g. requests').focus();
+    });
+  }
+  `
   }
 
   if (document.getElementById('add-slurm-option')) {
@@ -2528,12 +2671,16 @@ ${slurmSection}
     errorMsg.style.display = 'none';
     btnSubmit.disabled = true;
     spinnerText.style.display = 'inline';
-    const packages = !isEdit ? (kind === 'uv' ? getListValues(pkgList) : getListValues(condaPkgList)) : [];
+    const packages = condaPkgList ? getListValues(condaPkgList) : (!isEdit && kind === 'uv' ? getListValues(pkgList) : []);
+    const pipPackages = pipPkgList ? getListValues(pipPkgList) : [];
     vscode.postMessage({
       command: '${postCommand}',
       name,
       kind,
       packages,
+      pipPackages,
+      origPackages: ${condaPackagesJson},
+      origPipPackages: ${pipPackagesJson},
       pythonVersion: document.getElementById('python-version') ? document.getElementById('python-version').value.trim() : '',
       condaPath: document.getElementById('conda-path') ? document.getElementById('conda-path').value.trim() : '',
       image: document.getElementById('docker-image') ? document.getElementById('docker-image').value.trim() : '',

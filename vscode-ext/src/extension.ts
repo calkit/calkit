@@ -574,8 +574,6 @@ async function refreshStaleOutputContext(
   outputMap: Map<string, string>,
   provider: PipelineOutputDecorationProvider,
 ): Promise<void> {
-  const prevStale = new Set(staleOutputUris);
-  staleOutputUris.clear();
   try {
     const { stdout } = await execFileAsync(
       "calkit",
@@ -586,19 +584,25 @@ async function refreshStaleOutputContext(
       pipeline?: { stale_stage_names?: string[] };
     };
     const staleStageNames = new Set(status?.pipeline?.stale_stage_names ?? []);
+    const nextStale = new Set<string>();
     for (const [absPath, stageName] of outputMap) {
       if (staleStageNames.has(stageName)) {
-        staleOutputUris.add(absPath);
+        nextStale.add(absPath);
       }
+    }
+    const prevStale = new Set(staleOutputUris);
+    staleOutputUris.clear();
+    for (const p of nextStale) {
+      staleOutputUris.add(p);
+    }
+    const changedUris = [...new Set([...prevStale, ...staleOutputUris])].map(
+      (p) => vscode.Uri.file(p),
+    );
+    if (changedUris.length > 0) {
+      provider.refresh(changedUris);
     }
   } catch (error) {
     log(`Staleness check failed: ${String(error)}`);
-  }
-  const changedUris = [...new Set([...prevStale, ...staleOutputUris])].map(
-    (p) => vscode.Uri.file(p),
-  );
-  if (changedUris.length > 0) {
-    provider.refresh(changedUris);
   }
 }
 

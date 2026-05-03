@@ -529,6 +529,30 @@ def diff(
     run_dvc_command(["diff"])
 
 
+def _get_pipeline_output_storage_map() -> dict[str, str]:
+    """Get a map of pipeline output paths to their explicitly-set storage.
+
+    Only outputs with an explicitly-set ``storage`` key in ``calkit.yaml``
+    are included so that default-DVC outputs still go through auto-detection.
+    """
+    try:
+        ck_info = calkit.load_calkit_info()
+    except Exception:
+        return {}
+    pipeline = ck_info.get("pipeline", {})
+    if not pipeline:
+        return {}
+    stages = pipeline.get("stages", {})
+    result: dict[str, str] = {}
+    for stage in stages.values():
+        if not isinstance(stage, dict):
+            continue
+        for out in stage.get("outputs", []):
+            if isinstance(out, dict) and "path" in out and "storage" in out:
+                result[out["path"]] = out["storage"]
+    return result
+
+
 @app.command(name="add")
 def add(
     paths: list[str],
@@ -712,6 +736,7 @@ def add(
             ]:
                 paths.append(changed_file)
         zip_path_map = calkit.dvc.zip.get_zip_path_map()
+        pipeline_output_storage = _get_pipeline_output_storage_map()
         for path in paths:
             # Check if this path is already registered as a zip
             posix_path = Path(path).as_posix()
@@ -745,6 +770,43 @@ def add(
                         "with DVC"
                     )
                     run_dvc_command(["add", path])
+            elif posix_path in pipeline_output_storage:
+                # Respect storage explicitly set in the pipeline definition
+                pipeline_storage = pipeline_output_storage[posix_path]
+                if pipeline_storage == "git":
+                    if dry_run:
+                        typer.echo(
+                            f"Would add {path} to Git "
+                            "(pipeline output storage)"
+                        )
+                    else:
+                        typer.echo(
+                            f"Adding {path} to Git per pipeline output storage"
+                        )
+                        subprocess.call(["git", "add", path])
+                elif pipeline_storage == "dvc-zip":
+                    if dry_run:
+                        typer.echo(
+                            f"Would add {path} as a DVC zip "
+                            "(pipeline output storage)"
+                        )
+                    else:
+                        typer.echo(
+                            f"Adding {path} as a DVC zip per pipeline output "
+                            "storage"
+                        )
+                        calkit.dvc.zip.add(path)
+                else:
+                    if dry_run:
+                        typer.echo(
+                            f"Would add {path} to DVC "
+                            "(pipeline output storage)"
+                        )
+                    else:
+                        typer.echo(
+                            f"Adding {path} to DVC per pipeline output storage"
+                        )
+                        run_dvc_command(["add", path])
             elif os.path.splitext(path)[-1] in DVC_EXTENSIONS:
                 if dry_run:
                     typer.echo(f"Would add {path} to DVC (per extension)")
@@ -900,7 +962,7 @@ def save(
     if paths is not None:
         add(paths, to=to)
     elif save_all:
-        add(paths=["."])
+        add(paths=["."], to=to)
     if auto_commit_message and message is None:
         staged_files = calkit.git.get_staged_files_with_status()
         if verbose:

@@ -877,17 +877,27 @@ def update_stage(
         list[str],
         typer.Option("--set-inputs", help="Replace the inputs list."),
     ] = [],
+    set_outputs: Annotated[
+        list[str],
+        typer.Option(
+            "--set-outputs",
+            help="Replace DVC outputs list (paths only, storage=dvc).",
+        ),
+    ] = [],
+    set_outputs_git: Annotated[
+        list[str],
+        typer.Option(
+            "--set-outputs-git",
+            help="Replace Git-tracked outputs list.",
+        ),
+    ] = [],
     add_output: Annotated[
         list[str],
-        typer.Option("--add-output", help="Add an output path."),
+        typer.Option("--add-output", help="Add a DVC-tracked output path."),
     ] = [],
     rm_output: Annotated[
         list[str],
         typer.Option("--rm-output", help="Remove an output path."),
-    ] = [],
-    set_outputs: Annotated[
-        list[str],
-        typer.Option("--set-outputs", help="Replace the outputs list."),
     ] = [],
 ) -> None:
     """Update a pipeline stage in calkit.yaml."""
@@ -914,14 +924,25 @@ def update_stage(
         stage["inputs"] = inputs_list
     elif "inputs" in stage:
         del stage["inputs"]
-    # Outputs
-    if set_outputs:
-        outputs_list = [o for o in set_outputs if o]
+
+    # Outputs — support both plain string (DVC) and {path, storage} dict entries
+    def _out_path(o) -> str:
+        return o["path"] if isinstance(o, dict) else o
+
+    if set_outputs or set_outputs_git:
+        # Full replacement: rebuild from both lists
+        dvc_paths = [o for o in set_outputs if o]
+        git_paths = [o for o in set_outputs_git if o]
+        outputs_list: list = list(dvc_paths)
+        for p in git_paths:
+            outputs_list.append({"path": p, "storage": "git"})
     else:
-        outputs_list = list(stage.get("outputs") or [])
-        outputs_list = [o for o in outputs_list if o not in rm_output]
+        existing = list(stage.get("outputs") or [])
+        rm_set = set(rm_output)
+        outputs_list = [o for o in existing if _out_path(o) not in rm_set]
+        existing_paths = {_out_path(o) for o in outputs_list}
         for o in add_output:
-            if o not in outputs_list:
+            if o not in existing_paths:
                 outputs_list.append(o)
     if outputs_list:
         stage["outputs"] = outputs_list

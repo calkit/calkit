@@ -2301,15 +2301,16 @@ Arguments:
 
 Options:
 
-| Option                | Type | Required | Default | Description               |
-| --------------------- | ---- | -------- | ------- | ------------------------- |
-| `--environment`, `-e` | text | no       |         | Set environment.          |
-| `--add-input`         | text | no       |         | Add an input path.        |
-| `--rm-input`          | text | no       |         | Remove an input path.     |
-| `--set-inputs`        | text | no       |         | Replace the inputs list.  |
-| `--add-output`        | text | no       |         | Add an output path.       |
-| `--rm-output`         | text | no       |         | Remove an output path.    |
-| `--set-outputs`       | text | no       |         | Replace the outputs list. |
+| Option                | Type | Required | Default | Description                                         |
+| --------------------- | ---- | -------- | ------- | --------------------------------------------------- |
+| `--environment`, `-e` | text | no       |         | Set environment.                                    |
+| `--add-input`         | text | no       |         | Add an input path.                                  |
+| `--rm-input`          | text | no       |         | Remove an input path.                               |
+| `--set-inputs`        | text | no       |         | Replace the inputs list.                            |
+| `--set-outputs`       | text | no       |         | Replace DVC outputs list (paths only, storage=dvc). |
+| `--set-outputs-git`   | text | no       |         | Replace Git-tracked outputs list.                   |
+| `--add-output`        | text | no       |         | Add a DVC-tracked output path.                      |
+| `--rm-output`         | text | no       |         | Remove an output path.                              |
 
 <a id="subcommand-update-figure"></a>
 

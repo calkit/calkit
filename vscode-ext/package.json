@@ -156,6 +156,12 @@
         "icon": "$(cloud-download)"
       },
       {
+        "command": "calkit-vscode.runArtifactStage",
+        "title": "Run Stage",
+        "category": "Calkit",
+        "icon": "$(play)"
+      },
+      {
         "command": "calkit-vscode.runNotebookStage",
         "title": "Run Pipeline Stage",
         "category": "Calkit",
@@ -247,6 +253,11 @@
         {
           "command": "calkit-vscode.editStage",
           "when": "view == calkit-sidebar && viewItem == notebook-stage-prop",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.runArtifactStage",
+          "when": "view == calkit-sidebar && (viewItem == figure-stale || viewItem == dataset-stale)",
           "group": "inline"
         }
       ],
@@ -369,6 +380,9 @@
         },
         {
           "command": "calkit-vscode.defineArtifactImport"
+        },
+        {
+          "command": "calkit-vscode.runArtifactStage"
         },
         {
           "command": "calkit-vscode.runNotebookStage"

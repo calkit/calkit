@@ -39,6 +39,7 @@ const COMMAND_EDIT_STAGE = "calkit-vscode.editStage";
 const COMMAND_DEFINE_PROVENANCE = "calkit-vscode.defineProvenance";
 const COMMAND_DEFINE_ARTIFACT_STAGE = "calkit-vscode.defineArtifactStage";
 const COMMAND_DEFINE_ARTIFACT_IMPORT = "calkit-vscode.defineArtifactImport";
+const COMMAND_RUN_ARTIFACT_STAGE = "calkit-vscode.runArtifactStage";
 const COMMAND_RUN_NOTEBOOK_STAGE = "calkit-vscode.runNotebookStage";
 const COMMAND_EDIT_NOTEBOOK_STAGE = "calkit-vscode.editNotebookStage";
 const COMMAND_DEFINE_NOTEBOOK_STAGE = "calkit-vscode.defineNotebookStage";
@@ -444,6 +445,35 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_RUN_ARTIFACT_STAGE,
+      (item?: import("./sidebar").SidebarItem) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot || !item?.nodeId) {
+          return;
+        }
+        const artifactPath = item.nodeId;
+        const allEntries = [
+          ...(currentCalkitConfig?.figures ?? []),
+          ...(currentCalkitConfig?.datasets ?? []),
+        ];
+        const entry = allEntries.find((e) => e.path === artifactPath);
+        const stageName =
+          typeof entry?.stage === "string" ? entry.stage : undefined;
+        if (!stageName) {
+          void vscode.window.showErrorMessage(
+            `No pipeline stage found for '${artifactPath}'.`,
+          );
+          return;
+        }
+        const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
+        terminal.show(true);
+        terminal.sendText(`calkit run ${shQuote(stageName)}`);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_RUN_NOTEBOOK_STAGE, async () => {
       const workspaceRoot = getWorkspaceRoot();
       if (!workspaceRoot) {
@@ -537,7 +567,7 @@ export function activate(context: vscode.ExtensionContext): void {
   sidebarProvider = new CalkitSidebarProvider();
   sidebarTreeView = vscode.window.createTreeView("calkit-sidebar", {
     treeDataProvider: sidebarProvider,
-    showCollapseAll: false,
+    showCollapseAll: true,
   });
   context.subscriptions.push(sidebarTreeView);
 
@@ -1397,8 +1427,9 @@ async function showStageEditor(
       source: string;
       environment: string;
       output: string;
+      outputStorage: string;
       inputs: string[];
-      outputs: string[];
+      outputs: { path: string; storage: "dvc" | "git" }[];
       andRun: boolean;
     }) => {
       if (msg.command === "create") {
@@ -1410,7 +1441,8 @@ async function showStageEditor(
           args.push("--stage", msg.stageName);
         }
         if (msg.output) {
-          args.push("-o", msg.output);
+          const outFlag = msg.outputStorage === "git" ? "--out-git" : "-o";
+          args.push(outFlag, msg.output);
         }
         args.push(msg.source);
         const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
@@ -1425,15 +1457,26 @@ async function showStageEditor(
         for (const i of msg.inputs) {
           updateArgs.push("--set-inputs", i);
         }
-        // Pass a sentinel when list is empty so the CLI knows to clear it
         if (msg.inputs.length === 0) {
           updateArgs.push("--set-inputs", "");
         }
-        for (const o of msg.outputs) {
+        const dvcOuts = msg.outputs
+          .filter((o) => o.storage !== "git")
+          .map((o) => o.path);
+        const gitOuts = msg.outputs
+          .filter((o) => o.storage === "git")
+          .map((o) => o.path);
+        for (const o of dvcOuts) {
           updateArgs.push("--set-outputs", o);
         }
-        if (msg.outputs.length === 0) {
+        if (dvcOuts.length === 0) {
           updateArgs.push("--set-outputs", "");
+        }
+        for (const o of gitOuts) {
+          updateArgs.push("--set-outputs-git", o);
+        }
+        if (gitOuts.length === 0) {
+          updateArgs.push("--set-outputs-git", "");
         }
         void execFileAsync("calkit", updateArgs, { cwd: workspaceRoot })
           .then(() => {
@@ -1477,8 +1520,18 @@ function buildStageEditorHtml(
   const existingInputs = Array.isArray(existingStage?.inputs)
     ? (existingStage.inputs as string[]).filter((i) => typeof i === "string")
     : [];
-  const existingOutputs = Array.isArray(existingStage?.outputs)
-    ? (existingStage.outputs as string[]).filter((o) => typeof o === "string")
+  type OutputEntry = { path: string; storage: "dvc" | "git" };
+  const existingOutputs: OutputEntry[] = Array.isArray(existingStage?.outputs)
+    ? (
+        existingStage.outputs as (string | { path: string; storage?: string })[]
+      ).map((o) =>
+        typeof o === "string"
+          ? { path: o, storage: "dvc" as const }
+          : {
+              path: o.path,
+              storage: (o.storage === "git" ? "git" : "dvc") as "dvc" | "git",
+            },
+      )
     : [];
 
   // Source info for edit mode
@@ -1519,7 +1572,7 @@ function buildStageEditorHtml(
     .join("\n");
 
   const inputsJson = JSON.stringify(existingInputs);
-  const outputsJson = JSON.stringify(existingOutputs);
+  const outputsJson = JSON.stringify(existingOutputs); // [{path, storage}]
 
   const createSection = !isEdit
     ? `
@@ -1530,9 +1583,15 @@ function buildStageEditorHtml(
 </div>
 <div class="field">
   <label>Output <span style="font-weight:normal;text-transform:none">(optional)</span></label>
-  <input id="output" type="text" value="${escHtml(
-    prefillOutput ?? "",
-  )}" placeholder="e.g. figures/result.png" list="wf-list"/>
+  <div style="display:flex;gap:6px;align-items:center">
+    <input id="output" type="text" value="${escHtml(
+      prefillOutput ?? "",
+    )}" placeholder="e.g. figures/result.png" list="wf-list" style="flex:1"/>
+    <select id="output-storage" style="width:auto;flex-shrink:0">
+      <option value="dvc" selected>DVC</option>
+      <option value="git">Git</option>
+    </select>
+  </div>
 </div>
 <div class="field">
   <label>Stage name</label>
@@ -1632,25 +1691,48 @@ ${createSection}
   function slugify(s) {
     return s.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase();
   }
-  function makeListItem(listEl, value) {
+  function makeListItem(listEl, value, withStorage) {
     const row = document.createElement('div');
     row.className = 'list-item';
     const inp = document.createElement('input');
     inp.type = 'text';
-    inp.value = value || '';
+    inp.value = (withStorage ? value.path : value) || '';
     inp.setAttribute('list', 'wf-list');
+    if (withStorage) {
+      const sel = document.createElement('select');
+      sel.className = 'storage-sel';
+      sel.style.width = 'auto';
+      sel.style.flexShrink = '0';
+      [['dvc', 'DVC'], ['git', 'Git']].forEach(function([s, label]) {
+        const opt = document.createElement('option');
+        opt.value = s;
+        opt.textContent = label;
+        if (s === (value.storage || 'dvc')) { opt.selected = true; }
+        sel.appendChild(opt);
+      });
+      row.appendChild(inp);
+      row.appendChild(sel);
+    } else {
+      row.appendChild(inp);
+    }
     const btn = document.createElement('button');
     btn.className = 'remove-btn';
     btn.textContent = '×';
     btn.title = 'Remove';
     btn.addEventListener('click', function() { row.remove(); });
-    row.appendChild(inp);
     row.appendChild(btn);
     listEl.appendChild(row);
     return inp;
   }
-  function getListValues(listEl) {
+  function getInputValues(listEl) {
     return Array.from(listEl.querySelectorAll('input')).map(function(i) { return i.value.trim(); }).filter(Boolean);
+  }
+  function getOutputValues(listEl) {
+    return Array.from(listEl.querySelectorAll('.list-item')).map(function(row) {
+      const path = row.querySelector('input').value.trim();
+      const sel = row.querySelector('select.storage-sel');
+      return path ? { path: path, storage: sel ? sel.value : 'dvc' } : null;
+    }).filter(Boolean);
   }
 
   const inputsList = document.getElementById('inputs-list');
@@ -1660,15 +1742,15 @@ ${createSection}
   const newEnvPath = document.getElementById('new-env-path');
 
   // Pre-populate lists
-  ${inputsJson}.forEach(function(v) { makeListItem(inputsList, v); });
-  ${outputsJson}.forEach(function(v) { makeListItem(outputsList, v); });
+  ${inputsJson}.forEach(function(v) { makeListItem(inputsList, v, false); });
+  ${outputsJson}.forEach(function(v) { makeListItem(outputsList, v, true); });
 
   document.getElementById('add-input').addEventListener('click', function() {
-    const inp = makeListItem(inputsList, '');
+    const inp = makeListItem(inputsList, '', false);
     inp.focus();
   });
   document.getElementById('add-output').addEventListener('click', function() {
-    const inp = makeListItem(outputsList, '');
+    const inp = makeListItem(outputsList, { path: '', storage: 'dvc' }, true);
     inp.focus();
   });
 
@@ -1707,14 +1789,16 @@ ${createSection}
 
     document.getElementById('btn-create').addEventListener('click', function() {
       if (!sourceEl.value) { return; }
+      const outputStorageSel = document.getElementById('output-storage');
       vscode.postMessage({
         command: 'create',
         source: sourceEl.value,
         environment: resolvedEnv(),
         output: outputEl.value.trim(),
+        outputStorage: outputStorageSel ? outputStorageSel.value : 'dvc',
         stageName: stageNameEl.value.trim(),
-        inputs: getListValues(inputsList),
-        outputs: getListValues(outputsList),
+        inputs: getInputValues(inputsList),
+        outputs: getOutputValues(outputsList),
         andRun: true,
       });
     });
@@ -1723,8 +1807,8 @@ ${createSection}
       vscode.postMessage({
         command: 'save',
         environment: resolvedEnv(),
-        inputs: getListValues(inputsList),
-        outputs: getListValues(outputsList),
+        inputs: getInputValues(inputsList),
+        outputs: getOutputValues(outputsList),
         andRun,
       });
     }

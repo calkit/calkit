@@ -8,7 +8,10 @@ export interface PipelineStage {
   path?: string;
   environment?: string;
   inputs?: string[];
-  outputs?: string[];
+  outputs?: (
+    | string
+    | { path: string; storage?: string; [key: string]: unknown }
+  )[];
   slurm?: {
     setup?: string[];
     [key: string]: unknown;

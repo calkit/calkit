@@ -10,6 +10,12 @@ import type {
   PipelineStage,
 } from "./types";
 
+function outputEntryPath(
+  output: string | { path: string; [key: string]: unknown },
+): string {
+  return typeof output === "string" ? output : output.path;
+}
+
 export class SidebarItem extends vscode.TreeItem {
   constructor(
     label: string,
@@ -337,7 +343,7 @@ export class CalkitSidebarProvider
     const stages = this.calkitConfig?.pipeline?.stages ?? {};
     const knownPaths = new Set(listed.map((n) => n.path));
     // Add notebooks from pipeline stages
-    for (const [stageName, stage] of Object.entries(stages)) {
+    for (const [, stage] of Object.entries(stages)) {
       if (typeof stage.notebook_path === "string") {
         if (!knownPaths.has(stage.notebook_path)) {
           knownPaths.add(stage.notebook_path);
@@ -446,9 +452,10 @@ export class CalkitSidebarProvider
         }
         items.push(inputItem);
       }
-      for (const output of Array.isArray(stage.outputs)
-        ? (stage.outputs as string[])
+      for (const rawOutput of Array.isArray(stage.outputs)
+        ? stage.outputs
         : []) {
+        const output = outputEntryPath(rawOutput as string | { path: string });
         const outItem = new SidebarItem(
           "Output",
           vscode.TreeItemCollapsibleState.None,
@@ -763,7 +770,9 @@ export class CalkitSidebarProvider
         prop("Input", input, "arrow-left", input);
       }
       const explicitOutputs = Array.isArray(calkitStage.outputs)
-        ? (calkitStage.outputs as string[])
+        ? (calkitStage.outputs as (string | { path: string })[]).map(
+            outputEntryPath,
+          )
         : [];
       for (const output of explicitOutputs) {
         prop("Output", output, "arrow-right", output);

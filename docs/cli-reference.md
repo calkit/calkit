@@ -2003,6 +2003,7 @@ Update objects.
 | [`agent-skills`](#subcommand-update-agent-skills)     | Copy packaged Calkit agent skills to `~/.agents/skills`.                            |
 | [`env`](#subcommand-update-env)                       | Update an environment.                                                              |
 | [`environment`](#subcommand-update-environment)       | Update an environment.                                                              |
+| [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                             |
 | [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                               |
 
 <a id="subcommand-update-devcontainer"></a>
@@ -2191,6 +2192,36 @@ Options:
 | -------------- | ---- | -------- | ------- | --------------------------------- |
 | `--name`, `-n` | text | yes      |         | Name of the environment to update |
 | `--add`        | text | no       |         | Add package to environment,       |
+
+<a id="subcommand-update-stage"></a>
+
+#### `calkit update stage`
+
+Update a pipeline stage in calkit.yaml.
+
+Usage:
+
+```text
+calkit update stage [OPTIONS] NAME
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `name`   | text | yes      |         | Stage name. |
+
+Options:
+
+| Option                | Type | Required | Default | Description               |
+| --------------------- | ---- | -------- | ------- | ------------------------- |
+| `--environment`, `-e` | text | no       |         | Set environment.          |
+| `--add-input`         | text | no       |         | Add an input path.        |
+| `--rm-input`          | text | no       |         | Remove an input path.     |
+| `--set-inputs`        | text | no       |         | Replace the inputs list.  |
+| `--add-output`        | text | no       |         | Add an output path.       |
+| `--rm-output`         | text | no       |         | Remove an output path.    |
+| `--set-outputs`       | text | no       |         | Replace the outputs list. |
 
 <a id="subcommand-update-figure"></a>
 

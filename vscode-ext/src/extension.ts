@@ -32,7 +32,12 @@ const COMMAND_RUN_STAGE = "calkit-vscode.runStage";
 const COMMAND_RUN_STAGE_FOR_FILE = "calkit-vscode.runStageForFile";
 const COMMAND_RUN_PIPELINE = "calkit-vscode.runPipeline";
 const COMMAND_SHOW_DAG = "calkit-vscode.showPipelineDag";
+const COMMAND_NEW_STAGE = "calkit-vscode.newStage";
+const COMMAND_EDIT_STAGE = "calkit-vscode.editStage";
 const COMMAND_DEFINE_PROVENANCE = "calkit-vscode.defineProvenance";
+const COMMAND_RUN_NOTEBOOK_STAGE = "calkit-vscode.runNotebookStage";
+const COMMAND_EDIT_NOTEBOOK_STAGE = "calkit-vscode.editNotebookStage";
+const COMMAND_DEFINE_NOTEBOOK_STAGE = "calkit-vscode.defineNotebookStage";
 const COMMAND_REFRESH_SIDEBAR = "calkit-vscode.refreshSidebar";
 const FIGURE_EXTENSIONS = new Set([
   ".png",
@@ -253,6 +258,41 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_NEW_STAGE, async () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      await showStageEditor(context, workspaceRoot, undefined);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_EDIT_STAGE,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const stageName = item?.nodeId;
+        if (!stageName) {
+          return;
+        }
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
+        await showStageEditor(
+          context,
+          workspaceRoot,
+          undefined,
+          undefined,
+          stageName,
+          stage,
+        );
+      },
+    ),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand(
       COMMAND_DEFINE_PROVENANCE,
       async (uri?: vscode.Uri) => {
@@ -264,9 +304,90 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!workspaceRoot) {
           return;
         }
-        await defineProvenance(workspaceRoot, fileUri);
+        await defineProvenance(context, workspaceRoot, fileUri);
       },
     ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_RUN_NOTEBOOK_STAGE, async () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
+      if (!notebookUri) {
+        return;
+      }
+      const stageName = await findStageForFile(workspaceRoot, notebookUri);
+      if (!stageName) {
+        void vscode.window.showErrorMessage(
+          "No pipeline stage found for this notebook.",
+        );
+        return;
+      }
+      const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
+      terminal.show(true);
+      terminal.sendText(`calkit run ${stageName}`);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_EDIT_NOTEBOOK_STAGE, async () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
+      if (!notebookUri) {
+        return;
+      }
+      const stageName = await findStageForFile(workspaceRoot, notebookUri);
+      if (!stageName) {
+        void vscode.window.showErrorMessage(
+          "No pipeline stage found for this notebook.",
+        );
+        return;
+      }
+      const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
+      await showStageEditor(
+        context,
+        workspaceRoot,
+        undefined,
+        undefined,
+        stageName,
+        stage,
+      );
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_DEFINE_NOTEBOOK_STAGE, async () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
+      if (!notebookUri) {
+        return;
+      }
+      const relPath = path
+        .relative(workspaceRoot, notebookUri.fsPath)
+        .replace(/\\/g, "/");
+      const profile = getLaunchProfileForActiveNotebook(context);
+      const envName = profile?.environmentName;
+      const prefillStage = envName
+        ? { kind: "jupyter-notebook", environment: envName }
+        : { kind: "jupyter-notebook" };
+      await showStageEditor(
+        context,
+        workspaceRoot,
+        undefined,
+        relPath,
+        undefined,
+        prefillStage,
+      );
+    }),
   );
 
   context.subscriptions.push(
@@ -913,6 +1034,7 @@ function buildDagHtml(nonce: string): string {
 }
 
 async function defineProvenance(
+  context: vscode.ExtensionContext,
   workspaceRoot: string,
   fileUri: vscode.Uri,
 ): Promise<void> {
@@ -969,51 +1091,416 @@ async function defineProvenance(
     return;
   }
 
-  // "Produced by script/notebook" path
-  let scriptRelPath = relPath;
-  if (!isNotebook) {
-    const scriptUri = await vscode.window.showOpenDialog({
-      canSelectMany: false,
-      openLabel: "Select producing script or notebook",
-      defaultUri: vscode.Uri.file(workspaceRoot),
-      filters: { "Scripts & Notebooks": ["py", "ipynb", "R", "jl", "m"] },
-    });
-    if (!scriptUri?.length) {
-      return;
-    }
-    scriptRelPath = path
-      .relative(workspaceRoot, scriptUri[0].fsPath)
-      .replace(/\\/g, "/");
-  }
+  // "Produced by script/notebook" path — open the stage editor
+  await showStageEditor(
+    context,
+    workspaceRoot,
+    isNotebook ? undefined : relPath,
+    isNotebook ? relPath : undefined,
+  );
+}
 
-  const envChoice = await vscode.window.showQuickPick(
-    [
-      { label: "$(search) Detect automatically", envName: "" },
-      ...envNames.map((name) => ({
-        label: name,
-        description:
-          typeof envs[name].kind === "string"
-            ? (envs[name].kind as string)
-            : undefined,
-        envName: name,
-      })),
-    ],
-    {
-      title: "Select environment",
-      placeHolder: "Which environment runs this script?",
+const SOURCE_GLOB = "**/*.{py,ipynb,R,jl,m,tex}";
+const SOURCE_EXCLUDE =
+  "**/{.calkit,.dvc,node_modules,.git,__pycache__,.ipynb_checkpoints}/**";
+
+const KIND_BY_EXT: Record<string, string> = {
+  ".ipynb": "jupyter-notebook",
+  ".py": "script",
+  ".R": "script",
+  ".jl": "script",
+  ".m": "script",
+  ".tex": "latex",
+};
+
+async function showStageEditor(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+  prefillOutput?: string,
+  prefillSource?: string,
+  editStageName?: string,
+  existingStage?: import("./types").PipelineStage,
+): Promise<void> {
+  const nonce = getNonce();
+  const uris = await vscode.workspace.findFiles(SOURCE_GLOB, SOURCE_EXCLUDE);
+  const workspaceFiles = uris
+    .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
+    .sort();
+  const envs = currentCalkitConfig?.environments ?? {};
+  const envEntries = Object.entries(envs).map(([name, env]) => ({
+    name,
+    kind: typeof env.kind === "string" ? env.kind : "",
+  }));
+
+  const isEdit = editStageName !== undefined;
+  const panel = vscode.window.createWebviewPanel(
+    "calkit.stageEditor",
+    isEdit ? `Edit Stage: ${editStageName}` : "New Pipeline Stage",
+    vscode.ViewColumn.Active,
+    { enableScripts: true },
+  );
+  context.subscriptions.push(panel);
+  panel.webview.html = buildStageEditorHtml(
+    nonce,
+    workspaceFiles,
+    envEntries,
+    prefillOutput,
+    prefillSource,
+    editStageName,
+    existingStage,
+  );
+
+  panel.webview.onDidReceiveMessage(
+    (msg: {
+      command: string;
+      stageName: string;
+      source: string;
+      environment: string;
+      output: string;
+      inputs: string[];
+      outputs: string[];
+      andRun: boolean;
+    }) => {
+      if (msg.command === "create") {
+        const args: string[] = [];
+        if (msg.environment) {
+          args.push("-e", msg.environment);
+        }
+        if (msg.stageName) {
+          args.push("--stage", msg.stageName);
+        }
+        if (msg.output) {
+          args.push("-o", msg.output);
+        }
+        args.push(msg.source);
+        const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
+        terminal.show();
+        terminal.sendText(`calkit xr ${args.map(shQuote).join(" ")}`);
+        void panel.dispose();
+      } else if (msg.command === "save" && editStageName) {
+        const updateArgs: string[] = ["update", "stage", editStageName];
+        if (msg.environment !== undefined) {
+          updateArgs.push("--environment", msg.environment);
+        }
+        for (const i of msg.inputs) {
+          updateArgs.push("--set-inputs", i);
+        }
+        // Pass a sentinel when list is empty so the CLI knows to clear it
+        if (msg.inputs.length === 0) {
+          updateArgs.push("--set-inputs", "");
+        }
+        for (const o of msg.outputs) {
+          updateArgs.push("--set-outputs", o);
+        }
+        if (msg.outputs.length === 0) {
+          updateArgs.push("--set-outputs", "");
+        }
+        void execFileAsync("calkit", updateArgs, { cwd: workspaceRoot })
+          .then(() => {
+            if (msg.andRun) {
+              const terminal = getOrCreateTerminal(
+                "calkit: run",
+                workspaceRoot,
+              );
+              terminal.show();
+              terminal.sendText(`calkit run ${shQuote(editStageName)}`);
+            }
+            void panel.dispose();
+          })
+          .catch((err: unknown) => {
+            void vscode.window.showErrorMessage(
+              `Failed to update stage: ${String(err)}`,
+            );
+          });
+      }
     },
+    undefined,
+    context.subscriptions,
   );
-  if (!envChoice) {
-    return;
+}
+
+function buildStageEditorHtml(
+  nonce: string,
+  workspaceFiles: string[],
+  envEntries: { name: string; kind: string }[],
+  prefillOutput?: string,
+  prefillSource?: string,
+  editStageName?: string,
+  existingStage?: import("./types").PipelineStage,
+): string {
+  const isEdit = editStageName !== undefined;
+  const existingEnv =
+    typeof existingStage?.environment === "string"
+      ? existingStage.environment
+      : "";
+  const existingInputs = Array.isArray(existingStage?.inputs)
+    ? (existingStage.inputs as string[]).filter((i) => typeof i === "string")
+    : [];
+  const existingOutputs = Array.isArray(existingStage?.outputs)
+    ? (existingStage.outputs as string[]).filter((o) => typeof o === "string")
+    : [];
+
+  // Source info for edit mode
+  const sourceFile =
+    typeof existingStage?.notebook_path === "string"
+      ? existingStage.notebook_path
+      : typeof existingStage?.script_path === "string"
+      ? existingStage.script_path
+      : typeof existingStage?.target_path === "string"
+      ? existingStage.target_path
+      : "";
+  const stageKind =
+    typeof existingStage?.kind === "string" ? existingStage.kind : "";
+
+  const sourceOptions = workspaceFiles
+    .map(
+      (f) =>
+        `<option value="${escHtml(f)}"${
+          f === prefillSource ? " selected" : ""
+        }>${escHtml(f)}</option>`,
+    )
+    .join("\n");
+  const envOptions = [
+    `<option value=""${!existingEnv ? " selected" : ""}>${
+      isEdit ? "— none —" : "Detect automatically"
+    }</option>`,
+    ...envEntries.map(
+      (e) =>
+        `<option value="${escHtml(e.name)}"${
+          e.name === existingEnv ? " selected" : ""
+        }>${escHtml(e.name)}${e.kind ? ` (${escHtml(e.kind)})` : ""}</option>`,
+    ),
+    `<option value="__new__">New environment (enter spec path below)…</option>`,
+  ].join("\n");
+
+  const datalistOptions = workspaceFiles
+    .map((f) => `<option value="${escHtml(f)}">`)
+    .join("\n");
+
+  const inputsJson = JSON.stringify(existingInputs);
+  const outputsJson = JSON.stringify(existingOutputs);
+
+  const createSection = !isEdit
+    ? `
+<div class="field">
+  <label>Source file</label>
+  <select id="source">${sourceOptions}</select>
+  <div id="kind-hint"></div>
+</div>
+<div class="field">
+  <label>Output <span style="font-weight:normal;text-transform:none">(optional)</span></label>
+  <input id="output" type="text" value="${escHtml(
+    prefillOutput ?? "",
+  )}" placeholder="e.g. figures/result.png" list="wf-list"/>
+</div>
+<div class="field">
+  <label>Stage name</label>
+  <input id="stage-name" type="text" placeholder="Auto-generated if blank" />
+</div>`
+    : `
+<div class="field">
+  <label>Stage</label>
+  <div class="info-row">${escHtml(editStageName ?? "")}</div>
+</div>
+${
+  stageKind
+    ? `<div class="field"><label>Kind</label><div class="info-row">${escHtml(
+        stageKind,
+      )}</div></div>`
+    : ""
+}
+${
+  sourceFile
+    ? `<div class="field"><label>Source</label><div class="info-row">${escHtml(
+        sourceFile,
+      )}</div></div>`
+    : ""
+}`;
+
+  const buttons = !isEdit
+    ? `<button id="btn-create">Create Stage &amp; Run</button>`
+    : `<button id="btn-save">Save</button> <button id="btn-save-run" style="margin-left:8px">Save &amp; Run</button>`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline';">
+<title>${isEdit ? "Edit Stage" : "New Pipeline Stage"}</title>
+<style>
+  body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); padding: 20px; max-width: 580px; }
+  h1 { font-size: 1.2em; margin-bottom: 18px; }
+  .field { margin-bottom: 14px; }
+  label { display: block; margin-bottom: 4px; font-weight: 600; color: var(--vscode-descriptionForeground); font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.04em; }
+  input, select { width: 100%; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, #555); padding: 5px 8px; font-size: 1em; font-family: inherit; border-radius: 2px; }
+  input:focus, select:focus { outline: 1px solid var(--vscode-focusBorder); border-color: var(--vscode-focusBorder); }
+  .info-row { padding: 4px 0; color: var(--vscode-foreground); opacity: 0.8; }
+  #kind-hint { font-size: 0.8em; color: var(--vscode-descriptionForeground); margin-top: 3px; height: 1.2em; }
+  #new-env-row { margin-top: 6px; display: none; }
+  .list-section { border: 1px solid var(--vscode-input-border, #555); border-radius: 2px; padding: 6px 8px; }
+  .list-item { display: flex; gap: 6px; margin-bottom: 4px; align-items: center; }
+  .list-item input { flex: 1; }
+  .remove-btn { background: none; border: none; color: var(--vscode-descriptionForeground); cursor: pointer; font-size: 1.1em; padding: 2px 4px; margin-top: 0; flex-shrink: 0; }
+  .remove-btn:hover { color: var(--vscode-foreground); }
+  .add-btn { background: none; border: none; color: var(--vscode-textLink-foreground); cursor: pointer; font-size: 0.9em; padding: 2px 0; margin-top: 4px; }
+  .add-btn:hover { text-decoration: underline; }
+  .actions { margin-top: 20px; }
+  button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 7px 18px; cursor: pointer; font-size: 1em; border-radius: 2px; margin-top: 0; }
+  button:hover { background: var(--vscode-button-hoverBackground); }
+</style>
+</head>
+<body>
+<h1>${
+    isEdit
+      ? `Edit Stage: ${escHtml(editStageName ?? "")}`
+      : "New Pipeline Stage"
+  }</h1>
+${createSection}
+<div class="field">
+  <label>Environment</label>
+  <select id="env">${envOptions}</select>
+  <div id="new-env-row">
+    <input id="new-env-path" type="text" placeholder="e.g. pyproject.toml, environment.yml, Dockerfile" />
+  </div>
+</div>
+<div class="field">
+  <label>Inputs</label>
+  <div class="list-section">
+    <div id="inputs-list"></div>
+    <button class="add-btn" id="add-input">+ Add input</button>
+  </div>
+</div>
+<div class="field">
+  <label>Outputs</label>
+  <div class="list-section">
+    <div id="outputs-list"></div>
+    <button class="add-btn" id="add-output">+ Add output</button>
+  </div>
+</div>
+<datalist id="wf-list">${datalistOptions}</datalist>
+<div class="actions">${buttons}</div>
+<script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+  const kindByExt = ${JSON.stringify(KIND_BY_EXT)};
+  const isEdit = ${JSON.stringify(isEdit)};
+
+  function getKind(filePath) {
+    const dot = filePath.lastIndexOf('.');
+    return dot >= 0 ? (kindByExt[filePath.slice(dot)] ?? 'script') : '';
+  }
+  function slugify(s) {
+    return s.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase();
+  }
+  function makeListItem(listEl, value) {
+    const row = document.createElement('div');
+    row.className = 'list-item';
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = value || '';
+    inp.setAttribute('list', 'wf-list');
+    const btn = document.createElement('button');
+    btn.className = 'remove-btn';
+    btn.textContent = '×';
+    btn.title = 'Remove';
+    btn.addEventListener('click', function() { row.remove(); });
+    row.appendChild(inp);
+    row.appendChild(btn);
+    listEl.appendChild(row);
+    return inp;
+  }
+  function getListValues(listEl) {
+    return Array.from(listEl.querySelectorAll('input')).map(function(i) { return i.value.trim(); }).filter(Boolean);
   }
 
-  const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
-  terminal.show();
-  const envFlag = envChoice.envName ? ` -e ${shQuote(envChoice.envName)}` : "";
-  const outputFlag = isNotebook ? "" : ` -o ${shQuote(relPath)}`;
-  terminal.sendText(
-    `calkit xr${envFlag} ${shQuote(scriptRelPath)}${outputFlag}`,
-  );
+  const inputsList = document.getElementById('inputs-list');
+  const outputsList = document.getElementById('outputs-list');
+  const envEl = document.getElementById('env');
+  const newEnvRow = document.getElementById('new-env-row');
+  const newEnvPath = document.getElementById('new-env-path');
+
+  // Pre-populate lists
+  ${inputsJson}.forEach(function(v) { makeListItem(inputsList, v); });
+  ${outputsJson}.forEach(function(v) { makeListItem(outputsList, v); });
+
+  document.getElementById('add-input').addEventListener('click', function() {
+    const inp = makeListItem(inputsList, '');
+    inp.focus();
+  });
+  document.getElementById('add-output').addEventListener('click', function() {
+    const inp = makeListItem(outputsList, '');
+    inp.focus();
+  });
+
+  envEl.addEventListener('change', function() {
+    newEnvRow.style.display = envEl.value === '__new__' ? 'block' : 'none';
+  });
+
+  function resolvedEnv() {
+    return envEl.value === '__new__' ? newEnvPath.value.trim() : envEl.value;
+  }
+
+  if (!isEdit) {
+    const sourceEl = document.getElementById('source');
+    const outputEl = document.getElementById('output');
+    const stageNameEl = document.getElementById('stage-name');
+    const kindHint = document.getElementById('kind-hint');
+    let stageNameEdited = false;
+
+    function updateKindHint() {
+      const kind = getKind(sourceEl.value);
+      kindHint.textContent = kind ? 'Kind: ' + kind : '';
+    }
+    function updateStageName() {
+      if (!stageNameEdited) {
+        const out = outputEl.value.trim();
+        stageNameEl.value = out
+          ? slugify(out.replace(/\\.[^.]+$/, ''))
+          : slugify(sourceEl.value.replace(/\\.[^.]+$/, ''));
+      }
+    }
+    sourceEl.addEventListener('change', function() { updateKindHint(); updateStageName(); });
+    outputEl.addEventListener('input', updateStageName);
+    stageNameEl.addEventListener('input', function() { stageNameEdited = true; });
+    updateKindHint();
+    updateStageName();
+
+    document.getElementById('btn-create').addEventListener('click', function() {
+      if (!sourceEl.value) { return; }
+      vscode.postMessage({
+        command: 'create',
+        source: sourceEl.value,
+        environment: resolvedEnv(),
+        output: outputEl.value.trim(),
+        stageName: stageNameEl.value.trim(),
+        inputs: getListValues(inputsList),
+        outputs: getListValues(outputsList),
+        andRun: true,
+      });
+    });
+  } else {
+    function save(andRun) {
+      vscode.postMessage({
+        command: 'save',
+        environment: resolvedEnv(),
+        inputs: getListValues(inputsList),
+        outputs: getListValues(outputsList),
+        andRun,
+      });
+    }
+    document.getElementById('btn-save').addEventListener('click', function() { save(false); });
+    document.getElementById('btn-save-run').addEventListener('click', function() { save(true); });
+  }
+</script>
+</body>
+</html>`;
+}
+
+function escHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function getOrCreateTerminal(name: string, cwd: string): vscode.Terminal {
@@ -4159,6 +4646,13 @@ async function refreshNotebookToolbarContext(
   const hasResumableSlurm = Boolean(profile?.outerSlurmEnvironment);
   const isRunningSlurm = hasRunningServerSession("slurm");
   const isRunningDocker = hasRunningServerSession("docker");
+  const workspaceRoot = getWorkspaceRoot();
+  const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
+  let notebookHasStage = false;
+  if (workspaceRoot && notebookUri) {
+    const stageName = await findStageForFile(workspaceRoot, notebookUri);
+    notebookHasStage = stageName !== undefined;
+  }
 
   await vscode.commands.executeCommand(
     "setContext",
@@ -4174,6 +4668,11 @@ async function refreshNotebookToolbarContext(
     "setContext",
     "calkit.hasRunningDockerSession",
     isRunningDocker,
+  );
+  await vscode.commands.executeCommand(
+    "setContext",
+    "calkit.notebookHasStage",
+    notebookHasStage,
   );
 
   if (slurmStatusBarItem) {

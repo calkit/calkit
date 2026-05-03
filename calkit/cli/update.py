@@ -620,6 +620,79 @@ def update_environment(
     typer.echo(f"Updated environment '{env_name}'")
 
 
+@update_app.command(name="stage")
+def update_stage(
+    name: Annotated[str, typer.Argument(help="Stage name.")],
+    environment: Annotated[
+        str | None,
+        typer.Option("--environment", "-e", help="Set environment."),
+    ] = None,
+    add_input: Annotated[
+        list[str],
+        typer.Option("--add-input", help="Add an input path."),
+    ] = [],
+    rm_input: Annotated[
+        list[str],
+        typer.Option("--rm-input", help="Remove an input path."),
+    ] = [],
+    set_inputs: Annotated[
+        list[str],
+        typer.Option("--set-inputs", help="Replace the inputs list."),
+    ] = [],
+    add_output: Annotated[
+        list[str],
+        typer.Option("--add-output", help="Add an output path."),
+    ] = [],
+    rm_output: Annotated[
+        list[str],
+        typer.Option("--rm-output", help="Remove an output path."),
+    ] = [],
+    set_outputs: Annotated[
+        list[str],
+        typer.Option("--set-outputs", help="Replace the outputs list."),
+    ] = [],
+) -> None:
+    """Update a pipeline stage in calkit.yaml."""
+    with open("calkit.yaml") as f:
+        ck_info = calkit.ryaml.load(f)
+    if ck_info is None:
+        ck_info = {}
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    if name not in stages:
+        raise_error(f"Stage '{name}' not found in calkit.yaml.")
+    stage = stages[name]
+    if environment is not None:
+        stage["environment"] = environment or None
+    # Inputs
+    if set_inputs:
+        inputs_list = [i for i in set_inputs if i]
+    else:
+        inputs_list = list(stage.get("inputs") or [])
+        inputs_list = [i for i in inputs_list if i not in rm_input]
+        for i in add_input:
+            if i not in inputs_list:
+                inputs_list.append(i)
+    if inputs_list:
+        stage["inputs"] = inputs_list
+    elif "inputs" in stage:
+        del stage["inputs"]
+    # Outputs
+    if set_outputs:
+        outputs_list = [o for o in set_outputs if o]
+    else:
+        outputs_list = list(stage.get("outputs") or [])
+        outputs_list = [o for o in outputs_list if o not in rm_output]
+        for o in add_output:
+            if o not in outputs_list:
+                outputs_list.append(o)
+    if outputs_list:
+        stage["outputs"] = outputs_list
+    elif "outputs" in stage:
+        del stage["outputs"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+
+
 @update_app.command(name="figure")
 def update_figure(
     path: Annotated[str, typer.Argument(help="Path to the figure file.")],

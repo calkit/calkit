@@ -114,9 +114,39 @@
         "icon": "$(type-hierarchy)"
       },
       {
+        "command": "calkit-vscode.newStage",
+        "title": "New Stage",
+        "category": "Calkit",
+        "icon": "$(add)"
+      },
+      {
+        "command": "calkit-vscode.editStage",
+        "title": "Edit Stage",
+        "category": "Calkit",
+        "icon": "$(edit)"
+      },
+      {
         "command": "calkit-vscode.defineProvenance",
         "title": "Define Provenance",
         "category": "Calkit"
+      },
+      {
+        "command": "calkit-vscode.runNotebookStage",
+        "title": "Run Pipeline Stage",
+        "category": "Calkit",
+        "icon": "$(play)"
+      },
+      {
+        "command": "calkit-vscode.editNotebookStage",
+        "title": "Edit Pipeline Stage",
+        "category": "Calkit",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "calkit-vscode.defineNotebookStage",
+        "title": "Define Pipeline Stage",
+        "category": "Calkit",
+        "icon": "$(add)"
       },
       {
         "command": "calkit-vscode.refreshSidebar",
@@ -135,6 +165,11 @@
       ],
       "view/item/context": [
         {
+          "command": "calkit-vscode.newStage",
+          "when": "view == calkit-sidebar && viewItem == section-pipeline",
+          "group": "inline"
+        },
+        {
           "command": "calkit-vscode.showPipelineDag",
           "when": "view == calkit-sidebar && viewItem == section-pipeline",
           "group": "inline"
@@ -142,6 +177,11 @@
         {
           "command": "calkit-vscode.runPipeline",
           "when": "view == calkit-sidebar && viewItem == section-pipeline",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.editStage",
+          "when": "view == calkit-sidebar && viewItem == stage",
           "group": "inline"
         },
         {
@@ -201,6 +241,21 @@
           "command": "calkit-vscode.restartCalkitJob",
           "when": "notebookType == 'jupyter-notebook' && (calkit.hasRunningSlurmSession || calkit.hasRunningDockerSession) && !calkit.isSettingKernel",
           "group": "navigation@102"
+        },
+        {
+          "command": "calkit-vscode.runNotebookStage",
+          "when": "notebookType == 'jupyter-notebook' && calkit.notebookHasStage && !calkit.isSettingKernel",
+          "group": "navigation@103"
+        },
+        {
+          "command": "calkit-vscode.editNotebookStage",
+          "when": "notebookType == 'jupyter-notebook' && calkit.notebookHasStage && !calkit.isSettingKernel",
+          "group": "navigation@104"
+        },
+        {
+          "command": "calkit-vscode.defineNotebookStage",
+          "when": "notebookType == 'jupyter-notebook' && !calkit.notebookHasStage && !calkit.isSettingKernel",
+          "group": "navigation@103"
         }
       ],
       "commandPalette": [
@@ -235,7 +290,22 @@
           "command": "calkit-vscode.showPipelineDag"
         },
         {
+          "command": "calkit-vscode.newStage"
+        },
+        {
+          "command": "calkit-vscode.editStage"
+        },
+        {
           "command": "calkit-vscode.defineProvenance"
+        },
+        {
+          "command": "calkit-vscode.runNotebookStage"
+        },
+        {
+          "command": "calkit-vscode.editNotebookStage"
+        },
+        {
+          "command": "calkit-vscode.defineNotebookStage"
         },
         {
           "command": "calkit-vscode.refreshSidebar"

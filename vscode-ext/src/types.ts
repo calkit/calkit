@@ -21,10 +21,18 @@ export interface NotebookEntry {
   stage?: string;
 }
 
+export interface FigureEntry {
+  path: string;
+  stage?: string;
+  imported_from?: unknown;
+  [key: string]: unknown;
+}
+
 export interface CalkitInfo {
   name?: string;
   environments?: Record<string, CalkitEnvironment>;
   notebooks?: NotebookEntry[];
+  figures?: FigureEntry[];
   pipeline?: {
     stages?: Record<string, PipelineStage>;
   };

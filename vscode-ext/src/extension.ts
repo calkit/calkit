@@ -27,6 +27,18 @@ const COMMAND_START_SLURM = "calkit-vscode.startCalkitSlurmJob";
 const COMMAND_STOP_SLURM = "calkit-vscode.stopCalkitSlurmJob";
 const COMMAND_RESTART_JOB = "calkit-vscode.restartCalkitJob";
 const COMMAND_SHOW_PROVENANCE = "calkit-vscode.showProvenance";
+const FIGURE_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".svg",
+  ".pdf",
+  ".eps",
+  ".tiff",
+  ".tif",
+]);
+const NOTEBOOK_EXTENSION = ".ipynb";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
 const execFileAsync = promisify(execFile);
 const DEFAULT_MIN_CALKIT_VERSION = "0.37.3";
@@ -46,6 +58,9 @@ const slurmAutoStartDeclinedThisSession = new Set<string>();
 const slurmAutoStartSuppressedThisSession = new Set<string>();
 let hasCheckedCalkitCli = false;
 const pipelineOutputUris = new Set<string>();
+const staleOutputUris = new Set<string>();
+const importedFigureUris = new Set<string>();
+const pipelineNotebookUris = new Set<string>();
 let pipelineDecorationProvider: vscode.Disposable | undefined;
 
 function log(message: string): void {
@@ -181,6 +196,19 @@ export function activate(context: vscode.ExtensionContext): void {
     void refreshPipelineOutputContext(context);
   });
   dvcYamlWatcher.onDidDelete(() => {
+    void refreshPipelineOutputContext(context);
+  });
+
+  const calkitYamlWatcher =
+    vscode.workspace.createFileSystemWatcher("**/calkit.yaml");
+  context.subscriptions.push(calkitYamlWatcher);
+  calkitYamlWatcher.onDidChange(() => {
+    void refreshPipelineOutputContext(context);
+  });
+  calkitYamlWatcher.onDidCreate(() => {
+    void refreshPipelineOutputContext(context);
+  });
+  calkitYamlWatcher.onDidDelete(() => {
     void refreshPipelineOutputContext(context);
   });
 
@@ -445,10 +473,37 @@ class PipelineOutputDecorationProvider
 
   provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
     if (pipelineOutputUris.has(uri.fsPath)) {
+      if (staleOutputUris.has(uri.fsPath)) {
+        return {
+          badge: "S",
+          tooltip: "Calkit pipeline output — stage is stale, needs re-run",
+          color: new vscode.ThemeColor("list.warningForeground"),
+        };
+      }
       return {
         badge: "P",
-        tooltip: "Calkit pipeline output",
-        color: new vscode.ThemeColor("charts.blue"),
+        tooltip: "Calkit pipeline output — right-click to see creation process",
+      };
+    }
+    if (
+      FIGURE_EXTENSIONS.has(path.extname(uri.fsPath).toLowerCase()) &&
+      !importedFigureUris.has(uri.fsPath)
+    ) {
+      return {
+        badge: "!",
+        tooltip: "Not a pipeline output — was this created manually?",
+        color: new vscode.ThemeColor("list.warningForeground"),
+      };
+    }
+    if (
+      path.extname(uri.fsPath).toLowerCase() === NOTEBOOK_EXTENSION &&
+      !pipelineNotebookUris.has(uri.fsPath)
+    ) {
+      return {
+        badge: "!",
+        tooltip:
+          "Not part of any pipeline stage — notebook will not be run reproducibly",
+        color: new vscode.ThemeColor("list.warningForeground"),
       };
     }
     return undefined;
@@ -464,11 +519,33 @@ async function refreshPipelineOutputContext(
   if (!workspaceRoot) {
     return;
   }
-  const outputMap = await buildPipelineOutputMap(workspaceRoot);
-  const prevPaths = new Set(pipelineOutputUris);
+  const [outputMap, calkitConfig] = await Promise.all([
+    buildPipelineOutputMap(workspaceRoot),
+    readCalkitConfig(workspaceRoot),
+  ]);
+  const prevPaths = new Set([
+    ...pipelineOutputUris,
+    ...importedFigureUris,
+    ...pipelineNotebookUris,
+  ]);
   pipelineOutputUris.clear();
+  importedFigureUris.clear();
+  pipelineNotebookUris.clear();
   for (const absPath of outputMap.keys()) {
     pipelineOutputUris.add(absPath);
+  }
+  for (const fig of calkitConfig?.figures ?? []) {
+    if (fig.imported_from != null) {
+      importedFigureUris.add(path.join(workspaceRoot, fig.path));
+    }
+  }
+  for (const stage of Object.values(calkitConfig?.pipeline?.stages ?? {})) {
+    if (
+      stage.kind === "jupyter-notebook" &&
+      typeof stage.notebook_path === "string"
+    ) {
+      pipelineNotebookUris.add(path.join(workspaceRoot, stage.notebook_path));
+    }
   }
   if (!decorationProvider) {
     decorationProvider = new PipelineOutputDecorationProvider();
@@ -477,10 +554,93 @@ async function refreshPipelineOutputContext(
     pipelineDecorationProvider = disposable;
     context.subscriptions.push(disposable);
   }
-  const changedUris = [...new Set([...prevPaths, ...pipelineOutputUris])].map(
+  const changedUris = [
+    ...new Set([
+      ...prevPaths,
+      ...pipelineOutputUris,
+      ...importedFigureUris,
+      ...pipelineNotebookUris,
+    ]),
+  ].map((p) => vscode.Uri.file(p));
+  decorationProvider.refresh(changedUris);
+  // Run staleness check after the fast decoration pass so P badges appear
+  // immediately; S badges follow once calkit status finishes.
+  void refreshStaleOutputContext(workspaceRoot, outputMap, decorationProvider);
+}
+
+async function refreshStaleOutputContext(
+  workspaceRoot: string,
+  outputMap: Map<string, string>,
+  provider: PipelineOutputDecorationProvider,
+): Promise<void> {
+  const prevStale = new Set(staleOutputUris);
+  staleOutputUris.clear();
+  try {
+    const { stdout } = await execFileAsync(
+      "calkit",
+      ["status", "--json", "-c", "pipeline"],
+      { cwd: workspaceRoot, timeout: 60_000 },
+    );
+    const status = JSON.parse(stdout) as {
+      pipeline?: { stale_stage_names?: string[] };
+    };
+    const staleStageNames = new Set(status?.pipeline?.stale_stage_names ?? []);
+    for (const [absPath, stageName] of outputMap) {
+      if (staleStageNames.has(stageName)) {
+        staleOutputUris.add(absPath);
+      }
+    }
+  } catch (error) {
+    log(`Staleness check failed: ${String(error)}`);
+  }
+  const changedUris = [...new Set([...prevStale, ...staleOutputUris])].map(
     (p) => vscode.Uri.file(p),
   );
-  decorationProvider.refresh(changedUris);
+  if (changedUris.length > 0) {
+    provider.refresh(changedUris);
+  }
+}
+
+async function getDagMermaid(
+  workspaceRoot: string,
+): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync(
+      "calkit",
+      ["dvc", "dag", "--mermaid"],
+      { cwd: workspaceRoot, timeout: 15_000 },
+    );
+    return stdout.trim();
+  } catch {
+    return undefined;
+  }
+}
+
+function highlightStageInMermaid(source: string, stageName: string): string {
+  let highlightNodeId: string | undefined;
+  for (const line of source.split("\n")) {
+    const match = line.match(/^\t(node\d+)\["(.+?)"\]$/);
+    if (match && match[2] === stageName) {
+      highlightNodeId = match[1];
+      break;
+    }
+  }
+  if (!highlightNodeId) {
+    return source;
+  }
+  return (
+    source.trimEnd() +
+    `\nclassDef highlight fill:#f0a500,stroke:#e09000,color:#000\nclass ${highlightNodeId} highlight\n`
+  );
+}
+
+function getNonce(): string {
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  return Array.from(
+    { length: 32 },
+    () => chars[Math.floor(Math.random() * chars.length)],
+  ).join("");
 }
 
 async function showProvenancePanel(
@@ -517,21 +677,49 @@ async function showProvenancePanel(
     return;
   }
   const calkitStage = calkitConfig?.pipeline?.stages?.[stageName];
+  const nonce = getNonce();
   const panel = vscode.window.createWebviewPanel(
     "calkit.provenance",
     `Provenance: ${path.basename(fileUri.fsPath)}`,
     vscode.ViewColumn.Beside,
-    { enableScripts: false },
+    { enableScripts: true },
   );
   context.subscriptions.push(panel);
+  panel.webview.onDidReceiveMessage(
+    (msg: { command: string; path: string }) => {
+      if (msg.command === "openFile") {
+        void vscode.commands.executeCommand(
+          "vscode.open",
+          vscode.Uri.file(path.join(workspaceRoot, msg.path)),
+        );
+      }
+    },
+    undefined,
+    context.subscriptions,
+  );
   panel.webview.html = buildProvenanceHtml(
-    workspaceRoot,
+    nonce,
     relPath,
     stageName,
     dvcStage,
     calkitStage,
     calkitConfig,
   );
+  // Fetch DAG after showing the panel so the spinner is visible immediately.
+  const capturedStageName = stageName;
+  getDagMermaid(workspaceRoot)
+    .then((rawMermaid) => {
+      const mermaidSource = rawMermaid
+        ? highlightStageInMermaid(rawMermaid, capturedStageName)
+        : null;
+      void panel.webview.postMessage({
+        command: "dagReady",
+        mermaid: mermaidSource,
+      });
+    })
+    .catch(() => {
+      void panel.webview.postMessage({ command: "dagReady", mermaid: null });
+    });
 }
 
 function escapeHtml(text: string): string {
@@ -542,8 +730,15 @@ function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
+function fileLink(relPath: string, label?: string): string {
+  const display = escapeHtml(label ?? relPath);
+  return `<a href="#" class="file-link" data-path="${escapeHtml(
+    relPath,
+  )}">${display}</a>`;
+}
+
 function buildProvenanceHtml(
-  workspaceRoot: string,
+  nonce: string,
   relPath: string,
   stageName: string,
   dvcStage: import("./types").DvcStage,
@@ -556,8 +751,14 @@ function buildProvenanceHtml(
   const outs = dvcStageOutputPaths(dvcStage);
   const envName = calkitStage?.environment;
   const envInfo = envName ? calkitConfig?.environments?.[envName] : undefined;
-  const notebookPath = calkitStage?.notebook_path;
-  const scriptPath = calkitStage?.script_path;
+  const notebookPath =
+    typeof calkitStage?.notebook_path === "string"
+      ? calkitStage.notebook_path
+      : undefined;
+  const scriptPath =
+    typeof calkitStage?.script_path === "string"
+      ? calkitStage.script_path
+      : undefined;
   const createdBy = notebookPath ?? scriptPath;
   const calkitStageYaml = calkitStage ? YAML.stringify(calkitStage) : undefined;
 
@@ -567,31 +768,31 @@ function buildProvenanceHtml(
       `<tr><td class="label">${escapeHtml(label)}</td><td>${value}</td></tr>`,
     );
 
-  row("File", escapeHtml(relPath));
+  row("File", fileLink(relPath));
   row("Stage", escapeHtml(stageName));
   if (createdBy) {
-    row("Created by", escapeHtml(createdBy));
+    row("Created by", fileLink(createdBy));
   }
   if (envName) {
     row("Environment", escapeHtml(envName));
   }
   if (envInfo?.path) {
-    row("Env spec", escapeHtml(envInfo.path as string));
+    row("Env spec", fileLink(envInfo.path as string));
   }
   const lockPath = envName ? `.calkit/env-locks/${envName}` : undefined;
   if (lockPath) {
-    row("Env lock", escapeHtml(lockPath));
+    row("Env lock", fileLink(lockPath));
   }
   if (deps.length > 0) {
     row(
       "Inputs",
-      `<ul>${deps.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}</ul>`,
+      `<ul>${deps.map((d) => `<li>${fileLink(d)}</li>`).join("")}</ul>`,
     );
   }
   if (outs.length > 0) {
     row(
       "All outputs",
-      `<ul>${outs.map((o) => `<li>${escapeHtml(o)}</li>`).join("")}</ul>`,
+      `<ul>${outs.map((o) => `<li>${fileLink(o)}</li>`).join("")}</ul>`,
     );
   }
   if (dvcStage.cmd) {
@@ -609,6 +810,7 @@ function buildProvenanceHtml(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:;">
 <title>Provenance</title>
 <style>
   body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); padding: 16px; }
@@ -620,12 +822,49 @@ function buildProvenanceHtml(
   ul { margin: 0; padding-left: 16px; }
   pre { background: var(--vscode-textBlockQuote-background); padding: 8px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
   code { background: var(--vscode-textBlockQuote-background); padding: 2px 4px; border-radius: 3px; }
+  a.file-link { color: var(--vscode-textLink-foreground); text-decoration: none; cursor: pointer; }
+  a.file-link:hover { text-decoration: underline; }
+  #dag-container { margin-top: 8px; min-height: 40px; }
+  #dag-container svg { max-width: 100%; }
+  #dag-error { color: var(--vscode-descriptionForeground); font-style: italic; }
+  .spinner { width: 18px; height: 18px; border: 2px solid var(--vscode-foreground); border-top-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
-<h1>Pipeline Provenance</h1>
+<h1>Provenance</h1>
 <table>${rows.join("")}</table>
 ${calkitSection}
+<h2>Pipeline DAG</h2>
+<div id="dag-container"><div class="spinner"></div></div>
+<script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+  const isDark = document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast');
+  mermaid.initialize({ startOnLoad: false, theme: isDark ? 'dark' : 'default' });
+  document.querySelectorAll('a.file-link').forEach(function(el) {
+    el.addEventListener('click', function(e) {
+      e.preventDefault();
+      vscode.postMessage({ command: 'openFile', path: el.getAttribute('data-path') });
+    });
+  });
+  window.addEventListener('message', function(event) {
+    const msg = event.data;
+    if (msg.command !== 'dagReady') { return; }
+    const container = document.getElementById('dag-container');
+    if (!container) { return; }
+    if (!msg.mermaid) {
+      container.innerHTML = '<span id="dag-error">Pipeline diagram unavailable.</span>';
+      return;
+    }
+    container.innerHTML = '<div class="mermaid"></div>';
+    const el = container.querySelector('.mermaid');
+    el.textContent = msg.mermaid;
+    mermaid.run({ nodes: [el] }).catch(function(err) {
+      container.innerHTML = '<span id="dag-error">Could not render diagram: ' + String(err) + '</span>';
+    });
+  });
+</script>
 </body>
 </html>`;
 }

@@ -120,6 +120,7 @@ export class CalkitSidebarProvider
       );
       item.description = typeof env.kind === "string" ? env.kind : undefined;
       item.iconPath = new vscode.ThemeIcon("package");
+      item.contextValue = "env";
       return item;
     });
   }

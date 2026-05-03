@@ -24,6 +24,7 @@ import { CalkitSidebarProvider } from "./sidebar";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
 const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
+const COMMAND_EDIT_ENV = "calkit-vscode.editEnvironment";
 const COMMAND_START_SLURM = "calkit-vscode.startCalkitSlurmJob";
 const COMMAND_STOP_SLURM = "calkit-vscode.stopCalkitSlurmJob";
 const COMMAND_RESTART_JOB = "calkit-vscode.restartCalkitJob";
@@ -137,9 +138,37 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         return;
       }
-      await runCreateEnvironmentWizard(workspaceRoot);
+      await showEnvCreatorWebview(context, workspaceRoot);
       await refreshNotebookToolbarContext(context);
     }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_EDIT_ENV,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const envName = item?.nodeId;
+        if (!envName) {
+          return;
+        }
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const env = currentCalkitConfig?.environments?.[envName];
+        const desc = currentEnvDescriptions?.[envName];
+        const specPath =
+          desc?.spec_path ??
+          (typeof env?.path === "string" ? env.path : undefined);
+        await showEnvCreatorWebview(
+          context,
+          workspaceRoot,
+          envName,
+          env,
+          specPath,
+        );
+      },
+    ),
   );
 
   context.subscriptions.push(
@@ -2035,6 +2064,499 @@ async function runCreateEnvironmentWizard(
     }
     return created;
   }
+}
+
+async function showEnvCreatorWebview(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+  editEnvName?: string,
+  existingEnv?: import("./environments").CalkitEnvironment,
+  specPath?: string,
+): Promise<void> {
+  const isEdit = editEnvName !== undefined;
+  const nonce = getNonce();
+  const panel = vscode.window.createWebviewPanel(
+    "calkit.envCreator",
+    isEdit ? `Edit Environment: ${editEnvName}` : "New Environment",
+    vscode.ViewColumn.Active,
+    { enableScripts: true },
+  );
+  context.subscriptions.push(panel);
+  panel.webview.html = buildEnvCreatorHtml(
+    nonce,
+    editEnvName,
+    existingEnv,
+    specPath,
+  );
+  panel.webview.onDidReceiveMessage(
+    (msg: {
+      command: string;
+      name: string;
+      kind: string;
+      packages: string[];
+      pythonVersion: string;
+      condaPath: string;
+      image: string;
+      base: string;
+      dockerfilePath: string;
+      host: string;
+      defaultOptions: string[];
+      defaultSetup: string[];
+    }) => {
+      if (msg.command !== "create" && msg.command !== "save") {
+        return;
+      }
+      const args: string[] = [];
+      if (msg.command === "save") {
+        if (msg.kind === "docker") {
+          args.push("update", "docker-env", "-n", msg.name);
+          if (msg.image) {
+            args.push("--image", msg.image);
+          }
+        } else if (msg.kind === "slurm") {
+          args.push("update", "slurm-env", "-n", msg.name);
+          if (msg.host) {
+            args.push("--host", msg.host);
+          }
+          for (const opt of msg.defaultOptions) {
+            args.push("--set-default-options", opt);
+          }
+          if (msg.defaultOptions.length === 0) {
+            args.push("--set-default-options", "");
+          }
+          for (const cmd of msg.defaultSetup) {
+            args.push("--set-default-setup", cmd);
+          }
+          if (msg.defaultSetup.length === 0) {
+            args.push("--set-default-setup", "");
+          }
+        }
+      } else {
+        if (msg.kind === "uv") {
+          args.push("new", "uv-env", "-n", msg.name, "--no-commit");
+          if (msg.pythonVersion) {
+            args.push("--python", msg.pythonVersion);
+          }
+          for (const pkg of msg.packages) {
+            args.push(pkg);
+          }
+        } else if (msg.kind === "conda") {
+          args.push("new", "conda-env", "-n", msg.name, "--no-commit");
+          if (msg.condaPath) {
+            args.push("--path", msg.condaPath);
+          }
+          for (const pkg of msg.packages) {
+            args.push(pkg);
+          }
+        } else if (msg.kind === "docker") {
+          args.push("new", "docker-env", "-n", msg.name);
+          if (msg.base) {
+            args.push("--from", msg.base);
+            if (msg.dockerfilePath) {
+              args.push("--path", msg.dockerfilePath);
+            }
+          } else if (msg.image) {
+            args.push("--image", msg.image);
+          }
+          args.push("--no-check", "--no-commit");
+        } else if (msg.kind === "slurm") {
+          args.push(
+            "new",
+            "slurm-env",
+            "-n",
+            msg.name,
+            "--host",
+            msg.host,
+            "--no-commit",
+          );
+          for (const opt of msg.defaultOptions) {
+            args.push("--default-option", opt);
+          }
+          for (const cmd of msg.defaultSetup) {
+            args.push("--default-setup", cmd);
+          }
+        }
+      }
+      const progressTitle = isEdit
+        ? "Saving environment..."
+        : "Creating environment...";
+      const successMsg = isEdit
+        ? `Environment '${msg.name}' updated.`
+        : `Environment '${msg.name}' created successfully.`;
+      void vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: progressTitle,
+          cancellable: false,
+        },
+        async () => {
+          try {
+            await execFileAsync("calkit", args, { cwd: workspaceRoot });
+            void vscode.window.showInformationMessage(successMsg);
+            void refreshPipelineOutputContext(context);
+            panel.dispose();
+          } catch (error: unknown) {
+            const err = error as { stderr?: string; message?: string };
+            const errMsg = (err.stderr ?? err.message ?? String(error)).trim();
+            void panel.webview.postMessage({
+              command: "error",
+              message: errMsg,
+            });
+          }
+        },
+      );
+    },
+  );
+}
+
+function buildEnvCreatorHtml(
+  nonce: string,
+  editEnvName?: string,
+  existingEnv?: import("./environments").CalkitEnvironment,
+  specPath?: string,
+): string {
+  const isEdit = editEnvName !== undefined;
+  const kind = typeof existingEnv?.kind === "string" ? existingEnv.kind : "uv";
+  const existingImage =
+    typeof existingEnv?.image === "string" ? existingEnv.image : "";
+  const existingHost =
+    typeof existingEnv?.host === "string" ? existingEnv.host : "";
+  const existingOptions = Array.isArray(existingEnv?.default_options)
+    ? (existingEnv.default_options as string[]).filter(
+        (s) => typeof s === "string",
+      )
+    : [];
+  const existingSetup = Array.isArray(existingEnv?.default_setup)
+    ? (existingEnv.default_setup as string[]).filter(
+        (s) => typeof s === "string",
+      )
+    : [];
+
+  const optionsJson = JSON.stringify(existingOptions);
+  const setupJson = JSON.stringify(existingSetup);
+
+  const title = isEdit
+    ? `Edit Environment: ${escHtml(editEnvName ?? "")}`
+    : "New Environment";
+  const btnLabel = isEdit ? "Save" : "Create";
+  const spinnerLabel = isEdit ? "Saving..." : "Creating...";
+  const postCommand = isEdit ? "save" : "create";
+
+  const nameField = isEdit
+    ? `<div class="field"><label>Name</label><div class="info-row">${escHtml(
+        editEnvName ?? "",
+      )}</div></div>`
+    : `<div class="field"><label>Name</label><input id="name" type="text" required placeholder="e.g. default" /></div>`;
+
+  const kindField = isEdit
+    ? `<div class="field"><label>Kind</label><div class="info-row">${escHtml(
+        kind,
+      )}</div></div>`
+    : `<div class="field"><label>Kind</label>
+<select id="kind">
+  <option value="uv">uv</option>
+  <option value="conda">conda</option>
+  <option value="docker">docker</option>
+  <option value="slurm">slurm</option>
+</select>
+</div>`;
+
+  const uvSection =
+    isEdit && kind !== "uv"
+      ? ""
+      : `
+<div id="section-uv"${isEdit && kind === "uv" && specPath ? "" : ""}>
+${
+  isEdit && specPath
+    ? `  <div class="field"><label>Spec file</label><div class="info-row">${escHtml(
+        specPath,
+      )}</div></div>
+  <div class="field info-note">Edit <code>${escHtml(
+    specPath,
+  )}</code> directly to add or remove packages.</div>`
+    : `  <div class="field">
+    <label>Python version <span style="font-weight:normal;text-transform:none">(optional)</span></label>
+    <input id="python-version" type="text" placeholder="e.g. 3.11" />
+  </div>
+  <div class="field">
+    <label>Packages</label>
+    <div class="list-section">
+      <div id="packages-list"></div>
+      <button class="add-btn" id="add-package">+ Add package</button>
+    </div>
+  </div>`
+}
+</div>`;
+
+  const condaSection =
+    isEdit && kind !== "conda"
+      ? ""
+      : `
+<div id="section-conda"${!isEdit ? ' style="display:none"' : ""}>
+${
+  isEdit && specPath
+    ? `  <div class="field"><label>Spec file</label><div class="info-row">${escHtml(
+        specPath,
+      )}</div></div>
+  <div class="field info-note">Edit <code>${escHtml(
+    specPath,
+  )}</code> directly to add or remove packages.</div>`
+    : `  <div class="field">
+    <label>Packages</label>
+    <div class="list-section">
+      <div id="conda-packages-list"></div>
+      <button class="add-btn" id="add-conda-package">+ Add package</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>Spec path <span style="font-weight:normal;text-transform:none">(optional)</span></label>
+    <input id="conda-path" type="text" placeholder="environment.yml" />
+  </div>`
+}
+</div>`;
+
+  const dockerSection =
+    isEdit && kind !== "docker"
+      ? ""
+      : `
+<div id="section-docker"${!isEdit ? ' style="display:none"' : ""}>
+  <div class="field">
+    <label>Image</label>
+    <input id="docker-image" type="text" value="${escHtml(
+      existingImage,
+    )}" placeholder="e.g. ubuntu:22.04 or myregistry/myimage:latest" />
+  </div>
+${
+  !isEdit
+    ? `  <div class="field">
+    <label>Build from <span style="font-weight:normal;text-transform:none">(optional)</span></label>
+    <input id="docker-base" type="text" placeholder="base image for Dockerfile, e.g. ubuntu:22.04" />
+  </div>
+  <div class="field" id="dockerfile-path-field" style="display:none">
+    <label>Dockerfile path <span style="font-weight:normal;text-transform:none">(optional)</span></label>
+    <input id="dockerfile-path" type="text" placeholder="Dockerfile" />
+  </div>`
+    : ""
+}
+</div>`;
+
+  const slurmSection =
+    isEdit && kind !== "slurm"
+      ? ""
+      : `
+<div id="section-slurm"${!isEdit ? ' style="display:none"' : ""}>
+  <div class="field">
+    <label>Host</label>
+    <input id="slurm-host" type="text" value="${escHtml(
+      existingHost,
+    )}" placeholder="e.g. myserver.edu" />
+  </div>
+  <div class="field">
+    <label>Default options</label>
+    <div class="list-section">
+      <div id="slurm-options-list"></div>
+      <button class="add-btn" id="add-slurm-option">+ Add option</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>Default setup</label>
+    <div class="list-section">
+      <div id="slurm-setup-list"></div>
+      <button class="add-btn" id="add-slurm-setup">+ Add command</button>
+    </div>
+  </div>
+</div>`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline';">
+<title>${title}</title>
+<style>
+  body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); padding: 20px; max-width: 580px; }
+  h1 { font-size: 1.2em; margin-bottom: 18px; }
+  .field { margin-bottom: 14px; }
+  label { display: block; margin-bottom: 4px; font-weight: 600; color: var(--vscode-descriptionForeground); font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.04em; }
+  input, select { width: 100%; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, #555); padding: 5px 8px; font-size: 1em; font-family: inherit; border-radius: 2px; }
+  input:focus, select:focus { outline: 1px solid var(--vscode-focusBorder); border-color: var(--vscode-focusBorder); }
+  .info-row { padding: 5px 0; color: var(--vscode-foreground); }
+  .info-note { font-size: 0.9em; color: var(--vscode-descriptionForeground); padding: 4px 0; }
+  .info-note code { font-family: var(--vscode-editor-font-family, monospace); }
+  .list-section { border: 1px solid var(--vscode-input-border, #555); border-radius: 2px; padding: 6px 8px; }
+  .list-item { display: flex; gap: 6px; margin-bottom: 4px; align-items: center; }
+  .list-item input { flex: 1; }
+  .remove-btn { background: none; border: none; color: var(--vscode-descriptionForeground); cursor: pointer; font-size: 1.1em; padding: 2px 4px; flex-shrink: 0; }
+  .remove-btn:hover { color: var(--vscode-foreground); }
+  .add-btn { background: none; border: none; color: var(--vscode-textLink-foreground); cursor: pointer; font-size: 0.9em; padding: 2px 0; margin-top: 4px; }
+  .add-btn:hover { text-decoration: underline; }
+  .actions { margin-top: 20px; }
+  button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 7px 18px; cursor: pointer; font-size: 1em; border-radius: 2px; }
+  button.primary:hover { background: var(--vscode-button-hoverBackground); }
+  button.primary:disabled { opacity: 0.6; cursor: not-allowed; }
+  .error-msg { color: var(--vscode-errorForeground, #f44); margin-top: 8px; font-size: 0.92em; display: none; }
+  .spinner-text { margin-left: 10px; font-size: 0.92em; color: var(--vscode-descriptionForeground); display: none; }
+</style>
+</head>
+<body>
+<h1>${title}</h1>
+${nameField}
+${kindField}
+${uvSection}
+${condaSection}
+${dockerSection}
+${slurmSection}
+<div class="actions">
+  <button class="primary" id="btn-submit">${btnLabel}</button>
+  <span class="spinner-text" id="spinner-text">${spinnerLabel}</span>
+</div>
+<div class="error-msg" id="error-msg"></div>
+<script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+  const isEdit = ${isEdit};
+  const fixedKind = ${isEdit ? `'${escHtml(kind)}'` : "null"};
+
+  function getKind() {
+    if (fixedKind) { return fixedKind; }
+    return document.getElementById('kind').value;
+  }
+
+  ${
+    !isEdit
+      ? `
+  const kindEl = document.getElementById('kind');
+  const sections = {
+    uv: document.getElementById('section-uv'),
+    conda: document.getElementById('section-conda'),
+    docker: document.getElementById('section-docker'),
+    slurm: document.getElementById('section-slurm'),
+  };
+  function showSection(k) {
+    for (const [key, el] of Object.entries(sections)) {
+      if (el) { el.style.display = key === k ? '' : 'none'; }
+    }
+  }
+  kindEl.addEventListener('change', function() { showSection(kindEl.value); });
+  `
+      : ""
+  }
+
+  function makeListItem(listEl, value, placeholder) {
+    const row = document.createElement('div');
+    row.className = 'list-item';
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.placeholder = placeholder || '';
+    if (value) { inp.value = value; }
+    const btn = document.createElement('button');
+    btn.className = 'remove-btn';
+    btn.textContent = '\\u00d7';
+    btn.title = 'Remove';
+    btn.addEventListener('click', function() { row.remove(); });
+    row.appendChild(inp);
+    row.appendChild(btn);
+    listEl.appendChild(row);
+    return inp;
+  }
+  function getListValues(listEl) {
+    return Array.from(listEl.querySelectorAll('input')).map(function(i) { return i.value.trim(); }).filter(Boolean);
+  }
+
+  // Pre-populate slurm lists
+  const slurmOptList = document.getElementById('slurm-options-list');
+  const slurmSetupList = document.getElementById('slurm-setup-list');
+  if (slurmOptList) {
+    for (const v of ${optionsJson}) { makeListItem(slurmOptList, v, '--gpus=1'); }
+  }
+  if (slurmSetupList) {
+    for (const v of ${setupJson}) { makeListItem(slurmSetupList, v, 'module load julia/1.11'); }
+  }
+
+  ${
+    !isEdit
+      ? `
+  const pkgList = document.getElementById('packages-list');
+  const condaPkgList = document.getElementById('conda-packages-list');
+  const dockerBaseEl = document.getElementById('docker-base');
+  const dockerfilePathField = document.getElementById('dockerfile-path-field');
+
+  document.getElementById('add-package').addEventListener('click', function() {
+    makeListItem(pkgList, '', 'e.g. numpy').focus();
+  });
+  document.getElementById('add-conda-package').addEventListener('click', function() {
+    makeListItem(condaPkgList, '', 'e.g. numpy').focus();
+  });
+  if (dockerBaseEl) {
+    dockerBaseEl.addEventListener('input', function() {
+      dockerfilePathField.style.display = dockerBaseEl.value.trim() ? '' : 'none';
+    });
+  }
+  `
+      : ""
+  }
+
+  if (document.getElementById('add-slurm-option')) {
+    document.getElementById('add-slurm-option').addEventListener('click', function() {
+      makeListItem(slurmOptList, '', '--gpus=1').focus();
+    });
+  }
+  if (document.getElementById('add-slurm-setup')) {
+    document.getElementById('add-slurm-setup').addEventListener('click', function() {
+      makeListItem(slurmSetupList, '', 'module load julia/1.11').focus();
+    });
+  }
+
+  const btnSubmit = document.getElementById('btn-submit');
+  const spinnerText = document.getElementById('spinner-text');
+  const errorMsg = document.getElementById('error-msg');
+
+  btnSubmit.addEventListener('click', function() {
+    const kind = getKind();
+    const name = isEdit ? ${
+      isEdit ? `'${escHtml(editEnvName ?? "")}'` : "''"
+    } : document.getElementById('name').value.trim();
+    if (!name) {
+      errorMsg.textContent = 'Name is required.';
+      errorMsg.style.display = 'block';
+      return;
+    }
+    if (kind === 'slurm' && !document.getElementById('slurm-host').value.trim()) {
+      errorMsg.textContent = 'Host is required for SLURM environments.';
+      errorMsg.style.display = 'block';
+      return;
+    }
+    errorMsg.style.display = 'none';
+    btnSubmit.disabled = true;
+    spinnerText.style.display = 'inline';
+    const packages = !isEdit ? (kind === 'uv' ? getListValues(pkgList) : getListValues(condaPkgList)) : [];
+    vscode.postMessage({
+      command: '${postCommand}',
+      name,
+      kind,
+      packages,
+      pythonVersion: document.getElementById('python-version') ? document.getElementById('python-version').value.trim() : '',
+      condaPath: document.getElementById('conda-path') ? document.getElementById('conda-path').value.trim() : '',
+      image: document.getElementById('docker-image') ? document.getElementById('docker-image').value.trim() : '',
+      base: document.getElementById('docker-base') ? document.getElementById('docker-base').value.trim() : '',
+      dockerfilePath: document.getElementById('dockerfile-path') ? document.getElementById('dockerfile-path').value.trim() : '',
+      host: document.getElementById('slurm-host') ? document.getElementById('slurm-host').value.trim() : '',
+      defaultOptions: slurmOptList ? getListValues(slurmOptList) : [],
+      defaultSetup: slurmSetupList ? getListValues(slurmSetupList) : [],
+    });
+  });
+
+  window.addEventListener('message', function(event) {
+    const msg = event.data;
+    if (msg.command === 'error') {
+      btnSubmit.disabled = false;
+      spinnerText.style.display = 'none';
+      errorMsg.textContent = msg.message;
+      errorMsg.style.display = 'block';
+    }
+  });
+</script>
+</body>
+</html>`;
 }
 
 type WizardStepResult<T> =

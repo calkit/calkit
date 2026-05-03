@@ -2001,8 +2001,12 @@ Update objects.
 | [`github-actions`](#subcommand-update-github-actions) | Update a project's GitHub Actions to match the latest Calkit recommendations.       |
 | [`notebook`](#subcommand-update-notebook)             | Update notebook information.                                                        |
 | [`agent-skills`](#subcommand-update-agent-skills)     | Copy packaged Calkit agent skills to `~/.agents/skills`.                            |
-| [`env`](#subcommand-update-env)                       | Update an environment.                                                              |
-| [`environment`](#subcommand-update-environment)       | Update an environment.                                                              |
+| [`uv-env`](#subcommand-update-uv-env)                 | Update a uv environment.                                                            |
+| [`conda-env`](#subcommand-update-conda-env)           | Update a conda environment spec file.                                               |
+| [`docker-env`](#subcommand-update-docker-env)         | Update a docker environment.                                                        |
+| [`slurm-env`](#subcommand-update-slurm-env)           | Update a SLURM environment.                                                         |
+| [`env`](#subcommand-update-env)                       | Update an environment (generic; use update [kind]-env for full options).            |
+| [`environment`](#subcommand-update-environment)       | Update an environment (generic; use update [kind]-env for full options).            |
 | [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                             |
 | [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                               |
 
@@ -2151,13 +2155,95 @@ Options:
 | --------------- | ------- | -------- | ------- | ------------------------------ |
 | `--quiet`, `-q` | boolean | no       | False   | Suppress non-essential output. |
 
+<a id="subcommand-update-uv-env"></a>
+
+#### `calkit update uv-env`
+
+Update a uv environment.
+
+Usage:
+
+```text
+calkit update uv-env [OPTIONS]
+```
+
+Options:
+
+| Option             | Type | Required | Default | Description       |
+| ------------------ | ---- | -------- | ------- | ----------------- |
+| `--name`, `-n`     | text | yes      |         | Environment name. |
+| `--add`            | text | no       |         | Add a package.    |
+| `--remove`, `--rm` | text | no       |         | Remove a package. |
+
+<a id="subcommand-update-conda-env"></a>
+
+#### `calkit update conda-env`
+
+Update a conda environment spec file.
+
+Usage:
+
+```text
+calkit update conda-env [OPTIONS]
+```
+
+Options:
+
+| Option             | Type | Required | Default | Description       |
+| ------------------ | ---- | -------- | ------- | ----------------- |
+| `--name`, `-n`     | text | yes      |         | Environment name. |
+| `--add`            | text | no       |         | Add a package.    |
+| `--remove`, `--rm` | text | no       |         | Remove a package. |
+
+<a id="subcommand-update-docker-env"></a>
+
+#### `calkit update docker-env`
+
+Update a docker environment.
+
+Usage:
+
+```text
+calkit update docker-env [OPTIONS]
+```
+
+Options:
+
+| Option         | Type | Required | Default | Description            |
+| -------------- | ---- | -------- | ------- | ---------------------- |
+| `--name`, `-n` | text | yes      |         | Environment name.      |
+| `--image`      | text | no       |         | Docker image name/tag. |
+
+<a id="subcommand-update-slurm-env"></a>
+
+#### `calkit update slurm-env`
+
+Update a SLURM environment.
+
+Usage:
+
+```text
+calkit update slurm-env [OPTIONS]
+```
+
+Options:
+
+| Option                  | Type | Required | Default | Description                     |
+| ----------------------- | ---- | -------- | ------- | ------------------------------- |
+| `--name`, `-n`          | text | yes      |         | Environment name.               |
+| `--host`                | text | no       |         | SLURM host.                     |
+| `--add-default-option`  | text | no       |         | Add a default sbatch option.    |
+| `--rm-default-option`   | text | no       |         | Remove a default sbatch option. |
+| `--set-default-options` | text | no       |         | Replace default options list.   |
+| `--add-default-setup`   | text | no       |         | Add a default setup command.    |
+| `--rm-default-setup`    | text | no       |         | Remove a default setup command. |
+| `--set-default-setup`   | text | no       |         | Replace default setup list.     |
+
 <a id="subcommand-update-env"></a>
 
 #### `calkit update env`
 
-Update an environment.
-
-Currently only supports adding packages to Julia environments.
+Update an environment (generic; use update [kind]-env for full options).
 
 Usage:
 
@@ -2170,15 +2256,13 @@ Options:
 | Option         | Type | Required | Default | Description                       |
 | -------------- | ---- | -------- | ------- | --------------------------------- |
 | `--name`, `-n` | text | yes      |         | Name of the environment to update |
-| `--add`        | text | no       |         | Add package to environment,       |
+| `--add`        | text | no       |         | Add package (julia only).         |
 
 <a id="subcommand-update-environment"></a>
 
 #### `calkit update environment`
 
-Update an environment.
-
-Currently only supports adding packages to Julia environments.
+Update an environment (generic; use update [kind]-env for full options).
 
 Usage:
 
@@ -2191,7 +2275,7 @@ Options:
 | Option         | Type | Required | Default | Description                       |
 | -------------- | ---- | -------- | ------- | --------------------------------- |
 | `--name`, `-n` | text | yes      |         | Name of the environment to update |
-| `--add`        | text | no       |         | Add package to environment,       |
+| `--add`        | text | no       |         | Add package (julia only).         |
 
 <a id="subcommand-update-stage"></a>
 

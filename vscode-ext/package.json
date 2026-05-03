@@ -63,7 +63,14 @@
       {
         "command": "calkit-vscode.createCalkitEnvironment",
         "title": "Create Environment",
-        "category": "Calkit"
+        "category": "Calkit",
+        "icon": "$(add)"
+      },
+      {
+        "command": "calkit-vscode.editEnvironment",
+        "title": "Edit Environment",
+        "category": "Calkit",
+        "icon": "$(edit)"
       },
       {
         "command": "calkit-vscode.startCalkitSlurmJob",
@@ -165,6 +172,16 @@
       ],
       "view/item/context": [
         {
+          "command": "calkit-vscode.createCalkitEnvironment",
+          "when": "view == calkit-sidebar && viewItem == section-envs",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.editEnvironment",
+          "when": "view == calkit-sidebar && viewItem == env",
+          "group": "inline"
+        },
+        {
           "command": "calkit-vscode.newStage",
           "when": "view == calkit-sidebar && viewItem == section-pipeline",
           "group": "inline"
@@ -264,6 +281,9 @@
         },
         {
           "command": "calkit-vscode.createCalkitEnvironment"
+        },
+        {
+          "command": "calkit-vscode.editEnvironment"
         },
         {
           "command": "calkit-vscode.startCalkitSlurmJob"

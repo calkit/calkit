@@ -529,37 +529,6 @@ def diff(
     run_dvc_command(["diff"])
 
 
-def _get_pipeline_output_storage_map() -> dict[str, str]:
-    """Get a map of pipeline output paths to their explicitly-set storage.
-
-    Only outputs with an explicitly-set ``storage`` key in ``calkit.yaml``
-    are included so that default-DVC outputs still go through auto-detection.
-
-    Returns
-    -------
-    dict[str, str]
-        Mapping of posix file path to storage type, e.g.
-        ``{"figures/plot.png": "git", "data/archive": "dvc-zip"}``.
-        Plain string outputs (no explicit ``storage`` key) are not included.
-    """
-    try:
-        ck_info = calkit.load_calkit_info()
-    except Exception:
-        return {}
-    pipeline = ck_info.get("pipeline", {})
-    if not pipeline:
-        return {}
-    stages = pipeline.get("stages", {})
-    result: dict[str, str] = {}
-    for stage in stages.values():
-        if not isinstance(stage, dict):
-            continue
-        for out in stage.get("outputs", []):
-            if isinstance(out, dict) and "path" in out and "storage" in out:
-                result[out["path"]] = out["storage"]
-    return result
-
-
 @app.command(name="add")
 def add(
     paths: list[str],
@@ -743,7 +712,7 @@ def add(
             ]:
                 paths.append(changed_file)
         zip_path_map = calkit.dvc.zip.get_zip_path_map()
-        pipeline_output_storage = _get_pipeline_output_storage_map()
+        pipeline_output_storage = calkit.pipeline.get_output_storage_map()
         for path in paths:
             # Check if this path is already registered as a zip
             posix_path = Path(path).as_posix()

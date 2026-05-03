@@ -497,7 +497,8 @@ class PipelineOutputDecorationProvider
     }
     if (
       path.extname(uri.fsPath).toLowerCase() === NOTEBOOK_EXTENSION &&
-      !pipelineNotebookUris.has(uri.fsPath)
+      !pipelineNotebookUris.has(uri.fsPath) &&
+      !uri.fsPath.includes(`${path.sep}.calkit${path.sep}notebooks${path.sep}`)
     ) {
       return {
         badge: "!",

@@ -20,6 +20,7 @@ import {
 } from "./environments";
 import { getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath } from "./notebooks";
 import type { CalkitInfo, DvcYaml } from "./types";
+import { CalkitSidebarProvider } from "./sidebar";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
 const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
@@ -27,6 +28,9 @@ const COMMAND_START_SLURM = "calkit-vscode.startCalkitSlurmJob";
 const COMMAND_STOP_SLURM = "calkit-vscode.stopCalkitSlurmJob";
 const COMMAND_RESTART_JOB = "calkit-vscode.restartCalkitJob";
 const COMMAND_SHOW_PROVENANCE = "calkit-vscode.showProvenance";
+const COMMAND_RUN_STAGE = "calkit-vscode.runStage";
+const COMMAND_RUN_STAGE_FOR_FILE = "calkit-vscode.runStageForFile";
+const COMMAND_REFRESH_SIDEBAR = "calkit-vscode.refreshSidebar";
 const FIGURE_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -59,9 +63,13 @@ const slurmAutoStartSuppressedThisSession = new Set<string>();
 let hasCheckedCalkitCli = false;
 const pipelineOutputUris = new Set<string>();
 const staleOutputUris = new Set<string>();
+const staleStageNames = new Set<string>();
 const importedFigureUris = new Set<string>();
 const pipelineNotebookUris = new Set<string>();
 let pipelineDecorationProvider: vscode.Disposable | undefined;
+let currentCalkitConfig: CalkitInfo | undefined;
+let currentDvcYaml: DvcYaml | undefined;
+let sidebarProvider: CalkitSidebarProvider | undefined;
 
 function log(message: string): void {
   if (outputChannel) {
@@ -158,6 +166,58 @@ export function activate(context: vscode.ExtensionContext): void {
         await showProvenancePanel(context, workspaceRoot, fileUri);
       },
     ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_RUN_STAGE,
+      (item?: import("./sidebar").SidebarItem) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const stageName = item?.nodeId;
+        if (!stageName) {
+          return;
+        }
+        runStageInTerminal(workspaceRoot, stageName);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_RUN_STAGE_FOR_FILE,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        if (!fileUri) {
+          return;
+        }
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const stageName = await findStageForFile(workspaceRoot, fileUri);
+        if (!stageName) {
+          void vscode.window.showErrorMessage(
+            `No pipeline stage found for '${path.basename(fileUri.fsPath)}'.`,
+          );
+          return;
+        }
+        runStageInTerminal(workspaceRoot, stageName);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_REFRESH_SIDEBAR, () => {
+      void refreshPipelineOutputContext(context);
+    }),
+  );
+
+  sidebarProvider = new CalkitSidebarProvider();
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider("calkit-sidebar", sidebarProvider),
   );
 
   context.subscriptions.push(
@@ -442,18 +502,17 @@ function dvcStageOutputPaths(stage: import("./types").DvcStage): string[] {
   });
 }
 
-async function buildPipelineOutputMap(
+function buildPipelineOutputMapFromYaml(
   workspaceRoot: string,
-): Promise<Map<string, string>> {
-  const dvcYaml = await readDvcYaml(workspaceRoot);
+  dvcYaml: DvcYaml | undefined,
+): Map<string, string> {
   const result = new Map<string, string>();
   if (!dvcYaml?.stages) {
     return result;
   }
   for (const [stageName, stage] of Object.entries(dvcYaml.stages)) {
     for (const outputPath of dvcStageOutputPaths(stage)) {
-      const absPath = path.join(workspaceRoot, outputPath);
-      result.set(absPath, stageName);
+      result.set(path.join(workspaceRoot, outputPath), stageName);
     }
   }
   return result;
@@ -520,10 +579,13 @@ async function refreshPipelineOutputContext(
   if (!workspaceRoot) {
     return;
   }
-  const [outputMap, calkitConfig] = await Promise.all([
-    buildPipelineOutputMap(workspaceRoot),
+  const [dvcYaml, calkitConfig] = await Promise.all([
+    readDvcYaml(workspaceRoot),
     readCalkitConfig(workspaceRoot),
   ]);
+  currentDvcYaml = dvcYaml;
+  currentCalkitConfig = calkitConfig;
+  const outputMap = buildPipelineOutputMapFromYaml(workspaceRoot, dvcYaml);
   const prevPaths = new Set([
     ...pipelineOutputUris,
     ...importedFigureUris,
@@ -564,6 +626,12 @@ async function refreshPipelineOutputContext(
     ]),
   ].map((p) => vscode.Uri.file(p));
   decorationProvider.refresh(changedUris);
+  sidebarProvider?.refresh(
+    workspaceRoot,
+    calkitConfig,
+    dvcYaml,
+    staleStageNames,
+  );
   // Run staleness check after the fast decoration pass so P badges appear
   // immediately; S badges follow once calkit status finishes.
   void refreshStaleOutputContext(workspaceRoot, outputMap, decorationProvider);
@@ -583,10 +651,12 @@ async function refreshStaleOutputContext(
     const status = JSON.parse(stdout) as {
       pipeline?: { stale_stage_names?: string[] };
     };
-    const staleStageNames = new Set(status?.pipeline?.stale_stage_names ?? []);
+    const freshStaleStageNames = new Set(
+      status?.pipeline?.stale_stage_names ?? [],
+    );
     const nextStale = new Set<string>();
     for (const [absPath, stageName] of outputMap) {
-      if (staleStageNames.has(stageName)) {
+      if (freshStaleStageNames.has(stageName)) {
         nextStale.add(absPath);
       }
     }
@@ -595,12 +665,22 @@ async function refreshStaleOutputContext(
     for (const p of nextStale) {
       staleOutputUris.add(p);
     }
+    staleStageNames.clear();
+    for (const n of freshStaleStageNames) {
+      staleStageNames.add(n);
+    }
     const changedUris = [...new Set([...prevStale, ...staleOutputUris])].map(
       (p) => vscode.Uri.file(p),
     );
     if (changedUris.length > 0) {
       provider.refresh(changedUris);
     }
+    sidebarProvider?.refresh(
+      workspaceRoot,
+      currentCalkitConfig,
+      currentDvcYaml,
+      staleStageNames,
+    );
   } catch (error) {
     log(`Staleness check failed: ${String(error)}`);
   }
@@ -872,6 +952,41 @@ ${calkitSection}
 </script>
 </body>
 </html>`;
+}
+
+function runStageInTerminal(workspaceRoot: string, stageName: string): void {
+  const terminal = vscode.window.createTerminal({
+    name: `calkit: run ${stageName}`,
+    cwd: workspaceRoot,
+  });
+  terminal.show();
+  terminal.sendText(`calkit run ${shQuote(stageName)}`);
+}
+
+async function findStageForFile(
+  workspaceRoot: string,
+  fileUri: vscode.Uri,
+): Promise<string | undefined> {
+  const relPath = path
+    .relative(workspaceRoot, fileUri.fsPath)
+    .replace(/\\/g, "/");
+  const [dvcYaml, calkitConfig] = await Promise.all([
+    readDvcYaml(workspaceRoot),
+    readCalkitConfig(workspaceRoot),
+  ]);
+  for (const [stageName, stage] of Object.entries(dvcYaml?.stages ?? {})) {
+    if (dvcStageOutputPaths(stage).includes(relPath)) {
+      return stageName;
+    }
+  }
+  for (const [stageName, stage] of Object.entries(
+    calkitConfig?.pipeline?.stages ?? {},
+  )) {
+    if (stage.notebook_path === relPath || stage.script_path === relPath) {
+      return stageName;
+    }
+  }
+  return undefined;
 }
 
 async function selectCalkitEnvironment(

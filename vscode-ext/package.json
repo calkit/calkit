@@ -36,6 +36,24 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "calkit",
+          "title": "Calkit",
+          "icon": "images/calkit-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "calkit": [
+        {
+          "id": "calkit-sidebar",
+          "name": "Calkit",
+          "icon": "images/calkit-icon.svg"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "calkit-vscode.selectCalkitEnvironment",
@@ -70,20 +88,61 @@
         "title": "Show Provenance",
         "category": "Calkit",
         "icon": "$(list-tree)"
+      },
+      {
+        "command": "calkit-vscode.runStage",
+        "title": "Run Stage",
+        "category": "Calkit",
+        "icon": "$(play)"
+      },
+      {
+        "command": "calkit-vscode.runStageForFile",
+        "title": "Run Stage",
+        "category": "Calkit",
+        "icon": "$(play)"
+      },
+      {
+        "command": "calkit-vscode.refreshSidebar",
+        "title": "Refresh",
+        "category": "Calkit",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "calkit-vscode.refreshSidebar",
+          "when": "view == calkit-sidebar",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "calkit-vscode.runStage",
+          "when": "view == calkit-sidebar && viewItem == stage",
+          "group": "inline"
+        }
+      ],
       "explorer/context": [
         {
           "command": "calkit-vscode.showProvenance",
           "when": "!explorerResourceIsFolder",
           "group": "calkit@1"
+        },
+        {
+          "command": "calkit-vscode.runStageForFile",
+          "when": "!explorerResourceIsFolder",
+          "group": "calkit@2"
         }
       ],
       "editor/context": [
         {
           "command": "calkit-vscode.showProvenance",
           "group": "calkit@1"
+        },
+        {
+          "command": "calkit-vscode.runStageForFile",
+          "group": "calkit@2"
         }
       ],
       "notebook/toolbar": [
@@ -126,6 +185,15 @@
         },
         {
           "command": "calkit-vscode.showProvenance"
+        },
+        {
+          "command": "calkit-vscode.runStage"
+        },
+        {
+          "command": "calkit-vscode.runStageForFile"
+        },
+        {
+          "command": "calkit-vscode.refreshSidebar"
         }
       ]
     },

@@ -144,6 +144,18 @@
         "category": "Calkit"
       },
       {
+        "command": "calkit-vscode.defineArtifactStage",
+        "title": "Define Pipeline Stage",
+        "category": "Calkit",
+        "icon": "$(add)"
+      },
+      {
+        "command": "calkit-vscode.defineArtifactImport",
+        "title": "Define Import",
+        "category": "Calkit",
+        "icon": "$(cloud-download)"
+      },
+      {
         "command": "calkit-vscode.runNotebookStage",
         "title": "Run Pipeline Stage",
         "category": "Calkit",
@@ -220,6 +232,21 @@
         {
           "command": "calkit-vscode.editEnvironment",
           "when": "view == calkit-sidebar && viewItem == stage-env-prop",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.defineArtifactStage",
+          "when": "view == calkit-sidebar && (viewItem == figure-no-provenance || viewItem == dataset-no-provenance)",
+          "group": "inline@1"
+        },
+        {
+          "command": "calkit-vscode.defineArtifactImport",
+          "when": "view == calkit-sidebar && (viewItem == figure-no-provenance || viewItem == dataset-no-provenance)",
+          "group": "inline@2"
+        },
+        {
+          "command": "calkit-vscode.editStage",
+          "when": "view == calkit-sidebar && viewItem == notebook-stage-prop",
           "group": "inline"
         }
       ],
@@ -336,6 +363,12 @@
         },
         {
           "command": "calkit-vscode.defineProvenance"
+        },
+        {
+          "command": "calkit-vscode.defineArtifactStage"
+        },
+        {
+          "command": "calkit-vscode.defineArtifactImport"
         },
         {
           "command": "calkit-vscode.runNotebookStage"

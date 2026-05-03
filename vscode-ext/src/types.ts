@@ -29,11 +29,19 @@ export interface FigureEntry {
   [key: string]: unknown;
 }
 
+export interface DatasetEntry {
+  path: string;
+  stage?: string;
+  imported_from?: unknown;
+  [key: string]: unknown;
+}
+
 export interface CalkitInfo {
   name?: string;
   environments?: Record<string, CalkitEnvironment>;
   notebooks?: NotebookEntry[];
   figures?: FigureEntry[];
+  datasets?: DatasetEntry[];
   pipeline?: {
     stages?: Record<string, PipelineStage>;
   };

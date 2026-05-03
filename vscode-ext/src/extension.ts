@@ -37,6 +37,8 @@ const COMMAND_SHOW_DAG = "calkit-vscode.showPipelineDag";
 const COMMAND_NEW_STAGE = "calkit-vscode.newStage";
 const COMMAND_EDIT_STAGE = "calkit-vscode.editStage";
 const COMMAND_DEFINE_PROVENANCE = "calkit-vscode.defineProvenance";
+const COMMAND_DEFINE_ARTIFACT_STAGE = "calkit-vscode.defineArtifactStage";
+const COMMAND_DEFINE_ARTIFACT_IMPORT = "calkit-vscode.defineArtifactImport";
 const COMMAND_RUN_NOTEBOOK_STAGE = "calkit-vscode.runNotebookStage";
 const COMMAND_EDIT_NOTEBOOK_STAGE = "calkit-vscode.editNotebookStage";
 const COMMAND_DEFINE_NOTEBOOK_STAGE = "calkit-vscode.defineNotebookStage";
@@ -51,6 +53,16 @@ const FIGURE_EXTENSIONS = new Set([
   ".eps",
   ".tiff",
   ".tif",
+]);
+const DATASET_EXTENSIONS = new Set([
+  ".csv",
+  ".h5",
+  ".hdf5",
+  ".parquet",
+  ".nc",
+  ".zarr",
+  ".feather",
+  ".arrow",
 ]);
 const NOTEBOOK_EXTENSION = ".ipynb";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
@@ -80,6 +92,9 @@ let pipelineDecorationProvider: vscode.Disposable | undefined;
 let currentCalkitConfig: CalkitInfo | undefined;
 let currentDvcYaml: DvcYaml | undefined;
 let currentEnvDescriptions: Record<string, EnvDescription> | undefined;
+let currentDetectedNotebooks: string[] = [];
+let currentDetectedFigures: string[] = [];
+let currentDetectedDatasets: string[] = [];
 let sidebarProvider: CalkitSidebarProvider | undefined;
 let sidebarTreeView:
   | vscode.TreeView<import("./sidebar").SidebarItem>
@@ -376,6 +391,59 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_DEFINE_ARTIFACT_STAGE,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const artifactPath = item?.nodeId;
+        if (!artifactPath) {
+          return;
+        }
+        await showStageEditor(context, workspaceRoot, artifactPath);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_DEFINE_ARTIFACT_IMPORT,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const artifactPath = item?.nodeId;
+        if (!artifactPath) {
+          return;
+        }
+        const url = await vscode.window.showInputBox({
+          prompt: `URL this artifact was imported from`,
+          placeHolder: "https://...",
+        });
+        if (!url) {
+          return;
+        }
+        try {
+          await execFileAsync(
+            "calkit",
+            ["update", "figure", artifactPath, "--imported-from-url", url],
+            { cwd: workspaceRoot },
+          );
+          void refreshPipelineOutputContext(context);
+        } catch (error: unknown) {
+          const err = error as { stderr?: string; message?: string };
+          void vscode.window.showErrorMessage(
+            (err.stderr ?? err.message ?? String(error)).trim(),
+          );
+        }
+      },
+    ),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_RUN_NOTEBOOK_STAGE, async () => {
       const workspaceRoot = getWorkspaceRoot();
       if (!workspaceRoot) {
@@ -457,7 +525,11 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(COMMAND_REFRESH_SIDEBAR, () => {
+    vscode.commands.registerCommand(COMMAND_REFRESH_SIDEBAR, async () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (workspaceRoot) {
+        await scanDetectedFiles(workspaceRoot);
+      }
       void refreshPipelineOutputContext(context);
     }),
   );
@@ -825,6 +897,83 @@ class PipelineOutputDecorationProvider
 
 let decorationProvider: PipelineOutputDecorationProvider | undefined;
 
+function updateSidebarBadge(): void {
+  if (!sidebarTreeView || !sidebarProvider) {
+    return;
+  }
+  const count = sidebarProvider.getAttentionCount();
+  sidebarTreeView.badge =
+    count > 0
+      ? {
+          value: count,
+          tooltip: `${count} item${count === 1 ? "" : "s"} need attention`,
+        }
+      : undefined;
+}
+
+const DETECTED_FILES_EXCLUDE =
+  "**/{.*,__pycache__,node_modules,venv,env,site-packages}/**";
+
+const FIGURE_DIR_NAMES = new Set([
+  "figures",
+  "figs",
+  "fig",
+  "plots",
+  "plot",
+  "images",
+  "img",
+  "output",
+  "outputs",
+  "results",
+]);
+
+const DATA_DIR_NAMES = new Set([
+  "data",
+  "dataset",
+  "datasets",
+  "input",
+  "inputs",
+  "output",
+  "outputs",
+  "results",
+]);
+
+function hasAncestorIn(relPath: string, names: Set<string>): boolean {
+  return relPath
+    .split("/")
+    .slice(0, -1)
+    .some((p) => names.has(p.toLowerCase()));
+}
+
+async function scanDetectedFiles(workspaceRoot: string): Promise<void> {
+  const [notebookUris, allUris] = await Promise.all([
+    vscode.workspace.findFiles(
+      `**/*${NOTEBOOK_EXTENSION}`,
+      DETECTED_FILES_EXCLUDE,
+    ),
+    vscode.workspace.findFiles("**/*", DETECTED_FILES_EXCLUDE),
+  ]);
+  const toRelative = (
+    uris: vscode.Uri[],
+    exts: Set<string>,
+    filter?: (rel: string) => boolean,
+  ): string[] =>
+    uris
+      .filter((u) => exts.has(path.extname(u.fsPath).toLowerCase()))
+      .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
+      .filter((rel) => !filter || filter(rel))
+      .sort();
+  currentDetectedNotebooks = notebookUris
+    .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
+    .sort();
+  currentDetectedFigures = toRelative(allUris, FIGURE_EXTENSIONS, (rel) =>
+    hasAncestorIn(rel, FIGURE_DIR_NAMES),
+  );
+  currentDetectedDatasets = toRelative(allUris, DATASET_EXTENSIONS, (rel) =>
+    hasAncestorIn(rel, DATA_DIR_NAMES),
+  );
+}
+
 async function refreshPipelineOutputContext(
   context: vscode.ExtensionContext,
 ): Promise<void> {
@@ -881,13 +1030,26 @@ async function refreshPipelineOutputContext(
     ]),
   ].map((p) => vscode.Uri.file(p));
   decorationProvider.refresh(changedUris);
+  // Detected files are scanned separately (once at startup / on explicit
+  // refresh) to avoid re-scanning the whole workspace on every calkit.yaml
+  // change, which caused the sidebar lists to flicker.
+  if (
+    currentDetectedNotebooks.length === 0 &&
+    currentDetectedFigures.length === 0
+  ) {
+    await scanDetectedFiles(workspaceRoot);
+  }
   sidebarProvider?.refresh(
     workspaceRoot,
     calkitConfig,
     dvcYaml,
     staleStageNames,
     envDescriptions,
+    currentDetectedNotebooks,
+    currentDetectedFigures,
+    currentDetectedDatasets,
   );
+  updateSidebarBadge();
   // Run staleness check after the fast decoration pass so P badges appear
   // immediately; S badges follow once calkit status finishes.
   void refreshStaleOutputContext(workspaceRoot, outputMap, decorationProvider);
@@ -937,7 +1099,11 @@ async function refreshStaleOutputContext(
       currentDvcYaml,
       staleStageNames,
       currentEnvDescriptions,
+      currentDetectedNotebooks,
+      currentDetectedFigures,
+      currentDetectedDatasets,
     );
+    updateSidebarBadge();
   } catch (error) {
     log(`Staleness check failed: ${String(error)}`);
   }

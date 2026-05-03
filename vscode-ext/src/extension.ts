@@ -1103,6 +1103,7 @@ async function defineProvenance(
 const SOURCE_GLOB = "**/*.{py,ipynb,R,jl,m,tex}";
 const SOURCE_EXCLUDE =
   "**/{.calkit,.dvc,node_modules,.git,__pycache__,.ipynb_checkpoints}/**";
+const ALL_FILES_EXCLUDE = "**/{.*}/**";
 
 const KIND_BY_EXT: Record<string, string> = {
   ".ipynb": "jupyter-notebook",
@@ -1122,8 +1123,14 @@ async function showStageEditor(
   existingStage?: import("./types").PipelineStage,
 ): Promise<void> {
   const nonce = getNonce();
-  const uris = await vscode.workspace.findFiles(SOURCE_GLOB, SOURCE_EXCLUDE);
-  const workspaceFiles = uris
+  const [sourceUris, allUris] = await Promise.all([
+    vscode.workspace.findFiles(SOURCE_GLOB, SOURCE_EXCLUDE),
+    vscode.workspace.findFiles("**/*", ALL_FILES_EXCLUDE),
+  ]);
+  const workspaceFiles = sourceUris
+    .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
+    .sort();
+  const allProjectFiles = allUris
     .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
     .sort();
   const envs = currentCalkitConfig?.environments ?? {};
@@ -1143,6 +1150,7 @@ async function showStageEditor(
   panel.webview.html = buildStageEditorHtml(
     nonce,
     workspaceFiles,
+    allProjectFiles,
     envEntries,
     prefillOutput,
     prefillSource,
@@ -1222,6 +1230,7 @@ async function showStageEditor(
 function buildStageEditorHtml(
   nonce: string,
   workspaceFiles: string[],
+  allProjectFiles: string[],
   envEntries: { name: string; kind: string }[],
   prefillOutput?: string,
   prefillSource?: string,
@@ -1273,7 +1282,7 @@ function buildStageEditorHtml(
     `<option value="__new__">New environment (enter spec path below)…</option>`,
   ].join("\n");
 
-  const datalistOptions = workspaceFiles
+  const datalistOptions = allProjectFiles
     .map((f) => `<option value="${escHtml(f)}">`)
     .join("\n");
 

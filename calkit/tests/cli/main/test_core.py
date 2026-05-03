@@ -548,7 +548,8 @@ def test_add_pipeline_output_storage(tmp_dir):
     ``storage: git`` was set for that output in calkit.yaml.
     """
     subprocess.check_call(["calkit", "init"])
-    # Create a .png file – would normally be routed to DVC by extension
+    # Create a .png file – would normally be routed to DVC by extension.
+    # The content is intentionally fake; only the extension matters here.
     with open("figure.png", "w") as f:
         f.write("fake png content")
     # Write a calkit.yaml pipeline that declares this output with storage: git
@@ -606,7 +607,8 @@ def test_save_to_git_with_all(tmp_dir):
     subprocess.check_call(
         ["calkit", "save", "-am", "Add pipeline", "--no-push"]
     )
-    # Now create the .png file (would go to DVC by extension without the fix)
+    # Now create the .png file (would go to DVC by extension without the fix).
+    # The content is intentionally fake; only the extension matters here.
     with open("figure.png", "w") as f:
         f.write("fake png content")
     # save --to git -a should add figure.png to Git, not DVC

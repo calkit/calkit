@@ -534,6 +534,13 @@ def _get_pipeline_output_storage_map() -> dict[str, str]:
 
     Only outputs with an explicitly-set ``storage`` key in ``calkit.yaml``
     are included so that default-DVC outputs still go through auto-detection.
+
+    Returns
+    -------
+    dict[str, str]
+        Mapping of posix file path to storage type, e.g.
+        ``{"figures/plot.png": "git", "data/archive": "dvc-zip"}``.
+        Plain string outputs (no explicit ``storage`` key) are not included.
     """
     try:
         ck_info = calkit.load_calkit_info()

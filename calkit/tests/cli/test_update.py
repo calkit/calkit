@@ -5,9 +5,144 @@ import subprocess
 import pytest
 from typer.testing import CliRunner
 
+import calkit
 from calkit.cli.update import update_app
 
 runner = CliRunner()
+
+
+def test_update_uv_env(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "uv-env",
+            "-n",
+            "myenv",
+            "--python",
+            "3.13",
+            "requests",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "update",
+            "uv-env",
+            "-n",
+            "myenv",
+            "--add",
+            "numpy",
+            "--no-check",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "update",
+            "uv-env",
+            "-n",
+            "myenv",
+            "--rm",
+            "numpy",
+            "--no-check",
+        ]
+    )
+
+
+def test_update_conda_env(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    with open("environment.yml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "name": "test",
+                "channels": ["conda-forge"],
+                "dependencies": ["python", "requests", {"pip": ["httpx"]}],
+            },
+            f,
+        )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "conda-env",
+            "-n",
+            "myenv",
+            "--path",
+            "environment.yml",
+            "--no-check",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "update",
+            "conda-env",
+            "-n",
+            "myenv",
+            "--add",
+            "numpy",
+            "--no-check",
+        ]
+    )
+    with open("environment.yml") as f:
+        spec = calkit.ryaml.load(f)
+    conda_deps = [d for d in spec["dependencies"] if isinstance(d, str)]
+    assert "numpy" in conda_deps
+    subprocess.check_call(
+        [
+            "calkit",
+            "update",
+            "conda-env",
+            "-n",
+            "myenv",
+            "--rm",
+            "numpy",
+            "--no-check",
+        ]
+    )
+    with open("environment.yml") as f:
+        spec = calkit.ryaml.load(f)
+    conda_deps = [d for d in spec["dependencies"] if isinstance(d, str)]
+    assert "numpy" not in conda_deps
+    # Test pip add/remove
+    subprocess.check_call(
+        [
+            "calkit",
+            "update",
+            "conda-env",
+            "-n",
+            "myenv",
+            "--add-pip",
+            "rich",
+            "--no-check",
+        ]
+    )
+    with open("environment.yml") as f:
+        spec = calkit.ryaml.load(f)
+    pip_dict = next(
+        d for d in spec["dependencies"] if isinstance(d, dict) and "pip" in d
+    )
+    assert "rich" in pip_dict["pip"]
+    subprocess.check_call(
+        [
+            "calkit",
+            "update",
+            "conda-env",
+            "-n",
+            "myenv",
+            "--rm-pip",
+            "rich",
+            "--no-check",
+        ]
+    )
+    with open("environment.yml") as f:
+        spec = calkit.ryaml.load(f)
+    pip_dict = next(
+        d for d in spec["dependencies"] if isinstance(d, dict) and "pip" in d
+    )
+    assert "rich" not in pip_dict["pip"]
 
 
 def test_update_environment(tmp_dir):

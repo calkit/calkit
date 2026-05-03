@@ -2299,8 +2299,26 @@ async function showEnvCreatorWebview(
             void refreshPipelineOutputContext(context);
             panel.dispose();
           } catch (error: unknown) {
-            const err = error as { stderr?: string; message?: string };
+            const err = error as {
+              stderr?: string;
+              stdout?: string;
+              message?: string;
+            };
+            const output = [err.stdout, err.stderr]
+              .filter(Boolean)
+              .join("\n")
+              .trim();
+            if (output) {
+              log(output);
+            }
             const errMsg = (err.stderr ?? err.message ?? String(error)).trim();
+            void vscode.window
+              .showErrorMessage(errMsg, "View Output")
+              .then((choice) => {
+                if (choice === "View Output") {
+                  outputChannel.show(true);
+                }
+              });
             void panel.webview.postMessage({
               command: "error",
               message: errMsg,

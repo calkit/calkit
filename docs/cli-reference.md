@@ -2003,6 +2003,7 @@ Update objects.
 | [`agent-skills`](#subcommand-update-agent-skills)     | Copy packaged Calkit agent skills to `~/.agents/skills`.                            |
 | [`env`](#subcommand-update-env)                       | Update an environment.                                                              |
 | [`environment`](#subcommand-update-environment)       | Update an environment.                                                              |
+| [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                               |
 
 <a id="subcommand-update-devcontainer"></a>
 
@@ -2190,6 +2191,30 @@ Options:
 | -------------- | ---- | -------- | ------- | --------------------------------- |
 | `--name`, `-n` | text | yes      |         | Name of the environment to update |
 | `--add`        | text | no       |         | Add package to environment,       |
+
+<a id="subcommand-update-figure"></a>
+
+#### `calkit update figure`
+
+Update a figure entry in calkit.yaml.
+
+Usage:
+
+```text
+calkit update figure [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description              |
+| -------- | ---- | -------- | ------- | ------------------------ |
+| `path`   | text | yes      |         | Path to the figure file. |
+
+Options:
+
+| Option                | Type | Required | Default | Description                       |
+| --------------------- | ---- | -------- | ------- | --------------------------------- |
+| `--imported-from-url` | text | no       |         | URL the figure was imported from. |
 
 <a id="command-group-check"></a>
 

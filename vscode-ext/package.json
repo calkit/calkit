@@ -114,6 +114,11 @@
         "icon": "$(type-hierarchy)"
       },
       {
+        "command": "calkit-vscode.defineProvenance",
+        "title": "Define Provenance",
+        "category": "Calkit"
+      },
+      {
         "command": "calkit-vscode.refreshSidebar",
         "title": "Refresh",
         "category": "Calkit",
@@ -155,6 +160,11 @@
           "command": "calkit-vscode.runStageForFile",
           "when": "!explorerResourceIsFolder",
           "group": "calkit@2"
+        },
+        {
+          "command": "calkit-vscode.defineProvenance",
+          "when": "!explorerResourceIsFolder",
+          "group": "calkit@3"
         }
       ],
       "editor/context": [
@@ -165,6 +175,10 @@
         {
           "command": "calkit-vscode.runStageForFile",
           "group": "calkit@2"
+        },
+        {
+          "command": "calkit-vscode.defineProvenance",
+          "group": "calkit@3"
         }
       ],
       "notebook/toolbar": [
@@ -219,6 +233,9 @@
         },
         {
           "command": "calkit-vscode.showPipelineDag"
+        },
+        {
+          "command": "calkit-vscode.defineProvenance"
         },
         {
           "command": "calkit-vscode.refreshSidebar"

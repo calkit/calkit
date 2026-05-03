@@ -618,3 +618,34 @@ def update_environment(
     julia_cmd = ["-e", f"using Pkg; Pkg.add([{add_packages_str}])"]
     run_in_env(env_name=env_name, cmd=julia_cmd)
     typer.echo(f"Updated environment '{env_name}'")
+
+
+@update_app.command(name="figure")
+def update_figure(
+    path: Annotated[str, typer.Argument(help="Path to the figure file.")],
+    imported_from_url: Annotated[
+        str | None,
+        typer.Option(
+            "--imported-from-url",
+            help="URL the figure was imported from.",
+        ),
+    ] = None,
+) -> None:
+    """Update a figure entry in calkit.yaml."""
+    if imported_from_url is None:
+        raise_error("No updates specified.")
+    with open("calkit.yaml") as f:
+        ck_info = calkit.ryaml.load(f)
+    if ck_info is None:
+        ck_info = {}
+    figures = ck_info.get("figures", [])
+    imported_from_val = {"url": imported_from_url}
+    for fig in figures:
+        if fig.get("path") == path:
+            fig["imported_from"] = imported_from_val
+            break
+    else:
+        figures.append({"path": path, "imported_from": imported_from_val})
+        ck_info["figures"] = figures
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)

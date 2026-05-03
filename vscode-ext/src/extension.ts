@@ -32,6 +32,7 @@ const COMMAND_RUN_STAGE = "calkit-vscode.runStage";
 const COMMAND_RUN_STAGE_FOR_FILE = "calkit-vscode.runStageForFile";
 const COMMAND_RUN_PIPELINE = "calkit-vscode.runPipeline";
 const COMMAND_SHOW_DAG = "calkit-vscode.showPipelineDag";
+const COMMAND_DEFINE_PROVENANCE = "calkit-vscode.defineProvenance";
 const COMMAND_REFRESH_SIDEBAR = "calkit-vscode.refreshSidebar";
 const FIGURE_EXTENSIONS = new Set([
   ".png",
@@ -249,6 +250,23 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       showDagPanel(context, workspaceRoot);
     }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_DEFINE_PROVENANCE,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        if (!fileUri) {
+          return;
+        }
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        await defineProvenance(workspaceRoot, fileUri);
+      },
+    ),
   );
 
   context.subscriptions.push(
@@ -610,7 +628,8 @@ class PipelineOutputDecorationProvider
     ) {
       return {
         badge: "!",
-        tooltip: "Not produced by the pipeline",
+        tooltip:
+          "Not produced by the pipeline — right-click to define provenance",
       };
     }
     return undefined;
@@ -891,6 +910,110 @@ function buildDagHtml(nonce: string): string {
 </script>
 </body>
 </html>`;
+}
+
+async function defineProvenance(
+  workspaceRoot: string,
+  fileUri: vscode.Uri,
+): Promise<void> {
+  const relPath = path
+    .relative(workspaceRoot, fileUri.fsPath)
+    .replace(/\\/g, "/");
+  const ext = path.extname(fileUri.fsPath).toLowerCase();
+  const isNotebook = ext === NOTEBOOK_EXTENSION;
+  const envs = currentCalkitConfig?.environments ?? {};
+  const envNames = Object.keys(envs);
+
+  const choiceStage = "$(play) Produced by a script or notebook";
+  const choiceImported = "$(cloud-download) Imported from an external source";
+  const notebookChoiceStage =
+    "$(play) Run this notebook and record as a pipeline stage";
+
+  const picked = await vscode.window.showQuickPick(
+    isNotebook
+      ? [notebookChoiceStage, choiceImported]
+      : [choiceStage, choiceImported],
+    {
+      title: `Define provenance for ${path.basename(fileUri.fsPath)}`,
+      placeHolder: "How is this file produced?",
+    },
+  );
+  if (!picked) {
+    return;
+  }
+
+  if (picked === choiceImported) {
+    const source = await vscode.window.showInputBox({
+      title: "Mark as Imported",
+      prompt: "Where was this file imported from?",
+      placeHolder: "URL, project name, or brief description",
+    });
+    if (!source) {
+      return;
+    }
+    try {
+      await execFileAsync(
+        "calkit",
+        ["update", "figure", relPath, "--imported-from-url", source],
+        { cwd: workspaceRoot },
+      );
+    } catch (err) {
+      void vscode.window.showErrorMessage(
+        `Failed to update figure: ${String(err)}`,
+      );
+      return;
+    }
+    void vscode.window.showInformationMessage(
+      `Marked '${path.basename(fileUri.fsPath)}' as imported from '${source}'.`,
+    );
+    return;
+  }
+
+  // "Produced by script/notebook" path
+  let scriptRelPath = relPath;
+  if (!isNotebook) {
+    const scriptUri = await vscode.window.showOpenDialog({
+      canSelectMany: false,
+      openLabel: "Select producing script or notebook",
+      defaultUri: vscode.Uri.file(workspaceRoot),
+      filters: { "Scripts & Notebooks": ["py", "ipynb", "R", "jl", "m"] },
+    });
+    if (!scriptUri?.length) {
+      return;
+    }
+    scriptRelPath = path
+      .relative(workspaceRoot, scriptUri[0].fsPath)
+      .replace(/\\/g, "/");
+  }
+
+  const envChoice = await vscode.window.showQuickPick(
+    [
+      { label: "$(search) Detect automatically", envName: "" },
+      ...envNames.map((name) => ({
+        label: name,
+        description:
+          typeof envs[name].kind === "string"
+            ? (envs[name].kind as string)
+            : undefined,
+        envName: name,
+      })),
+    ],
+    {
+      title: "Select environment",
+      placeHolder: "Which environment runs this script?",
+    },
+  );
+  if (!envChoice) {
+    return;
+  }
+
+  const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
+  terminal.show();
+  const envFlag = envChoice.envName ? ` -e ${shQuote(envChoice.envName)}` : "";
+  const outputFlag = isNotebook ? "" : ` -o ${shQuote(relPath)}`;
+  terminal.sendText(
+    `calkit xr${envFlag} ${shQuote(scriptRelPath)}${outputFlag}`,
+  );
 }
 
 function getOrCreateTerminal(name: string, cwd: string): vscode.Terminal {

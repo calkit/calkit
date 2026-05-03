@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
-import type { CalkitInfo, DvcYaml } from "./types";
+import type { CalkitInfo, DvcYaml, EnvDescription } from "./types";
 
 export class SidebarItem extends vscode.TreeItem {
   constructor(
@@ -11,20 +11,6 @@ export class SidebarItem extends vscode.TreeItem {
   ) {
     super(label, collapsibleState);
   }
-}
-
-function dvcStageOutputPaths(
-  stage: NonNullable<DvcYaml["stages"]>[string],
-): string[] {
-  return (stage.outs ?? []).flatMap((o) =>
-    typeof o === "string" ? [o] : Object.keys(o),
-  );
-}
-
-function dvcStageDeps(stage: NonNullable<DvcYaml["stages"]>[string]): string[] {
-  return (stage.deps ?? []).flatMap((d) =>
-    typeof d === "string" ? [d] : Object.keys(d),
-  );
 }
 
 export class CalkitSidebarProvider
@@ -39,17 +25,20 @@ export class CalkitSidebarProvider
   private calkitConfig: CalkitInfo | undefined;
   private dvcYaml: DvcYaml | undefined;
   private staleStageNames = new Set<string>();
+  private envDescriptions: Record<string, EnvDescription> | undefined;
 
   refresh(
     workspaceRoot: string | undefined,
     calkitConfig: CalkitInfo | undefined,
     dvcYaml: DvcYaml | undefined,
     staleStageNames: Set<string>,
+    envDescriptions?: Record<string, EnvDescription>,
   ): void {
     this.workspaceRoot = workspaceRoot;
     this.calkitConfig = calkitConfig;
     this.dvcYaml = dvcYaml;
     this.staleStageNames = staleStageNames;
+    this.envDescriptions = envDescriptions;
     this._onDidChangeTreeData.fire();
   }
 
@@ -144,14 +133,25 @@ export class CalkitSidebarProvider
       }
       items.push(item);
     };
-    if (typeof env.path === "string") {
-      prop("Spec", env.path, env.path, "file-code");
+    const desc = this.envDescriptions?.[envName];
+    const specPath =
+      desc?.spec_path ?? (typeof env.path === "string" ? env.path : undefined);
+    const lockPath = desc?.lock_path;
+    const prefix =
+      desc?.prefix ?? (typeof env.prefix === "string" ? env.prefix : undefined);
+    const python =
+      desc?.python ?? (typeof env.python === "string" ? env.python : undefined);
+    if (specPath) {
+      prop("Spec", specPath, specPath, "file-code");
     }
-    if (typeof env.prefix === "string") {
-      prop("Prefix", env.prefix, undefined, "folder");
+    if (lockPath) {
+      prop("Lock", lockPath, lockPath, "lock");
     }
-    if (typeof env.python === "string") {
-      prop("Python", env.python, undefined, "symbol-namespace");
+    if (prefix) {
+      prop("Prefix", prefix, undefined, "folder");
+    }
+    if (python) {
+      prop("Python", python, undefined, "symbol-namespace");
     }
     return items;
   }
@@ -252,12 +252,16 @@ export class CalkitSidebarProvider
       }
     }
 
-    if (dvcStage) {
-      for (const dep of dvcStageDeps(dvcStage)) {
-        prop("Dep", dep, "arrow-right", dep);
+    if (calkitStage) {
+      for (const input of Array.isArray(calkitStage.inputs)
+        ? (calkitStage.inputs as string[])
+        : []) {
+        prop("Input", input, "arrow-right", input);
       }
-      for (const out of dvcStageOutputPaths(dvcStage)) {
-        prop("Out", out, "arrow-left", out);
+      for (const output of Array.isArray(calkitStage.outputs)
+        ? (calkitStage.outputs as string[])
+        : []) {
+        prop("Output", output, "arrow-left", output);
       }
     }
 

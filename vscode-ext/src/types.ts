@@ -38,6 +38,14 @@ export interface CalkitInfo {
   };
 }
 
+export interface EnvDescription {
+  kind?: string;
+  spec_path?: string;
+  lock_path?: string;
+  prefix?: string;
+  python?: string;
+}
+
 export interface DvcStage {
   cmd?: string;
   deps?: (string | Record<string, unknown>)[];

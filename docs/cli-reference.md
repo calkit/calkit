@@ -1778,9 +1778,11 @@ calkit list remotes
 
 Describe things.
 
-| Command                                 | Description          |
-| --------------------------------------- | -------------------- |
-| [`system`](#subcommand-describe-system) | Describe the system. |
+| Command                                 | Description                                                        |
+| --------------------------------------- | ------------------------------------------------------------------ |
+| [`system`](#subcommand-describe-system) | Describe the system.                                               |
+| [`env`](#subcommand-describe-env)       | Describe a single environment, including spec and lock file paths. |
+| [`envs`](#subcommand-describe-envs)     | Describe all environments, including spec and lock file paths.     |
 
 <a id="subcommand-describe-system"></a>
 
@@ -1792,6 +1794,36 @@ Usage:
 
 ```text
 calkit describe system
+```
+
+<a id="subcommand-describe-env"></a>
+
+#### `calkit describe env`
+
+Describe a single environment, including spec and lock file paths.
+
+Usage:
+
+```text
+calkit describe env [OPTIONS]
+```
+
+Options:
+
+| Option         | Type | Required | Default | Description       |
+| -------------- | ---- | -------- | ------- | ----------------- |
+| `--name`, `-n` | text | yes      |         | Environment name. |
+
+<a id="subcommand-describe-envs"></a>
+
+#### `calkit describe envs`
+
+Describe all environments, including spec and lock file paths.
+
+Usage:
+
+```text
+calkit describe envs
 ```
 
 <a id="command-group-import"></a>

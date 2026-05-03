@@ -19,7 +19,7 @@ import {
   type SlurmLaunchOptions,
 } from "./environments";
 import { getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath } from "./notebooks";
-import type { CalkitInfo, DvcYaml } from "./types";
+import type { CalkitInfo, DvcYaml, EnvDescription } from "./types";
 import { CalkitSidebarProvider } from "./sidebar";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
@@ -69,6 +69,7 @@ const pipelineNotebookUris = new Set<string>();
 let pipelineDecorationProvider: vscode.Disposable | undefined;
 let currentCalkitConfig: CalkitInfo | undefined;
 let currentDvcYaml: DvcYaml | undefined;
+let currentEnvDescriptions: Record<string, EnvDescription> | undefined;
 let sidebarProvider: CalkitSidebarProvider | undefined;
 
 function log(message: string): void {
@@ -475,6 +476,21 @@ export function deactivate(): void {
   terminateJupyterServerProcess("extension deactivation");
 }
 
+async function fetchEnvDescriptions(
+  workspaceRoot: string,
+): Promise<Record<string, EnvDescription> | undefined> {
+  try {
+    const { stdout } = await execFileAsync("calkit", ["describe", "envs"], {
+      cwd: workspaceRoot,
+      timeout: 15_000,
+    });
+    return JSON.parse(stdout) as Record<string, EnvDescription>;
+  } catch (error) {
+    log(`Failed to fetch env descriptions: ${String(error)}`);
+    return undefined;
+  }
+}
+
 async function readDvcYaml(
   workspaceRoot: string,
 ): Promise<DvcYaml | undefined> {
@@ -579,12 +595,14 @@ async function refreshPipelineOutputContext(
   if (!workspaceRoot) {
     return;
   }
-  const [dvcYaml, calkitConfig] = await Promise.all([
+  const [dvcYaml, calkitConfig, envDescriptions] = await Promise.all([
     readDvcYaml(workspaceRoot),
     readCalkitConfig(workspaceRoot),
+    fetchEnvDescriptions(workspaceRoot),
   ]);
   currentDvcYaml = dvcYaml;
   currentCalkitConfig = calkitConfig;
+  currentEnvDescriptions = envDescriptions;
   const outputMap = buildPipelineOutputMapFromYaml(workspaceRoot, dvcYaml);
   const prevPaths = new Set([
     ...pipelineOutputUris,
@@ -631,6 +649,7 @@ async function refreshPipelineOutputContext(
     calkitConfig,
     dvcYaml,
     staleStageNames,
+    envDescriptions,
   );
   // Run staleness check after the fast decoration pass so P badges appear
   // immediately; S badges follow once calkit status finishes.
@@ -680,6 +699,7 @@ async function refreshStaleOutputContext(
       currentCalkitConfig,
       currentDvcYaml,
       staleStageNames,
+      currentEnvDescriptions,
     );
   } catch (error) {
     log(`Staleness check failed: ${String(error)}`);

@@ -44,6 +44,7 @@ const COMMAND_RUN_NOTEBOOK_STAGE = "calkit-vscode.runNotebookStage";
 const COMMAND_EDIT_NOTEBOOK_STAGE = "calkit-vscode.editNotebookStage";
 const COMMAND_DEFINE_NOTEBOOK_STAGE = "calkit-vscode.defineNotebookStage";
 const COMMAND_REFRESH_SIDEBAR = "calkit-vscode.refreshSidebar";
+const COMMAND_OPEN_CALKIT_YAML = "calkit-vscode.openCalkitYaml";
 const FIGURE_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -551,6 +552,17 @@ export function activate(context: vscode.ExtensionContext): void {
         undefined,
         prefillStage,
       );
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_OPEN_CALKIT_YAML, () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      const fileUri = vscode.Uri.file(path.join(workspaceRoot, "calkit.yaml"));
+      void vscode.commands.executeCommand("vscode.open", fileUri);
     }),
   );
 
@@ -1532,6 +1544,8 @@ function buildStageEditorHtml(
               storage: (o.storage === "git" ? "git" : "dvc") as "dvc" | "git",
             },
       )
+    : prefillOutput
+    ? [{ path: prefillOutput, storage: "dvc" as const }]
     : [];
 
   // Source info for edit mode
@@ -1580,18 +1594,6 @@ function buildStageEditorHtml(
   <label>Source file</label>
   <select id="source">${sourceOptions}</select>
   <div id="kind-hint"></div>
-</div>
-<div class="field">
-  <label>Output <span style="font-weight:normal;text-transform:none">(optional)</span></label>
-  <div style="display:flex;gap:6px;align-items:center">
-    <input id="output" type="text" value="${escHtml(
-      prefillOutput ?? "",
-    )}" placeholder="e.g. figures/result.png" list="wf-list" style="flex:1"/>
-    <select id="output-storage" style="width:auto;flex-shrink:0">
-      <option value="dvc" selected>DVC</option>
-      <option value="git">Git</option>
-    </select>
-  </div>
 </div>
 <div class="field">
   <label>Stage name</label>
@@ -1698,6 +1700,15 @@ ${createSection}
     inp.type = 'text';
     inp.value = (withStorage ? value.path : value) || '';
     inp.setAttribute('list', 'wf-list');
+    inp.addEventListener('keydown', function(e) {
+      if (e.key === 'ArrowDown') {
+        const v = inp.value;
+        inp.value = v + '​';
+        inp.dispatchEvent(new Event('input'));
+        inp.value = v;
+        inp.dispatchEvent(new Event('input'));
+      }
+    });
     if (withStorage) {
       const sel = document.createElement('select');
       sel.className = 'storage-sel';
@@ -1764,41 +1775,45 @@ ${createSection}
 
   if (!isEdit) {
     const sourceEl = document.getElementById('source');
-    const outputEl = document.getElementById('output');
     const stageNameEl = document.getElementById('stage-name');
     const kindHint = document.getElementById('kind-hint');
     let stageNameEdited = false;
 
+    function firstOutputPath() {
+      const first = outputsList.querySelector('input');
+      return first ? first.value.trim() : '';
+    }
     function updateKindHint() {
       const kind = getKind(sourceEl.value);
       kindHint.textContent = kind ? 'Kind: ' + kind : '';
     }
     function updateStageName() {
       if (!stageNameEdited) {
-        const out = outputEl.value.trim();
+        const out = firstOutputPath();
         stageNameEl.value = out
           ? slugify(out.replace(/\\.[^.]+$/, ''))
           : slugify(sourceEl.value.replace(/\\.[^.]+$/, ''));
       }
     }
     sourceEl.addEventListener('change', function() { updateKindHint(); updateStageName(); });
-    outputEl.addEventListener('input', updateStageName);
+    outputsList.addEventListener('input', updateStageName);
     stageNameEl.addEventListener('input', function() { stageNameEdited = true; });
     updateKindHint();
     updateStageName();
 
     document.getElementById('btn-create').addEventListener('click', function() {
       if (!sourceEl.value) { return; }
-      const outputStorageSel = document.getElementById('output-storage');
+      const outs = getOutputValues(outputsList);
+      const primaryOut = outs.length > 0 ? outs[0] : null;
       vscode.postMessage({
         command: 'create',
         source: sourceEl.value,
         environment: resolvedEnv(),
-        output: outputEl.value.trim(),
-        outputStorage: outputStorageSel ? outputStorageSel.value : 'dvc',
+        output: primaryOut ? primaryOut.path : '',
+        outputStorage: primaryOut ? primaryOut.storage : 'dvc',
         stageName: stageNameEl.value.trim(),
         inputs: getInputValues(inputsList),
-        outputs: getOutputValues(outputsList),
+        outputs: outs,
         andRun: true,
       });
     });

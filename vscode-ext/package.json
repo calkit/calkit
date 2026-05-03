@@ -184,10 +184,21 @@
         "title": "Refresh",
         "category": "Calkit",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "calkit-vscode.openCalkitYaml",
+        "title": "Open calkit.yaml",
+        "category": "Calkit",
+        "icon": "$(go-to-file)"
       }
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "calkit-vscode.openCalkitYaml",
+          "when": "view == calkit-sidebar",
+          "group": "navigation"
+        },
         {
           "command": "calkit-vscode.refreshSidebar",
           "when": "view == calkit-sidebar",

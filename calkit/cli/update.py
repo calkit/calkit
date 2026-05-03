@@ -610,6 +610,13 @@ def update_uv_env(
         list[str],
         typer.Option("--remove", "--rm", help="Remove a package."),
     ] = [],
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Skip checking (syncing) the environment after updating.",
+        ),
+    ] = False,
 ) -> None:
     """Update a uv environment."""
     import subprocess
@@ -628,6 +635,11 @@ def update_uv_env(
         if res.returncode != 0:
             raise_error("Failed to remove packages")
     typer.echo(f"Updated uv environment '{env_name}'")
+    if not no_check:
+        typer.echo(f"Checking environment '{env_name}'")
+        from calkit.cli.check import check_environment
+
+        check_environment(env_name=env_name)
 
 
 @update_app.command(name="conda-env")
@@ -652,6 +664,13 @@ def update_conda_env(
         list[str],
         typer.Option("--remove-pip", "--rm-pip", help="Remove a pip package."),
     ] = [],
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Skip checking (syncing) the environment after updating.",
+        ),
+    ] = False,
 ) -> None:
     """Update a conda environment spec file."""
     ck_info, env = _load_env(env_name)
@@ -698,9 +717,11 @@ def update_conda_env(
     with open(spec_path, "w") as f:
         calkit.ryaml.dump(spec, f)
     typer.echo(f"Updated conda environment spec '{spec_path}'")
-    typer.echo(
-        "Run 'calkit check environments' to sync the conda environment."
-    )
+    if not no_check:
+        typer.echo(f"Checking environment '{env_name}'")
+        from calkit.cli.check import check_environment
+
+        check_environment(env_name=env_name)
 
 
 @update_app.command(name="docker-env")

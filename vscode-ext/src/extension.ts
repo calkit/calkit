@@ -19,13 +19,14 @@ import {
   type SlurmLaunchOptions,
 } from "./environments";
 import { getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath } from "./notebooks";
-import type { CalkitInfo } from "./types";
+import type { CalkitInfo, DvcYaml } from "./types";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
 const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
 const COMMAND_START_SLURM = "calkit-vscode.startCalkitSlurmJob";
 const COMMAND_STOP_SLURM = "calkit-vscode.stopCalkitSlurmJob";
 const COMMAND_RESTART_JOB = "calkit-vscode.restartCalkitJob";
+const COMMAND_SHOW_PROVENANCE = "calkit-vscode.showProvenance";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
 const execFileAsync = promisify(execFile);
 const DEFAULT_MIN_CALKIT_VERSION = "0.37.3";
@@ -44,6 +45,8 @@ const configuredNotebooksThisSession = new Set<string>();
 const slurmAutoStartDeclinedThisSession = new Set<string>();
 const slurmAutoStartSuppressedThisSession = new Set<string>();
 let hasCheckedCalkitCli = false;
+const pipelineOutputUris = new Set<string>();
+let pipelineDecorationProvider: vscode.Disposable | undefined;
 
 function log(message: string): void {
   if (outputChannel) {
@@ -123,6 +126,26 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_SHOW_PROVENANCE,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        if (!fileUri) {
+          void vscode.window.showErrorMessage(
+            "No file selected to show provenance for.",
+          );
+          return;
+        }
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        await showProvenancePanel(context, workspaceRoot, fileUri);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
     vscode.window.onDidChangeActiveNotebookEditor(() => {
       void refreshNotebookToolbarContext(context);
     }),
@@ -145,6 +168,21 @@ export function activate(context: vscode.ExtensionContext): void {
 
   void refreshNotebookToolbarContext(context);
   void autoSelectEnvironmentForActiveNotebook(context);
+  void refreshPipelineOutputContext(context);
+
+  // Watch for changes to dvc.yaml/calkit.yaml to keep pipeline output context fresh.
+  const dvcYamlWatcher =
+    vscode.workspace.createFileSystemWatcher("**/dvc.yaml");
+  context.subscriptions.push(dvcYamlWatcher);
+  dvcYamlWatcher.onDidChange(() => {
+    void refreshPipelineOutputContext(context);
+  });
+  dvcYamlWatcher.onDidCreate(() => {
+    void refreshPipelineOutputContext(context);
+  });
+  dvcYamlWatcher.onDidDelete(() => {
+    void refreshPipelineOutputContext(context);
+  });
 
   // Proposed API: shows Calkit in the top-level kernel source list.
   // This must never break activation when proposed APIs are unavailable.
@@ -347,6 +385,249 @@ async function pickCalkitSetupCommand(
 export function deactivate(): void {
   // Shut down any running SLURM jobs for notebook kernels
   terminateJupyterServerProcess("extension deactivation");
+}
+
+async function readDvcYaml(
+  workspaceRoot: string,
+): Promise<DvcYaml | undefined> {
+  const fileUri = vscode.Uri.file(path.join(workspaceRoot, "dvc.yaml"));
+  try {
+    const bytes = await vscode.workspace.fs.readFile(fileUri);
+    const raw = Buffer.from(bytes).toString("utf8");
+    return (YAML.parse(raw) as DvcYaml | undefined) ?? {};
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return {};
+    }
+    log(`Failed to read dvc.yaml: ${String(error)}`);
+    return undefined;
+  }
+}
+
+function dvcStageOutputPaths(stage: import("./types").DvcStage): string[] {
+  const outs = stage.outs ?? [];
+  return outs.flatMap((out) => {
+    if (typeof out === "string") {
+      return [out];
+    }
+    return Object.keys(out);
+  });
+}
+
+async function buildPipelineOutputMap(
+  workspaceRoot: string,
+): Promise<Map<string, string>> {
+  const dvcYaml = await readDvcYaml(workspaceRoot);
+  const result = new Map<string, string>();
+  if (!dvcYaml?.stages) {
+    return result;
+  }
+  for (const [stageName, stage] of Object.entries(dvcYaml.stages)) {
+    for (const outputPath of dvcStageOutputPaths(stage)) {
+      const absPath = path.join(workspaceRoot, outputPath);
+      result.set(absPath, stageName);
+    }
+  }
+  return result;
+}
+
+class PipelineOutputDecorationProvider
+  implements vscode.FileDecorationProvider
+{
+  private readonly _onDidChangeFileDecorations = new vscode.EventEmitter<
+    vscode.Uri[]
+  >();
+  readonly onDidChangeFileDecorations = this._onDidChangeFileDecorations.event;
+
+  refresh(uris: vscode.Uri[]): void {
+    this._onDidChangeFileDecorations.fire(uris);
+  }
+
+  provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
+    if (pipelineOutputUris.has(uri.fsPath)) {
+      return {
+        badge: "P",
+        tooltip: "Calkit pipeline output",
+        color: new vscode.ThemeColor("charts.blue"),
+      };
+    }
+    return undefined;
+  }
+}
+
+let decorationProvider: PipelineOutputDecorationProvider | undefined;
+
+async function refreshPipelineOutputContext(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const workspaceRoot = getWorkspaceRoot();
+  if (!workspaceRoot) {
+    return;
+  }
+  const outputMap = await buildPipelineOutputMap(workspaceRoot);
+  const prevPaths = new Set(pipelineOutputUris);
+  pipelineOutputUris.clear();
+  for (const absPath of outputMap.keys()) {
+    pipelineOutputUris.add(absPath);
+  }
+  if (!decorationProvider) {
+    decorationProvider = new PipelineOutputDecorationProvider();
+    const disposable =
+      vscode.window.registerFileDecorationProvider(decorationProvider);
+    pipelineDecorationProvider = disposable;
+    context.subscriptions.push(disposable);
+  }
+  const changedUris = [...new Set([...prevPaths, ...pipelineOutputUris])].map(
+    (p) => vscode.Uri.file(p),
+  );
+  decorationProvider.refresh(changedUris);
+}
+
+async function showProvenancePanel(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+  fileUri: vscode.Uri,
+): Promise<void> {
+  const relPath = path
+    .relative(workspaceRoot, fileUri.fsPath)
+    .replace(/\\/g, "/");
+  const [dvcYaml, calkitConfig] = await Promise.all([
+    readDvcYaml(workspaceRoot),
+    readCalkitConfig(workspaceRoot),
+  ]);
+  if (!dvcYaml?.stages) {
+    void vscode.window.showErrorMessage(
+      "No dvc.yaml pipeline found in this workspace.",
+    );
+    return;
+  }
+  let stageName: string | undefined;
+  let dvcStage: import("./types").DvcStage | undefined;
+  for (const [name, stage] of Object.entries(dvcYaml.stages)) {
+    if (dvcStageOutputPaths(stage).includes(relPath)) {
+      stageName = name;
+      dvcStage = stage;
+      break;
+    }
+  }
+  if (!stageName || !dvcStage) {
+    void vscode.window.showErrorMessage(
+      `'${relPath}' is not a known pipeline output in dvc.yaml.`,
+    );
+    return;
+  }
+  const calkitStage = calkitConfig?.pipeline?.stages?.[stageName];
+  const panel = vscode.window.createWebviewPanel(
+    "calkit.provenance",
+    `Provenance: ${path.basename(fileUri.fsPath)}`,
+    vscode.ViewColumn.Beside,
+    { enableScripts: false },
+  );
+  context.subscriptions.push(panel);
+  panel.webview.html = buildProvenanceHtml(
+    workspaceRoot,
+    relPath,
+    stageName,
+    dvcStage,
+    calkitStage,
+    calkitConfig,
+  );
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function buildProvenanceHtml(
+  workspaceRoot: string,
+  relPath: string,
+  stageName: string,
+  dvcStage: import("./types").DvcStage,
+  calkitStage: import("./types").PipelineStage | undefined,
+  calkitConfig: CalkitInfo | undefined,
+): string {
+  const deps = (dvcStage.deps ?? [])
+    .map((d) => (typeof d === "string" ? d : Object.keys(d)[0] ?? ""))
+    .filter(Boolean);
+  const outs = dvcStageOutputPaths(dvcStage);
+  const envName = calkitStage?.environment;
+  const envInfo = envName ? calkitConfig?.environments?.[envName] : undefined;
+  const notebookPath = calkitStage?.notebook_path;
+  const scriptPath = calkitStage?.script_path;
+  const createdBy = notebookPath ?? scriptPath;
+  const calkitStageYaml = calkitStage ? YAML.stringify(calkitStage) : undefined;
+
+  const rows: string[] = [];
+  const row = (label: string, value: string) =>
+    rows.push(
+      `<tr><td class="label">${escapeHtml(label)}</td><td>${value}</td></tr>`,
+    );
+
+  row("File", escapeHtml(relPath));
+  row("Stage", escapeHtml(stageName));
+  if (createdBy) {
+    row("Created by", escapeHtml(createdBy));
+  }
+  if (envName) {
+    row("Environment", escapeHtml(envName));
+  }
+  if (envInfo?.path) {
+    row("Env spec", escapeHtml(envInfo.path as string));
+  }
+  const lockPath = envName ? `.calkit/env-locks/${envName}` : undefined;
+  if (lockPath) {
+    row("Env lock", escapeHtml(lockPath));
+  }
+  if (deps.length > 0) {
+    row(
+      "Inputs",
+      `<ul>${deps.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}</ul>`,
+    );
+  }
+  if (outs.length > 0) {
+    row(
+      "All outputs",
+      `<ul>${outs.map((o) => `<li>${escapeHtml(o)}</li>`).join("")}</ul>`,
+    );
+  }
+  if (dvcStage.cmd) {
+    row("Command", `<code>${escapeHtml(dvcStage.cmd)}</code>`);
+  }
+
+  const calkitSection = calkitStageYaml
+    ? `<h2>calkit.yaml stage definition</h2><pre>${escapeHtml(
+        calkitStageYaml,
+      )}</pre>`
+    : "";
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Provenance</title>
+<style>
+  body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); padding: 16px; }
+  h1 { font-size: 1.2em; margin-bottom: 12px; }
+  h2 { font-size: 1em; margin-top: 20px; margin-bottom: 6px; }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 4px 8px; vertical-align: top; }
+  td.label { font-weight: bold; white-space: nowrap; width: 140px; color: var(--vscode-descriptionForeground); }
+  ul { margin: 0; padding-left: 16px; }
+  pre { background: var(--vscode-textBlockQuote-background); padding: 8px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+  code { background: var(--vscode-textBlockQuote-background); padding: 2px 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<h1>Pipeline Provenance</h1>
+<table>${rows.join("")}</table>
+${calkitSection}
+</body>
+</html>`;
 }
 
 async function selectCalkitEnvironment(

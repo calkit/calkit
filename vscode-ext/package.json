@@ -64,9 +64,28 @@
         "title": "Restart Notebook Server",
         "category": "Calkit",
         "icon": "$(debug-restart)"
+      },
+      {
+        "command": "calkit-vscode.showProvenance",
+        "title": "Show Provenance",
+        "category": "Calkit",
+        "icon": "$(list-tree)"
       }
     ],
     "menus": {
+      "explorer/context": [
+        {
+          "command": "calkit-vscode.showProvenance",
+          "when": "!explorerResourceIsFolder",
+          "group": "calkit@1"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "calkit-vscode.showProvenance",
+          "group": "calkit@1"
+        }
+      ],
       "notebook/toolbar": [
         {
           "command": "calkit-vscode.selectCalkitEnvironment",
@@ -104,6 +123,9 @@
         },
         {
           "command": "calkit-vscode.restartCalkitJob"
+        },
+        {
+          "command": "calkit-vscode.showProvenance"
         }
       ]
     },

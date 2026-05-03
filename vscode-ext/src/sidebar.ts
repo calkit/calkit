@@ -26,6 +26,13 @@ export class CalkitSidebarProvider
   private dvcYaml: DvcYaml | undefined;
   private staleStageNames = new Set<string>();
   private envDescriptions: Record<string, EnvDescription> | undefined;
+  // Cached section items so reveal() can use getParent()
+  private readonly envsSectionItem = this.makeSection("Environments", "envs");
+  private readonly pipelineSectionItem = this.makeSection(
+    "Pipeline",
+    "pipeline",
+  );
+  private stageItemCache = new Map<string, SidebarItem>();
 
   refresh(
     workspaceRoot: string | undefined,
@@ -39,7 +46,26 @@ export class CalkitSidebarProvider
     this.dvcYaml = dvcYaml;
     this.staleStageNames = staleStageNames;
     this.envDescriptions = envDescriptions;
+    this.stageItemCache.clear();
     this._onDidChangeTreeData.fire();
+  }
+
+  findStageItem(stageName: string): SidebarItem | undefined {
+    // Ensure cache is populated by building items if needed
+    if (this.stageItemCache.size === 0) {
+      this.getStageItems();
+    }
+    return this.stageItemCache.get(stageName);
+  }
+
+  getParent(element: SidebarItem): SidebarItem | undefined {
+    if (element.nodeKind === "stage") {
+      return this.pipelineSectionItem;
+    }
+    if (element.nodeKind === "env") {
+      return this.envsSectionItem;
+    }
+    return undefined;
   }
 
   getTreeItem(element: SidebarItem): vscode.TreeItem {
@@ -48,10 +74,7 @@ export class CalkitSidebarProvider
 
   getChildren(element?: SidebarItem): SidebarItem[] {
     if (!element) {
-      return [
-        this.makeSection("Environments", "envs"),
-        this.makeSection("Pipeline", "pipeline"),
-      ];
+      return [this.envsSectionItem, this.pipelineSectionItem];
     }
     switch (element.nodeKind) {
       case "section-envs":
@@ -141,6 +164,9 @@ export class CalkitSidebarProvider
       desc?.prefix ?? (typeof env.prefix === "string" ? env.prefix : undefined);
     const python =
       desc?.python ?? (typeof env.python === "string" ? env.python : undefined);
+    if (typeof env.image === "string") {
+      prop("Image", env.image, undefined, "vm");
+    }
     if (specPath) {
       prop("Spec", specPath, specPath, "file-code");
     }
@@ -171,7 +197,11 @@ export class CalkitSidebarProvider
       );
       return [empty];
     }
-    return [...allNames].map((stageName) => {
+    const items = [...allNames].map((stageName) => {
+      const cached = this.stageItemCache.get(stageName);
+      if (cached) {
+        return cached;
+      }
       const isStale = this.staleStageNames.has(stageName);
       const item = new SidebarItem(
         stageName,
@@ -193,8 +223,10 @@ export class CalkitSidebarProvider
       item.tooltip = isStale
         ? `${stageName} — stage is stale`
         : `${stageName} — up to date`;
+      this.stageItemCache.set(stageName, item);
       return item;
     });
+    return items;
   }
 
   private getStageProps(stageName: string): SidebarItem[] {
@@ -264,13 +296,13 @@ export class CalkitSidebarProvider
       for (const input of Array.isArray(calkitStage.inputs)
         ? (calkitStage.inputs as string[])
         : []) {
-        prop("Input", input, "arrow-right", input);
+        prop("Input", input, "arrow-left", input);
       }
       const explicitOutputs = Array.isArray(calkitStage.outputs)
         ? (calkitStage.outputs as string[])
         : [];
       for (const output of explicitOutputs) {
-        prop("Output", output, "arrow-left", output);
+        prop("Output", output, "arrow-right", output);
       }
       // Implicit PDF output for latex stages
       if (
@@ -279,7 +311,7 @@ export class CalkitSidebarProvider
       ) {
         const pdfPath = calkitStage.target_path.replace(/\.tex$/, ".pdf");
         if (!explicitOutputs.includes(pdfPath)) {
-          prop("Output", pdfPath, "arrow-left", pdfPath);
+          prop("Output", pdfPath, "arrow-right", pdfPath);
         }
       }
     }

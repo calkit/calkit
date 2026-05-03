@@ -102,6 +102,18 @@
         "icon": "$(play)"
       },
       {
+        "command": "calkit-vscode.runPipeline",
+        "title": "Run Pipeline",
+        "category": "Calkit",
+        "icon": "$(play)"
+      },
+      {
+        "command": "calkit-vscode.showPipelineDag",
+        "title": "Show Pipeline DAG",
+        "category": "Calkit",
+        "icon": "$(type-hierarchy)"
+      },
+      {
         "command": "calkit-vscode.refreshSidebar",
         "title": "Refresh",
         "category": "Calkit",
@@ -117,6 +129,16 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "calkit-vscode.showPipelineDag",
+          "when": "view == calkit-sidebar && viewItem == section-pipeline",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.runPipeline",
+          "when": "view == calkit-sidebar && viewItem == section-pipeline",
+          "group": "inline"
+        },
         {
           "command": "calkit-vscode.runStage",
           "when": "view == calkit-sidebar && viewItem == stage",
@@ -191,6 +213,12 @@
         },
         {
           "command": "calkit-vscode.runStageForFile"
+        },
+        {
+          "command": "calkit-vscode.runPipeline"
+        },
+        {
+          "command": "calkit-vscode.showPipelineDag"
         },
         {
           "command": "calkit-vscode.refreshSidebar"

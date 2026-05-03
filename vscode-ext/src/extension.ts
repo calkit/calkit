@@ -30,6 +30,8 @@ const COMMAND_RESTART_JOB = "calkit-vscode.restartCalkitJob";
 const COMMAND_SHOW_PROVENANCE = "calkit-vscode.showProvenance";
 const COMMAND_RUN_STAGE = "calkit-vscode.runStage";
 const COMMAND_RUN_STAGE_FOR_FILE = "calkit-vscode.runStageForFile";
+const COMMAND_RUN_PIPELINE = "calkit-vscode.runPipeline";
+const COMMAND_SHOW_DAG = "calkit-vscode.showPipelineDag";
 const COMMAND_REFRESH_SIDEBAR = "calkit-vscode.refreshSidebar";
 const FIGURE_EXTENSIONS = new Set([
   ".png",
@@ -71,6 +73,9 @@ let currentCalkitConfig: CalkitInfo | undefined;
 let currentDvcYaml: DvcYaml | undefined;
 let currentEnvDescriptions: Record<string, EnvDescription> | undefined;
 let sidebarProvider: CalkitSidebarProvider | undefined;
+let sidebarTreeView:
+  | vscode.TreeView<import("./sidebar").SidebarItem>
+  | undefined;
 
 function log(message: string): void {
   if (outputChannel) {
@@ -164,7 +169,21 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!workspaceRoot) {
           return;
         }
-        await showProvenancePanel(context, workspaceRoot, fileUri);
+        const stageName = await findStageForFile(workspaceRoot, fileUri);
+        if (!stageName) {
+          void vscode.window.showErrorMessage(
+            `No pipeline stage found for '${path.basename(fileUri.fsPath)}'.`,
+          );
+          return;
+        }
+        const stageItem = sidebarProvider?.findStageItem(stageName);
+        if (stageItem && sidebarTreeView) {
+          await sidebarTreeView.reveal(stageItem, {
+            select: true,
+            focus: true,
+            expand: true,
+          });
+        }
       },
     ),
   );
@@ -211,15 +230,39 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_RUN_PIPELINE, () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
+      terminal.show();
+      terminal.sendText("calkit run");
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_SHOW_DAG, () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      showDagPanel(context, workspaceRoot);
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_REFRESH_SIDEBAR, () => {
       void refreshPipelineOutputContext(context);
     }),
   );
 
   sidebarProvider = new CalkitSidebarProvider();
-  context.subscriptions.push(
-    vscode.window.registerTreeDataProvider("calkit-sidebar", sidebarProvider),
-  );
+  sidebarTreeView = vscode.window.createTreeView("calkit-sidebar", {
+    treeDataProvider: sidebarProvider,
+    showCollapseAll: false,
+  });
+  context.subscriptions.push(sidebarTreeView);
 
   context.subscriptions.push(
     vscode.window.onDidChangeActiveNotebookEditor(() => {
@@ -547,39 +590,27 @@ class PipelineOutputDecorationProvider
   }
 
   provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
+    const ext = path.extname(uri.fsPath).toLowerCase();
     if (pipelineOutputUris.has(uri.fsPath)) {
       if (staleOutputUris.has(uri.fsPath)) {
         return {
-          badge: "S",
           tooltip: "Calkit pipeline output — stage is stale, needs re-run",
           color: new vscode.ThemeColor("list.warningForeground"),
         };
       }
-      return {
-        badge: "P",
-        tooltip: "Calkit pipeline output — right-click to see creation process",
-      };
+      return undefined;
     }
     if (
-      FIGURE_EXTENSIONS.has(path.extname(uri.fsPath).toLowerCase()) &&
-      !importedFigureUris.has(uri.fsPath)
+      (FIGURE_EXTENSIONS.has(ext) && !importedFigureUris.has(uri.fsPath)) ||
+      (ext === NOTEBOOK_EXTENSION &&
+        !pipelineNotebookUris.has(uri.fsPath) &&
+        !uri.fsPath.includes(
+          `${path.sep}.calkit${path.sep}notebooks${path.sep}`,
+        ))
     ) {
       return {
         badge: "!",
-        tooltip: "Not a pipeline output — was this created manually?",
-        color: new vscode.ThemeColor("list.warningForeground"),
-      };
-    }
-    if (
-      path.extname(uri.fsPath).toLowerCase() === NOTEBOOK_EXTENSION &&
-      !pipelineNotebookUris.has(uri.fsPath) &&
-      !uri.fsPath.includes(`${path.sep}.calkit${path.sep}notebooks${path.sep}`)
-    ) {
-      return {
-        badge: "!",
-        tooltip:
-          "Not part of any pipeline stage — notebook will not be run reproducibly",
-        color: new vscode.ThemeColor("list.warningForeground"),
+        tooltip: "Not produced by the pipeline",
       };
     }
     return undefined;
@@ -706,6 +737,15 @@ async function refreshStaleOutputContext(
   }
 }
 
+function getNonce(): string {
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  return Array.from(
+    { length: 32 },
+    () => chars[Math.floor(Math.random() * chars.length)],
+  ).join("");
+}
+
 async function getDagMermaid(
   workspaceRoot: string,
 ): Promise<string | undefined> {
@@ -721,105 +761,24 @@ async function getDagMermaid(
   }
 }
 
-function highlightStageInMermaid(source: string, stageName: string): string {
-  let highlightNodeId: string | undefined;
-  for (const line of source.split("\n")) {
-    const match = line.match(/^\t(node\d+)\["(.+?)"\]$/);
-    if (match && match[2] === stageName) {
-      highlightNodeId = match[1];
-      break;
-    }
-  }
-  if (!highlightNodeId) {
-    return source;
-  }
-  return (
-    source.trimEnd() +
-    `\nclassDef highlight fill:#f0a500,stroke:#e09000,color:#000\nclass ${highlightNodeId} highlight\n`
-  );
-}
-
-function getNonce(): string {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  return Array.from(
-    { length: 32 },
-    () => chars[Math.floor(Math.random() * chars.length)],
-  ).join("");
-}
-
-async function showProvenancePanel(
+function showDagPanel(
   context: vscode.ExtensionContext,
   workspaceRoot: string,
-  fileUri: vscode.Uri,
-): Promise<void> {
-  const relPath = path
-    .relative(workspaceRoot, fileUri.fsPath)
-    .replace(/\\/g, "/");
-  const [dvcYaml, calkitConfig] = await Promise.all([
-    readDvcYaml(workspaceRoot),
-    readCalkitConfig(workspaceRoot),
-  ]);
-  if (!dvcYaml?.stages) {
-    void vscode.window.showErrorMessage(
-      "No dvc.yaml pipeline found in this workspace.",
-    );
-    return;
-  }
-  let stageName: string | undefined;
-  let dvcStage: import("./types").DvcStage | undefined;
-  for (const [name, stage] of Object.entries(dvcYaml.stages)) {
-    if (dvcStageOutputPaths(stage).includes(relPath)) {
-      stageName = name;
-      dvcStage = stage;
-      break;
-    }
-  }
-  if (!stageName || !dvcStage) {
-    void vscode.window.showErrorMessage(
-      `'${relPath}' is not a known pipeline output in dvc.yaml.`,
-    );
-    return;
-  }
-  const calkitStage = calkitConfig?.pipeline?.stages?.[stageName];
+): void {
   const nonce = getNonce();
   const panel = vscode.window.createWebviewPanel(
-    "calkit.provenance",
-    `Provenance: ${path.basename(fileUri.fsPath)}`,
-    vscode.ViewColumn.Beside,
+    "calkit.dag",
+    "Pipeline DAG",
+    vscode.ViewColumn.Active,
     { enableScripts: true },
   );
   context.subscriptions.push(panel);
-  panel.webview.onDidReceiveMessage(
-    (msg: { command: string; path: string }) => {
-      if (msg.command === "openFile") {
-        void vscode.commands.executeCommand(
-          "vscode.open",
-          vscode.Uri.file(path.join(workspaceRoot, msg.path)),
-        );
-      }
-    },
-    undefined,
-    context.subscriptions,
-  );
-  panel.webview.html = buildProvenanceHtml(
-    nonce,
-    relPath,
-    stageName,
-    dvcStage,
-    calkitStage,
-    calkitConfig,
-  );
-  // Fetch DAG after showing the panel so the spinner is visible immediately.
-  const capturedStageName = stageName;
+  panel.webview.html = buildDagHtml(nonce);
   getDagMermaid(workspaceRoot)
-    .then((rawMermaid) => {
-      const mermaidSource = rawMermaid
-        ? highlightStageInMermaid(rawMermaid, capturedStageName)
-        : null;
+    .then((mermaid) => {
       void panel.webview.postMessage({
         command: "dagReady",
-        mermaid: mermaidSource,
+        mermaid: mermaid ?? null,
       });
     })
     .catch(() => {
@@ -827,150 +786,106 @@ async function showProvenancePanel(
     });
 }
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function fileLink(relPath: string, label?: string): string {
-  const display = escapeHtml(label ?? relPath);
-  return `<a href="#" class="file-link" data-path="${escapeHtml(
-    relPath,
-  )}">${display}</a>`;
-}
-
-function buildProvenanceHtml(
-  nonce: string,
-  relPath: string,
-  stageName: string,
-  dvcStage: import("./types").DvcStage,
-  calkitStage: import("./types").PipelineStage | undefined,
-  calkitConfig: CalkitInfo | undefined,
-): string {
-  const deps = (dvcStage.deps ?? [])
-    .map((d) => (typeof d === "string" ? d : Object.keys(d)[0] ?? ""))
-    .filter(Boolean);
-  const outs = dvcStageOutputPaths(dvcStage);
-  const envName = calkitStage?.environment;
-  const envInfo = envName ? calkitConfig?.environments?.[envName] : undefined;
-  const notebookPath =
-    typeof calkitStage?.notebook_path === "string"
-      ? calkitStage.notebook_path
-      : undefined;
-  const scriptPath =
-    typeof calkitStage?.script_path === "string"
-      ? calkitStage.script_path
-      : undefined;
-  const targetPath =
-    typeof calkitStage?.target_path === "string"
-      ? calkitStage.target_path
-      : undefined;
-  const createdBy = notebookPath ?? scriptPath ?? targetPath;
-  const calkitStageYaml = calkitStage ? YAML.stringify(calkitStage) : undefined;
-
-  const rows: string[] = [];
-  const row = (label: string, value: string) =>
-    rows.push(
-      `<tr><td class="label">${escapeHtml(label)}</td><td>${value}</td></tr>`,
-    );
-
-  row("File", fileLink(relPath));
-  row("Stage", escapeHtml(stageName));
-  if (createdBy) {
-    row("Created by", fileLink(createdBy));
-  }
-  if (envName) {
-    row("Environment", escapeHtml(envName));
-  }
-  if (envInfo?.path) {
-    row("Env spec", fileLink(envInfo.path as string));
-  }
-  const lockPath = envName ? `.calkit/env-locks/${envName}` : undefined;
-  if (lockPath) {
-    row("Env lock", fileLink(lockPath));
-  }
-  if (deps.length > 0) {
-    row(
-      "Inputs",
-      `<ul>${deps.map((d) => `<li>${fileLink(d)}</li>`).join("")}</ul>`,
-    );
-  }
-  if (outs.length > 0) {
-    row(
-      "All outputs",
-      `<ul>${outs.map((o) => `<li>${fileLink(o)}</li>`).join("")}</ul>`,
-    );
-  }
-  if (dvcStage.cmd) {
-    row("Command", `<code>${escapeHtml(dvcStage.cmd)}</code>`);
-  }
-
-  const calkitSection = calkitStageYaml
-    ? `<h2>calkit.yaml stage definition</h2><pre>${escapeHtml(
-        calkitStageYaml,
-      )}</pre>`
-    : "";
-
+function buildDagHtml(nonce: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:;">
-<title>Provenance</title>
+<title>Pipeline DAG</title>
 <style>
-  body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); padding: 16px; }
-  h1 { font-size: 1.2em; margin-bottom: 12px; }
-  h2 { font-size: 1em; margin-top: 20px; margin-bottom: 6px; }
-  table { border-collapse: collapse; width: 100%; }
-  td { padding: 4px 8px; vertical-align: top; }
-  td.label { font-weight: bold; white-space: nowrap; width: 140px; color: var(--vscode-descriptionForeground); }
-  ul { margin: 0; padding-left: 16px; }
-  pre { background: var(--vscode-textBlockQuote-background); padding: 8px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
-  code { background: var(--vscode-textBlockQuote-background); padding: 2px 4px; border-radius: 3px; }
-  a.file-link { color: var(--vscode-textLink-foreground); text-decoration: none; cursor: pointer; }
-  a.file-link:hover { text-decoration: underline; }
-  #dag-container { margin-top: 8px; min-height: 40px; }
-  #dag-container svg { max-width: 100%; }
+  body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); padding: 16px; margin: 0; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; }
+  #toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-shrink: 0; }
+  h1 { font-size: 1.2em; margin: 0; flex: 1; }
+  button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 3px 8px; cursor: pointer; border-radius: 2px; font-size: 1em; }
+  button:hover { background: var(--vscode-button-hoverBackground); }
+  #zoom-label { font-size: 0.85em; color: var(--vscode-descriptionForeground); min-width: 3em; text-align: right; }
+  #viewport { flex: 1; overflow: auto; cursor: grab; user-select: none; }
+  #viewport.dragging { cursor: grabbing; }
+  #canvas { display: inline-block; transform-origin: 0 0; }
   #dag-error { color: var(--vscode-descriptionForeground); font-style: italic; }
-  .spinner { width: 18px; height: 18px; border: 2px solid var(--vscode-foreground); border-top-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
+  .spinner { width: 18px; height: 18px; border: 2px solid var(--vscode-foreground); border-top-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; margin-top: 20px; }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
-<h1>Provenance</h1>
-<table>${rows.join("")}</table>
-${calkitSection}
-<h2>Pipeline DAG</h2>
-<div id="dag-container"><div class="spinner"></div></div>
+<div id="toolbar">
+  <h1>Pipeline DAG</h1>
+  <button id="btn-zoom-out" title="Zoom out">−</button>
+  <span id="zoom-label">100%</span>
+  <button id="btn-zoom-in" title="Zoom in">+</button>
+  <button id="btn-reset" title="Reset zoom">Reset</button>
+</div>
+<div id="viewport"><div id="canvas"><div class="spinner"></div></div></div>
 <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 <script nonce="${nonce}">
-  const vscode = acquireVsCodeApi();
   const isDark = document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast');
   mermaid.initialize({ startOnLoad: false, theme: isDark ? 'dark' : 'default' });
-  document.querySelectorAll('a.file-link').forEach(function(el) {
-    el.addEventListener('click', function(e) {
-      e.preventDefault();
-      vscode.postMessage({ command: 'openFile', path: el.getAttribute('data-path') });
-    });
+
+  let scale = 1;
+  const viewport = document.getElementById('viewport');
+  const canvas = document.getElementById('canvas');
+  const zoomLabel = document.getElementById('zoom-label');
+
+  function applyZoom() {
+    canvas.style.transform = 'scale(' + scale + ')';
+    zoomLabel.textContent = Math.round(scale * 100) + '%';
+  }
+  function zoomBy(delta, originX, originY) {
+    const prev = scale;
+    scale = Math.min(4, Math.max(0.1, scale * (1 + delta)));
+    if (originX !== undefined) {
+      // Adjust scroll so zoom is centered on cursor
+      viewport.scrollLeft = (viewport.scrollLeft + originX) * (scale / prev) - originX;
+      viewport.scrollTop  = (viewport.scrollTop  + originY) * (scale / prev) - originY;
+    }
+    applyZoom();
+  }
+
+  document.getElementById('btn-zoom-in').addEventListener('click', function() { zoomBy(0.2); });
+  document.getElementById('btn-zoom-out').addEventListener('click', function() { zoomBy(-0.2); });
+  document.getElementById('btn-reset').addEventListener('click', function() { scale = 1; applyZoom(); });
+
+  viewport.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    const rect = viewport.getBoundingClientRect();
+    const ox = e.clientX - rect.left;
+    const oy = e.clientY - rect.top;
+    zoomBy(e.deltaY < 0 ? 0.1 : -0.1, ox, oy);
+  }, { passive: false });
+
+  // Pan by drag
+  let dragStart = null;
+  let scrollStart = null;
+  viewport.addEventListener('mousedown', function(e) {
+    if (e.button !== 0) { return; }
+    dragStart = { x: e.clientX, y: e.clientY };
+    scrollStart = { left: viewport.scrollLeft, top: viewport.scrollTop };
+    viewport.classList.add('dragging');
   });
+  window.addEventListener('mousemove', function(e) {
+    if (!dragStart) { return; }
+    viewport.scrollLeft = scrollStart.left - (e.clientX - dragStart.x);
+    viewport.scrollTop  = scrollStart.top  - (e.clientY - dragStart.y);
+  });
+  window.addEventListener('mouseup', function() {
+    dragStart = null;
+    viewport.classList.remove('dragging');
+  });
+
   window.addEventListener('message', function(event) {
     const msg = event.data;
     if (msg.command !== 'dagReady') { return; }
-    const container = document.getElementById('dag-container');
-    if (!container) { return; }
     if (!msg.mermaid) {
-      container.innerHTML = '<span id="dag-error">Pipeline diagram unavailable.</span>';
+      canvas.innerHTML = '<span id="dag-error">Pipeline diagram unavailable.</span>';
       return;
     }
-    container.innerHTML = '<div class="mermaid"></div>';
-    const el = container.querySelector('.mermaid');
+    canvas.innerHTML = '<div class="mermaid"></div>';
+    const el = canvas.querySelector('.mermaid');
     el.textContent = msg.mermaid;
     mermaid.run({ nodes: [el] }).catch(function(err) {
-      container.innerHTML = '<span id="dag-error">Could not render diagram: ' + String(err) + '</span>';
+      canvas.innerHTML = '<span id="dag-error">Could not render diagram: ' + String(err) + '</span>';
     });
   });
 </script>
@@ -978,11 +893,16 @@ ${calkitSection}
 </html>`;
 }
 
+function getOrCreateTerminal(name: string, cwd: string): vscode.Terminal {
+  const existing = vscode.window.terminals.find((t) => t.name === name);
+  if (existing) {
+    return existing;
+  }
+  return vscode.window.createTerminal({ name, cwd });
+}
+
 function runStageInTerminal(workspaceRoot: string, stageName: string): void {
-  const terminal = vscode.window.createTerminal({
-    name: `calkit: run ${stageName}`,
-    cwd: workspaceRoot,
-  });
+  const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
   terminal.show();
   terminal.sendText(`calkit run ${shQuote(stageName)}`);
 }

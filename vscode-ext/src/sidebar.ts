@@ -247,6 +247,14 @@ export class CalkitSidebarProvider
           calkitStage.script_path,
         );
       }
+      if (typeof calkitStage.target_path === "string") {
+        prop(
+          "Source",
+          calkitStage.target_path,
+          "file-code",
+          calkitStage.target_path,
+        );
+      }
       if (typeof calkitStage.environment === "string") {
         prop("Environment", calkitStage.environment, "package");
       }
@@ -258,10 +266,21 @@ export class CalkitSidebarProvider
         : []) {
         prop("Input", input, "arrow-right", input);
       }
-      for (const output of Array.isArray(calkitStage.outputs)
+      const explicitOutputs = Array.isArray(calkitStage.outputs)
         ? (calkitStage.outputs as string[])
-        : []) {
+        : [];
+      for (const output of explicitOutputs) {
         prop("Output", output, "arrow-left", output);
+      }
+      // Implicit PDF output for latex stages
+      if (
+        calkitStage.kind === "latex" &&
+        typeof calkitStage.target_path === "string"
+      ) {
+        const pdfPath = calkitStage.target_path.replace(/\.tex$/, ".pdf");
+        if (!explicitOutputs.includes(pdfPath)) {
+          prop("Output", pdfPath, "arrow-left", pdfPath);
+        }
       }
     }
 

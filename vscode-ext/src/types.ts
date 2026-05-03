@@ -4,6 +4,7 @@ export interface PipelineStage {
   kind?: string;
   notebook_path?: string;
   script_path?: string;
+  target_path?: string;
   path?: string;
   environment?: string;
   inputs?: string[];

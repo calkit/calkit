@@ -864,7 +864,11 @@ function buildProvenanceHtml(
     typeof calkitStage?.script_path === "string"
       ? calkitStage.script_path
       : undefined;
-  const createdBy = notebookPath ?? scriptPath;
+  const targetPath =
+    typeof calkitStage?.target_path === "string"
+      ? calkitStage.target_path
+      : undefined;
+  const createdBy = notebookPath ?? scriptPath ?? targetPath;
   const calkitStageYaml = calkitStage ? YAML.stringify(calkitStage) : undefined;
 
   const rows: string[] = [];

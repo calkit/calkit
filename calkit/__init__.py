@@ -4,6 +4,7 @@ __version__ = _version("calkit-python")
 
 from .core import *  # noqa: F403, I001
 
+# Lazy-load submodules to speed up imports
 _SUBMODULES = {
     "git",
     "dvc",
@@ -71,9 +72,7 @@ def _load_jupyter_server_extension(server_app):
     """
     import os
 
-    from .jupyterlab.routes import (
-        setup_route_handlers,  # deferred to avoid heavy tornado/jupyter_server import at CLI startup
-    )
+    from .jupyterlab.routes import setup_route_handlers
 
     # Change to root_dir so all handlers work in the correct directory context
     root_dir = server_app.root_dir

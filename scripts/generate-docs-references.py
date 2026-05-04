@@ -295,6 +295,15 @@ def generate_cli_markdown() -> str:
     lines: list[str] = []
     lines.append("# CLI reference")
     lines.append("")
+    lines.append("<!-- prettier-ignore -->")
+    lines.append("!!! note")
+    lines.append(
+        "    `ck` is an abbreviated alias for the `calkit` executable."
+    )
+    lines.append(
+        '    All `calkit` commands can be run as `ck` instead, e.g., `ck save -am "..."`.'
+    )
+    lines.append("")
     if top_summary:
         lines.append(top_summary)
         lines.append("")
@@ -642,7 +651,7 @@ def generate_stage_kinds_markdown() -> str:
                 _annotation_to_text(field.annotation),
                 "yes" if _is_required(field) else "no",
                 _default_to_text(field.default),
-            )
+            )  # type: ignore
         )
     lines.append(
         make_table(
@@ -678,7 +687,7 @@ def generate_stage_kinds_markdown() -> str:
                     _annotation_to_text(field.annotation),
                     "yes" if _is_required(field) else "no",
                     _default_to_text(field.default),
-                )
+                )  # type: ignore
             )
         if extra_rows:
             lines.append(

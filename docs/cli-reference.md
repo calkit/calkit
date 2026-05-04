@@ -1,5 +1,10 @@
 # CLI reference
 
+<!-- prettier-ignore -->
+!!! note
+    `ck` is an abbreviated alias for the `calkit` executable.
+    All `calkit` commands can be run as `ck` instead, e.g., `ck save -am "..."`.
+
 ## Top-level commands
 
 | Command                                       | Description                                                        |

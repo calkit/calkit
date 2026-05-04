@@ -568,9 +568,7 @@ def test_add_pipeline_output_storage(tmp_dir):
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(pipeline, f)
     # Adding the file should use Git, not DVC, because of pipeline storage
-    out = subprocess.check_output(
-        ["calkit", "add", "figure.png"], text=True
-    )
+    out = subprocess.check_output(["calkit", "add", "figure.png"], text=True)
     assert "Git" in out or "git" in out
     assert "figure.png" in calkit.git.get_staged_files()
     assert "figure.png" not in calkit.dvc.list_paths()

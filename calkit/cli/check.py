@@ -11,22 +11,11 @@ import subprocess
 from typing import Annotated, Callable
 
 import dotenv
-import git
 import typer
 
 import calkit
-import calkit.environments
-import calkit.matlab
-import calkit.pipeline
-from calkit.check import check_reproducibility
 from calkit.cli import raise_error, warn
 from calkit.core import get_md5
-from calkit.environments import (
-    get_all_conda_lock_fpaths,
-    get_all_docker_lock_fpaths,
-    get_all_venv_lock_fpaths,
-    get_env_lock_fpath,
-)
 
 check_app = typer.Typer(no_args_is_help=True)
 
@@ -249,6 +238,8 @@ def check_repro(
     ] = ".",
 ) -> None:
     """Check the reproducibility of a project."""
+    from calkit.check import check_reproducibility
+
     res = check_reproducibility(wdir=wdir, log_func=typer.echo)
     calkit.echo(res.to_pretty())
 
@@ -268,6 +259,13 @@ def check_environment(
     ] = False,
 ) -> str | None:
     """Check that an environment is up-to-date."""
+    from calkit.environments import (
+        get_all_conda_lock_fpaths,
+        get_all_docker_lock_fpaths,
+        get_all_venv_lock_fpaths,
+        get_env_lock_fpath,
+    )
+
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info(process_includes="environments")
     envs = ck_info.get("environments", {})
@@ -1294,6 +1292,8 @@ def check_env_vars(
                 dotenv_path=".env", key_to_set=name, value_to_set=value
             )
     # Ensure that .env is ignored by git
+    import git
+
     repo = git.Repo()
     if not repo.ignored(".env"):
         typer.echo("Adding .env to .gitignore")

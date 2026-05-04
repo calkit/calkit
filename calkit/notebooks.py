@@ -1,15 +1,15 @@
 """Functionality for working with notebooks."""
 
+from __future__ import annotations
+
 import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-import git
-
-import calkit
-from calkit.models.io import InputsFromStageOutputs, PathOutput
+if TYPE_CHECKING:
+    from calkit.models.io import InputsFromStageOutputs, PathOutput
 
 
 def get_executed_notebook_path(
@@ -95,6 +95,8 @@ def clean_notebook_outputs(path: str):
 def clean_all_in_pipeline(ck_info: dict | None = None) -> list[str]:
     """Clean all notebooks in the pipeline."""
     if ck_info is None:
+        import calkit
+
         ck_info = calkit.load_calkit_info()
     pipeline = ck_info.get("pipeline", {})
     stages = pipeline.get("stages", {})
@@ -131,7 +133,9 @@ def determine_storage(
     except (json.JSONDecodeError, UnicodeDecodeError, OSError):
         source_bytes = file_size
     estimated_bytes = max(file_size, source_bytes) * size_multiplier
-    return "git" if estimated_bytes <= calkit.DVC_SIZE_THRESH_BYTES else "dvc"
+    from calkit.core import DVC_SIZE_THRESH_BYTES
+
+    return "git" if estimated_bytes <= DVC_SIZE_THRESH_BYTES else "dvc"
 
 
 def declare_notebook(
@@ -153,6 +157,9 @@ def declare_notebook(
     if anything has changed about the pipeline declaration, then prompt the
     user to rerun.
     """
+    import git
+
+    import calkit
     from calkit.models.pipeline import JupyterNotebookStage, Pipeline
 
     # Detect the project root directory so we ensure calkit.yaml lives there

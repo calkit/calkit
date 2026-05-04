@@ -8,13 +8,10 @@ import shutil
 from datetime import datetime
 from importlib import resources
 
-import git
-import requests
 import typer
 from typing_extensions import Annotated
 
 import calkit
-import calkit.pipeline
 from calkit.cli import raise_error
 
 update_app = typer.Typer(no_args_is_help=True)
@@ -41,6 +38,9 @@ def update_devcontainer(
     ] = False,
 ):
     """Update a project's devcontainer to match the latest Calkit spec."""
+    import git
+    import requests
+
     url = (
         "https://raw.githubusercontent.com/calkit/devcontainer/"
         "refs/heads/main/devcontainer.json"
@@ -82,6 +82,8 @@ def update_license(
     """Update license with a reasonable default
     (MIT for code, CC-BY-4.0 for other files).
     """
+    import git
+
     with open("LICENSE", "w") as f:
         f.write(
             calkit.licenses.LICENSE_TEMPLATE_DUAL.format(
@@ -123,6 +125,10 @@ def update_release(
     ] = False,
 ):
     """Update a release."""
+    import git
+
+    import calkit.pipeline
+
     if name is None and not use_latest:
         raise_error("Release name or --latest must be specified")
     if delete and (publish or reupload):
@@ -349,6 +355,9 @@ def update_vscode_config(
     """Update a project's VS Code config to match the latest Calkit
     recommendations.
     """
+    import git
+    import requests
+
     out_dir = os.path.join(wdir or ".", ".vscode")
     os.makedirs(out_dir, exist_ok=True)
     repo = git.Repo(wdir)
@@ -393,6 +402,9 @@ def update_github_actions(
     """Update a project's GitHub Actions to match the latest Calkit
     recommendations.
     """
+    import git
+    import requests
+
     # First look for any existing workflows that run Calkit to use as the
     # output file name
     fname_out = "run-calkit.yml"

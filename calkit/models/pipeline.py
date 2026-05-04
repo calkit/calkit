@@ -26,10 +26,6 @@ from calkit.models.iteration import (
     ParametersType,
     RangeIteration,
 )
-from calkit.notebooks import (
-    get_cleaned_notebook_path,
-    get_executed_notebook_path,
-)
 
 
 def _check_path_relative_and_child_of_cwd(s: str) -> str:
@@ -800,10 +796,14 @@ class JupyterNotebookStage(Stage):
 
     @property
     def cleaned_notebook_path(self) -> str:
+        from calkit.notebooks import get_cleaned_notebook_path
+
         return get_cleaned_notebook_path(self.notebook_path, as_posix=True)
 
     @property
     def executed_notebook_path(self) -> str:
+        from calkit.notebooks import get_executed_notebook_path
+
         return get_executed_notebook_path(
             self.notebook_path,
             to="notebook",
@@ -813,6 +813,8 @@ class JupyterNotebookStage(Stage):
 
     @property
     def html_path(self) -> str:
+        from calkit.notebooks import get_executed_notebook_path
+
         return get_executed_notebook_path(
             self.notebook_path,
             to="html",

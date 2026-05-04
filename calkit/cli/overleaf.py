@@ -8,7 +8,6 @@ import os
 import shutil
 from pathlib import Path
 
-import git
 import typer
 from typing_extensions import Annotated
 
@@ -170,6 +169,8 @@ def import_publication(
     ] = False,
 ):
     """Import a publication from an Overleaf project."""
+    import git
+
     from calkit.cli.main import ignore as git_ignore
     from calkit.cli.new import new_latex_stage
 
@@ -423,6 +424,8 @@ def sync(
     ] = False,
 ):
     """Sync folders with Overleaf."""
+    import git
+
     # TODO: We should probably ensure the pipeline isn't stale
     # Read all synced folders, fixing legacy schema if applicable
     overleaf_info = calkit.overleaf.get_sync_info(fix_legacy=True)
@@ -595,6 +598,8 @@ def get_status(
     ] = None,
 ):
     """Check the status of folders synced with Overleaf in a project."""
+    import git
+
     # Read all synced folders, fixing legacy schema if applicable
     overleaf_info = calkit.overleaf.get_sync_info(fix_legacy=False)
     if not overleaf_info:

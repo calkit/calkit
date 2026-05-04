@@ -2,10 +2,12 @@
 
 import itertools
 import os
+from pathlib import Path
 
 import typer
 from pydantic import BaseModel, Field, computed_field, field_validator
 
+import calkit
 from calkit.models.iteration import expand_project_parameters
 from calkit.models.pipeline import (
     InputsFromStageOutputs,
@@ -428,6 +430,45 @@ def get_status(
     finally:
         if wdir is not None:
             os.chdir(prev_cwd)
+
+
+def get_output_storage_map(
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+) -> dict[str, str]:
+    """Get a map of pipeline output paths to their explicitly-set storage.
+
+    Only outputs with an explicitly-set ``storage`` key in ``calkit.yaml``
+    are included so that default-DVC outputs still go through auto-detection.
+
+    Parameters
+    ----------
+    ck_info : dict | None
+        Calkit project info dict. Loaded from ``calkit.yaml`` if not provided.
+    wdir : str | None
+        Working directory. Defaults to the current working directory.
+
+    Returns
+    -------
+    dict[str, str]
+        Mapping of posix file path to storage type, e.g.
+        ``{"figures/plot.png": "git", "data/archive": "dvc-zip"}``.
+        Plain string outputs (no explicit ``storage`` key) are not included.
+    """
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    pipeline = ck_info.get("pipeline", {})
+    if not pipeline:
+        return {}
+    stages = pipeline.get("stages", {})
+    result: dict[str, str] = {}
+    for stage in stages.values():
+        if not isinstance(stage, dict):
+            continue
+        for out in stage.get("outputs", []):
+            if isinstance(out, dict) and "path" in out and "storage" in out:
+                result[Path(out["path"]).as_posix()] = out["storage"]
+    return result
 
 
 def to_dvc(

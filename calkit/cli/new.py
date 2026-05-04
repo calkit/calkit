@@ -1517,7 +1517,7 @@ def new_uv_venv(
     ] = ".venv",
     python_version: Annotated[
         str | None, typer.Option("--python", "-p", help="Python version.")
-    ] = "3.14",
+    ] = None,
     description: Annotated[
         str | None, typer.Option("--description", help="Description.")
     ] = None,
@@ -1544,6 +1544,10 @@ def new_uv_venv(
     import git
 
     from calkit.cli.check import check_environment
+    from calkit.environments import DEFAULT_PYTHON_VERSION
+
+    if python_version is None:
+        python_version = DEFAULT_PYTHON_VERSION
 
     if os.path.isfile(path) and packages and not overwrite:
         raise_error("Output path already exists (use -f to overwrite)")

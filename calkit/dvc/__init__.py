@@ -8,5 +8,7 @@ def __getattr__(name: str):
         mod = importlib.import_module(f"calkit.dvc.{name}")
         globals()[name] = mod
         return mod
-    except ModuleNotFoundError:
+    except ModuleNotFoundError as e:
+        if e.name != f"calkit.dvc.{name}":
+            raise
         raise AttributeError(f"module 'calkit.dvc' has no attribute {name!r}")

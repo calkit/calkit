@@ -32,7 +32,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from calkit.models import ProjectStatus
+    from calkit.models import ProjectInfo, ProjectStatus
 
 import ruamel.yaml
 
@@ -176,7 +176,7 @@ def load_calkit_info(
 def load_calkit_info_object(
     wdir: str | None = None,
     process_includes: bool | str | list[str] = False,
-):
+) -> ProjectInfo:
     """Load Calkit project information as a ``ProjectInfo`` object."""
     from calkit.models import ProjectInfo
 

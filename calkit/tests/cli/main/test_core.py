@@ -607,28 +607,14 @@ def test_save_to_git_with_all(tmp_dir):
     Bug: when ``-a`` / ``--all`` was used together with ``--to git``, the
     ``--to`` value was not forwarded to the internal ``add()`` call, causing
     files to be auto-routed to DVC based on extension instead.
+
+    No pipeline storage override is set so the test relies solely on ``--to``
+    to route figure.png to Git; without the fix the extension-based heuristic
+    would send it to DVC.
     """
     subprocess.check_call(["calkit", "init"])
-    # Write a calkit.yaml pipeline with a .png output that has storage: git
-    pipeline = {
-        "pipeline": {
-            "stages": {
-                "analyze": {
-                    "kind": "command",
-                    "environment": "_system",
-                    "command": "echo done",
-                    "outputs": [{"path": "figure.png", "storage": "git"}],
-                }
-            }
-        }
-    }
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(pipeline, f)
-    subprocess.check_call(
-        ["calkit", "save", "-am", "Add pipeline", "--no-push"]
-    )
-    # Now create the .png file (would go to DVC by extension without the fix).
-    # The content is intentionally fake; only the extension matters here.
+    # No pipeline entry — figure.png has no explicit storage override, so
+    # only the --to flag can direct it to Git (extension would pick DVC).
     with open("figure.png", "w") as f:
         f.write("fake png content")
     # save --to git -a should add figure.png to Git, not DVC

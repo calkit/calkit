@@ -2,6 +2,7 @@
 
 import itertools
 import os
+from pathlib import Path
 
 import typer
 from pydantic import BaseModel, Field, computed_field, field_validator
@@ -455,10 +456,7 @@ def get_output_storage_map(
         Plain string outputs (no explicit ``storage`` key) are not included.
     """
     if ck_info is None:
-        try:
-            ck_info = calkit.load_calkit_info(wdir=wdir)
-        except Exception:
-            return {}
+        ck_info = calkit.load_calkit_info(wdir=wdir)
     pipeline = ck_info.get("pipeline", {})
     if not pipeline:
         return {}
@@ -469,7 +467,7 @@ def get_output_storage_map(
             continue
         for out in stage.get("outputs", []):
             if isinstance(out, dict) and "path" in out and "storage" in out:
-                result[out["path"]] = out["storage"]
+                result[Path(out["path"]).as_posix()] = out["storage"]
     return result
 
 

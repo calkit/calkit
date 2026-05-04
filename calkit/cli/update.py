@@ -974,22 +974,81 @@ def update_figure(
             help="URL the figure was imported from.",
         ),
     ] = None,
+    stage: Annotated[
+        str | None,
+        typer.Option(
+            "--stage",
+            help="Name of the pipeline stage that produces this figure.",
+        ),
+    ] = None,
 ) -> None:
     """Update a figure entry in calkit.yaml."""
-    if imported_from_url is None:
+    if imported_from_url is None and stage is None:
         raise_error("No updates specified.")
     with open("calkit.yaml") as f:
         ck_info = calkit.ryaml.load(f)
     if ck_info is None:
         ck_info = {}
     figures = ck_info.get("figures", [])
-    imported_from_val = {"url": imported_from_url}
     for fig in figures:
         if fig.get("path") == path:
-            fig["imported_from"] = imported_from_val
+            if imported_from_url is not None:
+                fig["imported_from"] = {"url": imported_from_url}
+            if stage is not None:
+                fig["stage"] = stage
             break
     else:
-        figures.append({"path": path, "imported_from": imported_from_val})
+        entry: dict = {"path": path}
+        if imported_from_url is not None:
+            entry["imported_from"] = {"url": imported_from_url}
+        if stage is not None:
+            entry["stage"] = stage
+        figures.append(entry)
         ck_info["figures"] = figures
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+
+
+@update_app.command(name="dataset")
+def update_dataset(
+    path: Annotated[str, typer.Argument(help="Path to the dataset file.")],
+    imported_from_url: Annotated[
+        str | None,
+        typer.Option(
+            "--imported-from-url",
+            help="URL the dataset was imported from.",
+        ),
+    ] = None,
+    stage: Annotated[
+        str | None,
+        typer.Option(
+            "--stage",
+            help="Name of the pipeline stage that produces this dataset.",
+        ),
+    ] = None,
+) -> None:
+    """Update a dataset entry in calkit.yaml."""
+    if imported_from_url is None and stage is None:
+        raise_error("No updates specified.")
+    with open("calkit.yaml") as f:
+        ck_info = calkit.ryaml.load(f)
+    if ck_info is None:
+        ck_info = {}
+    datasets = ck_info.get("datasets", [])
+    for ds in datasets:
+        if ds.get("path") == path:
+            if imported_from_url is not None:
+                ds["imported_from"] = {"url": imported_from_url}
+            if stage is not None:
+                ds["stage"] = stage
+            break
+    else:
+        entry: dict = {"path": path}
+        if imported_from_url is not None:
+            entry["imported_from"] = {"url": imported_from_url}
+        if stage is not None:
+            entry["stage"] = stage
+        datasets.append(entry)
+        ck_info["datasets"] = datasets
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)

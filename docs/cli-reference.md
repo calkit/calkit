@@ -2014,6 +2014,7 @@ Update objects.
 | [`environment`](#subcommand-update-environment)       | Update an environment (generic; use update [kind]-env for full options).            |
 | [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                             |
 | [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                               |
+| [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                              |
 
 <a id="subcommand-update-devcontainer"></a>
 
@@ -2337,9 +2338,35 @@ Arguments:
 
 Options:
 
-| Option                | Type | Required | Default | Description                       |
-| --------------------- | ---- | -------- | ------- | --------------------------------- |
-| `--imported-from-url` | text | no       |         | URL the figure was imported from. |
+| Option                | Type | Required | Default | Description                                           |
+| --------------------- | ---- | -------- | ------- | ----------------------------------------------------- |
+| `--imported-from-url` | text | no       |         | URL the figure was imported from.                     |
+| `--stage`             | text | no       |         | Name of the pipeline stage that produces this figure. |
+
+<a id="subcommand-update-dataset"></a>
+
+#### `calkit update dataset`
+
+Update a dataset entry in calkit.yaml.
+
+Usage:
+
+```text
+calkit update dataset [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description               |
+| -------- | ---- | -------- | ------- | ------------------------- |
+| `path`   | text | yes      |         | Path to the dataset file. |
+
+Options:
+
+| Option                | Type | Required | Default | Description                                            |
+| --------------------- | ---- | -------- | ------- | ------------------------------------------------------ |
+| `--imported-from-url` | text | no       |         | URL the dataset was imported from.                     |
+| `--stage`             | text | no       |         | Name of the pipeline stage that produces this dataset. |
 
 <a id="command-group-check"></a>
 

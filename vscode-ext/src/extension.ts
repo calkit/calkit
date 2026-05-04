@@ -404,7 +404,17 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!artifactPath) {
           return;
         }
-        await showStageEditor(context, workspaceRoot, artifactPath);
+        const artifactKind =
+          item?.nodeKind === "dataset" ? "dataset" : "figure";
+        await showStageEditor(
+          context,
+          workspaceRoot,
+          artifactPath,
+          undefined,
+          undefined,
+          undefined,
+          artifactKind,
+        );
       },
     ),
   );
@@ -421,8 +431,10 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!artifactPath) {
           return;
         }
+        const artifactKind =
+          item?.nodeKind === "dataset" ? "dataset" : "figure";
         const url = await vscode.window.showInputBox({
-          prompt: `URL this artifact was imported from`,
+          prompt: `URL this ${artifactKind} was imported from`,
           placeHolder: "https://...",
         });
         if (!url) {
@@ -431,7 +443,7 @@ export function activate(context: vscode.ExtensionContext): void {
         try {
           await execFileAsync(
             "calkit",
-            ["update", "figure", artifactPath, "--imported-from-url", url],
+            ["update", artifactKind, artifactPath, "--imported-from-url", url],
             { cwd: workspaceRoot },
           );
           void refreshPipelineOutputContext(context);
@@ -1317,6 +1329,9 @@ async function defineProvenance(
     .replace(/\\/g, "/");
   const ext = path.extname(fileUri.fsPath).toLowerCase();
   const isNotebook = ext === NOTEBOOK_EXTENSION;
+  const artifactKind: "figure" | "dataset" = DATASET_EXTENSIONS.has(ext)
+    ? "dataset"
+    : "figure";
   const envs = currentCalkitConfig?.environments ?? {};
   const envNames = Object.keys(envs);
 
@@ -1350,12 +1365,12 @@ async function defineProvenance(
     try {
       await execFileAsync(
         "calkit",
-        ["update", "figure", relPath, "--imported-from-url", source],
+        ["update", artifactKind, relPath, "--imported-from-url", source],
         { cwd: workspaceRoot },
       );
     } catch (err) {
       void vscode.window.showErrorMessage(
-        `Failed to update figure: ${String(err)}`,
+        `Failed to update ${artifactKind}: ${String(err)}`,
       );
       return;
     }
@@ -1371,6 +1386,9 @@ async function defineProvenance(
     workspaceRoot,
     isNotebook ? undefined : relPath,
     isNotebook ? relPath : undefined,
+    undefined,
+    undefined,
+    isNotebook ? undefined : artifactKind,
   );
 }
 
@@ -1395,6 +1413,7 @@ async function showStageEditor(
   prefillSource?: string,
   editStageName?: string,
   existingStage?: import("./types").PipelineStage,
+  artifactKind?: "figure" | "dataset",
 ): Promise<void> {
   const nonce = getNonce();
   const [sourceUris, allUris] = await Promise.all([
@@ -1457,6 +1476,22 @@ async function showStageEditor(
           args.push(outFlag, msg.output);
         }
         args.push(msg.source);
+        // If creating a stage for a known artifact, link artifact → stage in calkit.yaml
+        if (artifactKind && prefillOutput && msg.stageName) {
+          void execFileAsync(
+            "calkit",
+            ["update", artifactKind, prefillOutput, "--stage", msg.stageName],
+            { cwd: workspaceRoot },
+          )
+            .catch((err: unknown) => {
+              void vscode.window.showErrorMessage(
+                `Failed to link ${artifactKind} to stage: ${String(err)}`,
+              );
+            })
+            .finally(() => {
+              void refreshPipelineOutputContext(context);
+            });
+        }
         const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
         terminal.show();
         terminal.sendText(`calkit xr ${args.map(shQuote).join(" ")}`);

@@ -541,6 +541,92 @@ def test_add(tmp_dir):
     assert set(calkit.git.get_staged_files()) == staged_before
 
 
+def test_add_pipeline_output_storage(tmp_dir):
+    """Test that ``add`` respects pipeline output storage settings.
+
+    Bug: files with DVC extensions (e.g. .png) were routed to DVC even when
+    ``storage: git`` was set for that output in calkit.yaml.
+    """
+    subprocess.check_call(["calkit", "init"])
+    # Create a .png file – would normally be routed to DVC by extension.
+    # The content is intentionally fake; only the extension matters here.
+    with open("figure.png", "w") as f:
+        f.write("fake png content")
+    # Write a calkit.yaml pipeline that declares this output with storage: git
+    pipeline = {
+        "pipeline": {
+            "stages": {
+                "analyze": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "echo done",
+                    "outputs": [{"path": "figure.png", "storage": "git"}],
+                }
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(pipeline, f)
+    # Adding the file should use Git, not DVC, because of pipeline storage
+    out = subprocess.check_output(["calkit", "add", "figure.png"], text=True)
+    assert "Git" in out or "git" in out
+    assert "figure.png" in calkit.git.get_staged_files()
+    assert "figure.png" not in calkit.dvc.list_paths()
+    # Also verify dry-run output reflects pipeline output storage
+    out = subprocess.check_output(
+        ["calkit", "add", "--dry-run", "figure.png"], text=True
+    )
+    assert "Git" in out or "git" in out
+    # DVC pipeline output: storage: dvc means the file is tracked via
+    # dvc.lock (committed to Git), NOT via dvc add / .dvc files.
+    # Unstage figure.png to reset for the DVC storage case
+    subprocess.call(["git", "restore", "--staged", "figure.png"])
+    pipeline["pipeline"]["stages"]["analyze"]["outputs"] = [
+        {"path": "figure.png", "storage": "dvc"}
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(pipeline, f)
+    # Simulate dvc.lock being updated by a pipeline run
+    with open("dvc.lock", "w") as f:
+        f.write("schema: '2.0'\nstages:\n  analyze:\n    cmd: echo done\n")
+    subprocess.call(["git", "add", "dvc.lock"])
+    subprocess.call(["git", "commit", "-m", "init dvc.lock"])
+    # Modify dvc.lock so it is dirty and can be staged
+    with open("dvc.lock", "a") as f:
+        f.write("# updated\n")
+    out = subprocess.check_output(["calkit", "add", "figure.png"], text=True)
+    # Should mention dvc.lock, not attempt dvc add on the file
+    assert "dvc.lock" in out
+    assert not os.path.exists("figure.png.dvc")
+    assert "dvc.lock" in calkit.git.get_staged_files()
+
+
+def test_save_to_git_with_all(tmp_dir):
+    """Test that ``save --to git -a`` respects the ``--to`` flag.
+
+    Bug: when ``-a`` / ``--all`` was used together with ``--to git``, the
+    ``--to`` value was not forwarded to the internal ``add()`` call, causing
+    files to be auto-routed to DVC based on extension instead.
+
+    No pipeline storage override is set so the test relies solely on ``--to``
+    to route figure.png to Git; without the fix the extension-based heuristic
+    would send it to DVC.
+    """
+    subprocess.check_call(["calkit", "init"])
+    # No pipeline entry — figure.png has no explicit storage override, so
+    # only the --to flag can direct it to Git (extension would pick DVC).
+    with open("figure.png", "w") as f:
+        f.write("fake png content")
+    # save --to git -a should add figure.png to Git, not DVC
+    subprocess.check_call(
+        ["calkit", "save", "--to", "git", "-am", "Add figure", "--no-push"]
+    )
+    repo = git.Repo()
+    # figure.png should be tracked in Git, not DVC
+    assert repo.git.ls_files("figure.png")
+    assert "figure.png" not in calkit.dvc.list_paths()
+
+
 def test_large_folder_many_small_files(tmp_dir, tmp_path):
     subprocess.check_call(["calkit", "init"])
     # Set up a bare git remote and a local DVC remote as siblings of the

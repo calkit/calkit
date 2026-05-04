@@ -3,26 +3,54 @@ from importlib.metadata import version as _version
 __version__ = _version("calkit-python")
 
 from .core import *  # noqa: F403, I001
-from . import git  # noqa: F401
-from . import dvc  # noqa: F401
-from . import cloud  # noqa: F401
-from . import fs  # noqa: F401
-from . import jupyter  # noqa: F401
-from . import config  # noqa: F401
-from . import models  # noqa: F401
-from . import office  # noqa: F401
-from . import templates  # noqa: F401
-from . import conda  # noqa: F401
-from . import calc  # noqa: F401
-from . import check  # noqa: F401
-from . import github  # noqa: F401
-from . import invenio  # noqa: F401
-from . import releases  # noqa: F401
-from . import licenses  # noqa: F401
-from . import overleaf  # noqa: F401
-from . import julia  # noqa: F401
-from .notebooks import declare_notebook  # noqa: F401
-from .jupyterlab.routes import setup_route_handlers
+
+# Lazy-load submodules to speed up imports
+_SUBMODULES = {
+    "git",
+    "dvc",
+    "cloud",
+    "fs",
+    "jupyter",
+    "config",
+    "models",
+    "office",
+    "templates",
+    "conda",
+    "calc",
+    "check",
+    "github",
+    "invenio",
+    "releases",
+    "licenses",
+    "overleaf",
+    "julia",
+    "notebooks",
+    "environments",
+    "pipeline",
+    "matlab",
+    "datasets",
+    "detect",
+    "docker",
+    "gui",
+    "magics",
+    "ops",
+    "server",
+}
+
+
+def __getattr__(name: str):
+    if name in _SUBMODULES:
+        import importlib
+
+        mod = importlib.import_module(f"calkit.{name}")
+        globals()[name] = mod
+        return mod
+    if name == "declare_notebook":
+        from .notebooks import declare_notebook
+
+        globals()["declare_notebook"] = declare_notebook
+        return declare_notebook
+    raise AttributeError(f"module 'calkit' has no attribute {name!r}")
 
 
 def _jupyter_labextension_paths():
@@ -43,6 +71,8 @@ def _load_jupyter_server_extension(server_app):
         JupyterLab application instance
     """
     import os
+
+    from .jupyterlab.routes import setup_route_handlers
 
     # Change to root_dir so all handlers work in the correct directory context
     root_dir = server_app.root_dir

@@ -4,8 +4,37 @@ from __future__ import annotations
 
 import os
 import subprocess
+from typing import TYPE_CHECKING
 
 import typer
+
+if TYPE_CHECKING:
+    import click
+
+
+def complete_stage_names(
+    ctx: "click.Context",
+    param: "click.Parameter",
+    incomplete: str,
+) -> list:
+    """Return pipeline stage names for shell tab-completion."""
+    if not os.path.isfile("calkit.yaml"):
+        return []
+    try:
+        import ruamel.yaml
+        from click.shell_completion import CompletionItem
+
+        ryaml = ruamel.yaml.YAML()
+        with open("calkit.yaml") as f:
+            info = ryaml.load(f) or {}
+        stages = info.get("pipeline", {}).get("stages", {})
+        return [
+            CompletionItem(name)
+            for name in stages
+            if name.startswith(incomplete)
+        ]
+    except Exception:
+        return []
 
 
 def print_sep(name: str):

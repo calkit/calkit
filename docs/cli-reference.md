@@ -1,5 +1,10 @@
 # CLI reference
 
+<!-- prettier-ignore -->
+!!! note
+    `ck` is an abbreviated alias for the `calkit` executable.
+    All `calkit` commands can be run as `ck` instead, e.g., `ck save -am "..."`.
+
 ## Top-level commands
 
 | Command                                       | Description                                                        |
@@ -1159,7 +1164,7 @@ Options:
 | `--name`, `-n`      | text    | yes      |                  | Environment name.                                      |
 | `--path`            | text    | no       | requirements.txt | Path for requirements file.                            |
 | `--prefix`          | text    | no       | .venv            | Prefix for environment location.                       |
-| `--python`, `-p`    | text    | no       | 3.14             | Python version.                                        |
+| `--python`, `-p`    | text    | no       |                  | Python version.                                        |
 | `--description`     | text    | no       |                  | Description.                                           |
 | `--overwrite`, `-f` | boolean | no       | False            | Overwrite any existing environment with this name.     |
 | `--no-commit`       | boolean | no       | False            | Do not commit changes.                                 |

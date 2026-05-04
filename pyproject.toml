@@ -103,6 +103,7 @@ ck = "calkit.fs:CalkitFileSystem"
 [project.scripts]
 calkit = "calkit.cli:run"
 calk9 = "calkit.cli:run"
+ck = "calkit.cli:run"
 
 [tool.hatch.build.targets.wheel]
 packages = ["calkit"]
@@ -155,6 +156,11 @@ ignore = ["W002"]
 [tool.hatch.version]
 source = "vcs"
 tag-pattern = "^v(?P<version>.+)$"
+
+[tool.hatch.version.raw-options]
+git_describe_command = [
+    "git", "describe", "--dirty", "--tags", "--long", "--match", "v[0-9]*",
+]
 
 [tool.mypy]
 files = ["calkit"]

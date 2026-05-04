@@ -7,9 +7,7 @@ import os
 from copy import deepcopy
 from typing import Annotated, Any
 
-import git
 import typer
-from git import InvalidGitRepositoryError
 
 import calkit
 from calkit.cli import raise_error
@@ -106,6 +104,9 @@ def execute_and_record(
     import contextlib
     import io
     import shlex
+
+    import git
+    from git import InvalidGitRepositoryError
 
     from calkit.detect import (
         detect_io,

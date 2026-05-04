@@ -6,15 +6,11 @@ import glob
 import os
 import subprocess
 
-import git
 import typer
-from git.exc import InvalidGitRepositoryError
 from typing_extensions import Annotated
 
 import calkit
-from calkit import config
 from calkit.cli.core import raise_error
-from calkit.dvc import configure_remote, get_remotes, set_remote_auth
 
 config_app = typer.Typer(no_args_is_help=True)
 
@@ -22,6 +18,8 @@ config_app = typer.Typer(no_args_is_help=True)
 @config_app.command(name="set")
 def set_config_value(key: str, value: str):
     """Set a value in the config."""
+    from calkit import config
+
     keys = config.Settings.model_fields.keys()
     if key not in keys:
         raise_error(
@@ -38,6 +36,8 @@ def set_config_value(key: str, value: str):
 @config_app.command(name="get")
 def get_config_value(key: str) -> None:
     """Get and print a value from the config."""
+    from calkit import config
+
     cfg = config.read().model_dump()
     if key not in cfg:
         raise_error(
@@ -53,6 +53,8 @@ def get_config_value(key: str) -> None:
 @config_app.command(name="unset")
 def unset_config_value(key: str):
     """Unset a value in the config, returning it to default."""
+    from calkit import config
+
     model_fields = config.Settings.model_fields
     if key not in model_fields:
         raise_error(
@@ -90,6 +92,11 @@ def setup_remote(
     """Setup the Calkit cloud as the default DVC remote and store a token in
     the local config.
     """
+    import git
+    from git.exc import InvalidGitRepositoryError
+
+    from calkit.dvc import configure_remote, set_remote_auth
+
     try:
         remote_name = configure_remote(use_ck=not http)
         set_remote_auth(remote_name=remote_name)
@@ -119,6 +126,8 @@ def setup_remote_auth():
     """Store a Calkit cloud token in the local DVC config for all Calkit
     remotes.
     """
+    from calkit.dvc import get_remotes, set_remote_auth
+
     try:
         remotes = get_remotes()
     except Exception:
@@ -132,6 +141,8 @@ def setup_remote_auth():
 @config_app.command(name="list")
 def list_config_keys():
     """List keys in the config."""
+    from calkit import config
+
     cfg = config.read()
     for key in cfg.model_dump():
         typer.echo(key)
@@ -140,6 +151,8 @@ def list_config_keys():
 @config_app.command(name="github-ssh")
 def config_github_ssh():
     """Walk through the process of adding an SSH key to GitHub."""
+    import git
+
     typer.echo("Checking if you can already connect to GitHub via SSH")
     # First check if we can already connect to GitHub
     ssh_test_cmd = ["ssh", "-T", "git@github.com"]

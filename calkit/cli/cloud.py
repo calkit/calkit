@@ -8,7 +8,6 @@ import webbrowser
 from typing import Annotated
 
 import typer
-from requests.exceptions import HTTPError
 
 import calkit
 from calkit.cli import raise_error
@@ -47,6 +46,8 @@ def login(
     First try a GET request to the /user endpoint to check if the user is
     already logged in. If not, perform OAuth device flow.
     """
+    from requests.exceptions import HTTPError
+
     try:
         calkit.cloud.get("/user")
         calkit.echo("Authenticated successfully ✅")

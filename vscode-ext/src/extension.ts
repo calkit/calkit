@@ -46,6 +46,7 @@ const COMMAND_DEFINE_NOTEBOOK_STAGE = "calkit-vscode.defineNotebookStage";
 const COMMAND_REFRESH_SIDEBAR = "calkit-vscode.refreshSidebar";
 const COMMAND_OPEN_CALKIT_YAML = "calkit-vscode.openCalkitYaml";
 const COMMAND_OPEN_FIGURES_CAROUSEL = "calkit-vscode.openFiguresCarousel";
+const COMMAND_OPEN_FILE_HISTORY = "calkit-vscode.openFileHistory";
 const FIGURE_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -615,6 +616,32 @@ export function activate(context: vscode.ExtensionContext): void {
           ? Math.max(0, allPaths.indexOf(startPath))
           : 0;
         openFiguresCarousel(context, workspaceRoot, allPaths, startIndex);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_OPEN_FILE_HISTORY,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        let filePath = item?.nodeId;
+        if (!filePath) {
+          const activeUri = vscode.window.activeTextEditor?.document.uri;
+          if (activeUri) {
+            filePath = path
+              .relative(workspaceRoot, activeUri.fsPath)
+              .replace(/\\/g, "/");
+          }
+        }
+        if (!filePath) {
+          void vscode.window.showErrorMessage("No file selected.");
+          return;
+        }
+        await openFileHistoryPanel(context, workspaceRoot, filePath);
       },
     ),
   );
@@ -2130,6 +2157,468 @@ function buildCarouselHtml(
   });
 
   render();
+</script>
+</body>
+</html>`;
+}
+
+// ─── File history panel ───────────────────────────────────────────────────────
+
+interface CommitInfo {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  author: string;
+  date: string;
+}
+
+function readGitFileAtRef(
+  workspaceRoot: string,
+  ref: string,
+  filePath: string,
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    const proc = spawn("git", ["show", `${ref}:${filePath}`], {
+      cwd: workspaceRoot,
+    });
+    proc.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(chunks));
+      } else {
+        reject(new Error(`git show exited with code ${code}`));
+      }
+    });
+  });
+}
+
+function extToMime(ext: string): string {
+  const map: Record<string, string> = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
+    ".pdf": "application/pdf",
+    ".html": "text/html",
+    ".htm": "text/html",
+  };
+  return map[ext.toLowerCase()] ?? "application/octet-stream";
+}
+
+async function getGitHistory(
+  workspaceRoot: string,
+  filePath: string,
+): Promise<CommitInfo[]> {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      [
+        "log",
+        "--follow",
+        "-n",
+        "50",
+        "--format=%H|%h|%s|%an|%ai",
+        "--",
+        filePath,
+      ],
+      { cwd: workspaceRoot },
+    );
+    return stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const [hash, shortHash, ...rest] = line.split("|");
+        const subject = rest.slice(0, -2).join("|");
+        const author = rest[rest.length - 2];
+        const date = rest[rest.length - 1];
+        return { hash, shortHash, subject, author, date };
+      });
+  } catch {
+    return [];
+  }
+}
+
+async function openFileHistoryPanel(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+  filePath: string,
+): Promise<void> {
+  const ext = path.extname(filePath).toLowerCase();
+  const mime = extToMime(ext);
+  const absPath = path.join(workspaceRoot, filePath);
+
+  const panel = vscode.window.createWebviewPanel(
+    "calkit.fileHistory",
+    `History: ${path.basename(filePath)}`,
+    vscode.ViewColumn.Active,
+    { enableScripts: true },
+  );
+  context.subscriptions.push(panel);
+
+  const nonce = getNonce();
+  const history = await getGitHistory(workspaceRoot, filePath);
+
+  // Load current HEAD content from disk
+  let headDataUri = "";
+  try {
+    const buf = await import("node:fs/promises").then((fs) =>
+      fs.readFile(absPath),
+    );
+    headDataUri = `data:${mime};base64,${buf.toString("base64")}`;
+  } catch {
+    // file may not exist on disk yet
+  }
+
+  panel.webview.html = buildFileHistoryHtml(
+    nonce,
+    filePath,
+    ext,
+    mime,
+    history,
+    headDataUri,
+  );
+
+  panel.webview.onDidReceiveMessage(
+    async (msg: { command: string; ref: string }) => {
+      if (msg.command !== "getContent") {
+        return;
+      }
+      let dataUri = "";
+      try {
+        const buf = await readGitFileAtRef(workspaceRoot, msg.ref, filePath);
+        dataUri = `data:${mime};base64,${buf.toString("base64")}`;
+      } catch {
+        // file may not exist at this ref (e.g. DVC-tracked)
+        try {
+          const dvcBuf = await readGitFileAtRef(
+            workspaceRoot,
+            msg.ref,
+            `${filePath}.dvc`,
+          );
+          void panel.webview.postMessage({
+            command: "contentError",
+            ref: msg.ref,
+            reason: `DVC-tracked file. Pointer at this commit:\n${dvcBuf
+              .toString("utf8")
+              .trim()}`,
+          });
+          return;
+        } catch {
+          void panel.webview.postMessage({
+            command: "contentError",
+            ref: msg.ref,
+            reason: "File not found in git at this commit.",
+          });
+          return;
+        }
+      }
+      void panel.webview.postMessage({
+        command: "content",
+        ref: msg.ref,
+        dataUri,
+      });
+    },
+    undefined,
+    context.subscriptions,
+  );
+}
+
+function buildFileHistoryHtml(
+  nonce: string,
+  filePath: string,
+  ext: string,
+  _mime: string,
+  history: CommitInfo[],
+  headDataUri: string,
+): string {
+  const isImage =
+    ext === ".png" ||
+    ext === ".jpg" ||
+    ext === ".jpeg" ||
+    ext === ".gif" ||
+    ext === ".svg";
+  const isPdf = ext === ".pdf";
+  const isHtml = ext === ".html" || ext === ".htm";
+  const isRenderable = isImage || isPdf || isHtml;
+
+  const historyJson = JSON.stringify(history);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; frame-src data: blob:; object-src data: blob:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline';">
+<title>History: ${escHtml(path.basename(filePath))}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); overflow: hidden; }
+  #root { display: flex; height: 100vh; }
+
+  /* History sidebar */
+  #sidebar { width: 210px; flex-shrink: 0; border-right: 1px solid var(--vscode-panel-border, #444); display: flex; flex-direction: column; overflow: hidden; }
+  #sidebar-header { padding: 8px 10px; font-size: 0.8em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--vscode-descriptionForeground); border-bottom: 1px solid var(--vscode-panel-border, #444); flex-shrink: 0; }
+  #commits { overflow-y: auto; flex: 1; }
+  .commit { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid var(--vscode-panel-border, #333); position: relative; }
+  .commit:hover { background: var(--vscode-list-hoverBackground); }
+  .commit.selected-a { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+  .commit.selected-b { background: color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 60%, purple 40%); color: var(--vscode-list-activeSelectionForeground); }
+  .commit-hash { font-family: monospace; font-size: 0.8em; opacity: 0.7; }
+  .commit-subject { font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 175px; margin: 2px 0 1px; }
+  .commit-meta { font-size: 0.75em; opacity: 0.6; }
+  .badge { display: inline-block; font-size: 0.7em; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-left: 4px; vertical-align: middle; }
+  .badge-a { background: #1a6fb5; color: #fff; }
+  .badge-b { background: #7b31c9; color: #fff; }
+  #clear-btn { display: none; margin: 6px 10px; background: none; border: 1px solid var(--vscode-panel-border, #444); color: var(--vscode-foreground); padding: 3px 10px; cursor: pointer; font-size: 0.82em; border-radius: 3px; }
+  #clear-btn:hover { background: var(--vscode-list-hoverBackground); }
+
+  /* Main view */
+  #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+  #toolbar { padding: 6px 12px; border-bottom: 1px solid var(--vscode-panel-border, #444); font-size: 0.82em; color: var(--vscode-descriptionForeground); flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
+  .ref-badge { font-family: monospace; font-size: 0.95em; padding: 1px 6px; border-radius: 3px; color: #fff; }
+  .ref-badge.a { background: #1a6fb5; }
+  .ref-badge.b { background: #7b31c9; }
+  #view-area { flex: 1; overflow: hidden; display: flex; min-height: 0; }
+  .pane { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center; position: relative; min-width: 0; }
+  .pane + .pane { border-left: 1px solid var(--vscode-panel-border, #444); }
+  .pane img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+  .pane embed, .pane iframe { width: 100%; height: 100%; border: none; background: white; }
+  .pane-label { position: absolute; top: 6px; left: 8px; font-size: 0.75em; font-weight: 700; padding: 1px 6px; border-radius: 3px; color: #fff; z-index: 1; }
+  .pane-label.a { background: #1a6fb5; }
+  .pane-label.b { background: #7b31c9; }
+  .no-render, .loading, .err { color: var(--vscode-descriptionForeground); font-size: 0.88em; padding: 20px; text-align: center; white-space: pre-wrap; }
+  .err { color: var(--vscode-errorForeground, #f44); }
+</style>
+</head>
+<body>
+<div id="root">
+  <div id="sidebar">
+    <div id="sidebar-header">Version History</div>
+    <button id="clear-btn">Clear selection</button>
+    <div id="commits"></div>
+  </div>
+  <div id="main">
+    <div id="toolbar"><span id="toolbar-text">Current version</span></div>
+    <div id="view-area">
+      <div class="pane" id="pane-a"></div>
+      <div class="pane" id="pane-b" style="display:none"></div>
+    </div>
+  </div>
+</div>
+<script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+  const history = ${historyJson};
+  const isRenderable = ${JSON.stringify(isRenderable)};
+  const isImage = ${JSON.stringify(isImage)};
+  const isPdf = ${JSON.stringify(isPdf)};
+  const isHtml = ${JSON.stringify(isHtml)};
+  const headDataUri = ${JSON.stringify(headDataUri)};
+  const fileName = ${JSON.stringify(path.basename(filePath))};
+
+  let refA = null;
+  let refB = null;
+  const pending = {}; // ref -> [resolve, reject]
+
+  const commitsEl = document.getElementById('commits');
+  const paneA = document.getElementById('pane-a');
+  const paneB = document.getElementById('pane-b');
+  const toolbarText = document.getElementById('toolbar-text');
+  const clearBtn = document.getElementById('clear-btn');
+
+  // ── Build commit list ──
+  if (history.length === 0) {
+    commitsEl.innerHTML = '<div class="commit" style="cursor:default;opacity:0.6">No history found.</div>';
+  } else {
+    history.forEach(function(c) {
+      const el = document.createElement('div');
+      el.className = 'commit';
+      el.dataset.hash = c.shortHash;
+      el.innerHTML =
+        '<div class="commit-hash">' + esc(c.shortHash) + '</div>' +
+        '<div class="commit-subject">' + esc(c.subject) + '</div>' +
+        '<div class="commit-meta">' + esc(formatDate(c.date)) + ' · ' + esc(c.author) + '</div>';
+      el.addEventListener('click', function() { onCommitClick(c.shortHash); });
+      commitsEl.appendChild(el);
+    });
+  }
+
+  function formatDate(iso) {
+    try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
+  }
+  function esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ── Pane rendering ──
+  function renderInPane(paneEl, dataUri, label) {
+    paneEl.innerHTML = '';
+    if (label) {
+      const lb = document.createElement('div');
+      lb.className = 'pane-label ' + label;
+      lb.textContent = label.toUpperCase();
+      paneEl.appendChild(lb);
+    }
+    if (!isRenderable) {
+      const msg = document.createElement('div');
+      msg.className = 'no-render';
+      msg.textContent = 'Preview not available for this file type.';
+      paneEl.appendChild(msg);
+      return;
+    }
+    if (isImage) {
+      const img = document.createElement('img');
+      img.src = dataUri;
+      paneEl.appendChild(img);
+    } else if (isPdf) {
+      const embed = document.createElement('embed');
+      embed.src = dataUri;
+      embed.type = 'application/pdf';
+      embed.style.cssText = 'width:100%;height:100%;border:none';
+      paneEl.appendChild(embed);
+    } else if (isHtml) {
+      const frame = document.createElement('iframe');
+      frame.src = dataUri;
+      frame.style.cssText = 'width:100%;height:100%;border:none';
+      paneEl.appendChild(frame);
+    }
+  }
+
+  function showLoading(paneEl, label) {
+    paneEl.innerHTML = '';
+    if (label) {
+      const lb = document.createElement('div');
+      lb.className = 'pane-label ' + label;
+      lb.textContent = label.toUpperCase();
+      paneEl.appendChild(lb);
+    }
+    const msg = document.createElement('div');
+    msg.className = 'loading';
+    msg.textContent = 'Loading…';
+    paneEl.appendChild(msg);
+  }
+
+  function showError(paneEl, label, reason) {
+    paneEl.innerHTML = '';
+    if (label) {
+      const lb = document.createElement('div');
+      lb.className = 'pane-label ' + label;
+      lb.textContent = label.toUpperCase();
+      paneEl.appendChild(lb);
+    }
+    const msg = document.createElement('div');
+    msg.className = 'err';
+    msg.textContent = reason;
+    paneEl.appendChild(msg);
+  }
+
+  // ── Toolbar ──
+  function updateToolbar() {
+    if (!refA && !refB) {
+      toolbarText.textContent = 'Current version · ' + fileName;
+      clearBtn.style.display = 'none';
+    } else if (refA && !refB) {
+      toolbarText.innerHTML = '<span class="ref-badge a">A</span> <code>' + esc(refA) + '</code> · click another commit to compare';
+      clearBtn.style.display = 'inline-block';
+    } else {
+      toolbarText.innerHTML = '<span class="ref-badge a">A</span> <code>' + esc(refA) + '</code> &nbsp; vs &nbsp; <span class="ref-badge b">B</span> <code>' + esc(refB) + '</code>';
+      clearBtn.style.display = 'inline-block';
+    }
+  }
+
+  function updateCommitHighlights() {
+    commitsEl.querySelectorAll('.commit').forEach(function(el) {
+      el.classList.remove('selected-a', 'selected-b');
+      const h = el.dataset.hash;
+      if (h === refA) el.classList.add('selected-a');
+      else if (h === refB) el.classList.add('selected-b');
+      // update badges inside
+      el.querySelectorAll('.badge').forEach(function(b) { b.remove(); });
+      const hashEl = el.querySelector('.commit-hash');
+      if (h === refA) { const b = document.createElement('span'); b.className = 'badge badge-a'; b.textContent = 'A'; hashEl.appendChild(b); }
+      if (h === refB) { const b = document.createElement('span'); b.className = 'badge badge-b'; b.textContent = 'B'; hashEl.appendChild(b); }
+    });
+  }
+
+  // ── Fetch content ──
+  function getContent(ref) {
+    return new Promise(function(resolve, reject) {
+      pending[ref] = [resolve, reject];
+      vscode.postMessage({ command: 'getContent', ref: ref });
+    });
+  }
+
+  window.addEventListener('message', function(event) {
+    const msg = event.data;
+    if (msg.command === 'content') {
+      if (pending[msg.ref]) { pending[msg.ref][0](msg.dataUri); delete pending[msg.ref]; }
+    } else if (msg.command === 'contentError') {
+      if (pending[msg.ref]) { pending[msg.ref][1](new Error(msg.reason)); delete pending[msg.ref]; }
+    }
+  });
+
+  // ── Navigation ──
+  function onCommitClick(hash) {
+    if (!refA || refA === hash) {
+      refA = hash;
+      refB = null;
+    } else if (!refB) {
+      refB = hash;
+    } else {
+      refA = hash;
+      refB = null;
+    }
+    updateCommitHighlights();
+    updateToolbar();
+    refreshView();
+  }
+
+  clearBtn.addEventListener('click', function() {
+    refA = null;
+    refB = null;
+    updateCommitHighlights();
+    updateToolbar();
+    refreshView();
+  });
+
+  function refreshView() {
+    if (!refA && !refB) {
+      // Show current disk version
+      paneB.style.display = 'none';
+      paneA.style.flex = '1';
+      if (headDataUri) {
+        renderInPane(paneA, headDataUri, null);
+      } else {
+        showError(paneA, null, 'File not available on disk.');
+      }
+      return;
+    }
+    if (refA && !refB) {
+      paneB.style.display = 'none';
+      paneA.style.flex = '1';
+      showLoading(paneA, 'a');
+      getContent(refA).then(function(uri) {
+        renderInPane(paneA, uri, 'a');
+      }).catch(function(e) {
+        showError(paneA, 'a', e.message);
+      });
+      return;
+    }
+    // Compare mode
+    paneB.style.display = '';
+    paneA.style.flex = '1';
+    paneB.style.flex = '1';
+    showLoading(paneA, 'a');
+    showLoading(paneB, 'b');
+    getContent(refA).then(function(uri) { renderInPane(paneA, uri, 'a'); }).catch(function(e) { showError(paneA, 'a', e.message); });
+    getContent(refB).then(function(uri) { renderInPane(paneB, uri, 'b'); }).catch(function(e) { showError(paneB, 'b', e.message); });
+  }
+
+  // ── Init ──
+  updateToolbar();
+  refreshView();
 </script>
 </body>
 </html>`;

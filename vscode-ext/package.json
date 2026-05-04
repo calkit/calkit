@@ -196,6 +196,12 @@
         "title": "Browse Figures",
         "category": "Calkit",
         "icon": "$(layout-panel)"
+      },
+      {
+        "command": "calkit-vscode.openFileHistory",
+        "title": "View File History",
+        "category": "Calkit",
+        "icon": "$(history)"
       }
     ],
     "menus": {
@@ -286,6 +292,11 @@
           "command": "calkit-vscode.openFiguresCarousel",
           "when": "view == calkit-sidebar && (viewItem == figure || viewItem == figure-no-provenance || viewItem == figure-stale)",
           "group": "inline@0"
+        },
+        {
+          "command": "calkit-vscode.openFileHistory",
+          "when": "view == calkit-sidebar && (viewItem == figure || viewItem == figure-no-provenance || viewItem == figure-stale || viewItem == dataset || viewItem == dataset-no-provenance || viewItem == dataset-stale || viewItem == notebook || viewItem == notebook-no-env)",
+          "group": "inline@99"
         }
       ],
       "explorer/context": [
@@ -303,6 +314,11 @@
           "command": "calkit-vscode.defineProvenance",
           "when": "!explorerResourceIsFolder",
           "group": "calkit@3"
+        },
+        {
+          "command": "calkit-vscode.openFileHistory",
+          "when": "!explorerResourceIsFolder",
+          "group": "calkit@4"
         }
       ],
       "editor/context": [

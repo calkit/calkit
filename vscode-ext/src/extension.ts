@@ -45,6 +45,7 @@ const COMMAND_EDIT_NOTEBOOK_STAGE = "calkit-vscode.editNotebookStage";
 const COMMAND_DEFINE_NOTEBOOK_STAGE = "calkit-vscode.defineNotebookStage";
 const COMMAND_REFRESH_SIDEBAR = "calkit-vscode.refreshSidebar";
 const COMMAND_OPEN_CALKIT_YAML = "calkit-vscode.openCalkitYaml";
+const COMMAND_OPEN_FIGURES_CAROUSEL = "calkit-vscode.openFiguresCarousel";
 const FIGURE_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -250,7 +251,7 @@ export function activate(context: vscode.ExtensionContext): void {
         const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
         if (!fileUri) {
           void vscode.window.showErrorMessage(
-            "No file selected to show provenance for.",
+            "No file selected to show source for.",
           );
           return;
         }
@@ -586,6 +587,36 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       void refreshPipelineOutputContext(context);
     }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_OPEN_FIGURES_CAROUSEL,
+      (item?: import("./sidebar").SidebarItem) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const figList = currentCalkitConfig?.figures ?? [];
+        const knownPaths = new Set(figList.map((f) => f.path));
+        const allPaths = [...knownPaths];
+        for (const p of currentDetectedFigures) {
+          if (!knownPaths.has(p)) {
+            allPaths.push(p);
+          }
+        }
+        if (allPaths.length === 0) {
+          void vscode.window.showInformationMessage("No figures found.");
+          return;
+        }
+        // If triggered from a specific figure item, start at that index
+        const startPath = item?.nodeKind === "figure" ? item.nodeId : undefined;
+        const startIndex = startPath
+          ? Math.max(0, allPaths.indexOf(startPath))
+          : 0;
+        openFiguresCarousel(context, workspaceRoot, allPaths, startIndex);
+      },
+    ),
   );
 
   sidebarProvider = new CalkitSidebarProvider();
@@ -941,8 +972,7 @@ class PipelineOutputDecorationProvider
     ) {
       return {
         badge: "!",
-        tooltip:
-          "Not produced by the pipeline — right-click to define provenance",
+        tooltip: "Not produced by the pipeline — right-click to define source",
       };
     }
     return undefined;
@@ -1345,7 +1375,7 @@ async function defineProvenance(
       ? [notebookChoiceStage, choiceImported]
       : [choiceStage, choiceImported],
     {
-      title: `Define provenance for ${path.basename(fileUri.fsPath)}`,
+      title: `Define source for ${path.basename(fileUri.fsPath)}`,
       placeHolder: "How is this file produced?",
     },
   );
@@ -1876,6 +1906,233 @@ function escHtml(s: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function openFiguresCarousel(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+  figurePaths: string[],
+  startIndex: number,
+): void {
+  const panel = vscode.window.createWebviewPanel(
+    "calkit.figuresCarousel",
+    "Figures",
+    vscode.ViewColumn.Active,
+    {
+      enableScripts: true,
+      localResourceRoots: [vscode.Uri.file(workspaceRoot)],
+    },
+  );
+  context.subscriptions.push(panel);
+
+  // Build per-figure data: webview URI + provenance metadata
+  const figList = currentCalkitConfig?.figures ?? [];
+  type FigureData = {
+    path: string;
+    uriStr: string;
+    ext: string;
+    stage: string | undefined;
+    importedFrom: string | undefined;
+    title: string | undefined;
+    description: string | undefined;
+  };
+  const figures: FigureData[] = figurePaths.map((p) => {
+    const absUri = vscode.Uri.file(path.join(workspaceRoot, p));
+    const webviewUri = panel.webview.asWebviewUri(absUri);
+    const entry = figList.find((f) => f.path === p);
+    const importedFrom =
+      entry?.imported_from != null
+        ? typeof entry.imported_from === "object" &&
+          "url" in (entry.imported_from as object)
+          ? (entry.imported_from as { url: string }).url
+          : JSON.stringify(entry.imported_from)
+        : undefined;
+    return {
+      path: p,
+      uriStr: webviewUri.toString(),
+      ext: path.extname(p).toLowerCase(),
+      stage: typeof entry?.stage === "string" ? entry.stage : undefined,
+      importedFrom,
+      title: typeof entry?.title === "string" ? entry.title : undefined,
+      description:
+        typeof entry?.description === "string" ? entry.description : undefined,
+    };
+  });
+
+  const nonce = getNonce();
+  panel.webview.html = buildCarouselHtml(nonce, figures, startIndex);
+}
+
+function buildCarouselHtml(
+  nonce: string,
+  figures: {
+    path: string;
+    uriStr: string;
+    ext: string;
+    stage: string | undefined;
+    importedFrom: string | undefined;
+    title: string | undefined;
+    description: string | undefined;
+  }[],
+  startIndex: number,
+): string {
+  const RENDERABLE = new Set([
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".pdf",
+    ".html",
+    ".htm",
+  ]);
+  const figuresJson = JSON.stringify(figures);
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${
+    figures.length > 0 ? "vscode-file: vscode-resource:" : "'none'"
+  } data:; frame-src vscode-file: vscode-resource:; object-src vscode-file: vscode-resource:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline';">
+<title>Figures</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); }
+  #root { display: flex; flex-direction: column; height: 100vh; }
+  #toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border, #444); flex-shrink: 0; }
+  #counter { color: var(--vscode-descriptionForeground); font-size: 0.85em; white-space: nowrap; }
+  #path-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; opacity: 0.8; }
+  #viewer { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  #fig-content { max-width: 100%; max-height: 100%; display: flex; align-items: center; justify-content: center; }
+  #fig-content img { max-width: 100%; max-height: calc(100vh - 140px); object-fit: contain; display: block; }
+  #fig-content embed, #fig-content iframe { width: 100%; height: calc(100vh - 140px); border: none; background: white; }
+  .no-render { color: var(--vscode-descriptionForeground); font-size: 0.9em; padding: 20px; text-align: center; }
+  .nav-btn { background: var(--vscode-button-secondaryBackground, rgba(128,128,128,0.2)); color: var(--vscode-button-secondaryForeground, inherit); border: none; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-size: 1.1em; flex-shrink: 0; }
+  .nav-btn:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.35)); }
+  .nav-btn:disabled { opacity: 0.35; cursor: default; }
+  #metadata { flex-shrink: 0; padding: 8px 12px; border-top: 1px solid var(--vscode-panel-border, #444); font-size: 0.82em; display: flex; gap: 16px; flex-wrap: wrap; }
+  .meta-item { display: flex; gap: 4px; }
+  .meta-label { color: var(--vscode-descriptionForeground); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.85em; }
+  .meta-value { color: var(--vscode-foreground); opacity: 0.85; }
+  #dots { display: flex; gap: 5px; align-items: center; overflow-x: auto; max-width: 300px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--vscode-descriptionForeground); opacity: 0.35; cursor: pointer; flex-shrink: 0; }
+  .dot.active { opacity: 1; background: var(--vscode-focusBorder, #007fd4); }
+</style>
+</head>
+<body>
+<div id="root">
+  <div id="toolbar">
+    <button class="nav-btn" id="btn-prev">&#8592;</button>
+    <div id="dots"></div>
+    <button class="nav-btn" id="btn-next">&#8594;</button>
+    <span id="counter"></span>
+    <span id="path-label"></span>
+  </div>
+  <div id="viewer">
+    <div id="fig-content"></div>
+  </div>
+  <div id="metadata" id="metadata"></div>
+</div>
+<script nonce="${nonce}">
+  const RENDERABLE = ${JSON.stringify([...RENDERABLE])};
+  const figures = ${figuresJson};
+  let idx = ${Math.max(0, Math.min(startIndex, figures.length - 1))};
+
+  const btnPrev = document.getElementById('btn-prev');
+  const btnNext = document.getElementById('btn-next');
+  const counter = document.getElementById('counter');
+  const pathLabel = document.getElementById('path-label');
+  const figContent = document.getElementById('fig-content');
+  const metadata = document.getElementById('metadata');
+  const dotsEl = document.getElementById('dots');
+
+  // Build dots
+  figures.forEach(function(_, i) {
+    const dot = document.createElement('div');
+    dot.className = 'dot';
+    dot.addEventListener('click', function() { navigate(i); });
+    dotsEl.appendChild(dot);
+  });
+
+  function navigate(newIdx) {
+    idx = newIdx;
+    render();
+  }
+
+  function render() {
+    const fig = figures[idx];
+    // Update toolbar
+    counter.textContent = (idx + 1) + ' / ' + figures.length;
+    pathLabel.textContent = fig.path;
+    pathLabel.title = fig.path;
+    btnPrev.disabled = idx === 0;
+    btnNext.disabled = idx === figures.length - 1;
+    // Update dots
+    Array.from(dotsEl.querySelectorAll('.dot')).forEach(function(d, i) {
+      d.classList.toggle('active', i === idx);
+    });
+    // Render figure
+    figContent.innerHTML = '';
+    const ext = fig.ext;
+    if (ext === '.png' || ext === '.jpg' || ext === '.jpeg' || ext === '.gif' || ext === '.svg') {
+      const img = document.createElement('img');
+      img.src = fig.uriStr;
+      img.alt = fig.path;
+      figContent.appendChild(img);
+    } else if (ext === '.pdf') {
+      const embed = document.createElement('embed');
+      embed.src = fig.uriStr;
+      embed.type = 'application/pdf';
+      embed.style.width = '100%';
+      embed.style.height = 'calc(100vh - 140px)';
+      figContent.appendChild(embed);
+    } else if (ext === '.html' || ext === '.htm') {
+      const frame = document.createElement('iframe');
+      frame.src = fig.uriStr;
+      frame.style.width = '100%';
+      frame.style.height = 'calc(100vh - 140px)';
+      frame.style.border = 'none';
+      figContent.appendChild(frame);
+    } else {
+      const msg = document.createElement('div');
+      msg.className = 'no-render';
+      msg.textContent = 'Preview not available for ' + ext + ' files.';
+      figContent.appendChild(msg);
+    }
+    // Update metadata
+    metadata.innerHTML = '';
+    function metaItem(label, value) {
+      if (!value) return;
+      const div = document.createElement('div');
+      div.className = 'meta-item';
+      const lbl = document.createElement('span');
+      lbl.className = 'meta-label';
+      lbl.textContent = label + ':';
+      const val = document.createElement('span');
+      val.className = 'meta-value';
+      val.textContent = value;
+      div.appendChild(lbl);
+      div.appendChild(val);
+      metadata.appendChild(div);
+    }
+    metaItem('Title', fig.title);
+    metaItem('Stage', fig.stage);
+    metaItem('Imported from', fig.importedFrom);
+    metaItem('Description', fig.description);
+  }
+
+  btnPrev.addEventListener('click', function() { if (idx > 0) navigate(idx - 1); });
+  btnNext.addEventListener('click', function() { if (idx < figures.length - 1) navigate(idx + 1); });
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowLeft' && idx > 0) navigate(idx - 1);
+    if (e.key === 'ArrowRight' && idx < figures.length - 1) navigate(idx + 1);
+  });
+
+  render();
+</script>
+</body>
+</html>`;
 }
 
 function getOrCreateTerminal(name: string, cwd: string): vscode.Terminal {

@@ -98,7 +98,7 @@
       },
       {
         "command": "calkit-vscode.showProvenance",
-        "title": "Show Provenance",
+        "title": "Show Source",
         "category": "Calkit",
         "icon": "$(list-tree)"
       },
@@ -140,7 +140,7 @@
       },
       {
         "command": "calkit-vscode.defineProvenance",
-        "title": "Define Provenance",
+        "title": "Define Source",
         "category": "Calkit"
       },
       {
@@ -190,6 +190,12 @@
         "title": "Open calkit.yaml",
         "category": "Calkit",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "calkit-vscode.openFiguresCarousel",
+        "title": "Browse Figures",
+        "category": "Calkit",
+        "icon": "$(layout-panel)"
       }
     ],
     "menus": {
@@ -270,6 +276,16 @@
           "command": "calkit-vscode.runArtifactStage",
           "when": "view == calkit-sidebar && (viewItem == figure-stale || viewItem == dataset-stale)",
           "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.openFiguresCarousel",
+          "when": "view == calkit-sidebar && viewItem == section-figures",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.openFiguresCarousel",
+          "when": "view == calkit-sidebar && (viewItem == figure || viewItem == figure-no-provenance || viewItem == figure-stale)",
+          "group": "inline@0"
         }
       ],
       "explorer/context": [

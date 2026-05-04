@@ -550,7 +550,7 @@ export class CalkitSidebarProvider
         "warning",
         new vscode.ThemeColor("list.warningForeground"),
       );
-      item.tooltip = `${entry.path} — no provenance defined`;
+      item.tooltip = `${entry.path} — no source defined`;
       item.contextValue = `${nodeKind}-no-provenance`;
     } else if (isStale) {
       item.iconPath = new vscode.ThemeIcon(

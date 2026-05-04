@@ -577,6 +577,28 @@ def test_add_pipeline_output_storage(tmp_dir):
         ["calkit", "add", "--dry-run", "figure.png"], text=True
     )
     assert "Git" in out or "git" in out
+    # DVC pipeline output: storage: dvc means the file is tracked via
+    # dvc.lock (committed to Git), NOT via dvc add / .dvc files.
+    # Unstage figure.png to reset for the DVC storage case
+    subprocess.call(["git", "restore", "--staged", "figure.png"])
+    pipeline["pipeline"]["stages"]["analyze"]["outputs"] = [
+        {"path": "figure.png", "storage": "dvc"}
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(pipeline, f)
+    # Simulate dvc.lock being updated by a pipeline run
+    with open("dvc.lock", "w") as f:
+        f.write("schema: '2.0'\nstages:\n  analyze:\n    cmd: echo done\n")
+    subprocess.call(["git", "add", "dvc.lock"])
+    subprocess.call(["git", "commit", "-m", "init dvc.lock"])
+    # Modify dvc.lock so it is dirty and can be staged
+    with open("dvc.lock", "a") as f:
+        f.write("# updated\n")
+    out = subprocess.check_output(["calkit", "add", "figure.png"], text=True)
+    # Should mention dvc.lock, not attempt dvc add on the file
+    assert "dvc.lock" in out
+    assert not os.path.exists("figure.png.dvc")
+    assert "dvc.lock" in calkit.git.get_staged_files()
 
 
 def test_save_to_git_with_all(tmp_dir):

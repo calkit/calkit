@@ -776,14 +776,15 @@ def add(
                 else:
                     if dry_run:
                         typer.echo(
-                            f"Would add {path} to DVC "
-                            "(pipeline output storage)"
+                            f"Would add dvc.lock to Git "
+                            f"({path} is a DVC pipeline output)"
                         )
                     else:
                         typer.echo(
-                            f"Adding {path} to DVC per pipeline output storage"
+                            f"Adding dvc.lock to Git "
+                            f"({path} is a DVC pipeline output)"
                         )
-                        calkit.dvc.run_dvc_command(["add", path])
+                        subprocess.call(["git", "add", "dvc.lock"])
             elif os.path.splitext(path)[-1] in DVC_EXTENSIONS:
                 if dry_run:
                     typer.echo(f"Would add {path} to DVC (per extension)")

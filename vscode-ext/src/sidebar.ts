@@ -606,8 +606,15 @@ export class CalkitSidebarProvider
       item.tooltip = `${entry.path} — stage '${entry.stage}' is stale`;
       item.contextValue = `${nodeKind}-stale`;
     } else {
+      const isImported = !!entry.imported_from;
       item.iconPath = new vscode.ThemeIcon(
-        nodeKind === "figure" ? "file-media" : "database",
+        nodeKind === "figure"
+          ? isImported
+            ? "cloud-download"
+            : "file-media"
+          : isImported
+          ? "cloud-download"
+          : "database",
         new vscode.ThemeColor("testing.iconPassed"),
       );
       item.tooltip = entry.stage
@@ -615,13 +622,22 @@ export class CalkitSidebarProvider
         : `${entry.path} — imported`;
       item.contextValue = nodeKind;
     }
-    if (this.workspaceRoot && !hasProvenance) {
-      const absPath = path.join(this.workspaceRoot, entry.path);
-      item.command = {
-        command: "vscode.open",
-        title: "Open",
-        arguments: [vscode.Uri.file(absPath)],
-      };
+    // Clicking a figure always opens the carousel; clicking a dataset opens the file
+    if (this.workspaceRoot) {
+      if (nodeKind === "figure") {
+        item.command = {
+          command: "calkit-vscode.openFiguresCarousel",
+          title: "Browse Figures",
+          arguments: [item],
+        };
+      } else if (!hasProvenance) {
+        const absPath = path.join(this.workspaceRoot, entry.path);
+        item.command = {
+          command: "vscode.open",
+          title: "Open",
+          arguments: [vscode.Uri.file(absPath)],
+        };
+      }
     }
     return item;
   }

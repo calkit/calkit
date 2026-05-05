@@ -321,6 +321,13 @@
           "group": "calkit@4"
         }
       ],
+      "editor/title": [
+        {
+          "command": "calkit-vscode.runStageForFile",
+          "when": "calkit.activeFileHasStage && !calkit.isSettingKernel",
+          "group": "navigation"
+        }
+      ],
       "editor/context": [
         {
           "command": "calkit-vscode.showProvenance",

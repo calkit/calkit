@@ -668,6 +668,12 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      void refreshActiveFileStageContext(editor?.document.uri);
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.workspace.onDidOpenNotebookDocument(() => {
       void autoSelectEnvironmentForActiveNotebook(context);
     }),
@@ -2695,7 +2701,11 @@ async function findStageForFile(
   for (const [stageName, stage] of Object.entries(
     calkitConfig?.pipeline?.stages ?? {},
   )) {
-    if (stage.notebook_path === relPath || stage.script_path === relPath) {
+    if (
+      stage.notebook_path === relPath ||
+      stage.script_path === relPath ||
+      stage.target_path === relPath
+    ) {
       return stageName;
     }
   }
@@ -6417,6 +6427,21 @@ async function restartCalkitJobForActiveNotebook(
       "No running notebook server to restart.",
     );
   }
+}
+
+async function refreshActiveFileStageContext(
+  fileUri: vscode.Uri | undefined,
+): Promise<void> {
+  const workspaceRoot = getWorkspaceRoot();
+  let hasStage = false;
+  if (workspaceRoot && fileUri) {
+    hasStage = (await findStageForFile(workspaceRoot, fileUri)) !== undefined;
+  }
+  await vscode.commands.executeCommand(
+    "setContext",
+    "calkit.activeFileHasStage",
+    hasStage,
+  );
 }
 
 async function refreshNotebookToolbarContext(

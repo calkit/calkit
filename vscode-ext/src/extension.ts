@@ -71,7 +71,7 @@ const DATASET_EXTENSIONS = new Set([
 const NOTEBOOK_EXTENSION = ".ipynb";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
 const execFileAsync = promisify(execFile);
-const DEFAULT_MIN_CALKIT_VERSION = "0.37.3";
+const DEFAULT_MIN_CALKIT_VERSION = "0.38.3";
 const DEFAULT_NOTEBOOK_SLURM_TIME = "120";
 const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
 const MISSING_IJULIA_ERROR_TEXT =
@@ -103,6 +103,7 @@ let sidebarProvider: CalkitSidebarProvider | undefined;
 let sidebarTreeView:
   | vscode.TreeView<import("./sidebar").SidebarItem>
   | undefined;
+let refreshDebounceTimer: NodeJS.Timeout | undefined;
 
 function log(message: string): void {
   if (outputChannel) {
@@ -220,9 +221,16 @@ export function activate(context: vscode.ExtensionContext): void {
           );
           return;
         }
-        await vscode.window.showTextDocument(
-          vscode.Uri.file(path.join(workspaceRoot, filePath)),
-        );
+        const fileUri = vscode.Uri.file(path.join(workspaceRoot, filePath));
+        if (filePath.endsWith(".ipynb")) {
+          await vscode.commands.executeCommand(
+            "vscode.openWith",
+            fileUri,
+            "jupyter-notebook",
+          );
+        } else {
+          await vscode.window.showTextDocument(fileUri);
+        }
       },
     ),
   );
@@ -683,26 +691,26 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.createFileSystemWatcher("**/dvc.yaml");
   context.subscriptions.push(dvcYamlWatcher);
   dvcYamlWatcher.onDidChange(() => {
-    void refreshPipelineOutputContext(context);
+    scheduleRefreshPipelineOutputContext(context);
   });
   dvcYamlWatcher.onDidCreate(() => {
-    void refreshPipelineOutputContext(context);
+    scheduleRefreshPipelineOutputContext(context);
   });
   dvcYamlWatcher.onDidDelete(() => {
-    void refreshPipelineOutputContext(context);
+    scheduleRefreshPipelineOutputContext(context);
   });
 
   const calkitYamlWatcher =
     vscode.workspace.createFileSystemWatcher("**/calkit.yaml");
   context.subscriptions.push(calkitYamlWatcher);
   calkitYamlWatcher.onDidChange(() => {
-    void refreshPipelineOutputContext(context);
+    scheduleRefreshPipelineOutputContext(context);
   });
   calkitYamlWatcher.onDidCreate(() => {
-    void refreshPipelineOutputContext(context);
+    scheduleRefreshPipelineOutputContext(context);
   });
   calkitYamlWatcher.onDidDelete(() => {
-    void refreshPipelineOutputContext(context);
+    scheduleRefreshPipelineOutputContext(context);
   });
 
   // Proposed API: shows Calkit in the top-level kernel source list.
@@ -1077,12 +1085,47 @@ async function scanDetectedFiles(workspaceRoot: string): Promise<void> {
   currentDetectedNotebooks = notebookUris
     .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
     .sort();
-  currentDetectedFigures = toRelative(allUris, FIGURE_EXTENSIONS, (rel) =>
+  const figuresFromFs = toRelative(allUris, FIGURE_EXTENSIONS, (rel) =>
     hasAncestorIn(rel, FIGURE_DIR_NAMES),
   );
-  currentDetectedDatasets = toRelative(allUris, DATASET_EXTENSIONS, (rel) =>
+  const datasetsFromFs = toRelative(allUris, DATASET_EXTENSIONS, (rel) =>
     hasAncestorIn(rel, DATA_DIR_NAMES),
   );
+  // Also include pipeline outputs from dvc.yaml that match figure/dataset
+  // extensions even if they don't exist on disk yet (e.g. stale DVC outputs).
+  const figureSet = new Set(figuresFromFs);
+  const datasetSet = new Set(datasetsFromFs);
+  for (const stage of Object.values(currentDvcYaml?.stages ?? {})) {
+    for (const rel of dvcStageOutputPaths(stage)) {
+      const normalized = rel.replace(/\\/g, "/");
+      const ext = path.extname(rel).toLowerCase();
+      if (
+        FIGURE_EXTENSIONS.has(ext) &&
+        hasAncestorIn(normalized, FIGURE_DIR_NAMES)
+      ) {
+        figureSet.add(normalized);
+      } else if (
+        DATASET_EXTENSIONS.has(ext) &&
+        hasAncestorIn(normalized, DATA_DIR_NAMES)
+      ) {
+        datasetSet.add(normalized);
+      }
+    }
+  }
+  currentDetectedFigures = [...figureSet].sort();
+  currentDetectedDatasets = [...datasetSet].sort();
+}
+
+function scheduleRefreshPipelineOutputContext(
+  context: vscode.ExtensionContext,
+): void {
+  if (refreshDebounceTimer !== undefined) {
+    clearTimeout(refreshDebounceTimer);
+  }
+  refreshDebounceTimer = setTimeout(() => {
+    refreshDebounceTimer = undefined;
+    void refreshPipelineOutputContext(context);
+  }, 300);
 }
 
 async function refreshPipelineOutputContext(
@@ -1141,15 +1184,7 @@ async function refreshPipelineOutputContext(
     ]),
   ].map((p) => vscode.Uri.file(p));
   decorationProvider.refresh(changedUris);
-  // Detected files are scanned separately (once at startup / on explicit
-  // refresh) to avoid re-scanning the whole workspace on every calkit.yaml
-  // change, which caused the sidebar lists to flicker.
-  if (
-    currentDetectedNotebooks.length === 0 &&
-    currentDetectedFigures.length === 0
-  ) {
-    await scanDetectedFiles(workspaceRoot);
-  }
+  await scanDetectedFiles(workspaceRoot);
   sidebarProvider?.refresh(
     workspaceRoot,
     calkitConfig,
@@ -1194,6 +1229,7 @@ async function refreshStaleOutputContext(
     for (const p of nextStale) {
       staleOutputUris.add(p);
     }
+    const prevStageNames = new Set(staleStageNames);
     staleStageNames.clear();
     for (const n of freshStaleStageNames) {
       staleStageNames.add(n);
@@ -1204,17 +1240,23 @@ async function refreshStaleOutputContext(
     if (changedUris.length > 0) {
       provider.refresh(changedUris);
     }
-    sidebarProvider?.refresh(
-      workspaceRoot,
-      currentCalkitConfig,
-      currentDvcYaml,
-      staleStageNames,
-      currentEnvDescriptions,
-      currentDetectedNotebooks,
-      currentDetectedFigures,
-      currentDetectedDatasets,
-    );
-    updateSidebarBadge();
+    // Only re-render the sidebar if the set of stale stages actually changed
+    const staleChanged =
+      prevStageNames.size !== staleStageNames.size ||
+      [...staleStageNames].some((n) => !prevStageNames.has(n));
+    if (staleChanged) {
+      sidebarProvider?.refresh(
+        workspaceRoot,
+        currentCalkitConfig,
+        currentDvcYaml,
+        staleStageNames,
+        currentEnvDescriptions,
+        currentDetectedNotebooks,
+        currentDetectedFigures,
+        currentDetectedDatasets,
+      );
+      updateSidebarBadge();
+    }
   } catch (error) {
     log(`Staleness check failed: ${String(error)}`);
   }
@@ -1509,7 +1551,7 @@ async function showStageEditor(
   );
 
   panel.webview.onDidReceiveMessage(
-    (msg: {
+    async (msg: {
       command: string;
       stageName: string;
       source: string;
@@ -1533,21 +1575,17 @@ async function showStageEditor(
           args.push(outFlag, msg.output);
         }
         args.push(msg.source);
-        // If creating a stage for a known artifact, link artifact → stage in calkit.yaml
+        // Link artifact → stage in calkit.yaml before running xr so both writes don't race
         if (artifactKind && prefillOutput && msg.stageName) {
-          void execFileAsync(
+          await execFileAsync(
             "calkit",
             ["update", artifactKind, prefillOutput, "--stage", msg.stageName],
             { cwd: workspaceRoot },
-          )
-            .catch((err: unknown) => {
-              void vscode.window.showErrorMessage(
-                `Failed to link ${artifactKind} to stage: ${String(err)}`,
-              );
-            })
-            .finally(() => {
-              void refreshPipelineOutputContext(context);
-            });
+          ).catch((err: unknown) => {
+            void vscode.window.showErrorMessage(
+              `Failed to link ${artifactKind} to stage: ${String(err)}`,
+            );
+          });
         }
         const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
         terminal.show();

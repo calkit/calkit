@@ -43,6 +43,7 @@ export class CalkitSidebarProvider
   private detectedNotebooks: string[] = [];
   private detectedFigures: string[] = [];
   private detectedDatasets: string[] = [];
+  private lastFingerprint: string | undefined;
 
   // Cached section items so reveal() can use getParent()
   private readonly envsSectionItem = this.makeSection("Environments", "envs");
@@ -71,6 +72,19 @@ export class CalkitSidebarProvider
     detectedFigures?: string[],
     detectedDatasets?: string[],
   ): void {
+    const nextFingerprint = JSON.stringify([
+      calkitConfig,
+      dvcYaml,
+      [...staleStageNames].sort(),
+      envDescriptions,
+      detectedNotebooks,
+      detectedFigures,
+      detectedDatasets,
+    ]);
+    if (nextFingerprint === this.lastFingerprint) {
+      return;
+    }
+    this.lastFingerprint = nextFingerprint;
     this.workspaceRoot = workspaceRoot;
     this.calkitConfig = calkitConfig;
     this.dvcYaml = dvcYaml;
@@ -110,6 +124,7 @@ export class CalkitSidebarProvider
       }
     }
     // Figures with no provenance or stale stage
+    const outputToStage = this.buildOutputToStageMap();
     const figList = this.calkitConfig?.figures ?? [];
     const knownFigPaths = new Set(figList.map((f) => f.path));
     const allFigPaths = [...knownFigPaths];
@@ -119,16 +134,9 @@ export class CalkitSidebarProvider
       }
     }
     for (const figPath of allFigPaths) {
-      const entry = figList.find((f) => f.path === figPath) ?? {
-        path: figPath,
-      };
+      const entry = this.resolveArtifactEntry(figPath, "figure", outputToStage);
       if (!entry.stage && !entry.imported_from) {
         count++;
-      } else if (
-        typeof entry.stage === "string" &&
-        this.staleStageNames.has(entry.stage)
-      ) {
-        // Already counted via stale stages
       }
     }
     // Datasets with no provenance
@@ -141,9 +149,11 @@ export class CalkitSidebarProvider
       }
     }
     for (const dataPath of allDataPaths) {
-      const entry = dataList.find((d) => d.path === dataPath) ?? {
-        path: dataPath,
-      };
+      const entry = this.resolveArtifactEntry(
+        dataPath,
+        "dataset",
+        outputToStage,
+      );
       if (!entry.stage && !entry.imported_from) {
         count++;
       }
@@ -397,9 +407,9 @@ export class CalkitSidebarProvider
       ) {
         const absPath = path.join(this.workspaceRoot, nbPath);
         item.command = {
-          command: "vscode.open",
+          command: "vscode.openWith",
           title: "Open",
-          arguments: [vscode.Uri.file(absPath)],
+          arguments: [vscode.Uri.file(absPath), "jupyter-notebook"],
         };
       }
       return item;
@@ -482,24 +492,59 @@ export class CalkitSidebarProvider
       );
       openItem.iconPath = new vscode.ThemeIcon("go-to-file");
       openItem.command = {
-        command: "vscode.open",
+        command: "vscode.openWith",
         title: "Open",
-        arguments: [vscode.Uri.file(path.join(this.workspaceRoot, nbPath))],
+        arguments: [
+          vscode.Uri.file(path.join(this.workspaceRoot, nbPath)),
+          "jupyter-notebook",
+        ],
       };
       items.push(openItem);
     }
     return items;
   }
 
+  private buildOutputToStageMap(): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const [stageName, stage] of Object.entries(
+      this.calkitConfig?.pipeline?.stages ?? {},
+    )) {
+      for (const out of stage.outputs ?? []) {
+        map.set(outputEntryPath(out), stageName);
+      }
+    }
+    for (const [stageName, stage] of Object.entries(
+      this.dvcYaml?.stages ?? {},
+    )) {
+      for (const out of stage.outs ?? []) {
+        const p =
+          typeof out === "string" ? out : String(Object.keys(out)[0] ?? "");
+        if (p) {
+          map.set(p, stageName);
+        }
+      }
+    }
+    return map;
+  }
+
   private resolveArtifactEntry(
     artifactPath: string,
     kind: "figure" | "dataset",
+    outputToStage: Map<string, string>,
   ): FigureEntry | DatasetEntry {
     const list =
       kind === "figure"
         ? this.calkitConfig?.figures ?? []
         : this.calkitConfig?.datasets ?? [];
-    return list.find((e) => e.path === artifactPath) ?? { path: artifactPath };
+    const fromList = list.find((e) => e.path === artifactPath);
+    if (fromList?.stage || fromList?.imported_from) {
+      return fromList;
+    }
+    const stageName = outputToStage.get(artifactPath);
+    if (stageName) {
+      return { ...(fromList ?? { path: artifactPath }), stage: stageName };
+    }
+    return fromList ?? { path: artifactPath };
   }
 
   private getArtifactItems(kind: "figures" | "datasets"): SidebarItem[] {
@@ -524,9 +569,10 @@ export class CalkitSidebarProvider
         ),
       ];
     }
+    const outputToStage = this.buildOutputToStageMap();
     return allPaths.map((artifactPath) =>
       this.makeArtifactItem(
-        this.resolveArtifactEntry(artifactPath, nodeKind),
+        this.resolveArtifactEntry(artifactPath, nodeKind, outputToStage),
         nodeKind,
       ),
     );
@@ -584,7 +630,11 @@ export class CalkitSidebarProvider
     artifactPath: string,
     nodeKind: "figure" | "dataset",
   ): SidebarItem[] {
-    const entry = this.resolveArtifactEntry(artifactPath, nodeKind);
+    const entry = this.resolveArtifactEntry(
+      artifactPath,
+      nodeKind,
+      this.buildOutputToStageMap(),
+    );
     const items: SidebarItem[] = [];
     const stages = this.calkitConfig?.pipeline?.stages ?? {};
     if (typeof entry.stage === "string") {

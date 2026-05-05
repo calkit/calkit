@@ -67,6 +67,10 @@ const DATASET_EXTENSIONS = new Set([
   ".zarr",
   ".feather",
   ".arrow",
+  ".avro",
+  ".json",
+  ".jsonl",
+  ".ndjson",
 ]);
 const NOTEBOOK_EXTENSION = ".ipynb";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
@@ -1776,8 +1780,8 @@ ${
   #kind-hint { font-size: 0.8em; color: var(--vscode-descriptionForeground); margin-top: 3px; height: 1.2em; }
   #new-env-row { margin-top: 6px; display: none; }
   .list-section { border: 1px solid var(--vscode-input-border, #555); border-radius: 2px; padding: 6px 8px; }
-  .list-item { display: flex; gap: 6px; margin-bottom: 4px; align-items: center; }
-  .list-item input { flex: 1; }
+  .list-item { display: flex; gap: 6px; margin-bottom: 4px; align-items: center; position: relative; }
+  .list-item input { flex: 1; min-width: 0; }
   .remove-btn { background: none; border: none; color: var(--vscode-descriptionForeground); cursor: pointer; font-size: 1.1em; padding: 2px 4px; margin-top: 0; flex-shrink: 0; }
   .remove-btn:hover { color: var(--vscode-foreground); }
   .add-btn { background: none; border: none; color: var(--vscode-textLink-foreground); cursor: pointer; font-size: 0.9em; padding: 2px 0; margin-top: 4px; }
@@ -1785,6 +1789,11 @@ ${
   .actions { margin-top: 20px; }
   button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 7px 18px; cursor: pointer; font-size: 1em; border-radius: 2px; margin-top: 0; }
   button:hover { background: var(--vscode-button-hoverBackground); }
+  .ac-wrap { position: relative; flex: 1; min-width: 0; }
+  .ac-wrap input { width: 100%; box-sizing: border-box; }
+  .ac-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 100; background: var(--vscode-input-background); border: 1px solid var(--vscode-focusBorder); list-style: none; margin: 0; padding: 0; max-height: 180px; overflow-y: auto; }
+  .ac-dropdown li { padding: 4px 8px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ac-dropdown li:hover, .ac-dropdown li.ac-sel { background: var(--vscode-list-hoverBackground); }
 </style>
 </head>
 <body>
@@ -1815,12 +1824,12 @@ ${createSection}
     <button class="add-btn" id="add-output">+ Add output</button>
   </div>
 </div>
-<datalist id="wf-list">${datalistOptions}</datalist>
 <div class="actions">${buttons}</div>
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   const kindByExt = ${JSON.stringify(KIND_BY_EXT)};
   const isEdit = ${JSON.stringify(isEdit)};
+  const allProjectFiles = ${JSON.stringify(allProjectFiles)};
 
   function getKind(filePath) {
     const dot = filePath.lastIndexOf('.');
@@ -1829,22 +1838,86 @@ ${createSection}
   function slugify(s) {
     return s.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase();
   }
+  function attachAutocomplete(inp) {
+    let dropdown = null;
+    let selIdx = -1;
+    function close() {
+      if (dropdown) { dropdown.remove(); dropdown = null; }
+      selIdx = -1;
+    }
+    function open(items) {
+      close();
+      if (!items.length) return;
+      dropdown = document.createElement('ul');
+      dropdown.className = 'ac-dropdown';
+      items.forEach(function(text, i) {
+        const li = document.createElement('li');
+        li.textContent = text;
+        li.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          inp.value = text;
+          close();
+        });
+        dropdown.appendChild(li);
+      });
+      inp.closest('.ac-wrap').appendChild(dropdown);
+    }
+    function highlight(idx) {
+      if (!dropdown) return;
+      const items = dropdown.querySelectorAll('li');
+      items.forEach(function(li, i) { li.classList.toggle('ac-sel', i === idx); });
+      if (idx >= 0 && items[idx]) items[idx].scrollIntoView({ block: 'nearest' });
+    }
+    inp.addEventListener('input', function() {
+      const val = inp.value.toLowerCase();
+      const filtered = allProjectFiles.filter(function(f) { return f.toLowerCase().includes(val); }).slice(0, 30);
+      open(filtered);
+      selIdx = -1;
+    });
+    inp.addEventListener('keydown', function(e) {
+      if (!dropdown) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          const filtered = allProjectFiles.filter(function(f) { return f.toLowerCase().includes(inp.value.toLowerCase()); }).slice(0, 30);
+          open(filtered);
+          selIdx = 0;
+          highlight(selIdx);
+        }
+        return;
+      }
+      const items = dropdown.querySelectorAll('li');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        selIdx = Math.min(selIdx + 1, items.length - 1);
+        highlight(selIdx);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        selIdx = Math.max(selIdx - 1, -1);
+        highlight(selIdx);
+      } else if (e.key === 'Enter' && selIdx >= 0) {
+        e.preventDefault();
+        inp.value = items[selIdx].textContent;
+        close();
+      } else if (e.key === 'Escape') {
+        close();
+      } else if (e.key === 'Tab') {
+        if (selIdx >= 0) { inp.value = items[selIdx].textContent; }
+        close();
+      }
+    });
+    inp.addEventListener('blur', function() { setTimeout(close, 150); });
+  }
   function makeListItem(listEl, value, withStorage) {
     const row = document.createElement('div');
     row.className = 'list-item';
+    const wrap = document.createElement('div');
+    wrap.className = 'ac-wrap';
     const inp = document.createElement('input');
     inp.type = 'text';
     inp.value = (withStorage ? value.path : value) || '';
-    inp.setAttribute('list', 'wf-list');
-    inp.addEventListener('keydown', function(e) {
-      if (e.key === 'ArrowDown') {
-        const v = inp.value;
-        inp.value = v + '​';
-        inp.dispatchEvent(new Event('input'));
-        inp.value = v;
-        inp.dispatchEvent(new Event('input'));
-      }
-    });
+    attachAutocomplete(inp);
+    wrap.appendChild(inp);
+    row.appendChild(wrap);
     if (withStorage) {
       const sel = document.createElement('select');
       sel.className = 'storage-sel';
@@ -1857,10 +1930,7 @@ ${createSection}
         if (s === (value.storage || 'dvc')) { opt.selected = true; }
         sel.appendChild(opt);
       });
-      row.appendChild(inp);
       row.appendChild(sel);
-    } else {
-      row.appendChild(inp);
     }
     const btn = document.createElement('button');
     btn.className = 'remove-btn';

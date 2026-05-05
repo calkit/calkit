@@ -654,6 +654,62 @@ def update_uv_env(
         check_environment(env_name=env_name)
 
 
+@update_app.command(name="julia-env")
+def update_julia_env(
+    env_name: Annotated[
+        str,
+        typer.Option("--name", "-n", help="Environment name."),
+    ],
+    add: Annotated[
+        list[str],
+        typer.Option("--add", help="Add a package."),
+    ] = [],
+    remove: Annotated[
+        list[str],
+        typer.Option("--remove", "--rm", help="Remove a package."),
+    ] = [],
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Skip checking (syncing) the environment after updating.",
+        ),
+    ] = False,
+) -> None:
+    """Update a Julia environment."""
+    import subprocess
+
+    ck_info, env = _load_env(env_name)
+    if env.get("kind") != "julia":
+        raise_error(f"Environment '{env_name}' is not a Julia environment")
+    spec_path = env.get("path", "Project.toml")
+    env_dir = os.path.dirname(spec_path) or "."
+    julia_version = env.get("julia")
+    julia_bin = ["julia", f"+{julia_version}"] if julia_version else ["julia"]
+    cmds = [f'Pkg.activate("{env_dir}")']
+    if add:
+        pkg_list = "[" + ", ".join(f'"{p}"' for p in add) + "]"
+        cmds.append(f"Pkg.add({pkg_list})")
+    if remove:
+        pkg_list = "[" + ", ".join(f'"{p}"' for p in remove) + "]"
+        cmds.append(f"Pkg.rm({pkg_list})")
+    if add or remove:
+        cmd = julia_bin + [
+            f"--project={env_dir}",
+            "-e",
+            "using Pkg; " + "; ".join(cmds),
+        ]
+        res = subprocess.run(cmd)
+        if res.returncode != 0:
+            raise_error("Failed to update Julia environment")
+    typer.echo(f"Updated Julia environment '{env_name}'")
+    if not no_check:
+        typer.echo(f"Checking environment '{env_name}'")
+        from calkit.cli.check import check_environment
+
+        check_environment(env_name=env_name)
+
+
 @update_app.command(name="conda-env")
 def update_conda_env(
     env_name: Annotated[

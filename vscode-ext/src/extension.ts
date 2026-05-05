@@ -3267,6 +3267,49 @@ async function runCreateEnvironmentWizard(
   }
 }
 
+async function readUvPackages(
+  workspaceRoot: string,
+  specPath: string,
+): Promise<string[]> {
+  try {
+    const absPath = path.join(workspaceRoot, specPath);
+    const raw = (
+      await vscode.workspace.fs.readFile(vscode.Uri.file(absPath))
+    ).toString();
+    const match = raw.match(
+      /\[project\][^\[]*?dependencies\s*=\s*\[([\s\S]*?)\]/,
+    );
+    if (!match) {
+      return [];
+    }
+    return Array.from(match[1].matchAll(/"([^"]+)"/g)).map((m) => m[1]);
+  } catch {
+    return [];
+  }
+}
+
+async function readJuliaPackages(
+  workspaceRoot: string,
+  specPath: string,
+): Promise<string[]> {
+  try {
+    const absPath = path.join(workspaceRoot, specPath);
+    const raw = (
+      await vscode.workspace.fs.readFile(vscode.Uri.file(absPath))
+    ).toString();
+    const match = raw.match(/\[deps\]([\s\S]*?)(?:\[|$)/);
+    if (!match) {
+      return [];
+    }
+    return match[1]
+      .split("\n")
+      .map((l) => l.split("=")[0].trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 async function readCondaPackages(
   workspaceRoot: string,
   specPath: string,
@@ -3307,8 +3350,16 @@ async function showEnvCreatorWebview(
     conda: [],
     pip: [],
   };
-  if (isEdit && kind === "conda" && specPath) {
-    condaPackages = await readCondaPackages(workspaceRoot, specPath);
+  let uvPackages: string[] = [];
+  let juliaPackages: string[] = [];
+  if (isEdit && specPath) {
+    if (kind === "conda") {
+      condaPackages = await readCondaPackages(workspaceRoot, specPath);
+    } else if (kind === "uv" || kind === "uv-venv") {
+      uvPackages = await readUvPackages(workspaceRoot, specPath);
+    } else if (kind === "julia") {
+      juliaPackages = await readJuliaPackages(workspaceRoot, specPath);
+    }
   }
   const nonce = getNonce();
   const panel = vscode.window.createWebviewPanel(
@@ -3325,6 +3376,8 @@ async function showEnvCreatorWebview(
     specPath,
     condaPackages.conda,
     condaPackages.pip,
+    uvPackages,
+    juliaPackages,
   );
   panel.webview.onDidReceiveMessage(
     (msg: {
@@ -3373,6 +3426,34 @@ async function showEnvCreatorWebview(
           for (const p of msg.origPipPackages) {
             if (!newPipSet.has(p)) {
               args.push("--rm-pip", p);
+            }
+          }
+        } else if (msg.kind === "uv" || msg.kind === "uv-venv") {
+          args.push("update", "uv-env", "-n", msg.name, "--no-check");
+          const origSet = new Set(msg.origPackages);
+          const newSet = new Set(msg.packages);
+          for (const p of msg.packages) {
+            if (!origSet.has(p)) {
+              args.push("--add", p);
+            }
+          }
+          for (const p of msg.origPackages) {
+            if (!newSet.has(p)) {
+              args.push("--rm", p);
+            }
+          }
+        } else if (msg.kind === "julia") {
+          args.push("update", "julia-env", "-n", msg.name, "--no-check");
+          const origSet = new Set(msg.origPackages);
+          const newSet = new Set(msg.packages);
+          for (const p of msg.packages) {
+            if (!origSet.has(p)) {
+              args.push("--add", p);
+            }
+          }
+          for (const p of msg.origPackages) {
+            if (!newSet.has(p)) {
+              args.push("--rm", p);
             }
           }
         } else if (msg.kind === "docker") {
@@ -3501,6 +3582,8 @@ function buildEnvCreatorHtml(
   specPath?: string,
   editCondaPackages: string[] = [],
   editPipPackages: string[] = [],
+  editUvPackages: string[] = [],
+  editJuliaPackages: string[] = [],
 ): string {
   const isEdit = editEnvName !== undefined;
   const kind = typeof existingEnv?.kind === "string" ? existingEnv.kind : "uv";
@@ -3543,24 +3626,36 @@ function buildEnvCreatorHtml(
 <select id="kind">
   <option value="uv">uv</option>
   <option value="conda">conda</option>
+  <option value="julia">julia</option>
   <option value="docker">docker</option>
   <option value="slurm">slurm</option>
 </select>
 </div>`;
 
+  const uvPackagesJson = JSON.stringify(editUvPackages);
+  const juliaPackagesJson = JSON.stringify(editJuliaPackages);
+
   const uvSection =
-    isEdit && kind !== "uv"
+    isEdit && kind !== "uv" && kind !== "uv-venv"
       ? ""
       : `
-<div id="section-uv"${isEdit && kind === "uv" && specPath ? "" : ""}>
+<div id="section-uv">
 ${
-  isEdit && specPath
-    ? `  <div class="field"><label>Spec file</label><div class="info-row">${escHtml(
-        specPath,
-      )}</div></div>
-  <div class="field info-note">Edit <code>${escHtml(
-    specPath,
-  )}</code> directly to add or remove packages.</div>`
+  isEdit
+    ? `${
+        specPath
+          ? `  <div class="field"><label>Spec file</label><div class="info-row">${escHtml(
+              specPath,
+            )}</div></div>`
+          : ""
+      }
+  <div class="field">
+    <label>Packages</label>
+    <div class="list-section">
+      <div id="uv-packages-list"></div>
+      <button class="add-btn" id="add-uv-package">+ Add package</button>
+    </div>
+  </div>`
     : `  <div class="field">
     <label>Python version <span style="font-weight:normal;text-transform:none">(optional)</span></label>
     <input id="python-version" type="text" placeholder="e.g. 3.11" />
@@ -3568,8 +3663,39 @@ ${
   <div class="field">
     <label>Packages</label>
     <div class="list-section">
-      <div id="packages-list"></div>
-      <button class="add-btn" id="add-package">+ Add package</button>
+      <div id="uv-packages-list"></div>
+      <button class="add-btn" id="add-uv-package">+ Add package</button>
+    </div>
+  </div>`
+}
+</div>`;
+
+  const juliaSection =
+    isEdit && kind !== "julia"
+      ? ""
+      : `
+<div id="section-julia"${!isEdit ? ' style="display:none"' : ""}>
+${
+  isEdit
+    ? `${
+        specPath
+          ? `  <div class="field"><label>Spec file</label><div class="info-row">${escHtml(
+              specPath,
+            )}</div></div>`
+          : ""
+      }
+  <div class="field">
+    <label>Packages</label>
+    <div class="list-section">
+      <div id="julia-packages-list"></div>
+      <button class="add-btn" id="add-julia-package">+ Add package</button>
+    </div>
+  </div>`
+    : `  <div class="field">
+    <label>Packages</label>
+    <div class="list-section">
+      <div id="julia-packages-list"></div>
+      <button class="add-btn" id="add-julia-package">+ Add package</button>
     </div>
   </div>`
 }
@@ -3708,6 +3834,7 @@ ${
 ${nameField}
 ${kindField}
 ${uvSection}
+${juliaSection}
 ${condaSection}
 ${dockerSection}
 ${slurmSection}
@@ -3732,6 +3859,7 @@ ${slurmSection}
   const kindEl = document.getElementById('kind');
   const sections = {
     uv: document.getElementById('section-uv'),
+    julia: document.getElementById('section-julia'),
     conda: document.getElementById('section-conda'),
     docker: document.getElementById('section-docker'),
     slurm: document.getElementById('section-slurm'),
@@ -3767,9 +3895,17 @@ ${slurmSection}
     return Array.from(listEl.querySelectorAll('input')).map(function(i) { return i.value.trim(); }).filter(Boolean);
   }
 
-  // Pre-populate conda package lists
+  // Pre-populate package lists
+  const uvPkgList = document.getElementById('uv-packages-list');
+  const juliaPkgList = document.getElementById('julia-packages-list');
   const condaPkgList = document.getElementById('conda-packages-list');
   const pipPkgList = document.getElementById('pip-packages-list');
+  if (uvPkgList) {
+    for (const v of ${uvPackagesJson}) { makeListItem(uvPkgList, v, 'e.g. numpy'); }
+  }
+  if (juliaPkgList) {
+    for (const v of ${juliaPackagesJson}) { makeListItem(juliaPkgList, v, 'e.g. Plots'); }
+  }
   if (condaPkgList) {
     for (const v of ${condaPackagesJson}) { makeListItem(condaPkgList, v, 'e.g. numpy'); }
   }
@@ -3787,26 +3923,16 @@ ${slurmSection}
     for (const v of ${setupJson}) { makeListItem(slurmSetupList, v, 'module load julia/1.11'); }
   }
 
-  ${
-    !isEdit
-      ? `
-  const pkgList = document.getElementById('packages-list');
-  const dockerBaseEl = document.getElementById('docker-base');
-  const dockerfilePathField = document.getElementById('dockerfile-path-field');
-
-  document.getElementById('add-package').addEventListener('click', function() {
-    makeListItem(pkgList, '', 'e.g. numpy').focus();
-  });
-  document.getElementById('add-conda-package').addEventListener('click', function() {
-    makeListItem(condaPkgList, '', 'e.g. numpy').focus();
-  });
-  if (dockerBaseEl) {
-    dockerBaseEl.addEventListener('input', function() {
-      dockerfilePathField.style.display = dockerBaseEl.value.trim() ? '' : 'none';
+  if (document.getElementById('add-uv-package')) {
+    document.getElementById('add-uv-package').addEventListener('click', function() {
+      makeListItem(uvPkgList, '', 'e.g. numpy').focus();
     });
   }
-  `
-      : `
+  if (document.getElementById('add-julia-package')) {
+    document.getElementById('add-julia-package').addEventListener('click', function() {
+      makeListItem(juliaPkgList, '', 'e.g. Plots').focus();
+    });
+  }
   if (document.getElementById('add-conda-package')) {
     document.getElementById('add-conda-package').addEventListener('click', function() {
       makeListItem(condaPkgList, '', 'e.g. numpy').focus();
@@ -3817,7 +3943,17 @@ ${slurmSection}
       makeListItem(pipPkgList, '', 'e.g. requests').focus();
     });
   }
-  `
+  ${
+    !isEdit
+      ? `
+  const dockerBaseEl = document.getElementById('docker-base');
+  const dockerfilePathField = document.getElementById('dockerfile-path-field');
+  if (dockerBaseEl) {
+    dockerBaseEl.addEventListener('input', function() {
+      dockerfilePathField.style.display = dockerBaseEl.value.trim() ? '' : 'none';
+    });
+  }`
+      : ""
   }
 
   if (document.getElementById('add-slurm-option')) {
@@ -3853,15 +3989,25 @@ ${slurmSection}
     errorMsg.style.display = 'none';
     btnSubmit.disabled = true;
     spinnerText.style.display = 'inline';
-    const packages = condaPkgList ? getListValues(condaPkgList) : (!isEdit && kind === 'uv' ? getListValues(pkgList) : []);
+    let packages = [];
+    if (kind === 'uv' || kind === 'uv-venv') {
+      packages = uvPkgList ? getListValues(uvPkgList) : [];
+    } else if (kind === 'julia') {
+      packages = juliaPkgList ? getListValues(juliaPkgList) : [];
+    } else if (kind === 'conda') {
+      packages = condaPkgList ? getListValues(condaPkgList) : [];
+    }
     const pipPackages = pipPkgList ? getListValues(pipPkgList) : [];
+    const origPackages = kind === 'uv' || kind === 'uv-venv' ? ${uvPackagesJson}
+      : kind === 'julia' ? ${juliaPackagesJson}
+      : ${condaPackagesJson};
     vscode.postMessage({
       command: '${postCommand}',
       name,
       kind,
       packages,
       pipPackages,
-      origPackages: ${condaPackagesJson},
+      origPackages,
       origPipPackages: ${pipPackagesJson},
       pythonVersion: document.getElementById('python-version') ? document.getElementById('python-version').value.trim() : '',
       condaPath: document.getElementById('conda-path') ? document.getElementById('conda-path').value.trim() : '',

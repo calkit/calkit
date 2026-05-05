@@ -2007,6 +2007,7 @@ Update objects.
 | [`notebook`](#subcommand-update-notebook)             | Update notebook information.                                                        |
 | [`agent-skills`](#subcommand-update-agent-skills)     | Copy packaged Calkit agent skills to `~/.agents/skills`.                            |
 | [`uv-env`](#subcommand-update-uv-env)                 | Update a uv environment.                                                            |
+| [`julia-env`](#subcommand-update-julia-env)           | Update a Julia environment.                                                         |
 | [`conda-env`](#subcommand-update-conda-env)           | Update a conda environment spec file.                                               |
 | [`docker-env`](#subcommand-update-docker-env)         | Update a docker environment.                                                        |
 | [`slurm-env`](#subcommand-update-slurm-env)           | Update a SLURM environment.                                                         |
@@ -2171,6 +2172,27 @@ Usage:
 
 ```text
 calkit update uv-env [OPTIONS]
+```
+
+Options:
+
+| Option             | Type    | Required | Default | Description                                             |
+| ------------------ | ------- | -------- | ------- | ------------------------------------------------------- |
+| `--name`, `-n`     | text    | yes      |         | Environment name.                                       |
+| `--add`            | text    | no       |         | Add a package.                                          |
+| `--remove`, `--rm` | text    | no       |         | Remove a package.                                       |
+| `--no-check`       | boolean | no       | False   | Skip checking (syncing) the environment after updating. |
+
+<a id="subcommand-update-julia-env"></a>
+
+#### `calkit update julia-env`
+
+Update a Julia environment.
+
+Usage:
+
+```text
+calkit update julia-env [OPTIONS]
 ```
 
 Options:

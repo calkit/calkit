@@ -1250,7 +1250,7 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
     return res
 
 
-@app.command(name="run|r")
+@app.command(name="run")
 def run(
     targets: Annotated[
         list[str] | None,

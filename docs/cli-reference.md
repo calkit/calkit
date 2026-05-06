@@ -21,7 +21,7 @@
 | [`sync`](#top-command-sync)                      | Sync the project repo by pulling and then pushing.                 |
 | [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.               |
 | [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                        |
-| [`run\|r`](#top-command-run-r)                   | Check dependencies and run the pipeline.                           |
+| [`run`](#top-command-run)                        | Check dependencies and run the pipeline.                           |
 | [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                             |
 | [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                               |
 | [`xproc\|runproc`](#top-command-xproc-runproc)   | Execute a procedure.                                               |
@@ -327,16 +327,16 @@ Usage:
 calkit local-server
 ```
 
-<a id="top-command-run-r"></a>
+<a id="top-command-run"></a>
 
-### `calkit run|r`
+### `calkit run`
 
 Check dependencies and run the pipeline.
 
 Usage:
 
 ```text
-calkit run|r [OPTIONS] [TARGETS...]
+calkit run [OPTIONS] [TARGETS...]
 ```
 
 Arguments:

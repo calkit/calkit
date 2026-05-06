@@ -7,9 +7,9 @@ from typing import Annotated, Literal
 import typer
 
 import calkit
-from calkit.cli import warn
+from calkit.cli import AliasGroup, warn
 
-list_app = typer.Typer(no_args_is_help=True)
+list_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
 
 def _list_objects(
@@ -50,33 +50,37 @@ def _list_objects(
                 typer.echo(f"  {k}: {v}")
 
 
-@list_app.command(name="notebooks")
+@list_app.command(name="notebooks|nb")
 def list_notebooks():
+    """List notebooks in the project."""
     _list_objects("notebooks")
 
 
-@list_app.command(name="figures")
+@list_app.command(name="figures|figs")
 def list_figures():
+    """List figures in the project."""
     _list_objects("figures")
 
 
 @list_app.command(name="datasets")
 def list_datasets():
+    """List datasets in the project."""
     _list_objects("datasets")
 
 
-@list_app.command(name="publications")
+@list_app.command(name="publications|pubs")
 def list_publications():
+    """List publications in the project."""
     _list_objects("publications")
 
 
-@list_app.command(name="references")
+@list_app.command(name="references|refs")
 def list_references():
+    """List reference collections in the project."""
     _list_objects("references")
 
 
-@list_app.command(name="environments")
-@list_app.command(name="envs")
+@list_app.command(name="environments|envs")
 def list_environments():
     """List environments in the project."""
     envs = calkit.load_calkit_info().get("environments", {})
@@ -88,6 +92,7 @@ def list_environments():
 
 @list_app.command(name="templates")
 def list_templates():
+    """List all available Calkit templates."""
     for kind, tpl_dict in calkit.templates.TEMPLATES.items():
         for name in tpl_dict:
             typer.echo(f"{kind}/{name}")
@@ -95,6 +100,7 @@ def list_templates():
 
 @list_app.command(name="procedures")
 def list_procedures():
+    """List procedures in the current project."""
     ck_info = calkit.load_calkit_info()
     for p in ck_info.get("procedures", {}):
         typer.echo(p)
@@ -134,7 +140,7 @@ def list_stages(
         typer.Option("--kind", "-k", help="Filter stages by kind."),
     ] = None,
 ):
-    """List stages."""
+    """List pipeline stages."""
     stages = calkit.load_calkit_info().get("pipeline", {}).get("stages", {})
     for name, stage in stages.items():
         if kinds is not None and stage.get("kind") not in kinds:

@@ -43,8 +43,8 @@
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                        |
 | [`update`](#command-group-update)                | Update objects.                                                    |
 | [`check`](#command-group-check)                  | Check things.                                                      |
-| [`latex`](#command-group-latex)                  | Work with LaTeX.                                                   |
-| [`overleaf`](#command-group-overleaf)            | Interact with Overleaf.                                            |
+| [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                   |
+| [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                            |
 | [`cloud`](#command-group-cloud)                  | Interact with a Calkit Cloud.                                      |
 | [`slurm`](#command-group-slurm)                  | Work with SLURM.                                                   |
 | [`dev`](#command-group-dev)                      | Developer tools.                                                   |
@@ -785,13 +785,13 @@ Create a new Calkit object.
 | Command                                                                   | Description                                                           |
 | ------------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | [`project`](#subcommand-new-create-project)                               | Create a new project.                                                 |
-| [`figure`](#subcommand-new-create-figure)                                 | Create a new figure.                                                  |
+| [`figure\|fig`](#subcommand-new-create-figure-fig)                        | Create a new figure.                                                  |
 | [`question`](#subcommand-new-create-question)                             | Add a new question.                                                   |
-| [`notebook`](#subcommand-new-create-notebook)                             | Add a new notebook.                                                   |
+| [`notebook\|nb`](#subcommand-new-create-notebook-nb)                      | Add a new notebook.                                                   |
 | [`docker-env`](#subcommand-new-create-docker-env)                         | Create a new Docker environment.                                      |
 | [`foreach-stage`](#subcommand-new-create-foreach-stage)                   | Create a new DVC 'foreach' stage.                                     |
 | [`dataset`](#subcommand-new-create-dataset)                               | Create a new dataset.                                                 |
-| [`publication`](#subcommand-new-create-publication)                       | Create a new publication.                                             |
+| [`publication\|pub`](#subcommand-new-create-publication-pub)              | Create a new publication.                                             |
 | [`conda-env`](#subcommand-new-create-conda-env)                           | Create a new Conda environment.                                       |
 | [`uv-env`](#subcommand-new-create-uv-env)                                 | Create a new uv project environment.                                  |
 | [`slurm-env`](#subcommand-new-create-slurm-env)                           | Create a new SLURM environment.                                       |
@@ -841,16 +841,16 @@ Options:
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite project if one already exists.                                      |
 | `--verbose`         | boolean | no       | False   | Print verbose output.                                                         |
 
-<a id="subcommand-new-create-figure"></a>
+<a id="subcommand-new-create-figure-fig"></a>
 
-#### `calkit new|create figure`
+#### `calkit new|create figure|fig`
 
 Create a new figure.
 
 Usage:
 
 ```text
-calkit new|create figure [OPTIONS] PATH
+calkit new|create figure|fig [OPTIONS] PATH
 ```
 
 Arguments:
@@ -897,16 +897,16 @@ Options:
 | ---------- | ------- | -------- | ------- | ----------- |
 | `--commit` | boolean | no       | False   |             |
 
-<a id="subcommand-new-create-notebook"></a>
+<a id="subcommand-new-create-notebook-nb"></a>
 
-#### `calkit new|create notebook`
+#### `calkit new|create notebook|nb`
 
 Add a new notebook.
 
 Usage:
 
 ```text
-calkit new|create notebook [OPTIONS] PATH
+calkit new|create notebook|nb [OPTIONS] PATH
 ```
 
 Arguments:
@@ -1022,16 +1022,16 @@ Options:
 | `--no-commit`            | boolean | no       | False   |                                                                 |
 | `--overwrite`, `-f`      | boolean | no       | False   | Overwrite existing dataset if one exists.                       |
 
-<a id="subcommand-new-create-publication"></a>
+<a id="subcommand-new-create-publication-pub"></a>
 
-#### `calkit new|create publication`
+#### `calkit new|create publication|pub`
 
 Create a new publication.
 
 Usage:
 
 ```text
-calkit new|create publication [OPTIONS] PATH
+calkit new|create publication|pub [OPTIONS] PATH
 ```
 
 Arguments:
@@ -1626,44 +1626,49 @@ Options:
 
 List Calkit objects.
 
-| Command                                            | Description                       |
-| -------------------------------------------------- | --------------------------------- |
-| [`notebooks`](#subcommand-list-ls-notebooks)       |                                   |
-| [`figures`](#subcommand-list-ls-figures)           |                                   |
-| [`datasets`](#subcommand-list-ls-datasets)         |                                   |
-| [`publications`](#subcommand-list-ls-publications) |                                   |
-| [`references`](#subcommand-list-ls-references)     |                                   |
-| [`envs`](#subcommand-list-ls-envs)                 | List environments in the project. |
-| [`environments`](#subcommand-list-ls-environments) | List environments in the project. |
-| [`templates`](#subcommand-list-ls-templates)       |                                   |
-| [`procedures`](#subcommand-list-ls-procedures)     |                                   |
-| [`releases`](#subcommand-list-ls-releases)         | List releases.                    |
-| [`stages`](#subcommand-list-ls-stages)             | List stages.                      |
-| [`remotes`](#subcommand-list-ls-remotes)           | List Git and DVC remotes.         |
+| Command                                                       | Description                                |
+| ------------------------------------------------------------- | ------------------------------------------ |
+| [`notebooks\|nb`](#subcommand-list-ls-notebooks-nb)           | List notebooks in the project.             |
+| [`figures\|figs`](#subcommand-list-ls-figures-figs)           | List figures in the project.               |
+| [`datasets`](#subcommand-list-ls-datasets)                    | List datasets in the project.              |
+| [`publications\|pubs`](#subcommand-list-ls-publications-pubs) | List publications in the project.          |
+| [`references\|refs`](#subcommand-list-ls-references-refs)     | List reference collections in the project. |
+| [`environments\|envs`](#subcommand-list-ls-environments-envs) | List environments in the project.          |
+| [`templates`](#subcommand-list-ls-templates)                  | List all available Calkit templates.       |
+| [`procedures`](#subcommand-list-ls-procedures)                | List procedures in the current project.    |
+| [`releases`](#subcommand-list-ls-releases)                    | List releases.                             |
+| [`stages`](#subcommand-list-ls-stages)                        | List pipeline stages.                      |
+| [`remotes`](#subcommand-list-ls-remotes)                      | List Git and DVC remotes.                  |
 
-<a id="subcommand-list-ls-notebooks"></a>
+<a id="subcommand-list-ls-notebooks-nb"></a>
 
-#### `calkit list|ls notebooks`
+#### `calkit list|ls notebooks|nb`
+
+List notebooks in the project.
 
 Usage:
 
 ```text
-calkit list|ls notebooks
+calkit list|ls notebooks|nb
 ```
 
-<a id="subcommand-list-ls-figures"></a>
+<a id="subcommand-list-ls-figures-figs"></a>
 
-#### `calkit list|ls figures`
+#### `calkit list|ls figures|figs`
+
+List figures in the project.
 
 Usage:
 
 ```text
-calkit list|ls figures
+calkit list|ls figures|figs
 ```
 
 <a id="subcommand-list-ls-datasets"></a>
 
 #### `calkit list|ls datasets`
+
+List datasets in the project.
 
 Usage:
 
@@ -1671,53 +1676,47 @@ Usage:
 calkit list|ls datasets
 ```
 
-<a id="subcommand-list-ls-publications"></a>
+<a id="subcommand-list-ls-publications-pubs"></a>
 
-#### `calkit list|ls publications`
+#### `calkit list|ls publications|pubs`
 
-Usage:
-
-```text
-calkit list|ls publications
-```
-
-<a id="subcommand-list-ls-references"></a>
-
-#### `calkit list|ls references`
+List publications in the project.
 
 Usage:
 
 ```text
-calkit list|ls references
+calkit list|ls publications|pubs
 ```
 
-<a id="subcommand-list-ls-envs"></a>
+<a id="subcommand-list-ls-references-refs"></a>
 
-#### `calkit list|ls envs`
+#### `calkit list|ls references|refs`
+
+List reference collections in the project.
+
+Usage:
+
+```text
+calkit list|ls references|refs
+```
+
+<a id="subcommand-list-ls-environments-envs"></a>
+
+#### `calkit list|ls environments|envs`
 
 List environments in the project.
 
 Usage:
 
 ```text
-calkit list|ls envs
-```
-
-<a id="subcommand-list-ls-environments"></a>
-
-#### `calkit list|ls environments`
-
-List environments in the project.
-
-Usage:
-
-```text
-calkit list|ls environments
+calkit list|ls environments|envs
 ```
 
 <a id="subcommand-list-ls-templates"></a>
 
 #### `calkit list|ls templates`
+
+List all available Calkit templates.
 
 Usage:
 
@@ -1728,6 +1727,8 @@ calkit list|ls templates
 <a id="subcommand-list-ls-procedures"></a>
 
 #### `calkit list|ls procedures`
+
+List procedures in the current project.
 
 Usage:
 
@@ -1751,7 +1752,7 @@ calkit list|ls releases
 
 #### `calkit list|ls stages`
 
-List stages.
+List pipeline stages.
 
 Usage:
 
@@ -2514,20 +2515,20 @@ Options:
 | ------------ | ---- | -------- | ------- | ------------------------------------ |
 | `--if-error` | text | yes      |         | Command to run if there is an error. |
 
-<a id="command-group-latex"></a>
+<a id="command-group-latex-tex"></a>
 
-### `calkit latex`
+### `calkit latex|tex`
 
 Work with LaTeX.
 
-| Command                                    | Description                                   |
-| ------------------------------------------ | --------------------------------------------- |
-| [`from-json`](#subcommand-latex-from-json) | Convert a JSON file to LaTeX.                 |
-| [`build`](#subcommand-latex-build)         | Build a PDF of a LaTeX document with latexmk. |
+| Command                                        | Description                                   |
+| ---------------------------------------------- | --------------------------------------------- |
+| [`from-json`](#subcommand-latex-tex-from-json) | Convert a JSON file to LaTeX.                 |
+| [`build`](#subcommand-latex-tex-build)         | Build a PDF of a LaTeX document with latexmk. |
 
-<a id="subcommand-latex-from-json"></a>
+<a id="subcommand-latex-tex-from-json"></a>
 
-#### `calkit latex from-json`
+#### `calkit latex|tex from-json`
 
 Convert a JSON file to LaTeX.
 
@@ -2536,7 +2537,7 @@ This is useful for referencing calculated values in LaTeX documents.
 Usage:
 
 ```text
-calkit latex from-json [OPTIONS] INPUT-FPATHS...
+calkit latex|tex from-json [OPTIONS] INPUT-FPATHS...
 ```
 
 Arguments:
@@ -2553,9 +2554,9 @@ Options:
 | `--command`      | text | no       |         | Command name to use in LaTeX output.                                                                     |
 | `--format-json`  | text | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc. |
 
-<a id="subcommand-latex-build"></a>
+<a id="subcommand-latex-tex-build"></a>
 
-#### `calkit latex build`
+#### `calkit latex|tex build`
 
 Build a PDF of a LaTeX document with latexmk.
 
@@ -2564,7 +2565,7 @@ If a Calkit environment is not specified, latexmk will be run in the system envi
 Usage:
 
 ```text
-calkit latex build [OPTIONS] TEX-FILE
+calkit latex|tex build [OPTIONS] TEX-FILE
 ```
 
 Arguments:
@@ -2584,28 +2585,28 @@ Options:
 | `--force`, `-f`      | boolean | no       | False   | Force latexmk to recompile all files, even if they are up to date. |
 | `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                              |
 
-<a id="command-group-overleaf"></a>
+<a id="command-group-overleaf-ol"></a>
 
-### `calkit overleaf`
+### `calkit overleaf|ol`
 
 Interact with Overleaf.
 
-| Command                                 | Description                                                    |
-| --------------------------------------- | -------------------------------------------------------------- |
-| [`import`](#subcommand-overleaf-import) | Import a publication from an Overleaf project.                 |
-| [`sync`](#subcommand-overleaf-sync)     | Sync folders with Overleaf.                                    |
-| [`status`](#subcommand-overleaf-status) | Check the status of folders synced with Overleaf in a project. |
+| Command                                    | Description                                                    |
+| ------------------------------------------ | -------------------------------------------------------------- |
+| [`import`](#subcommand-overleaf-ol-import) | Import a publication from an Overleaf project.                 |
+| [`sync`](#subcommand-overleaf-ol-sync)     | Sync folders with Overleaf.                                    |
+| [`status`](#subcommand-overleaf-ol-status) | Check the status of folders synced with Overleaf in a project. |
 
-<a id="subcommand-overleaf-import"></a>
+<a id="subcommand-overleaf-ol-import"></a>
 
-#### `calkit overleaf import`
+#### `calkit overleaf|ol import`
 
 Import a publication from an Overleaf project.
 
 Usage:
 
 ```text
-calkit overleaf import [OPTIONS] SRC-URL DEST-DIR
+calkit overleaf|ol import [OPTIONS] SRC-URL DEST-DIR
 ```
 
 Arguments:
@@ -2629,16 +2630,16 @@ Options:
 | `--overwrite`, `-f`   | boolean | no       | False   | Force adding the publication even if it already exists.                                                                    |
 | `--push-only`, `-P`   | boolean | no       | False   | Push local files to Overleaf without pulling. Useful when initializing a new Overleaf project from local files.            |
 
-<a id="subcommand-overleaf-sync"></a>
+<a id="subcommand-overleaf-ol-sync"></a>
 
-#### `calkit overleaf sync`
+#### `calkit overleaf|ol sync`
 
 Sync folders with Overleaf.
 
 Usage:
 
 ```text
-calkit overleaf sync [OPTIONS] [PATHS...]
+calkit overleaf|ol sync [OPTIONS] [PATHS...]
 ```
 
 Arguments:
@@ -2658,16 +2659,16 @@ Options:
 | `--resolve`, `-r`   | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                |
 | `--push-only`, `-P` | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files. |
 
-<a id="subcommand-overleaf-status"></a>
+<a id="subcommand-overleaf-ol-status"></a>
 
-#### `calkit overleaf status`
+#### `calkit overleaf|ol status`
 
 Check the status of folders synced with Overleaf in a project.
 
 Usage:
 
 ```text
-calkit overleaf status [PATHS...]
+calkit overleaf|ol status [PATHS...]
 ```
 
 Arguments:

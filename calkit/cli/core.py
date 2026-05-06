@@ -3,13 +3,32 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from typing import TYPE_CHECKING
 
 import typer
+from typer.core import TyperGroup
 
 if TYPE_CHECKING:
     import click
+
+
+class AliasGroup(TyperGroup):
+    """TyperGroup that resolves command aliases defined with '|' in the name."""
+
+    _CMD_SPLIT_P = re.compile(r" ?[,|] ?")
+
+    def get_command(self, ctx, cmd_name):
+        cmd_name = self._group_cmd_name(cmd_name)
+        return super().get_command(ctx, cmd_name)
+
+    def _group_cmd_name(self, default_name):
+        for cmd in self.commands.values():
+            name = cmd.name
+            if name and default_name in self._CMD_SPLIT_P.split(name):
+                return name
+        return default_name
 
 
 def complete_stage_names(

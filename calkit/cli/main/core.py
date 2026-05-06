@@ -9,7 +9,6 @@ import logging
 import os
 import platform as _platform
 import posixpath
-import re
 import shutil
 import subprocess
 import sys
@@ -21,7 +20,6 @@ from pathlib import Path
 
 import dotenv
 import typer
-from typer.core import TyperGroup
 from typing_extensions import Annotated, Optional
 
 import calkit
@@ -33,6 +31,7 @@ from calkit import (
     DVC_SIZE_THRESH_BYTES,
 )
 from calkit.cli import (
+    AliasGroup,
     complete_stage_names,
     print_sep,
     raise_error,
@@ -61,24 +60,6 @@ from calkit.cli.overleaf import overleaf_app
 from calkit.cli.slurm import slurm_app
 from calkit.cli.update import update_app
 
-
-class AliasGroup(TyperGroup):
-    """A TyperGroup that supports combined aliases in command names like 'run|r'."""
-
-    _CMD_SPLIT_P = re.compile(r" ?[,|] ?")
-
-    def get_command(self, ctx, cmd_name):
-        cmd_name = self._group_cmd_name(cmd_name)
-        return super().get_command(ctx, cmd_name)
-
-    def _group_cmd_name(self, default_name):
-        for cmd in self.commands.values():
-            name = cmd.name
-            if name and default_name in self._CMD_SPLIT_P.split(name):
-                return name
-        return default_name
-
-
 app = typer.Typer(
     cls=AliasGroup,
     invoke_without_command=True,
@@ -97,8 +78,8 @@ app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
-app.add_typer(latex_app, name="latex", help="Work with LaTeX.")
-app.add_typer(overleaf_app, name="overleaf", help="Interact with Overleaf.")
+app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
+app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
 app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
 app.add_typer(slurm_app, name="slurm", help="Work with SLURM.")
 app.add_typer(dev_app, name="dev", help="Developer tools.", hidden=True)

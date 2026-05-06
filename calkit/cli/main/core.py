@@ -9,6 +9,7 @@ import logging
 import os
 import platform as _platform
 import posixpath
+import re
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,7 @@ from pathlib import Path
 
 import dotenv
 import typer
+from typer.core import TyperGroup
 from typing_extensions import Annotated, Optional
 
 import calkit
@@ -59,22 +61,38 @@ from calkit.cli.overleaf import overleaf_app
 from calkit.cli.slurm import slurm_app
 from calkit.cli.update import update_app
 
+
+class AliasGroup(TyperGroup):
+    """A TyperGroup that supports combined aliases in command names like 'run|r'."""
+
+    _CMD_SPLIT_P = re.compile(r" ?[,|] ?")
+
+    def get_command(self, ctx, cmd_name):
+        cmd_name = self._group_cmd_name(cmd_name)
+        return super().get_command(ctx, cmd_name)
+
+    def _group_cmd_name(self, default_name):
+        for cmd in self.commands.values():
+            name = cmd.name
+            if name and default_name in self._CMD_SPLIT_P.split(name):
+                return name
+        return default_name
+
+
 app = typer.Typer(
+    cls=AliasGroup,
     invoke_without_command=True,
     no_args_is_help=True,
     context_settings=dict(help_option_names=["-h", "--help"]),
     pretty_exceptions_show_locals=False,
 )
 app.add_typer(config_app, name="config", help="Configure Calkit.")
-app.add_typer(new_app, name="new", help="Create a new Calkit object.")
+app.add_typer(new_app, name="new|create", help="Create a new Calkit object.")
 app.add_typer(
-    new_app,
-    name="create",
-    help="Create a new Calkit object (alias for 'new').",
+    notebooks_app, name="notebooks|nb", help="Work with Jupyter notebooks."
 )
-app.add_typer(notebooks_app, name="nb", help="Work with Jupyter notebooks.")
-app.add_typer(list_app, name="list", help="List Calkit objects.")
-app.add_typer(describe_app, name="describe", help="Describe things.")
+app.add_typer(list_app, name="list|ls", help="List Calkit objects.")
+app.add_typer(describe_app, name="describe|desc", help="Describe things.")
 app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(update_app, name="update", help="Update objects.")
@@ -295,7 +313,7 @@ def _format_dvc_data_status(status: dict, zip_path_map: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-@app.command(name="status")
+@app.command(name="status|st")
 def get_status(
     targets: Annotated[
         list[str] | None,
@@ -862,7 +880,7 @@ def commit(
         push()
 
 
-@app.command(name="save")
+@app.command(name="save|sv")
 def save(
     paths: Annotated[
         Optional[list[str]],
@@ -1232,7 +1250,7 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
     return res
 
 
-@app.command(name="run")
+@app.command(name="run|r")
 def run(
     targets: Annotated[
         list[str] | None,
@@ -1732,12 +1750,7 @@ def manual_step(
 
 
 @app.command(
-    name="runenv",
-    help="Execute a command in an environment (alias for 'xenv').",
-    context_settings={"ignore_unknown_options": True},
-)
-@app.command(
-    name="xenv",
+    name="xenv|runenv",
     help="Execute a command in an environment.",
     context_settings={"ignore_unknown_options": True},
 )
@@ -2247,8 +2260,7 @@ def run_in_env(
         raise_error("Environment kind not supported")
 
 
-@app.command(name="runproc", help="Execute a procedure (alias for 'xproc').")
-@app.command(name="xproc", help="Execute a procedure.")
+@app.command(name="xproc|runproc", help="Execute a procedure.")
 def run_procedure(
     name: Annotated[str, typer.Argument(help="The name of the procedure.")],
     no_commit: Annotated[

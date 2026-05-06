@@ -13,10 +13,10 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
-from calkit.cli import raise_error, warn
+from calkit.cli import AliasGroup, raise_error, warn
 from calkit.core import ryaml
 
-new_app = typer.Typer(no_args_is_help=True)
+new_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
 
 def _check_path_dir(path: str):
@@ -455,7 +455,7 @@ def new_project(
     typer.echo(success_message)
 
 
-@new_app.command(name="figure")
+@new_app.command(name="figure|fig")
 def new_figure(
     path: str,
     title: Annotated[str, typer.Option("--title")],
@@ -598,7 +598,7 @@ def new_question(
         repo.git.commit(["-m", "Add question"])
 
 
-@new_app.command("notebook")
+@new_app.command("notebook|nb")
 def new_notebook(
     path: Annotated[str, typer.Argument(help="Notebook path (relative)")],
     title: Annotated[str, typer.Option("--title")],
@@ -1028,7 +1028,7 @@ def new_dataset(
             repo.git.commit(["-m", f"Add dataset {path}"])
 
 
-@new_app.command(name="publication", help="Create a new publication.")
+@new_app.command(name="publication|pub", help="Create a new publication.")
 def new_publication(
     path: Annotated[
         str,

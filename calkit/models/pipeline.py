@@ -264,9 +264,9 @@ class Stage(BaseModel):
         """Return the command prefix for running in an environment, if
         needed.
 
-        When a stage uses a job-scheduler env (SLURM or PBS), the prefix is
-        a ``calkit slurm batch``/``calkit pbs batch`` invocation. If the
-        scheduler env wraps a separate inner env (composite syntax
+        When a stage uses a job-scheduler env (SLURM or PBS), the prefix
+        is a ``calkit slurm|sched batch`` invocation. If the scheduler env
+        wraps a separate inner env (composite syntax
         ``<scheduler-env>:<inner-env>``), we additionally wrap the
         scheduled command with ``calkit xenv -n <inner-env>``. For a plain
         scheduler env (no inner runtime needed), we skip the inner xenv
@@ -278,27 +278,36 @@ class Stage(BaseModel):
             and self.pbs is None
         ):
             return ""
-        scheduler_cmd = None
-        if self.slurm is not None:
-            scheduler_cmd = self.sbatch_cmd
-        elif self.pbs is not None:
-            scheduler_cmd = self.qsub_cmd
-        if scheduler_cmd is not None:
+        if self.slurm is not None or self.pbs is not None:
+            sched_cmd = self.scheduler_cmd
             if self.inner_environment == self.outer_environment:
                 # Plain scheduler env: no inner runtime to dispatch into.
-                return scheduler_cmd + " --command --"
+                return sched_cmd + " --command --"
             return (
-                scheduler_cmd
+                sched_cmd
                 + " --command -- "
                 + f"calkit xenv -n {self.inner_environment} --no-check --"
             )
         return f"calkit xenv -n {self.inner_environment} --no-check --"
 
     @property
-    def sbatch_cmd(self) -> str:
-        if self.slurm is None:
-            raise ValueError("Stage does not have SLURM options")
-        cmd = f"calkit slurm batch --name {self.name}"
+    def scheduler_cmd(self) -> str:
+        """Build the ``calkit <alias> batch`` invocation for this stage.
+
+        SLURM stages emit ``calkit slurm batch …`` (kept as the alias
+        previously released as a top-level command); PBS and any future
+        scheduler kinds emit ``calkit sched batch …`` and route through
+        the same underlying CLI via the ``scheduler|sched|slurm`` group.
+        """
+        if self.slurm is not None:
+            opts = self.slurm
+            cli_alias = "slurm"
+        elif self.pbs is not None:
+            opts = self.pbs
+            cli_alias = "sched"
+        else:
+            raise ValueError("Stage has no scheduler options")
+        cmd = f"calkit {cli_alias} batch --name {self.name}"
         if self.iterate_over is not None:
             arg_names = []
             for item in self.iterate_over:
@@ -311,26 +320,24 @@ class Stage(BaseModel):
             )
         # Only emit the flag when the stage overrides the default mode
         # (``replace``); this keeps the compiled cmd minimal.
-        if self.slurm.env_default_options != "replace":
-            cmd += f" --env-default-options {self.slurm.env_default_options}"
-        if self.slurm.env_default_setup != "replace":
-            cmd += f" --env-default-setup {self.slurm.env_default_setup}"
+        if opts.env_default_options != "replace":
+            cmd += f" --env-default-options {opts.env_default_options}"
+        if opts.env_default_setup != "replace":
+            cmd += f" --env-default-setup {opts.env_default_setup}"
         if self.environment != "_system":
             cmd += f" --environment {self.outer_environment}"
-        if self.slurm.log_path is not None:
-            cmd += f" --log-path '{self.slurm.log_path}'"
+        if opts.log_path is not None:
+            cmd += f" --log-path '{opts.log_path}'"
         for dep in self.dvc_deps:
             cmd += f" --dep {dep}"
         for out in self.outputs:
-            # Determine if this is a non-persistent output
             if isinstance(out, str):
                 cmd += f" --out {out}"
             elif isinstance(out, PathOutput) and out.delete_before_run:
                 cmd += f" --out {out.path}"
-        # Check for any missing outs in dvc_outs
-        # This can be important for implicit outputs like notebook stages
+        # Check for any missing outs in dvc_outs (e.g., implicit notebook
+        # stage outputs).
         for out in self.dvc_outs:
-            # Determine if this is a non-persistent output
             if isinstance(out, str):
                 txt = f" --out {out}"
                 if txt not in cmd:
@@ -341,64 +348,11 @@ class Stage(BaseModel):
                     txt = f" --out {out_path}"
                     if txt not in cmd:
                         cmd += txt
-        if self.slurm.options is not None:
-            for opt in self.slurm.options:
+        if opts.options is not None:
+            for opt in opts.options:
                 cmd += f" -s {opt}"
-        if self.slurm.setup is not None:
-            for setup_cmd in self.slurm.setup:
-                cmd += f" --setup {shlex.quote(setup_cmd)}"
-        return cmd
-
-    @property
-    def qsub_cmd(self) -> str:
-        if self.pbs is None:
-            raise ValueError("Stage does not have PBS options")
-        cmd = f"calkit pbs batch --name {self.name}"
-        if self.iterate_over is not None:
-            arg_names = []
-            for item in self.iterate_over:
-                if isinstance(item.arg_name, list):
-                    arg_names += item.arg_name
-                else:
-                    arg_names.append(item.arg_name)
-            cmd += "@" + ",".join(
-                [f"{{{arg_name}}}" for arg_name in arg_names]
-            )
-        if self.pbs.env_default_options != "replace":
-            cmd += f" --env-default-options {self.pbs.env_default_options}"
-        if self.pbs.env_default_setup != "replace":
-            cmd += f" --env-default-setup {self.pbs.env_default_setup}"
-        if self.environment != "_system":
-            cmd += f" --environment {self.outer_environment}"
-        if self.pbs.log_path is not None:
-            cmd += f" --log-path '{self.pbs.log_path}'"
-        for dep in self.dvc_deps:
-            cmd += f" --dep {dep}"
-        for out in self.outputs:
-            # Determine if this is a non-persistent output
-            if isinstance(out, str):
-                cmd += f" --out {out}"
-            elif isinstance(out, PathOutput) and out.delete_before_run:
-                cmd += f" --out {out.path}"
-        # Check for any missing outs in dvc_outs
-        # This can be important for implicit outputs like notebook stages
-        for out in self.dvc_outs:
-            # Determine if this is a non-persistent output
-            if isinstance(out, str):
-                txt = f" --out {out}"
-                if txt not in cmd:
-                    cmd += txt
-            elif isinstance(out, dict):
-                out_path = list(out.keys())[0]
-                if not out[out_path].get("persist", False):
-                    txt = f" --out {out_path}"
-                    if txt not in cmd:
-                        cmd += txt
-        if self.pbs.options is not None:
-            for opt in self.pbs.options:
-                cmd += f" -q {opt}"
-        if self.pbs.setup is not None:
-            for setup_cmd in self.pbs.setup:
+        if opts.setup is not None:
+            for setup_cmd in opts.setup:
                 cmd += f" --setup {shlex.quote(setup_cmd)}"
         return cmd
 
@@ -687,32 +641,17 @@ class ShellScriptStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        # For shell scripts on a plain SLURM env (no inner env), run directly
-        # through sbatch rather than via xenv, since xenv does not support
-        # SLURM env kinds.
+        # For shell scripts on a plain scheduler env (no inner runtime),
+        # hand the script straight to the scheduler submit command rather
+        # than wrapping with xenv.
         if (
-            self.slurm is not None
-            and self.inner_environment == self.outer_environment
-        ):
-            cmd = self.sbatch_cmd
+            self.slurm is not None or self.pbs is not None
+        ) and self.inner_environment == self.outer_environment:
+            cmd = self.scheduler_cmd
             cmd += f" -- {self.script_path}"
             for arg in self.args:
                 cmd += f" {arg}"
-            # Keep compatibility with SBatchStage command formatting
-            dep_txt = f"--dep {self.script_path} "
-            if dep_txt in cmd:
-                cmd = cmd.replace(dep_txt, "")
-            return cmd
-        # For shell scripts on a plain PBS env (no inner env), run directly
-        # through qsub rather than via xenv.
-        if (
-            self.pbs is not None
-            and self.inner_environment == self.outer_environment
-        ):
-            cmd = self.qsub_cmd
-            cmd += f" -- {self.script_path}"
-            for arg in self.args:
-                cmd += f" {arg}"
+            # Avoid duplicating the script path as both --dep and target.
             dep_txt = f"--dep {self.script_path} "
             if dep_txt in cmd:
                 cmd = cmd.replace(dep_txt, "")
@@ -861,7 +800,7 @@ class SBatchStage(Stage):
         self.slurm.options = deduped_options
         self.slurm.log_path = self.log_path
         self.slurm.log_storage = self.log_storage
-        cmd = self.sbatch_cmd
+        cmd = self.scheduler_cmd
         cmd += f" -- {self.script_path}"
         for arg in self.args:
             cmd += f" {arg}"
@@ -968,10 +907,8 @@ class JupyterNotebookStage(Stage):
             ).decode("utf-8")
             cmd += f' --params-base64 "{params_base64}"'
         cmd += f' "{self.notebook_path}"'
-        if self.slurm is not None:
-            cmd = self.sbatch_cmd + " --command -- " + cmd
-        elif self.pbs is not None:
-            cmd = self.qsub_cmd + " --command -- " + cmd
+        if self.slurm is not None or self.pbs is not None:
+            cmd = self.scheduler_cmd + " --command -- " + cmd
         return cmd
 
     @property

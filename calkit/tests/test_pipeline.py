@@ -790,7 +790,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
     """Cover the PBS stage compilation paths.
 
     Scenarios in one test:
-    - shell-script on a plain pbs env compiles to a direct ``calkit pbs
+    - shell-script on a plain pbs env compiles to a direct ``calkit sched
       batch`` invocation with stage-level options and outputs,
     - shell-command on a plain pbs env wraps the command via
       ``--command --``,
@@ -901,11 +901,11 @@ def test_pbs_stage_to_dvc(tmp_dir):
     stage = stages["job1"]
     print(stage)
     assert stage["cmd"] == (
-        "calkit pbs batch --name job1 "
+        "calkit sched batch --name job1 "
         "--environment pbs-env "
         f"--dep data/input.txt --dep {pbs_lock} "
         "--out data/output2.txt "
-        "-q -l -q walltime=01:00:00 "
+        "-s -l -s walltime=01:00:00 "
         "-- scripts/run_job.sh something else"
     )
     # Env defaults stay out of the compiled cmd.
@@ -917,7 +917,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
     stage_cmd = stages["job-cmd"]
     print(stage_cmd)
     assert stage_cmd["cmd"] == (
-        "calkit pbs batch --name job-cmd "
+        "calkit sched batch --name job-cmd "
         "--environment pbs-env "
         f"--dep {pbs_lock} "
         '--command -- bash --noprofile --norc -c "echo hello"'
@@ -926,7 +926,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
     stage2 = stages["job2"]
     print(stage2)
     assert stage2["cmd"] == (
-        "calkit pbs batch --name job2 --env-default-options ignore "
+        "calkit sched batch --name job2 --env-default-options ignore "
         "--env-default-setup ignore "
         "--environment pbs-env "
         "--dep something.jl --dep data/input2.txt --dep Manifest.toml "
@@ -939,7 +939,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
     stage3 = stages["notebook"]
     print(stage3)
     assert stage3["cmd"] == (
-        "calkit pbs batch --name notebook "
+        "calkit sched batch --name notebook "
         "--environment pbs-env "
         "--dep .calkit/notebooks/cleaned/analysis.ipynb "
         "--dep data/input2.txt --dep Manifest.toml "
@@ -954,7 +954,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
     py_stage = stages["py-job"]
     print(py_stage)
     assert py_stage["cmd"] == (
-        "calkit pbs batch --name py-job "
+        "calkit sched batch --name py-job "
         "--environment pbs-env "
         "--dep scripts/run.py --dep data/input_py.txt --dep uv.lock "
         f"--dep {pbs_lock} "
@@ -969,7 +969,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
     r_stage = stages["r-job"]
     print(r_stage)
     assert r_stage["cmd"] == (
-        "calkit pbs batch --name r-job "
+        "calkit sched batch --name r-job "
         "--environment pbs-env "
         f"--dep scripts/run.R --dep renv.lock --dep {pbs_lock} "
         "--out data/output_r.txt "
@@ -982,7 +982,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
     sh_nested = stages["sh-cmd-nested"]
     print(sh_nested)
     assert sh_nested["cmd"] == (
-        "calkit pbs batch --name sh-cmd-nested "
+        "calkit sched batch --name sh-cmd-nested "
         "--environment pbs-env "
         f"--dep uv.lock --dep {pbs_lock} "
         "--command -- calkit xenv -n py1 --no-check -- "
@@ -1089,19 +1089,19 @@ def test_pbs_env_validation_rules(tmp_dir):
         write=False,
     )
     assert stages["run-script"]["cmd"] == (
-        "calkit pbs batch --name run-script "
+        "calkit sched batch --name run-script "
         "--environment mycluster "
         "--dep .calkit/env-locks/mycluster.json "
         "-- scripts/run.sh a b"
     )
     assert stages["run-shell-cmd"]["cmd"] == (
-        "calkit pbs batch --name run-shell-cmd "
+        "calkit sched batch --name run-shell-cmd "
         "--environment mycluster "
         "--dep .calkit/env-locks/mycluster.json "
         '--command -- bash --noprofile --norc -c "echo hi"'
     )
     assert stages["run-cmd"]["cmd"] == (
-        "calkit pbs batch --name run-cmd "
+        "calkit sched batch --name run-cmd "
         "--environment mycluster "
         "--dep .calkit/env-locks/mycluster.json "
         "--command -- mytool --flag"

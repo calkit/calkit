@@ -481,7 +481,10 @@ def to_dvc(
     import git
 
     import calkit.dvc.zip
-    from calkit.environments import get_env_lock_fpath
+    from calkit.environments import (
+        get_env_lock_fpath,
+        write_scheduler_env_lock,
+    )
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -506,24 +509,41 @@ def to_dvc(
         existing_dvc_stages = existing_dvc_yaml.get("stages", {})
     else:
         existing_dvc_stages = {}
-    # First, gather up any env lock paths we might need for DVC deps
-    used_envs = set(
-        [stage.inner_environment for stage in pipeline.stages.values()]
-    )
+    # First, gather up any env lock paths we might need for DVC deps.
+    # Include both inner and outer environments so SLURM/PBS env locks are
+    # picked up when used as the outer env in a composite environment.
+    used_envs: set[str] = set()
+    for stage in pipeline.stages.values():
+        used_envs.add(stage.inner_environment)
+        used_envs.add(stage.outer_environment)
     env_lock_fpaths = {}
     environments = ck_info.get("environments", {})
     for env_name, env in environments.items():
         if env_name not in used_envs:
             continue
-        lock_fpath = get_env_lock_fpath(
-            env=env, env_name=env_name, as_posix=True, for_dvc=True
-        )
+        # SLURM/PBS lock files have no external manifest; we generate them
+        # from the env config so DVC can use them as a stage dependency.
+        if env.get("kind") in ("slurm", "pbs"):
+            if write:
+                lock_fpath = write_scheduler_env_lock(
+                    env_name=env_name, env=env, wdir=wdir
+                )
+            else:
+                lock_fpath = get_env_lock_fpath(
+                    env=env, env_name=env_name, wdir=wdir, as_posix=True
+                )
+        else:
+            lock_fpath = get_env_lock_fpath(
+                env=env, env_name=env_name, as_posix=True, for_dvc=True
+            )
         if lock_fpath is None:
             continue
         env_lock_fpaths[env_name] = lock_fpath
     project_params = expand_project_parameters(ck_info.get("parameters", {}))
-    # Set any stage slurm options, which requires environment information
-    pipeline.set_stage_slurm_options(environments=environments)
+    # Validate and initialize scheduler options (SLURM/PBS) for stages
+    # whose outer environment is a job scheduler. Env defaults are applied
+    # at job-submission time, not here.
+    pipeline.set_stage_scheduler_options(environments=environments)
     # Ensure environment lock files are set as stage inputs if necessary
     pipeline.ensure_env_lock_paths_are_inputs(env_lock_fpaths=env_lock_fpaths)
     # Now convert Calkit stages into DVC stages

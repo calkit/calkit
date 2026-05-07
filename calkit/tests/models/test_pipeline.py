@@ -241,6 +241,15 @@ def test_matlabscriptstage():
 
 
 def test_sbatchstage():
+    """Cover ``SBatchStage`` model behavior in one place.
+
+    Scenarios:
+    - direct sbatch stage with options + outputs (defaults stay implicit),
+    - parameter iteration produces a templated job name and log path,
+    - stage-level setup commands are emitted via ``--setup``,
+    - opting out of merging emits ``--no-merge-env-default-{options,setup}``
+      independently.
+    """
     s = SBatchStage(
         name="job1",
         script_path="scripts/run_job.sh",
@@ -253,15 +262,19 @@ def test_sbatchstage():
     sd = s.to_dvc()
     print(sd)
     assert sd["cmd"] == (
-        "calkit slurm batch --name job1 --environment slurm-env "
+        "calkit slurm batch --name job1 "
+        "--environment slurm-env "
         "--dep data/input.txt --out data/output.txt "
         "-s --time=01:00:00 -s --mem=4G -- scripts/run_job.sh something else"
     )
+    # Defaults are implicit; no `--no-merge-...` flags appear.
+    assert "--no-merge-env-default-options" not in sd["cmd"]
+    assert "--no-merge-env-default-setup" not in sd["cmd"]
     assert "scripts/run_job.sh" in sd["deps"]
     assert "data/input.txt" in sd["deps"]
     out = {"data/output.txt": {"persist": True}}
     assert out in sd["outs"]
-    # Test with `iterate_over`
+    # iterate_over: templated job name + log path.
     s = SBatchStage(
         name="job2",
         script_path="scripts/run_job.sh",
@@ -278,18 +291,37 @@ def test_sbatchstage():
     assert s.log_output.path == ".calkit/slurm/logs/job2/{input_file}.out"
     print(sd)
     assert "--name job2@{input_file}" in sd["cmd"]
-
-
-def test_sbatchstage_with_setup_commands():
+    # Stage-level setup commands.
     s = SBatchStage(
         name="job-setup",
         script_path="scripts/run_job.sh",
         environment="slurm-env",
-        slurm={"setup": ["module purge", "module load python/3.11"]},  # type: ignore
+        slurm={  # type: ignore
+            "setup": ["module purge", "module load python/3.11"],
+        },
     )
     sd = s.to_dvc()
     assert "--setup 'module purge'" in sd["cmd"]
     assert "--setup 'module load python/3.11'" in sd["cmd"]
+    # Independent opt-outs: only the disabled side gets a flag.
+    s = SBatchStage(
+        name="job-no-opts",
+        script_path="scripts/run_job.sh",
+        environment="slurm-env",
+        slurm={"merge_env_default_options": False},  # type: ignore
+    )
+    sd = s.to_dvc()
+    assert "--no-merge-env-default-options" in sd["cmd"]
+    assert "--no-merge-env-default-setup" not in sd["cmd"]
+    s = SBatchStage(
+        name="job-no-setup",
+        script_path="scripts/run_job.sh",
+        environment="slurm-env",
+        slurm={"merge_env_default_setup": False},  # type: ignore
+    )
+    sd = s.to_dvc()
+    assert "--no-merge-env-default-options" not in sd["cmd"]
+    assert "--no-merge-env-default-setup" in sd["cmd"]
 
 
 def test_mappathsstage():

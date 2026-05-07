@@ -57,6 +57,7 @@ from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
 from calkit.cli.overleaf import overleaf_app
+from calkit.cli.pbs import pbs_app
 from calkit.cli.slurm import slurm_app
 from calkit.cli.update import update_app
 
@@ -82,6 +83,7 @@ app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
 app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
 app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
 app.add_typer(slurm_app, name="slurm", help="Work with SLURM.")
+app.add_typer(pbs_app, name="pbs", help="Work with PBS.")
 app.add_typer(dev_app, name="dev", help="Developer tools.", hidden=True)
 
 

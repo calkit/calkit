@@ -482,9 +482,23 @@ def test_remove_stage(tmp_dir):
     assert "process-data" in dvc_yaml["stages"]
 
 
-def test_sbatch_stage_to_dvc():
+def test_sbatch_stage_to_dvc(tmp_dir):
+    """Cover the SLURM stage compilation paths.
+
+    Scenarios in one test (per AGENTS.md guidance):
+    - direct sbatch stage with options + outputs,
+    - nested env with slurm outer wrapping a julia-script,
+    - nested env with slurm outer wrapping a jupyter-notebook,
+    - opting out of env-default merging via ``merge_env_defaults: false``,
+    - that env-level defaults are NOT baked into the compiled stage cmd
+      (they are merged at submission by ``calkit slurm batch``).
+    """
     envs = {
-        "slurm-env": {"kind": "slurm"},
+        "slurm-env": {
+            "kind": "slurm",
+            "default_setup": ["module purge", "module load julia/1.11"],
+            "default_options": ["--account=foo"],
+        },
         "julia1": {
             "kind": "julia",
             "julia": "1.11",
@@ -509,15 +523,21 @@ def test_sbatch_stage_to_dvc():
                     "data/output2.txt",
                 ],
             },
-            # Test nested env with slurm outer
+            # Nested env with slurm outer; uses stage-level setup and
+            # explicitly opts out of merging env defaults.
             "job2": {
                 "kind": "julia-script",
                 "script_path": "something.jl",
                 "environment": "slurm-env:julia1",
                 "inputs": ["data/input2.txt"],
                 "outputs": ["data/output3.txt"],
+                "slurm": {
+                    "setup": ["module load gcc/12"],
+                    "merge_env_default_options": False,
+                    "merge_env_default_setup": False,
+                },
             },
-            # Test jupyter-notebook stage in nested env with slurm outer
+            # Jupyter notebook in nested env with slurm outer.
             "notebook": {
                 "kind": "jupyter-notebook",
                 "notebook_path": "analysis.ipynb",
@@ -537,34 +557,53 @@ def test_sbatch_stage_to_dvc():
         },
         write=False,
     )
+    slurm_lock = ".calkit/env-locks/slurm-env.json"
     stage = stages["job1"]
     print(stage)
     assert stage["cmd"] == (
-        "calkit slurm batch --name job1 --environment slurm-env "
-        "--dep data/input.txt --out data/output2.txt "
+        "calkit slurm batch --name job1 "
+        "--environment slurm-env "
+        f"--dep data/input.txt --dep {slurm_lock} "
+        "--out data/output2.txt "
         "-s --time=01:00:00 -s --mem=4G -- scripts/run_job.sh something else"
     )
+    # Env-level default_setup / default_options are not baked into the
+    # compiled cmd; the batch CLI applies them at submission.
+    assert "module purge" not in stage["cmd"]
+    assert "--account=foo" not in stage["cmd"]
     assert "scripts/run_job.sh" in stage["deps"]
     assert "data/input.txt" in stage["deps"]
+    assert slurm_lock in stage["deps"]
     out = {"data/output.txt": {"cache": False, "persist": True}}
     assert out in stage["outs"]
     stage2 = stages["job2"]
     print(stage2)
     assert stage2["cmd"] == (
-        "calkit slurm batch --name job2 --environment slurm-env "
+        "calkit slurm batch --name job2 --no-merge-env-default-options "
+        "--no-merge-env-default-setup "
+        "--environment slurm-env "
         "--dep something.jl --dep data/input2.txt --dep Manifest.toml "
-        "--out data/output3.txt --command "
+        f"--dep {slurm_lock} "
+        "--out data/output3.txt "
+        "--setup 'module load gcc/12' --command "
         '-- calkit xenv -n julia1 --no-check -- "something.jl"'
     )
     assert "something.jl" in stage2["deps"]
     assert "data/input2.txt" in stage2["deps"]
+    assert slurm_lock in stage2["deps"]
     assert "data/output3.txt" in stage2["outs"]
+    # Even though the env defines default_setup, those entries don't end up
+    # in the compiled stage cmd.
+    assert "module purge" not in stage2["cmd"]
+    assert "module load julia/1.11" not in stage2["cmd"]
     stage3 = stages["notebook"]
     print(stage3)
     assert stage3["cmd"] == (
-        "calkit slurm batch --name notebook --environment slurm-env "
+        "calkit slurm batch --name notebook "
+        "--environment slurm-env "
         "--dep .calkit/notebooks/cleaned/analysis.ipynb "
         "--dep data/input2.txt --dep Manifest.toml "
+        f"--dep {slurm_lock} "
         "--out data/notebook_output.txt "
         "--out .calkit/notebooks/executed/analysis.ipynb "
         "--out .calkit/notebooks/html/analysis.html "
@@ -573,14 +612,119 @@ def test_sbatch_stage_to_dvc():
     )
     assert ".calkit/notebooks/cleaned/analysis.ipynb" in stage3["deps"]
     assert "data/input2.txt" in stage3["deps"]
+    assert slurm_lock in stage3["deps"]
     assert "data/notebook_output.txt" in stage3["outs"]
 
 
-def test_slurm_setup_commands_propagate_to_nested_stage_cmd():
+def test_slurm_env_validation_rules(tmp_dir):
+    """Cover the SLURM env-validation and plain-env shortcut rules.
+
+    Scenarios:
+    - language stage (python-script) on a plain slurm env errors and
+      points users at composite-env syntax,
+    - composite slurm:slurm env errors (no scheduler-in-scheduler),
+    - shell-script on a plain slurm env compiles to a direct sbatch
+      invocation with no inner xenv wrap,
+    - shell-command on a plain slurm env wraps the command via
+      ``--command -- bash -c``.
+    """
+    # Plain slurm env + a stage that needs an inner runtime should fail.
+    with pytest.raises(ValueError, match="use a composite environment"):
+        calkit.pipeline.to_dvc(
+            ck_info={
+                "environments": {"mycluster": {"kind": "slurm"}},
+                "pipeline": {
+                    "stages": {
+                        "run": {
+                            "kind": "python-script",
+                            "script_path": "scripts/run.py",
+                            "environment": "mycluster",
+                        }
+                    }
+                },
+            },
+            write=False,
+        )
+    # Slurm-inside-slurm should fail.
+    with pytest.raises(
+        ValueError,
+        match="inner environment must not be a job scheduler",
+    ):
+        calkit.pipeline.to_dvc(
+            ck_info={
+                "environments": {
+                    "mycluster": {"kind": "slurm"},
+                    "innercluster": {"kind": "slurm"},
+                },
+                "pipeline": {
+                    "stages": {
+                        "run": {
+                            "kind": "julia-script",
+                            "script_path": "scripts/run.jl",
+                            "environment": "mycluster:innercluster",
+                        }
+                    }
+                },
+            },
+            write=False,
+        )
+    # shell-script + shell-command on a plain slurm env both compile.
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": {"mycluster": {"kind": "slurm"}},
+            "pipeline": {
+                "stages": {
+                    "run-script": {
+                        "kind": "shell-script",
+                        "script_path": "scripts/run.sh",
+                        "environment": "mycluster",
+                        "args": ["a", "b"],
+                    },
+                    "run-cmd": {
+                        "kind": "shell-command",
+                        "command": "echo hi",
+                        "environment": "mycluster",
+                    },
+                }
+            },
+        },
+        write=False,
+    )
+    assert stages["run-script"]["cmd"] == (
+        "calkit slurm batch --name run-script "
+        "--environment mycluster "
+        "--dep .calkit/env-locks/mycluster.json "
+        "-- scripts/run.sh a b"
+    )
+    assert stages["run-cmd"]["cmd"] == (
+        "calkit slurm batch --name run-cmd "
+        "--environment mycluster "
+        "--dep .calkit/env-locks/mycluster.json "
+        '--command -- bash --noprofile --norc -c "echo hi"'
+    )
+
+
+def test_pbs_stage_to_dvc(tmp_dir):
+    """Cover the PBS stage compilation paths.
+
+    Scenarios in one test:
+    - shell-script on a plain pbs env compiles to a direct ``calkit pbs
+      batch`` invocation with stage-level options and outputs,
+    - shell-command on a plain pbs env wraps the command via
+      ``--command --``,
+    - julia-script on a composite ``pbs-env:julia1`` env, with stage-level
+      setup and both merge flags disabled,
+    - jupyter-notebook on the same composite env,
+    - env-level defaults are NOT baked into the compiled stage cmd (the
+      batch CLI applies them at submission),
+    - the env lock file is added as a dep on every stage that touches the
+      pbs env.
+    """
     envs = {
-        "slurm-env": {
-            "kind": "slurm",
+        "pbs-env": {
+            "kind": "pbs",
             "default_setup": ["module purge", "module load julia/1.11"],
+            "default_options": ["-A", "myproj"],
         },
         "julia1": {
             "kind": "julia",
@@ -591,12 +735,47 @@ def test_slurm_setup_commands_propagate_to_nested_stage_cmd():
     pipeline = {
         "stages": {
             "job1": {
+                "kind": "shell-script",
+                "script_path": "scripts/run_job.sh",
+                "environment": "pbs-env",
+                "args": ["something", "else"],
+                "inputs": ["data/input.txt"],
+                "outputs": [
+                    {
+                        "path": "data/output.txt",
+                        "storage": "git",
+                        "delete_before_run": False,
+                    },
+                    "data/output2.txt",
+                ],
+                "pbs": {"options": ["-l", "walltime=01:00:00"]},
+            },
+            "job-cmd": {
+                "kind": "shell-command",
+                "command": "echo hello",
+                "environment": "pbs-env",
+            },
+            "job2": {
                 "kind": "julia-script",
                 "script_path": "something.jl",
-                "environment": "slurm-env:julia1",
-                "slurm": {
+                "environment": "pbs-env:julia1",
+                "inputs": ["data/input2.txt"],
+                "outputs": ["data/output3.txt"],
+                "pbs": {
                     "setup": ["module load gcc/12"],
+                    "merge_env_default_options": False,
+                    "merge_env_default_setup": False,
                 },
+            },
+            "notebook": {
+                "kind": "jupyter-notebook",
+                "notebook_path": "analysis.ipynb",
+                "environment": "pbs-env:julia1",
+                "html_storage": "dvc",
+                "cleaned_ipynb_storage": None,
+                "executed_ipynb_storage": "git",
+                "inputs": ["data/input2.txt"],
+                "outputs": ["data/notebook_output.txt"],
             },
         },
     }
@@ -607,87 +786,162 @@ def test_slurm_setup_commands_propagate_to_nested_stage_cmd():
         },
         write=False,
     )
-    cmd = stages["job1"]["cmd"]
-    assert "--setup 'module purge'" in cmd
-    assert "--setup 'module load julia/1.11'" in cmd
-    assert "--setup 'module load gcc/12'" in cmd
-    assert "--command -- calkit xenv -n julia1 --no-check --" in cmd
+    pbs_lock = ".calkit/env-locks/pbs-env.json"
+    stage = stages["job1"]
+    print(stage)
+    assert stage["cmd"] == (
+        "calkit pbs batch --name job1 "
+        "--environment pbs-env "
+        f"--dep data/input.txt --dep {pbs_lock} "
+        "--out data/output2.txt "
+        "-q -l -q walltime=01:00:00 "
+        "-- scripts/run_job.sh something else"
+    )
+    # Env defaults stay out of the compiled cmd.
+    assert "module purge" not in stage["cmd"]
+    assert "myproj" not in stage["cmd"]
+    assert pbs_lock in stage["deps"]
+    out = {"data/output.txt": {"cache": False, "persist": True}}
+    assert out in stage["outs"]
+    stage_cmd = stages["job-cmd"]
+    print(stage_cmd)
+    assert stage_cmd["cmd"] == (
+        "calkit pbs batch --name job-cmd "
+        "--environment pbs-env "
+        f"--dep {pbs_lock} "
+        '--command -- bash --noprofile --norc -c "echo hello"'
+    )
+    assert pbs_lock in stage_cmd["deps"]
+    stage2 = stages["job2"]
+    print(stage2)
+    assert stage2["cmd"] == (
+        "calkit pbs batch --name job2 --no-merge-env-default-options "
+        "--no-merge-env-default-setup "
+        "--environment pbs-env "
+        "--dep something.jl --dep data/input2.txt --dep Manifest.toml "
+        f"--dep {pbs_lock} "
+        "--out data/output3.txt "
+        "--setup 'module load gcc/12' --command "
+        '-- calkit xenv -n julia1 --no-check -- "something.jl"'
+    )
+    assert pbs_lock in stage2["deps"]
+    stage3 = stages["notebook"]
+    print(stage3)
+    assert stage3["cmd"] == (
+        "calkit pbs batch --name notebook "
+        "--environment pbs-env "
+        "--dep .calkit/notebooks/cleaned/analysis.ipynb "
+        "--dep data/input2.txt --dep Manifest.toml "
+        f"--dep {pbs_lock} "
+        "--out data/notebook_output.txt "
+        "--out .calkit/notebooks/executed/analysis.ipynb "
+        "--out .calkit/notebooks/html/analysis.html "
+        "--command -- calkit nb execute --environment julia1 --no-check "
+        '--to html "analysis.ipynb"'
+    )
+    assert pbs_lock in stage3["deps"]
 
 
-def test_non_sbatch_stage_requires_composite_slurm_env():
-    envs = {
-        "mycluster": {"kind": "slurm"},
-    }
-    pipeline = {
-        "stages": {
-            "run": {
-                "kind": "python-script",
-                "script_path": "scripts/run.py",
-                "environment": "mycluster",
-            }
-        }
-    }
-    with pytest.raises(ValueError, match="Use a composite environment"):
+def test_pbs_env_validation_rules(tmp_dir):
+    """Cover the PBS env-validation and plain-env shortcut rules.
+
+    Mirrors ``test_slurm_env_validation_rules`` for PBS, plus the
+    cross-scheduler case (pbs outer, slurm inner) which is also rejected.
+    """
+    with pytest.raises(ValueError, match="use a composite environment"):
         calkit.pipeline.to_dvc(
             ck_info={
-                "environments": envs,
-                "pipeline": pipeline,
+                "environments": {"mycluster": {"kind": "pbs"}},
+                "pipeline": {
+                    "stages": {
+                        "run": {
+                            "kind": "python-script",
+                            "script_path": "scripts/run.py",
+                            "environment": "mycluster",
+                        }
+                    }
+                },
             },
             write=False,
         )
-
-
-def test_non_sbatch_stage_disallows_slurm_inner_env():
-    envs = {
-        "mycluster": {"kind": "slurm"},
-        "innercluster": {"kind": "slurm"},
-    }
-    pipeline = {
-        "stages": {
-            "run": {
-                "kind": "julia-script",
-                "script_path": "scripts/run.jl",
-                "environment": "mycluster:innercluster",
-            }
-        }
-    }
     with pytest.raises(
         ValueError,
-        match="inner environment.*must not be SLURM",
+        match="inner environment must not be a job scheduler",
     ):
         calkit.pipeline.to_dvc(
             ck_info={
-                "environments": envs,
-                "pipeline": pipeline,
+                "environments": {
+                    "mycluster": {"kind": "pbs"},
+                    "innercluster": {"kind": "pbs"},
+                },
+                "pipeline": {
+                    "stages": {
+                        "run": {
+                            "kind": "julia-script",
+                            "script_path": "scripts/run.jl",
+                            "environment": "mycluster:innercluster",
+                        }
+                    }
+                },
             },
             write=False,
         )
-
-
-def test_shell_script_stage_allows_non_composite_slurm_env():
-    envs = {
-        "mycluster": {"kind": "slurm"},
-    }
-    pipeline = {
-        "stages": {
-            "run": {
-                "kind": "shell-script",
-                "script_path": "scripts/run.sh",
-                "environment": "mycluster",
-                "args": ["a", "b"],
-            }
-        }
-    }
+    # Mixing schedulers (pbs outer, slurm inner) should also fail.
+    with pytest.raises(
+        ValueError,
+        match="inner environment must not be a job scheduler",
+    ):
+        calkit.pipeline.to_dvc(
+            ck_info={
+                "environments": {
+                    "mypbs": {"kind": "pbs"},
+                    "myslurm": {"kind": "slurm"},
+                },
+                "pipeline": {
+                    "stages": {
+                        "run": {
+                            "kind": "julia-script",
+                            "script_path": "scripts/run.jl",
+                            "environment": "mypbs:myslurm",
+                        }
+                    }
+                },
+            },
+            write=False,
+        )
+    # shell-script + shell-command on a plain pbs env both compile.
     stages = calkit.pipeline.to_dvc(
         ck_info={
-            "environments": envs,
-            "pipeline": pipeline,
+            "environments": {"mycluster": {"kind": "pbs"}},
+            "pipeline": {
+                "stages": {
+                    "run-script": {
+                        "kind": "shell-script",
+                        "script_path": "scripts/run.sh",
+                        "environment": "mycluster",
+                        "args": ["a", "b"],
+                    },
+                    "run-cmd": {
+                        "kind": "shell-command",
+                        "command": "echo hi",
+                        "environment": "mycluster",
+                    },
+                }
+            },
         },
         write=False,
     )
-    assert stages["run"]["cmd"] == (
-        "calkit slurm batch --name run --environment mycluster "
+    assert stages["run-script"]["cmd"] == (
+        "calkit pbs batch --name run-script "
+        "--environment mycluster "
+        "--dep .calkit/env-locks/mycluster.json "
         "-- scripts/run.sh a b"
+    )
+    assert stages["run-cmd"]["cmd"] == (
+        "calkit pbs batch --name run-cmd "
+        "--environment mycluster "
+        "--dep .calkit/env-locks/mycluster.json "
+        '--command -- bash --noprofile --norc -c "echo hi"'
     )
 
 

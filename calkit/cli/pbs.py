@@ -1,4 +1,4 @@
-"""CLI for working with SLURM."""
+"""CLI for working with PBS (OpenPBS, PBS Pro, TORQUE)."""
 
 from __future__ import annotations
 
@@ -16,11 +16,19 @@ from typing_extensions import Annotated
 import calkit
 from calkit.cli import raise_error
 
-slurm_app = typer.Typer(no_args_is_help=True)
+pbs_app = typer.Typer(no_args_is_help=True)
 
 
-@slurm_app.command(name="batch")
-def run_sbatch(
+def _qstat_active(job_id: str) -> bool:
+    """Return True if the job ID is currently queued or running."""
+    p = subprocess.run(
+        ["qstat", job_id], capture_output=True, text=True, check=False
+    )
+    return p.returncode == 0
+
+
+@pbs_app.command(name="batch")
+def run_qsub(
     name: Annotated[
         str,
         typer.Option("--name", "-n", help="Job name."),
@@ -39,15 +47,15 @@ def run_sbatch(
         typer.Option(
             "--environment",
             "-e",
-            help="Calkit (slurm) environment to use for the job.",
+            help="Calkit (PBS) environment to use for the job.",
         ),
     ],
     args: Annotated[
         list[str] | None,
         typer.Argument(
             help=(
-                "Arguments for sbatch, the first of which should be the "
-                "script."
+                "Arguments for the target command, passed to the job script "
+                "after the target."
             )
         ),
     ] = None,
@@ -73,13 +81,13 @@ def run_sbatch(
             ),
         ),
     ] = [],
-    sbatch_opts: Annotated[
+    qsub_opts: Annotated[
         list[str],
         typer.Option(
-            "--sbatch-option",
-            "-s",
+            "--qsub-option",
+            "-q",
             help=(
-                "Additional options to pass to sbatch (no spaces allowed). "
+                "Additional options to pass to qsub (no spaces allowed). "
                 "When provided, the environment's default options are "
                 "ignored."
             ),
@@ -111,9 +119,9 @@ def run_sbatch(
         typer.Option(
             "--merge-env-default-options/--no-merge-env-default-options",
             help=(
-                "Whether to prepend the environment's default sbatch "
-                "options to those provided here (sbatch's last-occurrence "
-                "wins, so explicit options still override)."
+                "Whether to prepend the environment's default qsub options "
+                "to those provided here (qsub's last-occurrence wins, so "
+                "explicit options still override)."
             ),
         ),
     ] = True,
@@ -128,7 +136,7 @@ def run_sbatch(
         ),
     ] = True,
 ) -> None:
-    """Submit a SLURM batch job for the project.
+    """Submit a PBS batch job for the project.
 
     Duplicates are not allowed, so if one is already running or queued with
     the same name, we'll wait for it to finish. The only exception is if the
@@ -136,18 +144,10 @@ def run_sbatch(
     be canceled and a new one submitted.
     """
 
-    def check_job_running_or_queued(job_id: str) -> bool:
-        p = subprocess.run(
-            ["squeue", "--job", job_id], capture_output=True, text=True
-        )
-        if p.returncode != 0:
-            return False
-        return len(p.stdout.strip().split("\n")) > 1
-
     def cancel_job(job_id: str, reason: str) -> None:
         typer.echo(f"{reason}; canceling existing job ID {job_id}")
         p = subprocess.run(
-            ["scancel", job_id], capture_output=True, text=True, check=False
+            ["qdel", job_id], capture_output=True, text=True, check=False
         )
         if p.returncode != 0:
             raise_error(
@@ -157,16 +157,16 @@ def run_sbatch(
     if args is None:
         args = []
     if log_path is None:
-        log_path = f".calkit/slurm/logs/{name}.out"
+        log_path = f".calkit/pbs/logs/{name}.out"
     if is_command is None:
         is_command = not os.path.isfile(target)
     if environment != "_system":
         ck_info = calkit.load_calkit_info()
         env = ck_info.get("environments", {}).get(environment, {})
         env_kind = env.get("kind")
-        if env_kind != "slurm":
+        if env_kind != "pbs":
             raise_error(
-                f"Environment '{environment}' is not a slurm environment"
+                f"Environment '{environment}' is not a PBS environment"
             )
         # Check host matches
         env_host = env.get("host", "localhost")
@@ -184,8 +184,8 @@ def run_sbatch(
                     f"Environment '{environment}' is for host '{env_host}', "
                     f"but this is '{current_host}'"
                 )
-        # Env defaults are prepended to anything provided here; sbatch keeps
-        # the latest occurrence of a flag, so explicit options still win.
+        # Env defaults are prepended to anything provided here; qsub honors
+        # the last occurrence of a flag, so explicit options still win.
         if merge_env_default_setup:
             env_setup_cmds = env.get("default_setup", []) or []
             if env_setup_cmds:
@@ -195,59 +195,55 @@ def run_sbatch(
         if merge_env_default_options:
             env_default_options = env.get("default_options", []) or []
             if env_default_options:
-                sbatch_opts = [
+                qsub_opts = [
                     opt
-                    for opt in [*env_default_options, *sbatch_opts]
+                    for opt in [*env_default_options, *qsub_opts]
                     if opt.strip()
                 ]
+    # Build the job script (executed inside the qsub job). PBS does not have
+    # an analog of `sbatch --wrap`, so we always pipe a small shell script
+    # through stdin.
+    target_invocation_parts = [target] + args
+    if not is_command and os.path.isfile(target):
+        # If the script is not executable, invoke it through its interpreter
+        # (shebang or fallback to bash).
+        if not os.access(target, os.X_OK):
+            interpreter = None
+            try:
+                with open(target, "r", encoding="utf-8") as f:
+                    first_line = f.readline().strip()
+                if first_line.startswith("#!"):
+                    shebang = first_line[2:].strip()
+                    if shebang:
+                        interpreter = shlex.split(shebang)
+            except OSError:
+                interpreter = None
+            if interpreter is None:
+                interpreter = ["bash"]
+            target_invocation_parts = interpreter + [target] + args
+    target_invocation = shlex.join(target_invocation_parts)
+    if setup_cmds:
+        job_script = " && ".join([*setup_cmds, target_invocation])
+    else:
+        job_script = target_invocation
+    if not is_command and target not in deps:
+        deps = [target] + deps
     cmd = [
-        "sbatch",
-        "--parsable",
-        "--job-name",
+        "qsub",
+        "-N",
         name,
+        "-j",
+        "oe",
         "-o",
         log_path,
-    ] + sbatch_opts
-    if setup_cmds:
-        # Run setup and target in the same shell so setup side effects (like
-        # module loads) persist for the target command.
-        wrapped_target_parts = [target] + args
-        if not is_command and os.path.isfile(target):
-            # `sbatch <script>` can run a non-executable script file, but
-            # `--wrap '<script>'` requires execute permission. For wrapped
-            # execution, invoke through the script interpreter when needed.
-            if not os.access(target, os.X_OK):
-                interpreter = None
-                try:
-                    with open(target, "r", encoding="utf-8") as f:
-                        first_line = f.readline().strip()
-                    if first_line.startswith("#!"):
-                        shebang = first_line[2:].strip()
-                        if shebang:
-                            interpreter = shlex.split(shebang)
-                except OSError:
-                    interpreter = None
-                if interpreter is None:
-                    interpreter = ["bash"]
-                wrapped_target_parts = interpreter + [target] + args
-        wrapped_target = shlex.join(wrapped_target_parts)
-        setup_chain = " && ".join([*setup_cmds, wrapped_target])
-        cmd += ["--wrap", setup_chain]
-        if not is_command and target not in deps:
-            deps = [target] + deps
-    elif is_command:
-        # Use shlex.join to properly escape target and args for shell execution
-        cmd += ["--wrap", shlex.join([target] + args)]
-    else:
-        cmd += [target] + args
-        if target not in deps:
-            deps = [target] + deps
-    slurm_dir = os.path.join(".calkit", "slurm")
-    os.makedirs(slurm_dir, exist_ok=True)
+        "-V",
+    ] + qsub_opts
+    pbs_dir = os.path.join(".calkit", "pbs")
+    os.makedirs(pbs_dir, exist_ok=True)
     logs_dir = os.path.dirname(log_path)
     if logs_dir:
         os.makedirs(logs_dir, exist_ok=True)
-    jobs_path = os.path.join(slurm_dir, "jobs.json")
+    jobs_path = os.path.join(pbs_dir, "jobs.json")
     if os.path.isfile(jobs_path):
         with open(jobs_path, "r") as f:
             jobs = json.load(f)
@@ -267,7 +263,7 @@ def run_sbatch(
         job_target = job_info.get("target")
         job_args = job_info.get("args", [])
         job_setup = job_info.get("setup", [])
-        running_or_queued = check_job_running_or_queued(job_id)
+        running_or_queued = _qstat_active(job_id)
         should_wait = True
         if running_or_queued:
             typer.echo(
@@ -319,7 +315,7 @@ def run_sbatch(
             if should_wait:
                 typer.echo("Waiting for job to finish")
             while running_or_queued and should_wait:
-                running_or_queued = check_job_running_or_queued(job_id)
+                running_or_queued = _qstat_active(job_id)
                 time.sleep(1)
             if should_wait:
                 raise typer.Exit(0)
@@ -335,7 +331,13 @@ def run_sbatch(
                     shutil.rmtree(out)
             except Exception as e:
                 raise_error(f"Error deleting '{out}': {e}")
-    p = subprocess.run(cmd, capture_output=True, check=False, text=True)
+    p = subprocess.run(
+        cmd,
+        input=job_script,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
     if p.returncode != 0:
         raise_error(f"Failed to submit new job: {p.stderr}")
     job_id = p.stdout.strip()
@@ -355,15 +357,15 @@ def run_sbatch(
     typer.echo("Waiting for job to finish")
     running_or_queued = True
     while running_or_queued:
-        running_or_queued = check_job_running_or_queued(job_id)
+        running_or_queued = _qstat_active(job_id)
         time.sleep(1)
 
 
-@slurm_app.command(name="queue")
+@pbs_app.command(name="queue")
 def get_queue() -> None:
-    """List SLURM jobs submitted via Calkit."""
-    slurm_dir = os.path.join(".calkit", "slurm")
-    jobs_path = os.path.join(slurm_dir, "jobs.json")
+    """List PBS jobs submitted via Calkit."""
+    pbs_dir = os.path.join(".calkit", "pbs")
+    jobs_path = os.path.join(pbs_dir, "jobs.json")
     if os.path.isfile(jobs_path):
         with open(jobs_path, "r") as f:
             jobs = json.load(f)
@@ -374,22 +376,23 @@ def get_queue() -> None:
         raise typer.Exit(0)
     job_ids = [j["job_id"] for j in jobs.values()]
     subprocess.run(
-        ["squeue", "-j", ",".join(job_ids)],
+        ["qstat"] + job_ids,
         capture_output=False,
         text=True,
+        check=False,
     )
 
 
-@slurm_app.command(name="cancel")
+@pbs_app.command(name="cancel")
 def cancel_jobs(
     names: Annotated[
         list[str],
         typer.Argument(help="Names of jobs to cancel."),
     ],
 ) -> None:
-    """Cancel SLURM jobs by their name in the project."""
-    slurm_dir = os.path.join(".calkit", "slurm")
-    jobs_path = os.path.join(slurm_dir, "jobs.json")
+    """Cancel PBS jobs by their name in the project."""
+    pbs_dir = os.path.join(".calkit", "pbs")
+    jobs_path = os.path.join(pbs_dir, "jobs.json")
     if os.path.isfile(jobs_path):
         with open(jobs_path, "r") as f:
             jobs = json.load(f)
@@ -398,36 +401,27 @@ def cancel_jobs(
     if len(jobs) == 0:
         typer.echo("No jobs found for this project")
         raise typer.Exit(0)
-    # Get any job IDs that are actually running or queued
-    job_ids = [j["job_id"] for j in jobs.values()]
-    p = subprocess.run(
-        ["squeue", "-h", "-o", "%A", "-j", ",".join(job_ids)],
-        capture_output=True,
-        text=True,
-    )
-    running_or_queued_ids = p.stdout.strip().split("\n")
-    running_or_queued_ids = [j for j in running_or_queued_ids if j]
     for name in names:
         if name not in jobs:
             typer.echo(f"No job named '{name}' found for this project")
             continue
         job_info = jobs[name]
         job_id = job_info["job_id"]
-        if job_id not in running_or_queued_ids:
+        if not _qstat_active(job_id):
             typer.echo(
                 f"Job '{name}' (last submitted ID: {job_id}) is not "
                 "running or queued"
             )
             continue
         p = subprocess.run(
-            ["scancel", job_id], capture_output=True, text=True, check=False
+            ["qdel", job_id], capture_output=True, text=True, check=False
         )
         if p.returncode != 0:
             raise_error(f"Failed to cancel job ID {job_id}: {p.stderr}")
         typer.echo(f"Canceled job '{name}' with ID {job_id}")
 
 
-@slurm_app.command(name="logs")
+@pbs_app.command(name="logs")
 def get_logs(
     names: Annotated[
         list[str] | None,
@@ -440,11 +434,11 @@ def get_logs(
         ),
     ] = False,
 ) -> None:
-    """Get the logs for a SLURM job by its name in the project."""
-    slurm_dir = os.path.join(".calkit", "slurm")
+    """Get the logs for a PBS job by its name in the project."""
+    pbs_dir = os.path.join(".calkit", "pbs")
     # If names are none, use all job names
     if names is None:
-        jobs_path = os.path.join(slurm_dir, "jobs.json")
+        jobs_path = os.path.join(pbs_dir, "jobs.json")
         if os.path.isfile(jobs_path):
             with open(jobs_path, "r") as f:
                 jobs = json.load(f)
@@ -453,7 +447,7 @@ def get_logs(
         names = list(jobs.keys())
     log_fpaths = []
     for name in names:
-        log_fpath = os.path.join(slurm_dir, "logs", f"{name}.out")
+        log_fpath = os.path.join(pbs_dir, "logs", f"{name}.out")
         if os.path.isfile(log_fpath):
             log_fpaths.append(log_fpath)
     if not log_fpaths:

@@ -144,6 +144,13 @@ class SlurmEnvironment(Environment):
     default_setup: list[str] | None = None
 
 
+class PBSEnvironment(Environment):
+    kind: Literal["pbs"] = "pbs"
+    host: str = "localhost"
+    default_options: list[str] | None = None
+    default_setup: list[str] | None = None
+
+
 class SSHEnvironment(BaseModel):
     kind: Literal["ssh"] = "ssh"
     host: str
@@ -315,6 +322,7 @@ class ProjectInfo(BaseModel):
         | JuliaEnvironment
         | MatlabEnvironment
         | SlurmEnvironment
+        | PBSEnvironment
         | VenvEnvironment
         | UvEnvironment
         | UvVenvEnvironment

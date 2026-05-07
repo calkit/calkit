@@ -908,3 +908,63 @@ def test_env_from_notebook_path(tmp_dir):
     assert res.env["path"] == "pyproject.toml"
     assert res.env["kind"] == "uv"
     assert res.exists
+
+
+def test_scheduler_env_lock_files(tmp_dir):
+    """Cover scheduler env lock-file behavior (slurm and pbs).
+
+    Scenarios:
+    - ``get_env_lock_fpath`` returns the expected path,
+    - ``write_scheduler_env_lock`` writes a deterministic JSON file,
+    - re-running with unchanged content leaves the file untouched,
+    - changing ``default_options`` produces different content (so DVC will
+      treat dependent stages as stale),
+    - non-scheduler envs return ``None``.
+    """
+    slurm_env = {
+        "kind": "slurm",
+        "host": "localhost",
+        "default_options": ["--time=01:00:00"],
+        "default_setup": ["module purge"],
+    }
+    pbs_env = {
+        "kind": "pbs",
+        "host": "hpc.example.org",
+        "default_options": ["-l", "walltime=01:00:00"],
+    }
+    slurm_lock = calkit.environments.get_env_lock_fpath(
+        env=slurm_env, env_name="cluster", as_posix=True
+    )
+    assert slurm_lock == ".calkit/env-locks/cluster.json"
+    pbs_lock_path = calkit.environments.get_env_lock_fpath(
+        env=pbs_env, env_name="hpc", as_posix=True
+    )
+    assert pbs_lock_path == ".calkit/env-locks/hpc.json"
+    written = calkit.environments.write_scheduler_env_lock(
+        env_name="cluster", env=slurm_env
+    )
+    assert written == slurm_lock
+    assert os.path.isfile(slurm_lock)
+    with open(slurm_lock) as f:
+        loaded = json.load(f)
+    assert loaded == slurm_env
+    mtime_before = os.path.getmtime(slurm_lock)
+    calkit.environments.write_scheduler_env_lock(
+        env_name="cluster", env=slurm_env
+    )
+    assert os.path.getmtime(slurm_lock) == mtime_before
+    updated = dict(slurm_env)
+    updated["default_options"] = ["--time=02:00:00"]
+    calkit.environments.write_scheduler_env_lock(
+        env_name="cluster", env=updated
+    )
+    with open(slurm_lock) as f:
+        loaded = json.load(f)
+    assert loaded["default_options"] == ["--time=02:00:00"]
+    other = {"kind": "uv", "path": "pyproject.toml"}
+    assert (
+        calkit.environments.write_scheduler_env_lock(
+            env_name="main", env=other
+        )
+        is None
+    )

@@ -47,6 +47,7 @@
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                            |
 | [`cloud`](#command-group-cloud)                  | Interact with a Calkit Cloud.                                      |
 | [`slurm`](#command-group-slurm)                  | Work with SLURM.                                                   |
+| [`pbs`](#command-group-pbs)                      | Work with PBS.                                                     |
 | [`dev`](#command-group-dev)                      | Developer tools.                                                   |
 
 ## Top-level command details
@@ -795,6 +796,7 @@ Create a new Calkit object.
 | [`conda-env`](#subcommand-new-create-conda-env)                           | Create a new Conda environment.                                       |
 | [`uv-env`](#subcommand-new-create-uv-env)                                 | Create a new uv project environment.                                  |
 | [`slurm-env`](#subcommand-new-create-slurm-env)                           | Create a new SLURM environment.                                       |
+| [`pbs-env`](#subcommand-new-create-pbs-env)                               | Create a new PBS environment.                                         |
 | [`uv-venv`](#subcommand-new-create-uv-venv)                               | Create a new uv virtual environment.                                  |
 | [`venv`](#subcommand-new-create-venv)                                     | Create a new Python virtual environment with venv.                    |
 | [`pixi-env`](#subcommand-new-create-pixi-env)                             | Create a new pixi virtual environment.                                |
@@ -1138,6 +1140,30 @@ Options:
 | `--description`     | text    | no       |           | Description.                                                                                                               |
 | `--overwrite`, `-f` | boolean | no       | False     | Overwrite any existing environment with this name.                                                                         |
 | `--no-commit`       | boolean | no       | False     | Do not commit changes.                                                                                                     |
+
+<a id="subcommand-new-create-pbs-env"></a>
+
+#### `calkit new|create pbs-env`
+
+Create a new PBS environment.
+
+Usage:
+
+```text
+calkit new|create pbs-env [OPTIONS]
+```
+
+Options:
+
+| Option              | Type    | Required | Default   | Description                                                                                                                   |
+| ------------------- | ------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`      | text    | yes      |           | Environment name.                                                                                                             |
+| `--host`            | text    | no       | localhost | Host where PBS commands should run.                                                                                           |
+| `--default-option`  | text    | no       |           | Default qsub option string (for example --default-option=-l --default-option=walltime=01:00:00). Repeat for multiple options. |
+| `--default-setup`   | text    | no       |           | Default shell setup command to run before PBS jobs (for example 'module load julia/1.11'). Repeat for multiple commands.      |
+| `--description`     | text    | no       |           | Description.                                                                                                                  |
+| `--overwrite`, `-f` | boolean | no       | False     | Overwrite any existing environment with this name.                                                                            |
+| `--no-commit`       | boolean | no       | False     | Do not commit changes.                                                                                                        |
 
 <a id="subcommand-new-create-uv-venv"></a>
 
@@ -2762,16 +2788,18 @@ Arguments:
 
 Options:
 
-| Option                  | Type    | Required | Default | Description                                                                                                        |
-| ----------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------ |
-| `--name`, `-n`          | text    | yes      |         | Job name.                                                                                                          |
-| `--environment`, `-e`   | text    | yes      |         | Calkit (slurm) environment to use for the job.                                                                     |
-| `--dep`, `-d`           | text    | no       |         | Additional dependencies to track, which if changed signify a job is invalid.                                       |
-| `--out`, `-o`           | text    | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job. |
-| `--sbatch-option`, `-s` | text    | no       |         | Additional options to pass to sbatch (no spaces allowed).                                                          |
-| `--setup`               | text    | no       |         | Shell setup command to run before launching the target (repeat for multiple commands).                             |
-| `--log-path`            | text    | no       |         | Output log path.                                                                                                   |
-| `--command`             | boolean | no       |         | Whether the target is a command instead of a script.                                                               |
+| Option                                                          | Type    | Required | Default | Description                                                                                                                                                 |
+| --------------------------------------------------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`                                                  | text    | yes      |         | Job name.                                                                                                                                                   |
+| `--environment`, `-e`                                           | text    | yes      |         | Calkit (slurm) environment to use for the job.                                                                                                              |
+| `--dep`, `-d`                                                   | text    | no       |         | Additional dependencies to track, which if changed signify a job is invalid.                                                                                |
+| `--out`, `-o`                                                   | text    | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job.                                          |
+| `--sbatch-option`, `-s`                                         | text    | no       |         | Additional options to pass to sbatch (no spaces allowed). When provided, the environment's default options are ignored.                                     |
+| `--setup`                                                       | text    | no       |         | Shell setup command to run before launching the target (repeat for multiple commands). When provided, the environment's default setup commands are ignored. |
+| `--log-path`                                                    | text    | no       |         | Output log path.                                                                                                                                            |
+| `--command`                                                     | boolean | no       |         | Whether the target is a command instead of a script.                                                                                                        |
+| `--merge-env-default-options`, `--no-merge-env-default-options` | boolean | no       | True    | Whether to prepend the environment's default sbatch options to those provided here (sbatch's last-occurrence wins, so explicit options still override).     |
+| `--merge-env-default-setup`, `--no-merge-env-default-setup`     | boolean | no       | True    | Whether to prepend the environment's default setup commands to those provided here.                                                                         |
 
 <a id="subcommand-slurm-queue"></a>
 
@@ -2813,6 +2841,109 @@ Usage:
 
 ```text
 calkit slurm logs [OPTIONS] [NAMES...]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                        |
+| -------- | ---- | -------- | ------- | ---------------------------------- |
+| `names`  | text | no       |         | Names of the jobs to get logs for. |
+
+Options:
+
+| Option           | Type    | Required | Default | Description                         |
+| ---------------- | ------- | -------- | ------- | ----------------------------------- |
+| `--follow`, `-f` | boolean | no       | False   | Follow the log output like tail -f. |
+
+<a id="command-group-pbs"></a>
+
+### `calkit pbs`
+
+Work with PBS.
+
+| Command                            | Description                                            |
+| ---------------------------------- | ------------------------------------------------------ |
+| [`batch`](#subcommand-pbs-batch)   | Submit a PBS batch job for the project.                |
+| [`queue`](#subcommand-pbs-queue)   | List PBS jobs submitted via Calkit.                    |
+| [`cancel`](#subcommand-pbs-cancel) | Cancel PBS jobs by their name in the project.          |
+| [`logs`](#subcommand-pbs-logs)     | Get the logs for a PBS job by its name in the project. |
+
+<a id="subcommand-pbs-batch"></a>
+
+#### `calkit pbs batch`
+
+Submit a PBS batch job for the project.
+
+Duplicates are not allowed, so if one is already running or queued with the same name, we'll wait for it to finish. The only exception is if the dependencies have changed, in which case any queued or running jobs will be canceled and a new one submitted.
+
+Usage:
+
+```text
+calkit pbs batch [OPTIONS] TARGET [ARGS...]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                  |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `target` | text | yes      |         | The target to run. This can be a shell script or an executable.              |
+| `args`   | text | no       |         | Arguments for the target command, passed to the job script after the target. |
+
+Options:
+
+| Option                                                          | Type    | Required | Default | Description                                                                                                                                                 |
+| --------------------------------------------------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`                                                  | text    | yes      |         | Job name.                                                                                                                                                   |
+| `--environment`, `-e`                                           | text    | yes      |         | Calkit (PBS) environment to use for the job.                                                                                                                |
+| `--dep`, `-d`                                                   | text    | no       |         | Additional dependencies to track, which if changed signify a job is invalid.                                                                                |
+| `--out`, `-o`                                                   | text    | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job.                                          |
+| `--qsub-option`, `-q`                                           | text    | no       |         | Additional options to pass to qsub (no spaces allowed). When provided, the environment's default options are ignored.                                       |
+| `--setup`                                                       | text    | no       |         | Shell setup command to run before launching the target (repeat for multiple commands). When provided, the environment's default setup commands are ignored. |
+| `--log-path`                                                    | text    | no       |         | Output log path.                                                                                                                                            |
+| `--command`                                                     | boolean | no       |         | Whether the target is a command instead of a script.                                                                                                        |
+| `--merge-env-default-options`, `--no-merge-env-default-options` | boolean | no       | True    | Whether to prepend the environment's default qsub options to those provided here (qsub's last-occurrence wins, so explicit options still override).         |
+| `--merge-env-default-setup`, `--no-merge-env-default-setup`     | boolean | no       | True    | Whether to prepend the environment's default setup commands to those provided here.                                                                         |
+
+<a id="subcommand-pbs-queue"></a>
+
+#### `calkit pbs queue`
+
+List PBS jobs submitted via Calkit.
+
+Usage:
+
+```text
+calkit pbs queue
+```
+
+<a id="subcommand-pbs-cancel"></a>
+
+#### `calkit pbs cancel`
+
+Cancel PBS jobs by their name in the project.
+
+Usage:
+
+```text
+calkit pbs cancel NAMES...
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description              |
+| -------- | ---- | -------- | ------- | ------------------------ |
+| `names`  | text | yes      |         | Names of jobs to cancel. |
+
+<a id="subcommand-pbs-logs"></a>
+
+#### `calkit pbs logs`
+
+Get the logs for a PBS job by its name in the project.
+
+Usage:
+
+```text
+calkit pbs logs [OPTIONS] [NAMES...]
 ```
 
 Arguments:

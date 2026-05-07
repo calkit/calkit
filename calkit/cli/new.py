@@ -1500,6 +1500,94 @@ def new_slurm_env(
             )
 
 
+@new_app.command("pbs-env")
+def new_pbs_env(
+    name: Annotated[
+        str, typer.Option("--name", "-n", help="Environment name.")
+    ],
+    host: Annotated[
+        str,
+        typer.Option("--host", help="Host where PBS commands should run."),
+    ] = "localhost",
+    default_options: Annotated[
+        list[str],
+        typer.Option(
+            "--default-option",
+            help=(
+                "Default qsub option string (for example "
+                "--default-option=-l --default-option=walltime=01:00:00). "
+                "Repeat for multiple options."
+            ),
+        ),
+    ] = [],
+    default_setup: Annotated[
+        list[str],
+        typer.Option(
+            "--default-setup",
+            help=(
+                "Default shell setup command to run before PBS jobs "
+                "(for example 'module load julia/1.11'). Repeat for "
+                "multiple commands."
+            ),
+        ),
+    ] = [],
+    description: Annotated[
+        str | None, typer.Option("--description", help="Description.")
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite any existing environment with this name.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
+):
+    """Create a new PBS environment."""
+    import git
+
+    host = host.strip()
+    if not host:
+        raise_error("Host is required")
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if isinstance(envs, list):
+        typer.echo("Converting environments from list to dict")
+        envs = {env.pop("name"): env for env in envs}
+    if name in envs and not overwrite:
+        raise_error(
+            f"Environment with name {name} already exists "
+            "(use -f to overwrite)"
+        )
+    normalized_default_options = [
+        opt.strip() for opt in default_options if opt.strip()
+    ]
+    normalized_default_setup = [
+        cmd.strip() for cmd in default_setup if cmd.strip()
+    ]
+    env = {"kind": "pbs", "host": host}
+    if normalized_default_options:
+        env["default_options"] = normalized_default_options  # type: ignore
+    if normalized_default_setup:
+        env["default_setup"] = normalized_default_setup  # type: ignore
+    if description is not None:
+        env["description"] = description
+    envs[name] = env
+    ck_info["environments"] = envs
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    if not no_commit:
+        repo = git.Repo()
+        repo.git.add("calkit.yaml")
+        if repo.git.diff(["--staged", "calkit.yaml"]):
+            repo.git.commit(
+                ["calkit.yaml", "-m", f"Add PBS environment {name}"]
+            )
+
+
 @new_app.command("uv-venv")
 def new_uv_venv(
     name: Annotated[

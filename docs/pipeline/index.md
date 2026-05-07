@@ -297,6 +297,7 @@ Common stage parameters:
 | `iterate_over` | list[StageIteration] \| None        | no       | null    |
 | `description`  | str \| None                         | no       | null    |
 | `slurm`        | StageSlurmOptions \| None           | no       | null    |
+| `pbs`          | StagePBSOptions \| None             | no       | null    |
 
 ### `command`
 

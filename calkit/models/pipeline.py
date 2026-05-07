@@ -132,12 +132,37 @@ class StageIteration(BaseModel):
 
 
 class StageSlurmOptions(BaseModel):
-    """Parameters for running a stage with SLURM."""
+    """Parameters for running a stage with SLURM.
+
+    The environment-level ``default_options`` / ``default_setup`` are
+    applied by ``calkit slurm batch`` at submission time. Whether each
+    list is merged with the stage's own values is controlled independently
+    by ``merge_env_default_options`` and ``merge_env_default_setup`` so
+    env-default merging stays out of pipeline compilation.
+    """
 
     options: list[str] | None = None
-    use_default_options_from_env: bool = True
     setup: list[str] | None = None
-    use_default_setup_from_env: bool = True
+    merge_env_default_options: bool = True
+    merge_env_default_setup: bool = True
+    log_path: str | None = None
+    log_storage: Literal["git", "dvc"] | None = "git"
+
+
+class StagePBSOptions(BaseModel):
+    """Parameters for running a stage with PBS.
+
+    The environment-level ``default_options`` / ``default_setup`` are
+    applied by ``calkit pbs batch`` at submission time. Whether each list
+    is merged with the stage's own values is controlled independently by
+    ``merge_env_default_options`` and ``merge_env_default_setup`` so
+    env-default merging stays out of pipeline compilation.
+    """
+
+    options: list[str] | None = None
+    setup: list[str] | None = None
+    merge_env_default_options: bool = True
+    merge_env_default_setup: bool = True
     log_path: str | None = None
     log_storage: Literal["git", "dvc"] | None = "git"
 
@@ -171,8 +196,18 @@ class Stage(BaseModel):
     iterate_over: list[StageIteration] | None = None
     description: str | None = None
     slurm: StageSlurmOptions | None = None
+    pbs: StagePBSOptions | None = None
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def check_scheduler_options_exclusive(self) -> Stage:
+        if self.slurm is not None and self.pbs is not None:
+            raise ValueError(
+                f"Stage '{self.name}' has both 'slurm' and 'pbs' options "
+                "set; only one scheduler may be used per stage"
+            )
+        return self
 
     @property
     def outer_environment(self) -> str:
@@ -235,13 +270,36 @@ class Stage(BaseModel):
     def xenv_cmd(self) -> str:
         """Return the command prefix for running in an environment, if
         needed.
+
+        When a stage uses a job-scheduler env (SLURM or PBS), the prefix is
+        a ``calkit slurm batch``/``calkit pbs batch`` invocation. If the
+        scheduler env wraps a separate inner env (composite syntax
+        ``<scheduler-env>:<inner-env>``), we additionally wrap the
+        scheduled command with ``calkit xenv -n <inner-env>``. For a plain
+        scheduler env (no inner runtime needed), we skip the inner xenv
+        wrap and let the user's command run directly inside the job.
         """
-        if self.environment == "_system" and self.slurm is None:
+        if (
+            self.environment == "_system"
+            and self.slurm is None
+            and self.pbs is None
+        ):
             return ""
-        cmd = f"calkit xenv -n {self.inner_environment} --no-check --"
+        scheduler_cmd = None
         if self.slurm is not None:
-            cmd = self.sbatch_cmd + " --command -- " + cmd
-        return cmd
+            scheduler_cmd = self.sbatch_cmd
+        elif self.pbs is not None:
+            scheduler_cmd = self.qsub_cmd
+        if scheduler_cmd is not None:
+            if self.inner_environment == self.outer_environment:
+                # Plain scheduler env: no inner runtime to dispatch into.
+                return scheduler_cmd + " --command --"
+            return (
+                scheduler_cmd
+                + " --command -- "
+                + f"calkit xenv -n {self.inner_environment} --no-check --"
+            )
+        return f"calkit xenv -n {self.inner_environment} --no-check --"
 
     @property
     def sbatch_cmd(self) -> str:
@@ -258,6 +316,13 @@ class Stage(BaseModel):
             cmd += "@" + ",".join(
                 [f"{{{arg_name}}}" for arg_name in arg_names]
             )
+        # Only emit the negative form when the stage opts out of merging
+        # env defaults; keeping the default (True) implicit keeps the
+        # compiled cmd minimal.
+        if not self.slurm.merge_env_default_options:
+            cmd += " --no-merge-env-default-options"
+        if not self.slurm.merge_env_default_setup:
+            cmd += " --no-merge-env-default-setup"
         if self.environment != "_system":
             cmd += f" --environment {self.outer_environment}"
         if self.slurm.log_path is not None:
@@ -289,6 +354,59 @@ class Stage(BaseModel):
                 cmd += f" -s {opt}"
         if self.slurm.setup is not None:
             for setup_cmd in self.slurm.setup:
+                cmd += f" --setup {shlex.quote(setup_cmd)}"
+        return cmd
+
+    @property
+    def qsub_cmd(self) -> str:
+        if self.pbs is None:
+            raise ValueError("Stage does not have PBS options")
+        cmd = f"calkit pbs batch --name {self.name}"
+        if self.iterate_over is not None:
+            arg_names = []
+            for item in self.iterate_over:
+                if isinstance(item.arg_name, list):
+                    arg_names += item.arg_name
+                else:
+                    arg_names.append(item.arg_name)
+            cmd += "@" + ",".join(
+                [f"{{{arg_name}}}" for arg_name in arg_names]
+            )
+        if not self.pbs.merge_env_default_options:
+            cmd += " --no-merge-env-default-options"
+        if not self.pbs.merge_env_default_setup:
+            cmd += " --no-merge-env-default-setup"
+        if self.environment != "_system":
+            cmd += f" --environment {self.outer_environment}"
+        if self.pbs.log_path is not None:
+            cmd += f" --log-path '{self.pbs.log_path}'"
+        for dep in self.dvc_deps:
+            cmd += f" --dep {dep}"
+        for out in self.outputs:
+            # Determine if this is a non-persistent output
+            if isinstance(out, str):
+                cmd += f" --out {out}"
+            elif isinstance(out, PathOutput) and out.delete_before_run:
+                cmd += f" --out {out.path}"
+        # Check for any missing outs in dvc_outs
+        # This can be important for implicit outputs like notebook stages
+        for out in self.dvc_outs:
+            # Determine if this is a non-persistent output
+            if isinstance(out, str):
+                txt = f" --out {out}"
+                if txt not in cmd:
+                    cmd += txt
+            elif isinstance(out, dict):
+                out_path = list(out.keys())[0]
+                if not out[out_path].get("persist", False):
+                    txt = f" --out {out_path}"
+                    if txt not in cmd:
+                        cmd += txt
+        if self.pbs.options is not None:
+            for opt in self.pbs.options:
+                cmd += f" -q {opt}"
+        if self.pbs.setup is not None:
+            for setup_cmd in self.pbs.setup:
                 cmd += f" --setup {shlex.quote(setup_cmd)}"
         return cmd
 
@@ -593,6 +711,20 @@ class ShellScriptStage(Stage):
             if dep_txt in cmd:
                 cmd = cmd.replace(dep_txt, "")
             return cmd
+        # For shell scripts on a plain PBS env (no inner env), run directly
+        # through qsub rather than via xenv.
+        if (
+            self.pbs is not None
+            and self.inner_environment == self.outer_environment
+        ):
+            cmd = self.qsub_cmd
+            cmd += f" -- {self.script_path}"
+            for arg in self.args:
+                cmd += f" {arg}"
+            dep_txt = f"--dep {self.script_path} "
+            if dep_txt in cmd:
+                cmd = cmd.replace(dep_txt, "")
+            return cmd
         cmd = self.xenv_cmd
         if self.shell == "zsh":
             norc_args = "-f"
@@ -848,6 +980,8 @@ class JupyterNotebookStage(Stage):
         cmd += f' "{self.notebook_path}"'
         if self.slurm is not None:
             cmd = self.sbatch_cmd + " --command -- " + cmd
+        elif self.pbs is not None:
+            cmd = self.qsub_cmd + " --command -- " + cmd
         return cmd
 
     @property
@@ -954,14 +1088,39 @@ class Pipeline(BaseModel):
             stage.name = stage_name
         return self
 
-    def set_stage_slurm_options(self, environments: dict[str, dict]) -> None:
-        """Set the SLURM options for each stage based on the provided info.
+    def set_stage_scheduler_options(
+        self, environments: dict[str, dict]
+    ) -> None:
+        """Validate and initialize scheduler (SLURM/PBS) options on stages.
 
-        If the stage's main or outer environment is of kind 'slurm',
-        we will set the stage's SLURM options based on the provided info,
-        such that it will run with `sbatch` and will be robust to SSH
-        disconnects.
+        For each stage whose outer environment is a job scheduler (SLURM or
+        PBS), this:
+
+        - validates the environment configuration (composite-env rules),
+        - initializes ``stage.slurm`` / ``stage.pbs`` so the stage's
+          ``xenv_cmd`` knows to wrap the command with ``calkit slurm batch``
+          / ``calkit pbs batch``.
+
+        Environment-level ``default_options`` and ``default_setup`` are NOT
+        merged into the stage here; the batch CLI applies them at submission
+        time so the pipeline does not need to be recompiled when env defaults
+        change.
         """
+        # Stage kinds that don't require a separate inner runtime, so they
+        # can run on a plain (non-composite) scheduler env. Anything else
+        # must use a composite env like ``<scheduler-env>:<inner-env>``.
+        plain_ok_kinds = {
+            "shell-script",
+            "shell-command",
+            "command",
+            # SBatchStage is the legacy slurm-specific direct stage; it's
+            # equivalent to ``shell-script`` + ``slurm`` options.
+            "sbatch",
+        }
+        scheduler_kinds = {
+            "slurm": (StageSlurmOptions, "slurm"),
+            "pbs": (StagePBSOptions, "pbs"),
+        }
         for stage in self.stages.values():
             env_name = stage.outer_environment
             if env_name != "_system" and env_name not in environments:
@@ -971,57 +1130,61 @@ class Pipeline(BaseModel):
                     "environments"
                 )
             env = environments.get(stage.outer_environment, {})
-            if env.get("kind") == "slurm":
-                if stage.kind not in ["sbatch", "shell-script"]:
-                    if stage.inner_environment == stage.outer_environment:
-                        raise ValueError(
-                            f"Stage '{stage.name}' uses non-sbatch kind "
-                            f"'{stage.kind}' with SLURM environment "
-                            f"'{stage.outer_environment}'; Use a composite "
-                            "environment like '<slurm-env>:<inner-env>' "
-                            "where the inner environment is not SLURM"
-                        )
-                    inner_env = environments.get(stage.inner_environment)
-                    if inner_env is None:
-                        raise ValueError(
-                            f"Stage '{stage.name}' has inner environment "
-                            f"'{stage.inner_environment}' that is not "
-                            "defined in environments"
-                        )
-                    if inner_env.get("kind") == "slurm":
-                        raise ValueError(
-                            f"Stage '{stage.name}' has SLURM outer "
-                            f"environment '{stage.outer_environment}' and "
-                            f"SLURM inner environment "
-                            f"'{stage.inner_environment}'; The inner "
-                            "environment for non-sbatch stages must not be "
-                            "SLURM"
-                        )
-                slurm_options = env.get("default_options", [])
-                if stage.slurm is None:
-                    stage.slurm = StageSlurmOptions()
-                if slurm_options and stage.slurm.use_default_options_from_env:
-                    # Append options together
-                    # sbatch takes the latest value as the effective one,
-                    # so stage-specific options will override environment
-                    # default options if there are any conflicts
-                    orig_options = stage.slurm.options or []
-                    stage.slurm.options = slurm_options + orig_options
-                slurm_setup = env.get("default_setup", [])
-                if slurm_setup and stage.slurm.use_default_setup_from_env:
-                    # Setup commands run in order, so environment defaults run
-                    # before any stage-specific setup.
-                    orig_setup = stage.slurm.setup or []
-                    stage.slurm.setup = slurm_setup + orig_setup
+            kind = env.get("kind")
+            if kind not in scheduler_kinds:
+                continue
+            options_cls, attr = scheduler_kinds[kind]
+            scheduler_label = kind.upper()
+            if stage.kind not in plain_ok_kinds:
+                if stage.inner_environment == stage.outer_environment:
+                    raise ValueError(
+                        f"Stage '{stage.name}' has kind '{stage.kind}' but "
+                        f"environment '{stage.outer_environment}' is a "
+                        f"{scheduler_label} env with no inner runtime; use "
+                        f"a composite environment like "
+                        f"'<{kind}-env>:<inner-env>'"
+                    )
+                inner_env = environments.get(stage.inner_environment)
+                if inner_env is None:
+                    raise ValueError(
+                        f"Stage '{stage.name}' has inner environment "
+                        f"'{stage.inner_environment}' that is not "
+                        "defined in environments"
+                    )
+                if inner_env.get("kind") in scheduler_kinds:
+                    raise ValueError(
+                        f"Stage '{stage.name}' has {scheduler_label} outer "
+                        f"environment '{stage.outer_environment}' and "
+                        f"scheduler inner environment "
+                        f"'{stage.inner_environment}'; the inner "
+                        "environment must not be a job scheduler"
+                    )
+            if getattr(stage, attr) is None:
+                setattr(stage, attr, options_cls())
+
+    def set_stage_slurm_options(self, environments: dict[str, dict]) -> None:
+        """Backwards-compatible alias for :meth:`set_stage_scheduler_options`.
+
+        Both SLURM and PBS scheduler initialization now happen in a single
+        call.
+        """
+        self.set_stage_scheduler_options(environments=environments)
 
     def ensure_env_lock_paths_are_inputs(
         self, env_lock_fpaths: dict[str, str]
     ) -> None:
         """Ensure that all environment lock file paths are included as inputs
         to each stage.
+
+        Both the stage's inner and outer environments are considered, so a
+        SLURM/PBS env used as the outer half of a composite environment
+        contributes its lock file as a stage dependency.
         """
         for _, stage in self.stages.items():
-            env_name = stage.inner_environment
-            lock_fpath = env_lock_fpaths.get(env_name)
-            if lock_fpath is not None and lock_fpath not in stage.inputs:
-                stage.inputs.append(lock_fpath)
+            for env_name in (
+                stage.inner_environment,
+                stage.outer_environment,
+            ):
+                lock_fpath = env_lock_fpaths.get(env_name)
+                if lock_fpath is not None and lock_fpath not in stage.inputs:
+                    stage.inputs.append(lock_fpath)

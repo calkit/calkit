@@ -3,8 +3,8 @@
 This module exposes a single typer app that dispatches to the right
 underlying scheduler binary (``sbatch``/``squeue``/``scancel`` for SLURM,
 ``qsub``/``qstat``/``qdel`` for PBS) based on the environment kind. It is
-registered under multiple names (``scheduler``, ``sched``, ``slurm``) so
-that already-released pipelines that emit ``calkit slurm batch ...`` keep
+registered under multiple names (``sched``, ``slurm``) so that
+already-released pipelines that emit ``calkit slurm batch ...`` keep
 working unchanged.
 """
 
@@ -22,9 +22,9 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
-from calkit.cli import raise_error
+from calkit.cli import AliasGroup, raise_error
 
-scheduler_app = typer.Typer(no_args_is_help=True)
+scheduler_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
 SCHEDULER_KINDS = ("slurm", "pbs")
 _BINARIES = {
@@ -505,7 +505,7 @@ def _build_pbs_submit(
     return cmd, job_script
 
 
-@scheduler_app.command(name="queue")
+@scheduler_app.command(name="queue|q")
 def get_queue() -> None:
     """List scheduler jobs submitted via Calkit (across SLURM and PBS)."""
     found_any = False

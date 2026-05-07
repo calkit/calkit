@@ -2757,12 +2757,12 @@ Options:
 
 Work with a job scheduler (SLURM or PBS).
 
-| Command                                    | Description                                                       |
-| ------------------------------------------ | ----------------------------------------------------------------- |
-| [`batch`](#subcommand-sched-slurm-batch)   | Submit a batch job through the scheduler associated with the env. |
-| [`queue`](#subcommand-sched-slurm-queue)   | List scheduler jobs submitted via Calkit (across SLURM and PBS).  |
-| [`cancel`](#subcommand-sched-slurm-cancel) | Cancel scheduler jobs by their name in the project.               |
-| [`logs`](#subcommand-sched-slurm-logs)     | Get the logs for scheduler jobs by their name in the project.     |
+| Command                                       | Description                                                       |
+| --------------------------------------------- | ----------------------------------------------------------------- |
+| [`batch`](#subcommand-sched-slurm-batch)      | Submit a batch job through the scheduler associated with the env. |
+| [`queue\|q`](#subcommand-sched-slurm-queue-q) | List scheduler jobs submitted via Calkit (across SLURM and PBS).  |
+| [`cancel`](#subcommand-sched-slurm-cancel)    | Cancel scheduler jobs by their name in the project.               |
+| [`logs`](#subcommand-sched-slurm-logs)        | Get the logs for scheduler jobs by their name in the project.     |
 
 <a id="subcommand-sched-slurm-batch"></a>
 
@@ -2800,16 +2800,16 @@ Options:
 | `--env-default-options`             | text    | no       | replace | How to apply the environment's default scheduler options: 'replace' (default) uses env defaults only when no options were provided here; 'merge' prepends env defaults (the scheduler's last-occurrence wins, so explicit options still override); 'ignore' never applies env defaults. |
 | `--env-default-setup`               | text    | no       | replace | How to apply the environment's default setup commands: 'replace' (default) uses env defaults only when no setup commands were provided here; 'merge' prepends env defaults; 'ignore' never applies env defaults.                                                                        |
 
-<a id="subcommand-sched-slurm-queue"></a>
+<a id="subcommand-sched-slurm-queue-q"></a>
 
-#### `calkit sched|slurm queue`
+#### `calkit sched|slurm queue|q`
 
 List scheduler jobs submitted via Calkit (across SLURM and PBS).
 
 Usage:
 
 ```text
-calkit sched|slurm queue
+calkit sched|slurm queue|q
 ```
 
 <a id="subcommand-sched-slurm-cancel"></a>

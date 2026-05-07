@@ -138,8 +138,9 @@ class StageSchedulerOptions(BaseModel):
     """Parameters for running a stage on a job scheduler (SLURM or PBS).
 
     The environment-level ``default_options`` / ``default_setup`` are
-    applied by ``calkit slurm batch`` / ``calkit pbs batch`` at submission
-    time. The mode for each list is controlled independently by
+    applied by ``calkit slurm batch`` (for slurm envs) or ``calkit sched
+    batch`` (for pbs and other scheduler envs) at submission time. The
+    mode for each list is controlled independently by
     ``env_default_options`` and ``env_default_setup``:
 
     - ``replace`` (default): if the stage provides values, those are used
@@ -297,7 +298,7 @@ class Stage(BaseModel):
         SLURM stages emit ``calkit slurm batch …`` (kept as the alias
         previously released as a top-level command); PBS and any future
         scheduler kinds emit ``calkit sched batch …`` and route through
-        the same underlying CLI via the ``scheduler|sched|slurm`` group.
+        the same underlying CLI via the ``sched|slurm`` group.
         """
         if self.slurm is not None:
             opts = self.slurm
@@ -1025,8 +1026,9 @@ class Pipeline(BaseModel):
 
         - validates the environment configuration (composite-env rules),
         - initializes ``stage.slurm`` / ``stage.pbs`` so the stage's
-          ``xenv_cmd`` knows to wrap the command with ``calkit slurm batch``
-          / ``calkit pbs batch``.
+          ``xenv_cmd`` knows to wrap the command with ``calkit slurm
+          batch`` (slurm) or ``calkit sched batch`` (pbs / other
+          scheduler kinds).
 
         Environment-level ``default_options`` and ``default_setup`` are NOT
         merged into the stage here; the batch CLI applies them at submission
@@ -1085,6 +1087,19 @@ class Pipeline(BaseModel):
                         f"scheduler inner environment "
                         f"'{stage.inner_environment}'; the inner "
                         "environment must not be a job scheduler"
+                    )
+            # Reject the case where the stage carries the *other*
+            # scheduler's options block. Otherwise we'd silently wrap with
+            # the wrong scheduler, since ``check_scheduler_options_exclusive``
+            # ran during model validation before this initialization step.
+            for other_kind, (_, other_attr) in scheduler_kinds.items():
+                if other_kind == kind:
+                    continue
+                if getattr(stage, other_attr) is not None:
+                    raise ValueError(
+                        f"Stage '{stage.name}' has '{other_attr}' options "
+                        f"set but its environment '{stage.outer_environment}' "
+                        f"is of kind '{kind}'; use '{attr}' options instead"
                     )
             if getattr(stage, attr) is None:
                 setattr(stage, attr, options_cls())

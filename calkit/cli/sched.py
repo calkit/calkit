@@ -3,9 +3,8 @@
 This module exposes a single typer app that dispatches to the right
 underlying scheduler binary (``sbatch``/``squeue``/``scancel`` for SLURM,
 ``qsub``/``qstat``/``qdel`` for PBS) based on the environment kind. It is
-registered under multiple names (``sched``, ``slurm``) so that
-already-released pipelines that emit ``calkit slurm batch ...`` keep
-working unchanged.
+registered under both ``sched`` and ``slurm`` so already-released
+pipelines that emit ``calkit slurm batch ...`` keep working unchanged.
 """
 
 from __future__ import annotations
@@ -542,11 +541,16 @@ def cancel_jobs(
         typer.Argument(help="Names of jobs to cancel."),
     ],
 ) -> None:
-    """Cancel scheduler jobs by their name in the project."""
-    all_jobs: dict[str, tuple[str, dict]] = {}
+    """Cancel scheduler jobs by their name in the project.
+
+    A job name may exist in both the SLURM and PBS job lists (e.g., the
+    user re-submitted under a different scheduler with the same name); in
+    that case all matching jobs are canceled.
+    """
+    all_jobs: dict[str, list[tuple[str, dict]]] = {}
     for kind in SCHEDULER_KINDS:
         for n, info in _load_jobs(kind).items():
-            all_jobs[n] = (kind, info)
+            all_jobs.setdefault(n, []).append((kind, info))
     if not all_jobs:
         typer.echo("No jobs found for this project")
         raise typer.Exit(0)
@@ -554,18 +558,20 @@ def cancel_jobs(
         if name not in all_jobs:
             typer.echo(f"No job named '{name}' found for this project")
             continue
-        kind, job_info = all_jobs[name]
-        job_id = job_info["job_id"]
-        if not _is_active(kind, job_id):
-            typer.echo(
-                f"Job '{name}' (last submitted ID: {job_id}) is not "
-                "running or queued"
-            )
-            continue
-        ok, stderr = _cancel(kind, job_id)
-        if not ok:
-            raise_error(f"Failed to cancel job ID {job_id}: {stderr}")
-        typer.echo(f"Canceled job '{name}' with ID {job_id}")
+        for kind, job_info in all_jobs[name]:
+            job_id = job_info["job_id"]
+            if not _is_active(kind, job_id):
+                typer.echo(
+                    f"Job '{name}' (last submitted {kind} ID: {job_id}) "
+                    "is not running or queued"
+                )
+                continue
+            ok, stderr = _cancel(kind, job_id)
+            if not ok:
+                raise_error(
+                    f"Failed to cancel {kind} job ID {job_id}: {stderr}"
+                )
+            typer.echo(f"Canceled {kind} job '{name}' with ID {job_id}")
 
 
 @scheduler_app.command(name="logs")

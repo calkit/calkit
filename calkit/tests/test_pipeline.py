@@ -714,6 +714,28 @@ def test_slurm_env_validation_rules(tmp_dir):
             },
             write=False,
         )
+    # A stage on a slurm env that carries a ``pbs:`` options block (or
+    # vice versa) should fail rather than being silently re-routed.
+    with pytest.raises(
+        ValueError,
+        match="has 'pbs' options set but its environment .* is of kind 'slurm'",
+    ):
+        calkit.pipeline.to_dvc(
+            ck_info={
+                "environments": {"mycluster": {"kind": "slurm"}},
+                "pipeline": {
+                    "stages": {
+                        "run": {
+                            "kind": "shell-script",
+                            "script_path": "scripts/run.sh",
+                            "environment": "mycluster",
+                            "pbs": {"options": ["-l", "walltime=01:00"]},
+                        }
+                    }
+                },
+            },
+            write=False,
+        )
     # Slurm-inside-slurm should fail.
     with pytest.raises(
         ValueError,

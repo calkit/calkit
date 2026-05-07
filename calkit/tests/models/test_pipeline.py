@@ -244,10 +244,12 @@ def test_sbatchstage():
     """Cover ``SBatchStage`` model behavior in one place.
 
     Scenarios:
-    - direct sbatch stage with options + outputs (defaults stay implicit),
+    - direct sbatch stage with options + outputs (default ``replace``
+      mode stays implicit, no ``--env-default-*`` flag emitted),
     - parameter iteration produces a templated job name and log path,
     - stage-level setup commands are emitted via ``--setup``,
-    - opting out of merging emits ``--no-merge-env-default-{options,setup}``
+    - non-default modes (``merge`` / ``ignore``) emit
+      ``--env-default-options`` and ``--env-default-setup``
       independently.
     """
     s = SBatchStage(
@@ -267,9 +269,9 @@ def test_sbatchstage():
         "--dep data/input.txt --out data/output.txt "
         "-s --time=01:00:00 -s --mem=4G -- scripts/run_job.sh something else"
     )
-    # Defaults are implicit; no `--no-merge-...` flags appear.
-    assert "--no-merge-env-default-options" not in sd["cmd"]
-    assert "--no-merge-env-default-setup" not in sd["cmd"]
+    # Default mode is implicit; no --env-default-* flags appear.
+    assert "--env-default-options" not in sd["cmd"]
+    assert "--env-default-setup" not in sd["cmd"]
     assert "scripts/run_job.sh" in sd["deps"]
     assert "data/input.txt" in sd["deps"]
     out = {"data/output.txt": {"persist": True}}
@@ -303,25 +305,26 @@ def test_sbatchstage():
     sd = s.to_dvc()
     assert "--setup 'module purge'" in sd["cmd"]
     assert "--setup 'module load python/3.11'" in sd["cmd"]
-    # Independent opt-outs: only the disabled side gets a flag.
+    # Non-default mode for options only (setup stays implicit).
     s = SBatchStage(
-        name="job-no-opts",
+        name="job-merge-opts",
         script_path="scripts/run_job.sh",
         environment="slurm-env",
-        slurm={"merge_env_default_options": False},  # type: ignore
+        slurm={"env_default_options": "merge"},  # type: ignore
     )
     sd = s.to_dvc()
-    assert "--no-merge-env-default-options" in sd["cmd"]
-    assert "--no-merge-env-default-setup" not in sd["cmd"]
+    assert "--env-default-options merge" in sd["cmd"]
+    assert "--env-default-setup" not in sd["cmd"]
+    # Non-default mode for setup only.
     s = SBatchStage(
-        name="job-no-setup",
+        name="job-ignore-setup",
         script_path="scripts/run_job.sh",
         environment="slurm-env",
-        slurm={"merge_env_default_setup": False},  # type: ignore
+        slurm={"env_default_setup": "ignore"},  # type: ignore
     )
     sd = s.to_dvc()
-    assert "--no-merge-env-default-options" not in sd["cmd"]
-    assert "--no-merge-env-default-setup" in sd["cmd"]
+    assert "--env-default-options" not in sd["cmd"]
+    assert "--env-default-setup ignore" in sd["cmd"]
 
 
 def test_mappathsstage():

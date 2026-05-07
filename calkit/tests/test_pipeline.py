@@ -533,8 +533,8 @@ def test_sbatch_stage_to_dvc(tmp_dir):
                 "outputs": ["data/output3.txt"],
                 "slurm": {
                     "setup": ["module load gcc/12"],
-                    "merge_env_default_options": False,
-                    "merge_env_default_setup": False,
+                    "env_default_options": "ignore",
+                    "env_default_setup": "ignore",
                 },
             },
             # Jupyter notebook in nested env with slurm outer.
@@ -579,8 +579,8 @@ def test_sbatch_stage_to_dvc(tmp_dir):
     stage2 = stages["job2"]
     print(stage2)
     assert stage2["cmd"] == (
-        "calkit slurm batch --name job2 --no-merge-env-default-options "
-        "--no-merge-env-default-setup "
+        "calkit slurm batch --name job2 --env-default-options ignore "
+        "--env-default-setup ignore "
         "--environment slurm-env "
         "--dep something.jl --dep data/input2.txt --dep Manifest.toml "
         f"--dep {slurm_lock} "
@@ -763,8 +763,8 @@ def test_pbs_stage_to_dvc(tmp_dir):
                 "outputs": ["data/output3.txt"],
                 "pbs": {
                     "setup": ["module load gcc/12"],
-                    "merge_env_default_options": False,
-                    "merge_env_default_setup": False,
+                    "env_default_options": "ignore",
+                    "env_default_setup": "ignore",
                 },
             },
             "notebook": {
@@ -815,8 +815,8 @@ def test_pbs_stage_to_dvc(tmp_dir):
     stage2 = stages["job2"]
     print(stage2)
     assert stage2["cmd"] == (
-        "calkit pbs batch --name job2 --no-merge-env-default-options "
-        "--no-merge-env-default-setup "
+        "calkit pbs batch --name job2 --env-default-options ignore "
+        "--env-default-setup ignore "
         "--environment pbs-env "
         "--dep something.jl --dep data/input2.txt --dep Manifest.toml "
         f"--dep {pbs_lock} "

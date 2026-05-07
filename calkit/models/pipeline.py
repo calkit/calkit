@@ -131,20 +131,30 @@ class StageIteration(BaseModel):
         return vals
 
 
+EnvDefaultsMode = Literal["ignore", "replace", "merge"]
+
+
 class StageSlurmOptions(BaseModel):
     """Parameters for running a stage with SLURM.
 
     The environment-level ``default_options`` / ``default_setup`` are
-    applied by ``calkit slurm batch`` at submission time. Whether each
-    list is merged with the stage's own values is controlled independently
-    by ``merge_env_default_options`` and ``merge_env_default_setup`` so
-    env-default merging stays out of pipeline compilation.
+    applied by ``calkit slurm batch`` at submission time. The mode for
+    each list is controlled independently by ``env_default_options`` and
+    ``env_default_setup``:
+
+    - ``replace`` (default): if the stage provides values, those are used
+      and env defaults are skipped; if the stage's list is empty, env
+      defaults fill in.
+    - ``merge``: env defaults are prepended to whatever the stage
+      provides (sbatch's last-occurrence-wins keeps stage values on top).
+    - ``ignore``: env defaults are never applied, regardless of whether
+      the stage provided any values.
     """
 
     options: list[str] | None = None
     setup: list[str] | None = None
-    merge_env_default_options: bool = True
-    merge_env_default_setup: bool = True
+    env_default_options: EnvDefaultsMode = "replace"
+    env_default_setup: EnvDefaultsMode = "replace"
     log_path: str | None = None
     log_storage: Literal["git", "dvc"] | None = "git"
 
@@ -153,16 +163,15 @@ class StagePBSOptions(BaseModel):
     """Parameters for running a stage with PBS.
 
     The environment-level ``default_options`` / ``default_setup`` are
-    applied by ``calkit pbs batch`` at submission time. Whether each list
-    is merged with the stage's own values is controlled independently by
-    ``merge_env_default_options`` and ``merge_env_default_setup`` so
-    env-default merging stays out of pipeline compilation.
+    applied by ``calkit pbs batch`` at submission time. See
+    :class:`StageSlurmOptions` for the meaning of the mode values
+    (``replace``, ``merge``, ``ignore``).
     """
 
     options: list[str] | None = None
     setup: list[str] | None = None
-    merge_env_default_options: bool = True
-    merge_env_default_setup: bool = True
+    env_default_options: EnvDefaultsMode = "replace"
+    env_default_setup: EnvDefaultsMode = "replace"
     log_path: str | None = None
     log_storage: Literal["git", "dvc"] | None = "git"
 
@@ -316,13 +325,12 @@ class Stage(BaseModel):
             cmd += "@" + ",".join(
                 [f"{{{arg_name}}}" for arg_name in arg_names]
             )
-        # Only emit the negative form when the stage opts out of merging
-        # env defaults; keeping the default (True) implicit keeps the
-        # compiled cmd minimal.
-        if not self.slurm.merge_env_default_options:
-            cmd += " --no-merge-env-default-options"
-        if not self.slurm.merge_env_default_setup:
-            cmd += " --no-merge-env-default-setup"
+        # Only emit the flag when the stage overrides the default mode
+        # (``replace``); this keeps the compiled cmd minimal.
+        if self.slurm.env_default_options != "replace":
+            cmd += f" --env-default-options {self.slurm.env_default_options}"
+        if self.slurm.env_default_setup != "replace":
+            cmd += f" --env-default-setup {self.slurm.env_default_setup}"
         if self.environment != "_system":
             cmd += f" --environment {self.outer_environment}"
         if self.slurm.log_path is not None:
@@ -372,10 +380,10 @@ class Stage(BaseModel):
             cmd += "@" + ",".join(
                 [f"{{{arg_name}}}" for arg_name in arg_names]
             )
-        if not self.pbs.merge_env_default_options:
-            cmd += " --no-merge-env-default-options"
-        if not self.pbs.merge_env_default_setup:
-            cmd += " --no-merge-env-default-setup"
+        if self.pbs.env_default_options != "replace":
+            cmd += f" --env-default-options {self.pbs.env_default_options}"
+        if self.pbs.env_default_setup != "replace":
+            cmd += f" --env-default-setup {self.pbs.env_default_setup}"
         if self.environment != "_system":
             cmd += f" --environment {self.outer_environment}"
         if self.pbs.log_path is not None:

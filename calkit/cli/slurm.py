@@ -106,27 +106,31 @@ def run_sbatch(
             help="Whether the target is a command instead of a script.",
         ),
     ] = None,
-    merge_env_default_options: Annotated[
-        bool,
+    env_default_options: Annotated[
+        str,
         typer.Option(
-            "--merge-env-default-options/--no-merge-env-default-options",
+            "--env-default-options",
             help=(
-                "Whether to prepend the environment's default sbatch "
-                "options to those provided here (sbatch's last-occurrence "
-                "wins, so explicit options still override)."
+                "How to apply the environment's default sbatch options: "
+                "'replace' (default) uses env defaults only when no "
+                "options were provided here; 'merge' prepends env defaults "
+                "(sbatch's last-occurrence wins, so explicit options still "
+                "override); 'ignore' never applies env defaults."
             ),
         ),
-    ] = True,
-    merge_env_default_setup: Annotated[
-        bool,
+    ] = "replace",
+    env_default_setup: Annotated[
+        str,
         typer.Option(
-            "--merge-env-default-setup/--no-merge-env-default-setup",
+            "--env-default-setup",
             help=(
-                "Whether to prepend the environment's default setup "
-                "commands to those provided here."
+                "How to apply the environment's default setup commands: "
+                "'replace' (default) uses env defaults only when no setup "
+                "commands were provided here; 'merge' prepends env "
+                "defaults; 'ignore' never applies env defaults."
             ),
         ),
-    ] = True,
+    ] = "replace",
 ) -> None:
     """Submit a SLURM batch job for the project.
 
@@ -160,6 +164,17 @@ def run_sbatch(
         log_path = f".calkit/slurm/logs/{name}.out"
     if is_command is None:
         is_command = not os.path.isfile(target)
+    valid_modes = ("ignore", "replace", "merge")
+    if env_default_options not in valid_modes:
+        raise_error(
+            f"Invalid --env-default-options value '{env_default_options}'; "
+            f"expected one of {', '.join(valid_modes)}"
+        )
+    if env_default_setup not in valid_modes:
+        raise_error(
+            f"Invalid --env-default-setup value '{env_default_setup}'; "
+            f"expected one of {', '.join(valid_modes)}"
+        )
     if environment != "_system":
         ck_info = calkit.load_calkit_info()
         env = ck_info.get("environments", {}).get(environment, {})
@@ -184,22 +199,20 @@ def run_sbatch(
                     f"Environment '{environment}' is for host '{env_host}', "
                     f"but this is '{current_host}'"
                 )
-        # Env defaults are prepended to anything provided here; sbatch keeps
-        # the latest occurrence of a flag, so explicit options still win.
-        if merge_env_default_setup:
-            env_setup_cmds = env.get("default_setup", []) or []
-            if env_setup_cmds:
-                setup_cmds = [
-                    s for s in [*env_setup_cmds, *setup_cmds] if s.strip()
-                ]
-        if merge_env_default_options:
-            env_default_options = env.get("default_options", []) or []
-            if env_default_options:
-                sbatch_opts = [
-                    opt
-                    for opt in [*env_default_options, *sbatch_opts]
-                    if opt.strip()
-                ]
+        env_setup_cmds = env.get("default_setup", []) or []
+        if env_default_setup == "merge" and env_setup_cmds:
+            setup_cmds = [
+                s for s in [*env_setup_cmds, *setup_cmds] if s.strip()
+            ]
+        elif env_default_setup == "replace" and not setup_cmds:
+            setup_cmds = [s for s in env_setup_cmds if s.strip()]
+        env_default_opts = env.get("default_options", []) or []
+        if env_default_options == "merge" and env_default_opts:
+            sbatch_opts = [
+                opt for opt in [*env_default_opts, *sbatch_opts] if opt.strip()
+            ]
+        elif env_default_options == "replace" and not sbatch_opts:
+            sbatch_opts = [opt for opt in env_default_opts if opt.strip()]
     cmd = [
         "sbatch",
         "--parsable",

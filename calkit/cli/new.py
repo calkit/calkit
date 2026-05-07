@@ -1491,13 +1491,16 @@ def new_slurm_env(
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
+    from calkit.cli.check import check_environment
+
+    env_lock_fpath = check_environment(env_name=name)
     if not no_commit:
         repo = git.Repo()
         repo.git.add("calkit.yaml")
-        if repo.git.diff(["--staged", "calkit.yaml"]):
-            repo.git.commit(
-                ["calkit.yaml", "-m", f"Add SLURM environment {name}"]
-            )
+        if env_lock_fpath is not None:
+            repo.git.add(str(env_lock_fpath))
+        if repo.git.diff("--staged"):
+            repo.git.commit(["-m", f"Add SLURM environment {name}"])
 
 
 @new_app.command("pbs-env")
@@ -1579,13 +1582,16 @@ def new_pbs_env(
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
+    from calkit.cli.check import check_environment
+
+    env_lock_fpath = check_environment(env_name=name)
     if not no_commit:
         repo = git.Repo()
         repo.git.add("calkit.yaml")
-        if repo.git.diff(["--staged", "calkit.yaml"]):
-            repo.git.commit(
-                ["calkit.yaml", "-m", f"Add PBS environment {name}"]
-            )
+        if env_lock_fpath is not None:
+            repo.git.add(str(env_lock_fpath))
+        if repo.git.diff("--staged"):
+            repo.git.commit(["-m", f"Add PBS environment {name}"])
 
 
 @new_app.command("uv-venv")

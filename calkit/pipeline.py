@@ -481,10 +481,7 @@ def to_dvc(
     import git
 
     import calkit.dvc.zip
-    from calkit.environments import (
-        get_env_lock_fpath,
-        write_scheduler_env_lock,
-    )
+    from calkit.environments import get_env_lock_fpath
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -521,17 +518,13 @@ def to_dvc(
     for env_name, env in environments.items():
         if env_name not in used_envs:
             continue
-        # SLURM/PBS lock files have no external manifest; we generate them
-        # from the env config so DVC can use them as a stage dependency.
+        # SLURM/PBS lock files are produced by the env-check step (see
+        # ``calkit check env``), not at compile time, so here we only
+        # compute the path and reference it as a DVC dep.
         if env.get("kind") in ("slurm", "pbs"):
-            if write:
-                lock_fpath = write_scheduler_env_lock(
-                    env_name=env_name, env=env, wdir=wdir
-                )
-            else:
-                lock_fpath = get_env_lock_fpath(
-                    env=env, env_name=env_name, wdir=wdir, as_posix=True
-                )
+            lock_fpath = get_env_lock_fpath(
+                env=env, env_name=env_name, wdir=wdir, as_posix=True
+            )
         else:
             lock_fpath = get_env_lock_fpath(
                 env=env, env_name=env_name, as_posix=True, for_dvc=True

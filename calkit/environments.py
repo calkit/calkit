@@ -37,7 +37,7 @@ CONDA_VENV_ARCHS = [
     "win-64",
 ]
 ENV_CHECK_CACHE_TTL_SECONDS = 3600
-KINDS_NO_CHECK = ["_system", "slurm", "pbs", "ssh"]
+KINDS_NO_CHECK = ["_system", "ssh"]
 COMPOSITE_ENV_SEP = ":"
 VALID_OUTER_ENV_KINDS = ["slurm", "pbs"]
 

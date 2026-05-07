@@ -773,12 +773,10 @@ class RScriptStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = (
-            f"calkit xenv -n {self.environment} -- Rscript {self.script_path}"
-        )
+        cmd = f"{self.xenv_cmd} Rscript {self.script_path}"
         for arg in self.args:
             cmd += f" {arg}"
-        return cmd
+        return cmd.strip()
 
 
 class JuliaScriptStage(Stage):

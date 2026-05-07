@@ -486,12 +486,18 @@ def test_sbatch_stage_to_dvc(tmp_dir):
     """Cover the SLURM stage compilation paths.
 
     Scenarios in one test (per AGENTS.md guidance):
-    - direct sbatch stage with options + outputs,
-    - nested env with slurm outer wrapping a julia-script,
-    - nested env with slurm outer wrapping a jupyter-notebook,
-    - opting out of env-default merging via ``merge_env_defaults: false``,
-    - that env-level defaults are NOT baked into the compiled stage cmd
-      (they are merged at submission by ``calkit slurm batch``).
+    - direct sbatch stage on a plain slurm env with options + outputs,
+    - composite ``slurm-env:py1`` wrapping a python-script (default
+      ``replace`` mode stays implicit),
+    - composite ``slurm-env:r1`` wrapping an r-script,
+    - composite ``slurm-env:py1`` wrapping a shell-command,
+    - composite ``slurm-env:julia1`` wrapping a julia-script with
+      stage-level setup and explicit ``env_default_*: ignore``,
+    - composite ``slurm-env:julia1`` wrapping a jupyter-notebook,
+    - env-level defaults are NOT baked into the compiled stage cmd
+      (they are merged at submission by ``calkit slurm batch``),
+    - the env lock file is added as a dep on every stage that touches the
+      slurm env.
     """
     envs = {
         "slurm-env": {
@@ -504,6 +510,8 @@ def test_sbatch_stage_to_dvc(tmp_dir):
             "julia": "1.11",
             "path": "Project.toml",
         },
+        "py1": {"kind": "uv", "path": "pyproject.toml"},
+        "r1": {"kind": "renv", "path": "DESCRIPTION"},
     }
     pipeline = {
         "stages": {
@@ -523,8 +531,30 @@ def test_sbatch_stage_to_dvc(tmp_dir):
                     "data/output2.txt",
                 ],
             },
-            # Nested env with slurm outer; uses stage-level setup and
-            # explicitly opts out of merging env defaults.
+            # python-script in a composite slurm env; default mode means
+            # no --env-default-* flags are emitted.
+            "py-job": {
+                "kind": "python-script",
+                "script_path": "scripts/run.py",
+                "environment": "slurm-env:py1",
+                "args": ["--flag", "value"],
+                "inputs": ["data/input_py.txt"],
+                "outputs": ["data/output_py.txt"],
+            },
+            # r-script in a composite slurm env.
+            "r-job": {
+                "kind": "r-script",
+                "script_path": "scripts/run.R",
+                "environment": "slurm-env:r1",
+                "outputs": ["data/output_r.txt"],
+            },
+            # shell-command in a composite slurm env.
+            "sh-cmd": {
+                "kind": "shell-command",
+                "command": "echo hi",
+                "environment": "slurm-env:py1",
+            },
+            # julia-script with stage-level setup + opt-out of env defaults.
             "job2": {
                 "kind": "julia-script",
                 "script_path": "something.jl",
@@ -537,7 +567,7 @@ def test_sbatch_stage_to_dvc(tmp_dir):
                     "env_default_setup": "ignore",
                 },
             },
-            # Jupyter notebook in nested env with slurm outer.
+            # Jupyter notebook in a composite slurm env.
             "notebook": {
                 "kind": "jupyter-notebook",
                 "notebook_path": "analysis.ipynb",
@@ -614,6 +644,45 @@ def test_sbatch_stage_to_dvc(tmp_dir):
     assert "data/input2.txt" in stage3["deps"]
     assert slurm_lock in stage3["deps"]
     assert "data/notebook_output.txt" in stage3["outs"]
+    py_stage = stages["py-job"]
+    print(py_stage)
+    assert py_stage["cmd"] == (
+        "calkit slurm batch --name py-job "
+        "--environment slurm-env "
+        "--dep scripts/run.py --dep data/input_py.txt --dep uv.lock "
+        f"--dep {slurm_lock} "
+        "--out data/output_py.txt "
+        "--command -- calkit xenv -n py1 --no-check -- "
+        "python scripts/run.py --flag value"
+    )
+    assert "scripts/run.py" in py_stage["deps"]
+    assert "data/input_py.txt" in py_stage["deps"]
+    assert "uv.lock" in py_stage["deps"]
+    assert slurm_lock in py_stage["deps"]
+    r_stage = stages["r-job"]
+    print(r_stage)
+    assert r_stage["cmd"] == (
+        "calkit slurm batch --name r-job "
+        "--environment slurm-env "
+        f"--dep scripts/run.R --dep renv.lock --dep {slurm_lock} "
+        "--out data/output_r.txt "
+        "--command -- calkit xenv -n r1 --no-check -- "
+        "Rscript scripts/run.R"
+    )
+    assert "scripts/run.R" in r_stage["deps"]
+    assert "renv.lock" in r_stage["deps"]
+    assert slurm_lock in r_stage["deps"]
+    sh_stage = stages["sh-cmd"]
+    print(sh_stage)
+    assert sh_stage["cmd"] == (
+        "calkit slurm batch --name sh-cmd "
+        "--environment slurm-env "
+        f"--dep uv.lock --dep {slurm_lock} "
+        "--command -- calkit xenv -n py1 --no-check -- "
+        'bash --noprofile --norc -c "echo hi"'
+    )
+    assert "uv.lock" in sh_stage["deps"]
+    assert slurm_lock in sh_stage["deps"]
 
 
 def test_slurm_env_validation_rules(tmp_dir):
@@ -668,7 +737,9 @@ def test_slurm_env_validation_rules(tmp_dir):
             },
             write=False,
         )
-    # shell-script + shell-command on a plain slurm env both compile.
+    # All non-language stage kinds compile on a plain slurm env:
+    # shell-script (direct sbatch), shell-command (wrapped via bash -c),
+    # and command (wrapped as-is via --command --).
     stages = calkit.pipeline.to_dvc(
         ck_info={
             "environments": {"mycluster": {"kind": "slurm"}},
@@ -680,9 +751,14 @@ def test_slurm_env_validation_rules(tmp_dir):
                         "environment": "mycluster",
                         "args": ["a", "b"],
                     },
-                    "run-cmd": {
+                    "run-shell-cmd": {
                         "kind": "shell-command",
                         "command": "echo hi",
+                        "environment": "mycluster",
+                    },
+                    "run-cmd": {
+                        "kind": "command",
+                        "command": "mytool --flag",
                         "environment": "mycluster",
                     },
                 }
@@ -696,11 +772,17 @@ def test_slurm_env_validation_rules(tmp_dir):
         "--dep .calkit/env-locks/mycluster.json "
         "-- scripts/run.sh a b"
     )
+    assert stages["run-shell-cmd"]["cmd"] == (
+        "calkit slurm batch --name run-shell-cmd "
+        "--environment mycluster "
+        "--dep .calkit/env-locks/mycluster.json "
+        '--command -- bash --noprofile --norc -c "echo hi"'
+    )
     assert stages["run-cmd"]["cmd"] == (
         "calkit slurm batch --name run-cmd "
         "--environment mycluster "
         "--dep .calkit/env-locks/mycluster.json "
-        '--command -- bash --noprofile --norc -c "echo hi"'
+        "--command -- mytool --flag"
     )
 
 
@@ -712,9 +794,13 @@ def test_pbs_stage_to_dvc(tmp_dir):
       batch`` invocation with stage-level options and outputs,
     - shell-command on a plain pbs env wraps the command via
       ``--command --``,
-    - julia-script on a composite ``pbs-env:julia1`` env, with stage-level
-      setup and both merge flags disabled,
-    - jupyter-notebook on the same composite env,
+    - composite ``pbs-env:py1`` wrapping a python-script (default mode
+      stays implicit),
+    - composite ``pbs-env:r1`` wrapping an r-script,
+    - composite ``pbs-env:py1`` wrapping a shell-command,
+    - composite ``pbs-env:julia1`` wrapping a julia-script with
+      stage-level setup and explicit ``env_default_*: ignore``,
+    - composite ``pbs-env:julia1`` wrapping a jupyter-notebook,
     - env-level defaults are NOT baked into the compiled stage cmd (the
       batch CLI applies them at submission),
     - the env lock file is added as a dep on every stage that touches the
@@ -731,6 +817,8 @@ def test_pbs_stage_to_dvc(tmp_dir):
             "julia": "1.11",
             "path": "Project.toml",
         },
+        "py1": {"kind": "uv", "path": "pyproject.toml"},
+        "r1": {"kind": "renv", "path": "DESCRIPTION"},
     }
     pipeline = {
         "stages": {
@@ -754,6 +842,29 @@ def test_pbs_stage_to_dvc(tmp_dir):
                 "kind": "shell-command",
                 "command": "echo hello",
                 "environment": "pbs-env",
+            },
+            # python-script in a composite pbs env.
+            "py-job": {
+                "kind": "python-script",
+                "script_path": "scripts/run.py",
+                "environment": "pbs-env:py1",
+                "args": ["--flag", "value"],
+                "inputs": ["data/input_py.txt"],
+                "outputs": ["data/output_py.txt"],
+            },
+            # r-script in a composite pbs env.
+            "r-job": {
+                "kind": "r-script",
+                "script_path": "scripts/run.R",
+                "environment": "pbs-env:r1",
+                "outputs": ["data/output_r.txt"],
+            },
+            # shell-command in a composite pbs env (inner runtime gets
+            # an xenv wrap).
+            "sh-cmd-nested": {
+                "kind": "shell-command",
+                "command": "echo hi",
+                "environment": "pbs-env:py1",
             },
             "job2": {
                 "kind": "julia-script",
@@ -840,6 +951,45 @@ def test_pbs_stage_to_dvc(tmp_dir):
         '--to html "analysis.ipynb"'
     )
     assert pbs_lock in stage3["deps"]
+    py_stage = stages["py-job"]
+    print(py_stage)
+    assert py_stage["cmd"] == (
+        "calkit pbs batch --name py-job "
+        "--environment pbs-env "
+        "--dep scripts/run.py --dep data/input_py.txt --dep uv.lock "
+        f"--dep {pbs_lock} "
+        "--out data/output_py.txt "
+        "--command -- calkit xenv -n py1 --no-check -- "
+        "python scripts/run.py --flag value"
+    )
+    assert "scripts/run.py" in py_stage["deps"]
+    assert "data/input_py.txt" in py_stage["deps"]
+    assert "uv.lock" in py_stage["deps"]
+    assert pbs_lock in py_stage["deps"]
+    r_stage = stages["r-job"]
+    print(r_stage)
+    assert r_stage["cmd"] == (
+        "calkit pbs batch --name r-job "
+        "--environment pbs-env "
+        f"--dep scripts/run.R --dep renv.lock --dep {pbs_lock} "
+        "--out data/output_r.txt "
+        "--command -- calkit xenv -n r1 --no-check -- "
+        "Rscript scripts/run.R"
+    )
+    assert "scripts/run.R" in r_stage["deps"]
+    assert "renv.lock" in r_stage["deps"]
+    assert pbs_lock in r_stage["deps"]
+    sh_nested = stages["sh-cmd-nested"]
+    print(sh_nested)
+    assert sh_nested["cmd"] == (
+        "calkit pbs batch --name sh-cmd-nested "
+        "--environment pbs-env "
+        f"--dep uv.lock --dep {pbs_lock} "
+        "--command -- calkit xenv -n py1 --no-check -- "
+        'bash --noprofile --norc -c "echo hi"'
+    )
+    assert "uv.lock" in sh_nested["deps"]
+    assert pbs_lock in sh_nested["deps"]
 
 
 def test_pbs_env_validation_rules(tmp_dir):
@@ -909,7 +1059,9 @@ def test_pbs_env_validation_rules(tmp_dir):
             },
             write=False,
         )
-    # shell-script + shell-command on a plain pbs env both compile.
+    # All non-language stage kinds compile on a plain pbs env:
+    # shell-script (direct qsub), shell-command (wrapped via bash -c),
+    # and command (wrapped as-is via --command --).
     stages = calkit.pipeline.to_dvc(
         ck_info={
             "environments": {"mycluster": {"kind": "pbs"}},
@@ -921,9 +1073,14 @@ def test_pbs_env_validation_rules(tmp_dir):
                         "environment": "mycluster",
                         "args": ["a", "b"],
                     },
-                    "run-cmd": {
+                    "run-shell-cmd": {
                         "kind": "shell-command",
                         "command": "echo hi",
+                        "environment": "mycluster",
+                    },
+                    "run-cmd": {
+                        "kind": "command",
+                        "command": "mytool --flag",
                         "environment": "mycluster",
                     },
                 }
@@ -937,11 +1094,17 @@ def test_pbs_env_validation_rules(tmp_dir):
         "--dep .calkit/env-locks/mycluster.json "
         "-- scripts/run.sh a b"
     )
+    assert stages["run-shell-cmd"]["cmd"] == (
+        "calkit pbs batch --name run-shell-cmd "
+        "--environment mycluster "
+        "--dep .calkit/env-locks/mycluster.json "
+        '--command -- bash --noprofile --norc -c "echo hi"'
+    )
     assert stages["run-cmd"]["cmd"] == (
         "calkit pbs batch --name run-cmd "
         "--environment mycluster "
         "--dep .calkit/env-locks/mycluster.json "
-        '--command -- bash --noprofile --norc -c "echo hi"'
+        "--command -- mytool --flag"
     )
 
 

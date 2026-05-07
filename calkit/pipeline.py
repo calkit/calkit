@@ -518,17 +518,9 @@ def to_dvc(
     for env_name, env in environments.items():
         if env_name not in used_envs:
             continue
-        # SLURM/PBS lock files are produced by the env-check step (see
-        # ``calkit check env``), not at compile time, so here we only
-        # compute the path and reference it as a DVC dep.
-        if env.get("kind") in ("slurm", "pbs"):
-            lock_fpath = get_env_lock_fpath(
-                env=env, env_name=env_name, wdir=wdir, as_posix=True
-            )
-        else:
-            lock_fpath = get_env_lock_fpath(
-                env=env, env_name=env_name, as_posix=True, for_dvc=True
-            )
+        lock_fpath = get_env_lock_fpath(
+            env=env, env_name=env_name, as_posix=True, for_dvc=True
+        )
         if lock_fpath is None:
             continue
         env_lock_fpaths[env_name] = lock_fpath

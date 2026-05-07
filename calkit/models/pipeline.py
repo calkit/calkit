@@ -134,38 +134,22 @@ class StageIteration(BaseModel):
 EnvDefaultsMode = Literal["ignore", "replace", "merge"]
 
 
-class StageSlurmOptions(BaseModel):
-    """Parameters for running a stage with SLURM.
+class StageSchedulerOptions(BaseModel):
+    """Parameters for running a stage on a job scheduler (SLURM or PBS).
 
     The environment-level ``default_options`` / ``default_setup`` are
-    applied by ``calkit slurm batch`` at submission time. The mode for
-    each list is controlled independently by ``env_default_options`` and
-    ``env_default_setup``:
+    applied by ``calkit slurm batch`` / ``calkit pbs batch`` at submission
+    time. The mode for each list is controlled independently by
+    ``env_default_options`` and ``env_default_setup``:
 
     - ``replace`` (default): if the stage provides values, those are used
       and env defaults are skipped; if the stage's list is empty, env
       defaults fill in.
     - ``merge``: env defaults are prepended to whatever the stage
-      provides (sbatch's last-occurrence-wins keeps stage values on top).
+      provides (the scheduler's last-occurrence-wins behavior keeps stage
+      values on top of any conflicts).
     - ``ignore``: env defaults are never applied, regardless of whether
       the stage provided any values.
-    """
-
-    options: list[str] | None = None
-    setup: list[str] | None = None
-    env_default_options: EnvDefaultsMode = "replace"
-    env_default_setup: EnvDefaultsMode = "replace"
-    log_path: str | None = None
-    log_storage: Literal["git", "dvc"] | None = "git"
-
-
-class StagePBSOptions(BaseModel):
-    """Parameters for running a stage with PBS.
-
-    The environment-level ``default_options`` / ``default_setup`` are
-    applied by ``calkit pbs batch`` at submission time. See
-    :class:`StageSlurmOptions` for the meaning of the mode values
-    (``replace``, ``merge``, ``ignore``).
     """
 
     options: list[str] | None = None
@@ -204,8 +188,8 @@ class Stage(BaseModel):
     always_run: bool = False
     iterate_over: list[StageIteration] | None = None
     description: str | None = None
-    slurm: StageSlurmOptions | None = None
-    pbs: StagePBSOptions | None = None
+    slurm: StageSchedulerOptions | None = None
+    pbs: StageSchedulerOptions | None = None
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
 
@@ -867,7 +851,7 @@ class SBatchStage(Stage):
     def dvc_cmd(self) -> str:
         # Merge top level SLURM options with those in the slurm object
         if self.slurm is None:
-            self.slurm = StageSlurmOptions()
+            self.slurm = StageSchedulerOptions()
         self.slurm.options = self.sbatch_options + (self.slurm.options or [])
         # Dedupe options but retain order
         deduped_options = []
@@ -1124,8 +1108,8 @@ class Pipeline(BaseModel):
             "sbatch",
         }
         scheduler_kinds = {
-            "slurm": (StageSlurmOptions, "slurm"),
-            "pbs": (StagePBSOptions, "pbs"),
+            "slurm": (StageSchedulerOptions, "slurm"),
+            "pbs": (StageSchedulerOptions, "pbs"),
         }
         for stage in self.stages.values():
             env_name = stage.outer_environment

@@ -1552,6 +1552,8 @@ def new_pbs_env(
     """Create a new PBS environment."""
     import git
 
+    from calkit.cli.check import check_environment
+
     host = host.strip()
     if not host:
         raise_error("Host is required")
@@ -1582,8 +1584,6 @@ def new_pbs_env(
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
-    from calkit.cli.check import check_environment
-
     env_lock_fpath = check_environment(env_name=name)
     if not no_commit:
         repo = git.Repo()

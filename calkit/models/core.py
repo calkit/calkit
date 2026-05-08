@@ -71,6 +71,7 @@ class Environment(BaseModel):
         "docker",
         "julia",
         "matlab",
+        "pbs",
         "poetry",
         "npm",
         "yarn",

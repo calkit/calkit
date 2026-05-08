@@ -328,7 +328,7 @@ class Stage(BaseModel):
         if self.environment != "_system":
             cmd += f" --environment {self.outer_environment}"
         if opts.log_path is not None:
-            cmd += f" --log-path '{opts.log_path}'"
+            cmd += f" --log-path {shlex.quote(opts.log_path)}"
         for dep in self.dvc_deps:
             cmd += f" --dep {dep}"
         for out in self.outputs:

@@ -287,11 +287,7 @@ def run_batch(
             log_path=log_path,
             is_command=is_command,
         )
-        # For slurm, scripts passed to sbatch directly don't need to be
-        # registered as deps via the wrapper (sbatch resolves them).
-        if not is_command and target not in deps and setup_cmds:
-            deps = [target] + deps
-        elif not is_command and target not in deps:
+        if not is_command and target not in deps:
             deps = [target] + deps
     else:
         submit_cmd, submit_input = _build_pbs_submit(

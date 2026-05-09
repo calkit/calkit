@@ -471,23 +471,6 @@ def get_output_storage_map(
     return result
 
 
-def flatten_dvc_stages(stages: dict, wdir: str) -> dict:
-    """Flatten a dictionary of DVC stages into single stage with all outputs
-    set to persist and not cache.
-
-    TODO: This also needs to flatten foreach and matrix stage deps/outs.
-    """
-    stage = {
-        "cmd": "calkit run",
-        "wdir": wdir,
-    }
-    # TODO: Collect up all deps and outs, flattening foreach and matrix stages
-    # into actual paths
-    # TODO: Any outs that are also in deps need to be removed from outs to
-    # avoid looking cyclic
-    return stage
-
-
 def to_dvc(
     ck_info: dict | None = None,
     wdir: str | None = None,
@@ -496,18 +479,11 @@ def to_dvc(
 ) -> dict:
     """Compile a Calkit pipeline to a DVC pipeline.
 
-    If a project has any subprojects, their pipelines will also be compiled
-    and each subproject will be compressed into a single stage in the parent
-    project.
+    If a project has subprojects, their dvc.yaml files are compiled (and
+    written if write=True) recursively. DVC's root repro auto-discovers all
+    dvc.yaml files in the tree, so no synthetic parent stages are needed.
 
-    Returns a dictionary of DVC stages, i.e., the content of a `dvc.yaml` file
-    that would exist underneath `stages`.
-
-    TODO: Instead of actually tracking deps and outs, we could simply call
-    subproject stages always changed and let the subpipeline handle caching?
-    It might be kind of nice for the superproject to only see the subproject
-    as a single stage though, in which case we could skip if it's up-to-date
-    based on its outer deps and outs.
+    Returns a dictionary of DVC stages for the `stages` key of a dvc.yaml.
     """
     import git
 
@@ -518,21 +494,17 @@ def to_dvc(
         ck_info = calkit.load_calkit_info(wdir=wdir)
     if "pipeline" not in ck_info and "subprojects" not in ck_info:
         raise ValueError("No pipeline or subprojects found in calkit.yaml")
-    # First compile subproject pipelines and flatten each into a single stage
-    # for the parent pipeline
-    subproject_pipelines = {}
+    # Compile subproject pipelines recursively; DVC discovers them via its
+    # normal multi-pipeline traversal so no parent stages are needed
     for subproject in ck_info.get("subprojects", []):
-        # Subprojects must be a dict with a path key
         if not isinstance(subproject, dict) or not subproject.get("path"):
             raise ValueError("Subprojects must have a 'path' defined")
         sp = Path(subproject["path"]).as_posix()
         if not os.path.isdir(sp):
             raise NotADirectoryError(f"Subproject path '{sp}' does not exist")
-        # TODO: Check that the subproject is actually under the parent
-        p = to_dvc(wdir=sp, write=write, verbose=verbose)
-        subproject_pipelines[sp] = p
-    # Now let's work on the main pipeline
-    # TODO: Allow projects to have no pipeline defined
+        to_dvc(wdir=sp, write=write, verbose=verbose)
+    if "pipeline" not in ck_info:
+        return {}
     try:
         pipeline = Pipeline.model_validate(ck_info["pipeline"])
     except Exception as e:
@@ -715,12 +687,6 @@ def to_dvc(
                                     )
                         else:
                             dvc_stages[stage_name]["deps"].append(out)
-    # If we have any subprojects, those go first in the DVC stages with names
-    # like _subproject:{path}
-    subproject_stages = {
-        f"_subproject:{p}": s for p, s in subproject_pipelines.items()
-    }
-    dvc_stages = subproject_stages | dvc_stages
     if write:
         dvc_yaml = existing_dvc_yaml
         existing_stages = existing_dvc_stages

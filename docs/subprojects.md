@@ -30,5 +30,13 @@ where a commit is tracked.
 This means a `calkit pull` will pull all subprojects from their
 defined ref.
 
-When calling `calkit run` from a parent project, all subproject pipelines
-will also be compiled and run if defined.
+When calling `calkit run` from a parent project, all subproject `dvc.yaml`
+files are compiled (and written) recursively.
+DVC then auto-discovers every `dvc.yaml` in the repository tree when running
+`dvc repro`, so subproject stages run as part of the same dependency graph as
+the parent without any synthetic wrapper stages.
+
+To express ordering between parent and subproject stages, add explicit file
+dependencies. For example, if a parent stage consumes an output produced by
+a subproject stage, list that file as a `dep` of the parent stage — DVC will
+resolve the full cross-pipeline DAG automatically.

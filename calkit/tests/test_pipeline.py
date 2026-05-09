@@ -876,6 +876,92 @@ def test_stale_stage_detects_changed_command():
     assert stale_stage.modified_outputs == []
 
 
+def test_wrapper_stage_no_dep_out_overlap(tmp_dir):
+    """Wrapper stage deps and outs must never overlap.
+
+    Covers:
+    - Path normalization: ``./out.txt`` and ``out.txt`` are the same file;
+      without normalization the set-subtraction misses this and both could
+      appear in wrapper deps and outs simultaneously.
+    - Defensive deduplication: even if normalization is bypassed, the
+      explicit dedup pass keeps such paths only as deps.
+    """
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["git", "config", "user.email", "t@t.com"])
+    subprocess.check_call(["git", "config", "user.name", "T"])
+    os.makedirs("isolated")
+    subprocess.check_call(["git", "init"], cwd="isolated")
+    subprocess.check_call(
+        ["git", "config", "user.email", "t@t.com"], cwd="isolated"
+    )
+    subprocess.check_call(["git", "config", "user.name", "T"], cwd="isolated")
+    subprocess.check_call(["dvc", "init"], cwd="isolated")
+    # Two stages: stage-a reads an external dep (with leading ./) and produces
+    # internal.txt; stage-b reads internal.txt (no ./) and produces result.txt.
+    # The leading "./" on the external dep is the normalization hazard.
+    with open("isolated/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "stage-a": {
+                            "kind": "command",
+                            "environment": "_system",
+                            "command": "cat ../external.txt > internal.txt",
+                            "inputs": ["../external.txt"],
+                            "outputs": [
+                                {"path": "internal.txt", "storage": "git"}
+                            ],
+                        },
+                        "stage-b": {
+                            "kind": "command",
+                            "environment": "_system",
+                            "command": "cat internal.txt > result.txt",
+                            "inputs": ["internal.txt"],
+                            "outputs": [
+                                {"path": "result.txt", "storage": "git"}
+                            ],
+                        },
+                    }
+                }
+            },
+            f,
+        )
+    # Compile subproject pipeline first so it has a dvc.yaml
+    calkit.pipeline.to_dvc(wdir="isolated", write=True, manage_gitignore=False)
+    # Inject a "./"-prefixed dep into the compiled dvc.yaml to simulate the
+    # path-aliasing scenario that caused the MDOcean/OpenFLASH error.
+    with open("isolated/dvc.yaml") as f:
+        isolated_dvc = calkit.ryaml.load(f)
+    if "stage-b" in isolated_dvc.get("stages", {}):
+        stage_b = isolated_dvc["stages"]["stage-b"]
+        # Replace the plain dep with the ./-prefixed variant
+        stage_b["deps"] = [
+            "./" + d if d == "internal.txt" else d
+            for d in stage_b.get("deps", [])
+        ]
+    with open("isolated/dvc.yaml", "w") as f:
+        calkit.ryaml.dump(isolated_dvc, f)
+    # Build parent pipeline referencing the isolated subproject
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {"subprojects": [{"path": "isolated"}]},
+            f,
+        )
+    with open("external.txt", "w") as f:
+        f.write("data")
+    dvc_stages = calkit.pipeline.to_dvc(write=False, manage_gitignore=False)
+    wrapper = dvc_stages.get("_subproject-isolated", {})
+    assert wrapper, "wrapper stage not generated"
+    wrapper_dep_set = set(wrapper.get("deps", []))
+    wrapper_out_paths = {
+        list(o.keys())[0] if isinstance(o, dict) else o
+        for o in wrapper.get("outs", [])
+    }
+    overlap = wrapper_dep_set & wrapper_out_paths
+    assert not overlap, f"wrapper has dep/out overlap: {overlap}"
+
+
 def test_translate_run_targets(tmp_dir):
     # Set up a parent project with one inline subproject and one isolated.
     subprocess.check_call(["git", "init"])

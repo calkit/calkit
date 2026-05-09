@@ -646,7 +646,9 @@ def to_dvc(
                         expanded = expanded.replace(
                             f"${{item.{var}}}", str(val)
                         )
-                    all_sp_outs.add(expanded)
+                    # Normalize to strip leading "./" so "data.txt" and
+                    # "./data.txt" are treated as the same path.
+                    all_sp_outs.add(Path(expanded).as_posix())
             for dep in stage_cfg.get("deps", []):
                 if not isinstance(dep, str):
                     continue
@@ -656,7 +658,7 @@ def to_dvc(
                         expanded = expanded.replace(
                             f"${{item.{var}}}", str(val)
                         )
-                    all_sp_deps.add(expanded)
+                    all_sp_deps.add(Path(expanded).as_posix())
         # External deps are inputs the subproject reads from outside itself.
         external_deps = all_sp_deps - all_sp_outs
         # The wrapper stage has `wdir: sp`, so DVC resolves deps/outs relative
@@ -667,10 +669,16 @@ def to_dvc(
         # Wrap outputs with cache: false + persist: true so the parent doesn't
         # double-cache files already managed by the subproject's DVC, and the
         # nested dvc repro run is responsible for file persistence.
+        wrapper_outs_raw = sorted(
+            o for o in all_sp_outs if not o.startswith(".calkit/env-locks/")
+        )
+        # Defensive deduplication: if any output path also appears as a dep
+        # (which can happen due to path aliasing), keep it as a dep only.
+        wrapper_dep_set = set(wrapper_deps)
         wrapper_outs = [
             {o: {"cache": False, "persist": True}}
-            for o in sorted(all_sp_outs)
-            if not o.startswith(".calkit/env-locks/")
+            for o in wrapper_outs_raw
+            if o not in wrapper_dep_set
         ]
         # Prefix with underscore so: (a) it sorts before user stages, (b) the
         # write path's "don't clobber user stages" check skips it (underscore

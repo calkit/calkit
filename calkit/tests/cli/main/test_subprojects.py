@@ -248,3 +248,75 @@ def test_isolated_subproject(tmp_dir):
     assert os.path.isfile("sub2/out.txt")
     with open("sub2/out.txt") as f:
         assert "hello from sub2" in f.read()
+
+
+# ---------------------------------------------------------------------------
+# Cross-subproject external dependency (MDOcean / OpenFLASH pattern)
+# ---------------------------------------------------------------------------
+
+
+def test_isolated_subproject_external_dep(tmp_dir):
+    """Isolated subproject that reads a file produced by the parent pipeline.
+
+    Mirrors the MDOcean/OpenFLASH relationship: the parent (MDOcean) produces
+    a mesh/config file that OpenFLASH consumes as an external dep.  The
+    wrapper stage must list that file in ``deps`` only (not ``outs``), and
+    the full pipeline must run in the correct order.
+    """
+    subprocess.check_call(["calkit", "init"])
+    # The parent produces shared.txt which the isolated subproject reads.
+    _init_isolated_subproject(
+        "solver",
+        {
+            "solve": _stage(
+                "cat ../shared.txt > solution.txt",
+                inputs=["../shared.txt"],
+                outputs=[{"path": "solution.txt", "storage": "git"}],
+            ),
+        },
+    )
+    _ck(
+        "calkit.yaml",
+        {
+            "subprojects": [{"path": "solver"}],
+            "pipeline": {
+                "stages": {
+                    "make-shared": _stage(
+                        'echo "mesh data" > shared.txt',
+                        outputs=[{"path": "shared.txt", "storage": "git"}],
+                    ),
+                    "post-process": _stage(
+                        "cat solver/solution.txt > final.txt",
+                        inputs=["solver/solution.txt"],
+                        outputs=[{"path": "final.txt", "storage": "git"}],
+                    ),
+                }
+            },
+        },
+    )
+    # Compile and verify wrapper structure
+    calkit.pipeline.to_dvc(write=True, manage_gitignore=False)
+    with open("dvc.yaml") as f:
+        root_dvc = calkit.ryaml.load(f)
+    wrapper = root_dvc["stages"]["_subproject-solver"]
+    wrapper_dep_set = set(wrapper.get("deps", []))
+    wrapper_out_paths = {
+        list(o.keys())[0] if isinstance(o, dict) else o
+        for o in wrapper.get("outs", [])
+    }
+    # shared.txt (via ../shared.txt relative to solver/) must be a dep only
+    assert "../shared.txt" in wrapper_dep_set
+    assert "../shared.txt" not in wrapper_out_paths
+    assert not wrapper_dep_set & wrapper_out_paths, "wrapper dep/out overlap"
+    # Full run must produce all outputs
+    subprocess.check_call(["calkit", "run"])
+    assert os.path.isfile("shared.txt")
+    assert os.path.isfile("solver/solution.txt")
+    assert os.path.isfile("final.txt")
+    with open("final.txt") as f:
+        assert "mesh data" in f.read()
+    # After run, pipeline should be up to date
+    status = calkit.pipeline.get_status(
+        check_environments=False, compile_to_dvc=False
+    )
+    assert not status.is_stale

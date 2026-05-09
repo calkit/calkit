@@ -336,10 +336,12 @@ def get_status(
     from git.exc import InvalidGitRepositoryError
 
     ck_info = calkit.load_calkit_info()
-    # If there's anything in ck_info and this isn't a Git repo, initialize one
+    # If there's anything in ck_info and this isn't a Git repo, initialize one.
+    # Use search_parent_directories so a subproject folder inside a parent repo
+    # is discovered correctly rather than getting a new git init.
     if ck_info:
         try:
-            git.Repo()
+            git.Repo(search_parent_directories=True)
         except InvalidGitRepositoryError:
             git.Repo.init()
     valid_categories = ["project", "git", "dvc", "pipeline"]
@@ -609,7 +611,7 @@ def add(
     if to is not None and to not in ["git", "dvc", "dvc-zip"]:
         raise_error(f"Invalid option for 'to': {to}")
     try:
-        repo = git.Repo()
+        repo = git.Repo(search_parent_directories=True)
     except InvalidGitRepositoryError:
         # Prompt user if they want to run git init here
         warn("Current directory is not a Git repo")

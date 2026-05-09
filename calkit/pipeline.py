@@ -381,18 +381,17 @@ def get_status(
                 f"{e.__class__.__name__}: {e}"
             )
             return PipelineStatus.model_validate(result)
-        # Isolated subprojects appear in the parent status as wrapper stages
-        # (e.g., "dvc.yaml:subproject-openflash").  When a wrapper stage is
-        # stale, replace it with the individual stale stages from the
-        # subproject's own DVC so the user sees {sp}:stage_name detail.
+        # All subprojects appear in the parent status as wrapper stages
+        # (e.g., "dvc.yaml:_subproject-sub1").  When a wrapper stage is stale,
+        # replace it with the individual stale stages from the subproject's own
+        # DVC so the user sees {sp}:stage_name detail.
         sp_by_stage_name: dict[str, str] = {}
         for sp_cfg in ck_info.get("subprojects", []):
             if not isinstance(sp_cfg, dict) or not sp_cfg.get("path"):
                 continue
             sp = Path(sp_cfg["path"]).as_posix()
-            if not os.path.isdir(os.path.join(sp, ".dvc")):
-                continue
-            sp_by_stage_name[f"_subproject-{Path(sp).name}"] = sp
+            if os.path.isdir(os.path.join(sp, ".dvc")):
+                sp_by_stage_name[f"_subproject-{Path(sp).name}"] = sp
         # Root-level stage keys have the form "stage_name" (no dvc.yaml: prefix).
         stale_wrapper_keys = [
             k
@@ -416,12 +415,20 @@ def get_status(
                 # Sub-project has its own stale stages: replace the wrapper key
                 # with individual stage keys so the user sees {sp}:stage_name.
                 del raw_status[wrapper_key]
+                sp_is_isolated = os.path.isdir(os.path.join(sp, ".dvc"))
                 for k, v in sp_raw_status.items():
-                    if "dvc.yaml:" in k:
-                        _, bare = k.split("dvc.yaml:", 1)
-                        raw_status[f"{sp}/dvc.yaml:{bare}"] = v
+                    # For isolated subprojects the DVC repo is rooted at sp, so
+                    # keys are sp-relative and need the sp/ prefix.
+                    # For inline subprojects the DVC repo is the parent root, so
+                    # keys already contain the sp path (e.g. "sub1/dvc.yaml:…").
+                    if sp_is_isolated:
+                        if "dvc.yaml:" in k:
+                            _, bare = k.split("dvc.yaml:", 1)
+                            raw_status[f"{sp}/dvc.yaml:{bare}"] = v
+                        else:
+                            raw_status[f"{sp}/dvc.yaml:{k}"] = v
                     else:
-                        raw_status[f"{sp}/dvc.yaml:{k}"] = v
+                        raw_status[k] = v
             # else: keep the wrapper key — sub-project is internally up-to-date
             # but the parent's dvc.lock needs refreshing.
         # DVC status keys have the form:
@@ -612,13 +619,15 @@ def to_dvc(
         if not os.path.isdir(sp):
             raise NotADirectoryError(f"Subproject path '{sp}' does not exist")
         sp_is_isolated = os.path.isdir(os.path.join(sp, ".dvc"))
+        if not sp_is_isolated:
+            continue
         sp_dvc_stages = to_dvc(
             wdir=sp,
             write=write,
             verbose=verbose,
             manage_gitignore=manage_gitignore,
         )
-        if not sp_is_isolated or not sp_dvc_stages:
+        if not sp_dvc_stages:
             continue
         # Collect all outputs and all deps from the subproject's compiled stages.
         # For matrix stages the template strings (${item.foo}) must be expanded

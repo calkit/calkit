@@ -316,6 +316,17 @@ def get_status(
             ),
         ),
     ] = None,
+    no_check_envs: Annotated[
+        bool,
+        typer.Option(
+            "--no-check-envs",
+            help=(
+                "Skip environment checks. "
+                "Note that this may produce an inaccurate pipeline status "
+                "if materialized environments have changed."
+            ),
+        ),
+    ] = False,
     as_json: Annotated[
         bool, typer.Option("--json", help="Output status as JSON.")
     ] = False,
@@ -349,7 +360,7 @@ def get_status(
         pipeline_status = calkit.pipeline.get_status(
             ck_info=ck_info,
             targets=targets,
-            check_environments=True,
+            check_environments=not no_check_envs,
             clean_notebooks=True,
             compile_to_dvc=True,
         )

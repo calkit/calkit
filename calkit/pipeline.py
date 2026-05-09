@@ -585,6 +585,15 @@ def to_dvc(
         )
         if lock_fpath is None:
             continue
+        # get_env_lock_fpath prefixes wdir for most env types so the returned
+        # path is parent-relative (e.g., "sub1/.calkit/env-locks/main").
+        # When writing a subproject dvc.yaml, deps must be relative to that
+        # file's directory, so strip the wdir prefix if present.
+        if wdir:
+            try:
+                lock_fpath = Path(lock_fpath).relative_to(wdir).as_posix()
+            except ValueError:
+                pass
         env_lock_fpaths[env_name] = lock_fpath
     project_params = expand_project_parameters(ck_info.get("parameters", {}))
     # Set any stage slurm options, which requires environment information

@@ -120,7 +120,7 @@ Options:
 | Option             | Type    | Required | Default | Description                                                                                                                  |
 | ------------------ | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | `--category`, `-c` | text    | no       |         | Status categories to show. By default, all categories are shown. Can be specified multiple times.                            |
-| `--no-check-envs`  | boolean | no       | False   | Skip environment checks. Note that this may produce an inaccurate pipeline status if materialized environments have changed. |
+| `--no-env-check`   | boolean | no       | False   | Skip environment checks. Note that this may produce an inaccurate pipeline status if materialized environments have changed. |
 | `--json`           | boolean | no       | False   | Output status as JSON.                                                                                                       |
 
 <a id="top-command-diff"></a>

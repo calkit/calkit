@@ -327,14 +327,15 @@ def get_status(
             ck_info = calkit.load_calkit_info()
         has_pipeline = bool(ck_info.get("pipeline", {}).get("stages", {}))
         has_pipeline = has_pipeline or os.path.isfile("dvc.yaml")
+        has_subprojects = bool(ck_info.get("subprojects"))
         result = {
-            "has_pipeline": has_pipeline,
+            "has_pipeline": has_pipeline or has_subprojects,
             "environment_checks": {},
             "cleaned_notebooks": [],
             "stale_stages": {},
             "errors": [],
         }
-        if not has_pipeline:
+        if not has_pipeline and not has_subprojects:
             return PipelineStatus.model_validate(result)
         if check_environments:
             _progress("Checking environments")
@@ -358,7 +359,10 @@ def get_status(
             ]
             if failed_env_checks:
                 return PipelineStatus.model_validate(result)
-        if compile_to_dvc and ck_info.get("pipeline", {}).get("stages", {}):
+        if compile_to_dvc and (
+            ck_info.get("pipeline", {}).get("stages", {})
+            or ck_info.get("subprojects")
+        ):
             _progress("Compiling pipeline")
             try:
                 to_dvc(ck_info=ck_info, write=True)
@@ -390,6 +394,25 @@ def get_status(
                 f"{e.__class__.__name__}: {e}"
             )
             return PipelineStatus.model_validate(result)
+        # For isolated subprojects (with their own .dvc/), DVC won't include
+        # them in the parent status. Query each one separately and prefix keys.
+        for sp_cfg in ck_info.get("subprojects", []):
+            if not isinstance(sp_cfg, dict) or not sp_cfg.get("path"):
+                continue
+            sp = Path(sp_cfg["path"]).as_posix()
+            if not os.path.isdir(os.path.join(sp, ".dvc")):
+                continue
+            try:
+                sp_dvc_repo = calkit.dvc.get_dvc_repo(sp)
+                sp_raw_status = sp_dvc_repo.status()
+                for k, v in sp_raw_status.items():
+                    if "dvc.yaml:" in k:
+                        _, bare = k.split("dvc.yaml:", 1)
+                        raw_status[f"{sp}/dvc.yaml:{bare}"] = v
+                    else:
+                        raw_status[f"{sp}/dvc.yaml:{k}"] = v
+            except Exception:
+                pass
         # DVC status keys have the form:
         #   "dvc.yaml:stage_name"         root pipeline
         #   "sub1/dvc.yaml:stage_name"    subproject pipeline

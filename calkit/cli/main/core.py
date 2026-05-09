@@ -1527,9 +1527,9 @@ def run(
     # If specified, perform initial Overleaf sync
     if sync_overleaf:
         overleaf_sync(no_commit=False, no_push=True, verbose=verbose)
-    # Compile the DVC pipeline
+    # Compile the DVC pipeline (and subproject pipelines)
     dvc_stages = None
-    if ck_info.get("pipeline", {}):
+    if ck_info.get("pipeline", {}) or ck_info.get("subprojects"):
         if not quiet:
             typer.echo("Compiling DVC pipeline")
         try:
@@ -1546,6 +1546,34 @@ def run(
         result = calkit.dvc.run_dvc_command(["init"])
         if result != 0:
             raise_error("Failed to initialize DVC repo")
+    # Run isolated subprojects (those with their own .dvc/ directory) separately,
+    # since DVC won't cross .dvc/ boundaries with --all-pipelines.
+    # They run in declaration order before the parent pipeline.
+    isolated_subprojects = [
+        sp
+        for sp in subprojects
+        if isinstance(sp, dict)
+        and sp.get("path")
+        and os.path.isdir(os.path.join(sp["path"], ".dvc"))
+    ]
+    if isolated_subprojects:
+        prev_cwd = os.getcwd()
+        for sp_cfg in isolated_subprojects:
+            sp = Path(sp_cfg["path"]).as_posix()
+            if not quiet:
+                typer.echo(f"Running subproject pipeline: {sp}")
+            os.chdir(sp)
+            try:
+                sp_repro_args = []
+                if force:
+                    sp_repro_args.append("--force")
+                if dry:
+                    sp_repro_args.append("--dry")
+                sp_result = dvc_cli_main(["repro"] + sp_repro_args)
+                if sp_result != 0:
+                    warn(f"Subproject pipeline failed: {sp}")
+            finally:
+                os.chdir(prev_cwd)
     # Convert deps into target stage names
     # TODO: This could probably be merged back upstream into DVC
     if dvc_stages is None:
@@ -1628,9 +1656,16 @@ def run(
     ]:
         if locals()[name.replace("-", "_")]:
             args.append("--" + name)
-    # When subprojects are present and no specific targets are given, tell DVC
-    # to run all discovered pipelines so subproject dvc.yaml files are included.
-    if ck_info.get("subprojects") and not targets and not all_pipelines:
+    # Inline subprojects (no .dvc/ dir) share the parent DVC project.
+    # Tell DVC to discover all pipelines so their dvc.yaml files are included.
+    inline_subprojects = [
+        sp
+        for sp in subprojects
+        if isinstance(sp, dict)
+        and sp.get("path")
+        and not os.path.isdir(os.path.join(sp["path"], ".dvc"))
+    ]
+    if inline_subprojects and not targets and not all_pipelines:
         args.append("--all-pipelines")
     if pipeline is not None:
         args += ["--pipeline", pipeline]

@@ -374,6 +374,7 @@ Options:
 | `--input`, `--dep`      | text    | no       |         | Run stages that depend on given input dependency path.                    |
 | `--output`, `--out`     | text    | no       |         | Run stages that produce the given output path.                            |
 | `--overleaf`, `-O`      | boolean | no       | False   | Sync with Overleaf before and after running.                              |
+| `--no-push`             | boolean | no       | False   | Do not push to Git and DVC after saving.                                  |
 
 <a id="top-command-manual-step"></a>
 

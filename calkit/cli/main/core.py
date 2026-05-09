@@ -1393,6 +1393,12 @@ def run(
             help="Sync with Overleaf before and after running.",
         ),
     ] = False,
+    no_push: Annotated[
+        bool,
+        typer.Option(
+            "--no-push", help="Do not push to Git and DVC after saving."
+        ),
+    ] = False,
 ) -> dict:
     """Check dependencies and run the pipeline."""
     import dvc.log
@@ -1734,7 +1740,7 @@ def run(
             save_message = "Run pipeline"
         if not quiet:
             typer.echo("Saving the project after successful run")
-        save(save_all=True, message=save_message)
+        save(save_all=True, message=save_message, no_push=no_push)
     # If specified, perform final Overleaf sync
     if sync_overleaf:
         overleaf_sync(

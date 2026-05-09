@@ -377,14 +377,41 @@ def get_status(
                 f"{e.__class__.__name__}: {e}"
             )
             return PipelineStatus.model_validate(result)
-        raw_stale_stages = {
-            k.split("dvc.yaml:")[-1]: v
-            for k, v in raw_status.items()
-            if v != ["always changed"] and not k.endswith(".dvc")
-        }
-        stages_config = ck_info.get("pipeline", {}).get("stages", {})
-        # Build an ordered list of stage names from dvc.yaml to preserve
-        # pipeline order, since dvc_repo.status() returns stages alphabetically
+        # DVC status keys have the form:
+        #   "dvc.yaml:stage_name"         root pipeline
+        #   "sub1/dvc.yaml:stage_name"    subproject pipeline
+        # Parse each key into (display_name, bare_stage_name, subproject_path).
+        # Using a display_name of "sub1/stage_name" for subproject stages avoids
+        # collisions when a subproject stage shares a name with a root stage.
+        raw_stale_stages: dict[str, tuple[str, str | None, list]] = {}
+        for k, v in raw_status.items():
+            if v == ["always changed"] or k.endswith(".dvc"):
+                continue
+            if "dvc.yaml:" in k:
+                prefix, bare_name = k.split("dvc.yaml:", 1)
+                subproject = prefix.rstrip("/") if prefix else None
+            else:
+                bare_name = k
+                subproject = None
+            display_name = (
+                f"{subproject}:{bare_name}" if subproject else bare_name
+            )
+            raw_stale_stages[display_name] = (bare_name, subproject, v)
+        root_stages_config = ck_info.get("pipeline", {}).get("stages", {})
+        # Lazily load subproject ck_info for configured_outputs lookup
+        sp_stages_config: dict[str, dict] = {}
+        for subproject in ck_info.get("subprojects", []):
+            if not isinstance(subproject, dict) or not subproject.get("path"):
+                continue
+            sp = Path(subproject["path"]).as_posix()
+            try:
+                sp_ck = calkit.load_calkit_info(wdir=sp)
+                sp_stages_config[sp] = sp_ck.get("pipeline", {}).get(
+                    "stages", {}
+                )
+            except Exception:
+                pass
+        # Build stage ordering from root dvc.yaml; subproject stages sort after.
         dvc_yaml_stages: list[str] = []
         if os.path.isfile("dvc.yaml"):
             try:
@@ -396,29 +423,50 @@ def get_status(
             except Exception:
                 pass
         ordered_stale_stages = {}
-        # First, add stages in dvc.yaml order, matching expanded stage names
-        # (e.g., benchmark-boom@1-3-1) against their base template name
-        # (benchmark-boom) using the position in dvc.yaml
         dvc_yaml_stage_order = {
             name: i for i, name in enumerate(dvc_yaml_stages)
         }
 
-        def _stage_sort_key(stage_name: str) -> int:
-            base = stage_name.split("@")[0]
-            return dvc_yaml_stage_order.get(base, len(dvc_yaml_stages))
+        def _stage_sort_key(display_name: str) -> tuple[int, int]:
+            # Subproject stages always sort after root stages (bucket 1 vs 0).
+            bare, sp, _ = raw_stale_stages[display_name]
+            if sp is None:
+                base = bare.split("@")[0]
+                return (
+                    0,
+                    dvc_yaml_stage_order.get(base, len(dvc_yaml_stages)),
+                )
+            return (1, 0)
 
-        for stage_name in sorted(raw_stale_stages.keys(), key=_stage_sort_key):
-            status_data = raw_stale_stages[stage_name]
-            ordered_stale_stages[stage_name] = StaleStage.from_status_data(
+        for display_name in sorted(
+            raw_stale_stages.keys(), key=_stage_sort_key
+        ):
+            bare_name, subproject, status_data = raw_stale_stages[display_name]
+            if subproject is None:
+                stage_cfg = root_stages_config.get(bare_name, {})
+            else:
+                stage_cfg = sp_stages_config.get(subproject, {}).get(
+                    bare_name, {}
+                )
+            # DVC reports subproject stage paths relative to the repo root
+            # (e.g., "sub1/out.txt"), but calkit.yaml stores them relative to
+            # the subproject dir ("out.txt").  Prefix with the subproject path
+            # so configured_outputs matches DVC's reported paths.
+            raw_outputs = [
+                output.get("path", str(output))
+                if isinstance(output, dict)
+                else str(output)
+                for output in stage_cfg.get("outputs", [])
+            ]
+            if subproject:
+                configured_outputs = [
+                    str(Path(subproject) / p) for p in raw_outputs
+                ]
+            else:
+                configured_outputs = raw_outputs
+            ordered_stale_stages[display_name] = StaleStage.from_status_data(
                 status_data=status_data,
-                configured_outputs=[
-                    output.get("path", str(output))
-                    if isinstance(output, dict)
-                    else str(output)
-                    for output in stages_config.get(stage_name, {}).get(
-                        "outputs", []
-                    )
-                ],
+                configured_outputs=configured_outputs,
             )
         result["stale_stages"] = ordered_stale_stages
         return PipelineStatus(

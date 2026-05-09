@@ -318,7 +318,7 @@ def get_status(
     no_check_envs: Annotated[
         bool,
         typer.Option(
-            "--no-check-envs",
+            "--no-env-check",
             help=(
                 "Skip environment checks. "
                 "Note that this may produce an inaccurate pipeline status "
@@ -1603,6 +1603,10 @@ def run(
     ]:
         if locals()[name.replace("-", "_")]:
             args.append("--" + name)
+    # When subprojects are present and no specific targets are given, tell DVC
+    # to run all discovered pipelines so subproject dvc.yaml files are included.
+    if ck_info.get("subprojects") and not targets and not all_pipelines:
+        args.append("--all-pipelines")
     if pipeline is not None:
         args += ["--pipeline", pipeline]
     if downstream is not None:

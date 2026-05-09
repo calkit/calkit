@@ -365,7 +365,7 @@ def get_status(
         ):
             _progress("Compiling pipeline")
             try:
-                to_dvc(ck_info=ck_info, write=True)
+                to_dvc(ck_info=ck_info, write=True, manage_gitignore=False)
             except Exception as e:
                 result["errors"].append(
                     f"Failed to compile pipeline: {e.__class__.__name__}: {e}"
@@ -592,6 +592,7 @@ def to_dvc(
     wdir: str | None = None,
     write: bool = False,
     verbose: bool = False,
+    manage_gitignore: bool = True,
 ) -> dict:
     """Compile a Calkit pipeline to a DVC pipeline.
 
@@ -624,7 +625,12 @@ def to_dvc(
         if not os.path.isdir(sp):
             raise NotADirectoryError(f"Subproject path '{sp}' does not exist")
         sp_is_isolated = os.path.isdir(os.path.join(sp, ".dvc"))
-        sp_dvc_stages = to_dvc(wdir=sp, write=write, verbose=verbose)
+        sp_dvc_stages = to_dvc(
+            wdir=sp,
+            write=write,
+            verbose=verbose,
+            manage_gitignore=manage_gitignore,
+        )
         if not sp_is_isolated or not sp_dvc_stages:
             continue
         # Collect all outputs and all deps from the subproject's compiled stages.
@@ -828,8 +834,10 @@ def to_dvc(
         )
         dvc_stage["desc"] = desc
         dvc_stages[stage_name] = dvc_stage
-        # Check for any outputs that should be ignored/unignored
-        if write:
+        # Check for any outputs that should be ignored/unignored.
+        # Skipped when manage_gitignore=False (e.g., status checks) to avoid
+        # spawning a git subprocess per output (~100 ms each).
+        if write and manage_gitignore:
             repo = calkit.git.get_repo(wdir)
             # Ensure we catch any Jupyter Notebook outputs
             outputs = stage.outputs.copy()

@@ -14,6 +14,7 @@ import dotenv
 import typer
 
 import calkit
+import calkit.git
 from calkit.cli import raise_error, warn
 from calkit.core import get_md5
 
@@ -1292,9 +1293,7 @@ def check_env_vars(
                 dotenv_path=".env", key_to_set=name, value_to_set=value
             )
     # Ensure that .env is ignored by git
-    import git
-
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     if not repo.ignored(".env"):
         typer.echo("Adding .env to .gitignore")
         with open(".gitignore", "a") as f:

@@ -23,6 +23,7 @@ import typer
 from typing_extensions import Annotated, Optional
 
 import calkit
+import calkit.git
 from calkit import (
     AUTO_IGNORE_PATHS,
     AUTO_IGNORE_PREFIXES,
@@ -125,8 +126,6 @@ def init(
     ] = False,
 ):
     """Initialize the current working directory."""
-    import git
-
     subprocess.run(["git", "init"])
     result = calkit.dvc.run_dvc_command(
         ["init"] + (["--force"] if force else [])
@@ -138,7 +137,7 @@ def init(
     if result != 0:
         raise_error("Failed to configure DVC autostage")
     # Commit the newly created .dvc directory
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     repo.git.add(".dvc")
     repo.git.commit("-m", "Initialize DVC")
     # TODO: Initialize `calkit.yaml`
@@ -341,7 +340,7 @@ def get_status(
     # is discovered correctly rather than getting a new git init.
     if ck_info:
         try:
-            git.Repo(search_parent_directories=True)
+            calkit.git.get_repo()
         except InvalidGitRepositoryError:
             git.Repo.init()
     valid_categories = ["project", "git", "dvc", "pipeline"]
@@ -386,7 +385,7 @@ def get_status(
             )
         if "git" in categories:
             try:
-                repo = git.Repo()
+                repo = calkit.git.get_repo()
                 changed_files = calkit.git.get_changed_files(repo=repo)
                 staged_files = calkit.git.get_staged_files(repo=repo)
                 untracked_files = calkit.git.get_untracked_files(repo=repo)
@@ -590,7 +589,6 @@ def add(
     adding any .dvc files to Git when adding to DVC.
     """
     import dvc.repo
-    import git
     from dvc.exceptions import NotDvcRepoError
     from git.exc import InvalidGitRepositoryError
 
@@ -611,7 +609,7 @@ def add(
     if to is not None and to not in ["git", "dvc", "dvc-zip"]:
         raise_error(f"Invalid option for 'to': {to}")
     try:
-        repo = git.Repo(search_parent_directories=True)
+        repo = calkit.git.get_repo()
     except InvalidGitRepositoryError:
         # Prompt user if they want to run git init here
         warn("Current directory is not a Git repo")
@@ -623,7 +621,7 @@ def add(
             subprocess.check_call(["git", "init"])
         else:
             raise_error("Not currently in a Git repo; run `calkit init` first")
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
     try:
         dvc_repo = calkit.dvc.get_dvc_repo()
     except NotDvcRepoError:
@@ -1129,9 +1127,7 @@ def ignore(
     ] = False,
 ):
     """Ignore a file, i.e., keep it out of version control."""
-    import git
-
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     # Ensure path makes it into .gitignore as a POSIX path
     path = Path(path).as_posix()
     if repo.ignored(path):
@@ -1142,7 +1138,7 @@ def ignore(
     with open(".gitignore", "a") as f:
         f.write(txt)
     if not no_commit:
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
         repo.git.reset()
         repo.git.add(".gitignore")
         if calkit.git.get_staged_files():
@@ -1403,7 +1399,6 @@ def run(
     import dvc.repo
     import dvc.repo.reproduce
     import dvc.ui
-    import git
     from dvc.cli import main as dvc_cli_main
     from git.exc import InvalidGitRepositoryError
 
@@ -1421,7 +1416,7 @@ def run(
     # Use search_parent_directories so running from a subproject folder
     # discovers the parent repo instead of triggering a new git init.
     try:
-        git.Repo(search_parent_directories=True)
+        calkit.git.get_repo()
     except InvalidGitRepositoryError:
         if not quiet:
             typer.echo("Initializing Git repo")
@@ -1569,7 +1564,7 @@ def run(
             raise_error("No stages found to run")
     if save_logs:
         # Get status of Git repo before running
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
         git_rev = repo.head.commit.hexsha
         try:
             git_branch = repo.active_branch.name
@@ -2320,8 +2315,6 @@ def run_procedure(
             return bool(value)
         return value
 
-    import git
-
     from calkit.models import Procedure
 
     ck_info = calkit.load_calkit_info(process_includes="procedures")
@@ -2333,7 +2326,7 @@ def run_procedure(
         proc = Procedure.model_validate(procs[name])
     except Exception as e:
         raise_error(f"Procedure '{name}' is invalid: {e}")
-    git_repo = git.Repo()
+    git_repo = calkit.git.get_repo()
     # Check to make sure the working tree is clean, so we know we ran the
     # committed version of the procedure
     git_status = git_repo.git.status()
@@ -2479,10 +2472,8 @@ def set_env_var(
     value: Annotated[str, typer.Argument(help="Value of the variable.")],
 ):
     """Set an environmental variable for the project in its '.env' file."""
-    import git
-
     # Ensure that .env is ignored by git
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     if not repo.ignored(".env"):
         typer.echo("Adding .env to .gitignore")
         with open(".gitignore", "a") as f:
@@ -2541,9 +2532,7 @@ def upgrade(
 @app.command(name="switch-branch")
 def switch_branch(name: Annotated[str, typer.Argument(help="Branch name.")]):
     """Switch to a different branch."""
-    import git
-
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     if name not in repo.heads:
         typer.echo(f"Branch '{name}' does not exist; creating")
         cmd = ["-b", name]
@@ -2672,9 +2661,7 @@ def map_paths(
     Currently this is done with copying. Outputs are ensured to be ignored by
     Git.
     """
-    import git
-
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
 
     def validate_and_split(mapping: str) -> tuple[str, str]:
         if "->" not in mapping:

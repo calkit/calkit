@@ -13,10 +13,9 @@ import zipfile
 from pathlib import Path
 from typing import Literal
 
-import git
-
 import calkit
 import calkit.dvc.zip
+import calkit.git
 
 SERVICES = {
     "caltechdata": {"name": "CaltechDATA", "url": "https://data.caltech.edu"},
@@ -156,7 +155,7 @@ def create_citation_cff(
 
 def ls_files() -> list[str]:
     """List all files to be released."""
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     git_files = repo.git.ls_files(".", recurse_submodules=True).splitlines()
     dvc_files = calkit.dvc.list_paths(recursive=True)
     cache_files: list[str] = []

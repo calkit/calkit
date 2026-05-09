@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 import typer
 
 import calkit
+import calkit.git
 from calkit.cli import AliasGroup, warn
 
 list_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
@@ -151,10 +152,8 @@ def list_stages(
 @list_app.command(name="remotes")
 def list_remotes():
     """List Git and DVC remotes."""
-    import git
-
     try:
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
         for remote in repo.remotes:
             typer.echo(f"(Git) {remote.name}: {remote.url}")
     except Exception as e:

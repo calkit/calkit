@@ -12,6 +12,7 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
+import calkit.git
 from calkit.cli import raise_error
 
 update_app = typer.Typer(no_args_is_help=True)
@@ -38,7 +39,6 @@ def update_devcontainer(
     ] = False,
 ):
     """Update a project's devcontainer to match the latest Calkit spec."""
-    import git
     import requests
 
     url = (
@@ -54,7 +54,7 @@ def update_devcontainer(
     with open(out_fpath, "w") as f:
         f.write(resp.text)
     if not no_commit:
-        repo = git.Repo(wdir)
+        repo = calkit.git.get_repo(wdir)
         rel_path = os.path.join(".devcontainer", "devcontainer.json")
         repo.git.add(rel_path)
         if repo.git.diff(["--staged", "--", rel_path]):
@@ -82,15 +82,13 @@ def update_license(
     """Update license with a reasonable default
     (MIT for code, CC-BY-4.0 for other files).
     """
-    import git
-
     with open("LICENSE", "w") as f:
         f.write(
             calkit.licenses.LICENSE_TEMPLATE_DUAL.format(
                 year=calkit.utcnow().year, copyright_holder=copyright_holder
             )
         )
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     repo.git.add("LICENSE")
     if not no_commit and repo.git.diff(["--staged", "--", "LICENSE"]):
         repo.git.commit(["LICENSE", "-m", "Update license"])
@@ -125,8 +123,6 @@ def update_release(
     ] = False,
 ):
     """Update a release."""
-    import git
-
     import calkit.pipeline
 
     if name is None and not use_latest:
@@ -159,7 +155,7 @@ def update_release(
     publisher = release.get("publisher")
     release_description = release.get("description")
     project_name = calkit.detect_project_name()
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     if publisher is None:
         raise_error("Release does not have a publisher")
     record_id = release.get("record_id")
@@ -355,12 +351,11 @@ def update_vscode_config(
     """Update a project's VS Code config to match the latest Calkit
     recommendations.
     """
-    import git
     import requests
 
     out_dir = os.path.join(wdir or ".", ".vscode")
     os.makedirs(out_dir, exist_ok=True)
-    repo = git.Repo(wdir)
+    repo = calkit.git.get_repo(wdir)
     for fname in ["settings.json", "extensions.json"]:
         url = (
             f"https://raw.githubusercontent.com/calkit/vscode-config/"
@@ -402,7 +397,6 @@ def update_github_actions(
     """Update a project's GitHub Actions to match the latest Calkit
     recommendations.
     """
-    import git
     import requests
 
     # First look for any existing workflows that run Calkit to use as the
@@ -429,7 +423,7 @@ def update_github_actions(
         f.write(resp.text)
     if not no_commit:
         rel_path = os.path.join(".github", "workflows", fname_out)
-        repo = git.Repo(wdir)
+        repo = calkit.git.get_repo(wdir)
         repo.git.add(rel_path)
         if repo.git.diff(["--staged", "--", rel_path]):
             repo.git.commit([rel_path, "-m", "Update GitHub Actions workflow"])

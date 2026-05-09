@@ -10,6 +10,7 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
+import calkit.git
 from calkit.cli.core import raise_error
 
 config_app = typer.Typer(no_args_is_help=True)
@@ -92,7 +93,6 @@ def setup_remote(
     """Setup the Calkit cloud as the default DVC remote and store a token in
     the local config.
     """
-    import git
     from git.exc import InvalidGitRepositoryError
 
     from calkit.dvc import configure_remote, set_remote_auth
@@ -113,7 +113,7 @@ def setup_remote(
     except (ValueError, RuntimeError) as e:
         raise_error(f"Failed to set up DVC remote: {e}")
     if not no_commit:
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
         repo.git.add(".dvc/config")
         if ".dvc/config" in calkit.git.get_staged_files():
             typer.echo("Committing changes to DVC config")

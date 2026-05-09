@@ -13,6 +13,7 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
+import calkit.git
 from calkit.cli import AliasGroup, raise_error, warn
 from calkit.core import ryaml
 
@@ -118,7 +119,7 @@ def new_project(
     if template and os.path.exists(abs_path):
         raise_error("Must specify a new directory if using --template")
     try:
-        repo = git.Repo(abs_path)
+        repo = calkit.git.get_repo(abs_path)
     except (InvalidGitRepositoryError, NoSuchPathError):
         repo = None
     if repo is not None and git_repo_url is None:
@@ -331,7 +332,7 @@ def new_project(
         # Now clone it
         subprocess.run(["git", "clone", template_git_url, abs_path])
         # Templates should always have DVC initialized, so no need to do that
-        repo = git.Repo(abs_path)
+        repo = calkit.git.get_repo(abs_path)
         git_rev = repo.git.rev_parse("HEAD")
         # Rename origin remote as upstream
         typer.echo("Renaming template remote as upstream")
@@ -401,11 +402,11 @@ def new_project(
         return
     os.makedirs(abs_path, exist_ok=True)
     try:
-        repo = git.Repo(abs_path)
+        repo = calkit.git.get_repo(abs_path)
     except InvalidGitRepositoryError:
         typer.echo("Initializing Git repository")
         subprocess.run(["git", "init", "-q"], cwd=abs_path)
-    repo = git.Repo(abs_path)
+    repo = calkit.git.get_repo(abs_path)
     if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
         typer.echo("Initializing DVC repository")
         result = run_dvc_command(
@@ -504,8 +505,6 @@ def new_figure(
     ] = False,
 ):
     """Create a new figure."""
-    import git
-
     from calkit.dvc import run_dvc_command
 
     ck_info = calkit.load_calkit_info()
@@ -566,7 +565,7 @@ def new_figure(
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     if not no_commit:
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
         repo.git.add("calkit.yaml")
         if cmd:
             repo.git.add("dvc.yaml")
@@ -580,8 +579,6 @@ def new_question(
     commit: Annotated[bool, typer.Option("--commit")] = False,
 ):
     """Add a new question."""
-    import git
-
     ck_info = calkit.load_calkit_info()
     questions = ck_info.get("questions", [])
     if question in questions:
@@ -593,7 +590,7 @@ def new_question(
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     if commit:
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
         repo.git.add("calkit.yaml")
         repo.git.commit(["-m", "Add question"])
 
@@ -613,8 +610,6 @@ def new_notebook(
     commit: Annotated[bool, typer.Option("--commit")] = False,
 ):
     """Add a new notebook."""
-    import git
-
     if os.path.isabs(path):
         raise ValueError("Path must be relative")
     if not os.path.isfile(path):
@@ -641,7 +636,7 @@ def new_notebook(
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     if commit:
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
         repo.git.add("calkit.yaml")
         repo.git.commit(["calkit.yaml", "-m", f"Add notebook {path}"])
 
@@ -766,8 +761,6 @@ def new_docker_env(
     ] = False,
 ):
     """Create a new Docker environment."""
-    import git
-
     from calkit.cli.check import check_environment
     from calkit.docker import LAYERS
 
@@ -783,7 +776,7 @@ def new_docker_env(
         image_name = f"{project_name}-{name}"
     if command_mode not in ["shell", "entrypoint"]:
         raise_error("--command-mode must be one of: shell, entrypoint")
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     if base and path is not None:
         txt = "FROM " + base + "\n\n"
         for layer in layers:
@@ -886,8 +879,6 @@ def new_foreach_stage(
     The list of values must be a simple list. For more complex objects,
     edit dvc.yaml directly.
     """
-    import git
-
     pipeline = calkit.dvc.read_pipeline()
     if name in pipeline and not overwrite:
         raise_error("Stage already exists; use -f to overwrite")
@@ -903,7 +894,7 @@ def new_foreach_stage(
     )
     with open("dvc.yaml", "w") as f:
         calkit.ryaml.dump(pipeline, f)
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     repo.git.add("dvc.yaml")
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add foreach stage {name}"])
@@ -958,8 +949,6 @@ def new_dataset(
     ] = False,
 ):
     """Create a new dataset."""
-    import git
-
     from calkit.dvc import run_dvc_command
 
     ck_info = calkit.load_calkit_info()
@@ -1020,7 +1009,7 @@ def new_dataset(
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     if not no_commit:
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
         repo.git.add("calkit.yaml")
         if cmd:
             repo.git.add("dvc.yaml")
@@ -1104,8 +1093,6 @@ def new_publication(
         ),
     ] = False,
 ) -> None:
-    import git
-
     from calkit.models.pipeline import LatexStage
 
     ck_info = calkit.load_calkit_info(process_includes=False)
@@ -1167,7 +1154,7 @@ def new_publication(
     )
     pubs.append(pub)
     ck_info["publications"] = pubs
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     # Create environment if applicable
     if env_name is not None and template_type == "latex":
         env = dict(
@@ -1263,15 +1250,13 @@ def new_conda_env(
     ] = False,
 ):
     """Create a new Conda environment."""
-    import git
-
     from calkit.cli.check import check_environment
 
     if packages is not None and os.path.isfile(path) and not overwrite:
         raise_error("Output path already exists (use -f to overwrite)")
     elif packages is None and not os.path.isfile(path):
         raise_error("Packages must be provided if path doesn't exist")
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     # Add environment to Calkit info
     ck_info = calkit.load_calkit_info()
     # If environments is a list instead of a dict, reformulate it
@@ -1366,8 +1351,6 @@ def new_uv_env(
     ] = False,
 ):
     """Create a new uv project environment."""
-    import git
-
     if path is not None and not path.endswith("pyproject.toml"):
         raise_error("Environment path must end with 'pyproject.toml'")
     ck_info = calkit.load_calkit_info()
@@ -1406,7 +1389,7 @@ def new_uv_env(
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     if not no_commit:
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
         repo.git.add(path)
         repo.git.add("calkit.yaml")
         if repo.git.diff("--staged"):
@@ -1459,8 +1442,6 @@ def new_slurm_env(
     ] = False,
 ):
     """Create a new SLURM environment."""
-    import git
-
     host = host.strip()
     if not host:
         raise_error("Host is required")
@@ -1492,7 +1473,7 @@ def new_slurm_env(
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     if not no_commit:
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
         repo.git.add("calkit.yaml")
         if repo.git.diff(["--staged", "calkit.yaml"]):
             repo.git.commit(
@@ -1541,8 +1522,6 @@ def new_uv_venv(
     ] = False,
 ):
     """Create a new uv virtual environment."""
-    import git
-
     from calkit.cli.check import check_environment
     from calkit.environments import DEFAULT_PYTHON_VERSION
 
@@ -1590,7 +1569,7 @@ def new_uv_venv(
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     if not no_commit:
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
         repo.git.add(path)
         repo.git.add("calkit.yaml")
     if not no_check:
@@ -1639,13 +1618,11 @@ def new_venv(
     ] = False,
 ):
     """Create a new Python virtual environment with venv."""
-    import git
-
     from calkit.cli.check import check_environment
 
     if os.path.isfile(path) and not overwrite:
         raise_error("Output path already exists (use -f to overwrite)")
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     # Add environment to Calkit info
     ck_info = calkit.load_calkit_info()
     # If environments is a list instead of a dict, reformulate it
@@ -1727,11 +1704,9 @@ def new_pixi_env(
     ] = False,
 ):
     """Create a new pixi virtual environment."""
-    import git
-
     from calkit.cli.check import check_environment
 
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     # Add environment to Calkit info
     ck_info = calkit.load_calkit_info()
     # If environments is a list instead of a dict, reformulate it
@@ -1852,7 +1827,7 @@ def new_julia_env(
             "Julia environment paths must point to a Project.toml file"
         )
     try:
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
     except git.InvalidGitRepositoryError:
         raise_error(
             "Current directory is not a Git repository; run calkit init"
@@ -1984,8 +1959,6 @@ def new_renv(
     ] = False,
 ):
     """Create a new R environment with renv."""
-    import git
-
     from calkit.environments import create_r_description_content
 
     if path is not None and not path.endswith("DESCRIPTION"):
@@ -2084,7 +2057,7 @@ def new_renv(
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     if not no_commit:
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
         repo.git.add(path)
         if os.path.exists(lock_path):
             repo.git.add(lock_path)
@@ -2125,8 +2098,6 @@ def new_status(
     ] = False,
 ):
     """Add a new project status to the log."""
-    import git
-
     typer.echo(f"Adding {status.value} status log entry")
     fpath = os.path.join(".calkit", "status.csv")
     os.makedirs(".calkit", exist_ok=True)
@@ -2140,7 +2111,7 @@ def new_status(
         writer.writerow([now.isoformat(), status.value, message])
     if not no_commit:
         typer.echo("Committing")
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
         repo.git.add(fpath)
         repo.git.commit([fpath, "-m", f"Add {status.value} status log entry"])
 
@@ -2257,7 +2228,6 @@ def _save_stage(
     no_commit: bool = False,
 ) -> None:
     """Save a Calkit pipeline stage."""
-    import git
     from git.exc import InvalidGitRepositoryError
 
     ck_info = calkit.load_calkit_info()
@@ -2280,7 +2250,7 @@ def _save_stage(
         ryaml.dump(ck_info, f)
     if not no_commit:
         try:
-            repo = git.Repo()
+            repo = calkit.git.get_repo()
         except InvalidGitRepositoryError:
             raise_error("Can't commit because this is not a Git repo")
         repo.git.add("calkit.yaml")
@@ -2745,7 +2715,6 @@ def new_release(
     """Create a new release."""
     import bibtexparser
     import dotenv
-    import git
 
     import calkit.pipeline
 
@@ -2777,7 +2746,7 @@ def new_release(
     # TODO: Enable resuming a release if upload failed part-way?
     if name in releases:
         raise_error(f"Release with name '{name}' already exists")
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     if name in repo.tags:
         raise_error(f"Git tag with name '{name}' already exists")
     # Check that the pipeline is up-to-date

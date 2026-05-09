@@ -10,6 +10,7 @@ from typing import Annotated, Any
 import typer
 
 import calkit
+import calkit.git
 from calkit.cli import raise_error
 from calkit.cli.main.core import app, run
 from calkit.core import DVC_EXTENSIONS, DVC_SIZE_THRESH_BYTES
@@ -297,7 +298,7 @@ def execute_and_record(
         language = "latex"
         pdf_path = first_arg.removesuffix(".tex") + ".pdf"
         try:
-            repo = git.Repo(".")
+            repo = calkit.git.get_repo()
             if repo.git.ls_files(pdf_path):
                 stage["pdf_storage"] = "git"
             else:
@@ -484,7 +485,7 @@ def execute_and_record(
             )
     # Initialize git repo and get DVC paths for storage determination
     try:
-        repo = git.Repo(".")
+        repo = calkit.git.get_repo()
     except InvalidGitRepositoryError:
         repo = None
     dvc_paths = []

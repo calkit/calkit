@@ -10,7 +10,6 @@ import sys
 import traceback
 from pathlib import Path
 
-import git
 import tornado
 from dvc.exceptions import NotDvcRepoError
 from jupyter_server.base.handlers import APIHandler as _APIHandler
@@ -20,6 +19,7 @@ from pydantic import BaseModel
 import calkit
 import calkit.cli.main
 import calkit.environments
+import calkit.git
 import calkit.pipeline
 from calkit.cli.new import (
     new_conda_env,
@@ -816,7 +816,7 @@ class GitStatusRouteHandler(APIHandler):
     @tornado.web.authenticated
     def get(self):
         try:
-            repo = git.Repo(os.getcwd())
+            repo = calkit.git.get_repo()
         except Exception as e:
             self.set_status(500)
             self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
@@ -950,7 +950,7 @@ class GitIgnoreRouteHandler(APIHandler):
             self.finish(json.dumps({"error": "paths must be a list"}))
             return
         try:
-            repo = git.Repo(os.getcwd())
+            repo = calkit.git.get_repo()
         except Exception as e:
             self.set_status(500)
             self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
@@ -978,7 +978,7 @@ class GitCommitRouteHandler(APIHandler):
             self.finish(json.dumps({"error": "Commit 'message' is required"}))
             return
         try:
-            repo = git.Repo(os.getcwd())
+            repo = calkit.git.get_repo()
         except Exception as e:
             self.set_status(500)
             self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
@@ -1035,7 +1035,7 @@ class GitHistoryRouteHandler(APIHandler):
     @tornado.web.authenticated
     def get(self):
         try:
-            repo = git.Repo(os.getcwd())
+            repo = calkit.git.get_repo()
         except Exception as e:
             self.set_status(500)
             self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
@@ -1058,7 +1058,7 @@ class GitPushRouteHandler(APIHandler):
     @tornado.web.authenticated
     def post(self):
         try:
-            repo = git.Repo(os.getcwd())
+            repo = calkit.git.get_repo()
         except Exception as e:
             self.set_status(500)
             self.finish(json.dumps({"error": f"Not a git repo: {e}"}))

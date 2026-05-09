@@ -8,6 +8,7 @@ import typer
 from pydantic import BaseModel, Field, computed_field, field_validator
 
 import calkit
+import calkit.git
 from calkit.models.iteration import expand_project_parameters
 from calkit.models.pipeline import (
     InputsFromStageOutputs,
@@ -485,8 +486,6 @@ def to_dvc(
 
     Returns a dictionary of DVC stages for the `stages` key of a dvc.yaml.
     """
-    import git
-
     import calkit.dvc.zip
     from calkit.environments import get_env_lock_fpath
 
@@ -534,7 +533,7 @@ def to_dvc(
         if env_name not in used_envs:
             continue
         lock_fpath = get_env_lock_fpath(
-            env=env, env_name=env_name, as_posix=True, for_dvc=True
+            env=env, env_name=env_name, as_posix=True, for_dvc=True, wdir=wdir
         )
         if lock_fpath is None:
             continue
@@ -627,7 +626,7 @@ def to_dvc(
         dvc_stages[stage_name] = dvc_stage
         # Check for any outputs that should be ignored/unignored
         if write:
-            repo = git.Repo(wdir)
+            repo = calkit.git.get_repo(wdir)
             # Ensure we catch any Jupyter Notebook outputs
             outputs = stage.outputs.copy()
             if stage.kind == "jupyter-notebook":
@@ -702,7 +701,8 @@ def to_dvc(
             ):
                 dvc_stages[stage_name] = stage
         dvc_yaml["stages"] = dvc_stages
-        with open("dvc.yaml", "w") as f:
+        dvc_yaml_fpath = os.path.join(wdir, "dvc.yaml") if wdir else "dvc.yaml"
+        with open(dvc_yaml_fpath, "w") as f:
             if verbose:
                 typer.echo("Writing to dvc.yaml")
             calkit.ryaml.dump(dvc_yaml, f)

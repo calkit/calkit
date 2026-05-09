@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, Literal
 
 import dvc.repo
-import git
 from configobj import ConfigObj
 from dvc.utils.objects import cached_property
 from dvc_objects.fs.base import ObjectFileSystem
@@ -18,6 +17,7 @@ from fsspec import Callback
 from fsspec.callbacks import DEFAULT_CALLBACK
 
 import calkit
+import calkit.git
 from calkit.cli import warn
 from calkit.config import get_app_name
 
@@ -293,7 +293,7 @@ def configure_remote(
     except ValueError as e:
         raise ValueError(f"Can't detect project name: {e}")
     # If Git origin is not set, set that
-    repo = git.Repo(wdir)
+    repo = calkit.git.get_repo(wdir)
     try:
         repo.remote()
     except ValueError:

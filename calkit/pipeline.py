@@ -2,7 +2,6 @@
 
 import itertools
 import os
-from collections.abc import Callable
 from pathlib import Path
 
 import typer
@@ -303,21 +302,13 @@ def get_status(
     clean_notebooks: bool = True,
     compile_to_dvc: bool = True,
     force_env_check: bool = False,
-    progress: "Callable[[str], None] | None" = None,
 ) -> PipelineStatus:
     """Get pipeline status after optional prep checks.
 
     This can compile the Calkit pipeline to DVC, clean notebook outputs,
     check pipeline environments, then query DVC for out-of-date stages.
-
-    ``progress`` is an optional callable invoked with a short status string
-    at each step, suitable for driving a spinner in a CLI.
     """
     import calkit.environments
-
-    def _progress(msg: str) -> None:
-        if progress is not None:
-            progress(msg)
 
     prev_cwd = os.getcwd()
     if wdir is not None:
@@ -338,7 +329,6 @@ def get_status(
         if not has_pipeline and not has_subprojects:
             return PipelineStatus.model_validate(result)
         if check_environments:
-            _progress("Checking environments")
             try:
                 env_checks = calkit.environments.check_all_in_pipeline(
                     ck_info=ck_info,
@@ -363,7 +353,6 @@ def get_status(
             ck_info.get("pipeline", {}).get("stages", {})
             or ck_info.get("subprojects")
         ):
-            _progress("Compiling pipeline")
             try:
                 to_dvc(ck_info=ck_info, write=True, manage_gitignore=False)
             except Exception as e:
@@ -372,7 +361,6 @@ def get_status(
                 )
                 return PipelineStatus.model_validate(result)
         if clean_notebooks and ck_info.get("pipeline", {}).get("stages", {}):
-            _progress("Cleaning notebooks")
             try:
                 cleaned = calkit.notebooks.clean_all_in_pipeline(
                     ck_info=ck_info
@@ -384,7 +372,6 @@ def get_status(
                     f"{e.__class__.__name__}: {e}"
                 )
                 return PipelineStatus.model_validate(result)
-        _progress("Getting pipeline status")
         try:
             dvc_repo = calkit.dvc.get_dvc_repo()
             raw_status = dvc_repo.status(targets=targets)

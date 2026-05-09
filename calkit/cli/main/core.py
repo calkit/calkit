@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import csv
 import glob
 import json
@@ -356,34 +355,16 @@ def get_status(
         categories = valid_categories
     pipeline_status = None
     if "pipeline" in categories or "dvc" in categories:
-        from rich.console import Console
-        from rich.status import Status
-
-        console = Console(stderr=True)
-        # Only show the spinner for interactive terminals, not JSON output
-        spinner_cm: Status | None = (
-            console.status("", spinner="dots", spinner_style="green")
-            if not as_json
-            else None
+        # Sync zips so the zip files reflect current workspace state before
+        # reporting status
+        calkit.dvc.zip.sync_all(direction="to-zip")
+        pipeline_status = calkit.pipeline.get_status(
+            ck_info=ck_info,
+            targets=targets,
+            check_environments=not no_check_envs,
+            clean_notebooks=True,
+            compile_to_dvc=True,
         )
-        with spinner_cm or contextlib.nullcontext():
-
-            def _progress(msg: str) -> None:
-                if spinner_cm is not None:
-                    spinner_cm.update(f"[bold green]{msg}[/bold green]")
-
-            # Sync zips so the zip files reflect current workspace state before
-            # reporting status
-            _progress("Syncing DVC zips")
-            calkit.dvc.zip.sync_all(direction="to-zip")
-            pipeline_status = calkit.pipeline.get_status(
-                ck_info=ck_info,
-                targets=targets,
-                check_environments=not no_check_envs,
-                clean_notebooks=True,
-                compile_to_dvc=True,
-                progress=_progress,
-            )
         if pipeline_status.failed_environment_checks:
             warn(
                 "Failed pipeline environment checks for: "

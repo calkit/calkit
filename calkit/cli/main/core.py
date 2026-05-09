@@ -1417,9 +1417,11 @@ def run(
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info()
-    # Ensure Git is initialized so DVC can be used
+    # Ensure Git is initialized so DVC can be used.
+    # Use search_parent_directories so running from a subproject folder
+    # discovers the parent repo instead of triggering a new git init.
     try:
-        git.Repo()
+        git.Repo(search_parent_directories=True)
     except InvalidGitRepositoryError:
         if not quiet:
             typer.echo("Initializing Git repo")
@@ -1469,6 +1471,39 @@ def run(
         failed = not result.get("success", False)
         if failed:
             warn(f"Failed to check environment '{env_name}'")
+    # Check environments for each subproject so DVC can detect changes
+    subprojects = ck_info.get("subprojects", [])
+    if subprojects:
+        prev_cwd = os.getcwd()
+        for subproject in subprojects:
+            if not isinstance(subproject, dict) or not subproject.get("path"):
+                continue
+            sp = Path(subproject["path"]).as_posix()
+            if not os.path.isdir(sp):
+                continue
+            if not quiet:
+                typer.echo(f"Checking environments for subproject: {sp}")
+            os.chdir(sp)
+            try:
+                sp_ck_info = calkit.load_calkit_info()
+                sp_env_results = calkit.environments.check_all_in_pipeline(
+                    ck_info=sp_ck_info, force=force
+                )
+                for env_name, sp_result in sp_env_results.items():
+                    if verbose:
+                        typer.echo(f"{sp}/{env_name}: {sp_result}")
+                    if not sp_result.get("success", False):
+                        warn(
+                            f"Failed to check environment '{env_name}' "
+                            f"in subproject '{sp}'"
+                        )
+            except Exception as e:
+                warn(
+                    f"Failed to check environments for subproject '{sp}': "
+                    f"{e.__class__.__name__}: {e}"
+                )
+            finally:
+                os.chdir(prev_cwd)
     # If specified, perform initial Overleaf sync
     if sync_overleaf:
         overleaf_sync(no_commit=False, no_push=True, verbose=verbose)

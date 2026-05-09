@@ -619,15 +619,16 @@ def to_dvc(
         if not os.path.isdir(sp):
             raise NotADirectoryError(f"Subproject path '{sp}' does not exist")
         sp_is_isolated = os.path.isdir(os.path.join(sp, ".dvc"))
-        if not sp_is_isolated:
-            continue
+        # Always compile the subproject's dvc.yaml recursively.
+        # Inline subprojects need their dvc.yaml written so DVC discovers them
+        # via --all-pipelines; isolated subprojects get a wrapper stage instead.
         sp_dvc_stages = to_dvc(
             wdir=sp,
             write=write,
             verbose=verbose,
             manage_gitignore=manage_gitignore,
         )
-        if not sp_dvc_stages:
+        if not sp_dvc_stages or not sp_is_isolated:
             continue
         # Collect all outputs and all deps from the subproject's compiled stages.
         # For matrix stages the template strings (${item.foo}) must be expanded

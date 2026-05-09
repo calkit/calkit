@@ -372,9 +372,9 @@ def get_status(
                 if spinner_cm is not None:
                     spinner_cm.update(f"[bold green]{msg}[/bold green]")
 
-            _progress("Syncing DVC zips")
             # Sync zips so the zip files reflect current workspace state before
             # reporting status
+            _progress("Syncing DVC zips")
             calkit.dvc.zip.sync_all(direction="to-zip")
             pipeline_status = calkit.pipeline.get_status(
                 ck_info=ck_info,

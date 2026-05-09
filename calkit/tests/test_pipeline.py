@@ -874,3 +874,83 @@ def test_stale_stage_detects_changed_command():
     assert stale_stage.stale_outputs == ["my-output.out"]
     assert stale_stage.modified_inputs == []
     assert stale_stage.modified_outputs == []
+
+
+def test_translate_run_targets(tmp_dir):
+    # Set up a parent project with one inline subproject and one isolated.
+    subprocess.check_call(["git", "init"])
+    os.makedirs("inline-sp/calkit", exist_ok=True)
+    os.makedirs("isolated-sp/.dvc", exist_ok=True)
+    with open("inline-sp/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "stage-a": {
+                            "kind": "shell-command",
+                            "command": "echo a",
+                            "environment": "env",
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    with open("isolated-sp/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "stage-b": {
+                            "kind": "shell-command",
+                            "command": "echo b",
+                            "environment": "env",
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    ck_info = {
+        "subprojects": [
+            {"path": "inline-sp"},
+            {"path": "isolated-sp"},
+        ]
+    }
+    # Inline subproject: name → dvc.yaml path
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["inline-sp"], ck_info=ck_info
+    )
+    assert parent == ["inline-sp/dvc.yaml"]
+    assert isolated == []
+    # Inline subproject: name:stage → dvc.yaml:stage
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["inline-sp:stage-a"], ck_info=ck_info
+    )
+    assert parent == ["inline-sp/dvc.yaml:stage-a"]
+    assert isolated == []
+    # Isolated subproject: name → wrapper stage
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["isolated-sp"], ck_info=ck_info
+    )
+    assert parent == ["_subproject-isolated-sp"]
+    assert isolated == []
+    # Isolated subproject: name:stage → isolated_sp_targets
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["isolated-sp:stage-b"], ck_info=ck_info
+    )
+    assert parent == []
+    assert isolated == [("isolated-sp", "stage-b")]
+    # Unrecognized targets pass through unchanged
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["my-parent-stage"], ck_info=ck_info
+    )
+    assert parent == ["my-parent-stage"]
+    assert isolated == []
+    # Mixed: inline stage + isolated stage + plain parent stage
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["inline-sp:stage-a", "isolated-sp:stage-b", "my-parent-stage"],
+        ck_info=ck_info,
+    )
+    assert parent == ["inline-sp/dvc.yaml:stage-a", "my-parent-stage"]
+    assert isolated == [("isolated-sp", "stage-b")]

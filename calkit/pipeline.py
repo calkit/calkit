@@ -915,3 +915,63 @@ def to_dvc(
                 typer.echo("Writing to dvc.yaml")
             calkit.ryaml.dump(dvc_yaml, f)
     return dvc_stages
+
+
+def translate_run_targets(
+    targets: list[str],
+    ck_info: dict | None = None,
+) -> tuple[list[str], list[tuple[str, str | None]]]:
+    """Translate calkit-style run targets to DVC-format targets.
+
+    Supported shorthand forms:
+    - ``subproject`` → ``subproject/dvc.yaml`` (inline) or
+      ``_subproject-name`` (isolated, parent wrapper stage)
+    - ``subproject:stage`` → ``subproject/dvc.yaml:stage`` (inline) or
+      ``(sp_path, stage)`` in the second return value (isolated; must be run
+      directly inside the subproject directory)
+
+    Any target that does not match a known subproject is passed through
+    unchanged into the first return value.
+
+    Returns
+    -------
+    tuple[list[str], list[tuple[str, str | None]]]
+        ``(parent_dvc_targets, isolated_sp_targets)`` where
+        ``isolated_sp_targets`` is a list of ``(sp_path, stage_or_None)``
+        pairs that must be reproduced by chdiring into the subproject.
+    """
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info()
+    subprojects = ck_info.get("subprojects", [])
+    sp_map: dict[str, dict] = {}
+    for sp_cfg in subprojects:
+        if not isinstance(sp_cfg, dict) or not sp_cfg.get("path"):
+            continue
+        sp = Path(sp_cfg["path"]).as_posix()
+        sp_map[sp] = sp_cfg
+        sp_map[Path(sp).name] = sp_cfg
+    parent_targets: list[str] = []
+    isolated_sp_targets: list[tuple[str, str | None]] = []
+    for target in targets:
+        if ":" in target:
+            sp_part, stage_part = target.split(":", 1)
+        else:
+            sp_part = target
+            stage_part = None
+        if sp_part not in sp_map:
+            parent_targets.append(target)
+            continue
+        sp_cfg = sp_map[sp_part]
+        sp = Path(sp_cfg["path"]).as_posix()
+        sp_is_isolated = os.path.isdir(os.path.join(sp, ".dvc"))
+        if sp_is_isolated:
+            if stage_part:
+                isolated_sp_targets.append((sp, stage_part))
+            else:
+                parent_targets.append(f"_subproject-{Path(sp).name}")
+        else:
+            if stage_part:
+                parent_targets.append(f"{sp}/dvc.yaml:{stage_part}")
+            else:
+                parent_targets.append(f"{sp}/dvc.yaml")
+    return parent_targets, isolated_sp_targets

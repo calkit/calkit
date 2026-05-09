@@ -1587,7 +1587,9 @@ def run(
         dvc_data_status_before.pop("git", None)  # Remove git status
     if targets is None:
         targets = []
-    args = deepcopy(targets)
+    args, isolated_sp_targets = calkit.pipeline.translate_run_targets(
+        deepcopy(targets), ck_info=ck_info
+    )
     # Extract any boolean args
     for name in [
         "quiet",
@@ -1610,7 +1612,9 @@ def run(
         if locals()[name.replace("-", "_")]:
             args.append("--" + name)
     # Inline subprojects (no .dvc/ dir) share the parent DVC project.
-    # Tell DVC to discover all pipelines so their dvc.yaml files are included.
+    # Tell DVC to discover all pipelines so their dvc.yaml files are included,
+    # unless the user already specified targets that include dvc.yaml paths
+    # (translated from subproject shorthand) or --all-pipelines was passed.
     inline_subprojects = [
         sp
         for sp in subprojects
@@ -1618,8 +1622,36 @@ def run(
         and sp.get("path")
         and not os.path.isdir(os.path.join(sp["path"], ".dvc"))
     ]
-    if inline_subprojects and not targets and not all_pipelines:
+    translated_targets_have_dvc_yaml = any(
+        "dvc.yaml" in t for t in args if not t.startswith("--")
+    )
+    if (
+        inline_subprojects
+        and not targets
+        and not all_pipelines
+        and not translated_targets_have_dvc_yaml
+    ):
         args.append("--all-pipelines")
+    failed = False
+    # Run isolated subproject stage targets directly inside their directories.
+    if isolated_sp_targets:
+        for sp_path, stage_name in isolated_sp_targets:
+            sp_args = [stage_name] if stage_name else []
+            if dry:
+                sp_args.append("--dry")
+            if force:
+                sp_args.append("--force")
+            original_dir = os.getcwd()
+            try:
+                os.chdir(sp_path)
+                sp_res = dvc_cli_main(["repro"] + sp_args)
+            finally:
+                os.chdir(original_dir)
+            if sp_res != 0:
+                failed = True
+        if not args or all(a.startswith("--") for a in args):
+            # Only isolated subproject stage targets were given; skip parent run
+            return {}
     if pipeline is not None:
         args += ["--pipeline", pipeline]
     if downstream is not None:
@@ -1653,7 +1685,7 @@ def run(
     # Disable other misc DVC output
     dvc.ui.ui.write = lambda *args, **kwargs: None
     res = dvc_cli_main(["repro"] + args)
-    failed = res != 0
+    failed = failed or res != 0
     # Parse log to get timing and which stages ran
     with open(log_fpath, "r") as f:
         log_content = f.read()

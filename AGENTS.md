@@ -21,3 +21,5 @@ Agents should never make commits to Git.
 
 Prefer tests that include multiple scenarios to comprehensively test
 a feature in one function over many different test functions.
+
+For prose, only use one space after punctuation.

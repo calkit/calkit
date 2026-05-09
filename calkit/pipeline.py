@@ -394,25 +394,49 @@ def get_status(
                 f"{e.__class__.__name__}: {e}"
             )
             return PipelineStatus.model_validate(result)
-        # For isolated subprojects (with their own .dvc/), DVC won't include
-        # them in the parent status. Query each one separately and prefix keys.
+        # Isolated subprojects appear in the parent status as wrapper stages
+        # (e.g., "dvc.yaml:subproject-openflash").  When a wrapper stage is
+        # stale, replace it with the individual stale stages from the
+        # subproject's own DVC so the user sees {sp}:stage_name detail.
+        sp_by_stage_name: dict[str, str] = {}
         for sp_cfg in ck_info.get("subprojects", []):
             if not isinstance(sp_cfg, dict) or not sp_cfg.get("path"):
                 continue
             sp = Path(sp_cfg["path"]).as_posix()
             if not os.path.isdir(os.path.join(sp, ".dvc")):
                 continue
+            sp_by_stage_name[f"_subproject-{Path(sp).name}"] = sp
+        # Root-level stage keys have the form "stage_name" (no dvc.yaml: prefix).
+        stale_wrapper_keys = [
+            k
+            for k in list(raw_status.keys())
+            if (k.split("dvc.yaml:", 1)[-1] if "dvc.yaml:" in k else k)
+            in sp_by_stage_name
+        ]
+        for wrapper_key in stale_wrapper_keys:
+            bare_wrapper = (
+                wrapper_key.split("dvc.yaml:", 1)[1]
+                if "dvc.yaml:" in wrapper_key
+                else wrapper_key
+            )
+            sp = sp_by_stage_name[bare_wrapper]
             try:
                 sp_dvc_repo = calkit.dvc.get_dvc_repo(sp)
                 sp_raw_status = sp_dvc_repo.status()
+            except Exception:
+                sp_raw_status = {}
+            if sp_raw_status:
+                # Sub-project has its own stale stages: replace the wrapper key
+                # with individual stage keys so the user sees {sp}:stage_name.
+                del raw_status[wrapper_key]
                 for k, v in sp_raw_status.items():
                     if "dvc.yaml:" in k:
                         _, bare = k.split("dvc.yaml:", 1)
                         raw_status[f"{sp}/dvc.yaml:{bare}"] = v
                     else:
                         raw_status[f"{sp}/dvc.yaml:{k}"] = v
-            except Exception:
-                pass
+            # else: keep the wrapper key — sub-project is internally up-to-date
+            # but the parent's dvc.lock needs refreshing.
         # DVC status keys have the form:
         #   "dvc.yaml:stage_name"         root pipeline
         #   "sub1/dvc.yaml:stage_name"    subproject pipeline
@@ -429,9 +453,16 @@ def get_status(
             else:
                 bare_name = k
                 subproject = None
-            display_name = (
-                f"{subproject}:{bare_name}" if subproject else bare_name
-            )
+            if subproject:
+                display_name = f"{subproject}:{bare_name}"
+            elif bare_name in sp_by_stage_name:
+                # Wrapper stage kept in place (sub-project internally up-to-
+                # date but parent dvc.lock needs refreshing); show as the
+                # subproject path so the display is `sub2 (subproject)` not
+                # `_subproject-sub2`.
+                display_name = f"{sp_by_stage_name[bare_name]} (subproject)"
+            else:
+                display_name = bare_name
             raw_stale_stages[display_name] = (bare_name, subproject, v)
         root_stages_config = ck_info.get("pipeline", {}).get("stages", {})
         # Lazily load subproject ck_info for configured_outputs lookup
@@ -577,22 +608,102 @@ def to_dvc(
         ck_info = calkit.load_calkit_info(wdir=wdir)
     if "pipeline" not in ck_info and "subprojects" not in ck_info:
         raise ValueError("No pipeline or subprojects found in calkit.yaml")
-    # Compile subproject pipelines recursively; DVC discovers them via its
-    # normal multi-pipeline traversal so no parent stages are needed
+    # Compile subproject pipelines recursively.
+    # For isolated subprojects (those with their own .dvc/ directory), DVC
+    # won't cross the .dvc/ boundary during --all-pipelines discovery, so we
+    # generate a single wrapper stage per isolated subproject in the parent
+    # dvc.yaml.  The wrapper's deps/outs capture the I/O boundary so DVC can
+    # order execution correctly across subprojects.
+    # For inline subprojects (no .dvc/ dir), DVC discovers them automatically
+    # via --all-pipelines so no wrapper stage is needed.
+    wrapper_stages: dict[str, dict] = {}
     for subproject in ck_info.get("subprojects", []):
         if not isinstance(subproject, dict) or not subproject.get("path"):
             raise ValueError("Subprojects must have a 'path' defined")
         sp = Path(subproject["path"]).as_posix()
         if not os.path.isdir(sp):
             raise NotADirectoryError(f"Subproject path '{sp}' does not exist")
-        to_dvc(wdir=sp, write=write, verbose=verbose)
+        sp_is_isolated = os.path.isdir(os.path.join(sp, ".dvc"))
+        sp_dvc_stages = to_dvc(wdir=sp, write=write, verbose=verbose)
+        if not sp_is_isolated or not sp_dvc_stages:
+            continue
+        # Collect all outputs and all deps from the subproject's compiled stages.
+        # For matrix stages the template strings (${item.foo}) must be expanded
+        # so the wrapper stage has concrete paths.
+        all_sp_outs: set[str] = set()
+        all_sp_deps: set[str] = set()
+        for stage_cfg in sp_dvc_stages.values():
+            matrix = stage_cfg.get("matrix")
+            replacements = _expand_matrix(matrix) if matrix else [{}]
+            for out in stage_cfg.get("outs", []):
+                raw = out if isinstance(out, str) else list(out.keys())[0]
+                for r in replacements:
+                    expanded = raw
+                    for var, val in r.items():
+                        expanded = expanded.replace(
+                            f"${{item.{var}}}", str(val)
+                        )
+                    all_sp_outs.add(expanded)
+            for dep in stage_cfg.get("deps", []):
+                if not isinstance(dep, str):
+                    continue
+                for r in replacements:
+                    expanded = dep
+                    for var, val in r.items():
+                        expanded = expanded.replace(
+                            f"${{item.{var}}}", str(val)
+                        )
+                    all_sp_deps.add(expanded)
+        # External deps are inputs the subproject reads from outside itself.
+        external_deps = all_sp_deps - all_sp_outs
+        # The wrapper stage has `wdir: sp`, so DVC resolves deps/outs relative
+        # to that directory — do NOT prefix with the subproject path.
+        wrapper_deps = sorted(
+            d for d in external_deps if not d.startswith(".calkit/env-locks/")
+        )
+        # Wrap outputs with cache: false + persist: true so the parent doesn't
+        # double-cache files already managed by the subproject's DVC, and the
+        # nested dvc repro run is responsible for file persistence.
+        wrapper_outs = [
+            {o: {"cache": False, "persist": True}}
+            for o in sorted(all_sp_outs)
+            if not o.startswith(".calkit/env-locks/")
+        ]
+        # Prefix with underscore so: (a) it sorts before user stages, (b) the
+        # write path's "don't clobber user stages" check skips it (underscore
+        # names are treated as private/auto-generated), and (c) it avoids
+        # collisions with user-defined stage names.
+        sp_stage_name = f"_subproject-{Path(sp).name}"
+        wrapper_stages[sp_stage_name] = {
+            "cmd": "calkit dvc repro",
+            "wdir": sp,
+            "deps": wrapper_deps,
+            "outs": wrapper_outs,
+            "desc": (
+                f"Automatically generated wrapper for subproject '{sp}'. "
+                "Changes made here will be overwritten."
+            ),
+        }
     if "pipeline" not in ck_info:
-        return {}
+        if write and wrapper_stages:
+            dvc_yaml_fpath = (
+                os.path.join(wdir, "dvc.yaml") if wdir else "dvc.yaml"
+            )
+            existing = {}
+            if os.path.isfile(dvc_yaml_fpath):
+                with open(dvc_yaml_fpath) as f:
+                    existing = calkit.ryaml.load(f) or {}
+            existing["stages"] = wrapper_stages
+            with open(dvc_yaml_fpath, "w") as f:
+                calkit.ryaml.dump(existing, f)
+        return wrapper_stages
     try:
         pipeline = Pipeline.model_validate(ck_info["pipeline"])
     except Exception as e:
         raise ValueError(f"Pipeline is not defined properly: {e}")
-    dvc_stages = {}
+    # Seed parent stages with wrapper stages so the isolated subproject
+    # stages appear in dvc.yaml before the parent's own stages.
+    dvc_stages: dict = dict(wrapper_stages)
     # Read existing dvc.yaml now so we can clean up stale .gitignore entries
     # when stage outputs are renamed or removed
     if write:

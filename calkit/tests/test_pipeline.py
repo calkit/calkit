@@ -9,7 +9,7 @@ import pytest
 import calkit
 import calkit.pipeline
 from calkit.environments import get_env_lock_fpath
-from calkit.pipeline import stages_are_similar
+from calkit.pipeline import flatten_dvc_stages, stages_are_similar
 
 
 def test_stages_are_similar():
@@ -874,3 +874,32 @@ def test_stale_stage_detects_changed_command():
     assert stale_stage.stale_outputs == ["my-output.out"]
     assert stale_stage.modified_inputs == []
     assert stale_stage.modified_outputs == []
+
+
+def test_flatten_dvc_stages():
+    stages = {
+        "stage1": {
+            "cmd": "whatever",
+            "deps": ["something", "else"],
+            "outs": [
+                "something-out",
+                "else-out",
+                {"else-more": {"cache": False}},
+            ],
+        },
+        "stage2": {
+            "cmd": "whatever2",
+            "deps": ["something-out"],
+            "outs": [{"outs/stage2": {"persist": True}}],
+        },
+    }
+    flattened = flatten_dvc_stages(stages=stages, wdir="sub1")
+    assert flattened["cmd"] == "calkit run"
+    assert flattened["wdir"] == "sub1"
+    assert flattened["deps"] == ["something", "else", "something-out"]
+    assert flattened["outs"] == [
+        {p: {"cache": False, "persist": True}}
+        for p in ["something-out", "else-out", "else-more", "outs/stage2"]
+    ]
+    # Now try with a foreach stage
+    # Now try with a matrix stage

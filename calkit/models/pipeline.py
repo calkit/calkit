@@ -13,6 +13,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Discriminator,
+    PrivateAttr,
     ValidationError,
     field_validator,
     model_validator,
@@ -190,22 +191,19 @@ class Stage(BaseModel):
     iterate_over: list[StageIteration] | None = None
     description: str | None = None
     slurm: StageSchedulerOptions | None = None
-    pbs: StageSchedulerOptions | None = None
     scheduler: StageSchedulerOptions | None = None
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
+    # Resolved at pipeline-compilation time by set_stage_scheduler_options;
+    # tracks which CLI alias (slurm / sched) to use for the submit command.
+    _scheduler_cli_alias: str = PrivateAttr(default="slurm")
 
     @model_validator(mode="after")
     def check_scheduler_options_exclusive(self) -> Stage:
-        set_keys = [
-            k
-            for k in ("slurm", "pbs", "scheduler")
-            if getattr(self, k) is not None
-        ]
-        if len(set_keys) > 1:
+        if self.slurm is not None and self.scheduler is not None:
             raise ValueError(
-                f"Stage '{self.name}' has multiple scheduler option keys set "
-                f"({', '.join(set_keys)}); only one may be used per stage"
+                f"Stage '{self.name}' has both 'slurm' and 'scheduler' "
+                "options set; use 'scheduler' only ('slurm' is deprecated)"
             )
         return self
 
@@ -279,13 +277,9 @@ class Stage(BaseModel):
         scheduler env (no inner runtime needed), we skip the inner xenv
         wrap and let the user's command run directly inside the job.
         """
-        if (
-            self.environment == "_system"
-            and self.slurm is None
-            and self.pbs is None
-        ):
+        if self.environment == "_system" and self.scheduler is None:
             return ""
-        if self.slurm is not None or self.pbs is not None:
+        if self.scheduler is not None:
             sched_cmd = self.scheduler_cmd
             if self.inner_environment == self.outer_environment:
                 # Plain scheduler env: no inner runtime to dispatch into.
@@ -306,15 +300,10 @@ class Stage(BaseModel):
         scheduler kinds emit ``calkit sched batch …`` and route through
         the same underlying CLI via the ``sched|slurm`` group.
         """
-        if self.slurm is not None:
-            opts = self.slurm
-            cli_alias = "slurm"
-        elif self.pbs is not None:
-            opts = self.pbs
-            cli_alias = "sched"
-        else:
+        if self.scheduler is None:
             raise ValueError("Stage has no scheduler options")
-        cmd = f"calkit {cli_alias} batch --name {self.name}"
+        opts = self.scheduler
+        cmd = f"calkit {self._scheduler_cli_alias} batch --name {self.name}"
         if self.iterate_over is not None:
             arg_names = []
             for item in self.iterate_over:
@@ -652,8 +641,9 @@ class ShellScriptStage(Stage):
         # hand the script straight to the scheduler submit command rather
         # than wrapping with xenv.
         if (
-            self.slurm is not None or self.pbs is not None
-        ) and self.inner_environment == self.outer_environment:
+            self.scheduler is not None
+            and self.inner_environment == self.outer_environment
+        ):
             cmd = self.scheduler_cmd
             cmd += f" -- {self.script_path}"
             for arg in self.args:
@@ -795,18 +785,22 @@ class SBatchStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        # Merge top level SLURM options with those in the slurm object
-        if self.slurm is None:
-            self.slurm = StageSchedulerOptions()
-        self.slurm.options = self.sbatch_options + (self.slurm.options or [])
+        # Resolve slurm -> scheduler if set_stage_scheduler_options hasn't run
+        # (e.g. when to_dvc() is called directly on the stage).
+        if self.scheduler is None:
+            self.scheduler = self.slurm or StageSchedulerOptions()
+            self.slurm = None
+        self.scheduler.options = self.sbatch_options + (
+            self.scheduler.options or []
+        )
         # Dedupe options but retain order
         deduped_options = []
-        for opt in self.slurm.options:
+        for opt in self.scheduler.options:
             if opt not in deduped_options:
                 deduped_options.append(opt)
-        self.slurm.options = deduped_options
-        self.slurm.log_path = self.log_path
-        self.slurm.log_storage = self.log_storage
+        self.scheduler.options = deduped_options
+        self.scheduler.log_path = self.log_path
+        self.scheduler.log_storage = self.log_storage
         cmd = self.scheduler_cmd
         cmd += f" -- {self.script_path}"
         for arg in self.args:
@@ -914,7 +908,7 @@ class JupyterNotebookStage(Stage):
             ).decode("utf-8")
             cmd += f' --params-base64 "{params_base64}"'
         cmd += f' "{self.notebook_path}"'
-        if self.slurm is not None or self.pbs is not None:
+        if self.scheduler is not None:
             cmd = self.scheduler_cmd + " --command -- " + cmd
         return cmd
 
@@ -1052,9 +1046,11 @@ class Pipeline(BaseModel):
             # equivalent to ``shell-script`` + ``slurm`` options.
             "sbatch",
         }
+        # Maps env kind -> CLI alias used for ``calkit <alias> batch``.
+        # Options are always stored in ``stage.slurm`` regardless of kind.
         scheduler_kinds = {
-            "slurm": (StageSchedulerOptions, "slurm"),
-            "pbs": (StageSchedulerOptions, "pbs"),
+            "slurm": "slurm",
+            "pbs": "sched",
         }
         for stage in self.stages.values():
             env_name = stage.outer_environment
@@ -1068,7 +1064,7 @@ class Pipeline(BaseModel):
             kind = env.get("kind")
             if kind not in scheduler_kinds:
                 continue
-            options_cls, attr = scheduler_kinds[kind]
+            cli_alias = scheduler_kinds[kind]
             scheduler_label = kind.upper()
             if stage.kind not in plain_ok_kinds:
                 if stage.inner_environment == stage.outer_environment:
@@ -1094,26 +1090,13 @@ class Pipeline(BaseModel):
                         f"'{stage.inner_environment}'; the inner "
                         "environment must not be a job scheduler"
                     )
-            # If the stage uses the generic ``scheduler:`` key, resolve it
-            # into the kind-specific attr now that we know the env kind.
-            if stage.scheduler is not None:
-                setattr(stage, attr, stage.scheduler)
-                stage.scheduler = None
-            # Reject the case where the stage carries the *other*
-            # scheduler's options block. ``scheduler:`` is kind-agnostic and
-            # has already been resolved above, so only check kind-specific keys.
-            for other_kind, (_, other_attr) in scheduler_kinds.items():
-                if other_kind == kind:
-                    continue
-                if getattr(stage, other_attr) is not None:
-                    raise ValueError(
-                        f"Stage '{stage.name}' has '{other_attr}' options "
-                        f"set but its environment '{stage.outer_environment}' "
-                        f"is of kind '{kind}'; use '{attr}' or 'scheduler' "
-                        "options instead"
-                    )
-            if getattr(stage, attr) is None:
-                setattr(stage, attr, options_cls())
+            # Resolve the deprecated ``slurm:`` alias into ``scheduler``.
+            if stage.scheduler is None and stage.slurm is not None:
+                stage.scheduler = stage.slurm
+                stage.slurm = None
+            if stage.scheduler is None:
+                stage.scheduler = StageSchedulerOptions()
+            stage._scheduler_cli_alias = cli_alias
 
     def set_stage_slurm_options(self, environments: dict[str, dict]) -> None:
         """Backwards-compatible alias for :meth:`set_stage_scheduler_options`.

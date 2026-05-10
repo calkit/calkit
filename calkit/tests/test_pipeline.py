@@ -714,28 +714,6 @@ def test_slurm_env_validation_rules(tmp_dir):
             },
             write=False,
         )
-    # A stage on a slurm env that carries a ``pbs:`` options block (or
-    # vice versa) should fail rather than being silently re-routed.
-    with pytest.raises(
-        ValueError,
-        match="has 'pbs' options set but its environment .* is of kind 'slurm'",
-    ):
-        calkit.pipeline.to_dvc(
-            ck_info={
-                "environments": {"mycluster": {"kind": "slurm"}},
-                "pipeline": {
-                    "stages": {
-                        "run": {
-                            "kind": "shell-script",
-                            "script_path": "scripts/run.sh",
-                            "environment": "mycluster",
-                            "pbs": {"options": ["-l", "walltime=01:00"]},
-                        }
-                    }
-                },
-            },
-            write=False,
-        )
     # Slurm-inside-slurm should fail.
     with pytest.raises(
         ValueError,
@@ -858,7 +836,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
                     },
                     "data/output2.txt",
                 ],
-                "pbs": {"options": ["-l", "walltime=01:00:00"]},
+                "scheduler": {"options": ["-l", "walltime=01:00:00"]},
             },
             "job-cmd": {
                 "kind": "shell-command",
@@ -894,7 +872,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
                 "environment": "pbs-env:julia1",
                 "inputs": ["data/input2.txt"],
                 "outputs": ["data/output3.txt"],
-                "pbs": {
+                "scheduler": {
                     "setup": ["module load gcc/12"],
                     "env_default_options": "ignore",
                     "env_default_setup": "ignore",
@@ -1176,7 +1154,7 @@ def test_generic_scheduler_key(tmp_dir):
     assert "-s -l -s walltime=01:00:00" in pbs_stages["run"]["cmd"]
     assert "calkit sched batch" in pbs_stages["run"]["cmd"]
     # Setting both scheduler: and slurm: should fail at parse time.
-    with pytest.raises(ValueError, match="multiple scheduler option keys"):
+    with pytest.raises(ValueError, match="both 'slurm' and 'scheduler'"):
         calkit.pipeline.to_dvc(
             ck_info={
                 "environments": {"mycluster": {"kind": "slurm"}},

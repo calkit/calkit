@@ -11,6 +11,8 @@ subprojects:
   - path: path/to/your/subproject
 ```
 
-Tip: Don't break projects into chunks so small that they can't be
-understood or provide value outside of the superproject context.
-That can result in fragmentation, tight coupling, and slow development.
+<!-- prettier-ignore -->
+!!! tip
+    Don't break projects into subprojects so small that they can't be
+    understood or provide value outside of the superproject context.
+    That can result in fragmentation, tight coupling, and slow development.

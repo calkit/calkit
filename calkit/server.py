@@ -178,8 +178,13 @@ def get_ls(owner_name: str, project_name: str) -> list[dict]:
 
 @app.post("/projects/{owner_name}/{project_name}/git/{command}")
 def run_git_command(
-    owner_name: str, project_name: str, command: str, params: dict = {}
+    owner_name: str,
+    project_name: str,
+    command: str,
+    params: dict | None = None,
 ):
+    if params is None:
+        params = {}
     project = get_local_project(owner_name, project_name)
     func = getattr(calkit.git.get_repo(project.wdir).git, command)
     return func(**params)
@@ -196,11 +201,9 @@ def git_push(owner_name: str, project_name: str, req: GitPushPost) -> Message:
     project = get_local_project(owner_name, project_name)
     logger.info(f"Found project at {project.wdir}")
     git_repo = calkit.git.get_repo(project.wdir)
-    branch_name = req.branch_name | git_repo.active_branch.name
+    branch_name = req.branch_name or git_repo.active_branch.name
     logger.info(f"Git pushing to {req.remote_name} {branch_name}")
-    git_repo.git.push(
-        [req.remote_name, req.branch_name | git_repo.active_branch.name]
-    )
+    git_repo.git.push(req.remote_name, branch_name)
     return Message(message="Success!")
 
 

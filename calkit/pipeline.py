@@ -150,6 +150,7 @@ class StaleStage(BaseModel):
         cls,
         status_data: list | dict | str,
         configured_outputs: list[str] | None = None,
+        path_prefix: str | None = None,
     ) -> "StaleStage":
         modified_inputs = []
         output_paths = []
@@ -190,6 +191,23 @@ class StaleStage(BaseModel):
         modified_inputs = list(dict.fromkeys(modified_inputs))
         output_paths = list(dict.fromkeys(output_paths))
         modified_outputs = list(dict.fromkeys(modified_outputs))
+        # Prefix all DVC-reported paths with the subproject directory when
+        # viewing status from the parent repo, so all paths are consistently
+        # parent-relative.  Use normpath to collapse any "../" segments that
+        # arise from cross-subproject deps (e.g. sp + "../shared.txt").
+        if path_prefix:
+            modified_inputs = [
+                os.path.normpath(os.path.join(path_prefix, p))
+                for p in modified_inputs
+            ]
+            output_paths = [
+                os.path.normpath(os.path.join(path_prefix, p))
+                for p in output_paths
+            ]
+            modified_outputs = [
+                os.path.normpath(os.path.join(path_prefix, p))
+                for p in modified_outputs
+            ]
         configured_outputs = [str(path) for path in (configured_outputs or [])]
         stale_outputs = []
         if modified_inputs or modified_command:
@@ -386,12 +404,14 @@ def get_status(
         # replace it with the individual stale stages from the subproject's own
         # DVC so the user sees {sp}:stage_name detail.
         sp_by_stage_name: dict[str, str] = {}
+        isolated_sp_paths: set[str] = set()
         for sp_cfg in ck_info.get("subprojects", []):
             if not isinstance(sp_cfg, dict) or not sp_cfg.get("path"):
                 continue
             sp = Path(sp_cfg["path"]).as_posix()
             if os.path.isdir(os.path.join(sp, ".dvc")):
                 sp_by_stage_name[f"_subproject-{Path(sp).name}"] = sp
+                isolated_sp_paths.add(sp)
         # Root-level stage keys have the form "stage_name" (no dvc.yaml: prefix).
         stale_wrapper_keys = [
             k
@@ -525,9 +545,14 @@ def get_status(
                 ]
             else:
                 configured_outputs = raw_outputs
+            # For isolated subprojects, DVC reports paths relative to the
+            # subproject dir; prefix them so all paths are parent-relative.
             ordered_stale_stages[display_name] = StaleStage.from_status_data(
                 status_data=status_data,
                 configured_outputs=configured_outputs,
+                path_prefix=subproject
+                if subproject in isolated_sp_paths
+                else None,
             )
         result["stale_stages"] = ordered_stale_stages
         return PipelineStatus(
@@ -628,7 +653,16 @@ def to_dvc(
             verbose=verbose,
             manage_gitignore=manage_gitignore,
         )
-        if not sp_dvc_stages or not sp_is_isolated:
+        if not sp_is_isolated:
+            continue
+        if not sp_dvc_stages:
+            import warnings
+
+            warnings.warn(
+                f"Subproject '{sp}' has no pipeline stages defined; "
+                "no wrapper stage will be created.",
+                stacklevel=2,
+            )
             continue
         # Collect all outputs and all deps from the subproject's compiled stages.
         # For matrix stages the template strings (${item.foo}) must be expanded
@@ -704,7 +738,7 @@ def to_dvc(
             if os.path.isfile(dvc_yaml_fpath):
                 with open(dvc_yaml_fpath) as f:
                     existing = calkit.ryaml.load(f) or {}
-            existing["stages"] = wrapper_stages
+            existing.setdefault("stages", {}).update(wrapper_stages)
             with open(dvc_yaml_fpath, "w") as f:
                 calkit.ryaml.dump(existing, f)
         return wrapper_stages

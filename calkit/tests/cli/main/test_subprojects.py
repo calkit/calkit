@@ -7,14 +7,12 @@ import calkit
 import calkit.pipeline
 
 
-def _ck(path, data):
-    """Write a calkit.yaml at ``path``."""
+def write_ck_info(path, data):
     with open(path, "w") as f:
         calkit.ryaml.dump(data, f)
 
 
-def _stage(cmd, inputs=None, outputs=None):
-    """Build a minimal ``_system`` shell-command stage definition."""
+def make_stage(cmd, inputs=None, outputs=None):
     s = {"kind": "command", "environment": "_system", "command": cmd}
     if inputs:
         s["inputs"] = inputs
@@ -29,28 +27,19 @@ def _stage(cmd, inputs=None, outputs=None):
 
 
 def test_inline_subproject(tmp_dir):
-    """Inline subproject (no .dvc/) shares the parent DVC project.
-
-    Covers:
-    - to_dvc writes sub1/dvc.yaml and includes sub1 stages in parent graph
-    - full pipeline run produces expected outputs
-    - cross-subproject dependency: parent stage depends on sub1 output
-    - stale detection when sub1 input changes
-    - target shorthands: ``sub1`` and ``sub1:stage-name``
-    """
     subprocess.check_call(["calkit", "init"])
     # --- sub1 setup ---
     os.makedirs("sub1")
-    _ck(
+    write_ck_info(
         "sub1/calkit.yaml",
         {
             "pipeline": {
                 "stages": {
-                    "produce": _stage(
+                    "produce": make_stage(
                         'echo "from sub1" > a.txt',
                         outputs=[{"path": "a.txt", "storage": "git"}],
                     ),
-                    "derive": _stage(
+                    "derive": make_stage(
                         "cat a.txt > b.txt",
                         inputs=["a.txt"],
                         outputs=[{"path": "b.txt", "storage": "git"}],
@@ -60,13 +49,13 @@ def test_inline_subproject(tmp_dir):
         },
     )
     # --- parent setup ---
-    _ck(
+    write_ck_info(
         "calkit.yaml",
         {
             "subprojects": [{"path": "sub1"}],
             "pipeline": {
                 "stages": {
-                    "consume": _stage(
+                    "consume": make_stage(
                         "cat sub1/a.txt > merged.txt",
                         inputs=["sub1/a.txt"],
                         outputs=[{"path": "merged.txt", "storage": "git"}],
@@ -104,7 +93,7 @@ def test_inline_subproject(tmp_dir):
     ck_sub1["pipeline"]["stages"]["produce"]["command"] = (
         'echo "updated" > a.txt'
     )
-    _ck("sub1/calkit.yaml", ck_sub1)
+    write_ck_info("sub1/calkit.yaml", ck_sub1)
     calkit.pipeline.to_dvc(write=True, manage_gitignore=False)
     status = calkit.pipeline.get_status(
         check_environments=False, compile_to_dvc=False
@@ -124,7 +113,7 @@ def test_inline_subproject(tmp_dir):
     # --- target shorthand: run a specific sub1 stage ---
     # Reset to make produce stale again
     ck_sub1["pipeline"]["stages"]["produce"]["command"] = 'echo "v2" > a.txt'
-    _ck("sub1/calkit.yaml", ck_sub1)
+    write_ck_info("sub1/calkit.yaml", ck_sub1)
     calkit.pipeline.to_dvc(write=True, manage_gitignore=False)
     subprocess.check_call(["calkit", "run", "sub1:produce"])
     with open("sub1/a.txt") as f:
@@ -137,7 +126,6 @@ def test_inline_subproject(tmp_dir):
 
 
 def _init_isolated_subproject(path, stages):
-    """Create a directory with its own git + dvc + calkit project."""
     os.makedirs(path, exist_ok=True)
     subprocess.check_call(["git", "init"], cwd=path)
     subprocess.check_call(
@@ -145,7 +133,7 @@ def _init_isolated_subproject(path, stages):
     )
     subprocess.check_call(["git", "config", "user.name", "Test"], cwd=path)
     subprocess.check_call(["dvc", "init"], cwd=path)
-    _ck(
+    write_ck_info(
         os.path.join(path, "calkit.yaml"),
         {"pipeline": {"stages": stages}},
     )
@@ -153,26 +141,16 @@ def _init_isolated_subproject(path, stages):
 
 
 def test_isolated_subproject(tmp_dir):
-    """Isolated subproject (has .dvc/) gets a wrapper stage in parent dvc.yaml.
-
-    Covers:
-    - to_dvc generates ``_subproject-<name>`` wrapper stage
-    - wrapper deps/outs capture the I/O boundary
-    - full run executes wrapper which calls ``calkit dvc repro`` inside sub2
-    - status display uses ``sub2 (subproject)`` label when wrapper is stale
-    - target ``sub2`` maps to the wrapper stage
-    - target ``sub2:stage`` runs dvc repro <stage> inside sub2
-    """
     subprocess.check_call(["calkit", "init"])
     # --- isolated sub2 ---
     _init_isolated_subproject(
         "sub2",
         {
-            "make-file": _stage(
+            "make-file": make_stage(
                 'echo "hello from sub2" > out.txt',
                 outputs=[{"path": "out.txt", "storage": "git"}],
             ),
-            "derive": _stage(
+            "derive": make_stage(
                 "cat out.txt > derived.txt",
                 inputs=["out.txt"],
                 outputs=[{"path": "derived.txt", "storage": "git"}],
@@ -180,13 +158,13 @@ def test_isolated_subproject(tmp_dir):
         },
     )
     # --- parent setup ---
-    _ck(
+    write_ck_info(
         "calkit.yaml",
         {
             "subprojects": [{"path": "sub2"}],
             "pipeline": {
                 "stages": {
-                    "consume": _stage(
+                    "consume": make_stage(
                         "cat sub2/out.txt > parent.txt",
                         inputs=["sub2/out.txt"],
                         outputs=[{"path": "parent.txt", "storage": "git"}],
@@ -216,8 +194,7 @@ def test_isolated_subproject(tmp_dir):
     )
     assert status.is_stale
     stale_names = set(status.stale_stage_names)
-    # Wrapper stage displayed as ``sub2 (subproject)`` or
-    # expanded sub2 stage names
+    # Wrapper stage displayed as ``sub2 (subproject)`` or expanded sub2 stage names
     assert any("sub2" in n for n in stale_names)
     # --- full run via parent ---
     subprocess.check_call(["calkit", "run"])
@@ -231,9 +208,23 @@ def test_isolated_subproject(tmp_dir):
         check_environments=False, compile_to_dvc=False
     )
     assert not status.is_stale
-    # --- target shorthand: ck run sub2 → wrapper stage ---
-    # Remove sub2's output to make the wrapper stale, then re-run via shorthand.
+    # --- stale paths must be parent-relative ---
+    # Removing sub2/out.txt makes sub2 stale again.
     os.remove("sub2/out.txt")
+    status = calkit.pipeline.get_status(
+        check_environments=False, compile_to_dvc=False
+    )
+    assert status.is_stale
+    for stage_name, stage_info in status.stale_stages.items():
+        if "sub2" not in stage_name:
+            continue
+        for path in stage_info.stale_outputs + stage_info.modified_inputs:
+            # All paths must be parent-relative (start with "sub2/")
+            assert path.startswith("sub2/") or path.startswith(
+                "sub2"
+            ), f"Path '{path}' in stage '{stage_name}' is not parent-relative"
+    # --- target shorthand: ck run sub2 → wrapper stage ---
+    # out.txt was removed above; re-run via shorthand.
     subprocess.check_call(["calkit", "run", "sub2"])
     assert os.path.isfile("sub2/out.txt")
     with open("sub2/out.txt") as f:
@@ -256,36 +247,29 @@ def test_isolated_subproject(tmp_dir):
 
 
 def test_isolated_subproject_external_dep(tmp_dir):
-    """Isolated subproject that reads a file produced by the parent pipeline.
-
-    Mirrors the MDOcean/OpenFLASH relationship: the parent (MDOcean) produces
-    a mesh/config file that OpenFLASH consumes as an external dep.  The
-    wrapper stage must list that file in ``deps`` only (not ``outs``), and
-    the full pipeline must run in the correct order.
-    """
     subprocess.check_call(["calkit", "init"])
     # The parent produces shared.txt which the isolated subproject reads.
     _init_isolated_subproject(
         "solver",
         {
-            "solve": _stage(
+            "solve": make_stage(
                 "cat ../shared.txt > solution.txt",
                 inputs=["../shared.txt"],
                 outputs=[{"path": "solution.txt", "storage": "git"}],
             ),
         },
     )
-    _ck(
+    write_ck_info(
         "calkit.yaml",
         {
             "subprojects": [{"path": "solver"}],
             "pipeline": {
                 "stages": {
-                    "make-shared": _stage(
+                    "make-shared": make_stage(
                         'echo "mesh data" > shared.txt',
                         outputs=[{"path": "shared.txt", "storage": "git"}],
                     ),
-                    "post-process": _stage(
+                    "post-process": make_stage(
                         "cat solver/solution.txt > final.txt",
                         inputs=["solver/solution.txt"],
                         outputs=[{"path": "final.txt", "storage": "git"}],

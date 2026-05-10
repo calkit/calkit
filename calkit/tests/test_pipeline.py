@@ -876,6 +876,33 @@ def test_stale_stage_detects_changed_command():
     assert stale_stage.modified_outputs == []
 
 
+def test_stale_stage_path_prefix():
+    # Isolated subproject paths are subproject-relative from DVC's perspective;
+    # path_prefix makes them parent-relative for consistent status display.
+    status_data = [
+        {
+            "changed deps": {"report/main.tex": "modified"},
+            "changed outs": {"report/main.pdf": "not in cache"},
+        }
+    ]
+    stale = calkit.pipeline.StaleStage.from_status_data(
+        status_data=status_data,
+        configured_outputs=["sub2/report/main.pdf"],
+        path_prefix="sub2",
+    )
+    # All paths must be parent-relative
+    assert stale.modified_inputs == ["sub2/report/main.tex"]
+    assert all(p.startswith("sub2/") for p in stale.stale_outputs)
+    # Cross-subproject dep via "../" should be normalized to parent-relative
+    status_data_cross = [{"changed deps": {"../shared.txt": "modified"}}]
+    stale_cross = calkit.pipeline.StaleStage.from_status_data(
+        status_data=status_data_cross,
+        configured_outputs=[],
+        path_prefix="solver",
+    )
+    assert stale_cross.modified_inputs == ["shared.txt"]
+
+
 def test_wrapper_stage_no_dep_out_overlap(tmp_dir):
     """Wrapper stage deps and outs must never overlap.
 

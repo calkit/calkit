@@ -298,6 +298,7 @@ Common stage parameters:
 | `description`  | str \| None                         | no       | null    |
 | `slurm`        | StageSchedulerOptions \| None       | no       | null    |
 | `pbs`          | StageSchedulerOptions \| None       | no       | null    |
+| `scheduler`    | StageSchedulerOptions \| None       | no       | null    |
 
 ### `command`
 

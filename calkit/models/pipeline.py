@@ -191,15 +191,21 @@ class Stage(BaseModel):
     description: str | None = None
     slurm: StageSchedulerOptions | None = None
     pbs: StageSchedulerOptions | None = None
+    scheduler: StageSchedulerOptions | None = None
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")
     def check_scheduler_options_exclusive(self) -> Stage:
-        if self.slurm is not None and self.pbs is not None:
+        set_keys = [
+            k
+            for k in ("slurm", "pbs", "scheduler")
+            if getattr(self, k) is not None
+        ]
+        if len(set_keys) > 1:
             raise ValueError(
-                f"Stage '{self.name}' has both 'slurm' and 'pbs' options "
-                "set; only one scheduler may be used per stage"
+                f"Stage '{self.name}' has multiple scheduler option keys set "
+                f"({', '.join(set_keys)}); only one may be used per stage"
             )
         return self
 
@@ -1088,10 +1094,14 @@ class Pipeline(BaseModel):
                         f"'{stage.inner_environment}'; the inner "
                         "environment must not be a job scheduler"
                     )
+            # If the stage uses the generic ``scheduler:`` key, resolve it
+            # into the kind-specific attr now that we know the env kind.
+            if stage.scheduler is not None:
+                setattr(stage, attr, stage.scheduler)
+                stage.scheduler = None
             # Reject the case where the stage carries the *other*
-            # scheduler's options block. Otherwise we'd silently wrap with
-            # the wrong scheduler, since ``check_scheduler_options_exclusive``
-            # ran during model validation before this initialization step.
+            # scheduler's options block. ``scheduler:`` is kind-agnostic and
+            # has already been resolved above, so only check kind-specific keys.
             for other_kind, (_, other_attr) in scheduler_kinds.items():
                 if other_kind == kind:
                     continue
@@ -1099,7 +1109,8 @@ class Pipeline(BaseModel):
                     raise ValueError(
                         f"Stage '{stage.name}' has '{other_attr}' options "
                         f"set but its environment '{stage.outer_environment}' "
-                        f"is of kind '{kind}'; use '{attr}' options instead"
+                        f"is of kind '{kind}'; use '{attr}' or 'scheduler' "
+                        "options instead"
                     )
             if getattr(stage, attr) is None:
                 setattr(stage, attr, options_cls())

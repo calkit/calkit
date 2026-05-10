@@ -1130,6 +1130,72 @@ def test_pbs_env_validation_rules(tmp_dir):
     )
 
 
+def test_generic_scheduler_key(tmp_dir):
+    """The generic ``scheduler:`` key resolves to the env's scheduler kind.
+
+    Scenarios:
+    - ``scheduler:`` on a SLURM env compiles identically to ``slurm:``,
+    - ``scheduler:`` on a PBS env compiles identically to ``pbs:``,
+    - setting both ``scheduler:`` and ``slurm:`` (or ``pbs:``) is rejected
+      at model validation time.
+    """
+    slurm_stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": {"mycluster": {"kind": "slurm"}},
+            "pipeline": {
+                "stages": {
+                    "run": {
+                        "kind": "shell-script",
+                        "script_path": "scripts/run.sh",
+                        "environment": "mycluster",
+                        "scheduler": {"options": ["--time=01:00:00"]},
+                    }
+                }
+            },
+        },
+        write=False,
+    )
+    assert "-s --time=01:00:00" in slurm_stages["run"]["cmd"]
+    assert "calkit slurm batch" in slurm_stages["run"]["cmd"]
+    pbs_stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": {"mycluster": {"kind": "pbs"}},
+            "pipeline": {
+                "stages": {
+                    "run": {
+                        "kind": "shell-script",
+                        "script_path": "scripts/run.sh",
+                        "environment": "mycluster",
+                        "scheduler": {"options": ["-l", "walltime=01:00:00"]},
+                    }
+                }
+            },
+        },
+        write=False,
+    )
+    assert "-s -l -s walltime=01:00:00" in pbs_stages["run"]["cmd"]
+    assert "calkit sched batch" in pbs_stages["run"]["cmd"]
+    # Setting both scheduler: and slurm: should fail at parse time.
+    with pytest.raises(ValueError, match="multiple scheduler option keys"):
+        calkit.pipeline.to_dvc(
+            ck_info={
+                "environments": {"mycluster": {"kind": "slurm"}},
+                "pipeline": {
+                    "stages": {
+                        "run": {
+                            "kind": "shell-script",
+                            "script_path": "scripts/run.sh",
+                            "environment": "mycluster",
+                            "slurm": {"options": ["--time=01:00:00"]},
+                            "scheduler": {"options": ["--time=02:00:00"]},
+                        }
+                    }
+                },
+            },
+            write=False,
+        )
+
+
 def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
     """When a stage output path is renamed, stale .gitignore entries are
     replaced.

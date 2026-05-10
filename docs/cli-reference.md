@@ -117,10 +117,11 @@ Arguments:
 
 Options:
 
-| Option             | Type    | Required | Default | Description                                                                                       |
-| ------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------- |
-| `--category`, `-c` | text    | no       |         | Status categories to show. By default, all categories are shown. Can be specified multiple times. |
-| `--json`           | boolean | no       | False   | Output status as JSON.                                                                            |
+| Option             | Type    | Required | Default | Description                                                                                                                  |
+| ------------------ | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `--category`, `-c` | text    | no       |         | Status categories to show. By default, all categories are shown. Can be specified multiple times.                            |
+| `--no-env-check`   | boolean | no       | False   | Skip environment checks. Note that this may produce an inaccurate pipeline status if materialized environments have changed. |
+| `--json`           | boolean | no       | False   | Output status as JSON.                                                                                                       |
 
 <a id="top-command-diff"></a>
 
@@ -373,6 +374,7 @@ Options:
 | `--input`, `--dep`      | text    | no       |         | Run stages that depend on given input dependency path.                    |
 | `--output`, `--out`     | text    | no       |         | Run stages that produce the given output path.                            |
 | `--overleaf`, `-O`      | boolean | no       | False   | Sync with Overleaf before and after running.                              |
+| `--no-push`             | boolean | no       | False   | Do not push to Git and DVC after saving.                                  |
 
 <a id="top-command-manual-step"></a>
 

@@ -7,6 +7,20 @@ from os import PathLike
 from pathlib import Path
 
 import git
+from git.exc import InvalidGitRepositoryError
+
+__all__ = ["InvalidGitRepositoryError", "get_repo"]
+
+
+def get_repo(path: str | None = None) -> git.Repo:
+    """Return a git.Repo for ``path`` (or cwd), searching parent dirs.
+
+    Prefer this over bare ``git.Repo()`` so that commands run from inside
+    a subproject folder (plain subdirectory of a parent git repo) correctly
+    discover the enclosing repo instead of raising InvalidGitRepositoryError
+    or, worse, initializing a new nested repo.
+    """
+    return git.Repo(path, search_parent_directories=True)
 
 
 def get_staged_files(
@@ -16,7 +30,7 @@ def get_staged_files(
     repo.
     """
     if repo is None:
-        repo = git.Repo(path)
+        repo = get_repo(path)
     cmd = ["--staged", "--name-only"]
     if path is not None:
         cmd.append(path)
@@ -30,7 +44,7 @@ def get_changed_files(
 ) -> list[str]:
     """Get a list of files that have been changed but not staged."""
     if repo is None:
-        repo = git.Repo(path)
+        repo = get_repo(path)
     return [
         item.a_path
         for item in repo.index.diff(None)
@@ -43,7 +57,7 @@ def get_untracked_files(
 ) -> list[str]:
     """Get a list of untracked files."""
     if repo is None:
-        repo = git.Repo(path)
+        repo = get_repo(path)
     return repo.untracked_files
 
 
@@ -51,7 +65,7 @@ def get_staged_files_with_status(
     path: str | None = None, repo: git.Repo | None = None
 ) -> list[dict]:
     if repo is None:
-        repo = git.Repo(path)
+        repo = get_repo(path)
     cmd = ["--staged", "--name-status"]
     if path is not None:
         cmd.append(path)

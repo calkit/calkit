@@ -1313,3 +1313,196 @@ def test_stale_stage_detects_changed_command():
     assert stale_stage.stale_outputs == ["my-output.out"]
     assert stale_stage.modified_inputs == []
     assert stale_stage.modified_outputs == []
+
+
+def test_stale_stage_path_prefix():
+    # Isolated subproject paths are subproject-relative from DVC's perspective;
+    # path_prefix makes them parent-relative for consistent status display.
+    status_data = [
+        {
+            "changed deps": {"report/main.tex": "modified"},
+            "changed outs": {"report/main.pdf": "not in cache"},
+        }
+    ]
+    stale = calkit.pipeline.StaleStage.from_status_data(
+        status_data=status_data,
+        configured_outputs=["sub2/report/main.pdf"],
+        path_prefix="sub2",
+    )
+    # All paths must be parent-relative
+    assert stale.modified_inputs == ["sub2/report/main.tex"]
+    assert all(p.startswith("sub2/") for p in stale.stale_outputs)
+    # Cross-subproject dep via "../" should be normalized to parent-relative
+    status_data_cross = [{"changed deps": {"../shared.txt": "modified"}}]
+    stale_cross = calkit.pipeline.StaleStage.from_status_data(
+        status_data=status_data_cross,
+        configured_outputs=[],
+        path_prefix="solver",
+    )
+    assert stale_cross.modified_inputs == ["shared.txt"]
+
+
+def test_wrapper_stage_no_dep_out_overlap(tmp_dir):
+    """Wrapper stage deps and outs must never overlap.
+
+    Covers:
+    - Path normalization: ``./out.txt`` and ``out.txt`` are the same file;
+      without normalization the set-subtraction misses this and both could
+      appear in wrapper deps and outs simultaneously.
+    - Defensive deduplication: even if normalization is bypassed, the
+      explicit dedup pass keeps such paths only as deps.
+    """
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["git", "config", "user.email", "t@t.com"])
+    subprocess.check_call(["git", "config", "user.name", "T"])
+    os.makedirs("isolated")
+    subprocess.check_call(["git", "init"], cwd="isolated")
+    subprocess.check_call(
+        ["git", "config", "user.email", "t@t.com"], cwd="isolated"
+    )
+    subprocess.check_call(["git", "config", "user.name", "T"], cwd="isolated")
+    subprocess.check_call(["dvc", "init"], cwd="isolated")
+    # Two stages: stage-a reads an external dep (with leading ./) and produces
+    # internal.txt; stage-b reads internal.txt (no ./) and produces result.txt.
+    # The leading "./" on the external dep is the normalization hazard.
+    with open("isolated/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "stage-a": {
+                            "kind": "command",
+                            "environment": "_system",
+                            "command": "cat ../external.txt > internal.txt",
+                            "inputs": ["../external.txt"],
+                            "outputs": [
+                                {"path": "internal.txt", "storage": "git"}
+                            ],
+                        },
+                        "stage-b": {
+                            "kind": "command",
+                            "environment": "_system",
+                            "command": "cat internal.txt > result.txt",
+                            "inputs": ["internal.txt"],
+                            "outputs": [
+                                {"path": "result.txt", "storage": "git"}
+                            ],
+                        },
+                    }
+                }
+            },
+            f,
+        )
+    # Compile subproject pipeline first so it has a dvc.yaml
+    calkit.pipeline.to_dvc(wdir="isolated", write=True, manage_gitignore=False)
+    # Inject a "./"-prefixed dep into the compiled dvc.yaml to simulate the
+    # path-aliasing scenario that caused the MDOcean/OpenFLASH error.
+    with open("isolated/dvc.yaml") as f:
+        isolated_dvc = calkit.ryaml.load(f)
+    if "stage-b" in isolated_dvc.get("stages", {}):
+        stage_b = isolated_dvc["stages"]["stage-b"]
+        # Replace the plain dep with the ./-prefixed variant
+        stage_b["deps"] = [
+            "./" + d if d == "internal.txt" else d
+            for d in stage_b.get("deps", [])
+        ]
+    with open("isolated/dvc.yaml", "w") as f:
+        calkit.ryaml.dump(isolated_dvc, f)
+    # Build parent pipeline referencing the isolated subproject
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {"subprojects": [{"path": "isolated"}]},
+            f,
+        )
+    with open("external.txt", "w") as f:
+        f.write("data")
+    dvc_stages = calkit.pipeline.to_dvc(write=False, manage_gitignore=False)
+    wrapper = dvc_stages.get("isolated", {})
+    assert wrapper, "wrapper stage not generated"
+    wrapper_dep_set = set(wrapper.get("deps", []))
+    wrapper_out_paths = {
+        list(o.keys())[0] if isinstance(o, dict) else o
+        for o in wrapper.get("outs", [])
+    }
+    overlap = wrapper_dep_set & wrapper_out_paths
+    assert not overlap, f"wrapper has dep/out overlap: {overlap}"
+
+
+def test_translate_run_targets(tmp_dir):
+    # Set up a parent project with one inline subproject and one isolated.
+    subprocess.check_call(["git", "init"])
+    os.makedirs("inline-sp/calkit", exist_ok=True)
+    os.makedirs("isolated-sp/.dvc", exist_ok=True)
+    with open("inline-sp/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "stage-a": {
+                            "kind": "shell-command",
+                            "command": "echo a",
+                            "environment": "env",
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    with open("isolated-sp/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "stage-b": {
+                            "kind": "shell-command",
+                            "command": "echo b",
+                            "environment": "env",
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    ck_info = {
+        "subprojects": [
+            {"path": "inline-sp"},
+            {"path": "isolated-sp"},
+        ]
+    }
+    # Inline subproject: name → dvc.yaml path
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["inline-sp"], ck_info=ck_info
+    )
+    assert parent == ["inline-sp/dvc.yaml"]
+    assert isolated == []
+    # Inline subproject: name:stage → dvc.yaml:stage
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["inline-sp:stage-a"], ck_info=ck_info
+    )
+    assert parent == ["inline-sp/dvc.yaml:stage-a"]
+    assert isolated == []
+    # Isolated subproject: name → wrapper stage
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["isolated-sp"], ck_info=ck_info
+    )
+    assert parent == ["isolated-sp"]
+    assert isolated == []
+    # Isolated subproject: name:stage → isolated_sp_targets
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["isolated-sp:stage-b"], ck_info=ck_info
+    )
+    assert parent == []
+    assert isolated == [("isolated-sp", "stage-b")]
+    # Unrecognized targets pass through unchanged
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["my-parent-stage"], ck_info=ck_info
+    )
+    assert parent == ["my-parent-stage"]
+    assert isolated == []
+    # Mixed: inline stage + isolated stage + plain parent stage
+    parent, isolated = calkit.pipeline.translate_run_targets(
+        ["inline-sp:stage-a", "isolated-sp:stage-b", "my-parent-stage"],
+        ck_info=ck_info,
+    )
+    assert parent == ["inline-sp/dvc.yaml:stage-a", "my-parent-stage"]
+    assert isolated == [("isolated-sp", "stage-b")]

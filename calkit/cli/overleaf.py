@@ -196,7 +196,7 @@ def import_publication(
     ck_info = calkit.load_calkit_info(process_includes="environments")
     pubs = ck_info.get("publications", [])
     # TODO: Don't allow the same Overleaf project ID in multiple publications
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     # Clone the Overleaf project into .calkit/overleaf if it doesn't exist
     # otherwise pull
     overleaf_dir = os.path.join(".calkit", "overleaf")
@@ -439,7 +439,7 @@ def sync(
                 raise_error(f"Path '{path}' is not synced with Overleaf")
     # First check our config for an Overleaf token
     overleaf_token = _get_overleaf_token()
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     conflict_fpath = calkit.overleaf.get_conflict_fpath()
     in_am_session = "in the middle of an am session" in repo.git.status()
     # Check if we're in the middle of resolving a merge conflict
@@ -505,7 +505,7 @@ def sync(
                 overleaf_remote_url, to_path=overleaf_project_dir
             )
         else:
-            overleaf_repo = git.Repo(overleaf_project_dir)
+            overleaf_repo = calkit.git.get_repo(overleaf_project_dir)
         # Pull the latest version in the Overleaf project
         typer.echo("Pulling the latest version from Overleaf")
         # Ensure that our current Overleaf remote URL is correct
@@ -638,7 +638,7 @@ def get_status(
                 overleaf_remote_url, to_path=overleaf_project_dir
             )
         else:
-            overleaf_repo = git.Repo(overleaf_project_dir)
+            overleaf_repo = calkit.git.get_repo(overleaf_project_dir)
         # Pull the latest version in the Overleaf project
         typer.echo("Pulling the latest version from Overleaf")
         # Ensure that our current Overleaf remote URL is correct
@@ -665,7 +665,7 @@ def get_status(
             )
         # Determine which paths to use for computing diff
         path_info = calkit.overleaf.OverleafSyncPaths(
-            main_repo=git.Repo(),
+            main_repo=calkit.git.get_repo(),
             overleaf_repo=overleaf_repo,
             path_in_project=path_in_project,
             sync_info_for_path=sync_data,

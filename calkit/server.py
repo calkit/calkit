@@ -14,7 +14,6 @@ import dvc.config
 import dvc.repo
 import dvc.repo.data
 import dvc.repo.status
-import git
 from dvc.exceptions import NotDvcRepoError
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -162,7 +161,7 @@ def get_cwd() -> str:
 @app.get("/projects/{owner_name}/{project_name}/ls")
 def get_ls(owner_name: str, project_name: str) -> list[dict]:
     project = get_local_project(owner_name, project_name)
-    repo = git.Repo(project.wdir)
+    repo = calkit.git.get_repo(project.wdir)
     contents = os.listdir(project.wdir)
     resp = []
     for item in contents:
@@ -178,10 +177,15 @@ def get_ls(owner_name: str, project_name: str) -> list[dict]:
 
 @app.post("/projects/{owner_name}/{project_name}/git/{command}")
 def run_git_command(
-    owner_name: str, project_name: str, command: str, params: dict = {}
+    owner_name: str,
+    project_name: str,
+    command: str,
+    params: dict | None = None,
 ):
+    if params is None:
+        params = {}
     project = get_local_project(owner_name, project_name)
-    func = getattr(git.Repo(project.wdir).git, command)
+    func = getattr(calkit.git.get_repo(project.wdir).git, command)
     return func(**params)
 
 
@@ -195,12 +199,10 @@ def git_push(owner_name: str, project_name: str, req: GitPushPost) -> Message:
     logger.info(f"Looking for project {owner_name}/{project_name}")
     project = get_local_project(owner_name, project_name)
     logger.info(f"Found project at {project.wdir}")
-    git_repo = git.Repo(project.wdir)
-    branch_name = req.branch_name | git_repo.active_branch.name
+    git_repo = calkit.git.get_repo(project.wdir)
+    branch_name = req.branch_name or git_repo.active_branch.name
     logger.info(f"Git pushing to {req.remote_name} {branch_name}")
-    git_repo.git.push(
-        [req.remote_name, req.branch_name | git_repo.active_branch.name]
-    )
+    git_repo.git.push(req.remote_name, branch_name)
     return Message(message="Success!")
 
 
@@ -209,7 +211,7 @@ def git_pull(owner_name: str, project_name: str) -> Message:
     logger.info(f"Looking for project {owner_name}/{project_name}")
     project = get_local_project(owner_name, project_name)
     logger.info(f"Found project at {project.wdir}")
-    git_repo = git.Repo(project.wdir)
+    git_repo = calkit.git.get_repo(project.wdir)
     git_repo.git.pull("--ff-only")
     return Message(message="Success!")
 
@@ -262,7 +264,7 @@ def get_status(
         owner_name, project_name, get_jupyter_server=False
     )
     logger.info(f"Found project at {project.wdir}")
-    git_repo = git.Repo(project.wdir)
+    git_repo = calkit.git.get_repo(project.wdir)
     if fetch_git:
         git_repo.git.fetch()
     untracked_git_files = git_repo.untracked_files
@@ -353,7 +355,7 @@ def put_git_ignored(
     owner_name: str, project_name: str, req: GitIgnorePut
 ) -> Message:
     project = get_local_project(owner_name, project_name)
-    git_repo = git.Repo(project.wdir)
+    git_repo = calkit.git.get_repo(project.wdir)
     path = req.path
     if git_repo.ignored(path):
         logger.info(f"{path} is already ignored")
@@ -420,7 +422,7 @@ def calkit_add_and_commit(
     owner_name: str, project_name: str, req: AddPost
 ) -> Message:
     project = get_local_project(owner_name, project_name)
-    git_repo = git.Repo(project.wdir)
+    git_repo = calkit.git.get_repo(project.wdir)
     # Unstage any staged files since we're going to add and commit here
     git_repo.git.reset()
     cmd = ["calkit", "add"] + req.paths
@@ -443,7 +445,7 @@ def calkit_add_and_commit(
 @app.post("/projects/{owner_name}/{project_name}/actions/discard-changes")
 def discard_changes(owner_name: str, project_name: str) -> Message:
     project = get_local_project(owner_name, project_name)
-    git_repo = git.Repo(project.wdir)
+    git_repo = calkit.git.get_repo(project.wdir)
     # Stash any git changes
     git_repo.git.stash()
     # Checkout any DVC changes
@@ -577,7 +579,7 @@ def post_pipeline_stage(
     pipeline["stages"] = stages
     with open(dvc_fpath, "w") as f:
         calkit.ryaml.dump(pipeline, f)
-    repo = git.Repo(path=project.wdir)
+    repo = calkit.git.get_repo(project.wdir)
     repo.git.add("dvc.yaml")
     # Add Calkit object if applicable
     if req.calkit_type is not None:

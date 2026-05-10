@@ -9,7 +9,7 @@ import pytest
 import calkit
 import calkit.pipeline
 from calkit.environments import get_env_lock_fpath
-from calkit.pipeline import stages_are_similar
+from calkit.pipeline import collapse_dvc_stages, stages_are_similar
 
 
 def test_stages_are_similar():
@@ -1386,6 +1386,126 @@ def test_stale_stage_path_prefix():
     assert stale_cross.modified_inputs == ["shared.txt"]
 
 
+def test_collapse_dvc_stages():
+    def out_paths(stage):
+        return {
+            list(o.keys())[0] if isinstance(o, dict) else o
+            for o in stage.get("outs", [])
+        }
+
+    # Basic case: internal deps are not surfaced; external ones are.
+    stages = {
+        "stage-a": {
+            "cmd": "echo hi",
+            "deps": ["../external.txt"],
+            "outs": ["internal.txt"],
+        },
+        "stage-b": {
+            "cmd": "echo hi",
+            "deps": ["internal.txt"],
+            "outs": [{"result.txt": {"cache": False}}],
+        },
+    }
+    collapsed = collapse_dvc_stages(
+        stages, cmd="calkit dvc repro", wdir="sub1", desc="wrapper"
+    )
+    assert collapsed["cmd"] == "calkit dvc repro"
+    assert collapsed["wdir"] == "sub1"
+    assert collapsed["desc"] == "wrapper"
+    assert collapsed["deps"] == ["../external.txt"]
+    assert out_paths(collapsed) == {"internal.txt", "result.txt"}
+    # All outs are wrapped with cache:false persist:true.
+    for o in collapsed["outs"]:
+        assert isinstance(o, dict)
+        assert list(o.values())[0] == {"cache": False, "persist": True}
+    # Without optional args the keys are absent.
+    minimal = collapse_dvc_stages(stages)
+    assert "cmd" not in minimal
+    assert "wdir" not in minimal
+    assert "desc" not in minimal
+    # Clean case: no always_changed when there is no folder-ancestor drop.
+    assert "always_changed" not in collapsed
+    assert "always_changed" not in minimal
+    # Folder dep that contains output files: dep must be dropped and
+    # always_changed set.  Mirrors the real-world scenario where a stage reads
+    # ``pubs/JFM/figs`` (a pre-existing directory) while another stage writes
+    # individual files into that same directory.
+    stages2 = {
+        "stage-a": {
+            "cmd": "echo hi",
+            "deps": ["../in.txt", "pubs/JFM/figs"],
+            "outs": ["listing.txt"],
+        },
+        "stage-b": {
+            "cmd": "echo hi",
+            "deps": ["listing.txt"],
+            "outs": ["pubs/JFM/figs/plot.pdf", "pubs/JFM/figs/other.pdf"],
+        },
+    }
+    collapsed2 = collapse_dvc_stages(stages2)
+    assert "pubs/JFM/figs" not in collapsed2["deps"]
+    assert "../in.txt" in collapsed2["deps"]
+    assert "pubs/JFM/figs/plot.pdf" in out_paths(collapsed2)
+    assert "pubs/JFM/figs/other.pdf" in out_paths(collapsed2)
+    assert collapsed2.get("always_changed") is True
+    # Descendant case: dep is inside an output folder — this is a normal
+    # internal drop and must NOT set always_changed.
+    stages2b = {
+        "stage-a": {
+            "cmd": "echo hi",
+            "deps": ["../in.txt"],
+            "outs": ["data/"],
+        },
+        "stage-b": {
+            "cmd": "echo hi",
+            "deps": ["data/file.csv"],
+            "outs": ["result.txt"],
+        },
+    }
+    collapsed2b = collapse_dvc_stages(stages2b)
+    assert "always_changed" not in collapsed2b
+    # Exact-match aliasing: "./file.txt" and "file.txt" must not both appear.
+    stages3 = {
+        "stage-a": {
+            "cmd": "echo hi",
+            "deps": ["../in.txt"],
+            "outs": ["file.txt"],
+        },
+        "stage-b": {
+            "cmd": "echo hi",
+            "deps": ["./file.txt"],
+            "outs": ["out.txt"],
+        },
+    }
+    collapsed3 = collapse_dvc_stages(stages3)
+    all_paths3 = set(collapsed3["deps"]) | out_paths(collapsed3)
+    # "file.txt" and "./file.txt" normalize to the same path; no duplicates.
+    assert len([p for p in all_paths3 if p in ("file.txt", "./file.txt")]) <= 1
+    # env-lock paths in deps are kept so the wrapper goes stale when a
+    # subproject lock file changes.
+    stages4 = {
+        "stage-a": {
+            "cmd": "echo hi",
+            "deps": [".calkit/env-locks/main", "../external.txt"],
+            "outs": ["output.txt"],
+        },
+    }
+    collapsed4 = collapse_dvc_stages(stages4)
+    assert ".calkit/env-locks/main" in collapsed4["deps"]
+    # Matrix stage: template variables are expanded before deduplication.
+    stages5 = {
+        "stage-m": {
+            "cmd": "echo ${item.n}",
+            "matrix": {"n": [1, 2]},
+            "deps": ["../shared.txt"],
+            "outs": ["out_${item.n}.txt"],
+        },
+    }
+    collapsed5 = collapse_dvc_stages(stages5)
+    assert collapsed5["deps"] == ["../shared.txt"]
+    assert out_paths(collapsed5) == {"out_1.txt", "out_2.txt"}
+
+
 def test_wrapper_stage_no_dep_out_overlap(tmp_dir):
     """Wrapper stage deps and outs must never overlap.
 
@@ -1470,6 +1590,57 @@ def test_wrapper_stage_no_dep_out_overlap(tmp_dir):
     }
     overlap = wrapper_dep_set & wrapper_out_paths
     assert not overlap, f"wrapper has dep/out overlap: {overlap}"
+    # Tree-overlap case: a folder dep whose contents include output files.
+    # stage-c reads an external folder ``figs`` and stage-d writes a file
+    # inside it.  The wrapper must not list ``figs`` as a dep while also
+    # listing ``figs/plot.pdf`` as an out.
+    with open("isolated/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "stage-c": {
+                            "kind": "command",
+                            "environment": "_system",
+                            "command": "ls ../figs > listing.txt",
+                            "inputs": ["../figs"],
+                            "outputs": [
+                                {"path": "listing.txt", "storage": "git"}
+                            ],
+                        },
+                        "stage-d": {
+                            "kind": "command",
+                            "environment": "_system",
+                            "command": "cp listing.txt figs/plot.pdf",
+                            "inputs": ["listing.txt"],
+                            "outputs": [
+                                {"path": "figs/plot.pdf", "storage": "git"}
+                            ],
+                        },
+                    }
+                }
+            },
+            f,
+        )
+    os.makedirs("figs", exist_ok=True)
+    calkit.pipeline.to_dvc(wdir="isolated", write=True, manage_gitignore=False)
+    dvc_stages2 = calkit.pipeline.to_dvc(write=False, manage_gitignore=False)
+    wrapper2 = dvc_stages2.get("isolated", {})
+    assert wrapper2, "wrapper stage not generated"
+    wrapper2_deps = wrapper2.get("deps", [])
+    wrapper2_out_paths = {
+        list(o.keys())[0] if isinstance(o, dict) else o
+        for o in wrapper2.get("outs", [])
+    }
+    # ``../figs`` in the subproject is the external dep; after normalization
+    # it becomes a parent-relative path.  No dep should tree-overlap any out.
+    from calkit.pipeline import _paths_overlap
+
+    for dep in wrapper2_deps:
+        for out in wrapper2_out_paths:
+            assert not _paths_overlap(
+                dep, out
+            ), f"wrapper dep '{dep}' tree-overlaps out '{out}'"
 
 
 def test_translate_run_targets(tmp_dir):

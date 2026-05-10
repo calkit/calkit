@@ -1,8 +1,46 @@
+from __future__ import annotations
+
 from importlib.metadata import version as _version
+from typing import TYPE_CHECKING
 
 __version__ = _version("calkit-python")
 
 from .core import *  # noqa: F403, I001
+
+if TYPE_CHECKING:
+    from calkit import (  # noqa: F401
+        calc,
+        check,
+        cloud,
+        conda,
+        config,
+        datasets,
+        detect,
+        docker,
+        dvc,
+        environments,
+        fs,
+        git,
+        github,
+        gui,
+        invenio,
+        julia,
+        jupyter,
+        licenses,
+        magics,
+        matlab,
+        models,
+        notebooks,
+        office,
+        ops,
+        overleaf,
+        pipeline,
+        releases,
+        server,
+        templates,
+    )
+
+    from .notebooks import declare_notebook  # noqa: F401
 
 # Lazy-load submodules to speed up imports
 _SUBMODULES = {

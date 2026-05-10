@@ -46,14 +46,19 @@ ZIP_COMPRESS_LEVEL = 1
 ZIP_USE_SYSTEM_CLI = False
 
 
-def _check_local_dir() -> Path:
-    if not os.path.isdir(LOCAL_DIR):
-        os.makedirs(LOCAL_DIR, exist_ok=True)
-    gitignore_path = os.path.join(LOCAL_DIR, ".gitignore")
+def _local_dir(wdir: str | None = None) -> str:
+    return os.path.join(wdir, LOCAL_DIR) if wdir else LOCAL_DIR
+
+
+def _check_local_dir(wdir: str | None = None) -> Path:
+    local_dir = _local_dir(wdir)
+    if not os.path.isdir(local_dir):
+        os.makedirs(local_dir, exist_ok=True)
+    gitignore_path = os.path.join(local_dir, ".gitignore")
     if not os.path.isfile(gitignore_path):
         with open(gitignore_path, "w") as f:
             f.write("*\n")
-    return Path(LOCAL_DIR)
+    return Path(local_dir)
 
 
 def is_zip_candidate(path: str) -> bool:
@@ -111,10 +116,15 @@ def make_zip_path(workspace_path: str) -> str:
     return os.path.join(ZIPS_DIR, "files", workspace_path + ".zip")
 
 
-def get_zip_path_map() -> dict[str, str]:
+def _path_map_path(wdir: str | None = None) -> str:
+    return os.path.join(wdir, PATH_MAP_PATH) if wdir else PATH_MAP_PATH
+
+
+def get_zip_path_map(wdir: str | None = None) -> dict[str, str]:
     """Get a mapping of input paths to zip paths."""
-    if os.path.isfile(PATH_MAP_PATH):
-        with open(PATH_MAP_PATH, "r") as f:
+    path = _path_map_path(wdir)
+    if os.path.isfile(path):
+        with open(path, "r") as f:
             return json.load(f)
     return {}
 
@@ -207,19 +217,22 @@ def calc_dir_sig(path: str) -> str:
     return f"{file_count}-{total_size}-{latest_mtime}"
 
 
-def get_hash(path: str, alg="md5") -> str | None:
+def get_hash(path: str, alg="md5", wdir: str | None = None) -> str | None:
     """Get the hash of a path, using/updating the cache if applicable."""
     try:
         st = os.stat(path)
     except OSError:
         return None
-    _check_local_dir()
+    _check_local_dir(wdir)
     # Normalize path as posix
     path = Path(path).as_posix()
     mtime = st.st_mtime_ns
     size = st.st_size
     dir_sig = calc_dir_sig(path)
-    with SqliteDict(HASH_CACHE_PATH) as cache:
+    hash_cache_path = (
+        os.path.join(wdir, HASH_CACHE_PATH) if wdir else HASH_CACHE_PATH
+    )
+    with SqliteDict(hash_cache_path) as cache:
         record = None
         raw = cache.get(path)
         if raw is not None:
@@ -250,38 +263,44 @@ def get_hash(path: str, alg="md5") -> str | None:
     return hash_val
 
 
-def get_sync_record(workspace_path: str) -> SyncRecord | None:
+def _sync_records_path(wdir: str | None = None) -> str:
+    return os.path.join(wdir, SYNC_RECORDS_PATH) if wdir else SYNC_RECORDS_PATH
+
+
+def get_sync_record(
+    workspace_path: str, wdir: str | None = None
+) -> SyncRecord | None:
     """Get a sync record for a given workspace path."""
-    _check_local_dir()
-    with SqliteDict(SYNC_RECORDS_PATH) as db:
+    _check_local_dir(wdir)
+    with SqliteDict(_sync_records_path(wdir)) as db:
         raw = db.get(workspace_path)
     if raw is not None:
         return SyncRecord.model_validate(raw)
     return None
 
 
-def write_sync_record(record: SyncRecord):
+def write_sync_record(record: SyncRecord, wdir: str | None = None):
     """Write a sync record."""
-    _check_local_dir()
-    with SqliteDict(SYNC_RECORDS_PATH) as db:
+    _check_local_dir(wdir)
+    with SqliteDict(_sync_records_path(wdir)) as db:
         db[record.workspace_path] = record.model_dump()
         db.commit()
 
 
-def delete_sync_record(workspace_path: str):
+def delete_sync_record(workspace_path: str, wdir: str | None = None):
     """Delete a sync record."""
-    _check_local_dir()
-    with SqliteDict(SYNC_RECORDS_PATH) as db:
+    _check_local_dir(wdir)
+    with SqliteDict(_sync_records_path(wdir)) as db:
         if workspace_path in db:
             del db[workspace_path]
             db.commit()
 
 
-def cleanup_sync_records():
+def cleanup_sync_records(wdir: str | None = None):
     """Remove sync records for paths no longer in the path map."""
-    _check_local_dir()
-    pm = get_zip_path_map()
-    with SqliteDict(SYNC_RECORDS_PATH) as db:
+    _check_local_dir(wdir)
+    pm = get_zip_path_map(wdir)
+    with SqliteDict(_sync_records_path(wdir)) as db:
         stale = [k for k in db if k not in pm]
         if stale:
             for k in stale:
@@ -289,8 +308,8 @@ def cleanup_sync_records():
             db.commit()
 
 
-def get_zip_path(workspace_path: str) -> str:
-    pm = get_zip_path_map()
+def get_zip_path(workspace_path: str, wdir: str | None = None) -> str:
+    pm = get_zip_path_map(wdir)
     workspace_path = Path(workspace_path).as_posix()
     if workspace_path in pm:
         return pm[workspace_path]
@@ -408,14 +427,15 @@ class SyncStatus(BaseModel):
 
 
 def get_sync_status(
-    workspace_path: str, zip_path: str | None = None
+    workspace_path: str,
+    zip_path: str | None = None,
+    wdir: str | None = None,
 ) -> SyncStatus:
-    # First get cached information and see if we need to rehash
-    workspace_hash = get_hash(workspace_path)
+    workspace_hash = get_hash(workspace_path, wdir=wdir)
     if zip_path is None:
-        zip_path = get_zip_path(workspace_path)
-    zip_hash = get_hash(zip_path)
-    last_sync_record = get_sync_record(workspace_path)
+        zip_path = get_zip_path(workspace_path, wdir=wdir)
+    zip_hash = get_hash(zip_path, wdir=wdir)
+    last_sync_record = get_sync_record(workspace_path, wdir=wdir)
     if last_sync_record is not None:
         workspace_changed = workspace_hash != last_sync_record.workspace_hash
         zip_changed = zip_hash != last_sync_record.zip_hash
@@ -439,9 +459,23 @@ def sync_one(
     workspace_path: str,
     zip_path: str | None = None,
     direction: Literal["to-zip", "to-workspace", "both"] = "both",
+    wdir: str | None = None,
 ) -> SyncRecord | None:
     """Process a single zip."""
-    status = get_sync_status(workspace_path, zip_path)
+    if wdir:
+        workspace_path = os.path.join(wdir, workspace_path)
+        if zip_path is not None:
+            zip_path = os.path.join(wdir, zip_path)
+    return _sync_one(workspace_path, zip_path, direction, wdir=wdir)
+
+
+def _sync_one(
+    workspace_path: str,
+    zip_path: str | None = None,
+    direction: Literal["to-zip", "to-workspace", "both"] = "both",
+    wdir: str | None = None,
+) -> SyncRecord | None:
+    status = get_sync_status(workspace_path, zip_path, wdir=wdir)
     workspace_changed = status.workspace_changed
     zip_changed = status.zip_changed
     workspace_hash = status.workspace_hash
@@ -454,7 +488,7 @@ def sync_one(
     # Both deleted — clear the stale sync record so a future recreated side
     # is treated as a fresh first sync rather than a spurious conflict
     if workspace_deleted and zip_deleted:
-        delete_sync_record(workspace_path)
+        delete_sync_record(workspace_path, wdir=wdir)
         return None
     # Neither side exists and no sync record — nothing to do (e.g., a
     # pipeline output that hasn't been produced yet on a fresh run)
@@ -478,28 +512,28 @@ def sync_one(
         if os.path.exists(zip_path):
             typer.echo(f"Deleting '{zip_path}' (workspace was deleted)")
             os.remove(zip_path)
-        delete_sync_record(workspace_path)
+        delete_sync_record(workspace_path, wdir=wdir)
         return None
     # Propagate zip deletion to workspace
     if zip_deleted and direction in ["to-workspace", "both"]:
         if os.path.exists(workspace_path):
             typer.echo(f"Deleting '{workspace_path}' (zip was deleted)")
             shutil.rmtree(workspace_path)
-        delete_sync_record(workspace_path)
+        delete_sync_record(workspace_path, wdir=wdir)
         return None
     # Zip was deleted but workspace exists and direction is to-zip:
     # restore zip
     if zip_deleted and direction == "to-zip":
         typer.echo(f"Rezipping '{workspace_path}' (zip was deleted)")
         zip_(workspace_path=workspace_path, zip_path=zip_path)
-        run_dvc_command(["add", zip_path])
-        zip_hash = get_hash(zip_path)
+        run_dvc_command(["add", zip_path], cwd=wdir)
+        zip_hash = get_hash(zip_path, wdir=wdir)
     # Workspace was deleted but zip exists and direction is to-workspace:
     # restore workspace
     if workspace_deleted and direction == "to-workspace":
         typer.echo(f"Unzipping to '{workspace_path}' (workspace was deleted)")
         unzip(workspace_path=workspace_path, zip_path=zip_path)
-        workspace_hash = get_hash(workspace_path)
+        workspace_hash = get_hash(workspace_path, wdir=wdir)
     # If hashes have changed since last check, we need to synchronize the
     # path with its zip file (unzip if zip is newer, rezip if path is newer)
     # If both have changed, we have a conflict and the user needs to decide
@@ -514,13 +548,13 @@ def sync_one(
     if workspace_changed and (direction in ["to-zip", "both"]):
         typer.echo(f"Zipping '{workspace_path}' (workspace has changed)")
         zip_(workspace_path=workspace_path, zip_path=zip_path)
-        run_dvc_command(["add", zip_path])
-        zip_hash = get_hash(zip_path)
+        run_dvc_command(["add", zip_path], cwd=wdir)
+        zip_hash = get_hash(zip_path, wdir=wdir)
     # If we unzip, we need to update the hash
     if zip_changed and (direction in ["to-workspace", "both"]):
         typer.echo(f"Unzipping to '{workspace_path}' (zip has changed)")
         unzip(workspace_path=workspace_path, zip_path=zip_path)
-        workspace_hash = get_hash(workspace_path)
+        workspace_hash = get_hash(workspace_path, wdir=wdir)
     assert workspace_hash is not None and zip_hash is not None
     record = SyncRecord(
         workspace_path=workspace_path,
@@ -529,7 +563,7 @@ def sync_one(
         workspace_hash=workspace_hash,
         zip_hash=zip_hash,
     )
-    write_sync_record(record)
+    write_sync_record(record, wdir=wdir)
     return record
 
 
@@ -547,11 +581,15 @@ def sync_some(
         )
 
 
-def sync_all(direction: Literal["to-zip", "to-workspace", "both"] = "both"):
+def sync_all(
+    direction: Literal["to-zip", "to-workspace", "both"] = "both",
+    wdir: str | None = None,
+):
     """Process all project zips."""
-    for workspace_path, zip_path in get_zip_path_map().items():
+    for workspace_path, zip_path in get_zip_path_map(wdir=wdir).items():
         sync_one(
             workspace_path=workspace_path,
             zip_path=zip_path,
             direction=direction,
+            wdir=wdir,
         )

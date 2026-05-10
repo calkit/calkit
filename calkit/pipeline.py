@@ -311,6 +311,89 @@ def _expand_matrix(input_dict: dict[str, list]) -> list[dict]:
     return final_list
 
 
+def _paths_overlap(a: str, b: str) -> bool:
+    """Return True if path `a` and path `b` overlap in the file tree.
+
+    Two paths overlap if they are equal or one is an ancestor directory of the
+    other, e.g. ``data/`` overlaps with ``data/file.csv``.
+    """
+    a = a.rstrip("/")
+    b = b.rstrip("/")
+    if a == b:
+        return True
+    return b.startswith(a + "/") or a.startswith(b + "/")
+
+
+def collapse_dvc_stages(
+    stages: dict,
+    cmd: str | None = None,
+    wdir: str | None = None,
+    desc: str | None = None,
+) -> dict:
+    """Collapse a dict of DVC stages into a single wrapper stage.
+
+    Collects all deps and outs from ``stages``, expands matrix templates, and
+    returns a complete DVC stage dict.  ``cmd``, ``wdir``, and ``desc`` are
+    optional; when provided they are included in the returned dict.
+
+    Rules applied:
+    - Paths starting with ``.calkit/env-locks/`` are excluded (internal lock
+      files that must not cross the project boundary).
+    - A dep that tree-overlaps any out is dropped (e.g. a folder dep that
+      contains output files would cause a DVC conflict).
+    - An out that tree-overlaps any remaining dep is also dropped (covers
+      exact-match aliasing and folder/child relationships).
+    - Outputs are wrapped with ``{cache: false, persist: true}`` so the parent
+      doesn't double-cache files already managed by the subproject's DVC.
+    """
+    all_outs: set[str] = set()
+    all_deps: set[str] = set()
+    for stage_cfg in stages.values():
+        matrix = stage_cfg.get("matrix")
+        replacements = _expand_matrix(matrix) if matrix else [{}]
+        for out in stage_cfg.get("outs", []):
+            raw = out if isinstance(out, str) else list(out.keys())[0]
+            for r in replacements:
+                expanded = raw
+                for var, val in r.items():
+                    expanded = expanded.replace(f"${{item.{var}}}", str(val))
+                all_outs.add(Path(expanded).as_posix())
+        for dep in stage_cfg.get("deps", []):
+            if not isinstance(dep, str):
+                continue
+            for r in replacements:
+                expanded = dep
+                for var, val in r.items():
+                    expanded = expanded.replace(f"${{item.{var}}}", str(val))
+                all_deps.add(Path(expanded).as_posix())
+    external_deps = all_deps - all_outs
+    outs_raw = sorted(
+        o for o in all_outs if not o.startswith(".calkit/env-locks/")
+    )
+    deps = sorted(
+        d
+        for d in external_deps
+        if not d.startswith(".calkit/env-locks/")
+        and not any(_paths_overlap(d, o) for o in outs_raw)
+    )
+    dep_set = set(deps)
+    outs = [
+        {o: {"cache": False, "persist": True}}
+        for o in outs_raw
+        if not any(_paths_overlap(o, d) for d in dep_set)
+    ]
+    stage: dict = {}
+    if cmd is not None:
+        stage["cmd"] = cmd
+    if wdir is not None:
+        stage["wdir"] = wdir
+    stage["deps"] = deps
+    stage["outs"] = outs
+    if desc is not None:
+        stage["desc"] = desc
+    return stage
+
+
 def get_status(
     ck_info: dict | None = None,
     targets: list[str] | None = None,
@@ -661,67 +744,16 @@ def to_dvc(
                 stacklevel=2,
             )
             continue
-        # Collect all outputs and all deps from the subproject's compiled stages.
-        # For matrix stages the template strings (${item.foo}) must be expanded
-        # so the wrapper stage has concrete paths.
-        all_sp_outs: set[str] = set()
-        all_sp_deps: set[str] = set()
-        for stage_cfg in sp_dvc_stages.values():
-            matrix = stage_cfg.get("matrix")
-            replacements = _expand_matrix(matrix) if matrix else [{}]
-            for out in stage_cfg.get("outs", []):
-                raw = out if isinstance(out, str) else list(out.keys())[0]
-                for r in replacements:
-                    expanded = raw
-                    for var, val in r.items():
-                        expanded = expanded.replace(
-                            f"${{item.{var}}}", str(val)
-                        )
-                    # Normalize to strip leading "./" so "data.txt" and
-                    # "./data.txt" are treated as the same path.
-                    all_sp_outs.add(Path(expanded).as_posix())
-            for dep in stage_cfg.get("deps", []):
-                if not isinstance(dep, str):
-                    continue
-                for r in replacements:
-                    expanded = dep
-                    for var, val in r.items():
-                        expanded = expanded.replace(
-                            f"${{item.{var}}}", str(val)
-                        )
-                    all_sp_deps.add(Path(expanded).as_posix())
-        # External deps are inputs the subproject reads from outside itself.
-        external_deps = all_sp_deps - all_sp_outs
-        # The wrapper stage has `wdir: sp`, so DVC resolves deps/outs relative
-        # to that directory — do NOT prefix with the subproject path.
-        wrapper_deps = sorted(
-            d for d in external_deps if not d.startswith(".calkit/env-locks/")
-        )
-        # Wrap outputs with cache: false + persist: true so the parent doesn't
-        # double-cache files already managed by the subproject's DVC, and the
-        # nested dvc repro run is responsible for file persistence.
-        wrapper_outs_raw = sorted(
-            o for o in all_sp_outs if not o.startswith(".calkit/env-locks/")
-        )
-        # Defensive deduplication: if any output path also appears as a dep
-        # (which can happen due to path aliasing), keep it as a dep only.
-        wrapper_dep_set = set(wrapper_deps)
-        wrapper_outs = [
-            {o: {"cache": False, "persist": True}}
-            for o in wrapper_outs_raw
-            if o not in wrapper_dep_set
-        ]
         sp_stage_name = Path(sp).name
-        wrapper_stages[sp_stage_name] = {
-            "cmd": "calkit dvc repro",
-            "wdir": sp,
-            "deps": wrapper_deps,
-            "outs": wrapper_outs,
-            "desc": (
+        wrapper_stages[sp_stage_name] = collapse_dvc_stages(
+            sp_dvc_stages,
+            cmd="calkit dvc repro",
+            wdir=sp,
+            desc=(
                 f"Automatically generated wrapper for subproject '{sp}'. "
                 "Changes made here will be overwritten."
             ),
-        }
+        )
     if "pipeline" not in ck_info:
         if write and wrapper_stages:
             dvc_yaml_fpath = (

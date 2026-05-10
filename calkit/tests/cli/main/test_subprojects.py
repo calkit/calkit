@@ -21,11 +21,6 @@ def make_stage(cmd, inputs=None, outputs=None):
     return s
 
 
-# ---------------------------------------------------------------------------
-# Inline subproject
-# ---------------------------------------------------------------------------
-
-
 def test_inline_subproject(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     # --- sub1 setup ---
@@ -120,12 +115,7 @@ def test_inline_subproject(tmp_dir):
         assert "v2" in f.read()
 
 
-# ---------------------------------------------------------------------------
-# Isolated subproject
-# ---------------------------------------------------------------------------
-
-
-def _init_isolated_subproject(path, stages):
+def init_isolated_subproject(path, stages):
     os.makedirs(path, exist_ok=True)
     subprocess.check_call(["git", "init"], cwd=path)
     subprocess.check_call(
@@ -143,7 +133,7 @@ def _init_isolated_subproject(path, stages):
 def test_isolated_subproject(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     # --- isolated sub2 ---
-    _init_isolated_subproject(
+    init_isolated_subproject(
         "sub2",
         {
             "make-file": make_stage(
@@ -194,7 +184,8 @@ def test_isolated_subproject(tmp_dir):
     )
     assert status.is_stale
     stale_names = set(status.stale_stage_names)
-    # Wrapper stage displayed as ``sub2 (subproject)`` or expanded sub2 stage names
+    # Wrapper stage displayed as ``sub2 (subproject)`` or expanded sub2 stage
+    # names
     assert any("sub2" in n for n in stale_names)
     # --- full run via parent ---
     subprocess.check_call(["calkit", "run"])
@@ -247,15 +238,10 @@ def test_isolated_subproject(tmp_dir):
     assert "sub2" not in (updated_dvc or {}).get("stages", {})
 
 
-# ---------------------------------------------------------------------------
-# Cross-subproject external dependency (MDOcean / OpenFLASH pattern)
-# ---------------------------------------------------------------------------
-
-
 def test_isolated_subproject_external_dep(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     # The parent produces shared.txt which the isolated subproject reads.
-    _init_isolated_subproject(
+    init_isolated_subproject(
         "solver",
         {
             "solve": make_stage(

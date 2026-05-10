@@ -63,10 +63,21 @@ def _is_active(kind: str, job_id: str) -> bool:
         if p.returncode != 0:
             return False
         return len(p.stdout.strip().split("\n")) > 1
+    # Use `qstat -f` and parse job_state: on Torque/OpenPBS, plain `qstat
+    # <id>` returns exit 0 even for completed (C) jobs, so checking the
+    # return code alone would cause `calkit sched batch` to hang forever
+    # after a PBS job finishes.  States C and F mean the job is done.
     p = subprocess.run(
-        ["qstat", job_id], capture_output=True, text=True, check=False
+        ["qstat", "-f", job_id], capture_output=True, text=True, check=False
     )
-    return p.returncode == 0
+    if p.returncode != 0:
+        return False
+    for line in p.stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("job_state"):
+            state = stripped.split("=", 1)[-1].strip()
+            return state not in ("C", "F")
+    return False
 
 
 def _cancel(kind: str, job_id: str) -> tuple[bool, str]:
@@ -287,8 +298,6 @@ def run_batch(
             log_path=log_path,
             is_command=is_command,
         )
-        if not is_command and target not in deps:
-            deps = [target] + deps
     else:
         submit_cmd, submit_input = _build_pbs_submit(
             name=name,
@@ -299,8 +308,8 @@ def run_batch(
             log_path=log_path,
             is_command=is_command,
         )
-        if not is_command and target not in deps:
-            deps = [target] + deps
+    if not is_command and target not in deps:
+        deps = [target] + deps
     # Set up storage
     os.makedirs(_kind_dir(kind), exist_ok=True)
     logs_dir = os.path.dirname(log_path)
@@ -487,16 +496,22 @@ def _build_pbs_submit(
         job_script = " && ".join([*setup_cmds, target_invocation])
     else:
         job_script = target_invocation
-    cmd = [
-        "qsub",
-        "-N",
-        name,
-        "-j",
-        "oe",
-        "-o",
-        log_path,
-        "-V",
-    ] + list(options)
+    # `-` tells qsub to read the job script from stdin; without it most PBS
+    # variants ignore the `input=` payload and wait for an interactive terminal.
+    cmd = (
+        [
+            "qsub",
+            "-N",
+            name,
+            "-j",
+            "oe",
+            "-o",
+            log_path,
+            "-V",
+        ]
+        + list(options)
+        + ["-"]
+    )
     return cmd, job_script
 
 

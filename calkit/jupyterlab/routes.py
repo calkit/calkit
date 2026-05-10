@@ -19,7 +19,6 @@ from pydantic import BaseModel
 import calkit
 import calkit.cli.main
 import calkit.environments
-import calkit.git
 import calkit.pipeline
 from calkit.cli.new import (
     new_conda_env,

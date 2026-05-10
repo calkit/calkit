@@ -6,7 +6,6 @@ from typing import Callable
 from pydantic import BaseModel, computed_field
 
 import calkit
-import calkit.git
 
 INSTRUCTIONS_NOTE = (
     "Note that these could be as simple as telling the user to "

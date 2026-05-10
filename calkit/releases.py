@@ -15,7 +15,6 @@ from typing import Literal
 
 import calkit
 import calkit.dvc.zip
-import calkit.git
 
 SERVICES = {
     "caltechdata": {"name": "CaltechDATA", "url": "https://data.caltech.edu"},

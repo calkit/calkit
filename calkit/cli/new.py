@@ -13,7 +13,6 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
-import calkit.git
 from calkit.cli import AliasGroup, raise_error, warn
 from calkit.core import ryaml
 

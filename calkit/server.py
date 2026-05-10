@@ -20,7 +20,6 @@ from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 
 import calkit
-import calkit.git
 import calkit.jupyter
 from calkit.dvc import get_dvc_repo, run_dvc_command
 

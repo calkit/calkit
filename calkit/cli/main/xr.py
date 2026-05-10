@@ -10,7 +10,6 @@ from typing import Annotated, Any
 import typer
 
 import calkit
-import calkit.git
 from calkit.cli import raise_error
 from calkit.cli.main.core import app, run
 from calkit.core import DVC_EXTENSIONS, DVC_SIZE_THRESH_BYTES

@@ -14,7 +14,6 @@ import dotenv
 import typer
 
 import calkit
-import calkit.git
 from calkit.cli import raise_error, warn
 from calkit.core import get_md5
 

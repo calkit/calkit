@@ -12,7 +12,6 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
-import calkit.git
 from calkit.cli import raise_error
 
 update_app = typer.Typer(no_args_is_help=True)

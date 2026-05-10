@@ -8,7 +8,6 @@ import typer
 from pydantic import BaseModel, Field, computed_field, field_validator
 
 import calkit
-import calkit.git
 from calkit.models.iteration import expand_project_parameters
 from calkit.models.pipeline import (
     InputsFromStageOutputs,

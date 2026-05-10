@@ -7,7 +7,6 @@ from typing import Annotated, Literal
 import typer
 
 import calkit
-import calkit.git
 from calkit.cli import AliasGroup, warn
 
 list_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)

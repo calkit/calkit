@@ -10,7 +10,6 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
-import calkit.git
 from calkit.cli.core import raise_error
 
 config_app = typer.Typer(no_args_is_help=True)

@@ -36,8 +36,6 @@ if TYPE_CHECKING:
 
 import ruamel.yaml
 
-import calkit.git
-
 logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
 
@@ -112,15 +110,13 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
             start, "*", "GitHub", *["*"] * (i + 1), "calkit.yaml"
         )
         res += glob.glob(pattern)
-    import git
-
     final_res = []
     for ck_fpath in res:
         path = os.path.dirname(ck_fpath)
         # Make sure this path is a Git repo
         try:
             calkit.git.get_repo(path)
-        except git.exc.InvalidGitRepositoryError:
+        except calkit.git.InvalidGitRepositoryError:
             continue
         final_res.append(path)
     return final_res

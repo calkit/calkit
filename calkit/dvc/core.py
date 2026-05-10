@@ -17,7 +17,6 @@ from fsspec import Callback
 from fsspec.callbacks import DEFAULT_CALLBACK
 
 import calkit
-import calkit.git
 from calkit.cli import warn
 from calkit.config import get_app_name
 

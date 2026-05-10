@@ -12,7 +12,6 @@ from typing import Annotated
 import typer
 
 import calkit
-import calkit.git
 from calkit.cli import raise_error
 
 import_app = typer.Typer(no_args_is_help=True)

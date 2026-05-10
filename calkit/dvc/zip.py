@@ -23,7 +23,6 @@ from sqlitedict import SqliteDict
 from tqdm import tqdm
 
 import calkit
-import calkit.git
 from calkit.core import DVC_SIZE_THRESH_BYTES
 from calkit.dvc.core import run_dvc_command
 

@@ -23,7 +23,6 @@ import typer
 from typing_extensions import Annotated, Optional
 
 import calkit
-import calkit.git
 from calkit import (
     AUTO_IGNORE_PATHS,
     AUTO_IGNORE_PREFIXES,

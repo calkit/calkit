@@ -711,7 +711,7 @@ def to_dvc(
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
     if "pipeline" not in ck_info and "subprojects" not in ck_info:
-        raise ValueError("No pipeline or subprojects found in calkit.yaml")
+        return {}
     # Compile subproject pipelines recursively.
     # For isolated subprojects (those with their own .dvc/ directory), DVC
     # won't cross the .dvc/ boundary during --all-pipelines discovery, so we

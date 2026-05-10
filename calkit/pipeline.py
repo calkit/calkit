@@ -399,10 +399,10 @@ def get_status(
                 f"{e.__class__.__name__}: {e}"
             )
             return PipelineStatus.model_validate(result)
-        # All subprojects appear in the parent status as wrapper stages
-        # (e.g., "dvc.yaml:_subproject-sub1").  When a wrapper stage is stale,
-        # replace it with the individual stale stages from the subproject's own
-        # DVC so the user sees {sp}:stage_name detail.
+        # Isolated subprojects appear in the parent status as wrapper stages
+        # named after the subproject directory (e.g., "dvc.yaml:sub1"). When
+        # a wrapper stage is stale, replace it with the individual stale stages
+        # from the subproject's own DVC so the user sees {sp}:stage_name detail.
         sp_by_stage_name: dict[str, str] = {}
         isolated_sp_paths: set[str] = set()
         for sp_cfg in ck_info.get("subprojects", []):
@@ -410,7 +410,7 @@ def get_status(
                 continue
             sp = Path(sp_cfg["path"]).as_posix()
             if os.path.isdir(os.path.join(sp, ".dvc")):
-                sp_by_stage_name[f"_subproject-{Path(sp).name}"] = sp
+                sp_by_stage_name[Path(sp).name] = sp
                 isolated_sp_paths.add(sp)
         # Root-level stage keys have the form "stage_name" (no dvc.yaml: prefix).
         stale_wrapper_keys = [
@@ -471,9 +471,7 @@ def get_status(
                 display_name = f"{subproject}:{bare_name}"
             elif bare_name in sp_by_stage_name:
                 # Wrapper stage kept in place (sub-project internally up-to-
-                # date but parent dvc.lock needs refreshing); show as the
-                # subproject path so the display is `sub2 (subproject)` not
-                # `_subproject-sub2`.
+                # date but parent dvc.lock needs refreshing).
                 display_name = f"{sp_by_stage_name[bare_name]} (subproject)"
             else:
                 display_name = bare_name
@@ -714,11 +712,7 @@ def to_dvc(
             for o in wrapper_outs_raw
             if o not in wrapper_dep_set
         ]
-        # Prefix with underscore so: (a) it sorts before user stages, (b) the
-        # write path's "don't clobber user stages" check skips it (underscore
-        # names are treated as private/auto-generated), and (c) it avoids
-        # collisions with user-defined stage names.
-        sp_stage_name = f"_subproject-{Path(sp).name}"
+        sp_stage_name = Path(sp).name
         wrapper_stages[sp_stage_name] = {
             "cmd": "calkit dvc repro",
             "wdir": sp,
@@ -746,6 +740,13 @@ def to_dvc(
         pipeline = Pipeline.model_validate(ck_info["pipeline"])
     except Exception as e:
         raise ValueError(f"Pipeline is not defined properly: {e}")
+    conflicts = set(wrapper_stages) & set(pipeline.stages)
+    if conflicts:
+        raise ValueError(
+            f"Subproject wrapper stage name(s) conflict with parent pipeline "
+            f"stage name(s): {sorted(conflicts)}. Rename the subproject "
+            f"directory or the conflicting stage(s)."
+        )
     # Seed parent stages with wrapper stages so the isolated subproject
     # stages appear in dvc.yaml before the parent's own stages.
     dvc_stages: dict = dict(wrapper_stages)
@@ -941,15 +942,12 @@ def to_dvc(
         dvc_yaml = existing_dvc_yaml
         existing_stages = existing_dvc_stages
         for stage_name, stage in existing_stages.items():
-            # Skip private stages (ones whose names start with an underscore)
-            # and stages that are automatically generated
-            if (
-                not stage_name.startswith("_")
-                and stage_name not in dvc_stages
-                and not stage.get("desc", "").startswith(
-                    "Automatically generated"
-                )
-            ):
+            # Preserve any existing stage not already in the new compilation
+            # and not auto-generated (auto-generated stages are re-emitted
+            # from scratch each time and must not be carried over).
+            if stage_name not in dvc_stages and not stage.get(
+                "desc", ""
+            ).startswith("Automatically generated"):
                 dvc_stages[stage_name] = stage
         dvc_yaml["stages"] = dvc_stages
         dvc_yaml_fpath = os.path.join(wdir, "dvc.yaml") if wdir else "dvc.yaml"
@@ -968,7 +966,7 @@ def translate_run_targets(
 
     Supported shorthand forms:
     - ``subproject`` → ``subproject/dvc.yaml`` (inline) or
-      ``_subproject-name`` (isolated, parent wrapper stage)
+      the wrapper stage name (isolated, parent wrapper stage)
     - ``subproject:stage`` → ``subproject/dvc.yaml:stage`` (inline) or
       ``(sp_path, stage)`` in the second return value (isolated; must be run
       directly inside the subproject directory)
@@ -1011,7 +1009,7 @@ def translate_run_targets(
             if stage_part:
                 isolated_sp_targets.append((sp, stage_part))
             else:
-                parent_targets.append(f"_subproject-{Path(sp).name}")
+                parent_targets.append(Path(sp).name)
         else:
             if stage_part:
                 parent_targets.append(f"{sp}/dvc.yaml:{stage_part}")

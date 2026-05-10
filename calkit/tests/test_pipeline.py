@@ -978,7 +978,7 @@ def test_wrapper_stage_no_dep_out_overlap(tmp_dir):
     with open("external.txt", "w") as f:
         f.write("data")
     dvc_stages = calkit.pipeline.to_dvc(write=False, manage_gitignore=False)
-    wrapper = dvc_stages.get("_subproject-isolated", {})
+    wrapper = dvc_stages.get("isolated", {})
     assert wrapper, "wrapper stage not generated"
     wrapper_dep_set = set(wrapper.get("deps", []))
     wrapper_out_paths = {
@@ -1046,7 +1046,7 @@ def test_translate_run_targets(tmp_dir):
     parent, isolated = calkit.pipeline.translate_run_targets(
         ["isolated-sp"], ck_info=ck_info
     )
-    assert parent == ["_subproject-isolated-sp"]
+    assert parent == ["isolated-sp"]
     assert isolated == []
     # Isolated subproject: name:stage → isolated_sp_targets
     parent, isolated = calkit.pipeline.translate_run_targets(

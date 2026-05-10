@@ -177,8 +177,8 @@ def test_isolated_subproject(tmp_dir):
     calkit.pipeline.to_dvc(write=True, manage_gitignore=False)
     with open("dvc.yaml") as f:
         root_dvc = calkit.ryaml.load(f)
-    assert "_subproject-sub2" in root_dvc["stages"]
-    wrapper = root_dvc["stages"]["_subproject-sub2"]
+    assert "sub2" in root_dvc["stages"]
+    wrapper = root_dvc["stages"]["sub2"]
     assert wrapper["cmd"] == "calkit dvc repro"
     assert wrapper["wdir"] == "sub2"
     # out.txt must appear in wrapper outs (as cache:false, persist:true)
@@ -239,6 +239,12 @@ def test_isolated_subproject(tmp_dir):
     assert os.path.isfile("sub2/out.txt")
     with open("sub2/out.txt") as f:
         assert "hello from sub2" in f.read()
+    # --- wrapper stage removed when subproject is removed from calkit.yaml ---
+    write_ck_info("calkit.yaml", {"pipeline": {"stages": {}}})
+    calkit.pipeline.to_dvc(write=True, manage_gitignore=False)
+    with open("dvc.yaml") as f:
+        updated_dvc = calkit.ryaml.load(f)
+    assert "sub2" not in (updated_dvc or {}).get("stages", {})
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +288,7 @@ def test_isolated_subproject_external_dep(tmp_dir):
     calkit.pipeline.to_dvc(write=True, manage_gitignore=False)
     with open("dvc.yaml") as f:
         root_dvc = calkit.ryaml.load(f)
-    wrapper = root_dvc["stages"]["_subproject-solver"]
+    wrapper = root_dvc["stages"]["solver"]
     wrapper_dep_set = set(wrapper.get("deps", []))
     wrapper_out_paths = {
         list(o.keys())[0] if isinstance(o, dict) else o

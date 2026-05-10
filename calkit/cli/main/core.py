@@ -1062,9 +1062,23 @@ def pull(
     result = calkit.dvc.run_dvc_command(["pull"] + dvc_args)
     if result != 0:
         raise_error("DVC pull failed")
-    # TODO: Handle DVC pulls in subprojects that have their own .dvc folders,
-    # since DVC considers those separate projects
     calkit.dvc.zip.sync_all(direction="to-workspace")
+    if not no_recursive:
+        # Pull DVC in isolated subprojects (those with their own .dvc folder)
+        ck_info = calkit.load_calkit_info()
+        for sp in ck_info.get("subprojects", []):
+            if not isinstance(sp, dict) or not sp.get("path"):
+                continue
+            sp_path = sp["path"]
+            if not os.path.isdir(os.path.join(sp_path, ".dvc")):
+                continue
+            typer.echo(f"DVC pulling subproject: {sp_path}")
+            sp_result = calkit.dvc.run_dvc_command(
+                ["pull"] + dvc_args, cwd=sp_path
+            )
+            if sp_result != 0:
+                raise_error(f"DVC pull failed for subproject: {sp_path}")
+            calkit.dvc.zip.sync_all(direction="to-workspace", wdir=sp_path)
 
 
 @app.command(name="push")

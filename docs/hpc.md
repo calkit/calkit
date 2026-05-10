@@ -1,7 +1,7 @@
 # High performance computing
 
 Calkit projects can help simplify working on high performance computing (HPC)
-clusters.
+clusters and their job schedulers.
 In general, what you'll want to do is clone the project there,
 run your pipeline (perhaps only certain stages), commit the results,
 then push them up to the cloud.
@@ -98,7 +98,7 @@ pipeline:
         - results/raw
       outputs:
         - results/summary.csv
-      slurm: # Or `pbs`
+      scheduler: # Or `slurm` or `pbs`
         env_default_options: replace # Default; can also be `ignore` or `merge`
         options:
           - --account-mylab

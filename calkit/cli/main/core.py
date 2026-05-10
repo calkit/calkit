@@ -1053,9 +1053,17 @@ def pull(
             if calkit.dvc.detect_calkit_remote_type(name, url) == "http":
                 typer.echo(f"Checking authentication for DVC remote: {name}")
                 calkit.dvc.set_remote_auth(remote_name=name)
+    if (
+        not no_recursive
+        and "--recursive" not in dvc_args
+        and "-R" not in dvc_args
+    ):
+        dvc_args.append("--recursive")
     result = calkit.dvc.run_dvc_command(["pull"] + dvc_args)
     if result != 0:
         raise_error("DVC pull failed")
+    # TODO: Handle DVC pulls in subprojects that have their own .dvc folders,
+    # since DVC considers those separate projects
     calkit.dvc.zip.sync_all(direction="to-workspace")
 
 

@@ -157,13 +157,11 @@ def declare_notebook(
     if anything has changed about the pipeline declaration, then prompt the
     user to rerun.
     """
-    import git
-
     import calkit
     from calkit.models.pipeline import JupyterNotebookStage, Pipeline
 
     # Detect the project root directory so we ensure calkit.yaml lives there
-    repo = git.Repo(search_parent_directories=True)
+    repo = calkit.git.get_repo()
     wdir = repo.working_dir
     if not os.path.isfile(os.path.join(wdir, path)):
         raise FileNotFoundError(

@@ -17,6 +17,7 @@ from git.exc import InvalidGitRepositoryError
 
 import calkit
 import calkit.cli.main
+from calkit.cli.core import complete_stage_names
 from calkit.cli.main.core import (
     _stage_run_info_from_log_content,
     _to_shell_cmd,
@@ -1000,3 +1001,76 @@ def test_map_paths(tmp_dir):
         ["calkit", "map-paths", "--file-to-dir", "test.txt->paper/data"]
     )
     assert os.path.isfile("paper/data/test.txt")
+
+
+def test_complete_stage_names(tmp_dir):
+    subprocess.check_call(["git", "init"])
+    # Parent project with one pipeline stage
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "parent-stage": {
+                    "kind": "shell-command",
+                    "command": "echo hi",
+                    "environment": "env",
+                }
+            }
+        },
+        "subprojects": [
+            {"path": "inline-sp"},
+            {"path": "isolated-sp"},
+        ],
+    }
+    os.makedirs("inline-sp")
+    os.makedirs("isolated-sp/.dvc", exist_ok=True)
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # Write calkit.yaml for inline subproject
+    with open("inline-sp/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "stage-a": {
+                            "kind": "shell-command",
+                            "command": "echo a",
+                            "environment": "env",
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    # Write calkit.yaml for isolated subproject
+    with open("isolated-sp/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "stage-b": {
+                            "kind": "shell-command",
+                            "command": "echo b",
+                            "environment": "env",
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    names = [item.value for item in complete_stage_names(None, None, "")]
+    # Parent stage
+    assert "parent-stage" in names
+    # Subproject shorthand
+    assert "inline-sp" in names
+    assert "isolated-sp" in names
+    # Subproject stage targets
+    assert "inline-sp:stage-a" in names
+    assert "isolated-sp:stage-b" in names
+    # Prefix filtering
+    filtered = [
+        item.value for item in complete_stage_names(None, None, "inline")
+    ]
+    assert "inline-sp" in filtered
+    assert "inline-sp:stage-a" in filtered
+    assert "parent-stage" not in filtered
+    assert "isolated-sp" not in filtered

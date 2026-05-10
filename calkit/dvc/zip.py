@@ -17,14 +17,12 @@ from pathlib import Path
 from typing import Literal
 from zipfile import ZipFile
 
-import git
 import typer
 from pydantic import BaseModel
 from sqlitedict import SqliteDict
 from tqdm import tqdm
 
 import calkit
-import calkit.git
 from calkit.core import DVC_SIZE_THRESH_BYTES
 from calkit.dvc.core import run_dvc_command
 
@@ -152,7 +150,7 @@ def add(workspace_path: str, is_stage_output: bool = False):
     This is sort of like a ``git add`` for zips. We should do any DVC staging
     if it's not a pipeline output.
     """
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     pm = get_zip_path_map()
     # Normalize input path as posix
     workspace_path = Path(workspace_path).as_posix()

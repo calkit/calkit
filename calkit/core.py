@@ -110,15 +110,13 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
             start, "*", "GitHub", *["*"] * (i + 1), "calkit.yaml"
         )
         res += glob.glob(pattern)
-    import git
-
     final_res = []
     for ck_fpath in res:
         path = os.path.dirname(ck_fpath)
         # Make sure this path is a Git repo
         try:
-            git.Repo(path)
-        except git.exc.InvalidGitRepositoryError:
+            calkit.git.get_repo(path)
+        except calkit.git.InvalidGitRepositoryError:
             continue
         final_res.append(path)
     return final_res
@@ -539,11 +537,9 @@ def detect_project_name(
         return name
     owner = ck_info.get("owner")
     if name is None or owner is None:
-        import git
-
         try:
-            url = git.Repo(path=wdir).remote().url
-        except (ValueError, git.exc.InvalidGitRepositoryError):
+            url = calkit.git.get_repo(wdir).remote().url
+        except (ValueError, calkit.git.InvalidGitRepositoryError):
             if name is not None and not prepend_owner:
                 return name
             if not prepend_owner:
@@ -564,10 +560,8 @@ def detect_project_name(
 
 def detect_project_github_url(wdir: str | None = None) -> str | None:
     """Detect the GitHub URL for the current project."""
-    import git
-
     try:
-        url = git.Repo(path=wdir).remote().url
+        url = calkit.git.get_repo(wdir).remote().url
     except ValueError:
         warnings.warn("No Git remote set with name 'origin'")
         return None
@@ -594,7 +588,6 @@ def get_dep_version(dep_name: str) -> str | None:
 
 def get_system_info() -> dict:
     """Get information about the system on which we're currently running."""
-    import git
     import psutil
 
     os_name = platform.system()
@@ -624,10 +617,7 @@ def get_system_info() -> dict:
     system_info["node_id"] = node_id
     # See if we can detect Calkit Git rev
     try:
-        repo = git.Repo(
-            path=os.path.dirname(calkit.__file__),
-            search_parent_directories=True,
-        )
+        repo = calkit.git.get_repo(os.path.dirname(calkit.__file__))
         system_info["calkit_git_rev"] = repo.head.commit.hexsha
     except Exception:
         pass

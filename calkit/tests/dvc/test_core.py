@@ -138,7 +138,7 @@ def test_configure_remote_ck_uses_ck_scheme_and_skips_http_auth(monkeypatch):
         def remote(self):
             return "origin"
 
-    monkeypatch.setattr(git, "Repo", lambda wdir=None: DummyRepo())
+    monkeypatch.setattr(git, "Repo", lambda wdir=None, **kwargs: DummyRepo())
     calls = []
     events = []
 

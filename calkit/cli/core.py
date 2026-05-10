@@ -46,10 +46,25 @@ def complete_stage_names(
         ryaml = ruamel.yaml.YAML()
         with open("calkit.yaml") as f:
             info = ryaml.load(f) or {}
+        candidates: list[str] = []
         stages = info.get("pipeline", {}).get("stages", {})
+        candidates.extend(stages.keys())
+        for sp_cfg in info.get("subprojects", []):
+            if not isinstance(sp_cfg, dict) or not sp_cfg.get("path"):
+                continue
+            sp_path = sp_cfg["path"]
+            sp_calkit = os.path.join(sp_path, "calkit.yaml")
+            sp_name = os.path.basename(sp_path.rstrip("/"))
+            candidates.append(sp_name)
+            if os.path.isfile(sp_calkit):
+                with open(sp_calkit) as f:
+                    sp_info = ryaml.load(f) or {}
+                sp_stages = sp_info.get("pipeline", {}).get("stages", {})
+                for stage in sp_stages:
+                    candidates.append(f"{sp_name}:{stage}")
         return [
             CompletionItem(name)
-            for name in stages
+            for name in candidates
             if name.startswith(incomplete)
         ]
     except Exception:

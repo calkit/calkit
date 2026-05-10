@@ -68,9 +68,6 @@ pipeline:
         - results/raw
       outputs:
         - results/summary.csv
-      slurm: # Or `pbs`
-        options:
-          - --gpus=2
 ```
 
 In this case, Calkit will first ensure the Conda environment matches its spec
@@ -82,6 +79,36 @@ Job state will be monitored so they are not resubmitted.
 If a job has finished and the pipeline is up-to-date, it won't be rerun.
 On the other hand, if something failed or one of the input files has changed,
 you'll be able to see that with `calkit status`.
+
+## Options and setup
+
+Default job options and setup commands can be defined at the environment
+level, and these can be ignored, replaced, or extended (via merging)
+for individual pipeline stages as shown
+in the example below.
+
+```yaml
+pipeline:
+  stages:
+    my-python-script:
+      kind: python-script
+      script_path: scripts/run.py
+      environment: cluster1:my-conda-env
+      inputs:
+        - results/raw
+      outputs:
+        - results/summary.csv
+      slurm: # Or `pbs`
+        env_default_options: replace # Default; can also be `ignore` or `merge`
+        options:
+          - --account-mylab
+          - --gpus=2
+          - --time=120
+        env_default_setup: replace # Default; can also be `ignore` or `merge`
+        setup:
+          - module purge
+          - module load something/else
+```
 
 ## Monitoring
 

@@ -940,10 +940,13 @@ def test_collapse_dvc_stages():
     assert "cmd" not in minimal
     assert "wdir" not in minimal
     assert "desc" not in minimal
-    # Folder dep that contains output files: dep must be dropped.
-    # Mirrors the real-world scenario where a stage reads ``pubs/JFM/figs``
-    # (a pre-existing directory) while another stage writes individual files
-    # into that same directory.
+    # Clean case: no always_changed when there is no folder-ancestor drop.
+    assert "always_changed" not in collapsed
+    assert "always_changed" not in minimal
+    # Folder dep that contains output files: dep must be dropped and
+    # always_changed set.  Mirrors the real-world scenario where a stage reads
+    # ``pubs/JFM/figs`` (a pre-existing directory) while another stage writes
+    # individual files into that same directory.
     stages2 = {
         "stage-a": {
             "cmd": "echo hi",
@@ -961,6 +964,7 @@ def test_collapse_dvc_stages():
     assert "../in.txt" in collapsed2["deps"]
     assert "pubs/JFM/figs/plot.pdf" in out_paths(collapsed2)
     assert "pubs/JFM/figs/other.pdf" in out_paths(collapsed2)
+    assert collapsed2.get("always_changed") is True
     # Exact-match aliasing: "./file.txt" and "file.txt" must not both appear.
     stages3 = {
         "stage-a": {
@@ -978,19 +982,17 @@ def test_collapse_dvc_stages():
     all_paths3 = set(collapsed3["deps"]) | out_paths(collapsed3)
     # "file.txt" and "./file.txt" normalize to the same path; no duplicates.
     assert len([p for p in all_paths3 if p in ("file.txt", "./file.txt")]) <= 1
-    # env-lock paths are excluded from both deps and outs.
+    # env-lock paths in deps are kept so the wrapper goes stale when a
+    # subproject lock file changes.
     stages4 = {
         "stage-a": {
             "cmd": "echo hi",
             "deps": [".calkit/env-locks/main", "../external.txt"],
-            "outs": [".calkit/env-locks/other", "output.txt"],
+            "outs": ["output.txt"],
         },
     }
     collapsed4 = collapse_dvc_stages(stages4)
-    assert not any(
-        p.startswith(".calkit/env-locks/")
-        for p in list(collapsed4["deps"]) + list(out_paths(collapsed4))
-    )
+    assert ".calkit/env-locks/main" in collapsed4["deps"]
     # Matrix stage: template variables are expanded before deduplication.
     stages5 = {
         "stage-m": {

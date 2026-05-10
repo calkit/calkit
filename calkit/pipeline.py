@@ -333,12 +333,10 @@ def collapse_dvc_stages(
     """Collapse a dict of DVC stages into a single wrapper stage.
 
     Collects all deps and outs from ``stages``, expands matrix templates, and
-    returns a complete DVC stage dict.  ``cmd``, ``wdir``, and ``desc`` are
+    returns a complete DVC stage dict. ``cmd``, ``wdir``, and ``desc`` are
     optional; when provided they are included in the returned dict.
 
     Rules applied:
-    - Paths starting with ``.calkit/env-locks/`` are excluded (internal lock
-      files that must not cross the project boundary).
     - A dep that tree-overlaps any out is dropped (e.g. a folder dep that
       contains output files would cause a DVC conflict).
     - An out that tree-overlaps any remaining dep is also dropped (covers
@@ -367,14 +365,18 @@ def collapse_dvc_stages(
                     expanded = expanded.replace(f"${{item.{var}}}", str(val))
                 all_deps.add(Path(expanded).as_posix())
     external_deps = all_deps - all_outs
-    outs_raw = sorted(
-        o for o in all_outs if not o.startswith(".calkit/env-locks/")
+    outs_raw = sorted(all_outs)
+    # Track whether any dep is dropped because it is a strict folder ancestor
+    # of an output (not an exact match — those are already removed by the
+    # set subtraction above).  When this happens the wrapper cannot fully
+    # express the input boundary, so we mark it always_changed.
+    has_ancestor_dep_drop = any(
+        d for d in external_deps if any(_paths_overlap(d, o) for o in outs_raw)
     )
     deps = sorted(
         d
         for d in external_deps
-        if not d.startswith(".calkit/env-locks/")
-        and not any(_paths_overlap(d, o) for o in outs_raw)
+        if not any(_paths_overlap(d, o) for o in outs_raw)
     )
     dep_set = set(deps)
     outs = [
@@ -387,6 +389,8 @@ def collapse_dvc_stages(
         stage["cmd"] = cmd
     if wdir is not None:
         stage["wdir"] = wdir
+    if has_ancestor_dep_drop:
+        stage["always_changed"] = True
     stage["deps"] = deps
     stage["outs"] = outs
     if desc is not None:
@@ -745,7 +749,7 @@ def to_dvc(
             )
             continue
         sp_stage_name = Path(sp).name
-        wrapper_stages[sp_stage_name] = collapse_dvc_stages(
+        wrapper = collapse_dvc_stages(
             sp_dvc_stages,
             cmd="calkit dvc repro",
             wdir=sp,
@@ -754,6 +758,12 @@ def to_dvc(
                 "Changes made here will be overwritten."
             ),
         )
+        # calkit.yaml is the source of truth for the subproject pipeline;
+        # tracking it ensures the wrapper goes stale when the pipeline
+        # definition changes.
+        if "calkit.yaml" not in wrapper["deps"]:
+            wrapper["deps"] = sorted(wrapper["deps"] + ["calkit.yaml"])
+        wrapper_stages[sp_stage_name] = wrapper
     if "pipeline" not in ck_info:
         if write and wrapper_stages:
             dvc_yaml_fpath = (

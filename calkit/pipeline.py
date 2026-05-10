@@ -367,11 +367,16 @@ def collapse_dvc_stages(
     external_deps = all_deps - all_outs
     outs_raw = sorted(all_outs)
     # Track whether any dep is dropped because it is a strict folder ancestor
-    # of an output (not an exact match — those are already removed by the
-    # set subtraction above).  When this happens the wrapper cannot fully
-    # express the input boundary, so we mark it always_changed.
+    # of an output (not an exact match — those are already removed by the set
+    # subtraction above). When this happens the wrapper cannot fully express
+    # the input boundary, so we mark it always_changed.
+    # A dep is a strict ancestor of an out when the out path starts with the
+    # dep path followed by "/". The reverse (dep inside an output folder) is
+    # just a normal internal path drop and does not require always_changed.
     has_ancestor_dep_drop = any(
-        d for d in external_deps if any(_paths_overlap(d, o) for o in outs_raw)
+        o.startswith(d.rstrip("/") + "/")
+        for d in external_deps
+        for o in outs_raw
     )
     deps = sorted(
         d
@@ -704,6 +709,8 @@ def to_dvc(
     dvc.yaml files in the tree, so no synthetic parent stages are needed.
 
     Returns a dictionary of DVC stages for the `stages` key of a dvc.yaml.
+    Returns ``{}`` when the project has no pipeline and no subprojects (e.g.
+    a subproject that is a library with no defined pipeline stages).
     """
     import calkit.dvc.zip
     from calkit.environments import get_env_lock_fpath

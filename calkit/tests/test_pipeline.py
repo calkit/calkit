@@ -965,6 +965,22 @@ def test_collapse_dvc_stages():
     assert "pubs/JFM/figs/plot.pdf" in out_paths(collapsed2)
     assert "pubs/JFM/figs/other.pdf" in out_paths(collapsed2)
     assert collapsed2.get("always_changed") is True
+    # Descendant case: dep is inside an output folder — this is a normal
+    # internal drop and must NOT set always_changed.
+    stages2b = {
+        "stage-a": {
+            "cmd": "echo hi",
+            "deps": ["../in.txt"],
+            "outs": ["data/"],
+        },
+        "stage-b": {
+            "cmd": "echo hi",
+            "deps": ["data/file.csv"],
+            "outs": ["result.txt"],
+        },
+    }
+    collapsed2b = collapse_dvc_stages(stages2b)
+    assert "always_changed" not in collapsed2b
     # Exact-match aliasing: "./file.txt" and "file.txt" must not both appear.
     stages3 = {
         "stage-a": {

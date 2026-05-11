@@ -1470,6 +1470,7 @@ def run(
     calkit.set_env_vars(ck_info=ck_info)
     # Clean all notebooks in the pipeline
     try:
+        typer.echo("Cleaning notebooks")
         calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
     except Exception as e:
         raise_error(f"Failed to clean notebooks: {e.__class__.__name__}: {e}")

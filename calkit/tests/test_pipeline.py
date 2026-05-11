@@ -9,7 +9,11 @@ import pytest
 import calkit
 import calkit.pipeline
 from calkit.environments import get_env_lock_fpath
-from calkit.pipeline import collapse_dvc_stages, stages_are_similar
+from calkit.pipeline import (
+    _expand_dep_excluding_subprojects,
+    collapse_dvc_stages,
+    stages_are_similar,
+)
 
 
 def test_stages_are_similar():
@@ -1641,6 +1645,28 @@ def test_wrapper_stage_no_dep_out_overlap(tmp_dir):
             assert not _paths_overlap(
                 dep, out
             ), f"wrapper dep '{dep}' tree-overlaps out '{out}'"
+
+
+def test_expand_dep_excluding_subprojects(tmp_dir):
+    # Directory dep not containing any isolated subproject returns as-is
+    os.makedirs("src")
+    open("src/a.py", "w").close()
+    result = _expand_dep_excluding_subprojects("src", [])
+    assert result == ["src"]
+    # Directory dep containing an isolated subproject is expanded to siblings
+    os.makedirs("sim/modules/SubProj/.dvc")
+    open("sim/modules/other.py", "w").close()
+    open("sim/run.py", "w").close()
+    result = _expand_dep_excluding_subprojects("sim", ["sim/modules/SubProj"])
+    assert "sim/run.py" in result
+    assert "sim/modules/other.py" in result
+    # The isolated subproject itself must not appear in the expansion
+    assert not any("SubProj" in r for r in result)
+    # A dep that is not a directory returns as-is
+    result = _expand_dep_excluding_subprojects(
+        "sim/run.py", ["sim/modules/SubProj"]
+    )
+    assert result == ["sim/run.py"]
 
 
 def test_translate_run_targets(tmp_dir):

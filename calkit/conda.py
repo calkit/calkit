@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import warnings
 from pathlib import Path
 from typing import cast
@@ -137,22 +138,20 @@ def _editable_package_name_from_dir(dir_path: str) -> str:
     raise ValueError(f"Could not determine package name from {dir_path}")
 
 
-def _run_pip_freeze(
-    conda_exe: str,
-    env_name: str | None = None,
-    prefix: str | None = None,
-) -> list[str]:
+def _run_pip_freeze(env_prefix: str) -> list[str]:
     """Run pip freeze inside a conda env and return the list of packages.
 
+    Uses the env's pip executable directly (avoids ``conda run``, which can
+    touch the env directory and invalidate the stored mtime check).
     This captures git URLs and exact refs that ``conda env export`` drops.
     """
-    cmd = [conda_exe, "run", "--no-capture-output"]
-    if prefix:
-        cmd += ["--prefix", prefix]
-    elif env_name:
-        cmd += ["-n", env_name]
-    cmd += ["pip", "freeze"]
-    output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode()
+    if sys.platform == "win32":
+        pip_exe = os.path.join(env_prefix, "Scripts", "pip.exe")
+    else:
+        pip_exe = os.path.join(env_prefix, "bin", "pip")
+    if not os.path.isfile(pip_exe):
+        return []
+    output = subprocess.check_output([pip_exe, "freeze"]).decode()
     return [
         line.strip()
         for line in output.splitlines()
@@ -182,7 +181,7 @@ def _enrich_pip_deps_from_freeze(
     freeze_by_name = {
         _pkg_name_from_dep(line): line
         for line in pip_freeze
-        if not line.startswith("-e ")
+        if not line.startswith("-e ") and "@ file://" not in line
     }
     result = []
     for dep in pip_deps:
@@ -455,8 +454,10 @@ def check_env(
     prefix_orig = prefix
     if prefix is not None:
         prefix = os.path.abspath(prefix)
+        env_prefix_path = prefix
         env_check_fpath = os.path.join(prefix, "env-export.yml")
     else:
+        env_prefix_path = os.path.join(envs_dir, env_name)
         env_check_fpath = os.path.join(
             os.path.expanduser("~"),
             ".calkit",
@@ -661,9 +662,7 @@ def check_env(
     if needs_pip_freeze:
         log_func("Running pip freeze to capture git deps")
         try:
-            pip_freeze = _run_pip_freeze(
-                conda_exe, env_name=env_name, prefix=prefix
-            )
+            pip_freeze = _run_pip_freeze(env_prefix_path)
         except Exception as e:
             log_func(f"pip freeze failed; git dep URLs may be missing: {e}")
     if env_needs_export:
@@ -729,7 +728,7 @@ def check_env(
                     export_pip_deps, pip_freeze
                 )
             for i, dep in enumerate(export_pip_deps):
-                dep_name = re.split("[=<>]+", dep, maxsplit=1)[0].strip()
+                dep_name = _pkg_name_from_dep(dep)
                 if dep_name in editable_pip_deps:
                     path_rel_to_project_root = editable_pip_deps[dep_name]
                     lock_dir = os.path.dirname(lock_fpath)

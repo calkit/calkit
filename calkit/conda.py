@@ -156,11 +156,13 @@ def _check_single(
         req = os.path.join(env_spec_dir, req)
         req = _editable_package_name_from_dir(req)
         editable = True
-    # If this is a Git version, we can't check it
-    # TODO: Clone Git repos to check?
-    if "@git" in req:
+    # Handle git-based requirements — both legacy "pkg@git+url" and PEP 508
+    # "pkg @ git+url" forms. Version cannot be verified, so just check the name.
+    _git_re = re.compile(r"\s*@\s*git\+", re.IGNORECASE)
+    req_is_git = bool(_git_re.search(req))
+    if req_is_git:
         warnings.warn(f"Cannot check Git version for {req}")
-        req = req.split("@git")[0]
+        req = _git_re.split(req)[0].strip()
     req_name = re.split("[=<>]", req)[0].strip()
     req_spec = req.removeprefix(req_name).strip().replace(" ", "")
     if "[" in req_name:
@@ -176,9 +178,18 @@ def _check_single(
             numbers_and_dots = re.match(r"^[0-9.]+$", req_spec[2:])
             if numbers_and_dots and len(req_spec.split(".")) < 3:
                 req_spec += ".*"
-    actual_name, actual_vers = re.split("[=<>]+", actual, maxsplit=1)
-    if actual_name != req_name:
+    # Normalize actual when it also uses a git URL (exported envs preserve it)
+    actual_is_git = bool(_git_re.search(actual))
+    if actual_is_git:
+        actual = _git_re.split(actual)[0].strip()
+    actual_parts = re.split("[=<>]+", actual, maxsplit=1)
+    actual_name = actual_parts[0]
+    actual_vers = actual_parts[1] if len(actual_parts) > 1 else ""
+    if actual_name.strip() != req_name:
         return False
+    # If either side is a git dep we already matched names — that's sufficient
+    if req_is_git or actual_is_git:
+        return True
     actual_spec = actual.removeprefix(actual_name)
     if conda and actual_spec.startswith("="):
         actual_spec = "=" + actual_spec

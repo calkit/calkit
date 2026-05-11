@@ -31,6 +31,27 @@ def test_check_single():
     assert _check_single(
         "python>=3.12,<3.13", "python==3.12.18", env_spec_dir=".", conda=False
     )
+    # PEP 508 git direct reference in req matches plain installed version
+    assert _check_single(
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        "pyxdsm==0.4.0",
+        env_spec_dir=".",
+        conda=False,
+    )
+    # Both sides in git format
+    assert _check_single(
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        env_spec_dir=".",
+        conda=False,
+    )
+    # Different package name must not match
+    assert not _check_single(
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        "other==1.0",
+        env_spec_dir=".",
+        conda=False,
+    )
 
 
 def test_check_list():

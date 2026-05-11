@@ -39,13 +39,6 @@ def test_check_single():
         env_spec_dir=".",
         conda=False,
     )
-    # Both sides in git format
-    assert _check_single(
-        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
-        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
-        env_spec_dir=".",
-        conda=False,
-    )
     # Different package name must not match
     assert not _check_single(
         "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",

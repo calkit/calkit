@@ -331,23 +331,24 @@ def _expand_dep_excluding_subprojects(
 ) -> list[str]:
     """Expand a directory dep to avoid traversing into isolated subprojects.
 
-    DVC cannot collect a directory dep that contains a .dvcignore file (i.e.
-    an isolated subproject). This function walks ``dep``, listing its contents
-    and skipping any isolated subproject directory, so the returned paths
-    collectively cover the same files without crossing into the subprojects.
+    DVC cannot collect a directory dep that contains a nested DVC repo (i.e.
+    an isolated subproject identified by a ``.dvc/`` directory). This function
+    walks ``dep``, listing its contents and skipping any isolated subproject
+    directory, so the returned paths collectively cover the same files without
+    crossing into the subprojects.
 
     ``root`` is the directory relative to which ``dep`` and ``isolated_sp_paths``
     are expressed (defaults to cwd).
     """
     root_path = Path(root) if root else Path(".")
     dep_path = root_path / dep
-    # Normalise SP paths to be relative to root for comparison
+    # Resolve once for reliable path comparison
+    dep_resolved = dep_path.resolve()
     sp_set = {(root_path / sp).resolve() for sp in isolated_sp_paths}
     nested = [
         sp
         for sp in sp_set
-        if sp != dep_path.resolve()
-        and str(sp).startswith(str(dep_path.resolve()))
+        if sp != dep_resolved and sp.is_relative_to(dep_resolved)
     ]
     if not nested or not dep_path.is_dir():
         return [dep]
@@ -364,7 +365,7 @@ def _expand_dep_excluding_subprojects(
                 # Skip the isolated subproject entirely
                 continue
             if child.is_dir() and any(
-                str(sp).startswith(str(child_resolved)) for sp in nested
+                sp.is_relative_to(child_resolved) for sp in nested
             ):
                 # This directory is an ancestor of an isolated SP; descend
                 _walk(child)

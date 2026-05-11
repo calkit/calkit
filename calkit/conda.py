@@ -422,6 +422,7 @@ def check_env(
                     os.remove(lock_to_use_for_creation)
                 lock_to_use_for_creation = None
     res = EnvCheckResult()
+    env_check_exported = False
     if verbose:
         log_func("Getting conda info")
     conda_exe = find_conda_exe()
@@ -560,8 +561,32 @@ def check_env(
             env_check["mtime"] = os.path.getmtime(
                 os.path.normpath(env_check["prefix"])
             )
-            with open(env_check_fpath, "w") as f:
-                ryaml.dump(env_check, f)
+            env_check_exported = True
+        else:
+            env_check_exported = False
+        # If the spec has git pip deps, enrich the check file pip section with
+        # pip freeze now so that git refs are compared correctly during the dep
+        # check rather than falling back to name-only matching.
+        spec_pip_deps = _get_pip_dependency_list(env_spec["dependencies"])
+        spec_has_git_pip = any(_GIT_RE.search(d) for d in spec_pip_deps)
+        early_pip_freeze: list[str] = []
+        if spec_has_git_pip:
+            log_func("Running pip freeze to enrich git dep comparison")
+            try:
+                early_pip_freeze = _run_pip_freeze(env_prefix_path)
+            except Exception as e:
+                log_func(
+                    f"pip freeze failed; git dep URLs may be missing: {e}"
+                )
+            if early_pip_freeze:
+                check_pip = _get_pip_dependency_list(env_check["dependencies"])
+                enriched_check_pip = _enrich_pip_deps_from_freeze(
+                    check_pip, early_pip_freeze
+                )
+                for dep_entry in env_check["dependencies"]:
+                    if isinstance(dep_entry, dict) and "pip" in dep_entry:
+                        dep_entry["pip"] = enriched_check_pip
+                        break
         # Determine if the env matches
         env_needs_rebuild = False
         existing_conda_deps, existing_pip_deps = _split_env_dependencies(
@@ -648,29 +673,31 @@ def check_env(
                 )
     # If the env was rebuilt, export the env check
     res.env_needs_export = env_needs_export
-    # Determine if the spec has any git pip deps — those require pip freeze to
-    # get the exact installed URL/ref that conda env export drops.
-    spec_pip_deps = _get_pip_dependency_list(env_spec["dependencies"])
-    spec_has_git_pip = any(_GIT_RE.search(d) for d in spec_pip_deps)
-    needs_pip_freeze = (
-        env_needs_export
-        or not res.env_exists
-        or res.env_needs_rebuild
-        or spec_has_git_pip
-    )
-    pip_freeze: list[str] = []
-    if needs_pip_freeze:
-        log_func("Running pip freeze to capture git deps")
-        try:
-            pip_freeze = _run_pip_freeze(env_prefix_path)
-        except Exception as e:
-            log_func(f"pip freeze failed; git dep URLs may be missing: {e}")
+    # Reuse the early pip freeze result if available; otherwise run pip freeze
+    # again only when needed (after a rebuild the installed packages changed).
+    if res.env_needs_rebuild or not res.env_exists:
+        pip_freeze: list[str] = []
+        if env_needs_export:
+            log_func("Running pip freeze to capture git deps")
+            try:
+                pip_freeze = _run_pip_freeze(env_prefix_path)
+            except Exception as e:
+                log_func(
+                    f"pip freeze failed; git dep URLs may be missing: {e}"
+                )
+    else:
+        pip_freeze = early_pip_freeze
     if env_needs_export:
-        log_func(f"Exporting existing env to {env_check_fpath}")
-        env_check = json.loads(subprocess.check_output(export_cmd).decode())
-        env_check["mtime"] = os.path.getmtime(
-            os.path.normpath(env_check["prefix"])
-        )
+        # Only re-export if the env was rebuilt or we don't already have a
+        # fresh export — avoids a double conda env export call.
+        if res.env_needs_rebuild or not env_check_exported:
+            log_func(f"Exporting existing env to {env_check_fpath}")
+            env_check = json.loads(
+                subprocess.check_output(export_cmd).decode()
+            )
+            env_check["mtime"] = os.path.getmtime(
+                os.path.normpath(env_check["prefix"])
+            )
         if pip_freeze:
             check_pip = _get_pip_dependency_list(env_check["dependencies"])
             enriched = _enrich_pip_deps_from_freeze(check_pip, pip_freeze)

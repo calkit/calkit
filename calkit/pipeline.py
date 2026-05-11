@@ -324,6 +324,59 @@ def _paths_overlap(a: str, b: str) -> bool:
     return b.startswith(a + "/") or a.startswith(b + "/")
 
 
+def _expand_dep_excluding_subprojects(
+    dep: str,
+    isolated_sp_paths: list[str],
+    root: str | None = None,
+) -> list[str]:
+    """Expand a directory dep to avoid traversing into isolated subprojects.
+
+    DVC cannot collect a directory dep that contains a .dvcignore file (i.e.
+    an isolated subproject). This function walks ``dep``, listing its contents
+    and skipping any isolated subproject directory, so the returned paths
+    collectively cover the same files without crossing into the subprojects.
+
+    ``root`` is the directory relative to which ``dep`` and ``isolated_sp_paths``
+    are expressed (defaults to cwd).
+    """
+    root_path = Path(root) if root else Path(".")
+    dep_path = root_path / dep
+    # Normalise SP paths to be relative to root for comparison
+    sp_set = {(root_path / sp).resolve() for sp in isolated_sp_paths}
+    nested = [
+        sp
+        for sp in sp_set
+        if sp != dep_path.resolve()
+        and str(sp).startswith(str(dep_path.resolve()))
+    ]
+    if not nested or not dep_path.is_dir():
+        return [dep]
+    result: list[str] = []
+
+    def _walk(dir_path: Path) -> None:
+        try:
+            children = sorted(dir_path.iterdir())
+        except PermissionError:
+            return
+        for child in children:
+            child_resolved = child.resolve()
+            if child_resolved in sp_set:
+                # Skip the isolated subproject entirely
+                continue
+            if child.is_dir() and any(
+                str(sp).startswith(str(child_resolved)) for sp in nested
+            ):
+                # This directory is an ancestor of an isolated SP; descend
+                _walk(child)
+            else:
+                rel = child.relative_to(root_path)
+                suffix = "/" if child.is_dir() else ""
+                result.append(rel.as_posix() + suffix)
+
+    _walk(dep_path)
+    return result if result else [dep]
+
+
 def collapse_dvc_stages(
     stages: dict,
     cmd: str | None = None,
@@ -728,6 +781,7 @@ def to_dvc(
     # For inline subprojects (no .dvc/ dir), DVC discovers them automatically
     # via --all-pipelines so no wrapper stage is needed.
     wrapper_stages: dict[str, dict] = {}
+    isolated_sp_paths: list[str] = []
     for subproject in ck_info.get("subprojects", []):
         if not isinstance(subproject, dict) or not subproject.get("path"):
             raise ValueError("Subprojects must have a 'path' defined")
@@ -746,6 +800,7 @@ def to_dvc(
         )
         if not sp_is_isolated:
             continue
+        isolated_sp_paths.append(sp)
         if not sp_dvc_stages:
             import warnings
 
@@ -915,6 +970,17 @@ def to_dvc(
             dvc_stage["deps"] = formatted_deps
             dvc_stage["outs"] = formatted_outs
             dvc_stage["matrix"] = dvc_matrix
+        # Expand any directory deps that contain isolated subprojects so DVC
+        # doesn't try to traverse into their .dvcignore files
+        if isolated_sp_paths:
+            expanded_deps = []
+            for dep in dvc_stage.get("deps", []):
+                expanded_deps.extend(
+                    _expand_dep_excluding_subprojects(
+                        dep, isolated_sp_paths, root=wdir
+                    )
+                )
+            dvc_stage["deps"] = expanded_deps
         # Add a description to the DVC stage
         desc = (
             f"Automatically generated from the '{stage_name}' stage "

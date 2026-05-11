@@ -36,6 +36,11 @@ environments:
     path: environment.yml
 ```
 
+The `host` for a cluster scheduler environment is optional.
+It can be useful to define for the sake of documentation,
+to ensure certain pipeline stages only run on certain clusters,
+or to invalidate cached outputs if the host changes.
+
 `shell-script`, `shell-command`, and `command` stages can run directly in
 `slurm` or `pbs` environments, e.g.,:
 
@@ -46,6 +51,9 @@ pipeline:
       kind: shell-script
       environment: cluster1
       script_path: scripts/run-job.sh
+      args:
+        - my-case
+        - --steps=1
       inputs:
         - config/simulation.txt
       outputs:

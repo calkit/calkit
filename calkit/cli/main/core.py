@@ -1493,7 +1493,7 @@ def run(
         failed = not result.get("success", False)
         if failed:
             warn(f"Failed to check environment '{env_name}'")
-    # Check environments for each subproject so DVC can detect changes
+    # Check environments and clean notebooks for each subproject
     subprojects = ck_info.get("subprojects", [])
     if subprojects:
         prev_cwd = os.getcwd()
@@ -1503,11 +1503,11 @@ def run(
             sp = Path(subproject["path"]).as_posix()
             if not os.path.isdir(sp):
                 continue
-            if not quiet:
-                typer.echo(f"Checking environments for subproject: {sp}")
             os.chdir(sp)
             try:
                 sp_ck_info = calkit.load_calkit_info()
+                if not quiet:
+                    typer.echo(f"Checking environments for subproject: {sp}")
                 sp_env_results = calkit.environments.check_all_in_pipeline(
                     ck_info=sp_ck_info, force=force
                 )
@@ -1519,9 +1519,12 @@ def run(
                             f"Failed to check environment '{env_name}' "
                             f"in subproject '{sp}'"
                         )
+                if not quiet:
+                    typer.echo(f"Cleaning notebooks for subproject: {sp}")
+                calkit.notebooks.clean_all_in_pipeline(ck_info=sp_ck_info)
             except Exception as e:
                 warn(
-                    f"Failed to check environments for subproject '{sp}': "
+                    f"Failed to prepare subproject '{sp}': "
                     f"{e.__class__.__name__}: {e}"
                 )
             finally:

@@ -669,9 +669,11 @@ def add(
             paths.remove(".")
             if dvc_repo is not None:
                 dvc_status = dvc_repo.data_status()
-                for dvc_uncommitted in dvc_status["uncommitted"].get(
+                uncommitted = dvc_status["uncommitted"]
+                dvc_uncommitted_all = uncommitted.get(
                     "modified", []
-                ):
+                ) + uncommitted.get("deleted", [])
+                for dvc_uncommitted in dvc_uncommitted_all:
                     if os.path.exists(dvc_uncommitted):
                         if dry_run:
                             typer.echo(
@@ -679,12 +681,25 @@ def add(
                             )
                         else:
                             typer.echo(f"Adding {dvc_uncommitted} to DVC")
-                            dvc_repo.commit(dvc_uncommitted, force=True)
+                            dvc_repo.commit(
+                                dvc_uncommitted,
+                                force=True,
+                                allow_missing=True,
+                            )
                     else:
-                        warn(
-                            f"DVC uncommitted '{dvc_uncommitted}' does not "
-                            "exist; skipping"
-                        )
+                        if dry_run:
+                            typer.echo(
+                                f"Would commit deleted {dvc_uncommitted} to DVC"
+                            )
+                        else:
+                            typer.echo(
+                                f"Committing deleted {dvc_uncommitted} to DVC"
+                            )
+                            dvc_repo.commit(
+                                dvc_uncommitted,
+                                force=True,
+                                allow_missing=True,
+                            )
             if not disable_auto_ignore:
                 for untracked_file in untracked_git_files:
                     if (

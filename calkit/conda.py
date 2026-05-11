@@ -269,7 +269,7 @@ def _check_single(
     actual_parts = re.split("[=<>]+", actual, maxsplit=1)
     actual_name = actual_parts[0]
     actual_vers = actual_parts[1] if len(actual_parts) > 1 else ""
-    if actual_name.strip() != req_name:
+    if actual_name.strip().lower() != req_name.lower():
         return False
     if req_is_git or actual_is_git:
         return True
@@ -422,7 +422,7 @@ def check_env(
                     os.remove(lock_to_use_for_creation)
                 lock_to_use_for_creation = None
     res = EnvCheckResult()
-    env_check_exported = False
+    early_pip_freeze: list[str] = []
     if verbose:
         log_func("Getting conda info")
     conda_exe = find_conda_exe()
@@ -468,6 +468,8 @@ def check_env(
     env_check_dir = os.path.dirname(env_check_fpath)
     os.makedirs(env_check_dir, exist_ok=True)
     env_spec_dir = os.path.dirname(os.path.abspath(env_fpath))
+    spec_pip_deps = _get_pip_dependency_list(env_spec["dependencies"])
+    spec_has_git_pip = any(_GIT_RE.search(d) for d in spec_pip_deps)
     # Create env export command, which will be used later
     export_cmd = [
         conda_exe,  # Mamba output is slightly different
@@ -561,15 +563,9 @@ def check_env(
             env_check["mtime"] = os.path.getmtime(
                 os.path.normpath(env_check["prefix"])
             )
-            env_check_exported = True
-        else:
-            env_check_exported = False
-        # If the spec has git pip deps, enrich the check file pip section with
-        # pip freeze now so that git refs are compared correctly during the dep
-        # check rather than falling back to name-only matching.
-        spec_pip_deps = _get_pip_dependency_list(env_spec["dependencies"])
-        spec_has_git_pip = any(_GIT_RE.search(d) for d in spec_pip_deps)
-        early_pip_freeze: list[str] = []
+        # If the spec has git pip deps, enrich the in-memory env_check pip
+        # section so that git refs are compared correctly during the dep check
+        # rather than falling back to name-only matching.
         if spec_has_git_pip:
             log_func("Running pip freeze to enrich git dep comparison")
             try:
@@ -673,11 +669,21 @@ def check_env(
                 )
     # If the env was rebuilt, export the env check
     res.env_needs_export = env_needs_export
-    # Reuse the early pip freeze result if available; otherwise run pip freeze
-    # again only when needed (after a rebuild the installed packages changed).
-    if res.env_needs_rebuild or not res.env_exists:
-        pip_freeze: list[str] = []
-        if env_needs_export:
+    # Determine whether we need pip freeze output for enriching the stored
+    # env check and lock file with exact git URLs/refs.
+    needs_pip_freeze = (
+        env_needs_export
+        or not res.env_exists
+        or res.env_needs_rebuild
+        or spec_has_git_pip
+    )
+    pip_freeze: list[str] = []
+    if needs_pip_freeze:
+        # Reuse the early freeze captured before dep check when possible so
+        # we don't run pip twice; fall back to a fresh run after a rebuild.
+        if early_pip_freeze and not res.env_needs_rebuild:
+            pip_freeze = early_pip_freeze
+        else:
             log_func("Running pip freeze to capture git deps")
             try:
                 pip_freeze = _run_pip_freeze(env_prefix_path)
@@ -685,19 +691,12 @@ def check_env(
                 log_func(
                     f"pip freeze failed; git dep URLs may be missing: {e}"
                 )
-    else:
-        pip_freeze = early_pip_freeze
     if env_needs_export:
-        # Only re-export if the env was rebuilt or we don't already have a
-        # fresh export — avoids a double conda env export call.
-        if res.env_needs_rebuild or not env_check_exported:
-            log_func(f"Exporting existing env to {env_check_fpath}")
-            env_check = json.loads(
-                subprocess.check_output(export_cmd).decode()
-            )
-            env_check["mtime"] = os.path.getmtime(
-                os.path.normpath(env_check["prefix"])
-            )
+        log_func(f"Exporting existing env to {env_check_fpath}")
+        env_check = json.loads(subprocess.check_output(export_cmd).decode())
+        env_check["mtime"] = os.path.getmtime(
+            os.path.normpath(env_check["prefix"])
+        )
         if pip_freeze:
             check_pip = _get_pip_dependency_list(env_check["dependencies"])
             enriched = _enrich_pip_deps_from_freeze(check_pip, pip_freeze)
@@ -765,6 +764,11 @@ def check_env(
                     export_pip_deps[i] = (
                         "-e " + Path(path_rel_to_lock).as_posix()
                     )
+            # Write the modified list back (enrichment returns a new list)
+            for dep_entry in env_export["dependencies"]:
+                if isinstance(dep_entry, dict) and "pip" in dep_entry:
+                    dep_entry["pip"] = export_pip_deps
+                    break
         out_dir = os.path.dirname(lock_fpath)
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)

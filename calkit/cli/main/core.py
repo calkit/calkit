@@ -669,9 +669,11 @@ def add(
             paths.remove(".")
             if dvc_repo is not None:
                 dvc_status = dvc_repo.data_status()
-                for dvc_uncommitted in dvc_status["uncommitted"].get(
+                uncommitted = dvc_status["uncommitted"]
+                dvc_uncommitted_all = uncommitted.get(
                     "modified", []
-                ):
+                ) + uncommitted.get("deleted", [])
+                for dvc_uncommitted in dvc_uncommitted_all:
                     if os.path.exists(dvc_uncommitted):
                         if dry_run:
                             typer.echo(
@@ -679,12 +681,25 @@ def add(
                             )
                         else:
                             typer.echo(f"Adding {dvc_uncommitted} to DVC")
-                            dvc_repo.commit(dvc_uncommitted, force=True)
+                            dvc_repo.commit(
+                                dvc_uncommitted,
+                                force=True,
+                                allow_missing=True,
+                            )
                     else:
-                        warn(
-                            f"DVC uncommitted '{dvc_uncommitted}' does not "
-                            "exist; skipping"
-                        )
+                        if dry_run:
+                            typer.echo(
+                                f"Would commit deleted {dvc_uncommitted} to DVC"
+                            )
+                        else:
+                            typer.echo(
+                                f"Committing deleted {dvc_uncommitted} to DVC"
+                            )
+                            dvc_repo.commit(
+                                dvc_uncommitted,
+                                force=True,
+                                allow_missing=True,
+                            )
             if not disable_auto_ignore:
                 for untracked_file in untracked_git_files:
                     if (
@@ -1453,13 +1468,8 @@ def run(
             raise_error("Failed to initialize Git repo")
     # Set env vars
     calkit.set_env_vars(ck_info=ck_info)
-    # Clean all notebooks in the pipeline
-    try:
-        calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
-    except Exception as e:
-        raise_error(f"Failed to clean notebooks: {e.__class__.__name__}: {e}")
     if not quiet:
-        typer.echo("Getting system information")
+        calkit.echo("💻 Getting system information")
     # Get system information
     system_info = calkit.get_system_info()
     if save_logs:
@@ -1475,7 +1485,7 @@ def run(
             json.dump(system_info, f, indent=2)
     # First check any system-level dependencies exist
     if not quiet:
-        typer.echo("Checking system-level dependencies")
+        calkit.echo("🔗 Checking system-level dependencies")
     try:
         calkit.check_system_deps(ck_info=ck_info, system_info=system_info)
     except Exception as e:
@@ -1483,7 +1493,7 @@ def run(
         raise_error(str(e))
     # Check all environments in the pipeline (with caching)
     # If any failed, warn the user that we might have problems running
-    typer.echo("Checking environments")
+    calkit.echo("📦 Checking environments")
     env_check_results = calkit.environments.check_all_in_pipeline(
         ck_info=ck_info, targets=targets, force=force
     )
@@ -1493,7 +1503,13 @@ def run(
         failed = not result.get("success", False)
         if failed:
             warn(f"Failed to check environment '{env_name}'")
-    # Check environments for each subproject so DVC can detect changes
+    # Clean all notebooks in the pipeline
+    try:
+        calkit.echo("📓 Cleaning notebooks")
+        calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
+    except Exception as e:
+        raise_error(f"Failed to clean notebooks: {e.__class__.__name__}: {e}")
+    # Check environments and clean notebooks for each subproject
     subprojects = ck_info.get("subprojects", [])
     if subprojects:
         prev_cwd = os.getcwd()
@@ -1503,11 +1519,13 @@ def run(
             sp = Path(subproject["path"]).as_posix()
             if not os.path.isdir(sp):
                 continue
-            if not quiet:
-                typer.echo(f"Checking environments for subproject: {sp}")
             os.chdir(sp)
             try:
                 sp_ck_info = calkit.load_calkit_info()
+                if not quiet:
+                    calkit.echo(
+                        f"📦 Checking environments for subproject: {sp}"
+                    )
                 sp_env_results = calkit.environments.check_all_in_pipeline(
                     ck_info=sp_ck_info, force=force
                 )
@@ -1519,9 +1537,12 @@ def run(
                             f"Failed to check environment '{env_name}' "
                             f"in subproject '{sp}'"
                         )
+                if not quiet:
+                    calkit.echo(f"📓 Cleaning notebooks for subproject: {sp}")
+                calkit.notebooks.clean_all_in_pipeline(ck_info=sp_ck_info)
             except Exception as e:
                 warn(
-                    f"Failed to check environments for subproject '{sp}': "
+                    f"Failed to prepare subproject '{sp}': "
                     f"{e.__class__.__name__}: {e}"
                 )
             finally:
@@ -1533,7 +1554,7 @@ def run(
     dvc_stages = None
     if ck_info.get("pipeline", {}) or ck_info.get("subprojects"):
         if not quiet:
-            typer.echo("Compiling DVC pipeline")
+            calkit.echo("🔀 Compiling DVC pipeline")
         try:
             dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
         except Exception as e:

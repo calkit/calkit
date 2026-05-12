@@ -71,7 +71,7 @@ pipeline:
     my-python-script:
       kind: python-script
       script_path: scripts/run.py
-      environment: cluster1:my-conda-env # Note the `:`
+      environment: cluster1:my-conda-env # Note the `:` between env names
       inputs:
         - results/raw
       outputs:
@@ -106,10 +106,10 @@ pipeline:
         - results/raw
       outputs:
         - results/summary.csv
-      scheduler: # Or `slurm` or `pbs`
+      scheduler:
         env_default_options: replace # Default; can also be `ignore` or `merge`
         options:
-          - --account-mylab
+          - --account=mylab
           - --gpus=2
           - --time=120
         env_default_setup: replace # Default; can also be `ignore` or `merge`
@@ -127,7 +127,7 @@ running on the cluster with:
 calkit scheduler queue
 ```
 
-or the abbreviated commands:
+Or with the abbreviated command:
 
 ```sh
 ck sch q

@@ -2,9 +2,8 @@
 
 This module exposes a single typer app that dispatches to the right
 underlying scheduler binary (``sbatch``/``squeue``/``scancel`` for SLURM,
-``qsub``/``qstat``/``qdel`` for PBS) based on the environment kind. It is
-registered under both ``sched`` and ``slurm`` so already-released
-pipelines that emit ``calkit slurm batch ...`` keep working unchanged.
+``qsub``/``qstat``/``qdel`` for PBS) based on the environment kind.
+Registered as ``scheduler|sch``.
 """
 
 from __future__ import annotations

@@ -124,19 +124,19 @@ Inside a project folder, you can check on any of the current project's jobs
 running on the cluster with:
 
 ```sh
-calkit sched queue
+calkit scheduler queue
 ```
 
 or the abbreviated commands:
 
 ```sh
-ck sched q
+ck sch q
 ```
 
 You can also view the job output logs with:
 
 ```sh
-ck sched logs
+ck sch logs
 ```
 
 See the `--help` output of each command for arguments and options.

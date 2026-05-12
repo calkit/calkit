@@ -139,9 +139,8 @@ class StageSchedulerOptions(BaseModel):
     """Parameters for running a stage on a job scheduler (SLURM or PBS).
 
     The environment-level ``default_options`` / ``default_setup`` are
-    applied by ``calkit slurm batch`` (for slurm envs) or ``calkit sched
-    batch`` (for pbs and other scheduler envs) at submission time. The
-    mode for each list is controlled independently by
+    applied by ``calkit scheduler batch`` at submission time.
+    The mode for each list is controlled independently by
     ``env_default_options`` and ``env_default_setup``:
 
     - ``replace`` (default): if the stage provides values, those are used
@@ -190,22 +189,26 @@ class Stage(BaseModel):
     always_run: bool = False
     iterate_over: list[StageIteration] | None = None
     description: str | None = None
-    slurm: StageSchedulerOptions | None = None
     scheduler: StageSchedulerOptions | None = None
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
     # Resolved at pipeline-compilation time by set_stage_scheduler_options;
-    # tracks which CLI alias (slurm / sched) to use for the submit command.
-    _scheduler_cli_alias: str = PrivateAttr(default="slurm")
+    # all scheduler kinds now emit ``calkit scheduler batch``.
+    _scheduler_cli_alias: str = PrivateAttr(default="scheduler")
 
-    @model_validator(mode="after")
-    def check_scheduler_options_exclusive(self) -> Stage:
-        if self.slurm is not None and self.scheduler is not None:
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_slurm_field(cls, data: Any) -> Any:
+        """Auto-migrate the old ``slurm:`` field to ``scheduler:``."""
+        if not isinstance(data, dict) or "slurm" not in data:
+            return data
+        if data.get("scheduler") is not None:
             raise ValueError(
-                f"Stage '{self.name}' has both 'slurm' and 'scheduler' "
-                "options set; use 'scheduler' only ('slurm' is deprecated)"
+                "Stage has both 'slurm' and 'scheduler' options set; "
+                "remove 'slurm' (use 'scheduler' only)"
             )
-        return self
+        data["scheduler"] = data.pop("slurm")
+        return data
 
     @property
     def outer_environment(self) -> str:
@@ -270,7 +273,7 @@ class Stage(BaseModel):
         needed.
 
         When a stage uses a job-scheduler env (SLURM or PBS), the prefix
-        is a ``calkit slurm|sched batch`` invocation. If the scheduler env
+        is a ``calkit scheduler batch`` invocation. If the scheduler env
         wraps a separate inner env (composite syntax
         ``<scheduler-env>:<inner-env>``), we additionally wrap the
         scheduled command with ``calkit xenv -n <inner-env>``. For a plain
@@ -293,13 +296,7 @@ class Stage(BaseModel):
 
     @property
     def scheduler_cmd(self) -> str:
-        """Build the ``calkit <alias> batch`` invocation for this stage.
-
-        SLURM stages emit ``calkit slurm batch …`` (kept as the alias
-        previously released as a top-level command); PBS and any future
-        scheduler kinds emit ``calkit sched batch …`` and route through
-        the same underlying CLI via the ``sched|slurm`` group.
-        """
+        """Build the ``calkit scheduler batch`` invocation for this stage."""
         if self.scheduler is None:
             raise ValueError("Stage has no scheduler options")
         opts = self.scheduler
@@ -785,11 +782,8 @@ class SBatchStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        # Resolve slurm -> scheduler if set_stage_scheduler_options hasn't run
-        # (e.g. when to_dvc() is called directly on the stage).
         if self.scheduler is None:
-            self.scheduler = self.slurm or StageSchedulerOptions()
-            self.slurm = None
+            self.scheduler = StageSchedulerOptions()
         self.scheduler.options = self.sbatch_options + (
             self.scheduler.options or []
         )
@@ -1022,13 +1016,9 @@ class Pipeline(BaseModel):
         """Validate and initialize scheduler (SLURM/PBS) options on stages.
 
         For each stage whose outer environment is a job scheduler (SLURM or
-        PBS), this:
-
-        - validates the environment configuration (composite-env rules),
-        - initializes ``stage.slurm`` / ``stage.pbs`` so the stage's
-          ``xenv_cmd`` knows to wrap the command with ``calkit slurm
-          batch`` (slurm) or ``calkit sched batch`` (pbs / other
-          scheduler kinds).
+        PBS), this validates the environment configuration and sets
+        ``stage.scheduler`` so the stage's ``xenv_cmd`` emits
+        ``calkit scheduler batch``.
 
         Environment-level ``default_options`` and ``default_setup`` are NOT
         merged into the stage here; the batch CLI applies them at submission
@@ -1038,19 +1028,18 @@ class Pipeline(BaseModel):
         # Stage kinds that don't require a separate inner runtime, so they
         # can run on a plain (non-composite) scheduler env. Anything else
         # must use a composite env like ``<scheduler-env>:<inner-env>``.
+        # ``sbatch`` is the legacy stage type; convert_sbatch_stages() should
+        # run first, but it stays here as a safety net.
         plain_ok_kinds = {
             "shell-script",
             "shell-command",
             "command",
-            # SBatchStage is the legacy slurm-specific direct stage; it's
-            # equivalent to ``shell-script`` + ``slurm`` options.
             "sbatch",
         }
-        # Maps env kind -> CLI alias used for ``calkit <alias> batch``.
-        # Options are always stored in ``stage.slurm`` regardless of kind.
+        # Both scheduler kinds now emit ``calkit scheduler batch``.
         scheduler_kinds = {
-            "slurm": "slurm",
-            "pbs": "sched",
+            "slurm": "scheduler",
+            "pbs": "scheduler",
         }
         for stage in self.stages.values():
             env_name = stage.outer_environment
@@ -1090,21 +1079,94 @@ class Pipeline(BaseModel):
                         f"'{stage.inner_environment}'; the inner "
                         "environment must not be a job scheduler"
                     )
-            # Resolve the deprecated ``slurm:`` alias into ``scheduler``.
-            if stage.scheduler is None and stage.slurm is not None:
-                stage.scheduler = stage.slurm
-                stage.slurm = None
             if stage.scheduler is None:
                 stage.scheduler = StageSchedulerOptions()
             stage._scheduler_cli_alias = cli_alias
 
     def set_stage_slurm_options(self, environments: dict[str, dict]) -> None:
-        """Backwards-compatible alias for :meth:`set_stage_scheduler_options`.
-
-        Both SLURM and PBS scheduler initialization now happen in a single
-        call.
-        """
+        """Backwards-compatible alias for :meth:`set_stage_scheduler_options`."""
         self.set_stage_scheduler_options(environments=environments)
+
+    def convert_sbatch_stages(self) -> dict[str, dict]:
+        """Replace legacy ``sbatch`` stages with ``shell-script`` equivalents.
+
+        Returns a dict mapping stage name → new stage data suitable for
+        updating ``calkit.yaml`` (keys present only for converted stages).
+        """
+        converted = {}
+        for name, stage in list(self.stages.items()):
+            if stage.kind != "sbatch":
+                continue
+            sched_opts: dict = {}
+            if stage.sbatch_options:
+                sched_opts["options"] = list(stage.sbatch_options)
+            if stage.log_path is not None:
+                sched_opts["log_path"] = stage.log_path
+            if stage.log_storage != "git":
+                sched_opts["log_storage"] = stage.log_storage
+            if stage.scheduler is not None:
+                if stage.scheduler.setup:
+                    sched_opts["setup"] = list(stage.scheduler.setup)
+                if stage.scheduler.env_default_options != "replace":
+                    sched_opts["env_default_options"] = (
+                        stage.scheduler.env_default_options
+                    )
+                if stage.scheduler.env_default_setup != "replace":
+                    sched_opts["env_default_setup"] = (
+                        stage.scheduler.env_default_setup
+                    )
+            new_stage = ShellScriptStage(
+                kind="shell-script",
+                name=name,
+                environment=stage.environment,
+                script_path=stage.script_path,
+                args=stage.args,
+                inputs=list(stage.inputs),
+                outputs=list(stage.outputs),
+                wdir=stage.wdir,
+                always_run=stage.always_run,
+                iterate_over=stage.iterate_over,
+                description=stage.description,
+                scheduler=StageSchedulerOptions(**sched_opts)
+                if sched_opts
+                else StageSchedulerOptions(),
+            )
+            self.stages[name] = new_stage
+            calkit_yaml_stage: dict = {
+                "kind": "shell-script",
+                "environment": stage.environment,
+                "script_path": stage.script_path,
+            }
+            if stage.args:
+                calkit_yaml_stage["args"] = list(stage.args)
+            if stage.inputs:
+                calkit_yaml_stage["inputs"] = [
+                    (i.model_dump() if hasattr(i, "model_dump") else i)
+                    for i in stage.inputs
+                ]
+            if stage.outputs:
+                calkit_yaml_stage["outputs"] = [
+                    (
+                        o.model_dump(exclude_none=True)
+                        if hasattr(o, "model_dump")
+                        else o
+                    )
+                    for o in stage.outputs
+                ]
+            if sched_opts:
+                calkit_yaml_stage["scheduler"] = sched_opts
+            if stage.wdir is not None:
+                calkit_yaml_stage["wdir"] = stage.wdir
+            if stage.always_run:
+                calkit_yaml_stage["always_run"] = True
+            if stage.description is not None:
+                calkit_yaml_stage["description"] = stage.description
+            if stage.iterate_over is not None:
+                calkit_yaml_stage["iterate_over"] = [
+                    it.model_dump() for it in stage.iterate_over
+                ]
+            converted[name] = calkit_yaml_stage
+        return converted
 
     def ensure_env_lock_paths_are_inputs(
         self, env_lock_fpaths: dict[str, str]

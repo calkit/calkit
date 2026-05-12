@@ -57,7 +57,7 @@ from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
 from calkit.cli.overleaf import overleaf_app
-from calkit.cli.sched import scheduler_app
+from calkit.cli.scheduler import scheduler_app
 from calkit.cli.update import update_app
 
 app = typer.Typer(

@@ -840,6 +840,12 @@ def to_dvc(
             with open(dvc_yaml_fpath, "w") as f:
                 calkit.ryaml.dump(existing, f)
         return wrapper_stages
+    # Detect stages with the old ``slurm:`` field before model validation
+    # because model_validate pops it in place.
+    raw_stages = ck_info.get("pipeline", {}).get("stages", {})
+    _pre_validate_slurm_stages = [
+        sname for sname, sdata in raw_stages.items() if "slurm" in sdata
+    ]
     try:
         pipeline = Pipeline.model_validate(ck_info["pipeline"])
     except Exception as e:
@@ -896,6 +902,38 @@ def to_dvc(
                 pass
         env_lock_fpaths[env_name] = lock_fpath
     project_params = expand_project_parameters(ck_info.get("parameters", {}))
+    # Convert legacy sbatch stages to shell-script + scheduler and rename
+    # old `slurm:` stage fields to `scheduler:`, updating calkit.yaml
+    # in-place when write=True so the file stays in sync.
+    converted_stages = pipeline.convert_sbatch_stages()
+    slurm_field_stages = [
+        sname
+        for sname in _pre_validate_slurm_stages
+        if sname not in converted_stages
+    ]
+    for sname in converted_stages:
+        typer.echo(
+            f"Converted legacy 'sbatch' stage '{sname}' to 'shell-script' "
+            "with 'scheduler' options in calkit.yaml"
+        )
+    for sname in slurm_field_stages:
+        typer.echo(
+            f"Renamed 'slurm' field to 'scheduler' in stage '{sname}' "
+            "in calkit.yaml"
+        )
+    if write and (converted_stages or slurm_field_stages):
+        ck_yaml_path = (
+            os.path.join(wdir, "calkit.yaml") if wdir else "calkit.yaml"
+        )
+        with open(ck_yaml_path) as _f:
+            ck_yaml_data = calkit.ryaml.load(_f) or {}
+        for sname, sdata in converted_stages.items():
+            ck_yaml_data["pipeline"]["stages"][sname] = sdata
+        for sname in slurm_field_stages:
+            stage_data = ck_yaml_data["pipeline"]["stages"][sname]
+            stage_data["scheduler"] = stage_data.pop("slurm")
+        with open(ck_yaml_path, "w") as _f:
+            calkit.ryaml.dump(ck_yaml_data, _f)
     # Validate and initialize scheduler options (SLURM/PBS) for stages
     # whose outer environment is a job scheduler. Env defaults are applied
     # at job-submission time, not here.
@@ -1003,8 +1041,6 @@ def to_dvc(
             outputs = stage.outputs.copy()
             if stage.kind == "jupyter-notebook":
                 outputs += stage.notebook_outputs
-            elif stage.kind == "sbatch":
-                outputs.append(stage.log_output)
             # Build the set of current DVC output paths so we can detect stale
             # .gitignore entries from the previous version of the stage,
             # including synthesized outputs like LaTeX PDFs

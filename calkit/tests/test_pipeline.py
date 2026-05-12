@@ -499,7 +499,7 @@ def test_sbatch_stage_to_dvc(tmp_dir):
       stage-level setup and explicit ``env_default_*: ignore``,
     - composite ``slurm-env:julia1`` wrapping a jupyter-notebook,
     - env-level defaults are NOT baked into the compiled stage cmd
-      (they are merged at submission by ``calkit slurm batch``),
+      (they are merged at submission by ``calkit scheduler batch``),
     - the env lock file is added as a dep on every stage that touches the
       slurm env.
     """
@@ -565,7 +565,7 @@ def test_sbatch_stage_to_dvc(tmp_dir):
                 "environment": "slurm-env:julia1",
                 "inputs": ["data/input2.txt"],
                 "outputs": ["data/output3.txt"],
-                "slurm": {
+                "scheduler": {
                     "setup": ["module load gcc/12"],
                     "env_default_options": "ignore",
                     "env_default_setup": "ignore",
@@ -595,7 +595,7 @@ def test_sbatch_stage_to_dvc(tmp_dir):
     stage = stages["job1"]
     print(stage)
     assert stage["cmd"] == (
-        "calkit slurm batch --name job1 "
+        "calkit scheduler batch --name job1 "
         "--environment slurm-env "
         f"--dep data/input.txt --dep {slurm_lock} "
         "--out data/output2.txt "
@@ -613,7 +613,7 @@ def test_sbatch_stage_to_dvc(tmp_dir):
     stage2 = stages["job2"]
     print(stage2)
     assert stage2["cmd"] == (
-        "calkit slurm batch --name job2 --env-default-options ignore "
+        "calkit scheduler batch --name job2 --env-default-options ignore "
         "--env-default-setup ignore "
         "--environment slurm-env "
         "--dep something.jl --dep data/input2.txt --dep Manifest.toml "
@@ -633,7 +633,7 @@ def test_sbatch_stage_to_dvc(tmp_dir):
     stage3 = stages["notebook"]
     print(stage3)
     assert stage3["cmd"] == (
-        "calkit slurm batch --name notebook "
+        "calkit scheduler batch --name notebook "
         "--environment slurm-env "
         "--dep .calkit/notebooks/cleaned/analysis.ipynb "
         "--dep data/input2.txt --dep Manifest.toml "
@@ -651,7 +651,7 @@ def test_sbatch_stage_to_dvc(tmp_dir):
     py_stage = stages["py-job"]
     print(py_stage)
     assert py_stage["cmd"] == (
-        "calkit slurm batch --name py-job "
+        "calkit scheduler batch --name py-job "
         "--environment slurm-env "
         "--dep scripts/run.py --dep data/input_py.txt --dep uv.lock "
         f"--dep {slurm_lock} "
@@ -666,7 +666,7 @@ def test_sbatch_stage_to_dvc(tmp_dir):
     r_stage = stages["r-job"]
     print(r_stage)
     assert r_stage["cmd"] == (
-        "calkit slurm batch --name r-job "
+        "calkit scheduler batch --name r-job "
         "--environment slurm-env "
         f"--dep scripts/run.R --dep renv.lock --dep {slurm_lock} "
         "--out data/output_r.txt "
@@ -679,7 +679,7 @@ def test_sbatch_stage_to_dvc(tmp_dir):
     sh_stage = stages["sh-cmd"]
     print(sh_stage)
     assert sh_stage["cmd"] == (
-        "calkit slurm batch --name sh-cmd "
+        "calkit scheduler batch --name sh-cmd "
         "--environment slurm-env "
         f"--dep uv.lock --dep {slurm_lock} "
         "--command -- calkit xenv -n py1 --no-check -- "
@@ -771,19 +771,19 @@ def test_slurm_env_validation_rules(tmp_dir):
         write=False,
     )
     assert stages["run-script"]["cmd"] == (
-        "calkit slurm batch --name run-script "
+        "calkit scheduler batch --name run-script "
         "--environment mycluster "
         "--dep .calkit/env-locks/mycluster.json "
         "-- scripts/run.sh a b"
     )
     assert stages["run-shell-cmd"]["cmd"] == (
-        "calkit slurm batch --name run-shell-cmd "
+        "calkit scheduler batch --name run-shell-cmd "
         "--environment mycluster "
         "--dep .calkit/env-locks/mycluster.json "
         '--command -- bash --noprofile --norc -c "echo hi"'
     )
     assert stages["run-cmd"]["cmd"] == (
-        "calkit slurm batch --name run-cmd "
+        "calkit scheduler batch --name run-cmd "
         "--environment mycluster "
         "--dep .calkit/env-locks/mycluster.json "
         "--command -- mytool --flag"
@@ -905,7 +905,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
     stage = stages["job1"]
     print(stage)
     assert stage["cmd"] == (
-        "calkit sched batch --name job1 "
+        "calkit scheduler batch --name job1 "
         "--environment pbs-env "
         f"--dep data/input.txt --dep {pbs_lock} "
         "--out data/output2.txt "
@@ -921,7 +921,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
     stage_cmd = stages["job-cmd"]
     print(stage_cmd)
     assert stage_cmd["cmd"] == (
-        "calkit sched batch --name job-cmd "
+        "calkit scheduler batch --name job-cmd "
         "--environment pbs-env "
         f"--dep {pbs_lock} "
         '--command -- bash --noprofile --norc -c "echo hello"'
@@ -930,7 +930,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
     stage2 = stages["job2"]
     print(stage2)
     assert stage2["cmd"] == (
-        "calkit sched batch --name job2 --env-default-options ignore "
+        "calkit scheduler batch --name job2 --env-default-options ignore "
         "--env-default-setup ignore "
         "--environment pbs-env "
         "--dep something.jl --dep data/input2.txt --dep Manifest.toml "
@@ -943,7 +943,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
     stage3 = stages["notebook"]
     print(stage3)
     assert stage3["cmd"] == (
-        "calkit sched batch --name notebook "
+        "calkit scheduler batch --name notebook "
         "--environment pbs-env "
         "--dep .calkit/notebooks/cleaned/analysis.ipynb "
         "--dep data/input2.txt --dep Manifest.toml "
@@ -958,7 +958,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
     py_stage = stages["py-job"]
     print(py_stage)
     assert py_stage["cmd"] == (
-        "calkit sched batch --name py-job "
+        "calkit scheduler batch --name py-job "
         "--environment pbs-env "
         "--dep scripts/run.py --dep data/input_py.txt --dep uv.lock "
         f"--dep {pbs_lock} "
@@ -973,7 +973,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
     r_stage = stages["r-job"]
     print(r_stage)
     assert r_stage["cmd"] == (
-        "calkit sched batch --name r-job "
+        "calkit scheduler batch --name r-job "
         "--environment pbs-env "
         f"--dep scripts/run.R --dep renv.lock --dep {pbs_lock} "
         "--out data/output_r.txt "
@@ -986,7 +986,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
     sh_nested = stages["sh-cmd-nested"]
     print(sh_nested)
     assert sh_nested["cmd"] == (
-        "calkit sched batch --name sh-cmd-nested "
+        "calkit scheduler batch --name sh-cmd-nested "
         "--environment pbs-env "
         f"--dep uv.lock --dep {pbs_lock} "
         "--command -- calkit xenv -n py1 --no-check -- "
@@ -1093,19 +1093,19 @@ def test_pbs_env_validation_rules(tmp_dir):
         write=False,
     )
     assert stages["run-script"]["cmd"] == (
-        "calkit sched batch --name run-script "
+        "calkit scheduler batch --name run-script "
         "--environment mycluster "
         "--dep .calkit/env-locks/mycluster.json "
         "-- scripts/run.sh a b"
     )
     assert stages["run-shell-cmd"]["cmd"] == (
-        "calkit sched batch --name run-shell-cmd "
+        "calkit scheduler batch --name run-shell-cmd "
         "--environment mycluster "
         "--dep .calkit/env-locks/mycluster.json "
         '--command -- bash --noprofile --norc -c "echo hi"'
     )
     assert stages["run-cmd"]["cmd"] == (
-        "calkit sched batch --name run-cmd "
+        "calkit scheduler batch --name run-cmd "
         "--environment mycluster "
         "--dep .calkit/env-locks/mycluster.json "
         "--command -- mytool --flag"
@@ -1138,7 +1138,7 @@ def test_generic_scheduler_key(tmp_dir):
         write=False,
     )
     assert "-s --time=01:00:00" in slurm_stages["run"]["cmd"]
-    assert "calkit slurm batch" in slurm_stages["run"]["cmd"]
+    assert "calkit scheduler batch" in slurm_stages["run"]["cmd"]
     pbs_stages = calkit.pipeline.to_dvc(
         ck_info={
             "environments": {"mycluster": {"kind": "pbs"}},
@@ -1156,9 +1156,11 @@ def test_generic_scheduler_key(tmp_dir):
         write=False,
     )
     assert "-s -l -s walltime=01:00:00" in pbs_stages["run"]["cmd"]
-    assert "calkit sched batch" in pbs_stages["run"]["cmd"]
+    assert "calkit scheduler batch" in pbs_stages["run"]["cmd"]
     # Setting both scheduler: and slurm: should fail at parse time.
-    with pytest.raises(ValueError, match="both 'slurm' and 'scheduler'"):
+    with pytest.raises(
+        ValueError, match="both 'slurm' and 'scheduler'|remove 'slurm'"
+    ):
         calkit.pipeline.to_dvc(
             ck_info={
                 "environments": {"mycluster": {"kind": "slurm"}},
@@ -1176,6 +1178,34 @@ def test_generic_scheduler_key(tmp_dir):
             },
             write=False,
         )
+
+
+def test_slurm_field_renamed_to_scheduler(tmp_dir):
+    """Stages with a ``slurm:`` field get it renamed to ``scheduler:``
+    in calkit.yaml silently when write=True.
+    """
+    subprocess.check_call(["calkit", "init"])
+    ck_yaml = {
+        "environments": {"mycluster": {"kind": "slurm"}},
+        "pipeline": {
+            "stages": {
+                "run": {
+                    "kind": "shell-script",
+                    "script_path": "scripts/run.sh",
+                    "environment": "mycluster",
+                    "slurm": {"options": ["--time=01:00:00"]},
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as _f:
+        calkit.ryaml.dump(ck_yaml, _f)
+    calkit.pipeline.to_dvc(write=True)
+    updated = calkit.load_calkit_info()
+    stage = updated["pipeline"]["stages"]["run"]
+    assert "slurm" not in stage
+    assert "scheduler" in stage
+    assert stage["scheduler"]["options"] == ["--time=01:00:00"]
 
 
 def test_gitignore_updated_when_stage_output_renamed(tmp_dir):

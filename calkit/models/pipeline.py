@@ -1185,14 +1185,14 @@ class Pipeline(BaseModel):
                 calkit_yaml_stage["args"] = list(stage.args)
             if stage.inputs:
                 calkit_yaml_stage["inputs"] = [
-                    (i.model_dump() if hasattr(i, "model_dump") else i)
+                    (i.model_dump() if isinstance(i, BaseModel) else i)
                     for i in stage.inputs
                 ]
             if stage.outputs:
                 calkit_yaml_stage["outputs"] = [
                     (
                         o.model_dump(exclude_none=True)
-                        if hasattr(o, "model_dump")
+                        if isinstance(o, BaseModel)
                         else o
                     )
                     for o in stage.outputs

@@ -46,7 +46,7 @@
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                   |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                            |
 | [`cloud`](#command-group-cloud)                  | Interact with a Calkit Cloud.                                      |
-| [`sched\|slurm`](#command-group-sched-slurm)     | Work with a job scheduler (SLURM or PBS).                          |
+| [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                          |
 | [`dev`](#command-group-dev)                      | Developer tools.                                                   |
 
 ## Top-level command details
@@ -2753,22 +2753,22 @@ Options:
 | --------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------- |
 | `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config. |
 
-<a id="command-group-sched-slurm"></a>
+<a id="command-group-scheduler-sch"></a>
 
-### `calkit sched|slurm`
+### `calkit scheduler|sch`
 
 Work with a job scheduler (SLURM or PBS).
 
-| Command                                       | Description                                                       |
-| --------------------------------------------- | ----------------------------------------------------------------- |
-| [`batch`](#subcommand-sched-slurm-batch)      | Submit a batch job through the scheduler associated with the env. |
-| [`queue\|q`](#subcommand-sched-slurm-queue-q) | List scheduler jobs submitted via Calkit (across SLURM and PBS).  |
-| [`cancel`](#subcommand-sched-slurm-cancel)    | Cancel scheduler jobs by their name in the project.               |
-| [`logs`](#subcommand-sched-slurm-logs)        | Get the logs for scheduler jobs by their name in the project.     |
+| Command                                         | Description                                                       |
+| ----------------------------------------------- | ----------------------------------------------------------------- |
+| [`batch`](#subcommand-scheduler-sch-batch)      | Submit a batch job through the scheduler associated with the env. |
+| [`queue\|q`](#subcommand-scheduler-sch-queue-q) | List scheduler jobs submitted via Calkit (across SLURM and PBS).  |
+| [`cancel`](#subcommand-scheduler-sch-cancel)    | Cancel scheduler jobs by their name in the project.               |
+| [`logs`](#subcommand-scheduler-sch-logs)        | Get the logs for scheduler jobs by their name in the project.     |
 
-<a id="subcommand-sched-slurm-batch"></a>
+<a id="subcommand-scheduler-sch-batch"></a>
 
-#### `calkit sched|slurm batch`
+#### `calkit scheduler|sch batch`
 
 Submit a batch job through the scheduler associated with the env.
 
@@ -2777,7 +2777,7 @@ Duplicates are not allowed, so if one is already running or queued with the same
 Usage:
 
 ```text
-calkit sched|slurm batch [OPTIONS] TARGET [ARGS...]
+calkit scheduler|sch batch [OPTIONS] TARGET [ARGS...]
 ```
 
 Arguments:
@@ -2802,21 +2802,21 @@ Options:
 | `--env-default-options`             | text    | no       | replace | How to apply the environment's default scheduler options: 'replace' (default) uses env defaults only when no options were provided here; 'merge' prepends env defaults (the scheduler's last-occurrence wins, so explicit options still override); 'ignore' never applies env defaults. |
 | `--env-default-setup`               | text    | no       | replace | How to apply the environment's default setup commands: 'replace' (default) uses env defaults only when no setup commands were provided here; 'merge' prepends env defaults; 'ignore' never applies env defaults.                                                                        |
 
-<a id="subcommand-sched-slurm-queue-q"></a>
+<a id="subcommand-scheduler-sch-queue-q"></a>
 
-#### `calkit sched|slurm queue|q`
+#### `calkit scheduler|sch queue|q`
 
 List scheduler jobs submitted via Calkit (across SLURM and PBS).
 
 Usage:
 
 ```text
-calkit sched|slurm queue|q
+calkit scheduler|sch queue|q
 ```
 
-<a id="subcommand-sched-slurm-cancel"></a>
+<a id="subcommand-scheduler-sch-cancel"></a>
 
-#### `calkit sched|slurm cancel`
+#### `calkit scheduler|sch cancel`
 
 Cancel scheduler jobs by their name in the project.
 
@@ -2825,7 +2825,7 @@ A job name may exist in both the SLURM and PBS job lists (e.g., the user re-subm
 Usage:
 
 ```text
-calkit sched|slurm cancel NAMES...
+calkit scheduler|sch cancel NAMES...
 ```
 
 Arguments:
@@ -2834,9 +2834,9 @@ Arguments:
 | -------- | ---- | -------- | ------- | ------------------------ |
 | `names`  | text | yes      |         | Names of jobs to cancel. |
 
-<a id="subcommand-sched-slurm-logs"></a>
+<a id="subcommand-scheduler-sch-logs"></a>
 
-#### `calkit sched|slurm logs`
+#### `calkit scheduler|sch logs`
 
 Get the logs for scheduler jobs by their name in the project.
 
@@ -2845,7 +2845,7 @@ Looks across both SLURM and PBS storage; if no names are given, every tracked jo
 Usage:
 
 ```text
-calkit sched|slurm logs [OPTIONS] [NAMES...]
+calkit scheduler|sch logs [OPTIONS] [NAMES...]
 ```
 
 Arguments:

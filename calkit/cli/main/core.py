@@ -83,7 +83,7 @@ app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
 app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
 app.add_typer(
     scheduler_app,
-    name="sched|slurm",
+    name="scheduler|sch",
     help="Work with a job scheduler (SLURM or PBS).",
 )
 app.add_typer(dev_app, name="dev", help="Developer tools.", hidden=True)

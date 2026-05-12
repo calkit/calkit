@@ -83,7 +83,7 @@ and/or lock file, then run the Python script with the job scheduler.
 
 It's generally a good idea to run the pipeline with something like `tmux`,
 but it's also okay to log off and return to rerun `calkit run`.
-Job state will be monitored so they are not resubmitted.
+Job status will be saved so they are not resubmitted.
 If a job has finished and the pipeline is up-to-date, it won't be rerun.
 On the other hand, if something failed or one of the input files has changed,
 you'll be able to see that with `calkit status`.

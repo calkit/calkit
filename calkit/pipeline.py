@@ -911,17 +911,17 @@ def to_dvc(
         for sname in _pre_validate_slurm_stages
         if sname not in converted_stages
     ]
-    for sname in converted_stages:
-        typer.echo(
-            f"Converted legacy 'sbatch' stage '{sname}' to 'shell-script' "
-            "with 'scheduler' options in calkit.yaml"
-        )
-    for sname in slurm_field_stages:
-        typer.echo(
-            f"Renamed 'slurm' field to 'scheduler' in stage '{sname}' "
-            "in calkit.yaml"
-        )
     if write and (converted_stages or slurm_field_stages):
+        for sname in converted_stages:
+            typer.echo(
+                f"Converted legacy 'sbatch' stage '{sname}' to 'shell-script' "
+                "with 'scheduler' options in calkit.yaml"
+            )
+        for sname in slurm_field_stages:
+            typer.echo(
+                f"Renamed 'slurm' field to 'scheduler' in stage '{sname}' "
+                "in calkit.yaml"
+            )
         ck_yaml_path = (
             os.path.join(wdir, "calkit.yaml") if wdir else "calkit.yaml"
         )

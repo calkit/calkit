@@ -370,8 +370,9 @@ def get_env_lock_fpath(
     elif env_kind in ("slurm", "pbs"):
         # Job-scheduler envs have no external dependency manifest, so the
         # "lock" is just a JSON dump of the env config. The file is
-        # generated during pipeline compilation; see
-        # ``write_scheduler_env_lock``.
+        # written by ``write_scheduler_env_lock`` during environment
+        # checks (e.g., ``calkit check env``) and stage compilation
+        # references it as a DVC dep so changes invalidate cached runs.
         lock_fpath += ".json"
     else:
         return

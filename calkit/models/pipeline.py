@@ -195,6 +195,10 @@ class Stage(BaseModel):
     # Resolved at pipeline-compilation time by set_stage_scheduler_options;
     # all scheduler kinds now emit ``calkit scheduler batch``.
     _scheduler_cli_alias: str = PrivateAttr(default="scheduler")
+    # The outer env's kind (``slurm`` or ``pbs``) when this stage runs
+    # through a job scheduler; used to derive the default log path so the
+    # log file can be tracked as a DVC output.
+    _scheduler_kind: str | None = PrivateAttr(default=None)
 
     @model_validator(mode="before")
     @classmethod
@@ -349,6 +353,37 @@ class Stage(BaseModel):
                 cmd += f" --setup {shlex.quote(setup_cmd)}"
         return cmd
 
+    @property
+    def scheduler_log_output(self) -> PathOutput | None:
+        """The log file produced by a scheduler-batched stage.
+
+        Mirrors the default ``calkit scheduler batch`` chooses at runtime
+        (``.calkit/<kind>/logs/<name>.out``) unless the stage explicitly
+        sets ``scheduler.log_path``. For iterated stages, iteration arg
+        names are interpolated as ``{arg}`` placeholders so the DVC
+        matrix-format pass substitutes them into the per-item path.
+        """
+        if self.scheduler is None or self._scheduler_kind is None:
+            return None
+        log_path = self.scheduler.log_path
+        if log_path is None:
+            log_path = f".calkit/{self._scheduler_kind}/logs/{self.name}"
+            if self.iterate_over is not None:
+                arg_names = []
+                for item in self.iterate_over:
+                    if isinstance(item.arg_name, list):
+                        arg_names += item.arg_name
+                    else:
+                        arg_names.append(item.arg_name)
+                for arg_name in arg_names:
+                    log_path += f"/{{{arg_name}}}"
+            log_path += ".out"
+        return PathOutput(
+            path=log_path,
+            storage=self.scheduler.log_storage,
+            delete_before_run=False,
+        )
+
     def to_dvc(self) -> dict:
         """Convert to a DVC stage.
 
@@ -361,6 +396,18 @@ class Stage(BaseModel):
             if isinstance(i, str) and i not in deps:
                 deps.append(i)
         outs = self.dvc_outs
+        log_out = self.scheduler_log_output
+        if log_out is not None:
+            log_entry = {
+                log_out.path: {
+                    "cache": log_out.storage == "dvc",
+                    "persist": True,
+                }
+            }
+            if not any(
+                isinstance(o, dict) and log_out.path in o for o in outs
+            ):
+                outs.append(log_entry)
         stage = {"cmd": cmd, "deps": deps, "outs": outs}
         if self.wdir is not None:
             stage["wdir"] = self.wdir
@@ -1082,10 +1129,7 @@ class Pipeline(BaseModel):
             if stage.scheduler is None:
                 stage.scheduler = StageSchedulerOptions()
             stage._scheduler_cli_alias = cli_alias
-
-    def set_stage_slurm_options(self, environments: dict[str, dict]) -> None:
-        """Backwards-compatible alias for :meth:`set_stage_scheduler_options`."""
-        self.set_stage_scheduler_options(environments=environments)
+            stage._scheduler_kind = kind
 
     def convert_sbatch_stages(self) -> dict[str, dict]:
         """Replace legacy ``sbatch`` stages with ``shell-script`` equivalents.

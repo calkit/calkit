@@ -30,27 +30,39 @@ _BINARIES = {
     "pbs": {"submit": "qsub", "query": "qstat", "cancel": "qdel"},
 }
 
-
-def _kind_dir(kind: str) -> str:
-    return os.path.join(".calkit", kind)
-
-
-def _jobs_path(kind: str) -> str:
-    return os.path.join(_kind_dir(kind), "jobs.json")
+SCHEDULER_DIR = os.path.join(".calkit", "scheduler")
+JOBS_PATH = os.path.join(SCHEDULER_DIR, "jobs.json")
+LOGS_DIR = os.path.join(SCHEDULER_DIR, "logs")
 
 
-def _load_jobs(kind: str) -> dict:
-    path = _jobs_path(kind)
-    if os.path.isfile(path):
-        with open(path, "r") as f:
+def _ensure_local_gitignore() -> None:
+    """Make sure ``.calkit/scheduler/jobs.json`` is ignored by Git.
+
+    Uses a directory-local ``.gitignore`` so we don't have to touch the
+    project-root ``.gitignore`` or call into the user's git repo.
+    """
+    os.makedirs(SCHEDULER_DIR, exist_ok=True)
+    gitignore_path = os.path.join(SCHEDULER_DIR, ".gitignore")
+    desired = "jobs.json\n"
+    if os.path.isfile(gitignore_path):
+        with open(gitignore_path, "r") as f:
+            if "jobs.json" in f.read().splitlines():
+                return
+    with open(gitignore_path, "w") as f:
+        f.write(desired)
+
+
+def _load_jobs() -> dict:
+    if os.path.isfile(JOBS_PATH):
+        with open(JOBS_PATH, "r") as f:
             return json.load(f)
     return {}
 
 
-def _save_jobs(kind: str, jobs: dict) -> None:
-    path = _jobs_path(kind)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
+def _save_jobs(jobs: dict) -> None:
+    os.makedirs(SCHEDULER_DIR, exist_ok=True)
+    _ensure_local_gitignore()
+    with open(JOBS_PATH, "w") as f:
         json.dump(jobs, f, indent=4)
 
 
@@ -100,11 +112,10 @@ def _detect_local_kind() -> str | None:
     if have_pbs and not have_slurm:
         return "pbs"
     if have_slurm and have_pbs:
-        slurm_jobs = _load_jobs("slurm")
-        pbs_jobs = _load_jobs("pbs")
-        if slurm_jobs and not pbs_jobs:
+        kinds = {info.get("kind") for info in _load_jobs().values()}
+        if "slurm" in kinds and "pbs" not in kinds:
             return "slurm"
-        if pbs_jobs and not slurm_jobs:
+        if "pbs" in kinds and "slurm" not in kinds:
             return "pbs"
         return "slurm"
     return None
@@ -257,7 +268,7 @@ def run_batch(
             f"'{kind}')"
         )
     if log_path is None:
-        log_path = os.path.join(_kind_dir(kind), "logs", f"{name}.out")
+        log_path = os.path.join(LOGS_DIR, f"{name}.out")
     if is_command is None:
         is_command = not os.path.isfile(target)
     # Host check
@@ -310,11 +321,11 @@ def run_batch(
     if not is_command and target not in deps:
         deps = [target] + deps
     # Set up storage
-    os.makedirs(_kind_dir(kind), exist_ok=True)
+    os.makedirs(SCHEDULER_DIR, exist_ok=True)
     logs_dir = os.path.dirname(log_path)
     if logs_dir:
         os.makedirs(logs_dir, exist_ok=True)
-    jobs = _load_jobs(kind)
+    jobs = _load_jobs()
     typer.echo("Computing MD5s for dependencies")
     current_dep_md5s = {}
     for dep in deps:
@@ -329,12 +340,15 @@ def run_batch(
         job_target = job_info.get("target")
         job_args = job_info.get("args", [])
         job_setup = job_info.get("setup", [])
-        running_or_queued = _is_active(kind, job_id)
+        # The recorded job may have been submitted under a different
+        # scheduler kind; use its own kind for activity/cancel checks.
+        prev_kind = job_info.get("kind", kind)
+        running_or_queued = _is_active(prev_kind, job_id)
         should_wait = True
 
         def _cancel_with_reason(reason: str) -> None:
             typer.echo(f"{reason}; canceling existing job ID {job_id}")
-            ok, stderr = _cancel(kind, job_id)
+            ok, stderr = _cancel(prev_kind, job_id)
             if not ok:
                 raise_error(
                     f"Failed to cancel existing job ID {job_id}: {stderr}"
@@ -377,7 +391,7 @@ def run_batch(
             if should_wait:
                 typer.echo("Waiting for job to finish")
             while running_or_queued and should_wait:
-                running_or_queued = _is_active(kind, job_id)
+                running_or_queued = _is_active(prev_kind, job_id)
                 time.sleep(1)
             if should_wait:
                 raise typer.Exit(0)
@@ -405,6 +419,7 @@ def run_batch(
     job_id = p.stdout.strip()
     typer.echo(f"Submitted job with ID: {job_id}")
     new_job = {
+        "kind": kind,
         "job_id": job_id,
         "deps": deps,
         "target": target,
@@ -413,7 +428,7 @@ def run_batch(
         "dep_md5s": current_dep_md5s,
     }
     jobs[name] = new_job
-    _save_jobs(kind, jobs)
+    _save_jobs(jobs)
     typer.echo("Waiting for job to finish")
     running_or_queued = True
     while running_or_queued:
@@ -517,13 +532,16 @@ def _build_pbs_submit(
 @scheduler_app.command(name="queue|q")
 def get_queue() -> None:
     """List scheduler jobs submitted via Calkit (across SLURM and PBS)."""
-    found_any = False
-    for kind in SCHEDULER_KINDS:
-        jobs = _load_jobs(kind)
-        if not jobs:
-            continue
-        found_any = True
-        job_ids = [j["job_id"] for j in jobs.values()]
+    jobs = _load_jobs()
+    if not jobs:
+        typer.echo("No jobs found for this project")
+        raise typer.Exit(0)
+    by_kind: dict[str, list[str]] = {}
+    for info in jobs.values():
+        by_kind.setdefault(info.get("kind", "slurm"), []).append(
+            info["job_id"]
+        )
+    for kind, job_ids in by_kind.items():
         query_bin = _BINARIES[kind]["query"]
         if kind == "slurm":
             subprocess.run(
@@ -539,9 +557,6 @@ def get_queue() -> None:
                 text=True,
                 check=False,
             )
-    if not found_any:
-        typer.echo("No jobs found for this project")
-        raise typer.Exit(0)
 
 
 @scheduler_app.command(name="cancel")
@@ -551,37 +566,28 @@ def cancel_jobs(
         typer.Argument(help="Names of jobs to cancel."),
     ],
 ) -> None:
-    """Cancel scheduler jobs by their name in the project.
-
-    A job name may exist in both the SLURM and PBS job lists (e.g., the
-    user re-submitted under a different scheduler with the same name); in
-    that case all matching jobs are canceled.
-    """
-    all_jobs: dict[str, list[tuple[str, dict]]] = {}
-    for kind in SCHEDULER_KINDS:
-        for n, info in _load_jobs(kind).items():
-            all_jobs.setdefault(n, []).append((kind, info))
-    if not all_jobs:
+    """Cancel scheduler jobs by their name in the project."""
+    jobs = _load_jobs()
+    if not jobs:
         typer.echo("No jobs found for this project")
         raise typer.Exit(0)
     for name in names:
-        if name not in all_jobs:
+        if name not in jobs:
             typer.echo(f"No job named '{name}' found for this project")
             continue
-        for kind, job_info in all_jobs[name]:
-            job_id = job_info["job_id"]
-            if not _is_active(kind, job_id):
-                typer.echo(
-                    f"Job '{name}' (last submitted {kind} ID: {job_id}) "
-                    "is not running or queued"
-                )
-                continue
-            ok, stderr = _cancel(kind, job_id)
-            if not ok:
-                raise_error(
-                    f"Failed to cancel {kind} job ID {job_id}: {stderr}"
-                )
-            typer.echo(f"Canceled {kind} job '{name}' with ID {job_id}")
+        job_info = jobs[name]
+        kind = job_info.get("kind", "slurm")
+        job_id = job_info["job_id"]
+        if not _is_active(kind, job_id):
+            typer.echo(
+                f"Job '{name}' ({kind} ID: {job_id}) "
+                "is not running or queued"
+            )
+            continue
+        ok, stderr = _cancel(kind, job_id)
+        if not ok:
+            raise_error(f"Failed to cancel {kind} job ID {job_id}: {stderr}")
+        typer.echo(f"Canceled {kind} job '{name}' with ID {job_id}")
 
 
 @scheduler_app.command(name="logs")
@@ -599,19 +605,15 @@ def get_logs(
 ) -> None:
     """Get the logs for scheduler jobs by their name in the project.
 
-    Looks across both SLURM and PBS storage; if no names are given, every
-    tracked job's log is shown.
+    If no names are given, every tracked job's log is shown.
     """
     if names is None:
-        names = []
-        for kind in SCHEDULER_KINDS:
-            names += list(_load_jobs(kind).keys())
+        names = list(_load_jobs().keys())
     log_fpaths: list[str] = []
     for name in names:
-        for kind in SCHEDULER_KINDS:
-            log_fpath = os.path.join(_kind_dir(kind), "logs", f"{name}.out")
-            if os.path.isfile(log_fpath):
-                log_fpaths.append(log_fpath)
+        log_fpath = os.path.join(LOGS_DIR, f"{name}.out")
+        if os.path.isfile(log_fpath):
+            log_fpaths.append(log_fpath)
     if not log_fpaths:
         raise_error("No log files found")
     if follow:

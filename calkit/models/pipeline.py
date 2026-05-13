@@ -358,7 +358,7 @@ class Stage(BaseModel):
         """The log file produced by a scheduler-batched stage.
 
         Mirrors the default ``calkit scheduler batch`` chooses at runtime
-        (``.calkit/<kind>/logs/<name>.out``) unless the stage explicitly
+        (``.calkit/scheduler/logs/<name>.out``) unless the stage explicitly
         sets ``scheduler.log_path``. For iterated stages, iteration arg
         names are interpolated as ``{arg}`` placeholders so the DVC
         matrix-format pass substitutes them into the per-item path.
@@ -368,10 +368,10 @@ class Stage(BaseModel):
         log_path = self.scheduler.log_path
         if log_path is None:
             # Mirror what ``calkit scheduler batch`` chooses at runtime: the
-            # CLI joins ``<kind>/logs/<--name>.out`` directly, and the job
-            # name passed via ``scheduler_cmd`` already includes any
+            # CLI joins ``scheduler/logs/<--name>.out`` directly, and the
+            # job name passed via ``scheduler_cmd`` already includes any
             # ``@{arg}`` suffix for iterated stages.
-            log_path = f".calkit/{self._scheduler_kind}/logs/{self.name}"
+            log_path = f".calkit/scheduler/logs/{self.name}"
             if self.iterate_over is not None:
                 arg_names = []
                 for item in self.iterate_over:
@@ -789,7 +789,7 @@ class SBatchStage(Stage):
     def log_output(self) -> PathOutput:
         log_path = self.log_path
         if log_path is None:
-            log_path = f".calkit/slurm/logs/{self.name}"
+            log_path = f".calkit/scheduler/logs/{self.name}"
             if self.iterate_over is not None:
                 arg_names = []
                 for item in self.iterate_over:
@@ -797,8 +797,9 @@ class SBatchStage(Stage):
                         arg_names += item.arg_name
                     else:
                         arg_names.append(item.arg_name)
-                for arg_name in arg_names:
-                    log_path += f"/{{{arg_name}}}"
+                log_path += "@" + ",".join(
+                    f"{{{arg_name}}}" for arg_name in arg_names
+                )
             log_path += ".out"
         return PathOutput(
             path=log_path,

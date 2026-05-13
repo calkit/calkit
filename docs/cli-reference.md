@@ -2820,8 +2820,6 @@ calkit scheduler|sch queue|q
 
 Cancel scheduler jobs by their name in the project.
 
-A job name may exist in both the SLURM and PBS job lists (e.g., the user re-submitted under a different scheduler with the same name); in that case all matching jobs are canceled.
-
 Usage:
 
 ```text
@@ -2840,7 +2838,7 @@ Arguments:
 
 Get the logs for scheduler jobs by their name in the project.
 
-Looks across both SLURM and PBS storage; if no names are given, every tracked job's log is shown.
+If no names are given, every tracked job's log is shown.
 
 Usage:
 

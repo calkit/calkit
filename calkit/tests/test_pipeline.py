@@ -591,7 +591,7 @@ def test_sbatch_stage_to_dvc(tmp_dir):
         },
         write=False,
     )
-    slurm_lock = ".calkit/env-locks/slurm-env.json"
+    slurm_lock = ".calkit/env-locks/slurm-env/info.json"
     stage = stages["job1"]
     print(stage)
     assert stage["cmd"] == (
@@ -773,19 +773,19 @@ def test_slurm_env_validation_rules(tmp_dir):
     assert stages["run-script"]["cmd"] == (
         "calkit scheduler batch --name run-script "
         "--environment mycluster "
-        "--dep .calkit/env-locks/mycluster.json "
+        "--dep .calkit/env-locks/mycluster/info.json "
         "-- scripts/run.sh a b"
     )
     assert stages["run-shell-cmd"]["cmd"] == (
         "calkit scheduler batch --name run-shell-cmd "
         "--environment mycluster "
-        "--dep .calkit/env-locks/mycluster.json "
+        "--dep .calkit/env-locks/mycluster/info.json "
         '--command -- bash --noprofile --norc -c "echo hi"'
     )
     assert stages["run-cmd"]["cmd"] == (
         "calkit scheduler batch --name run-cmd "
         "--environment mycluster "
-        "--dep .calkit/env-locks/mycluster.json "
+        "--dep .calkit/env-locks/mycluster/info.json "
         "--command -- mytool --flag"
     )
 
@@ -901,7 +901,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
         },
         write=False,
     )
-    pbs_lock = ".calkit/env-locks/pbs-env.json"
+    pbs_lock = ".calkit/env-locks/pbs-env/info.json"
     stage = stages["job1"]
     print(stage)
     assert stage["cmd"] == (
@@ -1095,19 +1095,19 @@ def test_pbs_env_validation_rules(tmp_dir):
     assert stages["run-script"]["cmd"] == (
         "calkit scheduler batch --name run-script "
         "--environment mycluster "
-        "--dep .calkit/env-locks/mycluster.json "
+        "--dep .calkit/env-locks/mycluster/info.json "
         "-- scripts/run.sh a b"
     )
     assert stages["run-shell-cmd"]["cmd"] == (
         "calkit scheduler batch --name run-shell-cmd "
         "--environment mycluster "
-        "--dep .calkit/env-locks/mycluster.json "
+        "--dep .calkit/env-locks/mycluster/info.json "
         '--command -- bash --noprofile --norc -c "echo hi"'
     )
     assert stages["run-cmd"]["cmd"] == (
         "calkit scheduler batch --name run-cmd "
         "--environment mycluster "
-        "--dep .calkit/env-locks/mycluster.json "
+        "--dep .calkit/env-locks/mycluster/info.json "
         "--command -- mytool --flag"
     )
 

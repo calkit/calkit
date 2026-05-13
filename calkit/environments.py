@@ -373,7 +373,7 @@ def get_env_lock_fpath(
         # written by ``write_scheduler_env_lock`` during environment
         # checks (e.g., ``calkit check env``) and stage compilation
         # references it as a DVC dep so changes invalidate cached runs.
-        lock_fpath += ".json"
+        lock_fpath = os.path.join(env_lock_dir, env_name, "info.json")
     else:
         return
     if as_posix:

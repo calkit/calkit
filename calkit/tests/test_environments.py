@@ -935,11 +935,11 @@ def test_scheduler_env_lock_files(tmp_dir):
     slurm_lock = calkit.environments.get_env_lock_fpath(
         env=slurm_env, env_name="cluster", as_posix=True
     )
-    assert slurm_lock == ".calkit/env-locks/cluster.json"
+    assert slurm_lock == ".calkit/env-locks/cluster/info.json"
     pbs_lock_path = calkit.environments.get_env_lock_fpath(
         env=pbs_env, env_name="hpc", as_posix=True
     )
-    assert pbs_lock_path == ".calkit/env-locks/hpc.json"
+    assert pbs_lock_path == ".calkit/env-locks/hpc/info.json"
     written = calkit.environments.write_scheduler_env_lock(
         env_name="cluster", env=slurm_env
     )

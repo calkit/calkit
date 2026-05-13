@@ -599,7 +599,8 @@ def test_sbatch_stage_to_dvc(tmp_dir):
         "--environment slurm-env "
         f"--dep data/input.txt --dep {slurm_lock} "
         "--out data/output2.txt "
-        "-s --time=01:00:00 -s --mem=4G -- scripts/run_job.sh something else"
+        "--option --time=01:00:00 --option --mem=4G "
+        "-- scripts/run_job.sh something else"
     )
     # Env-level default_setup / default_options are not baked into the
     # compiled cmd; the batch CLI applies them at submission.
@@ -909,7 +910,7 @@ def test_pbs_stage_to_dvc(tmp_dir):
         "--environment pbs-env "
         f"--dep data/input.txt --dep {pbs_lock} "
         "--out data/output2.txt "
-        "-s -l -s walltime=01:00:00 "
+        "--option -l --option walltime=01:00:00 "
         "-- scripts/run_job.sh something else"
     )
     # Env defaults stay out of the compiled cmd.
@@ -1137,7 +1138,7 @@ def test_generic_scheduler_key(tmp_dir):
         },
         write=False,
     )
-    assert "-s --time=01:00:00" in slurm_stages["run"]["cmd"]
+    assert "--option --time=01:00:00" in slurm_stages["run"]["cmd"]
     assert "calkit scheduler batch" in slurm_stages["run"]["cmd"]
     pbs_stages = calkit.pipeline.to_dvc(
         ck_info={
@@ -1155,7 +1156,7 @@ def test_generic_scheduler_key(tmp_dir):
         },
         write=False,
     )
-    assert "-s -l -s walltime=01:00:00" in pbs_stages["run"]["cmd"]
+    assert "--option -l --option walltime=01:00:00" in pbs_stages["run"]["cmd"]
     assert "calkit scheduler batch" in pbs_stages["run"]["cmd"]
     # Setting both scheduler: and slurm: should fail at parse time.
     with pytest.raises(

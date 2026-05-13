@@ -280,7 +280,8 @@ def test_sbatchstage():
         "calkit scheduler batch --name job1 "
         "--environment slurm-env "
         "--dep data/input.txt --out data/output.txt "
-        "-s --time=01:00:00 -s --mem=4G -- scripts/run_job.sh something else"
+        "--option --time=01:00:00 --option --mem=4G "
+        "-- scripts/run_job.sh something else"
     )
     assert "--env-default-options" not in sd["cmd"]
     assert "--env-default-setup" not in sd["cmd"]

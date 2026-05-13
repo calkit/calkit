@@ -347,7 +347,7 @@ class Stage(BaseModel):
                         cmd += txt
         if opts.options is not None:
             for opt in opts.options:
-                cmd += f" -s {opt}"
+                cmd += f" --option {opt}"
         if opts.setup is not None:
             for setup_cmd in opts.setup:
                 cmd += f" --setup {shlex.quote(setup_cmd)}"

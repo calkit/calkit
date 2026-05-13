@@ -777,6 +777,11 @@ class JuliaCommandStage(Stage):
         return cmd
 
 
+# TODO: ``sbatch`` stages are deprecated; ``convert_sbatch_stages`` rewrites
+# them into ``shell-script`` + ``scheduler:`` on pipeline compile. Once the
+# new schema has had enough time to propagate in the wild, drop this class,
+# the union entry, the ``plain_ok_kinds`` carve-out, and
+# ``convert_sbatch_stages`` to remove the legacy complexity.
 class SBatchStage(Stage):
     kind: Literal["sbatch"] = "sbatch"
     script_path: RelativeChildPathString

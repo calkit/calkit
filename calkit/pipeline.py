@@ -1041,6 +1041,9 @@ def to_dvc(
             outputs = stage.outputs.copy()
             if stage.kind == "jupyter-notebook":
                 outputs += stage.notebook_outputs
+            sched_log = stage.scheduler_log_output
+            if sched_log is not None:
+                outputs.append(sched_log)
             # Build the set of current DVC output paths so we can detect stale
             # .gitignore entries from the previous version of the stage,
             # including synthesized outputs like LaTeX PDFs

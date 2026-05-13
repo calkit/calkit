@@ -367,6 +367,10 @@ class Stage(BaseModel):
             return None
         log_path = self.scheduler.log_path
         if log_path is None:
+            # Mirror what ``calkit scheduler batch`` chooses at runtime: the
+            # CLI joins ``<kind>/logs/<--name>.out`` directly, and the job
+            # name passed via ``scheduler_cmd`` already includes any
+            # ``@{arg}`` suffix for iterated stages.
             log_path = f".calkit/{self._scheduler_kind}/logs/{self.name}"
             if self.iterate_over is not None:
                 arg_names = []
@@ -375,8 +379,9 @@ class Stage(BaseModel):
                         arg_names += item.arg_name
                     else:
                         arg_names.append(item.arg_name)
-                for arg_name in arg_names:
-                    log_path += f"/{{{arg_name}}}"
+                log_path += "@" + ",".join(
+                    f"{{{arg_name}}}" for arg_name in arg_names
+                )
             log_path += ".out"
         return PathOutput(
             path=log_path,

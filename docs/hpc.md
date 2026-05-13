@@ -102,10 +102,6 @@ pipeline:
       kind: python-script
       script_path: scripts/run.py
       environment: cluster1:my-conda-env
-      inputs:
-        - results/raw
-      outputs:
-        - results/summary.csv
       scheduler:
         env_default_options: replace # Default; can also be `ignore` or `merge`
         options:
@@ -116,6 +112,10 @@ pipeline:
         setup:
           - module purge
           - module load something/else
+      inputs:
+        - results/raw
+      outputs:
+        - results/summary.csv
 ```
 
 ## Monitoring

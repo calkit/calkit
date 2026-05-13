@@ -99,28 +99,6 @@ def _cancel(kind: str, job_id: str) -> tuple[bool, str]:
     return p.returncode == 0, p.stderr
 
 
-def _detect_local_kind() -> str | None:
-    """Return the scheduler kind whose submit binary is on PATH.
-
-    If both are available, prefer the one that has at least one tracked
-    job in the project; otherwise fall back to slurm.
-    """
-    have_slurm = shutil.which("sbatch") is not None
-    have_pbs = shutil.which("qsub") is not None
-    if have_slurm and not have_pbs:
-        return "slurm"
-    if have_pbs and not have_slurm:
-        return "pbs"
-    if have_slurm and have_pbs:
-        kinds = {info.get("kind") for info in _load_jobs().values()}
-        if "slurm" in kinds and "pbs" not in kinds:
-            return "slurm"
-        if "pbs" in kinds and "slurm" not in kinds:
-            return "pbs"
-        return "slurm"
-    return None
-
-
 @scheduler_app.command(name="batch")
 def run_batch(
     name: Annotated[

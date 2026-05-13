@@ -158,7 +158,6 @@ def run_batch(
         typer.Option(
             "--option",
             "-s",
-            "--sbatch-option",
             help=(
                 "Additional options to pass to the scheduler submit command "
                 "(no spaces allowed)."

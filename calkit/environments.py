@@ -374,6 +374,8 @@ def get_env_lock_fpath(
         # checks (e.g., ``calkit check env``) and stage compilation
         # references it as a DVC dep so changes invalidate cached runs.
         lock_fpath = os.path.join(env_lock_dir, env_name, "info.json")
+        if for_dvc:
+            lock_fpath = os.path.dirname(lock_fpath)
     else:
         return
     if as_posix:

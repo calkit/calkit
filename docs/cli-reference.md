@@ -46,7 +46,7 @@
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                   |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                            |
 | [`cloud`](#command-group-cloud)                  | Interact with a Calkit Cloud.                                      |
-| [`slurm`](#command-group-slurm)                  | Work with SLURM.                                                   |
+| [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                          |
 | [`dev`](#command-group-dev)                      | Developer tools.                                                   |
 
 ## Top-level command details
@@ -797,6 +797,7 @@ Create a new Calkit object.
 | [`conda-env`](#subcommand-new-create-conda-env)                           | Create a new Conda environment.                                       |
 | [`uv-env`](#subcommand-new-create-uv-env)                                 | Create a new uv project environment.                                  |
 | [`slurm-env`](#subcommand-new-create-slurm-env)                           | Create a new SLURM environment.                                       |
+| [`pbs-env`](#subcommand-new-create-pbs-env)                               | Create a new PBS environment.                                         |
 | [`uv-venv`](#subcommand-new-create-uv-venv)                               | Create a new uv virtual environment.                                  |
 | [`venv`](#subcommand-new-create-venv)                                     | Create a new Python virtual environment with venv.                    |
 | [`pixi-env`](#subcommand-new-create-pixi-env)                             | Create a new pixi virtual environment.                                |
@@ -1140,6 +1141,30 @@ Options:
 | `--description`     | text    | no       |           | Description.                                                                                                               |
 | `--overwrite`, `-f` | boolean | no       | False     | Overwrite any existing environment with this name.                                                                         |
 | `--no-commit`       | boolean | no       | False     | Do not commit changes.                                                                                                     |
+
+<a id="subcommand-new-create-pbs-env"></a>
+
+#### `calkit new|create pbs-env`
+
+Create a new PBS environment.
+
+Usage:
+
+```text
+calkit new|create pbs-env [OPTIONS]
+```
+
+Options:
+
+| Option              | Type    | Required | Default   | Description                                                                                                                   |
+| ------------------- | ------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`      | text    | yes      |           | Environment name.                                                                                                             |
+| `--host`            | text    | no       | localhost | Host where PBS commands should run.                                                                                           |
+| `--default-option`  | text    | no       |           | Default qsub option string (for example --default-option=-l --default-option=walltime=01:00:00). Repeat for multiple options. |
+| `--default-setup`   | text    | no       |           | Default shell setup command to run before PBS jobs (for example 'module load julia/1.11'). Repeat for multiple commands.      |
+| `--description`     | text    | no       |           | Description.                                                                                                                  |
+| `--overwrite`, `-f` | boolean | no       | False     | Overwrite any existing environment with this name.                                                                            |
+| `--no-commit`       | boolean | no       | False     | Do not commit changes.                                                                                                        |
 
 <a id="subcommand-new-create-uv-venv"></a>
 
@@ -2728,75 +2753,77 @@ Options:
 | --------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------- |
 | `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config. |
 
-<a id="command-group-slurm"></a>
+<a id="command-group-scheduler-sch"></a>
 
-### `calkit slurm`
+### `calkit scheduler|sch`
 
-Work with SLURM.
+Work with a job scheduler (SLURM or PBS).
 
-| Command                              | Description                                              |
-| ------------------------------------ | -------------------------------------------------------- |
-| [`batch`](#subcommand-slurm-batch)   | Submit a SLURM batch job for the project.                |
-| [`queue`](#subcommand-slurm-queue)   | List SLURM jobs submitted via Calkit.                    |
-| [`cancel`](#subcommand-slurm-cancel) | Cancel SLURM jobs by their name in the project.          |
-| [`logs`](#subcommand-slurm-logs)     | Get the logs for a SLURM job by its name in the project. |
+| Command                                         | Description                                                       |
+| ----------------------------------------------- | ----------------------------------------------------------------- |
+| [`batch`](#subcommand-scheduler-sch-batch)      | Submit a batch job through the scheduler associated with the env. |
+| [`queue\|q`](#subcommand-scheduler-sch-queue-q) | List scheduler jobs submitted via Calkit (across SLURM and PBS).  |
+| [`cancel`](#subcommand-scheduler-sch-cancel)    | Cancel scheduler jobs by their name in the project.               |
+| [`logs`](#subcommand-scheduler-sch-logs)        | Get the logs for scheduler jobs by their name in the project.     |
 
-<a id="subcommand-slurm-batch"></a>
+<a id="subcommand-scheduler-sch-batch"></a>
 
-#### `calkit slurm batch`
+#### `calkit scheduler|sch batch`
 
-Submit a SLURM batch job for the project.
+Submit a batch job through the scheduler associated with the env.
 
 Duplicates are not allowed, so if one is already running or queued with the same name, we'll wait for it to finish. The only exception is if the dependencies have changed, in which case any queued or running jobs will be canceled and a new one submitted.
 
 Usage:
 
 ```text
-calkit slurm batch [OPTIONS] TARGET [ARGS...]
+calkit scheduler|sch batch [OPTIONS] TARGET [ARGS...]
 ```
 
 Arguments:
 
-| Argument | Type | Required | Default | Description                                                     |
-| -------- | ---- | -------- | ------- | --------------------------------------------------------------- |
-| `target` | text | yes      |         | The target to run. This can be a shell script or an executable. |
-| `args`   | text | no       |         | Arguments for sbatch, the first of which should be the script.  |
+| Argument | Type | Required | Default | Description                                                                  |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `target` | text | yes      |         | The target to run. This can be a shell script or an executable.              |
+| `args`   | text | no       |         | Arguments for the target command, passed to the job script after the target. |
 
 Options:
 
-| Option                  | Type    | Required | Default | Description                                                                                                        |
-| ----------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------ |
-| `--name`, `-n`          | text    | yes      |         | Job name.                                                                                                          |
-| `--environment`, `-e`   | text    | yes      |         | Calkit (slurm) environment to use for the job.                                                                     |
-| `--dep`, `-d`           | text    | no       |         | Additional dependencies to track, which if changed signify a job is invalid.                                       |
-| `--out`, `-o`           | text    | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job. |
-| `--sbatch-option`, `-s` | text    | no       |         | Additional options to pass to sbatch (no spaces allowed).                                                          |
-| `--setup`               | text    | no       |         | Shell setup command to run before launching the target (repeat for multiple commands).                             |
-| `--log-path`            | text    | no       |         | Output log path.                                                                                                   |
-| `--command`             | boolean | no       |         | Whether the target is a command instead of a script.                                                               |
+| Option                  | Type    | Required | Default | Description                                                                                                                                                                                                                                                                             |
+| ----------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | text    | yes      |         | Job name.                                                                                                                                                                                                                                                                               |
+| `--environment`, `-e`   | text    | yes      |         | Calkit (scheduler) environment to use for the job.                                                                                                                                                                                                                                      |
+| `--dep`, `-d`           | text    | no       |         | Additional dependencies to track, which if changed signify a job is invalid.                                                                                                                                                                                                            |
+| `--out`, `-o`           | text    | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job.                                                                                                                                                                      |
+| `--option`, `-s`        | text    | no       |         | Additional options to pass to the scheduler submit command (no spaces allowed).                                                                                                                                                                                                         |
+| `--setup`               | text    | no       |         | Shell setup command to run before launching the target (repeat for multiple commands).                                                                                                                                                                                                  |
+| `--log-path`            | text    | no       |         | Output log path.                                                                                                                                                                                                                                                                        |
+| `--command`             | boolean | no       |         | Whether the target is a command instead of a script.                                                                                                                                                                                                                                    |
+| `--env-default-options` | text    | no       | replace | How to apply the environment's default scheduler options: 'replace' (default) uses env defaults only when no options were provided here; 'merge' prepends env defaults (the scheduler's last-occurrence wins, so explicit options still override); 'ignore' never applies env defaults. |
+| `--env-default-setup`   | text    | no       | replace | How to apply the environment's default setup commands: 'replace' (default) uses env defaults only when no setup commands were provided here; 'merge' prepends env defaults; 'ignore' never applies env defaults.                                                                        |
 
-<a id="subcommand-slurm-queue"></a>
+<a id="subcommand-scheduler-sch-queue-q"></a>
 
-#### `calkit slurm queue`
+#### `calkit scheduler|sch queue|q`
 
-List SLURM jobs submitted via Calkit.
+List scheduler jobs submitted via Calkit (across SLURM and PBS).
 
 Usage:
 
 ```text
-calkit slurm queue
+calkit scheduler|sch queue|q
 ```
 
-<a id="subcommand-slurm-cancel"></a>
+<a id="subcommand-scheduler-sch-cancel"></a>
 
-#### `calkit slurm cancel`
+#### `calkit scheduler|sch cancel`
 
-Cancel SLURM jobs by their name in the project.
+Cancel scheduler jobs by their name in the project.
 
 Usage:
 
 ```text
-calkit slurm cancel NAMES...
+calkit scheduler|sch cancel NAMES...
 ```
 
 Arguments:
@@ -2805,16 +2832,18 @@ Arguments:
 | -------- | ---- | -------- | ------- | ------------------------ |
 | `names`  | text | yes      |         | Names of jobs to cancel. |
 
-<a id="subcommand-slurm-logs"></a>
+<a id="subcommand-scheduler-sch-logs"></a>
 
-#### `calkit slurm logs`
+#### `calkit scheduler|sch logs`
 
-Get the logs for a SLURM job by its name in the project.
+Get the logs for scheduler jobs by their name in the project.
+
+If no names are given, every tracked job's log is shown.
 
 Usage:
 
 ```text
-calkit slurm logs [OPTIONS] [NAMES...]
+calkit scheduler|sch logs [OPTIONS] [NAMES...]
 ```
 
 Arguments:

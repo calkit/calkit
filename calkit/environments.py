@@ -37,9 +37,9 @@ CONDA_VENV_ARCHS = [
     "win-64",
 ]
 ENV_CHECK_CACHE_TTL_SECONDS = 3600
-KINDS_NO_CHECK = ["_system", "slurm", "ssh"]
+KINDS_NO_CHECK = ["_system", "ssh"]
 COMPOSITE_ENV_SEP = ":"
-VALID_OUTER_ENV_KINDS = ["slurm"]
+VALID_OUTER_ENV_KINDS = ["slurm", "pbs"]
 
 
 def get_julia_packages_dir() -> str:
@@ -367,10 +367,70 @@ def get_env_lock_fpath(
         # Replace DESCRIPTION with renv.lock
         env_dir = os.path.dirname(env_path)
         lock_fpath = os.path.join(env_dir, "renv.lock")
+    elif env_kind in ("slurm", "pbs"):
+        # Job-scheduler envs have no external dependency manifest, so the
+        # "lock" is just a JSON dump of the env config. The file is
+        # written by ``write_scheduler_env_lock`` during environment
+        # checks (e.g., ``calkit check env``) and stage compilation
+        # references it as a DVC dep so changes invalidate cached runs.
+        lock_fpath = os.path.join(env_lock_dir, env_name, "info.json")
+        if for_dvc:
+            lock_fpath = os.path.dirname(lock_fpath)
     else:
         return
     if as_posix:
         lock_fpath = Path(lock_fpath).as_posix()
+    return lock_fpath
+
+
+def write_scheduler_env_lock(
+    env_name: str,
+    env: dict,
+    wdir: str | None = None,
+) -> str | None:
+    """Write a JSON lock file for a SLURM or PBS environment.
+
+    The lock file simply contains a deterministic JSON dump of the env
+    config so DVC can use it as a stage dependency: when the env's
+    ``default_options``, ``default_setup``, ``host``, etc. change, the
+    lock file changes and any stage that depends on it is invalidated.
+
+    Parameters
+    ----------
+    env_name : str
+        Environment name as it appears in ``calkit.yaml``.
+    env : dict
+        Environment configuration dict.
+    wdir : str | None
+        Working directory; defaults to the current process cwd.
+
+    Returns
+    -------
+    str | None
+        The lock file path (relative to ``wdir`` if provided), or ``None``
+        if the env kind has no scheduler lock file.
+    """
+    if env.get("kind") not in ("slurm", "pbs"):
+        return None
+    lock_fpath = get_env_lock_fpath(
+        env=env, env_name=env_name, wdir=wdir, as_posix=True
+    )
+    if lock_fpath is None:
+        return None
+    full_path = (
+        os.path.join(wdir, lock_fpath) if wdir is not None else lock_fpath
+    )
+    parent = os.path.dirname(full_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    content = json.dumps(env, indent=2, sort_keys=True) + "\n"
+    if os.path.isfile(full_path):
+        with open(full_path, "r") as f:
+            existing = f.read()
+        if existing == content:
+            return lock_fpath
+    with open(full_path, "w") as f:
+        f.write(content)
     return lock_fpath
 
 

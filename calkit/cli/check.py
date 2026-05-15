@@ -264,6 +264,7 @@ def check_environment(
         get_all_docker_lock_fpaths,
         get_all_venv_lock_fpaths,
         get_env_lock_fpath,
+        write_scheduler_env_lock,
     )
 
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
@@ -405,6 +406,12 @@ def check_environment(
             verbose=verbose,
             cache_key=env_name,
         )
+    elif env["kind"] in ("slurm", "pbs"):
+        # Job-scheduler envs have no external manifest to validate; the
+        # "check" is just writing a deterministic JSON lock file from the
+        # env config so DVC stages that depend on the env get invalidated
+        # when the config changes.
+        write_scheduler_env_lock(env_name=env_name, env=env)
     else:
         raise_error(f"Environment kind '{env['kind']}' not supported")
     return get_env_lock_fpath(env=env, env_name=env_name, as_posix=False)

@@ -115,16 +115,6 @@ For more details, see `calkit.models.pipeline`.
 
 - `command`
 
-### `sbatch`
-
-- `script_path`
-- `args`
-- `sbatch_options`
-
-This stage type runs a script with `sbatch`, which is a common way to run
-jobs on a high performance computing (HPC) cluster that uses the SLURM
-job scheduler.
-
 ## Iteration
 
 ### Over a list of values
@@ -296,7 +286,7 @@ Common stage parameters:
 | `always_run`   | bool                                | no       | False   |
 | `iterate_over` | list[StageIteration] \| None        | no       | null    |
 | `description`  | str \| None                         | no       | null    |
-| `slurm`        | StageSlurmOptions \| None           | no       | null    |
+| `scheduler`    | StageSchedulerOptions \| None       | no       | null    |
 
 ### `command`
 

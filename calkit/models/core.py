@@ -71,6 +71,7 @@ class Environment(BaseModel):
         "docker",
         "julia",
         "matlab",
+        "pbs",
         "poetry",
         "npm",
         "yarn",
@@ -139,6 +140,13 @@ class MatlabEnvironment(Environment):
 
 class SlurmEnvironment(Environment):
     kind: Literal["slurm"] = "slurm"
+    host: str = "localhost"
+    default_options: list[str] | None = None
+    default_setup: list[str] | None = None
+
+
+class PBSEnvironment(Environment):
+    kind: Literal["pbs"] = "pbs"
     host: str = "localhost"
     default_options: list[str] | None = None
     default_setup: list[str] | None = None
@@ -315,6 +323,7 @@ class ProjectInfo(BaseModel):
         | JuliaEnvironment
         | MatlabEnvironment
         | SlurmEnvironment
+        | PBSEnvironment
         | VenvEnvironment
         | UvEnvironment
         | UvVenvEnvironment

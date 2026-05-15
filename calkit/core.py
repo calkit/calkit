@@ -171,6 +171,18 @@ def load_calkit_info(
     return info
 
 
+def save_calkit_info(
+    info: dict,
+    wdir: str | PathLike | None = None,
+) -> None:
+    """Save Calkit project information to ``calkit.yaml``."""
+    fpath = "calkit.yaml"
+    if wdir is not None:
+        fpath = os.path.join(wdir, fpath)
+    with open(fpath, "w") as f:
+        ryaml.dump(info, f)
+
+
 def load_calkit_info_object(
     wdir: str | None = None,
     process_includes: bool | str | list[str] = False,

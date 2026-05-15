@@ -19,16 +19,63 @@ import {
   type SlurmLaunchOptions,
 } from "./environments";
 import { getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath } from "./notebooks";
-import type { CalkitInfo } from "./types";
+import type { CalkitInfo, DvcYaml, EnvDescription } from "./types";
+import { CalkitSidebarProvider } from "./sidebar";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
 const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
+const COMMAND_EDIT_ENV = "calkit-vscode.editEnvironment";
+const COMMAND_OPEN_STAGE_FILE = "calkit-vscode.openStageFile";
 const COMMAND_START_SLURM = "calkit-vscode.startCalkitSlurmJob";
 const COMMAND_STOP_SLURM = "calkit-vscode.stopCalkitSlurmJob";
 const COMMAND_RESTART_JOB = "calkit-vscode.restartCalkitJob";
+const COMMAND_SHOW_PROVENANCE = "calkit-vscode.showProvenance";
+const COMMAND_RUN_STAGE = "calkit-vscode.runStage";
+const COMMAND_RUN_STAGE_FOR_FILE = "calkit-vscode.runStageForFile";
+const COMMAND_RUN_PIPELINE = "calkit-vscode.runPipeline";
+const COMMAND_SHOW_DAG = "calkit-vscode.showPipelineDag";
+const COMMAND_NEW_STAGE = "calkit-vscode.newStage";
+const COMMAND_EDIT_STAGE = "calkit-vscode.editStage";
+const COMMAND_DEFINE_PROVENANCE = "calkit-vscode.defineProvenance";
+const COMMAND_DEFINE_ARTIFACT_STAGE = "calkit-vscode.defineArtifactStage";
+const COMMAND_DEFINE_ARTIFACT_IMPORT = "calkit-vscode.defineArtifactImport";
+const COMMAND_RUN_ARTIFACT_STAGE = "calkit-vscode.runArtifactStage";
+const COMMAND_RUN_NOTEBOOK_STAGE = "calkit-vscode.runNotebookStage";
+const COMMAND_EDIT_NOTEBOOK_STAGE = "calkit-vscode.editNotebookStage";
+const COMMAND_DEFINE_NOTEBOOK_STAGE = "calkit-vscode.defineNotebookStage";
+const COMMAND_REFRESH_SIDEBAR = "calkit-vscode.refreshSidebar";
+const COMMAND_OPEN_CALKIT_YAML = "calkit-vscode.openCalkitYaml";
+const COMMAND_OPEN_FIGURES_CAROUSEL = "calkit-vscode.openFiguresCarousel";
+const COMMAND_OPEN_FILE_HISTORY = "calkit-vscode.openFileHistory";
+const FIGURE_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".svg",
+  ".pdf",
+  ".eps",
+  ".tiff",
+  ".tif",
+]);
+const DATASET_EXTENSIONS = new Set([
+  ".csv",
+  ".h5",
+  ".hdf5",
+  ".parquet",
+  ".nc",
+  ".zarr",
+  ".feather",
+  ".arrow",
+  ".avro",
+  ".json",
+  ".jsonl",
+  ".ndjson",
+]);
+const NOTEBOOK_EXTENSION = ".ipynb";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
 const execFileAsync = promisify(execFile);
-const DEFAULT_MIN_CALKIT_VERSION = "0.37.3";
+const DEFAULT_MIN_CALKIT_VERSION = "0.38.3";
 const DEFAULT_NOTEBOOK_SLURM_TIME = "120";
 const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
 const MISSING_IJULIA_ERROR_TEXT =
@@ -44,6 +91,23 @@ const configuredNotebooksThisSession = new Set<string>();
 const slurmAutoStartDeclinedThisSession = new Set<string>();
 const slurmAutoStartSuppressedThisSession = new Set<string>();
 let hasCheckedCalkitCli = false;
+const pipelineOutputUris = new Set<string>();
+const staleOutputUris = new Set<string>();
+const staleStageNames = new Set<string>();
+const importedFigureUris = new Set<string>();
+const pipelineNotebookUris = new Set<string>();
+let pipelineDecorationProvider: vscode.Disposable | undefined;
+let currentCalkitConfig: CalkitInfo | undefined;
+let currentDvcYaml: DvcYaml | undefined;
+let currentEnvDescriptions: Record<string, EnvDescription> | undefined;
+let currentDetectedNotebooks: string[] = [];
+let currentDetectedFigures: string[] = [];
+let currentDetectedDatasets: string[] = [];
+let sidebarProvider: CalkitSidebarProvider | undefined;
+let sidebarTreeView:
+  | vscode.TreeView<import("./sidebar").SidebarItem>
+  | undefined;
+let refreshDebounceTimer: NodeJS.Timeout | undefined;
 
 function log(message: string): void {
   if (outputChannel) {
@@ -99,9 +163,80 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         return;
       }
-      await runCreateEnvironmentWizard(workspaceRoot);
+      await showEnvCreatorWebview(context, workspaceRoot);
       await refreshNotebookToolbarContext(context);
     }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_EDIT_ENV,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const envName = item?.nodeId;
+        if (!envName) {
+          return;
+        }
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const env = currentCalkitConfig?.environments?.[envName];
+        const desc = currentEnvDescriptions?.[envName];
+        const specPath =
+          desc?.spec_path ??
+          (typeof env?.path === "string" ? env.path : undefined);
+        await showEnvCreatorWebview(
+          context,
+          workspaceRoot,
+          envName,
+          env,
+          specPath,
+        );
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_OPEN_STAGE_FILE,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const stageName = item?.nodeId;
+        if (!stageName) {
+          return;
+        }
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
+        const filePath =
+          (typeof stage?.notebook_path === "string"
+            ? stage.notebook_path
+            : undefined) ??
+          (typeof stage?.script_path === "string"
+            ? stage.script_path
+            : undefined) ??
+          (typeof stage?.target_path === "string"
+            ? stage.target_path
+            : undefined);
+        if (!filePath) {
+          void vscode.window.showErrorMessage(
+            `No source file found for stage '${stageName}'.`,
+          );
+          return;
+        }
+        const fileUri = vscode.Uri.file(path.join(workspaceRoot, filePath));
+        if (filePath.endsWith(".ipynb")) {
+          await vscode.commands.executeCommand(
+            "vscode.openWith",
+            fileUri,
+            "jupyter-notebook",
+          );
+        } else {
+          await vscode.window.showTextDocument(fileUri);
+        }
+      },
+    ),
   );
 
   context.subscriptions.push(
@@ -123,8 +258,422 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_SHOW_PROVENANCE,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        if (!fileUri) {
+          void vscode.window.showErrorMessage(
+            "No file selected to show source for.",
+          );
+          return;
+        }
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const stageName = await findStageForFile(workspaceRoot, fileUri);
+        if (!stageName) {
+          void vscode.window.showErrorMessage(
+            `No pipeline stage found for '${path.basename(fileUri.fsPath)}'.`,
+          );
+          return;
+        }
+        const stageItem = sidebarProvider?.findStageItem(stageName);
+        if (stageItem && sidebarTreeView) {
+          await sidebarTreeView.reveal(stageItem, {
+            select: true,
+            focus: true,
+            expand: true,
+          });
+        }
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_RUN_STAGE,
+      (item?: import("./sidebar").SidebarItem) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const stageName = item?.nodeId;
+        if (!stageName) {
+          return;
+        }
+        runStageInTerminal(workspaceRoot, stageName);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_RUN_STAGE_FOR_FILE,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        if (!fileUri) {
+          return;
+        }
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const stageName = await findStageForFile(workspaceRoot, fileUri);
+        if (!stageName) {
+          void vscode.window.showErrorMessage(
+            `No pipeline stage found for '${path.basename(fileUri.fsPath)}'.`,
+          );
+          return;
+        }
+        runStageInTerminal(workspaceRoot, stageName);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_RUN_PIPELINE, () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
+      terminal.show();
+      terminal.sendText("calkit run");
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_SHOW_DAG, () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      showDagPanel(context, workspaceRoot);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_NEW_STAGE, async () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      await showStageEditor(context, workspaceRoot, undefined);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_EDIT_STAGE,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const stageName = item?.nodeId;
+        if (!stageName) {
+          return;
+        }
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
+        await showStageEditor(
+          context,
+          workspaceRoot,
+          undefined,
+          undefined,
+          stageName,
+          stage,
+        );
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_DEFINE_PROVENANCE,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        if (!fileUri) {
+          return;
+        }
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        await defineProvenance(context, workspaceRoot, fileUri);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_DEFINE_ARTIFACT_STAGE,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const artifactPath = item?.nodeId;
+        if (!artifactPath) {
+          return;
+        }
+        const artifactKind =
+          item?.nodeKind === "dataset" ? "dataset" : "figure";
+        await showStageEditor(
+          context,
+          workspaceRoot,
+          artifactPath,
+          undefined,
+          undefined,
+          undefined,
+          artifactKind,
+        );
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_DEFINE_ARTIFACT_IMPORT,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const artifactPath = item?.nodeId;
+        if (!artifactPath) {
+          return;
+        }
+        const artifactKind =
+          item?.nodeKind === "dataset" ? "dataset" : "figure";
+        const url = await vscode.window.showInputBox({
+          prompt: `URL this ${artifactKind} was imported from`,
+          placeHolder: "https://...",
+        });
+        if (!url) {
+          return;
+        }
+        try {
+          await execFileAsync(
+            "calkit",
+            ["update", artifactKind, artifactPath, "--imported-from-url", url],
+            { cwd: workspaceRoot },
+          );
+          void refreshPipelineOutputContext(context);
+        } catch (error: unknown) {
+          const err = error as { stderr?: string; message?: string };
+          void vscode.window.showErrorMessage(
+            (err.stderr ?? err.message ?? String(error)).trim(),
+          );
+        }
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_RUN_ARTIFACT_STAGE,
+      (item?: import("./sidebar").SidebarItem) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot || !item?.nodeId) {
+          return;
+        }
+        const artifactPath = item.nodeId;
+        const allEntries = [
+          ...(currentCalkitConfig?.figures ?? []),
+          ...(currentCalkitConfig?.datasets ?? []),
+        ];
+        const entry = allEntries.find((e) => e.path === artifactPath);
+        const stageName =
+          typeof entry?.stage === "string" ? entry.stage : undefined;
+        if (!stageName) {
+          void vscode.window.showErrorMessage(
+            `No pipeline stage found for '${artifactPath}'.`,
+          );
+          return;
+        }
+        const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
+        terminal.show(true);
+        terminal.sendText(`calkit run ${shQuote(stageName)}`);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_RUN_NOTEBOOK_STAGE, async () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
+      if (!notebookUri) {
+        return;
+      }
+      const stageName = await findStageForFile(workspaceRoot, notebookUri);
+      if (!stageName) {
+        void vscode.window.showErrorMessage(
+          "No pipeline stage found for this notebook.",
+        );
+        return;
+      }
+      const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
+      terminal.show(true);
+      terminal.sendText(`calkit run ${stageName}`);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_EDIT_NOTEBOOK_STAGE, async () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
+      if (!notebookUri) {
+        return;
+      }
+      const stageName = await findStageForFile(workspaceRoot, notebookUri);
+      if (!stageName) {
+        void vscode.window.showErrorMessage(
+          "No pipeline stage found for this notebook.",
+        );
+        return;
+      }
+      const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
+      await showStageEditor(
+        context,
+        workspaceRoot,
+        undefined,
+        undefined,
+        stageName,
+        stage,
+      );
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_DEFINE_NOTEBOOK_STAGE, async () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
+      if (!notebookUri) {
+        return;
+      }
+      const relPath = path
+        .relative(workspaceRoot, notebookUri.fsPath)
+        .replace(/\\/g, "/");
+      const profile = getLaunchProfileForActiveNotebook(context);
+      const envName = profile?.environmentName;
+      const prefillStage = envName
+        ? { kind: "jupyter-notebook", environment: envName }
+        : { kind: "jupyter-notebook" };
+      await showStageEditor(
+        context,
+        workspaceRoot,
+        undefined,
+        relPath,
+        undefined,
+        prefillStage,
+      );
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_OPEN_CALKIT_YAML, () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      const fileUri = vscode.Uri.file(path.join(workspaceRoot, "calkit.yaml"));
+      void vscode.commands.executeCommand("vscode.open", fileUri);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_REFRESH_SIDEBAR, async () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (workspaceRoot) {
+        await scanDetectedFiles(workspaceRoot);
+      }
+      void refreshPipelineOutputContext(context);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_OPEN_FIGURES_CAROUSEL,
+      (item?: import("./sidebar").SidebarItem) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const figList = currentCalkitConfig?.figures ?? [];
+        const knownPaths = new Set(figList.map((f) => f.path));
+        const allPaths = [...knownPaths];
+        for (const p of currentDetectedFigures) {
+          if (!knownPaths.has(p)) {
+            allPaths.push(p);
+          }
+        }
+        if (allPaths.length === 0) {
+          void vscode.window.showInformationMessage("No figures found.");
+          return;
+        }
+        // If triggered from a specific figure item, start at that index
+        const startPath = item?.nodeKind === "figure" ? item.nodeId : undefined;
+        const startIndex = startPath
+          ? Math.max(0, allPaths.indexOf(startPath))
+          : 0;
+        openFiguresCarousel(context, workspaceRoot, allPaths, startIndex);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_OPEN_FILE_HISTORY,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        let filePath = item?.nodeId;
+        if (!filePath) {
+          const activeUri = vscode.window.activeTextEditor?.document.uri;
+          if (activeUri) {
+            filePath = path
+              .relative(workspaceRoot, activeUri.fsPath)
+              .replace(/\\/g, "/");
+          }
+        }
+        if (!filePath) {
+          void vscode.window.showErrorMessage("No file selected.");
+          return;
+        }
+        await openFileHistoryPanel(context, workspaceRoot, filePath);
+      },
+    ),
+  );
+
+  sidebarProvider = new CalkitSidebarProvider();
+  sidebarTreeView = vscode.window.createTreeView("calkit-sidebar", {
+    treeDataProvider: sidebarProvider,
+    showCollapseAll: true,
+  });
+  context.subscriptions.push(sidebarTreeView);
+
+  context.subscriptions.push(
     vscode.window.onDidChangeActiveNotebookEditor(() => {
       void refreshNotebookToolbarContext(context);
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      void refreshActiveFileStageContext(editor?.document.uri);
     }),
   );
 
@@ -145,6 +694,34 @@ export function activate(context: vscode.ExtensionContext): void {
 
   void refreshNotebookToolbarContext(context);
   void autoSelectEnvironmentForActiveNotebook(context);
+  void refreshPipelineOutputContext(context);
+
+  // Watch for changes to dvc.yaml/calkit.yaml to keep pipeline output context fresh.
+  const dvcYamlWatcher =
+    vscode.workspace.createFileSystemWatcher("**/dvc.yaml");
+  context.subscriptions.push(dvcYamlWatcher);
+  dvcYamlWatcher.onDidChange(() => {
+    scheduleRefreshPipelineOutputContext(context);
+  });
+  dvcYamlWatcher.onDidCreate(() => {
+    scheduleRefreshPipelineOutputContext(context);
+  });
+  dvcYamlWatcher.onDidDelete(() => {
+    scheduleRefreshPipelineOutputContext(context);
+  });
+
+  const calkitYamlWatcher =
+    vscode.workspace.createFileSystemWatcher("**/calkit.yaml");
+  context.subscriptions.push(calkitYamlWatcher);
+  calkitYamlWatcher.onDidChange(() => {
+    scheduleRefreshPipelineOutputContext(context);
+  });
+  calkitYamlWatcher.onDidCreate(() => {
+    scheduleRefreshPipelineOutputContext(context);
+  });
+  calkitYamlWatcher.onDidDelete(() => {
+    scheduleRefreshPipelineOutputContext(context);
+  });
 
   // Proposed API: shows Calkit in the top-level kernel source list.
   // This must never break activation when proposed APIs are unavailable.
@@ -347,6 +924,1901 @@ async function pickCalkitSetupCommand(
 export function deactivate(): void {
   // Shut down any running SLURM jobs for notebook kernels
   terminateJupyterServerProcess("extension deactivation");
+}
+
+async function fetchEnvDescriptions(
+  workspaceRoot: string,
+): Promise<Record<string, EnvDescription> | undefined> {
+  try {
+    const { stdout } = await execFileAsync("calkit", ["describe", "envs"], {
+      cwd: workspaceRoot,
+      timeout: 15_000,
+    });
+    return JSON.parse(stdout) as Record<string, EnvDescription>;
+  } catch (error) {
+    log(`Failed to fetch env descriptions: ${String(error)}`);
+    return undefined;
+  }
+}
+
+async function readDvcYaml(
+  workspaceRoot: string,
+): Promise<DvcYaml | undefined> {
+  const fileUri = vscode.Uri.file(path.join(workspaceRoot, "dvc.yaml"));
+  try {
+    const bytes = await vscode.workspace.fs.readFile(fileUri);
+    const raw = Buffer.from(bytes).toString("utf8");
+    return (YAML.parse(raw) as DvcYaml | undefined) ?? {};
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return {};
+    }
+    log(`Failed to read dvc.yaml: ${String(error)}`);
+    return undefined;
+  }
+}
+
+function dvcStageOutputPaths(stage: import("./types").DvcStage): string[] {
+  const outs = stage.outs ?? [];
+  return outs.flatMap((out) => {
+    if (typeof out === "string") {
+      return [out];
+    }
+    return Object.keys(out);
+  });
+}
+
+function buildPipelineOutputMapFromYaml(
+  workspaceRoot: string,
+  dvcYaml: DvcYaml | undefined,
+): Map<string, string> {
+  const result = new Map<string, string>();
+  if (!dvcYaml?.stages) {
+    return result;
+  }
+  for (const [stageName, stage] of Object.entries(dvcYaml.stages)) {
+    for (const outputPath of dvcStageOutputPaths(stage)) {
+      result.set(path.join(workspaceRoot, outputPath), stageName);
+    }
+  }
+  return result;
+}
+
+class PipelineOutputDecorationProvider
+  implements vscode.FileDecorationProvider
+{
+  private readonly _onDidChangeFileDecorations = new vscode.EventEmitter<
+    vscode.Uri[]
+  >();
+  readonly onDidChangeFileDecorations = this._onDidChangeFileDecorations.event;
+
+  refresh(uris: vscode.Uri[]): void {
+    this._onDidChangeFileDecorations.fire(uris);
+  }
+
+  provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
+    const ext = path.extname(uri.fsPath).toLowerCase();
+    if (pipelineOutputUris.has(uri.fsPath)) {
+      if (staleOutputUris.has(uri.fsPath)) {
+        return {
+          tooltip: "Calkit pipeline output — stage is stale, needs re-run",
+          color: new vscode.ThemeColor("list.warningForeground"),
+        };
+      }
+      return undefined;
+    }
+    if (
+      (FIGURE_EXTENSIONS.has(ext) && !importedFigureUris.has(uri.fsPath)) ||
+      (ext === NOTEBOOK_EXTENSION &&
+        !pipelineNotebookUris.has(uri.fsPath) &&
+        !uri.fsPath.includes(
+          `${path.sep}.calkit${path.sep}notebooks${path.sep}`,
+        ))
+    ) {
+      return {
+        badge: "!",
+        tooltip: "Not produced by the pipeline — right-click to define source",
+      };
+    }
+    return undefined;
+  }
+}
+
+let decorationProvider: PipelineOutputDecorationProvider | undefined;
+
+function updateSidebarBadge(): void {
+  if (!sidebarTreeView || !sidebarProvider) {
+    return;
+  }
+  const count = sidebarProvider.getAttentionCount();
+  sidebarTreeView.badge =
+    count > 0
+      ? {
+          value: count,
+          tooltip: `${count} item${count === 1 ? "" : "s"} need attention`,
+        }
+      : undefined;
+}
+
+const DETECTED_FILES_EXCLUDE =
+  "**/{.*,__pycache__,node_modules,venv,env,site-packages}/**";
+
+const FIGURE_DIR_NAMES = new Set([
+  "figures",
+  "figs",
+  "fig",
+  "plots",
+  "plot",
+  "images",
+  "img",
+  "output",
+  "outputs",
+  "results",
+]);
+
+const DATA_DIR_NAMES = new Set([
+  "data",
+  "dataset",
+  "datasets",
+  "input",
+  "inputs",
+  "output",
+  "outputs",
+  "results",
+]);
+
+function hasAncestorIn(relPath: string, names: Set<string>): boolean {
+  return relPath
+    .split("/")
+    .slice(0, -1)
+    .some((p) => names.has(p.toLowerCase()));
+}
+
+const ARTIFACT_GLOB = `**/*.{${[...FIGURE_EXTENSIONS, ...DATASET_EXTENSIONS]
+  .map((e) => e.replace(/^\./, ""))
+  .join(",")}}`;
+
+async function scanDetectedFiles(workspaceRoot: string): Promise<void> {
+  const [notebookUris, allUris] = await Promise.all([
+    vscode.workspace.findFiles(
+      `**/*${NOTEBOOK_EXTENSION}`,
+      DETECTED_FILES_EXCLUDE,
+    ),
+    vscode.workspace.findFiles(ARTIFACT_GLOB, DETECTED_FILES_EXCLUDE),
+  ]);
+  const toRelative = (
+    uris: vscode.Uri[],
+    exts: Set<string>,
+    filter?: (rel: string) => boolean,
+  ): string[] =>
+    uris
+      .filter((u) => exts.has(path.extname(u.fsPath).toLowerCase()))
+      .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
+      .filter((rel) => !filter || filter(rel))
+      .sort();
+  currentDetectedNotebooks = notebookUris
+    .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
+    .sort();
+  const figuresFromFs = toRelative(allUris, FIGURE_EXTENSIONS, (rel) =>
+    hasAncestorIn(rel, FIGURE_DIR_NAMES),
+  );
+  const datasetsFromFs = toRelative(allUris, DATASET_EXTENSIONS, (rel) =>
+    hasAncestorIn(rel, DATA_DIR_NAMES),
+  );
+  // Also include pipeline outputs from dvc.yaml that match figure/dataset
+  // extensions even if they don't exist on disk yet (e.g. stale DVC outputs).
+  const figureSet = new Set(figuresFromFs);
+  const datasetSet = new Set(datasetsFromFs);
+  for (const stage of Object.values(currentDvcYaml?.stages ?? {})) {
+    for (const rel of dvcStageOutputPaths(stage)) {
+      const normalized = rel.replace(/\\/g, "/");
+      const ext = path.extname(rel).toLowerCase();
+      if (
+        FIGURE_EXTENSIONS.has(ext) &&
+        hasAncestorIn(normalized, FIGURE_DIR_NAMES)
+      ) {
+        figureSet.add(normalized);
+      } else if (
+        DATASET_EXTENSIONS.has(ext) &&
+        hasAncestorIn(normalized, DATA_DIR_NAMES)
+      ) {
+        datasetSet.add(normalized);
+      }
+    }
+  }
+  currentDetectedFigures = [...figureSet].sort();
+  currentDetectedDatasets = [...datasetSet].sort();
+}
+
+function scheduleRefreshPipelineOutputContext(
+  context: vscode.ExtensionContext,
+): void {
+  if (refreshDebounceTimer !== undefined) {
+    clearTimeout(refreshDebounceTimer);
+  }
+  refreshDebounceTimer = setTimeout(() => {
+    refreshDebounceTimer = undefined;
+    void refreshPipelineOutputContext(context);
+  }, 300);
+}
+
+async function refreshPipelineOutputContext(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const workspaceRoot = getWorkspaceRoot();
+  if (!workspaceRoot) {
+    return;
+  }
+  const [dvcYaml, calkitConfig, envDescriptions] = await Promise.all([
+    readDvcYaml(workspaceRoot),
+    readCalkitConfig(workspaceRoot),
+    fetchEnvDescriptions(workspaceRoot),
+  ]);
+  currentDvcYaml = dvcYaml;
+  currentCalkitConfig = calkitConfig;
+  currentEnvDescriptions = envDescriptions;
+  const outputMap = buildPipelineOutputMapFromYaml(workspaceRoot, dvcYaml);
+  const prevPaths = new Set([
+    ...pipelineOutputUris,
+    ...importedFigureUris,
+    ...pipelineNotebookUris,
+  ]);
+  pipelineOutputUris.clear();
+  importedFigureUris.clear();
+  pipelineNotebookUris.clear();
+  for (const absPath of outputMap.keys()) {
+    pipelineOutputUris.add(absPath);
+  }
+  for (const fig of calkitConfig?.figures ?? []) {
+    if (fig.imported_from != null) {
+      importedFigureUris.add(path.join(workspaceRoot, fig.path));
+    }
+  }
+  for (const stage of Object.values(calkitConfig?.pipeline?.stages ?? {})) {
+    if (
+      stage.kind === "jupyter-notebook" &&
+      typeof stage.notebook_path === "string"
+    ) {
+      pipelineNotebookUris.add(path.join(workspaceRoot, stage.notebook_path));
+    }
+  }
+  if (!decorationProvider) {
+    decorationProvider = new PipelineOutputDecorationProvider();
+    const disposable =
+      vscode.window.registerFileDecorationProvider(decorationProvider);
+    pipelineDecorationProvider = disposable;
+    context.subscriptions.push(disposable);
+  }
+  const changedUris = [
+    ...new Set([
+      ...prevPaths,
+      ...pipelineOutputUris,
+      ...importedFigureUris,
+      ...pipelineNotebookUris,
+    ]),
+  ].map((p) => vscode.Uri.file(p));
+  decorationProvider.refresh(changedUris);
+  await scanDetectedFiles(workspaceRoot);
+  sidebarProvider?.refresh(
+    workspaceRoot,
+    calkitConfig,
+    dvcYaml,
+    staleStageNames,
+    envDescriptions,
+    currentDetectedNotebooks,
+    currentDetectedFigures,
+    currentDetectedDatasets,
+  );
+  updateSidebarBadge();
+  // Run the staleness check after the fast decoration pass: "not produced
+  // by the pipeline" badges are applied immediately, and stale-output
+  // decorations follow once calkit status finishes.
+  void refreshStaleOutputContext(workspaceRoot, outputMap, decorationProvider);
+}
+
+async function refreshStaleOutputContext(
+  workspaceRoot: string,
+  outputMap: Map<string, string>,
+  provider: PipelineOutputDecorationProvider,
+): Promise<void> {
+  try {
+    const { stdout } = await execFileAsync(
+      "calkit",
+      ["status", "--json", "-c", "pipeline"],
+      { cwd: workspaceRoot, timeout: 60_000 },
+    );
+    const status = JSON.parse(stdout) as {
+      pipeline?: { stale_stage_names?: string[] };
+    };
+    const freshStaleStageNames = new Set(
+      status?.pipeline?.stale_stage_names ?? [],
+    );
+    const nextStale = new Set<string>();
+    for (const [absPath, stageName] of outputMap) {
+      if (freshStaleStageNames.has(stageName)) {
+        nextStale.add(absPath);
+      }
+    }
+    const prevStale = new Set(staleOutputUris);
+    staleOutputUris.clear();
+    for (const p of nextStale) {
+      staleOutputUris.add(p);
+    }
+    const prevStageNames = new Set(staleStageNames);
+    staleStageNames.clear();
+    for (const n of freshStaleStageNames) {
+      staleStageNames.add(n);
+    }
+    const changedUris = [...new Set([...prevStale, ...staleOutputUris])].map(
+      (p) => vscode.Uri.file(p),
+    );
+    if (changedUris.length > 0) {
+      provider.refresh(changedUris);
+    }
+    // Only re-render the sidebar if the set of stale stages actually changed
+    const staleChanged =
+      prevStageNames.size !== staleStageNames.size ||
+      [...staleStageNames].some((n) => !prevStageNames.has(n));
+    if (staleChanged) {
+      sidebarProvider?.refresh(
+        workspaceRoot,
+        currentCalkitConfig,
+        currentDvcYaml,
+        staleStageNames,
+        currentEnvDescriptions,
+        currentDetectedNotebooks,
+        currentDetectedFigures,
+        currentDetectedDatasets,
+      );
+      updateSidebarBadge();
+    }
+  } catch (error) {
+    log(`Staleness check failed: ${String(error)}`);
+  }
+}
+
+function getNonce(): string {
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  return Array.from(
+    { length: 32 },
+    () => chars[Math.floor(Math.random() * chars.length)],
+  ).join("");
+}
+
+async function getDagMermaid(
+  workspaceRoot: string,
+): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync(
+      "calkit",
+      ["dvc", "dag", "--mermaid"],
+      { cwd: workspaceRoot, timeout: 15_000 },
+    );
+    return stdout.trim();
+  } catch {
+    return undefined;
+  }
+}
+
+function showDagPanel(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+): void {
+  const nonce = getNonce();
+  const panel = vscode.window.createWebviewPanel(
+    "calkit.dag",
+    "Pipeline DAG",
+    vscode.ViewColumn.Active,
+    { enableScripts: true },
+  );
+  context.subscriptions.push(panel);
+  panel.webview.html = buildDagHtml(nonce);
+  getDagMermaid(workspaceRoot)
+    .then((mermaid) => {
+      void panel.webview.postMessage({
+        command: "dagReady",
+        mermaid: mermaid ?? null,
+      });
+    })
+    .catch(() => {
+      void panel.webview.postMessage({ command: "dagReady", mermaid: null });
+    });
+}
+
+function buildDagHtml(nonce: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:;">
+<title>Pipeline DAG</title>
+<style>
+  body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); padding: 16px; margin: 0; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; }
+  #toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-shrink: 0; }
+  h1 { font-size: 1.2em; margin: 0; flex: 1; }
+  button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 3px 8px; cursor: pointer; border-radius: 2px; font-size: 1em; }
+  button:hover { background: var(--vscode-button-hoverBackground); }
+  #zoom-label { font-size: 0.85em; color: var(--vscode-descriptionForeground); min-width: 3em; text-align: right; }
+  #viewport { flex: 1; overflow: auto; cursor: grab; user-select: none; }
+  #viewport.dragging { cursor: grabbing; }
+  #canvas { display: inline-block; transform-origin: 0 0; }
+  #dag-error { color: var(--vscode-descriptionForeground); font-style: italic; }
+  .spinner { width: 18px; height: 18px; border: 2px solid var(--vscode-foreground); border-top-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; margin-top: 20px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <h1>Pipeline DAG</h1>
+  <button id="btn-zoom-out" title="Zoom out">−</button>
+  <span id="zoom-label">100%</span>
+  <button id="btn-zoom-in" title="Zoom in">+</button>
+  <button id="btn-reset" title="Reset zoom">Reset</button>
+</div>
+<div id="viewport"><div id="canvas"><div class="spinner"></div></div></div>
+<script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script nonce="${nonce}">
+  const isDark = document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast');
+  mermaid.initialize({ startOnLoad: false, theme: isDark ? 'dark' : 'default' });
+
+  let scale = 1;
+  const viewport = document.getElementById('viewport');
+  const canvas = document.getElementById('canvas');
+  const zoomLabel = document.getElementById('zoom-label');
+
+  function applyZoom() {
+    canvas.style.transform = 'scale(' + scale + ')';
+    zoomLabel.textContent = Math.round(scale * 100) + '%';
+  }
+  function zoomBy(delta, originX, originY) {
+    const prev = scale;
+    scale = Math.min(4, Math.max(0.1, scale * (1 + delta)));
+    if (originX !== undefined) {
+      // Adjust scroll so zoom is centered on cursor
+      viewport.scrollLeft = (viewport.scrollLeft + originX) * (scale / prev) - originX;
+      viewport.scrollTop  = (viewport.scrollTop  + originY) * (scale / prev) - originY;
+    }
+    applyZoom();
+  }
+
+  document.getElementById('btn-zoom-in').addEventListener('click', function() { zoomBy(0.2); });
+  document.getElementById('btn-zoom-out').addEventListener('click', function() { zoomBy(-0.2); });
+  document.getElementById('btn-reset').addEventListener('click', function() { scale = 1; applyZoom(); });
+
+  viewport.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    const rect = viewport.getBoundingClientRect();
+    const ox = e.clientX - rect.left;
+    const oy = e.clientY - rect.top;
+    zoomBy(e.deltaY < 0 ? 0.1 : -0.1, ox, oy);
+  }, { passive: false });
+
+  // Pan by drag
+  let dragStart = null;
+  let scrollStart = null;
+  viewport.addEventListener('mousedown', function(e) {
+    if (e.button !== 0) { return; }
+    dragStart = { x: e.clientX, y: e.clientY };
+    scrollStart = { left: viewport.scrollLeft, top: viewport.scrollTop };
+    viewport.classList.add('dragging');
+  });
+  window.addEventListener('mousemove', function(e) {
+    if (!dragStart) { return; }
+    viewport.scrollLeft = scrollStart.left - (e.clientX - dragStart.x);
+    viewport.scrollTop  = scrollStart.top  - (e.clientY - dragStart.y);
+  });
+  window.addEventListener('mouseup', function() {
+    dragStart = null;
+    viewport.classList.remove('dragging');
+  });
+
+  window.addEventListener('message', function(event) {
+    const msg = event.data;
+    if (msg.command !== 'dagReady') { return; }
+    if (!msg.mermaid) {
+      canvas.innerHTML = '<span id="dag-error">Pipeline diagram unavailable.</span>';
+      return;
+    }
+    canvas.innerHTML = '<div class="mermaid"></div>';
+    const el = canvas.querySelector('.mermaid');
+    el.textContent = msg.mermaid;
+    mermaid.run({ nodes: [el] }).catch(function(err) {
+      canvas.innerHTML = '<span id="dag-error">Could not render diagram: ' + String(err) + '</span>';
+    });
+  });
+</script>
+</body>
+</html>`;
+}
+
+async function defineProvenance(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+  fileUri: vscode.Uri,
+): Promise<void> {
+  const relPath = path
+    .relative(workspaceRoot, fileUri.fsPath)
+    .replace(/\\/g, "/");
+  const ext = path.extname(fileUri.fsPath).toLowerCase();
+  const isNotebook = ext === NOTEBOOK_EXTENSION;
+  const artifactKind: "figure" | "dataset" = DATASET_EXTENSIONS.has(ext)
+    ? "dataset"
+    : "figure";
+  const envs = currentCalkitConfig?.environments ?? {};
+  const envNames = Object.keys(envs);
+
+  const choiceStage = "$(play) Produced by a script or notebook";
+  const choiceImported = "$(cloud-download) Imported from an external source";
+  const notebookChoiceStage =
+    "$(play) Run this notebook and record as a pipeline stage";
+
+  const picked = await vscode.window.showQuickPick(
+    isNotebook
+      ? [notebookChoiceStage, choiceImported]
+      : [choiceStage, choiceImported],
+    {
+      title: `Define source for ${path.basename(fileUri.fsPath)}`,
+      placeHolder: "How is this file produced?",
+    },
+  );
+  if (!picked) {
+    return;
+  }
+
+  if (picked === choiceImported) {
+    const source = await vscode.window.showInputBox({
+      title: "Mark as Imported",
+      prompt: "Where was this file imported from?",
+      placeHolder: "URL, project name, or brief description",
+    });
+    if (!source) {
+      return;
+    }
+    try {
+      await execFileAsync(
+        "calkit",
+        ["update", artifactKind, relPath, "--imported-from-url", source],
+        { cwd: workspaceRoot },
+      );
+    } catch (err) {
+      void vscode.window.showErrorMessage(
+        `Failed to update ${artifactKind}: ${String(err)}`,
+      );
+      return;
+    }
+    void vscode.window.showInformationMessage(
+      `Marked '${path.basename(fileUri.fsPath)}' as imported from '${source}'.`,
+    );
+    return;
+  }
+
+  // "Produced by script/notebook" path — open the stage editor
+  await showStageEditor(
+    context,
+    workspaceRoot,
+    isNotebook ? undefined : relPath,
+    isNotebook ? relPath : undefined,
+    undefined,
+    undefined,
+    isNotebook ? undefined : artifactKind,
+  );
+}
+
+const SOURCE_GLOB = "**/*.{py,ipynb,R,jl,m,tex}";
+const SOURCE_EXCLUDE =
+  "**/{.calkit,.dvc,node_modules,.git,__pycache__,.ipynb_checkpoints}/**";
+const ALL_FILES_EXCLUDE = "**/{.*}/**";
+
+const KIND_BY_EXT: Record<string, string> = {
+  ".ipynb": "jupyter-notebook",
+  ".py": "script",
+  ".R": "script",
+  ".jl": "script",
+  ".m": "script",
+  ".tex": "latex",
+};
+
+async function showStageEditor(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+  prefillOutput?: string,
+  prefillSource?: string,
+  editStageName?: string,
+  existingStage?: import("./types").PipelineStage,
+  artifactKind?: "figure" | "dataset",
+): Promise<void> {
+  const nonce = getNonce();
+  const [sourceUris, allUris] = await Promise.all([
+    vscode.workspace.findFiles(SOURCE_GLOB, SOURCE_EXCLUDE),
+    vscode.workspace.findFiles("**/*", ALL_FILES_EXCLUDE),
+  ]);
+  const workspaceFiles = sourceUris
+    .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
+    .sort();
+  const allProjectFiles = allUris
+    .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
+    .sort();
+  const envs = currentCalkitConfig?.environments ?? {};
+  const envEntries = Object.entries(envs).map(([name, env]) => ({
+    name,
+    kind: typeof env.kind === "string" ? env.kind : "",
+  }));
+
+  const isEdit = editStageName !== undefined;
+  const panel = vscode.window.createWebviewPanel(
+    "calkit.stageEditor",
+    isEdit ? `Edit Stage: ${editStageName}` : "New Pipeline Stage",
+    vscode.ViewColumn.Active,
+    { enableScripts: true },
+  );
+  context.subscriptions.push(panel);
+  panel.webview.html = buildStageEditorHtml(
+    nonce,
+    workspaceFiles,
+    allProjectFiles,
+    envEntries,
+    prefillOutput,
+    prefillSource,
+    editStageName,
+    existingStage,
+  );
+
+  panel.webview.onDidReceiveMessage(
+    async (msg: {
+      command: string;
+      stageName: string;
+      source: string;
+      environment: string;
+      output: string;
+      outputStorage: string;
+      inputs: string[];
+      outputs: { path: string; storage: "dvc" | "git" }[];
+      andRun: boolean;
+    }) => {
+      if (msg.command === "create") {
+        const args: string[] = [];
+        if (msg.environment) {
+          args.push("-e", msg.environment);
+        }
+        if (msg.stageName) {
+          args.push("--stage", msg.stageName);
+        }
+        for (const i of msg.inputs ?? []) {
+          if (i) {
+            args.push("-i", i);
+          }
+        }
+        // calkit xr only supports DVC-tracked outputs (-o); Git-tracked
+        // outputs are applied afterward via `calkit update stage`.
+        const dvcOuts = (msg.outputs ?? [])
+          .filter((o) => o.storage !== "git")
+          .map((o) => o.path)
+          .filter(Boolean);
+        const gitOuts = (msg.outputs ?? [])
+          .filter((o) => o.storage === "git")
+          .map((o) => o.path)
+          .filter(Boolean);
+        for (const o of dvcOuts) {
+          args.push("-o", o);
+        }
+        if (gitOuts.length > 0 && !msg.stageName) {
+          void vscode.window.showErrorMessage(
+            "A stage name is required to record Git-tracked outputs.",
+          );
+          return;
+        }
+        args.push(msg.source);
+        // Link artifact → stage in calkit.yaml before running xr so both writes don't race
+        if (artifactKind && prefillOutput && msg.stageName) {
+          await execFileAsync(
+            "calkit",
+            ["update", artifactKind, prefillOutput, "--stage", msg.stageName],
+            { cwd: workspaceRoot },
+          ).catch((err: unknown) => {
+            void vscode.window.showErrorMessage(
+              `Failed to link ${artifactKind} to stage: ${String(err)}`,
+            );
+          });
+        }
+        const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
+        terminal.show();
+        let cmd = `calkit xr ${args.map(shQuote).join(" ")}`;
+        if (gitOuts.length > 0) {
+          const gitOutArgs = ["update", "stage", msg.stageName];
+          for (const o of gitOuts) {
+            gitOutArgs.push("--set-outputs-git", o);
+          }
+          cmd += ` && calkit ${gitOutArgs.map(shQuote).join(" ")}`;
+        }
+        terminal.sendText(cmd);
+        void panel.dispose();
+      } else if (msg.command === "save" && editStageName) {
+        const updateArgs: string[] = ["update", "stage", editStageName];
+        if (msg.environment !== undefined) {
+          updateArgs.push("--environment", msg.environment);
+        }
+        for (const i of msg.inputs) {
+          updateArgs.push("--set-inputs", i);
+        }
+        if (msg.inputs.length === 0) {
+          updateArgs.push("--set-inputs", "");
+        }
+        const dvcOuts = msg.outputs
+          .filter((o) => o.storage !== "git")
+          .map((o) => o.path);
+        const gitOuts = msg.outputs
+          .filter((o) => o.storage === "git")
+          .map((o) => o.path);
+        for (const o of dvcOuts) {
+          updateArgs.push("--set-outputs", o);
+        }
+        if (dvcOuts.length === 0) {
+          updateArgs.push("--set-outputs", "");
+        }
+        for (const o of gitOuts) {
+          updateArgs.push("--set-outputs-git", o);
+        }
+        if (gitOuts.length === 0) {
+          updateArgs.push("--set-outputs-git", "");
+        }
+        void execFileAsync("calkit", updateArgs, { cwd: workspaceRoot })
+          .then(() => {
+            if (msg.andRun) {
+              const terminal = getOrCreateTerminal(
+                "calkit: run",
+                workspaceRoot,
+              );
+              terminal.show();
+              terminal.sendText(`calkit run ${shQuote(editStageName)}`);
+            }
+            void panel.dispose();
+          })
+          .catch((err: unknown) => {
+            void vscode.window.showErrorMessage(
+              `Failed to update stage: ${String(err)}`,
+            );
+          });
+      }
+    },
+    undefined,
+    context.subscriptions,
+  );
+}
+
+function buildStageEditorHtml(
+  nonce: string,
+  workspaceFiles: string[],
+  allProjectFiles: string[],
+  envEntries: { name: string; kind: string }[],
+  prefillOutput?: string,
+  prefillSource?: string,
+  editStageName?: string,
+  existingStage?: import("./types").PipelineStage,
+): string {
+  const isEdit = editStageName !== undefined;
+  const existingEnv =
+    typeof existingStage?.environment === "string"
+      ? existingStage.environment
+      : "";
+  const existingInputs = Array.isArray(existingStage?.inputs)
+    ? (existingStage.inputs as string[]).filter((i) => typeof i === "string")
+    : [];
+  type OutputEntry = { path: string; storage: "dvc" | "git" };
+  const existingOutputs: OutputEntry[] = Array.isArray(existingStage?.outputs)
+    ? (
+        existingStage.outputs as (string | { path: string; storage?: string })[]
+      ).map((o) =>
+        typeof o === "string"
+          ? { path: o, storage: "dvc" as const }
+          : {
+              path: o.path,
+              storage: (o.storage === "git" ? "git" : "dvc") as "dvc" | "git",
+            },
+      )
+    : prefillOutput
+    ? [{ path: prefillOutput, storage: "dvc" as const }]
+    : [];
+
+  // Source info for edit mode
+  const sourceFile =
+    typeof existingStage?.notebook_path === "string"
+      ? existingStage.notebook_path
+      : typeof existingStage?.script_path === "string"
+      ? existingStage.script_path
+      : typeof existingStage?.target_path === "string"
+      ? existingStage.target_path
+      : "";
+  const stageKind =
+    typeof existingStage?.kind === "string" ? existingStage.kind : "";
+
+  const sourceOptions = workspaceFiles
+    .map(
+      (f) =>
+        `<option value="${escHtml(f)}"${
+          f === prefillSource ? " selected" : ""
+        }>${escHtml(f)}</option>`,
+    )
+    .join("\n");
+  const envOptions = [
+    `<option value=""${!existingEnv ? " selected" : ""}>${
+      isEdit ? "— none —" : "Detect automatically"
+    }</option>`,
+    ...envEntries.map(
+      (e) =>
+        `<option value="${escHtml(e.name)}"${
+          e.name === existingEnv ? " selected" : ""
+        }>${escHtml(e.name)}${e.kind ? ` (${escHtml(e.kind)})` : ""}</option>`,
+    ),
+    `<option value="__new__">New environment (enter spec path below)…</option>`,
+  ].join("\n");
+
+  const datalistOptions = allProjectFiles
+    .map((f) => `<option value="${escHtml(f)}">`)
+    .join("\n");
+
+  const inputsJson = JSON.stringify(existingInputs);
+  const outputsJson = JSON.stringify(existingOutputs); // [{path, storage}]
+
+  const createSection = !isEdit
+    ? `
+<div class="field">
+  <label>Source file</label>
+  <select id="source">${sourceOptions}</select>
+  <div id="kind-hint"></div>
+</div>
+<div class="field">
+  <label>Stage name</label>
+  <input id="stage-name" type="text" placeholder="Auto-generated if blank" />
+</div>`
+    : `
+<div class="field">
+  <label>Stage</label>
+  <div class="info-row">${escHtml(editStageName ?? "")}</div>
+</div>
+${
+  stageKind
+    ? `<div class="field"><label>Kind</label><div class="info-row">${escHtml(
+        stageKind,
+      )}</div></div>`
+    : ""
+}
+${
+  sourceFile
+    ? `<div class="field"><label>Source</label><div class="info-row">${escHtml(
+        sourceFile,
+      )}</div></div>`
+    : ""
+}`;
+
+  const buttons = !isEdit
+    ? `<button id="btn-create">Create Stage &amp; Run</button>`
+    : `<button id="btn-save">Save</button> <button id="btn-save-run" style="margin-left:8px">Save &amp; Run</button>`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline';">
+<title>${isEdit ? "Edit Stage" : "New Pipeline Stage"}</title>
+<style>
+  body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); padding: 20px; max-width: 580px; }
+  h1 { font-size: 1.2em; margin-bottom: 18px; }
+  .field { margin-bottom: 14px; }
+  label { display: block; margin-bottom: 4px; font-weight: 600; color: var(--vscode-descriptionForeground); font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.04em; }
+  input, select { width: 100%; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, #555); padding: 5px 8px; font-size: 1em; font-family: inherit; border-radius: 2px; }
+  input:focus, select:focus { outline: 1px solid var(--vscode-focusBorder); border-color: var(--vscode-focusBorder); }
+  .info-row { padding: 4px 0; color: var(--vscode-foreground); opacity: 0.8; }
+  #kind-hint { font-size: 0.8em; color: var(--vscode-descriptionForeground); margin-top: 3px; height: 1.2em; }
+  #new-env-row { margin-top: 6px; display: none; }
+  .list-section { border: 1px solid var(--vscode-input-border, #555); border-radius: 2px; padding: 6px 8px; }
+  .list-item { display: flex; gap: 6px; margin-bottom: 4px; align-items: center; position: relative; }
+  .list-item input { flex: 1; min-width: 0; }
+  .remove-btn { background: none; border: none; color: var(--vscode-descriptionForeground); cursor: pointer; font-size: 1.1em; padding: 2px 4px; margin-top: 0; flex-shrink: 0; }
+  .remove-btn:hover { color: var(--vscode-foreground); }
+  .add-btn { background: none; border: none; color: var(--vscode-textLink-foreground); cursor: pointer; font-size: 0.9em; padding: 2px 0; margin-top: 4px; }
+  .add-btn:hover { text-decoration: underline; }
+  .actions { margin-top: 20px; }
+  button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 7px 18px; cursor: pointer; font-size: 1em; border-radius: 2px; margin-top: 0; }
+  button:hover { background: var(--vscode-button-hoverBackground); }
+  .ac-wrap { position: relative; flex: 1; min-width: 0; }
+  .ac-wrap input { width: 100%; box-sizing: border-box; }
+  .ac-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 100; background: var(--vscode-input-background); border: 1px solid var(--vscode-focusBorder); list-style: none; margin: 0; padding: 0; max-height: 180px; overflow-y: auto; }
+  .ac-dropdown li { padding: 4px 8px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ac-dropdown li:hover, .ac-dropdown li.ac-sel { background: var(--vscode-list-hoverBackground); }
+</style>
+</head>
+<body>
+<h1>${
+    isEdit
+      ? `Edit Stage: ${escHtml(editStageName ?? "")}`
+      : "New Pipeline Stage"
+  }</h1>
+${createSection}
+<div class="field">
+  <label>Environment</label>
+  <select id="env">${envOptions}</select>
+  <div id="new-env-row">
+    <input id="new-env-path" type="text" placeholder="e.g. pyproject.toml, environment.yml, Dockerfile" />
+  </div>
+</div>
+<div class="field">
+  <label>Inputs</label>
+  <div class="list-section">
+    <div id="inputs-list"></div>
+    <button class="add-btn" id="add-input">+ Add input</button>
+  </div>
+</div>
+<div class="field">
+  <label>Outputs</label>
+  <div class="list-section">
+    <div id="outputs-list"></div>
+    <button class="add-btn" id="add-output">+ Add output</button>
+  </div>
+</div>
+<div class="actions">${buttons}</div>
+<script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+  const kindByExt = ${JSON.stringify(KIND_BY_EXT)};
+  const isEdit = ${JSON.stringify(isEdit)};
+  const allProjectFiles = ${JSON.stringify(allProjectFiles)};
+
+  function getKind(filePath) {
+    const dot = filePath.lastIndexOf('.');
+    return dot >= 0 ? (kindByExt[filePath.slice(dot)] ?? 'script') : '';
+  }
+  function slugify(s) {
+    return s.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase();
+  }
+  function attachAutocomplete(inp) {
+    let dropdown = null;
+    let selIdx = -1;
+    function close() {
+      if (dropdown) { dropdown.remove(); dropdown = null; }
+      selIdx = -1;
+    }
+    function open(items) {
+      close();
+      if (!items.length) return;
+      dropdown = document.createElement('ul');
+      dropdown.className = 'ac-dropdown';
+      items.forEach(function(text, i) {
+        const li = document.createElement('li');
+        li.textContent = text;
+        li.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          inp.value = text;
+          close();
+        });
+        dropdown.appendChild(li);
+      });
+      inp.closest('.ac-wrap').appendChild(dropdown);
+    }
+    function highlight(idx) {
+      if (!dropdown) return;
+      const items = dropdown.querySelectorAll('li');
+      items.forEach(function(li, i) { li.classList.toggle('ac-sel', i === idx); });
+      if (idx >= 0 && items[idx]) items[idx].scrollIntoView({ block: 'nearest' });
+    }
+    inp.addEventListener('input', function() {
+      const val = inp.value.toLowerCase();
+      const filtered = allProjectFiles.filter(function(f) { return f.toLowerCase().includes(val); }).slice(0, 30);
+      open(filtered);
+      selIdx = -1;
+    });
+    inp.addEventListener('keydown', function(e) {
+      if (!dropdown) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          const filtered = allProjectFiles.filter(function(f) { return f.toLowerCase().includes(inp.value.toLowerCase()); }).slice(0, 30);
+          open(filtered);
+          selIdx = 0;
+          highlight(selIdx);
+        }
+        return;
+      }
+      const items = dropdown.querySelectorAll('li');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        selIdx = Math.min(selIdx + 1, items.length - 1);
+        highlight(selIdx);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        selIdx = Math.max(selIdx - 1, -1);
+        highlight(selIdx);
+      } else if (e.key === 'Enter' && selIdx >= 0) {
+        e.preventDefault();
+        inp.value = items[selIdx].textContent;
+        close();
+      } else if (e.key === 'Escape') {
+        close();
+      } else if (e.key === 'Tab') {
+        if (selIdx >= 0) { inp.value = items[selIdx].textContent; }
+        close();
+      }
+    });
+    inp.addEventListener('blur', function() { setTimeout(close, 150); });
+  }
+  function makeListItem(listEl, value, withStorage) {
+    const row = document.createElement('div');
+    row.className = 'list-item';
+    const wrap = document.createElement('div');
+    wrap.className = 'ac-wrap';
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = (withStorage ? value.path : value) || '';
+    attachAutocomplete(inp);
+    wrap.appendChild(inp);
+    row.appendChild(wrap);
+    if (withStorage) {
+      const sel = document.createElement('select');
+      sel.className = 'storage-sel';
+      sel.style.width = 'auto';
+      sel.style.flexShrink = '0';
+      [['dvc', 'DVC'], ['git', 'Git']].forEach(function([s, label]) {
+        const opt = document.createElement('option');
+        opt.value = s;
+        opt.textContent = label;
+        if (s === (value.storage || 'dvc')) { opt.selected = true; }
+        sel.appendChild(opt);
+      });
+      row.appendChild(sel);
+    }
+    const btn = document.createElement('button');
+    btn.className = 'remove-btn';
+    btn.textContent = '×';
+    btn.title = 'Remove';
+    btn.addEventListener('click', function() { row.remove(); });
+    row.appendChild(btn);
+    listEl.appendChild(row);
+    return inp;
+  }
+  function getInputValues(listEl) {
+    return Array.from(listEl.querySelectorAll('input')).map(function(i) { return i.value.trim(); }).filter(Boolean);
+  }
+  function getOutputValues(listEl) {
+    return Array.from(listEl.querySelectorAll('.list-item')).map(function(row) {
+      const path = row.querySelector('input').value.trim();
+      const sel = row.querySelector('select.storage-sel');
+      return path ? { path: path, storage: sel ? sel.value : 'dvc' } : null;
+    }).filter(Boolean);
+  }
+
+  const inputsList = document.getElementById('inputs-list');
+  const outputsList = document.getElementById('outputs-list');
+  const envEl = document.getElementById('env');
+  const newEnvRow = document.getElementById('new-env-row');
+  const newEnvPath = document.getElementById('new-env-path');
+
+  // Pre-populate lists
+  ${inputsJson}.forEach(function(v) { makeListItem(inputsList, v, false); });
+  ${outputsJson}.forEach(function(v) { makeListItem(outputsList, v, true); });
+
+  document.getElementById('add-input').addEventListener('click', function() {
+    const inp = makeListItem(inputsList, '', false);
+    inp.focus();
+  });
+  document.getElementById('add-output').addEventListener('click', function() {
+    const inp = makeListItem(outputsList, { path: '', storage: 'dvc' }, true);
+    inp.focus();
+  });
+
+  envEl.addEventListener('change', function() {
+    newEnvRow.style.display = envEl.value === '__new__' ? 'block' : 'none';
+  });
+
+  function resolvedEnv() {
+    return envEl.value === '__new__' ? newEnvPath.value.trim() : envEl.value;
+  }
+
+  if (!isEdit) {
+    const sourceEl = document.getElementById('source');
+    const stageNameEl = document.getElementById('stage-name');
+    const kindHint = document.getElementById('kind-hint');
+    let stageNameEdited = false;
+
+    function firstOutputPath() {
+      const first = outputsList.querySelector('input');
+      return first ? first.value.trim() : '';
+    }
+    function updateKindHint() {
+      const kind = getKind(sourceEl.value);
+      kindHint.textContent = kind ? 'Kind: ' + kind : '';
+    }
+    function updateStageName() {
+      if (!stageNameEdited) {
+        const out = firstOutputPath();
+        stageNameEl.value = out
+          ? slugify(out.replace(/\\.[^.]+$/, ''))
+          : slugify(sourceEl.value.replace(/\\.[^.]+$/, ''));
+      }
+    }
+    sourceEl.addEventListener('change', function() { updateKindHint(); updateStageName(); });
+    outputsList.addEventListener('input', updateStageName);
+    stageNameEl.addEventListener('input', function() { stageNameEdited = true; });
+    updateKindHint();
+    updateStageName();
+
+    document.getElementById('btn-create').addEventListener('click', function() {
+      if (!sourceEl.value) { return; }
+      const outs = getOutputValues(outputsList);
+      const primaryOut = outs.length > 0 ? outs[0] : null;
+      vscode.postMessage({
+        command: 'create',
+        source: sourceEl.value,
+        environment: resolvedEnv(),
+        output: primaryOut ? primaryOut.path : '',
+        outputStorage: primaryOut ? primaryOut.storage : 'dvc',
+        stageName: stageNameEl.value.trim(),
+        inputs: getInputValues(inputsList),
+        outputs: outs,
+        andRun: true,
+      });
+    });
+  } else {
+    function save(andRun) {
+      vscode.postMessage({
+        command: 'save',
+        environment: resolvedEnv(),
+        inputs: getInputValues(inputsList),
+        outputs: getOutputValues(outputsList),
+        andRun,
+      });
+    }
+    document.getElementById('btn-save').addEventListener('click', function() { save(false); });
+    document.getElementById('btn-save-run').addEventListener('click', function() { save(true); });
+  }
+</script>
+</body>
+</html>`;
+}
+
+function escHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function openFiguresCarousel(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+  figurePaths: string[],
+  startIndex: number,
+): void {
+  const panel = vscode.window.createWebviewPanel(
+    "calkit.figuresCarousel",
+    "Figures",
+    vscode.ViewColumn.Active,
+    {
+      enableScripts: true,
+      localResourceRoots: [vscode.Uri.file(workspaceRoot)],
+    },
+  );
+  context.subscriptions.push(panel);
+
+  // Build per-figure data: webview URI + provenance metadata
+  const figList = currentCalkitConfig?.figures ?? [];
+  type FigureData = {
+    path: string;
+    uriStr: string;
+    ext: string;
+    stage: string | undefined;
+    importedFrom: string | undefined;
+    title: string | undefined;
+    description: string | undefined;
+  };
+  const figures: FigureData[] = figurePaths.map((p) => {
+    const absUri = vscode.Uri.file(path.join(workspaceRoot, p));
+    const webviewUri = panel.webview.asWebviewUri(absUri);
+    const entry = figList.find((f) => f.path === p);
+    const importedFrom =
+      entry?.imported_from != null
+        ? typeof entry.imported_from === "object" &&
+          "url" in (entry.imported_from as object)
+          ? (entry.imported_from as { url: string }).url
+          : JSON.stringify(entry.imported_from)
+        : undefined;
+    return {
+      path: p,
+      uriStr: webviewUri.toString(),
+      ext: path.extname(p).toLowerCase(),
+      stage: typeof entry?.stage === "string" ? entry.stage : undefined,
+      importedFrom,
+      title: typeof entry?.title === "string" ? entry.title : undefined,
+      description:
+        typeof entry?.description === "string" ? entry.description : undefined,
+    };
+  });
+
+  const nonce = getNonce();
+  panel.webview.html = buildCarouselHtml(
+    nonce,
+    figures,
+    startIndex,
+    panel.webview.cspSource,
+  );
+}
+
+function buildCarouselHtml(
+  nonce: string,
+  figures: {
+    path: string;
+    uriStr: string;
+    ext: string;
+    stage: string | undefined;
+    importedFrom: string | undefined;
+    title: string | undefined;
+    description: string | undefined;
+  }[],
+  startIndex: number,
+  cspSource: string,
+): string {
+  const RENDERABLE = new Set([
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".pdf",
+    ".html",
+    ".htm",
+  ]);
+  const figuresJson = JSON.stringify(figures);
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${
+    figures.length > 0 ? cspSource : "'none'"
+  } data:; frame-src ${cspSource}; object-src ${cspSource}; script-src 'nonce-${nonce}'; style-src 'unsafe-inline';">
+<title>Figures</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); }
+  #root { display: flex; flex-direction: column; height: 100vh; }
+  #toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border, #444); flex-shrink: 0; }
+  #counter { color: var(--vscode-descriptionForeground); font-size: 0.85em; white-space: nowrap; }
+  #path-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; opacity: 0.8; }
+  #viewer { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  #fig-content { max-width: 100%; max-height: 100%; display: flex; align-items: center; justify-content: center; }
+  #fig-content img { max-width: 100%; max-height: calc(100vh - 140px); object-fit: contain; display: block; }
+  #fig-content embed, #fig-content iframe { width: 100%; height: calc(100vh - 140px); border: none; background: white; }
+  .no-render { color: var(--vscode-descriptionForeground); font-size: 0.9em; padding: 20px; text-align: center; }
+  .nav-btn { background: var(--vscode-button-secondaryBackground, rgba(128,128,128,0.2)); color: var(--vscode-button-secondaryForeground, inherit); border: none; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-size: 1.1em; flex-shrink: 0; }
+  .nav-btn:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.35)); }
+  .nav-btn:disabled { opacity: 0.35; cursor: default; }
+  #metadata { flex-shrink: 0; padding: 8px 12px; border-top: 1px solid var(--vscode-panel-border, #444); font-size: 0.82em; display: flex; gap: 16px; flex-wrap: wrap; }
+  .meta-item { display: flex; gap: 4px; }
+  .meta-label { color: var(--vscode-descriptionForeground); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.85em; }
+  .meta-value { color: var(--vscode-foreground); opacity: 0.85; }
+  #dots { display: flex; gap: 5px; align-items: center; overflow-x: auto; max-width: 300px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--vscode-descriptionForeground); opacity: 0.35; cursor: pointer; flex-shrink: 0; }
+  .dot.active { opacity: 1; background: var(--vscode-focusBorder, #007fd4); }
+</style>
+</head>
+<body>
+<div id="root">
+  <div id="toolbar">
+    <button class="nav-btn" id="btn-prev">&#8592;</button>
+    <div id="dots"></div>
+    <button class="nav-btn" id="btn-next">&#8594;</button>
+    <span id="counter"></span>
+    <span id="path-label"></span>
+  </div>
+  <div id="viewer">
+    <div id="fig-content"></div>
+  </div>
+  <div id="metadata" id="metadata"></div>
+</div>
+<script nonce="${nonce}">
+  const RENDERABLE = ${JSON.stringify([...RENDERABLE])};
+  const figures = ${figuresJson};
+  let idx = ${Math.max(0, Math.min(startIndex, figures.length - 1))};
+
+  const btnPrev = document.getElementById('btn-prev');
+  const btnNext = document.getElementById('btn-next');
+  const counter = document.getElementById('counter');
+  const pathLabel = document.getElementById('path-label');
+  const figContent = document.getElementById('fig-content');
+  const metadata = document.getElementById('metadata');
+  const dotsEl = document.getElementById('dots');
+
+  // Build dots
+  figures.forEach(function(_, i) {
+    const dot = document.createElement('div');
+    dot.className = 'dot';
+    dot.addEventListener('click', function() { navigate(i); });
+    dotsEl.appendChild(dot);
+  });
+
+  function navigate(newIdx) {
+    idx = newIdx;
+    render();
+  }
+
+  function render() {
+    const fig = figures[idx];
+    // Update toolbar
+    counter.textContent = (idx + 1) + ' / ' + figures.length;
+    pathLabel.textContent = fig.path;
+    pathLabel.title = fig.path;
+    btnPrev.disabled = idx === 0;
+    btnNext.disabled = idx === figures.length - 1;
+    // Update dots
+    Array.from(dotsEl.querySelectorAll('.dot')).forEach(function(d, i) {
+      d.classList.toggle('active', i === idx);
+    });
+    // Render figure
+    figContent.innerHTML = '';
+    const ext = fig.ext;
+    if (ext === '.png' || ext === '.jpg' || ext === '.jpeg' || ext === '.gif' || ext === '.svg') {
+      const img = document.createElement('img');
+      img.src = fig.uriStr;
+      img.alt = fig.path;
+      figContent.appendChild(img);
+    } else if (ext === '.pdf') {
+      const embed = document.createElement('embed');
+      embed.src = fig.uriStr;
+      embed.type = 'application/pdf';
+      embed.style.width = '100%';
+      embed.style.height = 'calc(100vh - 140px)';
+      figContent.appendChild(embed);
+    } else if (ext === '.html' || ext === '.htm') {
+      const frame = document.createElement('iframe');
+      frame.src = fig.uriStr;
+      frame.style.width = '100%';
+      frame.style.height = 'calc(100vh - 140px)';
+      frame.style.border = 'none';
+      figContent.appendChild(frame);
+    } else {
+      const msg = document.createElement('div');
+      msg.className = 'no-render';
+      msg.textContent = 'Preview not available for ' + ext + ' files.';
+      figContent.appendChild(msg);
+    }
+    // Update metadata
+    metadata.innerHTML = '';
+    function metaItem(label, value) {
+      if (!value) return;
+      const div = document.createElement('div');
+      div.className = 'meta-item';
+      const lbl = document.createElement('span');
+      lbl.className = 'meta-label';
+      lbl.textContent = label + ':';
+      const val = document.createElement('span');
+      val.className = 'meta-value';
+      val.textContent = value;
+      div.appendChild(lbl);
+      div.appendChild(val);
+      metadata.appendChild(div);
+    }
+    metaItem('Title', fig.title);
+    metaItem('Stage', fig.stage);
+    metaItem('Imported from', fig.importedFrom);
+    metaItem('Description', fig.description);
+  }
+
+  btnPrev.addEventListener('click', function() { if (idx > 0) navigate(idx - 1); });
+  btnNext.addEventListener('click', function() { if (idx < figures.length - 1) navigate(idx + 1); });
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowLeft' && idx > 0) navigate(idx - 1);
+    if (e.key === 'ArrowRight' && idx < figures.length - 1) navigate(idx + 1);
+  });
+
+  render();
+</script>
+</body>
+</html>`;
+}
+
+// ─── File history panel ───────────────────────────────────────────────────────
+
+interface CommitInfo {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  author: string;
+  date: string;
+}
+
+function readGitFileAtRef(
+  workspaceRoot: string,
+  ref: string,
+  filePath: string,
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    const proc = spawn("git", ["show", `${ref}:${filePath}`], {
+      cwd: workspaceRoot,
+    });
+    proc.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(chunks));
+      } else {
+        reject(new Error(`git show exited with code ${code}`));
+      }
+    });
+  });
+}
+
+function extToMime(ext: string): string {
+  const map: Record<string, string> = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
+    ".pdf": "application/pdf",
+    ".html": "text/html",
+    ".htm": "text/html",
+  };
+  return map[ext.toLowerCase()] ?? "application/octet-stream";
+}
+
+async function getGitHistory(
+  workspaceRoot: string,
+  filePath: string,
+): Promise<CommitInfo[]> {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      [
+        "log",
+        "--follow",
+        "-n",
+        "50",
+        "--format=%H|%h|%s|%an|%ai",
+        "--",
+        filePath,
+      ],
+      { cwd: workspaceRoot },
+    );
+    return stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const [hash, shortHash, ...rest] = line.split("|");
+        const subject = rest.slice(0, -2).join("|");
+        const author = rest[rest.length - 2];
+        const date = rest[rest.length - 1];
+        return { hash, shortHash, subject, author, date };
+      });
+  } catch {
+    return [];
+  }
+}
+
+async function openFileHistoryPanel(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+  filePath: string,
+): Promise<void> {
+  const ext = path.extname(filePath).toLowerCase();
+  const mime = extToMime(ext);
+  const absPath = path.join(workspaceRoot, filePath);
+
+  const panel = vscode.window.createWebviewPanel(
+    "calkit.fileHistory",
+    `History: ${path.basename(filePath)}`,
+    vscode.ViewColumn.Active,
+    { enableScripts: true },
+  );
+  context.subscriptions.push(panel);
+
+  const nonce = getNonce();
+  const history = await getGitHistory(workspaceRoot, filePath);
+
+  // Load current HEAD content from disk
+  let headDataUri = "";
+  try {
+    const buf = await import("node:fs/promises").then((fs) =>
+      fs.readFile(absPath),
+    );
+    headDataUri = `data:${mime};base64,${buf.toString("base64")}`;
+  } catch {
+    // file may not exist on disk yet
+  }
+
+  panel.webview.html = buildFileHistoryHtml(
+    nonce,
+    filePath,
+    ext,
+    mime,
+    history,
+    headDataUri,
+  );
+
+  panel.webview.onDidReceiveMessage(
+    async (msg: { command: string; ref: string }) => {
+      if (msg.command !== "getContent") {
+        return;
+      }
+      let dataUri = "";
+      try {
+        const buf = await readGitFileAtRef(workspaceRoot, msg.ref, filePath);
+        dataUri = `data:${mime};base64,${buf.toString("base64")}`;
+      } catch {
+        // file may not exist at this ref (e.g. DVC-tracked)
+        try {
+          const dvcBuf = await readGitFileAtRef(
+            workspaceRoot,
+            msg.ref,
+            `${filePath}.dvc`,
+          );
+          void panel.webview.postMessage({
+            command: "contentError",
+            ref: msg.ref,
+            reason: `DVC-tracked file. Pointer at this commit:\n${dvcBuf
+              .toString("utf8")
+              .trim()}`,
+          });
+          return;
+        } catch {
+          void panel.webview.postMessage({
+            command: "contentError",
+            ref: msg.ref,
+            reason: "File not found in git at this commit.",
+          });
+          return;
+        }
+      }
+      void panel.webview.postMessage({
+        command: "content",
+        ref: msg.ref,
+        dataUri,
+      });
+    },
+    undefined,
+    context.subscriptions,
+  );
+}
+
+function buildFileHistoryHtml(
+  nonce: string,
+  filePath: string,
+  ext: string,
+  _mime: string,
+  history: CommitInfo[],
+  headDataUri: string,
+): string {
+  const isImage =
+    ext === ".png" ||
+    ext === ".jpg" ||
+    ext === ".jpeg" ||
+    ext === ".gif" ||
+    ext === ".svg";
+  const isPdf = ext === ".pdf";
+  const isHtml = ext === ".html" || ext === ".htm";
+  const isRenderable = isImage || isPdf || isHtml;
+
+  const historyJson = JSON.stringify(history);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; frame-src data: blob:; object-src data: blob:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline';">
+<title>History: ${escHtml(path.basename(filePath))}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); overflow: hidden; }
+  #root { display: flex; height: 100vh; }
+
+  /* History sidebar */
+  #sidebar { width: 210px; flex-shrink: 0; border-right: 1px solid var(--vscode-panel-border, #444); display: flex; flex-direction: column; overflow: hidden; }
+  #sidebar-header { padding: 8px 10px; font-size: 0.8em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--vscode-descriptionForeground); border-bottom: 1px solid var(--vscode-panel-border, #444); flex-shrink: 0; }
+  #commits { overflow-y: auto; flex: 1; }
+  .commit { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid var(--vscode-panel-border, #333); position: relative; }
+  .commit:hover { background: var(--vscode-list-hoverBackground); }
+  .commit.selected-a { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+  .commit.selected-b { background: color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 60%, purple 40%); color: var(--vscode-list-activeSelectionForeground); }
+  .commit-hash { font-family: monospace; font-size: 0.8em; opacity: 0.7; }
+  .commit-subject { font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 175px; margin: 2px 0 1px; }
+  .commit-meta { font-size: 0.75em; opacity: 0.6; }
+  .badge { display: inline-block; font-size: 0.7em; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-left: 4px; vertical-align: middle; }
+  .badge-a { background: #1a6fb5; color: #fff; }
+  .badge-b { background: #7b31c9; color: #fff; }
+  #clear-btn { display: none; margin: 6px 10px; background: none; border: 1px solid var(--vscode-panel-border, #444); color: var(--vscode-foreground); padding: 3px 10px; cursor: pointer; font-size: 0.82em; border-radius: 3px; }
+  #clear-btn:hover { background: var(--vscode-list-hoverBackground); }
+
+  /* Main view */
+  #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+  #toolbar { padding: 6px 12px; border-bottom: 1px solid var(--vscode-panel-border, #444); font-size: 0.82em; color: var(--vscode-descriptionForeground); flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
+  .ref-badge { font-family: monospace; font-size: 0.95em; padding: 1px 6px; border-radius: 3px; color: #fff; }
+  .ref-badge.a { background: #1a6fb5; }
+  .ref-badge.b { background: #7b31c9; }
+  #view-area { flex: 1; overflow: hidden; display: flex; min-height: 0; }
+  .pane { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center; position: relative; min-width: 0; }
+  .pane + .pane { border-left: 1px solid var(--vscode-panel-border, #444); }
+  .pane img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+  .pane embed, .pane iframe { width: 100%; height: 100%; border: none; background: white; }
+  .pane-label { position: absolute; top: 6px; left: 8px; font-size: 0.75em; font-weight: 700; padding: 1px 6px; border-radius: 3px; color: #fff; z-index: 1; }
+  .pane-label.a { background: #1a6fb5; }
+  .pane-label.b { background: #7b31c9; }
+  .no-render, .loading, .err { color: var(--vscode-descriptionForeground); font-size: 0.88em; padding: 20px; text-align: center; white-space: pre-wrap; }
+  .err { color: var(--vscode-errorForeground, #f44); }
+</style>
+</head>
+<body>
+<div id="root">
+  <div id="sidebar">
+    <div id="sidebar-header">Version History</div>
+    <button id="clear-btn">Clear selection</button>
+    <div id="commits"></div>
+  </div>
+  <div id="main">
+    <div id="toolbar"><span id="toolbar-text">Current version</span></div>
+    <div id="view-area">
+      <div class="pane" id="pane-a"></div>
+      <div class="pane" id="pane-b" style="display:none"></div>
+    </div>
+  </div>
+</div>
+<script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+  const history = ${historyJson};
+  const isRenderable = ${JSON.stringify(isRenderable)};
+  const isImage = ${JSON.stringify(isImage)};
+  const isPdf = ${JSON.stringify(isPdf)};
+  const isHtml = ${JSON.stringify(isHtml)};
+  const headDataUri = ${JSON.stringify(headDataUri)};
+  const fileName = ${JSON.stringify(path.basename(filePath))};
+
+  let refA = null;
+  let refB = null;
+  const pending = {}; // ref -> [resolve, reject]
+
+  const commitsEl = document.getElementById('commits');
+  const paneA = document.getElementById('pane-a');
+  const paneB = document.getElementById('pane-b');
+  const toolbarText = document.getElementById('toolbar-text');
+  const clearBtn = document.getElementById('clear-btn');
+
+  // ── Build commit list ──
+  if (history.length === 0) {
+    commitsEl.innerHTML = '<div class="commit" style="cursor:default;opacity:0.6">No history found.</div>';
+  } else {
+    history.forEach(function(c) {
+      const el = document.createElement('div');
+      el.className = 'commit';
+      el.dataset.hash = c.shortHash;
+      el.innerHTML =
+        '<div class="commit-hash">' + esc(c.shortHash) + '</div>' +
+        '<div class="commit-subject">' + esc(c.subject) + '</div>' +
+        '<div class="commit-meta">' + esc(formatDate(c.date)) + ' · ' + esc(c.author) + '</div>';
+      el.addEventListener('click', function() { onCommitClick(c.shortHash); });
+      commitsEl.appendChild(el);
+    });
+  }
+
+  function formatDate(iso) {
+    try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
+  }
+  function esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ── Pane rendering ──
+  function renderInPane(paneEl, dataUri, label) {
+    paneEl.innerHTML = '';
+    if (label) {
+      const lb = document.createElement('div');
+      lb.className = 'pane-label ' + label;
+      lb.textContent = label.toUpperCase();
+      paneEl.appendChild(lb);
+    }
+    if (!isRenderable) {
+      const msg = document.createElement('div');
+      msg.className = 'no-render';
+      msg.textContent = 'Preview not available for this file type.';
+      paneEl.appendChild(msg);
+      return;
+    }
+    if (isImage) {
+      const img = document.createElement('img');
+      img.src = dataUri;
+      paneEl.appendChild(img);
+    } else if (isPdf) {
+      const embed = document.createElement('embed');
+      embed.src = dataUri;
+      embed.type = 'application/pdf';
+      embed.style.cssText = 'width:100%;height:100%;border:none';
+      paneEl.appendChild(embed);
+    } else if (isHtml) {
+      const frame = document.createElement('iframe');
+      frame.src = dataUri;
+      frame.style.cssText = 'width:100%;height:100%;border:none';
+      paneEl.appendChild(frame);
+    }
+  }
+
+  function showLoading(paneEl, label) {
+    paneEl.innerHTML = '';
+    if (label) {
+      const lb = document.createElement('div');
+      lb.className = 'pane-label ' + label;
+      lb.textContent = label.toUpperCase();
+      paneEl.appendChild(lb);
+    }
+    const msg = document.createElement('div');
+    msg.className = 'loading';
+    msg.textContent = 'Loading…';
+    paneEl.appendChild(msg);
+  }
+
+  function showError(paneEl, label, reason) {
+    paneEl.innerHTML = '';
+    if (label) {
+      const lb = document.createElement('div');
+      lb.className = 'pane-label ' + label;
+      lb.textContent = label.toUpperCase();
+      paneEl.appendChild(lb);
+    }
+    const msg = document.createElement('div');
+    msg.className = 'err';
+    msg.textContent = reason;
+    paneEl.appendChild(msg);
+  }
+
+  // ── Toolbar ──
+  function updateToolbar() {
+    if (!refA && !refB) {
+      toolbarText.textContent = 'Current version · ' + fileName;
+      clearBtn.style.display = 'none';
+    } else if (refA && !refB) {
+      toolbarText.innerHTML = '<span class="ref-badge a">A</span> <code>' + esc(refA) + '</code> · click another commit to compare';
+      clearBtn.style.display = 'inline-block';
+    } else {
+      toolbarText.innerHTML = '<span class="ref-badge a">A</span> <code>' + esc(refA) + '</code> &nbsp; vs &nbsp; <span class="ref-badge b">B</span> <code>' + esc(refB) + '</code>';
+      clearBtn.style.display = 'inline-block';
+    }
+  }
+
+  function updateCommitHighlights() {
+    commitsEl.querySelectorAll('.commit').forEach(function(el) {
+      el.classList.remove('selected-a', 'selected-b');
+      const h = el.dataset.hash;
+      if (h === refA) el.classList.add('selected-a');
+      else if (h === refB) el.classList.add('selected-b');
+      // update badges inside
+      el.querySelectorAll('.badge').forEach(function(b) { b.remove(); });
+      const hashEl = el.querySelector('.commit-hash');
+      if (h === refA) { const b = document.createElement('span'); b.className = 'badge badge-a'; b.textContent = 'A'; hashEl.appendChild(b); }
+      if (h === refB) { const b = document.createElement('span'); b.className = 'badge badge-b'; b.textContent = 'B'; hashEl.appendChild(b); }
+    });
+  }
+
+  // ── Fetch content ──
+  function getContent(ref) {
+    return new Promise(function(resolve, reject) {
+      pending[ref] = [resolve, reject];
+      vscode.postMessage({ command: 'getContent', ref: ref });
+    });
+  }
+
+  window.addEventListener('message', function(event) {
+    const msg = event.data;
+    if (msg.command === 'content') {
+      if (pending[msg.ref]) { pending[msg.ref][0](msg.dataUri); delete pending[msg.ref]; }
+    } else if (msg.command === 'contentError') {
+      if (pending[msg.ref]) { pending[msg.ref][1](new Error(msg.reason)); delete pending[msg.ref]; }
+    }
+  });
+
+  // ── Navigation ──
+  function onCommitClick(hash) {
+    if (!refA || refA === hash) {
+      refA = hash;
+      refB = null;
+    } else if (!refB) {
+      refB = hash;
+    } else {
+      refA = hash;
+      refB = null;
+    }
+    updateCommitHighlights();
+    updateToolbar();
+    refreshView();
+  }
+
+  clearBtn.addEventListener('click', function() {
+    refA = null;
+    refB = null;
+    updateCommitHighlights();
+    updateToolbar();
+    refreshView();
+  });
+
+  function refreshView() {
+    if (!refA && !refB) {
+      // Show current disk version
+      paneB.style.display = 'none';
+      paneA.style.flex = '1';
+      if (headDataUri) {
+        renderInPane(paneA, headDataUri, null);
+      } else {
+        showError(paneA, null, 'File not available on disk.');
+      }
+      return;
+    }
+    if (refA && !refB) {
+      paneB.style.display = 'none';
+      paneA.style.flex = '1';
+      showLoading(paneA, 'a');
+      getContent(refA).then(function(uri) {
+        renderInPane(paneA, uri, 'a');
+      }).catch(function(e) {
+        showError(paneA, 'a', e.message);
+      });
+      return;
+    }
+    // Compare mode
+    paneB.style.display = '';
+    paneA.style.flex = '1';
+    paneB.style.flex = '1';
+    showLoading(paneA, 'a');
+    showLoading(paneB, 'b');
+    getContent(refA).then(function(uri) { renderInPane(paneA, uri, 'a'); }).catch(function(e) { showError(paneA, 'a', e.message); });
+    getContent(refB).then(function(uri) { renderInPane(paneB, uri, 'b'); }).catch(function(e) { showError(paneB, 'b', e.message); });
+  }
+
+  // ── Init ──
+  updateToolbar();
+  refreshView();
+</script>
+</body>
+</html>`;
+}
+
+function getOrCreateTerminal(name: string, cwd: string): vscode.Terminal {
+  const existing = vscode.window.terminals.find((t) => t.name === name);
+  if (existing) {
+    return existing;
+  }
+  return vscode.window.createTerminal({ name, cwd });
+}
+
+function runStageInTerminal(workspaceRoot: string, stageName: string): void {
+  const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
+  terminal.show();
+  terminal.sendText(`calkit run ${shQuote(stageName)}`);
+}
+
+async function findStageForFile(
+  workspaceRoot: string,
+  fileUri: vscode.Uri,
+): Promise<string | undefined> {
+  const relPath = path
+    .relative(workspaceRoot, fileUri.fsPath)
+    .replace(/\\/g, "/");
+  const [dvcYaml, calkitConfig] = await Promise.all([
+    readDvcYaml(workspaceRoot),
+    readCalkitConfig(workspaceRoot),
+  ]);
+  for (const [stageName, stage] of Object.entries(dvcYaml?.stages ?? {})) {
+    if (dvcStageOutputPaths(stage).includes(relPath)) {
+      return stageName;
+    }
+  }
+  for (const [stageName, stage] of Object.entries(
+    calkitConfig?.pipeline?.stages ?? {},
+  )) {
+    if (
+      stage.notebook_path === relPath ||
+      stage.script_path === relPath ||
+      stage.target_path === relPath
+    ) {
+      return stageName;
+    }
+  }
+  return undefined;
 }
 
 async function selectCalkitEnvironment(
@@ -832,6 +3304,773 @@ async function runCreateEnvironmentWizard(
     }
     return created;
   }
+}
+
+async function readUvPackages(
+  workspaceRoot: string,
+  specPath: string,
+): Promise<string[]> {
+  try {
+    const absPath = path.join(workspaceRoot, specPath);
+    const raw = (
+      await vscode.workspace.fs.readFile(vscode.Uri.file(absPath))
+    ).toString();
+    const match = raw.match(
+      /\[project\][^\[]*?dependencies\s*=\s*\[([\s\S]*?)\]/,
+    );
+    if (!match) {
+      return [];
+    }
+    return Array.from(match[1].matchAll(/"([^"]+)"/g)).map((m) => m[1]);
+  } catch {
+    return [];
+  }
+}
+
+async function readJuliaPackages(
+  workspaceRoot: string,
+  specPath: string,
+): Promise<string[]> {
+  try {
+    const absPath = path.join(workspaceRoot, specPath);
+    const raw = (
+      await vscode.workspace.fs.readFile(vscode.Uri.file(absPath))
+    ).toString();
+    const match = raw.match(/\[deps\]([\s\S]*?)(?:\[|$)/);
+    if (!match) {
+      return [];
+    }
+    return match[1]
+      .split("\n")
+      .map((l) => l.split("=")[0].trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function readCondaPackages(
+  workspaceRoot: string,
+  specPath: string,
+): Promise<{ conda: string[]; pip: string[] }> {
+  try {
+    const absPath = path.join(workspaceRoot, specPath);
+    const raw = (
+      await vscode.workspace.fs.readFile(vscode.Uri.file(absPath))
+    ).toString();
+    const parsed = (await import("yaml")).parse(raw) as {
+      dependencies?: unknown[];
+    } | null;
+    const deps = parsed?.dependencies ?? [];
+    const conda = deps.filter((d): d is string => typeof d === "string");
+    const pipDict = deps.find(
+      (d): d is { pip: string[] } =>
+        typeof d === "object" && d !== null && "pip" in d,
+    );
+    const pip = Array.isArray(pipDict?.pip)
+      ? pipDict.pip.filter((p): p is string => typeof p === "string")
+      : [];
+    return { conda, pip };
+  } catch {
+    return { conda: [], pip: [] };
+  }
+}
+
+async function showEnvCreatorWebview(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+  editEnvName?: string,
+  existingEnv?: import("./environments").CalkitEnvironment,
+  specPath?: string,
+): Promise<void> {
+  const isEdit = editEnvName !== undefined;
+  const kind = typeof existingEnv?.kind === "string" ? existingEnv.kind : "uv";
+  let condaPackages: { conda: string[]; pip: string[] } = {
+    conda: [],
+    pip: [],
+  };
+  let uvPackages: string[] = [];
+  let juliaPackages: string[] = [];
+  if (isEdit && specPath) {
+    if (kind === "conda") {
+      condaPackages = await readCondaPackages(workspaceRoot, specPath);
+    } else if (kind === "uv" || kind === "uv-venv") {
+      uvPackages = await readUvPackages(workspaceRoot, specPath);
+    } else if (kind === "julia") {
+      juliaPackages = await readJuliaPackages(workspaceRoot, specPath);
+    }
+  }
+  const nonce = getNonce();
+  const panel = vscode.window.createWebviewPanel(
+    "calkit.envCreator",
+    isEdit ? `Edit Environment: ${editEnvName}` : "New Environment",
+    vscode.ViewColumn.Active,
+    { enableScripts: true },
+  );
+  context.subscriptions.push(panel);
+  panel.webview.html = buildEnvCreatorHtml(
+    nonce,
+    editEnvName,
+    existingEnv,
+    specPath,
+    condaPackages.conda,
+    condaPackages.pip,
+    uvPackages,
+    juliaPackages,
+  );
+  panel.webview.onDidReceiveMessage(
+    (msg: {
+      command: string;
+      name: string;
+      kind: string;
+      packages: string[];
+      pipPackages: string[];
+      origPackages: string[];
+      origPipPackages: string[];
+      pythonVersion: string;
+      condaPath: string;
+      image: string;
+      base: string;
+      dockerfilePath: string;
+      host: string;
+      defaultOptions: string[];
+      defaultSetup: string[];
+    }) => {
+      if (msg.command !== "create" && msg.command !== "save") {
+        return;
+      }
+      const args: string[] = [];
+      if (msg.command === "save") {
+        if (msg.kind === "conda") {
+          args.push("update", "conda-env", "-n", msg.name);
+          const origSet = new Set(msg.origPackages);
+          const newSet = new Set(msg.packages);
+          for (const p of msg.packages) {
+            if (!origSet.has(p)) {
+              args.push("--add", p);
+            }
+          }
+          for (const p of msg.origPackages) {
+            if (!newSet.has(p)) {
+              args.push("--rm", p);
+            }
+          }
+          const origPipSet = new Set(msg.origPipPackages);
+          const newPipSet = new Set(msg.pipPackages);
+          for (const p of msg.pipPackages) {
+            if (!origPipSet.has(p)) {
+              args.push("--add-pip", p);
+            }
+          }
+          for (const p of msg.origPipPackages) {
+            if (!newPipSet.has(p)) {
+              args.push("--rm-pip", p);
+            }
+          }
+        } else if (msg.kind === "uv" || msg.kind === "uv-venv") {
+          args.push("update", "uv-env", "-n", msg.name, "--no-check");
+          const origSet = new Set(msg.origPackages);
+          const newSet = new Set(msg.packages);
+          for (const p of msg.packages) {
+            if (!origSet.has(p)) {
+              args.push("--add", p);
+            }
+          }
+          for (const p of msg.origPackages) {
+            if (!newSet.has(p)) {
+              args.push("--rm", p);
+            }
+          }
+        } else if (msg.kind === "julia") {
+          args.push("update", "julia-env", "-n", msg.name, "--no-check");
+          const origSet = new Set(msg.origPackages);
+          const newSet = new Set(msg.packages);
+          for (const p of msg.packages) {
+            if (!origSet.has(p)) {
+              args.push("--add", p);
+            }
+          }
+          for (const p of msg.origPackages) {
+            if (!newSet.has(p)) {
+              args.push("--rm", p);
+            }
+          }
+        } else if (msg.kind === "docker") {
+          args.push("update", "docker-env", "-n", msg.name);
+          if (msg.image) {
+            args.push("--image", msg.image);
+          }
+        } else if (msg.kind === "slurm") {
+          args.push("update", "slurm-env", "-n", msg.name);
+          if (msg.host) {
+            args.push("--host", msg.host);
+          }
+          for (const opt of msg.defaultOptions) {
+            args.push("--set-default-options", opt);
+          }
+          if (msg.defaultOptions.length === 0) {
+            args.push("--set-default-options", "");
+          }
+          for (const cmd of msg.defaultSetup) {
+            args.push("--set-default-setup", cmd);
+          }
+          if (msg.defaultSetup.length === 0) {
+            args.push("--set-default-setup", "");
+          }
+        }
+      } else {
+        if (msg.kind === "uv") {
+          args.push("new", "uv-env", "-n", msg.name, "--no-commit");
+          if (msg.pythonVersion) {
+            args.push("--python", msg.pythonVersion);
+          }
+          for (const pkg of msg.packages) {
+            args.push(pkg);
+          }
+        } else if (msg.kind === "conda") {
+          args.push("new", "conda-env", "-n", msg.name, "--no-commit");
+          if (msg.condaPath) {
+            args.push("--path", msg.condaPath);
+          }
+          for (const pkg of msg.packages) {
+            args.push(pkg);
+          }
+        } else if (msg.kind === "docker") {
+          args.push("new", "docker-env", "-n", msg.name);
+          if (msg.base) {
+            args.push("--from", msg.base);
+            if (msg.dockerfilePath) {
+              args.push("--path", msg.dockerfilePath);
+            }
+          } else if (msg.image) {
+            args.push("--image", msg.image);
+          }
+          args.push("--no-check", "--no-commit");
+        } else if (msg.kind === "slurm") {
+          args.push(
+            "new",
+            "slurm-env",
+            "-n",
+            msg.name,
+            "--host",
+            msg.host,
+            "--no-commit",
+          );
+          for (const opt of msg.defaultOptions) {
+            args.push("--default-option", opt);
+          }
+          for (const cmd of msg.defaultSetup) {
+            args.push("--default-setup", cmd);
+          }
+        }
+      }
+      const progressTitle = isEdit
+        ? "Saving environment..."
+        : "Creating environment...";
+      const successMsg = isEdit
+        ? `Environment '${msg.name}' updated.`
+        : `Environment '${msg.name}' created successfully.`;
+      void vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: progressTitle,
+          cancellable: false,
+        },
+        async () => {
+          try {
+            await execFileAsync("calkit", args, { cwd: workspaceRoot });
+            void vscode.window.showInformationMessage(successMsg);
+            void refreshPipelineOutputContext(context);
+            panel.dispose();
+          } catch (error: unknown) {
+            const err = error as {
+              stderr?: string;
+              stdout?: string;
+              message?: string;
+            };
+            const output = [err.stdout, err.stderr]
+              .filter(Boolean)
+              .join("\n")
+              .trim();
+            if (output) {
+              log(output);
+            }
+            const errMsg = (err.stderr ?? err.message ?? String(error)).trim();
+            void vscode.window
+              .showErrorMessage(errMsg, "View Output")
+              .then((choice) => {
+                if (choice === "View Output") {
+                  outputChannel.show(true);
+                }
+              });
+            void panel.webview.postMessage({
+              command: "error",
+              message: errMsg,
+            });
+          }
+        },
+      );
+    },
+  );
+}
+
+function buildEnvCreatorHtml(
+  nonce: string,
+  editEnvName?: string,
+  existingEnv?: import("./environments").CalkitEnvironment,
+  specPath?: string,
+  editCondaPackages: string[] = [],
+  editPipPackages: string[] = [],
+  editUvPackages: string[] = [],
+  editJuliaPackages: string[] = [],
+): string {
+  const isEdit = editEnvName !== undefined;
+  const kind = typeof existingEnv?.kind === "string" ? existingEnv.kind : "uv";
+  const existingImage =
+    typeof existingEnv?.image === "string" ? existingEnv.image : "";
+  const existingHost =
+    typeof existingEnv?.host === "string" ? existingEnv.host : "";
+  const existingOptions = Array.isArray(existingEnv?.default_options)
+    ? (existingEnv.default_options as string[]).filter(
+        (s) => typeof s === "string",
+      )
+    : [];
+  const existingSetup = Array.isArray(existingEnv?.default_setup)
+    ? (existingEnv.default_setup as string[]).filter(
+        (s) => typeof s === "string",
+      )
+    : [];
+
+  const optionsJson = JSON.stringify(existingOptions);
+  const setupJson = JSON.stringify(existingSetup);
+
+  const title = isEdit
+    ? `Edit Environment: ${escHtml(editEnvName ?? "")}`
+    : "New Environment";
+  const btnLabel = isEdit ? "Save" : "Create";
+  const spinnerLabel = isEdit ? "Saving..." : "Creating...";
+  const postCommand = isEdit ? "save" : "create";
+
+  const nameField = isEdit
+    ? `<div class="field"><label>Name</label><div class="info-row">${escHtml(
+        editEnvName ?? "",
+      )}</div></div>`
+    : `<div class="field"><label>Name</label><input id="name" type="text" required placeholder="e.g. default" /></div>`;
+
+  const kindField = isEdit
+    ? `<div class="field"><label>Kind</label><div class="info-row">${escHtml(
+        kind,
+      )}</div></div>`
+    : `<div class="field"><label>Kind</label>
+<select id="kind">
+  <option value="uv">uv</option>
+  <option value="conda">conda</option>
+  <option value="julia">julia</option>
+  <option value="docker">docker</option>
+  <option value="slurm">slurm</option>
+</select>
+</div>`;
+
+  const uvPackagesJson = JSON.stringify(editUvPackages);
+  const juliaPackagesJson = JSON.stringify(editJuliaPackages);
+
+  const uvSection =
+    isEdit && kind !== "uv" && kind !== "uv-venv"
+      ? ""
+      : `
+<div id="section-uv">
+${
+  isEdit
+    ? `${
+        specPath
+          ? `  <div class="field"><label>Spec file</label><div class="info-row">${escHtml(
+              specPath,
+            )}</div></div>`
+          : ""
+      }
+  <div class="field">
+    <label>Packages</label>
+    <div class="list-section">
+      <div id="uv-packages-list"></div>
+      <button class="add-btn" id="add-uv-package">+ Add package</button>
+    </div>
+  </div>`
+    : `  <div class="field">
+    <label>Python version <span style="font-weight:normal;text-transform:none">(optional)</span></label>
+    <input id="python-version" type="text" placeholder="e.g. 3.11" />
+  </div>
+  <div class="field">
+    <label>Packages</label>
+    <div class="list-section">
+      <div id="uv-packages-list"></div>
+      <button class="add-btn" id="add-uv-package">+ Add package</button>
+    </div>
+  </div>`
+}
+</div>`;
+
+  const juliaSection =
+    isEdit && kind !== "julia"
+      ? ""
+      : `
+<div id="section-julia"${!isEdit ? ' style="display:none"' : ""}>
+${
+  isEdit
+    ? `${
+        specPath
+          ? `  <div class="field"><label>Spec file</label><div class="info-row">${escHtml(
+              specPath,
+            )}</div></div>`
+          : ""
+      }
+  <div class="field">
+    <label>Packages</label>
+    <div class="list-section">
+      <div id="julia-packages-list"></div>
+      <button class="add-btn" id="add-julia-package">+ Add package</button>
+    </div>
+  </div>`
+    : `  <div class="field">
+    <label>Packages</label>
+    <div class="list-section">
+      <div id="julia-packages-list"></div>
+      <button class="add-btn" id="add-julia-package">+ Add package</button>
+    </div>
+  </div>`
+}
+</div>`;
+
+  const condaPackagesJson = JSON.stringify(editCondaPackages);
+  const pipPackagesJson = JSON.stringify(editPipPackages);
+
+  const condaSection =
+    isEdit && kind !== "conda"
+      ? ""
+      : `
+<div id="section-conda"${!isEdit ? ' style="display:none"' : ""}>
+${
+  isEdit
+    ? `${
+        specPath
+          ? `  <div class="field"><label>Spec file</label><div class="info-row">${escHtml(
+              specPath,
+            )}</div></div>`
+          : ""
+      }
+  <div class="field">
+    <label>Conda packages</label>
+    <div class="list-section">
+      <div id="conda-packages-list"></div>
+      <button class="add-btn" id="add-conda-package">+ Add package</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>pip packages</label>
+    <div class="list-section">
+      <div id="pip-packages-list"></div>
+      <button class="add-btn" id="add-pip-package">+ Add pip package</button>
+    </div>
+  </div>`
+    : `  <div class="field">
+    <label>Packages</label>
+    <div class="list-section">
+      <div id="conda-packages-list"></div>
+      <button class="add-btn" id="add-conda-package">+ Add package</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>Spec path <span style="font-weight:normal;text-transform:none">(optional)</span></label>
+    <input id="conda-path" type="text" placeholder="environment.yml" />
+  </div>`
+}
+</div>`;
+
+  const dockerSection =
+    isEdit && kind !== "docker"
+      ? ""
+      : `
+<div id="section-docker"${!isEdit ? ' style="display:none"' : ""}>
+  <div class="field">
+    <label>Image</label>
+    <input id="docker-image" type="text" value="${escHtml(
+      existingImage,
+    )}" placeholder="e.g. ubuntu:22.04 or myregistry/myimage:latest" />
+  </div>
+${
+  !isEdit
+    ? `  <div class="field">
+    <label>Build from <span style="font-weight:normal;text-transform:none">(optional)</span></label>
+    <input id="docker-base" type="text" placeholder="base image for Dockerfile, e.g. ubuntu:22.04" />
+  </div>
+  <div class="field" id="dockerfile-path-field" style="display:none">
+    <label>Dockerfile path <span style="font-weight:normal;text-transform:none">(optional)</span></label>
+    <input id="dockerfile-path" type="text" placeholder="Dockerfile" />
+  </div>`
+    : ""
+}
+</div>`;
+
+  const slurmSection =
+    isEdit && kind !== "slurm"
+      ? ""
+      : `
+<div id="section-slurm"${!isEdit ? ' style="display:none"' : ""}>
+  <div class="field">
+    <label>Host</label>
+    <input id="slurm-host" type="text" value="${escHtml(
+      existingHost,
+    )}" placeholder="e.g. myserver.edu" />
+  </div>
+  <div class="field">
+    <label>Default options</label>
+    <div class="list-section">
+      <div id="slurm-options-list"></div>
+      <button class="add-btn" id="add-slurm-option">+ Add option</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>Default setup</label>
+    <div class="list-section">
+      <div id="slurm-setup-list"></div>
+      <button class="add-btn" id="add-slurm-setup">+ Add command</button>
+    </div>
+  </div>
+</div>`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline';">
+<title>${title}</title>
+<style>
+  body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); padding: 20px; max-width: 580px; }
+  h1 { font-size: 1.2em; margin-bottom: 18px; }
+  .field { margin-bottom: 14px; }
+  label { display: block; margin-bottom: 4px; font-weight: 600; color: var(--vscode-descriptionForeground); font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.04em; }
+  input, select { width: 100%; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, #555); padding: 5px 8px; font-size: 1em; font-family: inherit; border-radius: 2px; }
+  input:focus, select:focus { outline: 1px solid var(--vscode-focusBorder); border-color: var(--vscode-focusBorder); }
+  .info-row { padding: 5px 0; color: var(--vscode-foreground); }
+  .info-note { font-size: 0.9em; color: var(--vscode-descriptionForeground); padding: 4px 0; }
+  .info-note code { font-family: var(--vscode-editor-font-family, monospace); }
+  .list-section { border: 1px solid var(--vscode-input-border, #555); border-radius: 2px; padding: 6px 8px; }
+  .list-item { display: flex; gap: 6px; margin-bottom: 4px; align-items: center; }
+  .list-item input { flex: 1; }
+  .remove-btn { background: none; border: none; color: var(--vscode-descriptionForeground); cursor: pointer; font-size: 1.1em; padding: 2px 4px; flex-shrink: 0; }
+  .remove-btn:hover { color: var(--vscode-foreground); }
+  .add-btn { background: none; border: none; color: var(--vscode-textLink-foreground); cursor: pointer; font-size: 0.9em; padding: 2px 0; margin-top: 4px; }
+  .add-btn:hover { text-decoration: underline; }
+  .actions { margin-top: 20px; }
+  button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 7px 18px; cursor: pointer; font-size: 1em; border-radius: 2px; }
+  button.primary:hover { background: var(--vscode-button-hoverBackground); }
+  button.primary:disabled { opacity: 0.6; cursor: not-allowed; }
+  .error-msg { color: var(--vscode-errorForeground, #f44); margin-top: 8px; font-size: 0.92em; display: none; }
+  .spinner-text { margin-left: 10px; font-size: 0.92em; color: var(--vscode-descriptionForeground); display: none; }
+</style>
+</head>
+<body>
+<h1>${title}</h1>
+${nameField}
+${kindField}
+${uvSection}
+${juliaSection}
+${condaSection}
+${dockerSection}
+${slurmSection}
+<div class="actions">
+  <button class="primary" id="btn-submit">${btnLabel}</button>
+  <span class="spinner-text" id="spinner-text">${spinnerLabel}</span>
+</div>
+<div class="error-msg" id="error-msg"></div>
+<script nonce="${nonce}">
+  const vscode = acquireVsCodeApi();
+  const isEdit = ${isEdit};
+  const fixedKind = ${isEdit ? `'${escHtml(kind)}'` : "null"};
+
+  function getKind() {
+    if (fixedKind) { return fixedKind; }
+    return document.getElementById('kind').value;
+  }
+
+  ${
+    !isEdit
+      ? `
+  const kindEl = document.getElementById('kind');
+  const sections = {
+    uv: document.getElementById('section-uv'),
+    julia: document.getElementById('section-julia'),
+    conda: document.getElementById('section-conda'),
+    docker: document.getElementById('section-docker'),
+    slurm: document.getElementById('section-slurm'),
+  };
+  function showSection(k) {
+    for (const [key, el] of Object.entries(sections)) {
+      if (el) { el.style.display = key === k ? '' : 'none'; }
+    }
+  }
+  kindEl.addEventListener('change', function() { showSection(kindEl.value); });
+  `
+      : ""
+  }
+
+  function makeListItem(listEl, value, placeholder) {
+    const row = document.createElement('div');
+    row.className = 'list-item';
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.placeholder = placeholder || '';
+    if (value) { inp.value = value; }
+    const btn = document.createElement('button');
+    btn.className = 'remove-btn';
+    btn.textContent = '\\u00d7';
+    btn.title = 'Remove';
+    btn.addEventListener('click', function() { row.remove(); });
+    row.appendChild(inp);
+    row.appendChild(btn);
+    listEl.appendChild(row);
+    return inp;
+  }
+  function getListValues(listEl) {
+    return Array.from(listEl.querySelectorAll('input')).map(function(i) { return i.value.trim(); }).filter(Boolean);
+  }
+
+  // Pre-populate package lists
+  const uvPkgList = document.getElementById('uv-packages-list');
+  const juliaPkgList = document.getElementById('julia-packages-list');
+  const condaPkgList = document.getElementById('conda-packages-list');
+  const pipPkgList = document.getElementById('pip-packages-list');
+  if (uvPkgList) {
+    for (const v of ${uvPackagesJson}) { makeListItem(uvPkgList, v, 'e.g. numpy'); }
+  }
+  if (juliaPkgList) {
+    for (const v of ${juliaPackagesJson}) { makeListItem(juliaPkgList, v, 'e.g. Plots'); }
+  }
+  if (condaPkgList) {
+    for (const v of ${condaPackagesJson}) { makeListItem(condaPkgList, v, 'e.g. numpy'); }
+  }
+  if (pipPkgList) {
+    for (const v of ${pipPackagesJson}) { makeListItem(pipPkgList, v, 'e.g. requests'); }
+  }
+
+  // Pre-populate slurm lists
+  const slurmOptList = document.getElementById('slurm-options-list');
+  const slurmSetupList = document.getElementById('slurm-setup-list');
+  if (slurmOptList) {
+    for (const v of ${optionsJson}) { makeListItem(slurmOptList, v, '--gpus=1'); }
+  }
+  if (slurmSetupList) {
+    for (const v of ${setupJson}) { makeListItem(slurmSetupList, v, 'module load julia/1.11'); }
+  }
+
+  if (document.getElementById('add-uv-package')) {
+    document.getElementById('add-uv-package').addEventListener('click', function() {
+      makeListItem(uvPkgList, '', 'e.g. numpy').focus();
+    });
+  }
+  if (document.getElementById('add-julia-package')) {
+    document.getElementById('add-julia-package').addEventListener('click', function() {
+      makeListItem(juliaPkgList, '', 'e.g. Plots').focus();
+    });
+  }
+  if (document.getElementById('add-conda-package')) {
+    document.getElementById('add-conda-package').addEventListener('click', function() {
+      makeListItem(condaPkgList, '', 'e.g. numpy').focus();
+    });
+  }
+  if (document.getElementById('add-pip-package')) {
+    document.getElementById('add-pip-package').addEventListener('click', function() {
+      makeListItem(pipPkgList, '', 'e.g. requests').focus();
+    });
+  }
+  ${
+    !isEdit
+      ? `
+  const dockerBaseEl = document.getElementById('docker-base');
+  const dockerfilePathField = document.getElementById('dockerfile-path-field');
+  if (dockerBaseEl) {
+    dockerBaseEl.addEventListener('input', function() {
+      dockerfilePathField.style.display = dockerBaseEl.value.trim() ? '' : 'none';
+    });
+  }`
+      : ""
+  }
+
+  if (document.getElementById('add-slurm-option')) {
+    document.getElementById('add-slurm-option').addEventListener('click', function() {
+      makeListItem(slurmOptList, '', '--gpus=1').focus();
+    });
+  }
+  if (document.getElementById('add-slurm-setup')) {
+    document.getElementById('add-slurm-setup').addEventListener('click', function() {
+      makeListItem(slurmSetupList, '', 'module load julia/1.11').focus();
+    });
+  }
+
+  const btnSubmit = document.getElementById('btn-submit');
+  const spinnerText = document.getElementById('spinner-text');
+  const errorMsg = document.getElementById('error-msg');
+
+  btnSubmit.addEventListener('click', function() {
+    const kind = getKind();
+    const name = isEdit ? ${
+      isEdit ? JSON.stringify(editEnvName ?? "") : "''"
+    } : document.getElementById('name').value.trim();
+    if (!name) {
+      errorMsg.textContent = 'Name is required.';
+      errorMsg.style.display = 'block';
+      return;
+    }
+    if (kind === 'slurm' && !document.getElementById('slurm-host').value.trim()) {
+      errorMsg.textContent = 'Host is required for SLURM environments.';
+      errorMsg.style.display = 'block';
+      return;
+    }
+    errorMsg.style.display = 'none';
+    btnSubmit.disabled = true;
+    spinnerText.style.display = 'inline';
+    let packages = [];
+    if (kind === 'uv' || kind === 'uv-venv') {
+      packages = uvPkgList ? getListValues(uvPkgList) : [];
+    } else if (kind === 'julia') {
+      packages = juliaPkgList ? getListValues(juliaPkgList) : [];
+    } else if (kind === 'conda') {
+      packages = condaPkgList ? getListValues(condaPkgList) : [];
+    }
+    const pipPackages = pipPkgList ? getListValues(pipPkgList) : [];
+    const origPackages = kind === 'uv' || kind === 'uv-venv' ? ${uvPackagesJson}
+      : kind === 'julia' ? ${juliaPackagesJson}
+      : ${condaPackagesJson};
+    vscode.postMessage({
+      command: '${postCommand}',
+      name,
+      kind,
+      packages,
+      pipPackages,
+      origPackages,
+      origPipPackages: ${pipPackagesJson},
+      pythonVersion: document.getElementById('python-version') ? document.getElementById('python-version').value.trim() : '',
+      condaPath: document.getElementById('conda-path') ? document.getElementById('conda-path').value.trim() : '',
+      image: document.getElementById('docker-image') ? document.getElementById('docker-image').value.trim() : '',
+      base: document.getElementById('docker-base') ? document.getElementById('docker-base').value.trim() : '',
+      dockerfilePath: document.getElementById('dockerfile-path') ? document.getElementById('dockerfile-path').value.trim() : '',
+      host: document.getElementById('slurm-host') ? document.getElementById('slurm-host').value.trim() : '',
+      defaultOptions: slurmOptList ? getListValues(slurmOptList) : [],
+      defaultSetup: slurmSetupList ? getListValues(slurmSetupList) : [],
+    });
+  });
+
+  window.addEventListener('message', function(event) {
+    const msg = event.data;
+    if (msg.command === 'error') {
+      btnSubmit.disabled = false;
+      spinnerText.style.display = 'none';
+      errorMsg.textContent = msg.message;
+      errorMsg.style.display = 'block';
+    }
+  });
+</script>
+</body>
+</html>`;
 }
 
 type WizardStepResult<T> =
@@ -3445,6 +6684,21 @@ async function restartCalkitJobForActiveNotebook(
   }
 }
 
+async function refreshActiveFileStageContext(
+  fileUri: vscode.Uri | undefined,
+): Promise<void> {
+  const workspaceRoot = getWorkspaceRoot();
+  let hasStage = false;
+  if (workspaceRoot && fileUri) {
+    hasStage = (await findStageForFile(workspaceRoot, fileUri)) !== undefined;
+  }
+  await vscode.commands.executeCommand(
+    "setContext",
+    "calkit.activeFileHasStage",
+    hasStage,
+  );
+}
+
 async function refreshNotebookToolbarContext(
   context: vscode.ExtensionContext,
 ): Promise<void> {
@@ -3452,6 +6706,13 @@ async function refreshNotebookToolbarContext(
   const hasResumableSlurm = Boolean(profile?.outerSlurmEnvironment);
   const isRunningSlurm = hasRunningServerSession("slurm");
   const isRunningDocker = hasRunningServerSession("docker");
+  const workspaceRoot = getWorkspaceRoot();
+  const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
+  let notebookHasStage = false;
+  if (workspaceRoot && notebookUri) {
+    const stageName = await findStageForFile(workspaceRoot, notebookUri);
+    notebookHasStage = stageName !== undefined;
+  }
 
   await vscode.commands.executeCommand(
     "setContext",
@@ -3467,6 +6728,11 @@ async function refreshNotebookToolbarContext(
     "setContext",
     "calkit.hasRunningDockerSession",
     isRunningDocker,
+  );
+  await vscode.commands.executeCommand(
+    "setContext",
+    "calkit.notebookHasStage",
+    notebookHasStage,
   );
 
   if (slurmStatusBarItem) {

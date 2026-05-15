@@ -225,8 +225,7 @@ def update_release(
         except Exception as e:
             raise_error(f"Failed to delete release draft: {e}")
         ck_info["releases"].pop(name)
-        with open("calkit.yaml", "w") as f:
-            calkit.ryaml.dump(ck_info, f)
+        calkit.save_calkit_info(ck_info)
         repo.git.add("calkit.yaml")
         if "calkit.yaml" in calkit.git.get_staged_files():
             repo.git.commit(["calkit.yaml", "-m", f"Delete release {name}"])
@@ -491,8 +490,7 @@ def update_notebook(
                     }
                 )
         # Write the updated configuration
-        with open("calkit.yaml", "w") as f:
-            calkit.ryaml.dump(ck_info, f)
+        calkit.save_calkit_info(ck_info)
         # Output result
         result = {
             "notebook_path": notebook_path_normalized,
@@ -584,6 +582,310 @@ def update_agent_skills(
         typer.echo(f"Updated {copied} skills in {dest_root}")
 
 
+def _load_env(env_name: str) -> tuple[dict, dict]:
+    """Load calkit.yaml and return (ck_info, env_dict)."""
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments") or {}
+    if env_name not in envs:
+        raise_error(f"Environment '{env_name}' does not exist")
+    return ck_info, envs[env_name]
+
+
+@update_app.command(name="uv-env")
+def update_uv_env(
+    env_name: Annotated[
+        str,
+        typer.Option("--name", "-n", help="Environment name."),
+    ],
+    add: Annotated[
+        list[str],
+        typer.Option("--add", help="Add a package."),
+    ] = [],
+    remove: Annotated[
+        list[str],
+        typer.Option("--remove", "--rm", help="Remove a package."),
+    ] = [],
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Skip checking (syncing) the environment after updating.",
+        ),
+    ] = False,
+) -> None:
+    """Update a uv environment."""
+    import subprocess
+
+    ck_info, env = _load_env(env_name)
+    if env.get("kind") not in ("uv", "uv-venv"):
+        raise_error(f"Environment '{env_name}' is not a uv environment")
+    spec_path = env.get("path", "pyproject.toml")
+    env_dir = os.path.dirname(spec_path) or "."
+    if add:
+        res = subprocess.run(["uv", "add"] + list(add), cwd=env_dir)
+        if res.returncode != 0:
+            raise_error("Failed to add packages")
+    if remove:
+        res = subprocess.run(["uv", "remove"] + list(remove), cwd=env_dir)
+        if res.returncode != 0:
+            raise_error("Failed to remove packages")
+    typer.echo(f"Updated uv environment '{env_name}'")
+    if not no_check:
+        typer.echo(f"Checking environment '{env_name}'")
+        from calkit.cli.check import check_environment
+
+        check_environment(env_name=env_name)
+
+
+@update_app.command(name="julia-env")
+def update_julia_env(
+    env_name: Annotated[
+        str,
+        typer.Option("--name", "-n", help="Environment name."),
+    ],
+    add: Annotated[
+        list[str],
+        typer.Option("--add", help="Add a package."),
+    ] = [],
+    remove: Annotated[
+        list[str],
+        typer.Option("--remove", "--rm", help="Remove a package."),
+    ] = [],
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Skip checking (syncing) the environment after updating.",
+        ),
+    ] = False,
+) -> None:
+    """Update a Julia environment."""
+    import subprocess
+
+    ck_info, env = _load_env(env_name)
+    if env.get("kind") != "julia":
+        raise_error(f"Environment '{env_name}' is not a Julia environment")
+    spec_path = env.get("path", "Project.toml")
+    env_dir = os.path.dirname(spec_path) or "."
+    julia_version = env.get("julia")
+    julia_bin = ["julia", f"+{julia_version}"] if julia_version else ["julia"]
+    cmds = [f'Pkg.activate("{env_dir}")']
+    if add:
+        pkg_list = "[" + ", ".join(f'"{p}"' for p in add) + "]"
+        cmds.append(f"Pkg.add({pkg_list})")
+    if remove:
+        pkg_list = "[" + ", ".join(f'"{p}"' for p in remove) + "]"
+        cmds.append(f"Pkg.rm({pkg_list})")
+    if add or remove:
+        cmd = julia_bin + [
+            f"--project={env_dir}",
+            "-e",
+            "using Pkg; " + "; ".join(cmds),
+        ]
+        res = subprocess.run(cmd)
+        if res.returncode != 0:
+            raise_error("Failed to update Julia environment")
+    typer.echo(f"Updated Julia environment '{env_name}'")
+    if not no_check:
+        typer.echo(f"Checking environment '{env_name}'")
+        from calkit.cli.check import check_environment
+
+        check_environment(env_name=env_name)
+
+
+@update_app.command(name="conda-env")
+def update_conda_env(
+    env_name: Annotated[
+        str,
+        typer.Option("--name", "-n", help="Environment name."),
+    ],
+    add: Annotated[
+        list[str],
+        typer.Option("--add", help="Add a conda package."),
+    ] = [],
+    remove: Annotated[
+        list[str],
+        typer.Option("--remove", "--rm", help="Remove a conda package."),
+    ] = [],
+    add_pip: Annotated[
+        list[str],
+        typer.Option("--add-pip", help="Add a pip package."),
+    ] = [],
+    remove_pip: Annotated[
+        list[str],
+        typer.Option("--remove-pip", "--rm-pip", help="Remove a pip package."),
+    ] = [],
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Skip checking (syncing) the environment after updating.",
+        ),
+    ] = False,
+) -> None:
+    """Update a conda environment spec file."""
+    ck_info, env = _load_env(env_name)
+    if env.get("kind") != "conda":
+        raise_error(f"Environment '{env_name}' is not a conda environment")
+    spec_path = env.get("path", "environment.yml")
+    with open(spec_path) as f:
+        spec = calkit.ryaml.load(f)
+    if spec is None:
+        spec = {}
+    deps = list(spec.get("dependencies") or [])
+    # Edit conda (string) deps
+    for pkg in remove:
+        deps = [
+            d
+            for d in deps
+            if not isinstance(d, str)
+            or (d != pkg and not d.startswith(pkg + "="))
+        ]
+    for pkg in add:
+        already = any(
+            isinstance(d, str) and (d == pkg or d.startswith(pkg + "="))
+            for d in deps
+        )
+        if not already:
+            deps.append(pkg)
+    # Edit pip sublist
+    if add_pip or remove_pip:
+        pip_dict = next(
+            (d for d in deps if isinstance(d, dict) and "pip" in d), None
+        )
+        pip_list = list(pip_dict["pip"] if pip_dict else [])
+        for pkg in remove_pip:
+            pip_list = [
+                p for p in pip_list if p != pkg and not p.startswith(pkg + "=")
+            ]
+        for pkg in add_pip:
+            already = any(
+                p == pkg or p.startswith(pkg + "==") or p.startswith(pkg + "=")
+                for p in pip_list
+            )
+            if not already:
+                pip_list.append(pkg)
+        if pip_dict is not None:
+            deps.remove(pip_dict)
+        if pip_list:
+            deps.append({"pip": pip_list})
+    if deps:
+        spec["dependencies"] = deps
+    elif "dependencies" in spec:
+        del spec["dependencies"]
+    with open(spec_path, "w") as f:
+        calkit.ryaml.dump(spec, f)
+    typer.echo(f"Updated conda environment spec '{spec_path}'")
+    if not no_check:
+        typer.echo(f"Checking environment '{env_name}'")
+        from calkit.cli.check import check_environment
+
+        check_environment(env_name=env_name)
+
+
+@update_app.command(name="docker-env")
+def update_docker_env(
+    env_name: Annotated[
+        str,
+        typer.Option("--name", "-n", help="Environment name."),
+    ],
+    image: Annotated[
+        str | None,
+        typer.Option("--image", help="Docker image name/tag."),
+    ] = None,
+) -> None:
+    """Update a docker environment."""
+    ck_info, env = _load_env(env_name)
+    if env.get("kind") != "docker":
+        raise_error(f"Environment '{env_name}' is not a docker environment")
+    if image is None:
+        raise_error("No updates specified. Use --image to set the image.")
+    env["image"] = image
+    calkit.save_calkit_info(ck_info)
+    typer.echo(f"Updated docker environment '{env_name}'")
+
+
+@update_app.command(name="slurm-env")
+def update_slurm_env(
+    env_name: Annotated[
+        str,
+        typer.Option("--name", "-n", help="Environment name."),
+    ],
+    host: Annotated[
+        str | None,
+        typer.Option("--host", help="SLURM host."),
+    ] = None,
+    add_default_option: Annotated[
+        list[str],
+        typer.Option(
+            "--add-default-option", help="Add a default sbatch option."
+        ),
+    ] = [],
+    rm_default_option: Annotated[
+        list[str],
+        typer.Option(
+            "--rm-default-option", help="Remove a default sbatch option."
+        ),
+    ] = [],
+    set_default_options: Annotated[
+        list[str],
+        typer.Option(
+            "--set-default-options", help="Replace default options list."
+        ),
+    ] = [],
+    add_default_setup: Annotated[
+        list[str],
+        typer.Option(
+            "--add-default-setup", help="Add a default setup command."
+        ),
+    ] = [],
+    rm_default_setup: Annotated[
+        list[str],
+        typer.Option(
+            "--rm-default-setup", help="Remove a default setup command."
+        ),
+    ] = [],
+    set_default_setup: Annotated[
+        list[str],
+        typer.Option(
+            "--set-default-setup", help="Replace default setup list."
+        ),
+    ] = [],
+) -> None:
+    """Update a SLURM environment."""
+    ck_info, env = _load_env(env_name)
+    if env.get("kind") != "slurm":
+        raise_error(f"Environment '{env_name}' is not a slurm environment")
+    if host is not None:
+        env["host"] = host
+    if set_default_options:
+        opts = [o for o in set_default_options if o]
+    else:
+        opts = list(env.get("default_options") or [])
+        opts = [o for o in opts if o not in rm_default_option]
+        for o in add_default_option:
+            if o not in opts:
+                opts.append(o)
+    if opts:
+        env["default_options"] = opts
+    elif "default_options" in env:
+        del env["default_options"]
+    if set_default_setup:
+        cmds = [c for c in set_default_setup if c]
+    else:
+        cmds = list(env.get("default_setup") or [])
+        cmds = [c for c in cmds if c not in rm_default_setup]
+        for c in add_default_setup:
+            if c not in cmds:
+                cmds.append(c)
+    if cmds:
+        env["default_setup"] = cmds
+    elif "default_setup" in env:
+        del env["default_setup"]
+    calkit.save_calkit_info(ck_info)
+    typer.echo(f"Updated slurm environment '{env_name}'")
+
+
 @update_app.command(name="environment")
 @update_app.command(name="env")
 def update_environment(
@@ -593,33 +895,198 @@ def update_environment(
     ],
     add_packages: Annotated[
         list[str] | None,
+        typer.Option("--add", help="Add package (julia only)."),
+    ] = None,
+) -> None:
+    """Update an environment (generic; use update [kind]-env for full options)."""
+    from calkit.cli.main import run_in_env
+
+    ck_info, env = _load_env(env_name)
+    kind = env.get("kind")
+    if kind == "julia" and add_packages:
+        add_packages_str = ", ".join(
+            [f'"{pkg.strip()}"' for pkg in add_packages]
+        )
+        julia_cmd = ["-e", f"using Pkg; Pkg.add([{add_packages_str}])"]
+        run_in_env(env_name=env_name, cmd=julia_cmd)
+    else:
+        raise_error(
+            f"Use 'calkit update {kind}-env' for kind '{kind}', "
+            "or --add for Julia."
+        )
+    typer.echo(f"Updated environment '{env_name}'")
+
+
+@update_app.command(name="stage")
+def update_stage(
+    name: Annotated[str, typer.Argument(help="Stage name.")],
+    environment: Annotated[
+        str | None,
+        typer.Option("--environment", "-e", help="Set environment."),
+    ] = None,
+    add_input: Annotated[
+        list[str],
+        typer.Option("--add-input", help="Add an input path."),
+    ] = [],
+    rm_input: Annotated[
+        list[str],
+        typer.Option("--rm-input", help="Remove an input path."),
+    ] = [],
+    set_inputs: Annotated[
+        list[str],
+        typer.Option("--set-inputs", help="Replace the inputs list."),
+    ] = [],
+    set_outputs: Annotated[
+        list[str],
         typer.Option(
-            "--add",
-            help=("Add package to environment,"),
+            "--set-outputs",
+            help="Replace DVC outputs list (paths only, storage=dvc).",
+        ),
+    ] = [],
+    set_outputs_git: Annotated[
+        list[str],
+        typer.Option(
+            "--set-outputs-git",
+            help="Replace Git-tracked outputs list.",
+        ),
+    ] = [],
+    add_output: Annotated[
+        list[str],
+        typer.Option("--add-output", help="Add a DVC-tracked output path."),
+    ] = [],
+    rm_output: Annotated[
+        list[str],
+        typer.Option("--rm-output", help="Remove an output path."),
+    ] = [],
+) -> None:
+    """Update a pipeline stage in calkit.yaml."""
+    with open("calkit.yaml") as f:
+        ck_info = calkit.ryaml.load(f)
+    if ck_info is None:
+        ck_info = {}
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    if name not in stages:
+        raise_error(f"Stage '{name}' not found in calkit.yaml.")
+    stage = stages[name]
+    if environment is not None:
+        stage["environment"] = environment or None
+    # Inputs
+    if set_inputs:
+        inputs_list = [i for i in set_inputs if i]
+    else:
+        inputs_list = list(stage.get("inputs") or [])
+        inputs_list = [i for i in inputs_list if i not in rm_input]
+        for i in add_input:
+            if i not in inputs_list:
+                inputs_list.append(i)
+    if inputs_list:
+        stage["inputs"] = inputs_list
+    elif "inputs" in stage:
+        del stage["inputs"]
+
+    # Outputs — support both plain string (DVC) and {path, storage} dict entries
+    def _out_path(o) -> str:
+        return o["path"] if isinstance(o, dict) else o
+
+    if set_outputs or set_outputs_git:
+        # Full replacement: rebuild from both lists
+        dvc_paths = [o for o in set_outputs if o]
+        git_paths = [o for o in set_outputs_git if o]
+        outputs_list: list = list(dvc_paths)
+        for p in git_paths:
+            outputs_list.append({"path": p, "storage": "git"})
+    else:
+        existing = list(stage.get("outputs") or [])
+        rm_set = set(rm_output)
+        outputs_list = [o for o in existing if _out_path(o) not in rm_set]
+        existing_paths = {_out_path(o) for o in outputs_list}
+        for o in add_output:
+            if o not in existing_paths:
+                outputs_list.append(o)
+    if outputs_list:
+        stage["outputs"] = outputs_list
+    elif "outputs" in stage:
+        del stage["outputs"]
+    calkit.save_calkit_info(ck_info)
+
+
+@update_app.command(name="figure")
+def update_figure(
+    path: Annotated[str, typer.Argument(help="Path to the figure file.")],
+    imported_from_url: Annotated[
+        str | None,
+        typer.Option(
+            "--imported-from-url",
+            help="URL the figure was imported from.",
+        ),
+    ] = None,
+    stage: Annotated[
+        str | None,
+        typer.Option(
+            "--stage",
+            help="Name of the pipeline stage that produces this figure.",
         ),
     ] = None,
 ) -> None:
-    """Update an environment.
-
-    Currently only supports adding packages to Julia environments.
-    """
-    from calkit.cli.main import run_in_env
-
+    """Update a figure entry in calkit.yaml."""
+    if imported_from_url is None and stage is None:
+        raise_error("No updates specified.")
     ck_info = calkit.load_calkit_info()
-    envs = ck_info.get("environments", {})
-    if env_name not in envs:
-        raise_error(f"Environment '{env_name}' does not exist")
-    if add_packages is None:
-        raise_error(
-            "No updates specified. Use --add to specify packages to add."
-        )
-    env = envs[env_name]
-    if env.get("kind") != "julia":
-        raise_error("Currently only Julia environments are supported")
-    # If adding package to a Julia environment, we need to simply run a command
-    # in it
-    assert isinstance(add_packages, list)
-    add_packages_str = ", ".join([f'"{pkg.strip()}"' for pkg in add_packages])
-    julia_cmd = ["-e", f"using Pkg; Pkg.add([{add_packages_str}])"]
-    run_in_env(env_name=env_name, cmd=julia_cmd)
-    typer.echo(f"Updated environment '{env_name}'")
+    figures = ck_info.get("figures", [])
+    for fig in figures:
+        if fig.get("path") == path:
+            if imported_from_url is not None:
+                fig["imported_from"] = {"url": imported_from_url}
+            if stage is not None:
+                fig["stage"] = stage
+            break
+    else:
+        entry: dict = {"path": path}
+        if imported_from_url is not None:
+            entry["imported_from"] = {"url": imported_from_url}
+        if stage is not None:
+            entry["stage"] = stage
+        figures.append(entry)
+        ck_info["figures"] = figures
+    calkit.save_calkit_info(ck_info)
+
+
+@update_app.command(name="dataset")
+def update_dataset(
+    path: Annotated[str, typer.Argument(help="Path to the dataset file.")],
+    imported_from_url: Annotated[
+        str | None,
+        typer.Option(
+            "--imported-from-url",
+            help="URL the dataset was imported from.",
+        ),
+    ] = None,
+    stage: Annotated[
+        str | None,
+        typer.Option(
+            "--stage",
+            help="Name of the pipeline stage that produces this dataset.",
+        ),
+    ] = None,
+) -> None:
+    """Update a dataset entry in calkit.yaml."""
+    if imported_from_url is None and stage is None:
+        raise_error("No updates specified.")
+    ck_info = calkit.load_calkit_info()
+    datasets = ck_info.get("datasets", [])
+    for ds in datasets:
+        if ds.get("path") == path:
+            if imported_from_url is not None:
+                ds["imported_from"] = {"url": imported_from_url}
+            if stage is not None:
+                ds["stage"] = stage
+            break
+    else:
+        entry: dict = {"path": path}
+        if imported_from_url is not None:
+            entry["imported_from"] = {"url": imported_from_url}
+        if stage is not None:
+            entry["stage"] = stage
+        datasets.append(entry)
+        ck_info["datasets"] = datasets
+    calkit.save_calkit_info(ck_info)

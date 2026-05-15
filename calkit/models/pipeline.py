@@ -189,6 +189,7 @@ class Stage(BaseModel):
     always_run: bool = False
     iterate_over: list[StageIteration] | None = None
     description: str | None = None
+    frozen: bool = False
     scheduler: StageSchedulerOptions | None = None
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
@@ -418,6 +419,8 @@ class Stage(BaseModel):
             stage["wdir"] = self.wdir
         if self.always_run:
             stage["always_changed"] = True
+        if self.frozen:
+            stage["frozen"] = True
         return stage
 
 
@@ -1182,6 +1185,7 @@ class Pipeline(BaseModel):
                 always_run=stage.always_run,
                 iterate_over=stage.iterate_over,
                 description=stage.description,
+                frozen=stage.frozen,
                 scheduler=StageSchedulerOptions(**sched_opts)
                 if sched_opts
                 else StageSchedulerOptions(),
@@ -1216,6 +1220,8 @@ class Pipeline(BaseModel):
                 calkit_yaml_stage["always_run"] = True
             if stage.description is not None:
                 calkit_yaml_stage["description"] = stage.description
+            if stage.frozen:
+                calkit_yaml_stage["frozen"] = True
             if stage.iterate_over is not None:
                 calkit_yaml_stage["iterate_over"] = [
                     it.model_dump() for it in stage.iterate_over

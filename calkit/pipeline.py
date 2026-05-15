@@ -1,6 +1,7 @@
 """Pipeline-related functionality."""
 
 import itertools
+import logging
 import os
 from pathlib import Path
 
@@ -14,6 +15,54 @@ from calkit.models.pipeline import (
     PathOutput,
     Pipeline,
 )
+
+
+class _FrozenStageWarningFilter(logging.Filter):
+    """Drop only DVC's "stage is frozen" status warning.
+
+    Frozen stages are intentionally hidden from Calkit status output, so this
+    warning is noise; all other ``dvc.repo.status`` diagnostics pass through.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "is frozen. Its dependencies are" not in record.getMessage()
+
+
+def _coerce_frozen(value: object) -> bool:
+    """Interpret a raw ``frozen`` value the same way the Stage model would.
+
+    ``ck_info`` holds unvalidated YAML, so a quoted ``frozen: "false"`` is a
+    truthy string here; defer to Pydantic's bool parsing so status filtering
+    matches the compiled pipeline's behavior.
+    """
+    from pydantic import TypeAdapter, ValidationError
+
+    try:
+        return TypeAdapter(bool).validate_python(value)
+    except ValidationError:
+        return bool(value)
+
+
+def frozen_stage_base_names(
+    ck_info: dict | None = None, wdir: str | None = None
+) -> set[str]:
+    """Return the base names of root pipeline stages marked ``frozen``.
+
+    Shared by the various status paths so frozen stages are consistently
+    hidden. Iterated stages use a ``name@param`` key in DVC status, so callers
+    should compare against the part before ``@``.
+    """
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    names: set[str] = set()
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    if isinstance(stages, dict):
+        for name, cfg in stages.items():
+            if isinstance(cfg, dict) and _coerce_frozen(
+                cfg.get("frozen", False)
+            ):
+                names.add(name)
+    return names
 
 
 class PipelineStatus(BaseModel):
@@ -537,7 +586,19 @@ def get_status(
                 return PipelineStatus.model_validate(result)
         try:
             dvc_repo = calkit.dvc.get_dvc_repo()
-            raw_status = dvc_repo.status(targets=targets)
+            # Frozen stages emit a "stage is frozen. Its dependencies are not
+            # going to be shown in the status output." warning from DVC's
+            # status module; suppress just that message since we intentionally
+            # hide frozen stages from the Calkit status output entirely.
+            # A targeted filter is used (rather than raising the logger level)
+            # so unrelated DVC diagnostics are still emitted.
+            dvc_status_logger = logging.getLogger("dvc.repo.status")
+            frozen_filter = _FrozenStageWarningFilter()
+            dvc_status_logger.addFilter(frozen_filter)
+            try:
+                raw_status = dvc_repo.status(targets=targets)
+            finally:
+                dvc_status_logger.removeFilter(frozen_filter)
         except Exception as e:
             result["errors"].append(
                 "Failed to get pipeline status from DVC: "
@@ -666,6 +727,21 @@ def get_status(
             raw_stale_stages.keys(), key=_stage_sort_key
         ):
             bare_name, subproject, status_data = raw_stale_stages[display_name]
+            # Frozen stages are intentionally pinned: never report them as
+            # stale (and they are never reproduced). Iterated stages have a
+            # "name@param" bare name, so look up config by the base name too.
+            base_name = bare_name.split("@")[0]
+            if subproject is None:
+                frozen_cfg = root_stages_config.get(
+                    bare_name, root_stages_config.get(base_name, {})
+                )
+            else:
+                sp_cfg = sp_stages_config.get(subproject, {})
+                frozen_cfg = sp_cfg.get(bare_name, sp_cfg.get(base_name, {}))
+            if isinstance(frozen_cfg, dict) and _coerce_frozen(
+                frozen_cfg.get("frozen", False)
+            ):
+                continue
             if subproject is None:
                 stage_cfg = root_stages_config.get(bare_name, {})
             else:

@@ -896,10 +896,16 @@ class PipelineStatusRouteHandler(APIHandler):
             calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
             dvc_repo = get_dvc_repo(os.getcwd())
             raw_status = dvc_repo.status()
+            # Frozen stages are intentionally pinned and hidden from status
+            frozen_stages = calkit.pipeline.frozen_stage_base_names(
+                ck_info=ck_info
+            )
             pipeline_status = {
                 k.split("dvc.yaml:")[-1]: v
                 for k, v in raw_status.items()
-                if v != ["always changed"] and not k.endswith(".dvc")
+                if v != ["always changed"]
+                and not k.endswith(".dvc")
+                and k.split("dvc.yaml:")[-1].split("@")[0] not in frozen_stages
             }
             is_outdated = len(pipeline_status) > 0
             self.finish(

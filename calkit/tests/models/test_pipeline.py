@@ -13,7 +13,6 @@ from calkit.models.pipeline import (
     MatlabCommandStage,
     MatlabScriptStage,
     PythonScriptStage,
-    SBatchStage,
     StageIteration,
     WordToPdfStage,
 )
@@ -241,55 +240,98 @@ def test_matlabscriptstage():
 
 
 def test_sbatchstage():
-    s = SBatchStage(
-        name="job1",
-        script_path="scripts/run_job.sh",
-        environment="slurm-env",
-        args=["something", "else"],
-        sbatch_options=["--time=01:00:00", "--mem=4G"],
-        inputs=["data/input.txt"],
-        outputs=["data/output.txt"],
+    """Cover ``SBatchStage`` model behavior and conversion to shell-script.
+
+    Scenarios:
+    - parsing an sbatch stage and converting via convert_sbatch_stages(),
+    - the converted stage emits ``calkit scheduler batch``,
+    - sbatch_options land in scheduler.options,
+    - stage-level setup commands survive the conversion,
+    - non-default env_default_* modes survive the conversion.
+    """
+    from calkit.models.pipeline import Pipeline, ShellScriptStage
+
+    # Build a minimal Pipeline with one sbatch stage and convert it.
+    pipeline = Pipeline.model_validate(
+        {
+            "stages": {
+                "job1": {
+                    "kind": "sbatch",
+                    "script_path": "scripts/run_job.sh",
+                    "environment": "slurm-env",
+                    "args": ["something", "else"],
+                    "sbatch_options": ["--time=01:00:00", "--mem=4G"],
+                    "inputs": ["data/input.txt"],
+                    "outputs": ["data/output.txt"],
+                }
+            }
+        }
     )
-    sd = s.to_dvc()
+    converted = pipeline.convert_sbatch_stages()
+    assert "job1" in converted
+    stage = pipeline.stages["job1"]
+    assert isinstance(stage, ShellScriptStage)
+    assert stage.scheduler is not None
+    assert stage.scheduler.options == ["--time=01:00:00", "--mem=4G"]
+    # Set the CLI alias as compilation would (default is already "scheduler").
+    sd = stage.to_dvc()
     print(sd)
     assert sd["cmd"] == (
-        "calkit slurm batch --name job1 --environment slurm-env "
+        "calkit scheduler batch --name job1 "
+        "--environment slurm-env "
         "--dep data/input.txt --out data/output.txt "
-        "-s --time=01:00:00 -s --mem=4G -- scripts/run_job.sh something else"
+        "--option --time=01:00:00 --option --mem=4G "
+        "-- scripts/run_job.sh something else"
     )
+    assert "--env-default-options" not in sd["cmd"]
+    assert "--env-default-setup" not in sd["cmd"]
     assert "scripts/run_job.sh" in sd["deps"]
     assert "data/input.txt" in sd["deps"]
-    out = {"data/output.txt": {"persist": True}}
-    assert out in sd["outs"]
-    # Test with `iterate_over`
-    s = SBatchStage(
-        name="job2",
-        script_path="scripts/run_job.sh",
-        environment="slurm-env",
-        args=["{input_file}"],
-        iterate_over=[
-            StageIteration(
-                arg_name="input_file",
-                values=["data/input1.txt", "data/input2.txt"],
-            )
-        ],
+    # Stage-level setup commands survive conversion.
+    pipeline2 = Pipeline.model_validate(
+        {
+            "stages": {
+                "job-setup": {
+                    "kind": "sbatch",
+                    "script_path": "scripts/run_job.sh",
+                    "environment": "slurm-env",
+                    "scheduler": {
+                        "setup": ["module purge", "module load python/3.11"],
+                    },
+                }
+            }
+        }
     )
-    sd = s.to_dvc()
-    assert s.log_output.path == ".calkit/slurm/logs/job2/{input_file}.out"
-    print(sd)
-    assert "--name job2@{input_file}" in sd["cmd"]
-
-
-def test_sbatchstage_with_setup_commands():
-    s = SBatchStage(
-        name="job-setup",
-        script_path="scripts/run_job.sh",
-        environment="slurm-env",
-        slurm={"setup": ["module purge", "module load python/3.11"]},  # type: ignore
+    pipeline2.convert_sbatch_stages()
+    sd2 = pipeline2.stages["job-setup"].to_dvc()
+    assert "--setup 'module purge'" in sd2["cmd"]
+    assert "--setup 'module load python/3.11'" in sd2["cmd"]
+    # Non-default env_default_* modes survive.
+    pipeline3 = Pipeline.model_validate(
+        {
+            "stages": {
+                "job-opts": {
+                    "kind": "sbatch",
+                    "script_path": "scripts/run_job.sh",
+                    "environment": "slurm-env",
+                    "scheduler": {"env_default_options": "merge"},
+                },
+                "job-setup-ignore": {
+                    "kind": "sbatch",
+                    "script_path": "scripts/run_job.sh",
+                    "environment": "slurm-env",
+                    "scheduler": {"env_default_setup": "ignore"},
+                },
+            }
+        }
     )
-    sd = s.to_dvc()
-    assert "--setup 'module purge'" in sd["cmd"]
-    assert "--setup 'module load python/3.11'" in sd["cmd"]
+    pipeline3.convert_sbatch_stages()
+    sd_opts = pipeline3.stages["job-opts"].to_dvc()
+    assert "--env-default-options merge" in sd_opts["cmd"]
+    assert "--env-default-setup" not in sd_opts["cmd"]
+    sd_setup = pipeline3.stages["job-setup-ignore"].to_dvc()
+    assert "--env-default-options" not in sd_setup["cmd"]
+    assert "--env-default-setup ignore" in sd_setup["cmd"]
 
 
 def test_mappathsstage():

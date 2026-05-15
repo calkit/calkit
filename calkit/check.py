@@ -174,14 +174,13 @@ def check_reproducibility(
     wdir: str = ".", log_func: Callable | None = None
 ) -> ReproCheck:
     """Check the reproducibility of a project."""
-    import git
     from git.exc import InvalidGitRepositoryError
 
     res = dict()
     if log_func is None:
         log_func = print
     try:
-        git.Repo(wdir)
+        calkit.git.get_repo(wdir)
         res["is_git_repo"] = True
     except InvalidGitRepositoryError:
         res["is_git_repo"] = False

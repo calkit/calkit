@@ -382,7 +382,7 @@ def test_detect_jupyter_notebook_io_with_variables(tmp_dir):
             {
                 "cell_type": "code",
                 "source": [
-                    "log_path_template = '../.calkit/slurm/logs/amip-{case}.out'\n",
+                    "log_path_template = '../.calkit/scheduler/logs/amip-{case}.out'\n",
                     "data_file = 'input_data.csv'\n",
                     "output_dir = 'results'\n",
                 ],
@@ -413,7 +413,7 @@ def test_detect_jupyter_notebook_io_with_variables(tmp_dir):
     # Variable references should be resolved
     assert "input_data.csv" in result["inputs"]
     # Template string from format should be detected
-    assert ".calkit/slurm/logs/amip-baseline.out" in result["inputs"]
+    assert ".calkit/scheduler/logs/amip-baseline.out" in result["inputs"]
 
 
 def test_detect_jupyter_notebook_io_julia(tmp_dir):

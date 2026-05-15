@@ -31,6 +31,7 @@ from calkit import (
     DVC_SIZE_THRESH_BYTES,
 )
 from calkit.cli import (
+    AliasGroup,
     complete_stage_names,
     print_sep,
     raise_error,
@@ -56,33 +57,35 @@ from calkit.cli.new import new_app
 from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
 from calkit.cli.overleaf import overleaf_app
-from calkit.cli.slurm import slurm_app
+from calkit.cli.scheduler import scheduler_app
 from calkit.cli.update import update_app
 
 app = typer.Typer(
+    cls=AliasGroup,
     invoke_without_command=True,
     no_args_is_help=True,
     context_settings=dict(help_option_names=["-h", "--help"]),
     pretty_exceptions_show_locals=False,
 )
 app.add_typer(config_app, name="config", help="Configure Calkit.")
-app.add_typer(new_app, name="new", help="Create a new Calkit object.")
+app.add_typer(new_app, name="new|create", help="Create a new Calkit object.")
 app.add_typer(
-    new_app,
-    name="create",
-    help="Create a new Calkit object (alias for 'new').",
+    notebooks_app, name="notebooks|nb", help="Work with Jupyter notebooks."
 )
-app.add_typer(notebooks_app, name="nb", help="Work with Jupyter notebooks.")
-app.add_typer(list_app, name="list", help="List Calkit objects.")
-app.add_typer(describe_app, name="describe", help="Describe things.")
+app.add_typer(list_app, name="list|ls", help="List Calkit objects.")
+app.add_typer(describe_app, name="describe|desc", help="Describe things.")
 app.add_typer(import_app, name="import", help="Import objects.")
 app.add_typer(office_app, name="office", help="Work with Microsoft Office.")
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
-app.add_typer(latex_app, name="latex", help="Work with LaTeX.")
-app.add_typer(overleaf_app, name="overleaf", help="Interact with Overleaf.")
+app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
+app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
 app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
-app.add_typer(slurm_app, name="slurm", help="Work with SLURM.")
+app.add_typer(
+    scheduler_app,
+    name="scheduler|sch",
+    help="Work with a job scheduler (SLURM or PBS).",
+)
 app.add_typer(dev_app, name="dev", help="Developer tools.", hidden=True)
 
 
@@ -126,8 +129,6 @@ def init(
     ] = False,
 ):
     """Initialize the current working directory."""
-    import git
-
     subprocess.run(["git", "init"])
     result = calkit.dvc.run_dvc_command(
         ["init"] + (["--force"] if force else [])
@@ -139,7 +140,7 @@ def init(
     if result != 0:
         raise_error("Failed to configure DVC autostage")
     # Commit the newly created .dvc directory
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     repo.git.add(".dvc")
     repo.git.commit("-m", "Initialize DVC")
     # TODO: Initialize `calkit.yaml`
@@ -295,7 +296,7 @@ def _format_dvc_data_status(status: dict, zip_path_map: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-@app.command(name="status")
+@app.command(name="status|st")
 def get_status(
     targets: Annotated[
         list[str] | None,
@@ -317,6 +318,17 @@ def get_status(
             ),
         ),
     ] = None,
+    no_check_envs: Annotated[
+        bool,
+        typer.Option(
+            "--no-env-check",
+            help=(
+                "Skip environment checks. "
+                "Note that this may produce an inaccurate pipeline status "
+                "if materialized environments have changed."
+            ),
+        ),
+    ] = False,
     as_json: Annotated[
         bool, typer.Option("--json", help="Output status as JSON.")
     ] = False,
@@ -326,10 +338,12 @@ def get_status(
     from git.exc import InvalidGitRepositoryError
 
     ck_info = calkit.load_calkit_info()
-    # If there's anything in ck_info and this isn't a Git repo, initialize one
+    # If there's anything in ck_info and this isn't a Git repo, initialize one.
+    # Use search_parent_directories so a subproject folder inside a parent repo
+    # is discovered correctly rather than getting a new git init.
     if ck_info:
         try:
-            git.Repo()
+            calkit.git.get_repo()
         except InvalidGitRepositoryError:
             git.Repo.init()
     valid_categories = ["project", "git", "dvc", "pipeline"]
@@ -350,7 +364,7 @@ def get_status(
         pipeline_status = calkit.pipeline.get_status(
             ck_info=ck_info,
             targets=targets,
-            check_environments=True,
+            check_environments=not no_check_envs,
             clean_notebooks=True,
             compile_to_dvc=True,
         )
@@ -374,7 +388,7 @@ def get_status(
             )
         if "git" in categories:
             try:
-                repo = git.Repo()
+                repo = calkit.git.get_repo()
                 changed_files = calkit.git.get_changed_files(repo=repo)
                 staged_files = calkit.git.get_staged_files(repo=repo)
                 untracked_files = calkit.git.get_untracked_files(repo=repo)
@@ -578,7 +592,6 @@ def add(
     adding any .dvc files to Git when adding to DVC.
     """
     import dvc.repo
-    import git
     from dvc.exceptions import NotDvcRepoError
     from git.exc import InvalidGitRepositoryError
 
@@ -599,7 +612,7 @@ def add(
     if to is not None and to not in ["git", "dvc", "dvc-zip"]:
         raise_error(f"Invalid option for 'to': {to}")
     try:
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
     except InvalidGitRepositoryError:
         # Prompt user if they want to run git init here
         warn("Current directory is not a Git repo")
@@ -611,7 +624,7 @@ def add(
             subprocess.check_call(["git", "init"])
         else:
             raise_error("Not currently in a Git repo; run `calkit init` first")
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
     try:
         dvc_repo = calkit.dvc.get_dvc_repo()
     except NotDvcRepoError:
@@ -660,9 +673,11 @@ def add(
             paths.remove(".")
             if dvc_repo is not None:
                 dvc_status = dvc_repo.data_status()
-                for dvc_uncommitted in dvc_status["uncommitted"].get(
+                uncommitted = dvc_status["uncommitted"]
+                dvc_uncommitted_all = uncommitted.get(
                     "modified", []
-                ):
+                ) + uncommitted.get("deleted", [])
+                for dvc_uncommitted in dvc_uncommitted_all:
                     if os.path.exists(dvc_uncommitted):
                         if dry_run:
                             typer.echo(
@@ -670,12 +685,25 @@ def add(
                             )
                         else:
                             typer.echo(f"Adding {dvc_uncommitted} to DVC")
-                            dvc_repo.commit(dvc_uncommitted, force=True)
+                            dvc_repo.commit(
+                                dvc_uncommitted,
+                                force=True,
+                                allow_missing=True,
+                            )
                     else:
-                        warn(
-                            f"DVC uncommitted '{dvc_uncommitted}' does not "
-                            "exist; skipping"
-                        )
+                        if dry_run:
+                            typer.echo(
+                                f"Would commit deleted {dvc_uncommitted} to DVC"
+                            )
+                        else:
+                            typer.echo(
+                                f"Committing deleted {dvc_uncommitted} to DVC"
+                            )
+                            dvc_repo.commit(
+                                dvc_uncommitted,
+                                force=True,
+                                allow_missing=True,
+                            )
             if not disable_auto_ignore:
                 for untracked_file in untracked_git_files:
                     if (
@@ -862,7 +890,7 @@ def commit(
         push()
 
 
-@app.command(name="save")
+@app.command(name="save|sv")
 def save(
     paths: Annotated[
         Optional[list[str]],
@@ -1044,10 +1072,32 @@ def pull(
             if calkit.dvc.detect_calkit_remote_type(name, url) == "http":
                 typer.echo(f"Checking authentication for DVC remote: {name}")
                 calkit.dvc.set_remote_auth(remote_name=name)
+    if (
+        not no_recursive
+        and "--recursive" not in dvc_args
+        and "-R" not in dvc_args
+    ):
+        dvc_args.append("--recursive")
     result = calkit.dvc.run_dvc_command(["pull"] + dvc_args)
     if result != 0:
         raise_error("DVC pull failed")
     calkit.dvc.zip.sync_all(direction="to-workspace")
+    if not no_recursive:
+        # Pull DVC in isolated subprojects (those with their own .dvc folder)
+        ck_info = calkit.load_calkit_info()
+        for sp in ck_info.get("subprojects", []):
+            if not isinstance(sp, dict) or not sp.get("path"):
+                continue
+            sp_path = sp["path"]
+            if not os.path.isdir(os.path.join(sp_path, ".dvc")):
+                continue
+            typer.echo(f"DVC pulling subproject: {sp_path}")
+            sp_result = calkit.dvc.run_dvc_command(
+                ["pull"] + dvc_args, cwd=sp_path
+            )
+            if sp_result != 0:
+                raise_error(f"DVC pull failed for subproject: {sp_path}")
+            calkit.dvc.zip.sync_all(direction="to-workspace", wdir=sp_path)
 
 
 @app.command(name="push")
@@ -1117,9 +1167,7 @@ def ignore(
     ] = False,
 ):
     """Ignore a file, i.e., keep it out of version control."""
-    import git
-
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     # Ensure path makes it into .gitignore as a POSIX path
     path = Path(path).as_posix()
     if repo.ignored(path):
@@ -1130,7 +1178,7 @@ def ignore(
     with open(".gitignore", "a") as f:
         f.write(txt)
     if not no_commit:
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
         repo.git.reset()
         repo.git.add(".gitignore")
         if calkit.git.get_staged_files():
@@ -1385,13 +1433,18 @@ def run(
             help="Sync with Overleaf before and after running.",
         ),
     ] = False,
+    no_push: Annotated[
+        bool,
+        typer.Option(
+            "--no-push", help="Do not push to Git and DVC after saving."
+        ),
+    ] = False,
 ) -> dict:
     """Check dependencies and run the pipeline."""
     import dvc.log
     import dvc.repo
     import dvc.repo.reproduce
     import dvc.ui
-    import git
     from dvc.cli import main as dvc_cli_main
     from git.exc import InvalidGitRepositoryError
 
@@ -1405,9 +1458,11 @@ def run(
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info()
-    # Ensure Git is initialized so DVC can be used
+    # Ensure Git is initialized so DVC can be used.
+    # Use search_parent_directories so running from a subproject folder
+    # discovers the parent repo instead of triggering a new git init.
     try:
-        git.Repo()
+        calkit.git.get_repo()
     except InvalidGitRepositoryError:
         if not quiet:
             typer.echo("Initializing Git repo")
@@ -1417,13 +1472,8 @@ def run(
             raise_error("Failed to initialize Git repo")
     # Set env vars
     calkit.set_env_vars(ck_info=ck_info)
-    # Clean all notebooks in the pipeline
-    try:
-        calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
-    except Exception as e:
-        raise_error(f"Failed to clean notebooks: {e.__class__.__name__}: {e}")
     if not quiet:
-        typer.echo("Getting system information")
+        calkit.echo("💻 Getting system information")
     # Get system information
     system_info = calkit.get_system_info()
     if save_logs:
@@ -1439,7 +1489,7 @@ def run(
             json.dump(system_info, f, indent=2)
     # First check any system-level dependencies exist
     if not quiet:
-        typer.echo("Checking system-level dependencies")
+        calkit.echo("🔗 Checking system-level dependencies")
     try:
         calkit.check_system_deps(ck_info=ck_info, system_info=system_info)
     except Exception as e:
@@ -1447,7 +1497,7 @@ def run(
         raise_error(str(e))
     # Check all environments in the pipeline (with caching)
     # If any failed, warn the user that we might have problems running
-    typer.echo("Checking environments")
+    calkit.echo("📦 Checking environments")
     env_check_results = calkit.environments.check_all_in_pipeline(
         ck_info=ck_info, targets=targets, force=force
     )
@@ -1457,14 +1507,58 @@ def run(
         failed = not result.get("success", False)
         if failed:
             warn(f"Failed to check environment '{env_name}'")
+    # Clean all notebooks in the pipeline
+    try:
+        calkit.echo("📓 Cleaning notebooks")
+        calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
+    except Exception as e:
+        raise_error(f"Failed to clean notebooks: {e.__class__.__name__}: {e}")
+    # Check environments and clean notebooks for each subproject
+    subprojects = ck_info.get("subprojects", [])
+    if subprojects:
+        prev_cwd = os.getcwd()
+        for subproject in subprojects:
+            if not isinstance(subproject, dict) or not subproject.get("path"):
+                continue
+            sp = Path(subproject["path"]).as_posix()
+            if not os.path.isdir(sp):
+                continue
+            os.chdir(sp)
+            try:
+                sp_ck_info = calkit.load_calkit_info()
+                if not quiet:
+                    calkit.echo(
+                        f"📦 Checking environments for subproject: {sp}"
+                    )
+                sp_env_results = calkit.environments.check_all_in_pipeline(
+                    ck_info=sp_ck_info, force=force
+                )
+                for env_name, sp_result in sp_env_results.items():
+                    if verbose:
+                        typer.echo(f"{sp}/{env_name}: {sp_result}")
+                    if not sp_result.get("success", False):
+                        warn(
+                            f"Failed to check environment '{env_name}' "
+                            f"in subproject '{sp}'"
+                        )
+                if not quiet:
+                    calkit.echo(f"📓 Cleaning notebooks for subproject: {sp}")
+                calkit.notebooks.clean_all_in_pipeline(ck_info=sp_ck_info)
+            except Exception as e:
+                warn(
+                    f"Failed to prepare subproject '{sp}': "
+                    f"{e.__class__.__name__}: {e}"
+                )
+            finally:
+                os.chdir(prev_cwd)
     # If specified, perform initial Overleaf sync
     if sync_overleaf:
         overleaf_sync(no_commit=False, no_push=True, verbose=verbose)
-    # Compile the DVC pipeline
+    # Compile the DVC pipeline (and subproject pipelines)
     dvc_stages = None
-    if ck_info.get("pipeline", {}):
+    if ck_info.get("pipeline", {}) or ck_info.get("subprojects"):
         if not quiet:
-            typer.echo("Compiling DVC pipeline")
+            calkit.echo("🔀 Compiling DVC pipeline")
         try:
             dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
         except Exception as e:
@@ -1522,7 +1616,7 @@ def run(
             raise_error("No stages found to run")
     if save_logs:
         # Get status of Git repo before running
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
         git_rev = repo.head.commit.hexsha
         try:
             git_branch = repo.active_branch.name
@@ -1539,7 +1633,9 @@ def run(
         dvc_data_status_before.pop("git", None)  # Remove git status
     if targets is None:
         targets = []
-    args = deepcopy(targets)
+    args, isolated_sp_targets = calkit.pipeline.translate_run_targets(
+        deepcopy(targets), ck_info=ck_info
+    )
     # Extract any boolean args
     for name in [
         "quiet",
@@ -1561,6 +1657,47 @@ def run(
     ]:
         if locals()[name.replace("-", "_")]:
             args.append("--" + name)
+    # Inline subprojects (no .dvc/ dir) share the parent DVC project.
+    # Tell DVC to discover all pipelines so their dvc.yaml files are included,
+    # unless the user already specified targets that include dvc.yaml paths
+    # (translated from subproject shorthand) or --all-pipelines was passed.
+    inline_subprojects = [
+        sp
+        for sp in subprojects
+        if isinstance(sp, dict)
+        and sp.get("path")
+        and not os.path.isdir(os.path.join(sp["path"], ".dvc"))
+    ]
+    translated_targets_have_dvc_yaml = any(
+        "dvc.yaml" in t for t in args if not t.startswith("--")
+    )
+    if (
+        inline_subprojects
+        and not targets
+        and not all_pipelines
+        and not translated_targets_have_dvc_yaml
+    ):
+        args.append("--all-pipelines")
+    failed = False
+    # Run isolated subproject stage targets directly inside their directories.
+    if isolated_sp_targets:
+        for sp_path, stage_name in isolated_sp_targets:
+            sp_args = [stage_name] if stage_name else []
+            if dry:
+                sp_args.append("--dry")
+            if force:
+                sp_args.append("--force")
+            original_dir = os.getcwd()
+            try:
+                os.chdir(sp_path)
+                sp_res = dvc_cli_main(["repro"] + sp_args)
+            finally:
+                os.chdir(original_dir)
+            if sp_res != 0:
+                failed = True
+        if not args or all(a.startswith("--") for a in args):
+            # Only isolated subproject stage targets were given; skip parent run
+            return {}
     if pipeline is not None:
         args += ["--pipeline", pipeline]
     if downstream is not None:
@@ -1594,7 +1731,7 @@ def run(
     # Disable other misc DVC output
     dvc.ui.ui.write = lambda *args, **kwargs: None
     res = dvc_cli_main(["repro"] + args)
-    failed = res != 0
+    failed = failed or res != 0
     # Parse log to get timing and which stages ran
     with open(log_fpath, "r") as f:
         log_content = f.read()
@@ -1688,7 +1825,7 @@ def run(
             save_message = "Run pipeline"
         if not quiet:
             typer.echo("Saving the project after successful run")
-        save(save_all=True, message=save_message)
+        save(save_all=True, message=save_message, no_push=no_push)
     # If specified, perform final Overleaf sync
     if sync_overleaf:
         overleaf_sync(
@@ -1732,12 +1869,7 @@ def manual_step(
 
 
 @app.command(
-    name="runenv",
-    help="Execute a command in an environment (alias for 'xenv').",
-    context_settings={"ignore_unknown_options": True},
-)
-@app.command(
-    name="xenv",
+    name="xenv|runenv",
     help="Execute a command in an environment.",
     context_settings={"ignore_unknown_options": True},
 )
@@ -2247,8 +2379,7 @@ def run_in_env(
         raise_error("Environment kind not supported")
 
 
-@app.command(name="runproc", help="Execute a procedure (alias for 'xproc').")
-@app.command(name="xproc", help="Execute a procedure.")
+@app.command(name="xproc|runproc", help="Execute a procedure.")
 def run_procedure(
     name: Annotated[str, typer.Argument(help="The name of the procedure.")],
     no_commit: Annotated[
@@ -2279,8 +2410,6 @@ def run_procedure(
             return bool(value)
         return value
 
-    import git
-
     from calkit.models import Procedure
 
     ck_info = calkit.load_calkit_info(process_includes="procedures")
@@ -2292,7 +2421,7 @@ def run_procedure(
         proc = Procedure.model_validate(procs[name])
     except Exception as e:
         raise_error(f"Procedure '{name}' is invalid: {e}")
-    git_repo = git.Repo()
+    git_repo = calkit.git.get_repo()
     # Check to make sure the working tree is clean, so we know we ran the
     # committed version of the procedure
     git_status = git_repo.git.status()
@@ -2438,10 +2567,8 @@ def set_env_var(
     value: Annotated[str, typer.Argument(help="Value of the variable.")],
 ):
     """Set an environmental variable for the project in its '.env' file."""
-    import git
-
     # Ensure that .env is ignored by git
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     if not repo.ignored(".env"):
         typer.echo("Adding .env to .gitignore")
         with open(".gitignore", "a") as f:
@@ -2500,9 +2627,7 @@ def upgrade(
 @app.command(name="switch-branch")
 def switch_branch(name: Annotated[str, typer.Argument(help="Branch name.")]):
     """Switch to a different branch."""
-    import git
-
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     if name not in repo.heads:
         typer.echo(f"Branch '{name}' does not exist; creating")
         cmd = ["-b", name]
@@ -2631,9 +2756,7 @@ def map_paths(
     Currently this is done with copying. Outputs are ensured to be ignored by
     Git.
     """
-    import git
-
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
 
     def validate_and_split(mapping: str) -> tuple[str, str]:
         if "->" not in mapping:

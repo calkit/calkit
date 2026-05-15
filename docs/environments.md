@@ -393,8 +393,7 @@ environments:
     host: hpc.myinstitute.org
 ```
 
-To run a script in a `slurm` environment, use the
-[`sbatch` pipeline stage type](pipeline/index.md#sbatch).
+See the [HPC guide](hpc.md) for how to use SLURM (and PBS) environments in pipeline stages.
 
 ### SSH
 

@@ -1074,13 +1074,17 @@ function hasAncestorIn(relPath: string, names: Set<string>): boolean {
     .some((p) => names.has(p.toLowerCase()));
 }
 
+const ARTIFACT_GLOB = `**/*.{${[...FIGURE_EXTENSIONS, ...DATASET_EXTENSIONS]
+  .map((e) => e.replace(/^\./, ""))
+  .join(",")}}`;
+
 async function scanDetectedFiles(workspaceRoot: string): Promise<void> {
   const [notebookUris, allUris] = await Promise.all([
     vscode.workspace.findFiles(
       `**/*${NOTEBOOK_EXTENSION}`,
       DETECTED_FILES_EXCLUDE,
     ),
-    vscode.workspace.findFiles("**/*", DETECTED_FILES_EXCLUDE),
+    vscode.workspace.findFiles(ARTIFACT_GLOB, DETECTED_FILES_EXCLUDE),
   ]);
   const toRelative = (
     uris: vscode.Uri[],
@@ -1206,8 +1210,9 @@ async function refreshPipelineOutputContext(
     currentDetectedDatasets,
   );
   updateSidebarBadge();
-  // Run staleness check after the fast decoration pass so P badges appear
-  // immediately; S badges follow once calkit status finishes.
+  // Run the staleness check after the fast decoration pass: "not produced
+  // by the pipeline" badges are applied immediately, and stale-output
+  // decorations follow once calkit status finishes.
   void refreshStaleOutputContext(workspaceRoot, outputMap, decorationProvider);
 }
 
@@ -1580,9 +1585,29 @@ async function showStageEditor(
         if (msg.stageName) {
           args.push("--stage", msg.stageName);
         }
-        if (msg.output) {
-          const outFlag = msg.outputStorage === "git" ? "--out-git" : "-o";
-          args.push(outFlag, msg.output);
+        for (const i of msg.inputs ?? []) {
+          if (i) {
+            args.push("-i", i);
+          }
+        }
+        // calkit xr only supports DVC-tracked outputs (-o); Git-tracked
+        // outputs are applied afterward via `calkit update stage`.
+        const dvcOuts = (msg.outputs ?? [])
+          .filter((o) => o.storage !== "git")
+          .map((o) => o.path)
+          .filter(Boolean);
+        const gitOuts = (msg.outputs ?? [])
+          .filter((o) => o.storage === "git")
+          .map((o) => o.path)
+          .filter(Boolean);
+        for (const o of dvcOuts) {
+          args.push("-o", o);
+        }
+        if (gitOuts.length > 0 && !msg.stageName) {
+          void vscode.window.showErrorMessage(
+            "A stage name is required to record Git-tracked outputs.",
+          );
+          return;
         }
         args.push(msg.source);
         // Link artifact → stage in calkit.yaml before running xr so both writes don't race
@@ -1599,7 +1624,15 @@ async function showStageEditor(
         }
         const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
         terminal.show();
-        terminal.sendText(`calkit xr ${args.map(shQuote).join(" ")}`);
+        let cmd = `calkit xr ${args.map(shQuote).join(" ")}`;
+        if (gitOuts.length > 0) {
+          const gitOutArgs = ["update", "stage", msg.stageName];
+          for (const o of gitOuts) {
+            gitOutArgs.push("--set-outputs-git", o);
+          }
+          cmd += ` && calkit ${gitOutArgs.map(shQuote).join(" ")}`;
+        }
+        terminal.sendText(cmd);
         void panel.dispose();
       } else if (msg.command === "save" && editStageName) {
         const updateArgs: string[] = ["update", "stage", editStageName];
@@ -2101,7 +2134,12 @@ function openFiguresCarousel(
   });
 
   const nonce = getNonce();
-  panel.webview.html = buildCarouselHtml(nonce, figures, startIndex);
+  panel.webview.html = buildCarouselHtml(
+    nonce,
+    figures,
+    startIndex,
+    panel.webview.cspSource,
+  );
 }
 
 function buildCarouselHtml(
@@ -2116,6 +2154,7 @@ function buildCarouselHtml(
     description: string | undefined;
   }[],
   startIndex: number,
+  cspSource: string,
 ): string {
   const RENDERABLE = new Set([
     ".png",
@@ -2133,8 +2172,8 @@ function buildCarouselHtml(
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${
-    figures.length > 0 ? "vscode-file: vscode-resource:" : "'none'"
-  } data:; frame-src vscode-file: vscode-resource:; object-src vscode-file: vscode-resource:; script-src 'nonce-${nonce}'; style-src 'unsafe-inline';">
+    figures.length > 0 ? cspSource : "'none'"
+  } data:; frame-src ${cspSource}; object-src ${cspSource}; script-src 'nonce-${nonce}'; style-src 'unsafe-inline';">
 <title>Figures</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -3974,7 +4013,7 @@ ${slurmSection}
   btnSubmit.addEventListener('click', function() {
     const kind = getKind();
     const name = isEdit ? ${
-      isEdit ? `'${escHtml(editEnvName ?? "")}'` : "''"
+      isEdit ? JSON.stringify(editEnvName ?? "") : "''"
     } : document.getElementById('name').value.trim();
     if (!name) {
       errorMsg.textContent = 'Name is required.';

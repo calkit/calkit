@@ -22,6 +22,7 @@ def test_update_uv_env(tmp_dir):
             "myenv",
             "--python",
             "3.13",
+            "--no-check",
             "requests",
         ]
     )

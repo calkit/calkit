@@ -630,7 +630,7 @@ export class CalkitSidebarProvider
           title: "Browse Figures",
           arguments: [item],
         };
-      } else if (!hasProvenance) {
+      } else {
         const absPath = path.join(this.workspaceRoot, entry.path);
         item.command = {
           command: "vscode.open",

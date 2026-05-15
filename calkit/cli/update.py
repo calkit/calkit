@@ -225,8 +225,7 @@ def update_release(
         except Exception as e:
             raise_error(f"Failed to delete release draft: {e}")
         ck_info["releases"].pop(name)
-        with open("calkit.yaml", "w") as f:
-            calkit.ryaml.dump(ck_info, f)
+        calkit.save_calkit_info(ck_info)
         repo.git.add("calkit.yaml")
         if "calkit.yaml" in calkit.git.get_staged_files():
             repo.git.commit(["calkit.yaml", "-m", f"Delete release {name}"])
@@ -491,8 +490,7 @@ def update_notebook(
                     }
                 )
         # Write the updated configuration
-        with open("calkit.yaml", "w") as f:
-            calkit.ryaml.dump(ck_info, f)
+        calkit.save_calkit_info(ck_info)
         # Output result
         result = {
             "notebook_path": notebook_path_normalized,
@@ -586,19 +584,11 @@ def update_agent_skills(
 
 def _load_env(env_name: str) -> tuple[dict, dict]:
     """Load calkit.yaml and return (ck_info, env_dict)."""
-    with open("calkit.yaml") as f:
-        ck_info = calkit.ryaml.load(f)
-    if ck_info is None:
-        ck_info = {}
+    ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments") or {}
     if env_name not in envs:
         raise_error(f"Environment '{env_name}' does not exist")
     return ck_info, envs[env_name]
-
-
-def _save_calkit_yaml(ck_info: dict) -> None:
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(ck_info, f)
 
 
 @update_app.command(name="uv-env")
@@ -752,7 +742,11 @@ def update_conda_env(
             or (d != pkg and not d.startswith(pkg + "="))
         ]
     for pkg in add:
-        if pkg not in deps:
+        already = any(
+            isinstance(d, str) and (d == pkg or d.startswith(pkg + "="))
+            for d in deps
+        )
+        if not already:
             deps.append(pkg)
     # Edit pip sublist
     if add_pip or remove_pip:
@@ -765,7 +759,11 @@ def update_conda_env(
                 p for p in pip_list if p != pkg and not p.startswith(pkg + "=")
             ]
         for pkg in add_pip:
-            if pkg not in pip_list:
+            already = any(
+                p == pkg or p.startswith(pkg + "==") or p.startswith(pkg + "=")
+                for p in pip_list
+            )
+            if not already:
                 pip_list.append(pkg)
         if pip_dict is not None:
             deps.remove(pip_dict)
@@ -803,7 +801,7 @@ def update_docker_env(
     if image is None:
         raise_error("No updates specified. Use --image to set the image.")
     env["image"] = image
-    _save_calkit_yaml(ck_info)
+    calkit.save_calkit_info(ck_info)
     typer.echo(f"Updated docker environment '{env_name}'")
 
 
@@ -884,7 +882,7 @@ def update_slurm_env(
         env["default_setup"] = cmds
     elif "default_setup" in env:
         del env["default_setup"]
-    _save_calkit_yaml(ck_info)
+    calkit.save_calkit_info(ck_info)
     typer.echo(f"Updated slurm environment '{env_name}'")
 
 
@@ -1009,8 +1007,7 @@ def update_stage(
         stage["outputs"] = outputs_list
     elif "outputs" in stage:
         del stage["outputs"]
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(ck_info, f)
+    calkit.save_calkit_info(ck_info)
 
 
 @update_app.command(name="figure")
@@ -1034,10 +1031,7 @@ def update_figure(
     """Update a figure entry in calkit.yaml."""
     if imported_from_url is None and stage is None:
         raise_error("No updates specified.")
-    with open("calkit.yaml") as f:
-        ck_info = calkit.ryaml.load(f)
-    if ck_info is None:
-        ck_info = {}
+    ck_info = calkit.load_calkit_info()
     figures = ck_info.get("figures", [])
     for fig in figures:
         if fig.get("path") == path:
@@ -1054,8 +1048,7 @@ def update_figure(
             entry["stage"] = stage
         figures.append(entry)
         ck_info["figures"] = figures
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(ck_info, f)
+    calkit.save_calkit_info(ck_info)
 
 
 @update_app.command(name="dataset")
@@ -1079,10 +1072,7 @@ def update_dataset(
     """Update a dataset entry in calkit.yaml."""
     if imported_from_url is None and stage is None:
         raise_error("No updates specified.")
-    with open("calkit.yaml") as f:
-        ck_info = calkit.ryaml.load(f)
-    if ck_info is None:
-        ck_info = {}
+    ck_info = calkit.load_calkit_info()
     datasets = ck_info.get("datasets", [])
     for ds in datasets:
         if ds.get("path") == path:
@@ -1099,5 +1089,4 @@ def update_dataset(
             entry["stage"] = stage
         datasets.append(entry)
         ck_info["datasets"] = datasets
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(ck_info, f)
+    calkit.save_calkit_info(ck_info)

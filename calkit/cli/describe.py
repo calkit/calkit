@@ -8,6 +8,7 @@ from typing import Annotated
 import typer
 
 import calkit
+from calkit.cli import raise_error
 from calkit.environments import get_env_lock_fpath
 
 describe_app = typer.Typer(no_args_is_help=True)
@@ -31,8 +32,7 @@ def describe_env(
     ck_info = calkit.load_calkit_info()
     envs: dict = ck_info.get("environments", {})
     if name not in envs:
-        typer.echo(f"Environment '{name}' not found.", err=True)
-        raise typer.Exit(1)
+        raise_error(f"Environment '{name}' not found.")
     env = envs[name]
     lock_path = get_env_lock_fpath(env=env, env_name=name)
     result = {

@@ -1209,6 +1209,34 @@ def test_slurm_field_renamed_to_scheduler(tmp_dir):
     assert stage["scheduler"]["options"] == ["--time=01:00:00"]
 
 
+def test_frozen_preserved_through_sbatch_conversion(tmp_dir):
+    """A frozen legacy ``sbatch`` stage stays frozen after conversion."""
+    subprocess.check_call(["calkit", "init"])
+    ck_yaml = {
+        "environments": {"mycluster": {"kind": "slurm"}},
+        "pipeline": {
+            "stages": {
+                "run": {
+                    "kind": "sbatch",
+                    "script_path": "scripts/run.sh",
+                    "environment": "mycluster",
+                    "frozen": True,
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as _f:
+        calkit.ryaml.dump(ck_yaml, _f)
+    dvc_stages = calkit.pipeline.to_dvc(write=True)
+    # The converted shell-script stage and the rewritten calkit.yaml entry
+    # must both still be frozen, and DVC must not reproduce it
+    assert dvc_stages["run"]["frozen"] is True
+    updated = calkit.load_calkit_info()
+    converted = updated["pipeline"]["stages"]["run"]
+    assert converted["kind"] == "shell-script"
+    assert converted["frozen"] is True
+
+
 def test_gitignore_updated_when_stage_output_renamed(tmp_dir):
     """When a stage output path is renamed, stale .gitignore entries are
     replaced.
@@ -1415,6 +1443,10 @@ def test_get_status_excludes_frozen_stage(tmp_dir):
             "with open('my-output.out', 'w') as f:\n"
             "    f.write('Hello, world!')\n"
         )
+    # The compiled DVC stage must carry frozen: true so DVC itself never
+    # reproduces it (this is what actually prevents it from running)
+    dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info)
+    assert dvc_stages["get-data"]["frozen"] is True
     # A frozen stage is never reported as stale, even though it has never
     # been run and its outputs do not exist yet
     status = calkit.pipeline.get_status(ck_info=ck_info)

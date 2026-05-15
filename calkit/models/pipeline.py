@@ -189,6 +189,7 @@ class Stage(BaseModel):
     always_run: bool = False
     iterate_over: list[StageIteration] | None = None
     description: str | None = None
+    frozen: bool = False
     scheduler: StageSchedulerOptions | None = None
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
@@ -418,6 +419,8 @@ class Stage(BaseModel):
             stage["wdir"] = self.wdir
         if self.always_run:
             stage["always_changed"] = True
+        if self.frozen:
+            stage["frozen"] = True
         return stage
 
 

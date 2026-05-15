@@ -1383,6 +1383,55 @@ def test_get_status(tmp_dir):
     assert status.stale_stages["get-data"].modified_outputs == []
 
 
+def test_get_status_excludes_frozen_stage(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "environments": {
+            "py": {
+                "kind": "uv-venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+            }
+        },
+        "pipeline": {
+            "stages": {
+                "get-data": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "something/my-cool-script.py",
+                    "outputs": ["my-output.out"],
+                    "frozen": True,
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("requirements.txt", "w") as f:
+        f.write("requests\n")
+    os.makedirs("something", exist_ok=True)
+    with open("something/my-cool-script.py", "w") as f:
+        f.write(
+            "with open('my-output.out', 'w') as f:\n"
+            "    f.write('Hello, world!')\n"
+        )
+    # A frozen stage is never reported as stale, even though it has never
+    # been run and its outputs do not exist yet
+    status = calkit.pipeline.get_status(ck_info=ck_info)
+    assert not status.failed_environment_checks
+    assert not status.is_stale
+    assert "get-data" not in status.stale_stage_names
+    # Modifying the script must not make the frozen stage stale either
+    with open("something/my-cool-script.py", "w") as f:
+        f.write(
+            "with open('my-output.out', 'w') as f:\n"
+            "    f.write('Changed!')\n"
+        )
+    status = calkit.pipeline.get_status(ck_info=ck_info)
+    assert not status.is_stale
+    assert "get-data" not in status.stale_stage_names
+
+
 def test_stale_stage_detects_changed_command():
     stale_stage = calkit.pipeline.StaleStage.from_status_data(
         status_data=[{"changed command": "python src/new-script.py"}],

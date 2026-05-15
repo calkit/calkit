@@ -286,6 +286,7 @@ Common stage parameters:
 | `always_run`   | bool                                | no       | False   |
 | `iterate_over` | list[StageIteration] \| None        | no       | null    |
 | `description`  | str \| None                         | no       | null    |
+| `frozen`       | bool                                | no       | False   |
 | `scheduler`    | StageSchedulerOptions \| None       | no       | null    |
 
 ### `command`

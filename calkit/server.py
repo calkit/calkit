@@ -306,10 +306,16 @@ def get_status(
         # Remove any always changed entries so the pipeline doesn't look
         # out of date
         logger.info(f"Raw DVC pipeline status: {dvc_pipeline_status}")
+        # Frozen stages are intentionally pinned and hidden from status
+        frozen_stages = calkit.pipeline.frozen_stage_base_names(
+            wdir=project.wdir
+        )
         dvc_pipeline_status = {
             k.split("dvc.yaml:")[-1]: v
             for k, v in dvc_pipeline_status.items()
-            if v != ["always changed"] and not k.endswith(".dvc")
+            if v != ["always changed"]
+            and not k.endswith(".dvc")
+            and k.split("dvc.yaml:")[-1].split("@")[0] not in frozen_stages
         }
         logger.info(
             f"DVC pipeline status after filtering: {dvc_pipeline_status}"

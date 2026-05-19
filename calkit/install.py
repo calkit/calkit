@@ -36,6 +36,42 @@ class Installer(TypedDict):
 Platform = Literal["unix", "windows"]
 
 
+# rustup installs the whole Rust toolchain (cargo + rustc); juliaup
+# installs julia. Defined out-of-band so the binary-name aliases below
+# share the same dict by reference and stay in lockstep.
+_RUSTUP_INSTALLER: dict[Platform, Installer] = {
+    "unix": {
+        "script": (
+            "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs "
+            "| sh -s -- -y --default-toolchain stable"
+        ),
+        "path_add": "~/.cargo/bin",
+    },
+    "windows": {
+        # winget is the path of least resistance on modern Windows; the
+        # upstream rustup-init.exe download is not a one-liner.
+        "script": (
+            "winget install --id Rustlang.Rustup -e "
+            "--accept-source-agreements --accept-package-agreements"
+        ),
+        "path_add": "~\\.cargo\\bin",
+    },
+}
+_JULIAUP_INSTALLER: dict[Platform, Installer] = {
+    "unix": {
+        "script": "curl -fsSL https://install.julialang.org | sh -s -- -y",
+        "path_add": "~/.juliaup/bin",
+    },
+    "windows": {
+        "script": (
+            "winget install --id Julialang.Juliaup -e "
+            "--accept-source-agreements --accept-package-agreements"
+        ),
+        "path_add": "~\\.juliaup\\bin",
+    },
+}
+
+
 # name -> platform -> Installer
 INSTALLERS: dict[str, dict[Platform, Installer]] = {
     "pixi": {
@@ -64,7 +100,13 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
             "path_add": "~/.local/bin",
         },
     },
+    "rustup": _RUSTUP_INSTALLER,
+    "juliaup": _JULIAUP_INSTALLER,
 }
+# Aliases for the binaries users actually invoke / list as deps; sharing
+# the same installer dict by reference keeps the entries in lockstep.
+INSTALLERS["cargo"] = _RUSTUP_INSTALLER
+INSTALLERS["julia"] = _JULIAUP_INSTALLER
 
 
 def _current_platform() -> Platform:

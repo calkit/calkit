@@ -1678,19 +1678,20 @@ Options:
 
 List Calkit objects.
 
-| Command                                                       | Description                                |
-| ------------------------------------------------------------- | ------------------------------------------ |
-| [`notebooks\|nb`](#subcommand-list-ls-notebooks-nb)           | List notebooks in the project.             |
-| [`figures\|figs`](#subcommand-list-ls-figures-figs)           | List figures in the project.               |
-| [`datasets`](#subcommand-list-ls-datasets)                    | List datasets in the project.              |
-| [`publications\|pubs`](#subcommand-list-ls-publications-pubs) | List publications in the project.          |
-| [`references\|refs`](#subcommand-list-ls-references-refs)     | List reference collections in the project. |
-| [`environments\|envs`](#subcommand-list-ls-environments-envs) | List environments in the project.          |
-| [`templates`](#subcommand-list-ls-templates)                  | List all available Calkit templates.       |
-| [`procedures`](#subcommand-list-ls-procedures)                | List procedures in the current project.    |
-| [`releases`](#subcommand-list-ls-releases)                    | List releases.                             |
-| [`stages`](#subcommand-list-ls-stages)                        | List pipeline stages.                      |
-| [`remotes`](#subcommand-list-ls-remotes)                      | List Git and DVC remotes.                  |
+| Command                                                       | Description                                   |
+| ------------------------------------------------------------- | --------------------------------------------- |
+| [`notebooks\|nb`](#subcommand-list-ls-notebooks-nb)           | List notebooks in the project.                |
+| [`figures\|figs`](#subcommand-list-ls-figures-figs)           | List figures in the project.                  |
+| [`datasets`](#subcommand-list-ls-datasets)                    | List datasets in the project.                 |
+| [`publications\|pubs`](#subcommand-list-ls-publications-pubs) | List publications in the project.             |
+| [`references\|refs`](#subcommand-list-ls-references-refs)     | List reference collections in the project.    |
+| [`environments\|envs`](#subcommand-list-ls-environments-envs) | List environments in the project.             |
+| [`templates`](#subcommand-list-ls-templates)                  | List all available Calkit templates.          |
+| [`installers`](#subcommand-list-ls-installers)                | List apps with a registered native installer. |
+| [`procedures`](#subcommand-list-ls-procedures)                | List procedures in the current project.       |
+| [`releases`](#subcommand-list-ls-releases)                    | List releases.                                |
+| [`stages`](#subcommand-list-ls-stages)                        | List pipeline stages.                         |
+| [`remotes`](#subcommand-list-ls-remotes)                      | List Git and DVC remotes.                     |
 
 <a id="subcommand-list-ls-notebooks-nb"></a>
 
@@ -1774,6 +1775,20 @@ Usage:
 
 ```text
 calkit list|ls templates
+```
+
+<a id="subcommand-list-ls-installers"></a>
+
+#### `calkit list|ls installers`
+
+List apps with a registered native installer.
+
+These can be declared as `kind: app` dependencies in `calkit.yaml` and Calkit will offer to install them via `calkit install <name>` or automatically during `calkit run` on an interactive TTY.
+
+Usage:
+
+```text
+calkit list|ls installers
 ```
 
 <a id="subcommand-list-ls-procedures"></a>

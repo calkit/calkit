@@ -18,6 +18,19 @@ def tmp_dir(tmp_path, monkeypatch):
     return tmp_path
 
 
+def test_installer_registry_includes_aliases():
+    # rustup/cargo and juliaup/julia share their installer entries by
+    # reference, so editing one updates the other -- guard against any
+    # future refactor that accidentally splits them.
+    assert install.INSTALLERS["cargo"] is install.INSTALLERS["rustup"]
+    assert install.INSTALLERS["julia"] is install.INSTALLERS["juliaup"]
+    for name in ("rustup", "juliaup", "cargo", "julia"):
+        entry = install.INSTALLERS[name]
+        assert "unix" in entry and "windows" in entry
+        assert entry["unix"]["script"]
+        assert entry["unix"]["path_add"]
+
+
 def test_get_installer():
     # Known app on a supported platform returns an entry with a script
     # and an install-location hint for PATH injection.

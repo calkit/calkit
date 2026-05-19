@@ -66,7 +66,11 @@ def make_table(rows: list[tuple[Any, ...]], header: list[str]) -> str:
 
 
 def _command_text(cmd: click.Command) -> str:
-    return (cmd.help or cmd.short_help or "").strip()
+    # CLI helps written in RST style use ``double backticks`` for inline
+    # code; convert to markdown single backticks so prettier doesn't
+    # rewrite the generated file and fail the pre-commit hook.
+    text = (cmd.help or cmd.short_help or "").strip()
+    return text.replace("``", "`")
 
 
 def _command_desc(cmd: click.Command) -> str:

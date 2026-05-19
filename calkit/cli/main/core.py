@@ -346,6 +346,17 @@ def get_status(
             calkit.git.get_repo()
         except InvalidGitRepositoryError:
             git.Repo.init()
+        # Likewise, if this isn't a DVC repo, initialize one so the pipeline
+        # can be compiled and its status reported. DVC init requires a Git
+        # repo, which the block above ensures exists.
+        if not os.path.isfile(os.path.join(".dvc", "config")):
+            typer.echo("Initializing DVC repository")
+            try:
+                result = calkit.dvc.run_dvc_command(["init", "-q"])
+                if result != 0:
+                    raise subprocess.CalledProcessError(result, "dvc init")
+            except subprocess.CalledProcessError as e:
+                raise_error(f"Failed to initialize DVC repository: {e}")
     valid_categories = ["project", "git", "dvc", "pipeline"]
     if categories is not None:
         for category in categories:

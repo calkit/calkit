@@ -124,22 +124,30 @@ def new_project(
     if repo is not None and git_repo_url is None:
         if verbose:
             typer.echo("Detecting Git repo URL from existing repo")
-        try:
-            remote_names = [r.name for r in repo.remotes]
-            remote = repo.remotes[
-                remote_names.index("origin") if "origin" in remote_names else 0
-            ]
-            git_repo_url = remote.url
-            # Convert to HTTPS if it's SSH
-            if git_repo_url.startswith("git@"):
-                git_repo_url = git_repo_url.replace(
-                    "git@github.com:", "https://github.com/"
+        remote_names = [r.name for r in repo.remotes]
+        if remote_names:
+            try:
+                remote = repo.remotes[
+                    remote_names.index("origin")
+                    if "origin" in remote_names
+                    else 0
+                ]
+                git_repo_url = remote.url
+                # Convert to HTTPS if it's SSH
+                if git_repo_url.startswith("git@"):
+                    git_repo_url = git_repo_url.replace(
+                        "git@github.com:", "https://github.com/"
+                    )
+                git_repo_url = git_repo_url.removesuffix(".git")
+            except Exception as e:
+                git_repo_url = None
+                raise_error(
+                    f"Could not detect Git repo URL from existing repo: {e}"
                 )
-            git_repo_url = git_repo_url.removesuffix(".git")
-        except Exception as e:
-            git_repo_url = None
+        elif not cloud:
             raise_error(
-                f"Could not detect Git repo URL from existing repo: {e}"
+                "Existing Git repo has no remotes; "
+                "specify --git-url or use --cloud to create one"
             )
         # We don't have a project name but do have a Git repo URL, the
         # project name will be the Git repo name lowercased, since that's
@@ -167,9 +175,10 @@ def new_project(
     ck_info_fpath = os.path.join(abs_path, "calkit.yaml")
     if os.path.isfile(ck_info_fpath) and not overwrite:
         ck_info = calkit.load_calkit_info(wdir=abs_path)
-        name = ck_info.get("name", name)
-        title = ck_info.get("title", title)
-        description = ck_info.get("description", description)
+        # Prefer values explicitly passed on the CLI; fall back to calkit.yaml
+        name = name or ck_info.get("name")
+        title = title or ck_info.get("title")
+        description = description or ck_info.get("description")
         typer.echo(
             "Destination is already a Calkit project; "
             "will use existing project info where possible"
@@ -191,6 +200,15 @@ def new_project(
         # Cloud should allow None, which will allow us to post just the name
         # NOTE: This will fail if the user hasn't logged into the Calkit Cloud
         # in 6 months, since their GitHub refresh token stored is expired
+        # Strip control characters (e.g., stray newlines) the API rejects
+        if description is not None:
+            description = (
+                "".join(
+                    " " if (ord(c) < 32 and c != "\t") or ord(c) == 127 else c
+                    for c in description
+                ).strip()
+                or None
+            )
         typer.echo("Creating project in Calkit Cloud")
         try:
             resp = calkit.cloud.post(

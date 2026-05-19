@@ -275,10 +275,36 @@ class ProjectStatus(BaseModel):
 
 
 class Dependency(BaseModel):
-    """A system-level dependency, e.g., and app or environmental variable."""
+    """A system-level dependency.
 
-    kind: Literal["app", "env-var"]
+    Three kinds are supported:
+
+    - ``app``: an executable that must be on ``PATH``.
+    - ``env-var``: an environmental variable that must be defined.
+    - ``setup``: a per-machine precondition that isn't a file -- e.g.,
+      the user must have authenticated a CLI like ``gh auth login``.
+      A ``setup`` dep declares ``check_command`` (a shell command whose
+      exit code determines whether the dep is satisfied) and
+      ``setup_command`` (run on a TTY when the user agrees, or printed
+      as a fix-it command otherwise). To run either inside a project
+      environment, prefix it with ``calkit xenv -n <env> --`` explicitly
+      rather than relying on an implicit wrap. A future ``cache_ttl``
+      field can extend this to skip re-probing for slow checks.
+    """
+
+    kind: Literal["app", "env-var", "setup"] = "app"
     name: str
+    # ``setup``-kind fields; ignored for other kinds.
+    check_command: str | None = None
+    setup_command: str | None = None
+    # ``cache_ttl`` is a duration string ('30m', '1h', '7d', '1w') or an
+    # integer number of seconds. Setup deps cache successful checks by
+    # default for ``DEFAULT_SETUP_CACHE_TTL``; set ``cache_ttl: 0`` to
+    # disable caching and re-probe every run.
+    cache_ttl: str | int | None = None
+    description: str | None = None
+    # Allow a per-env-var default value to be set (used by ``check env-vars``).
+    default: str | None = None
 
 
 class ProjectInfo(BaseModel):

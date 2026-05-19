@@ -2390,6 +2390,50 @@ def run_in_env(
         raise_error("Environment kind not supported")
 
 
+@app.command(
+    name="install",
+    help=(
+        "Install a registered native dependency (e.g., pixi, uv) via its "
+        "upstream installer for the current platform."
+    ),
+)
+def install_app(
+    name: Annotated[
+        str,
+        typer.Argument(
+            help="The app to install (e.g., 'pixi', 'uv').",
+        ),
+    ],
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="Skip the confirmation prompt and install immediately.",
+        ),
+    ] = False,
+) -> None:
+    from calkit import install as _install
+
+    entry = _install.get_installer(name)
+    if entry is None:
+        raise_error(
+            f"No registered installer for '{name}'. Known apps: "
+            + ", ".join(sorted(_install.INSTALLERS))
+        )
+    # ``--yes`` makes this scriptable (CI, provisioning) without losing
+    # the safety prompt for plain interactive use.
+    if yes:
+        ok = _install.install(name)
+    else:
+        from calkit.dependencies import _is_interactive
+
+        ok = _install.prompt_and_install(name, interactive=_is_interactive())
+    if not ok:
+        raise_error(f"Failed to install '{name}'")
+    typer.echo(f"✅ Installed '{name}'")
+
+
 @app.command(name="xproc|runproc", help="Execute a procedure.")
 def run_procedure(
     name: Annotated[str, typer.Argument(help="The name of the procedure.")],

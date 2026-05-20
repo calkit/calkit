@@ -22,6 +22,9 @@ from calkit.cli.main.core import (
     _stage_run_info_from_log_content,
     _to_shell_cmd,
 )
+from calkit.cli.main.core import (
+    app as calkit_app,
+)
 
 
 def _repo_test_file(name: str) -> Path:
@@ -1074,3 +1077,96 @@ def test_complete_stage_names(tmp_dir):
     assert "inline-sp:stage-a" in filtered
     assert "parent-stage" not in filtered
     assert "isolated-sp" not in filtered
+
+
+def test_use_version_execs_uvx(monkeypatch):
+    # ``calkit --use-version 0.38 run -f`` re-invokes itself under uvx
+    # with the requested calkit-python version pinned and the original
+    # subcommand/args forwarded.
+    captured: dict = {}
+
+    def fake_execvp(file, argv):
+        captured["argv"] = argv
+        raise SystemExit(0)
+
+    monkeypatch.setattr("os.execvp", fake_execvp)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/uvx")
+    monkeypatch.setattr(
+        sys, "argv", ["calkit", "--use-version", "0.38", "run", "-f"]
+    )
+    from typer.testing import CliRunner
+
+    runner = CliRunner()
+    result = runner.invoke(calkit_app, ["--use-version", "0.38", "run", "-f"])
+    # SystemExit is raised inside fake_execvp; Typer surfaces it as exit 0.
+    assert result.exit_code == 0
+    argv = captured["argv"]
+    assert argv[:4] == ["uvx", "--from", "calkit-python@0.38", "calkit"]
+    # ``--use-version`` is stripped so the child doesn't loop.
+    assert "--use-version" not in argv
+    assert argv[-2:] == ["run", "-f"]
+
+
+def test_use_version_intercepts_before_typer(monkeypatch):
+    # ``calkit --use-version 0.1.1 -- --help`` and ``-- --version`` must
+    # re-exec via uvx; if Typer were allowed to parse first, Click's
+    # eager ``--help``/``--version`` (or ``no_args_is_help``) would
+    # print the *current* CLI's output before the callback ran.
+    captured: dict = {}
+
+    def fake_execvp(file, argv):
+        captured["argv"] = argv
+        raise SystemExit(0)
+
+    monkeypatch.setattr("os.execvp", fake_execvp)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/uvx")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["calkit", "--use-version", "0.1.1", "--", "--help"],
+    )
+    from calkit.cli import run as cli_run
+
+    with pytest.raises(SystemExit):
+        cli_run()
+    assert captured["argv"][:4] == [
+        "uvx",
+        "--from",
+        "calkit-python@0.1.1",
+        "calkit",
+    ]
+    # The leading ``--`` separator was only needed to escape the parent
+    # parser; the forwarded argv must NOT carry it through, or the older
+    # child CLI will interpret ``--help`` as a positional subcommand.
+    assert "--" not in captured["argv"]
+    assert captured["argv"][-1] == "--help"
+    # ``--use-version=<v>`` form is also honored.
+    captured.clear()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["calkit", "--use-version=0.3", "--", "--version"],
+    )
+    with pytest.raises(SystemExit):
+        cli_run()
+    assert captured["argv"][:4] == [
+        "uvx",
+        "--from",
+        "calkit-python@0.3",
+        "calkit",
+    ]
+    assert "--" not in captured["argv"]
+    assert captured["argv"][-1] == "--version"
+
+
+def test_use_version_without_uvx(monkeypatch):
+    # If uvx isn't on PATH, --use-version fails fast with a clear error
+    # instead of falling through to running the local calkit.
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    from typer.testing import CliRunner
+
+    runner = CliRunner()
+    result = runner.invoke(calkit_app, ["--use-version", "0.38", "run"])
+    assert result.exit_code != 0
+    # ``raise_error`` writes to stderr but typer's runner merges output.
+    assert "uvx" in (result.output + (result.stderr or ""))

@@ -208,6 +208,52 @@ def test_setup_dep_name_is_optional(tmp_dir):
         calkit.check_system_deps(ck_info=ck_info, interactive=False)
 
 
+def test_check_calkit_version(monkeypatch):
+    # Bare version is interpreted as ``==``; a passing spec returns None.
+    monkeypatch.setattr(calkit, "__version__", "0.38.0")
+    assert deps.check_calkit_version("0.38.0") is None
+    assert deps.check_calkit_version(">=0.38") is None
+    assert deps.check_calkit_version(">=0.30,<1.0") is None
+    # A failing spec raises with a fix-it message naming --use-version
+    # and 'calkit upgrade'.
+    monkeypatch.setattr(calkit, "__version__", "0.36.0")
+    with pytest.raises(ValueError) as exc:
+        deps.check_calkit_version(">=0.38")
+    msg = str(exc.value)
+    assert "calkit>=0.38" in msg
+    assert "0.36.0" in msg
+    assert "--use-version 0.38" in msg
+    assert "calkit upgrade" in msg
+    # A garbage spec is a configuration error.
+    with pytest.raises(ValueError, match="Invalid calkit version spec"):
+        deps.check_calkit_version("not-a-spec!!")
+    # End-to-end through the ``- calkit>=0.38`` string form in calkit.yaml.
+    monkeypatch.setattr(calkit, "__version__", "0.36.0")
+    ck_info = {"dependencies": ["calkit>=0.38"]}
+    with pytest.raises(ValueError, match="--use-version"):
+        calkit.check_system_deps(ck_info=ck_info, interactive=False)
+    # And with the flat-dict form using ``version_spec``.
+    ck_info_flat = {
+        "dependencies": [
+            {"name": "calkit", "kind": "app", "version_spec": ">=0.38"}
+        ]
+    }
+    with pytest.raises(ValueError, match="--use-version"):
+        calkit.check_system_deps(ck_info=ck_info_flat, interactive=False)
+    # When the version satisfies the spec, the run is allowed through.
+    monkeypatch.setattr(calkit, "__version__", "0.38.0")
+    calkit.check_system_deps(ck_info=ck_info, interactive=False)
+
+
+def test_format_uvx_from():
+    # Bare versions become ``calkit-python@<v>`` (uv's exact-pin form);
+    # PEP 440 specifiers are appended as-is.
+    assert deps._format_uvx_from("0.38") == "calkit-python@0.38"
+    assert deps._format_uvx_from("0.38.0") == "calkit-python@0.38.0"
+    assert deps._format_uvx_from(">=0.38") == "calkit-python>=0.38"
+    assert deps._format_uvx_from("==0.38") == "calkit-python==0.38"
+
+
 def test_check_system_deps_setup_kind(tmp_dir):
     # End-to-end through the top-level entry point. The legacy and flat
     # dict shapes both flow through ``_normalize_dep`` and reach the

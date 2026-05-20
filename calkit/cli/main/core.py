@@ -111,10 +111,63 @@ def main(
         bool,
         typer.Option("--version", help="Show version and exit."),
     ] = False,
+    use_version: Annotated[
+        Optional[str],
+        typer.Option(
+            "--use-version",
+            help=(
+                "Re-invoke the CLI under a specific calkit-python version "
+                "via 'uvx --from'."
+            ),
+        ),
+    ] = None,
 ):
     if version:
         typer.echo(f"Calkit {calkit.__version__}")
         raise typer.Exit()
+    if use_version:
+        _exec_with_version(use_version)
+
+
+def _exec_with_version(version_spec: str) -> None:
+    """Replace this process with ``uvx --from calkit-python<spec> calkit ...``.
+
+    Strips ``--use-version`` from ``sys.argv`` before re-invoking so the
+    child process doesn't loop. Requires ``uv`` to be available on PATH.
+    """
+    from calkit.dependencies import _format_uvx_from
+
+    if shutil.which("uvx") is None:
+        raise_error(
+            "'--use-version' requires 'uvx' (install uv: "
+            "https://docs.astral.sh/uv/)."
+        )
+    cleaned: list[str] = []
+    argv = sys.argv[1:]
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--use-version":
+            i += 2
+            continue
+        if a.startswith("--use-version="):
+            i += 1
+            continue
+        cleaned.append(a)
+        i += 1
+    # A leading ``--`` was only needed to escape *our* option parser
+    # (e.g. ``ck --use-version 0.3 -- --version``). Forwarding it would
+    # leave the child CLI to interpret it as a positional, so older
+    # versions error with "No such command '--version'".
+    if cleaned and cleaned[0] == "--":
+        cleaned = cleaned[1:]
+    cmd = [
+        "uvx",
+        "--from",
+        _format_uvx_from(version_spec),
+        "calkit",
+    ] + cleaned
+    os.execvp(cmd[0], cmd)
 
 
 @app.command(name="init")

@@ -25,3 +25,7 @@ a feature in one function over many different test functions.
 Do not write docstrings in test functions.
 
 For prose, only use one space after punctuation.
+
+Don't overzealously split up functions just because they're long.
+Functions should usually be used ~3 times before abstracting.
+Otherwise, split up long ones into logical sections with comments.

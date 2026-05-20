@@ -54,6 +54,71 @@ _TTL_UNITS = {
 _TTL_RE = re.compile(r"^\s*(\d+)\s*([smhdw]?)\s*$", re.IGNORECASE)
 
 
+def _format_uvx_from(spec: str) -> str:
+    """Format a calkit version spec into a ``uvx --from`` argument.
+
+    A bare version like ``0.38`` becomes ``calkit-python@0.38`` (uv's
+    exact-pin shorthand); a PEP 440 specifier like ``>=0.38`` is
+    appended directly, e.g. ``calkit-python>=0.38``.
+    """
+    spec = spec.strip()
+    if not spec:
+        return "calkit-python"
+    if spec[0].isdigit():
+        return f"calkit-python@{spec}"
+    return f"calkit-python{spec}"
+
+
+def _suggest_version_from_spec(spec: str) -> str | None:
+    """Pull the first version-looking token out of ``spec`` for a hint."""
+    m = re.search(r"\d[\w.+\-!]*", spec)
+    return m.group(0) if m else None
+
+
+def check_calkit_version(spec: str) -> None:
+    """Verify the running calkit satisfies ``spec`` (e.g. ``>=0.38``).
+
+    Raises ``ValueError`` with a fix-it message pointing the user at
+    ``calkit --use-version`` or ``calkit upgrade`` when the installed
+    version is outside the requested specifier. A bare version like
+    ``0.38`` is interpreted as ``==0.38`` so users can write
+    ``- calkit==0.38`` or simply ``- calkit>=0.38`` in ``calkit.yaml``.
+    """
+    from packaging.specifiers import SpecifierSet
+    from packaging.version import InvalidVersion, Version
+
+    import calkit
+
+    raw = (spec or "").strip()
+    if not raw:
+        return
+    spec_str = raw if raw[0] in "<>=!~" else f"=={raw}"
+    try:
+        spec_set = SpecifierSet(spec_str)
+    except Exception as e:
+        raise ValueError(f"Invalid calkit version spec '{spec}': {e}")
+    try:
+        current = Version(calkit.__version__)
+    except InvalidVersion:
+        # A dev/editable install with an unparseable version: don't block.
+        return
+    if current in spec_set:
+        return
+    suggested = _suggest_version_from_spec(spec_str)
+    msg = (
+        f"calkit{spec_str} required, but installed version is "
+        f"{calkit.__version__}."
+    )
+    if suggested:
+        msg += (
+            f" Re-run with 'calkit --use-version {suggested} ...' or "
+            "upgrade with 'calkit upgrade'."
+        )
+    else:
+        msg += " Upgrade with 'calkit upgrade'."
+    raise ValueError(msg)
+
+
 def parse_ttl(ttl: str | int | float) -> int:
     """Parse a TTL like ``30s``, ``5m``, ``2h``, ``7d``, ``1w`` into seconds.
 

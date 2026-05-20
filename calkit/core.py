@@ -354,7 +354,17 @@ def _normalize_dep(dep) -> dict:
     common and forcing users to invent a name adds friction.
     """
     if isinstance(dep, str):
-        return {"name": re.split("[=<>]", dep)[0], "kind": "app"}
+        # Split on the first version operator so a string like
+        # ``calkit>=0.38`` produces both a clean name and a version spec
+        # the caller can validate.
+        m = re.match(r"^([A-Za-z0-9_.\-]+)(.*)$", dep.strip())
+        if m is None:
+            raise ValueError(f"Malformed dependency: {dep}")
+        out: dict = {"name": m.group(1), "kind": "app"}
+        spec = m.group(2).strip()
+        if spec:
+            out["version_spec"] = spec
+        return out
     if not isinstance(dep, dict):
         raise ValueError(f"Malformed dependency: {dep}")
     keys = list(dep.keys())
@@ -449,6 +459,17 @@ def check_system_deps(
         raise ValueError(f"env-var '{dep_name}' not found")
     for dep in buckets["app"]:
         dep_name = dep["name"]
+        # The ``calkit`` app is always satisfied by the running process,
+        # but a declared ``version_spec`` (e.g. ``calkit>=0.38``) is
+        # checked against the installed version so projects can pin a
+        # minimum CLI without writing a custom setup step.
+        if dep_name == "calkit":
+            spec = dep.get("version_spec")
+            if spec:
+                from calkit.dependencies import check_calkit_version
+
+                check_calkit_version(spec)
+            continue
         if check_dep_exists(dep_name, "app", system_info=system_info):
             continue
         # Offer the registered native installer when we have one.

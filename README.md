@@ -174,7 +174,7 @@ use. To pin a specific Calkit release inside the shell, set the
 before invoking `calkit`.
 
 The flake is currently a thin wrapper around `uvx --from calkit-python
-calkit` — it depends on `uv` from `nixpkgs` and fetches the published
+calkit`. It depends on `uv` from `nixpkgs` and fetches the published
 wheel from PyPI on first use. This trades a fully Nix-native build for
 zero version-drift maintenance, and avoids the macOS `docx2pdf` /
 `appscript` and JupyterLab labextension build issues that block a pure

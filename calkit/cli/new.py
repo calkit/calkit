@@ -2264,6 +2264,17 @@ def new_nix_env(
     )
     with open(path, "w") as f:
         f.write(content)
+    # ``nix flake lock`` refuses to see files that aren't tracked by Git
+    # when run inside a Git repo. Stage the new flake before locking so
+    # the brand-new (still untracked) file is visible to Nix. Staging is
+    # harmless when ``--no-commit`` is set -- the commit step is what we
+    # gate on, not the staging.
+    try:
+        _flake_repo = calkit.git.get_repo()
+    except calkit.git.InvalidGitRepositoryError:
+        _flake_repo = None
+    if _flake_repo is not None:
+        _flake_repo.git.add(path)
     # Generate flake.lock for reproducibility unless skipped. The lock
     # is what makes the environment reproducible across machines, so we
     # want it committed alongside flake.nix.
@@ -2302,14 +2313,14 @@ def new_nix_env(
     ck_info["environments"] = envs
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
-    if not no_commit:
-        repo = calkit.git.get_repo()
-        repo.git.add(path)
+    if not no_commit and _flake_repo is not None:
+        # ``path`` was already staged earlier so ``nix flake lock`` could
+        # see it; just add the lock file (if produced) and calkit.yaml.
         if os.path.exists(lock_path):
-            repo.git.add(lock_path)
-        repo.git.add("calkit.yaml")
-        if repo.git.diff("--staged"):
-            repo.git.commit(["-m", f"Add nix environment {name}"])
+            _flake_repo.git.add(lock_path)
+        _flake_repo.git.add("calkit.yaml")
+        if _flake_repo.git.diff("--staged"):
+            _flake_repo.git.commit(["-m", f"Add nix environment {name}"])
 
 
 class Status(str, Enum):

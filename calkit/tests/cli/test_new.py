@@ -663,6 +663,23 @@ def test_new_julia_env(tmp_dir):
     assert not os.path.isfile("envs/empty/Manifest.toml")
 
 
+def test_new_nix_env_stages_flake(tmp_dir):
+    # ``nix flake lock`` refuses to see untracked files inside a Git
+    # repo. ``calkit new nix-env`` must stage the freshly written
+    # flake.nix before invoking the lock step, even when ``--no-check``
+    # skips the lock itself -- we verify staging happens by checking
+    # that the auto-commit captured flake.nix.
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        ["calkit", "new", "nix-env", "--name", "main", "python3", "--no-check"]
+    )
+    assert os.path.isfile("flake.nix")
+    repo = git.Repo(".")
+    head_files = [item.path for item in repo.head.commit.tree.traverse()]
+    assert "flake.nix" in head_files
+    assert "calkit.yaml" in head_files
+
+
 def test_new_release(tmp_dir, monkeypatch, httpserver):
     # Set up a mock Zenodo API so the test doesn't depend on the real sandbox
     record_id = "test-record-abc123"

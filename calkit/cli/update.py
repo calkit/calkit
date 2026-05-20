@@ -650,6 +650,16 @@ def update_environment(
             )
             return
         typer.echo(f"Added to {flake_path}: {', '.join(added)}")
+        # ``nix flake lock`` ignores files that aren't tracked by Git
+        # when run inside a Git repo. Stage the modified flake first so
+        # the lock step sees our edits even if the flake was previously
+        # untracked.
+        try:
+            _repo_for_lock = calkit.git.get_repo()
+        except calkit.git.InvalidGitRepositoryError:
+            _repo_for_lock = None
+        if _repo_for_lock is not None:
+            _repo_for_lock.git.add(flake_path)
         # Best-effort lock refresh: skip with a warning when nix isn't on
         # PATH so the flake edit + commit still go through (e.g. on a
         # machine where the user only edits configs).

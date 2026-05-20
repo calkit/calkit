@@ -148,12 +148,13 @@ non-zero.
 
 Apps currently in the registry:
 
-| Dep name           | Installer                                                                 |
-| ------------------ | ------------------------------------------------------------------------- |
-| `pixi`             | `curl -fsSL https://pixi.sh/install.sh \| sh` (and PowerShell on Windows) |
-| `uv`               | `curl -LsSf https://astral.sh/uv/install.sh \| sh`                        |
-| `rustup`, `cargo`  | upstream `rustup` script on Unix, `winget` on Windows                     |
-| `juliaup`, `julia` | upstream `juliaup` script on Unix, `winget` on Windows                    |
+| Dep name           | Installer                                                                                          |
+| ------------------ | -------------------------------------------------------------------------------------------------- |
+| `pixi`             | `curl -fsSL https://pixi.sh/install.sh \| sh` (and PowerShell on Windows)                          |
+| `uv`               | `curl -LsSf https://astral.sh/uv/install.sh \| sh`                                                 |
+| `rustup`, `cargo`  | upstream `rustup` script on Unix, `winget` on Windows                                              |
+| `juliaup`, `julia` | upstream `juliaup` script on Unix, `winget` on Windows                                             |
+| `nix`              | [Determinate Systems installer](https://install.determinate.systems) on Unix; WSL2-only on Windows |
 
 Run `calkit list installers` for the live list.
 

@@ -528,6 +528,12 @@ environments:
     path: flake.nix
 ```
 
+Projects can contain multiple Nix envs. The first one lands at the repo
+root (`flake.nix`); subsequent ones get nested under
+`.calkit/envs/{name}/flake.nix` so each env has its own independent
+`flake.lock`. You can override the path with `--path` if you want a
+different layout.
+
 To enter a specific dev shell from the flake (instead of the default),
 set `shell`:
 

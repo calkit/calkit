@@ -1159,6 +1159,35 @@ def test_use_version_intercepts_before_typer(monkeypatch):
     assert captured["argv"][-1] == "--version"
 
 
+def test_use_version_only_scanned_in_group_options(monkeypatch):
+    # ``--use-version`` buried after a subcommand (or after ``--``) is
+    # a forwarded argument for that subcommand's child process, NOT a
+    # request to re-exec under uvx. The pre-Typer intercept must only
+    # look at the group's own options region.
+    called: dict = {"exec": False}
+
+    def fake_execvp(file, argv):
+        called["exec"] = True
+        raise SystemExit(0)
+
+    monkeypatch.setattr("os.execvp", fake_execvp)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/uvx")
+    from calkit.cli import _maybe_exec_with_version
+
+    # Subcommand precedes ``--use-version``: must NOT re-exec.
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["calkit", "xenv", "--", "some-tool", "--use-version", "1.0"],
+    )
+    _maybe_exec_with_version()
+    assert called["exec"] is False
+    # And a bare ``--`` before ``--use-version`` is forwarded territory.
+    monkeypatch.setattr(sys, "argv", ["calkit", "--", "--use-version", "1.0"])
+    _maybe_exec_with_version()
+    assert called["exec"] is False
+
+
 def test_use_version_without_uvx(monkeypatch):
     # If uvx isn't on PATH, --use-version fails fast with a clear error
     # instead of falling through to running the local calkit.

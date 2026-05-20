@@ -141,3 +141,37 @@ def test_check_system_deps_orders_and_auto_installs(tmp_dir, monkeypatch):
     assert os.environ["API_KEY"] == "secret"
     # Auto-install ran and put pixi on PATH for the in-process setup check.
     assert str(fake_bin_dir) in os.environ["PATH"].split(os.pathsep)
+
+
+def test_install_cli_command(monkeypatch):
+    # The ``calkit install <name>`` subcommand wires three paths:
+    # unknown app -> error, --yes -> direct ``install`` (no prompt),
+    # default -> ``prompt_and_install``.
+    from typer.testing import CliRunner
+
+    from calkit.cli.main.core import app as calkit_app
+
+    runner = CliRunner()
+    # Unknown app surfaces the known list and exits non-zero.
+    result = runner.invoke(calkit_app, ["install", "definitely-not-a-tool"])
+    assert result.exit_code != 0
+    assert "No registered installer" in (result.output + (result.stderr or ""))
+    # ``--yes`` skips the prompt and goes straight through ``install``;
+    # ``prompt_and_install`` must not be called.
+    with (
+        mock.patch("calkit.install.install", return_value=True) as m_install,
+        mock.patch("calkit.install.prompt_and_install") as m_prompt,
+    ):
+        result = runner.invoke(calkit_app, ["install", "pixi", "--yes"])
+        assert result.exit_code == 0
+        m_install.assert_called_once_with("pixi")
+        m_prompt.assert_not_called()
+    # Default path delegates to ``prompt_and_install``; a False return
+    # value surfaces as a non-zero exit.
+    with mock.patch(
+        "calkit.install.prompt_and_install", return_value=False
+    ) as m_prompt:
+        result = runner.invoke(calkit_app, ["install", "pixi"])
+        assert result.exit_code != 0
+        m_prompt.assert_called_once()
+        assert m_prompt.call_args.args[0] == "pixi"

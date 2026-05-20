@@ -508,21 +508,13 @@ def get_env_var_dep_names(ck_info: dict | None = None) -> list[str]:
         ck_info = load_calkit_info()
     env_vars = []
     for dep in ck_info.get("dependencies", []):
-        if isinstance(dep, dict):
-            keys = list(dep.keys())
-            # For backwards compatibility, we allow the name to be a single key
-            # or we allow a `name` key to be present
-            if len(keys) != 1 and "name" not in keys:
-                raise ValueError(f"Malformed dependency: {dep}")
-            if len(keys) == 1:
-                dep_kind = dep[keys[0]].get("kind", "app")
-                if dep_kind == "env-var":
-                    env_vars.append(keys[0])
-            elif dep.get("kind") == "env-var":
-                if "name" in keys:
-                    env_vars.append(dep["name"])
-                else:
-                    raise ValueError(f"Malformed dependency: {dep}")
+        # Delegate shape-parsing to ``_normalize_dep`` so this stays in
+        # lockstep with ``check_system_deps`` -- string deps, single-key
+        # dicts, flat dicts, and nameless setup deps all flow through
+        # one path.
+        normalized = _normalize_dep(dep)
+        if normalized["kind"] == "env-var":
+            env_vars.append(normalized["name"])
     return env_vars
 
 

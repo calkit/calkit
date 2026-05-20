@@ -1015,3 +1015,41 @@ def test_nix_env(tmp_dir):
     assert "uv" in content
     assert "nixos-24.05" in content
     assert "devShells" in content
+
+
+def test_add_packages_to_nix_flake(tmp_dir):
+    # Round-trip: generate a flake, add some packages, verify they appear
+    # in the packages list, that duplicates aren't re-inserted, and that
+    # we error cleanly when the anchor is missing.
+    initial = calkit.environments.create_nix_flake_content(
+        packages=["python3"],
+    )
+    with open("flake.nix", "w") as f:
+        f.write(initial)
+    added = calkit.environments.add_packages_to_nix_flake(
+        "flake.nix", ["R", "uv"]
+    )
+    assert added == ["R", "uv"]
+    with open("flake.nix") as f:
+        updated = f.read()
+    # All three packages now live in the packages list, in declaration
+    # order (existing first, then new).
+    pkgs_section = updated.split("packages = with pkgs;", 1)[1]
+    pkgs_section = pkgs_section.split("];", 1)[0]
+    assert pkgs_section.index("python3") < pkgs_section.index("R")
+    assert pkgs_section.index("R") < pkgs_section.index("uv")
+    # Adding a package that's already there is a no-op, not a duplicate.
+    again = calkit.environments.add_packages_to_nix_flake(
+        "flake.nix", ["R", "polars"]
+    )
+    assert again == ["polars"]
+    with open("flake.nix") as f:
+        after = f.read()
+    assert after.count("\n            R\n") == 1
+    # Unknown structure: raise rather than silently mangle the file.
+    with open("hand-rolled.nix", "w") as f:
+        f.write("{ outputs = { self }: { devShells = {}; }; }\n")
+    with pytest.raises(ValueError):
+        calkit.environments.add_packages_to_nix_flake(
+            "hand-rolled.nix", ["python3"]
+        )

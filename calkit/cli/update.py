@@ -595,13 +595,17 @@ def update_environment(
         list[str] | None,
         typer.Option(
             "--add",
-            help=("Add package to environment,"),
+            "--add-package",
+            help=(
+                "Package to add to the environment. Repeat the flag for "
+                "multiple packages."
+            ),
         ),
     ] = None,
 ) -> None:
     """Update an environment.
 
-    Currently only supports adding packages to Julia environments.
+    Currently supports adding packages to Julia and Nix (flake) envs.
     """
     from calkit.cli.main import run_in_env
 
@@ -614,12 +618,88 @@ def update_environment(
             "No updates specified. Use --add to specify packages to add."
         )
     env = envs[env_name]
-    if env.get("kind") != "julia":
-        raise_error("Currently only Julia environments are supported")
-    # If adding package to a Julia environment, we need to simply run a command
-    # in it
     assert isinstance(add_packages, list)
-    add_packages_str = ", ".join([f'"{pkg.strip()}"' for pkg in add_packages])
-    julia_cmd = ["-e", f"using Pkg; Pkg.add([{add_packages_str}])"]
-    run_in_env(env_name=env_name, cmd=julia_cmd)
+    kind = env.get("kind")
+    if kind == "julia":
+        # Adding to a Julia env is just a Pkg.add call inside the env.
+        add_packages_str = ", ".join(
+            [f'"{pkg.strip()}"' for pkg in add_packages]
+        )
+        julia_cmd = ["-e", f"using Pkg; Pkg.add([{add_packages_str}])"]
+        run_in_env(env_name=env_name, cmd=julia_cmd)
+    elif kind == "nix":
+        import platform as _platform
+        import subprocess
+
+        from calkit.environments import add_packages_to_nix_flake
+
+        flake_path = env.get("path")
+        if not flake_path or not os.path.isfile(flake_path):
+            raise_error(
+                f"Nix flake not found at '{flake_path}' for env "
+                f"'{env_name}'"
+            )
+        try:
+            added = add_packages_to_nix_flake(flake_path, add_packages)
+        except ValueError as e:
+            raise_error(str(e))
+        if not added:
+            typer.echo(
+                f"All requested packages are already in {flake_path}; "
+                "nothing to do."
+            )
+            return
+        typer.echo(f"Added to {flake_path}: {', '.join(added)}")
+        # Best-effort lock refresh: skip with a warning when nix isn't on
+        # PATH so the flake edit + commit still go through (e.g. on a
+        # machine where the user only edits configs).
+        env_dir = os.path.dirname(flake_path) or "."
+        if shutil.which("nix") is None:
+            if _platform.system() == "Windows":
+                from calkit.cli import warn
+
+                warn(
+                    "Nix is not available natively on Windows; skipping "
+                    "'nix flake lock'. Run Calkit inside WSL2 to refresh "
+                    "flake.lock."
+                )
+            else:
+                from calkit.cli import warn
+
+                warn(
+                    "The 'nix' command was not found; skipping "
+                    "'nix flake lock'. Install it with "
+                    "'calkit install nix' to refresh flake.lock."
+                )
+        else:
+            res = subprocess.run(
+                [
+                    "nix",
+                    "--extra-experimental-features",
+                    "nix-command flakes",
+                    "flake",
+                    "lock",
+                ],
+                cwd=env_dir,
+            )
+            if res.returncode != 0:
+                raise_error("Failed to refresh flake.lock")
+        # Commit the updated flake + lock so the change is captured.
+        repo = calkit.git.get_repo()
+        repo.git.add(flake_path)
+        lock_path = os.path.join(env_dir, "flake.lock")
+        if os.path.exists(lock_path):
+            repo.git.add(lock_path)
+        if repo.git.diff("--staged"):
+            repo.git.commit(
+                [
+                    "-m",
+                    f"Add {', '.join(added)} to nix env {env_name}",
+                ]
+            )
+    else:
+        raise_error(
+            "Adding packages is currently supported only for "
+            "julia and nix environments"
+        )
     typer.echo(f"Updated environment '{env_name}'")

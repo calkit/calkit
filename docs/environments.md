@@ -545,6 +545,13 @@ Run a command in a Nix environment:
 calkit xenv -n my-nix-env -- python --version
 ```
 
+Add more packages to an existing Nix env (this edits the flake's
+`packages = with pkgs; [ ... ]` list, refreshes `flake.lock`, and commits):
+
+```sh
+calkit update env --name my-nix-env --add-package R --add-package polars
+```
+
 On Linux and macOS, install Nix with `calkit install nix` — this runs the
 [Determinate Systems installer](https://install.determinate.systems),
 which enables flakes by default. Nix is not supported natively on

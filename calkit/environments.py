@@ -1135,6 +1135,76 @@ def create_nix_flake_content(
 """
 
 
+def add_packages_to_nix_flake(
+    flake_path: str, packages: list[str]
+) -> list[str]:
+    """Add ``packages`` to a flake.nix's ``packages = with pkgs; [ ... ]``
+    list, preserving formatting and skipping packages already present.
+
+    Designed for flakes produced by ``calkit new nix-env``. If the anchor
+    can't be found (e.g. the user hand-rolled a structurally different
+    flake), raises ``ValueError`` so the caller can tell the user to edit
+    manually rather than corrupting their file.
+
+    Returns the list of packages actually inserted.
+    """
+    import re
+
+    with open(flake_path) as f:
+        lines = f.readlines()
+    anchor_re = re.compile(r"packages\s*=\s*with\s+pkgs\s*;\s*\[")
+    close_re = re.compile(r"^\s*\]\s*;")
+    start = next(
+        (i for i, line in enumerate(lines) if anchor_re.search(line)), None
+    )
+    if start is None:
+        raise ValueError(
+            f"Could not find 'packages = with pkgs; [' in {flake_path}; "
+            "add packages manually."
+        )
+    end = next(
+        (j for j in range(start + 1, len(lines)) if close_re.match(lines[j])),
+        None,
+    )
+    if end is None:
+        raise ValueError(
+            f"Could not find closing ']' for packages list in {flake_path}."
+        )
+    # Collect existing entries (ignore blanks + comments) and pick up the
+    # indent from the first real entry so inserted lines match.
+    existing: set[str] = set()
+    inner_indent: str | None = None
+    for k in range(start + 1, end):
+        stripped = lines[k].strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        existing.add(stripped)
+        if inner_indent is None:
+            indent_match = re.match(r"^(\s*)", lines[k])
+            inner_indent = indent_match.group(1) if indent_match else ""
+    if inner_indent is None:
+        # Empty list -- derive indent from the closing bracket + 2 spaces.
+        close_indent_match = re.match(r"^(\s*)", lines[end])
+        close_indent = (
+            close_indent_match.group(1) if close_indent_match else ""
+        )
+        inner_indent = close_indent + "  "
+    added: list[str] = []
+    new_entries = []
+    for pkg in packages:
+        if pkg in existing:
+            continue
+        new_entries.append(f"{inner_indent}{pkg}\n")
+        existing.add(pkg)
+        added.append(pkg)
+    if not new_entries:
+        return added
+    lines[end:end] = new_entries
+    with open(flake_path, "w") as f:
+        f.writelines(lines)
+    return added
+
+
 def create_python_requirements_content(dependencies: list[str]) -> str:
     """Generate requirements.txt file content from a list of dependencies.
 

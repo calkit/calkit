@@ -2227,7 +2227,7 @@ Options:
 
 Update an environment.
 
-Currently only supports adding packages to Julia environments.
+Currently supports adding packages to Julia and Nix (flake) envs.
 
 Usage:
 
@@ -2237,10 +2237,10 @@ calkit update env [OPTIONS]
 
 Options:
 
-| Option         | Type | Required | Default | Description                       |
-| -------------- | ---- | -------- | ------- | --------------------------------- |
-| `--name`, `-n` | text | yes      |         | Name of the environment to update |
-| `--add`        | text | no       |         | Add package to environment,       |
+| Option                   | Type | Required | Default | Description                                                               |
+| ------------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------- |
+| `--name`, `-n`           | text | yes      |         | Name of the environment to update                                         |
+| `--add`, `--add-package` | text | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
 
 <a id="subcommand-update-environment"></a>
 
@@ -2248,7 +2248,7 @@ Options:
 
 Update an environment.
 
-Currently only supports adding packages to Julia environments.
+Currently supports adding packages to Julia and Nix (flake) envs.
 
 Usage:
 
@@ -2258,10 +2258,10 @@ calkit update environment [OPTIONS]
 
 Options:
 
-| Option         | Type | Required | Default | Description                       |
-| -------------- | ---- | -------- | ------- | --------------------------------- |
-| `--name`, `-n` | text | yes      |         | Name of the environment to update |
-| `--add`        | text | no       |         | Add package to environment,       |
+| Option                   | Type | Required | Default | Description                                                               |
+| ------------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------- |
+| `--name`, `-n`           | text | yes      |         | Name of the environment to update                                         |
+| `--add`, `--add-package` | text | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
 
 <a id="command-group-check"></a>
 

@@ -14,10 +14,10 @@ import dotenv
 import typer
 
 import calkit
-from calkit.cli import raise_error, warn
+from calkit.cli import AliasGroup, raise_error, warn
 from calkit.core import get_md5
 
-check_app = typer.Typer(no_args_is_help=True)
+check_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
 
 def _juliaup_version_installed(julia_version: str) -> bool:
@@ -1243,11 +1243,20 @@ def check_matlab_env(
     )
 
 
-@check_app.command(name="dependencies")
-@check_app.command(name="deps")
+@check_app.command(name="deps|dependencies")
 def check_dependencies(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output")
+    ] = False,
+    no_cache: Annotated[
+        bool,
+        typer.Option(
+            "--no-cache",
+            help=(
+                "Re-probe every setup dependency, ignoring (and clearing) "
+                "the cache at .calkit/local/dep-checks.sqlite."
+            ),
+        ),
     ] = False,
 ) -> None:
     """Check that a project's system-level dependencies are set up
@@ -1255,8 +1264,10 @@ def check_dependencies(
     """
     typer.echo("Checking project dependencies")
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    if no_cache:
+        calkit.dependencies.cache_clear()
     try:
-        calkit.check_system_deps()
+        calkit.check_system_deps(use_cache=not no_cache)
     except Exception as e:
         raise_error(str(e))
     message = "✅ All set!"
@@ -1278,32 +1289,22 @@ def check_env_vars(
     for name in env_var_dep_names:
         if verbose:
             typer.echo(f"Checking for environmental variable '{name}'")
-        attrs = {}
+        # Pull the dep's attrs to honor any per-var default.
+        attrs: dict = {}
         for dep in deps:
-            if isinstance(dep, dict) and "name" in dep:
+            if isinstance(dep, dict) and dep.get("name") == name:
                 attrs = dep
                 break
-            elif isinstance(dep, dict) and list(dep.keys()) == [name]:
-                attrs = dep[name]
+            if isinstance(dep, dict) and list(dep.keys()) == [name]:
+                attrs = dep[name] or {}
                 break
         if name not in os.environ:
             typer.echo(f"Missing env var '{name}'")
-            if "default" in attrs:
-                default = attrs["default"]
-            else:
-                default = None
-            value = typer.prompt(
-                f"Enter a value for {name}", default=default, type=str
+            value = calkit.dependencies.prompt_and_store_env_var(
+                name, default=attrs.get("default")
             )
-            dotenv.set_key(
-                dotenv_path=".env", key_to_set=name, value_to_set=value
-            )
-    # Ensure that .env is ignored by git
-    repo = calkit.git.get_repo()
-    if not repo.ignored(".env"):
-        typer.echo("Adding .env to .gitignore")
-        with open(".gitignore", "a") as f:
-            f.write("\n.env\n")
+            if value is None:
+                raise_error(f"No value provided for '{name}'")
     message = "✅ All set!"
     calkit.echo(message)
 

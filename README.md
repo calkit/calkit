@@ -134,6 +134,22 @@ you can use uv's `uvx` command to run it directly:
 uvx calk9 --help
 ```
 
+### Running against a specific version
+
+If a project requires a Calkit version other than the one you have
+installed, use the top-level `--use-version` flag to re-invoke the CLI
+under that release without changing your installation:
+
+```sh
+calkit --use-version 0.38 run
+```
+
+This re-execs the CLI via `uvx --from calkit-python@<version> calkit`,
+so it requires [uv](https://docs.astral.sh/uv/) on `PATH`.
+You can also declare a minimum version in `calkit.yaml`;
+see
+[Pinning the Calkit CLI version](https://docs.calkit.org/dependencies.md#pinning-the-calkit-cli-version).
+
 ### Calkit Assistant
 
 For Windows users, the

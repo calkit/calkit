@@ -102,11 +102,55 @@ INSTALLERS: dict[str, dict[Platform, Installer]] = {
     },
     "rustup": _RUSTUP_INSTALLER,
     "juliaup": _JULIAUP_INSTALLER,
+    # Determinate Systems' Nix installer ships flakes on by default and
+    # uninstalls cleanly. ``--no-confirm`` makes it scriptable; the binary
+    # ends up on the multi-user default profile path so we can prepend it
+    # to PATH for the in-process re-check.
+    "nix": {
+        "unix": {
+            "script": (
+                "curl --proto '=https' --tlsv1.2 -fsSL "
+                "https://install.determinate.systems/nix "
+                "| sh -s -- install --no-confirm"
+            ),
+            "path_add": "/nix/var/nix/profiles/default/bin",
+        },
+    },
 }
 # Aliases for the binaries users actually invoke / list as deps; sharing
 # the same installer dict by reference keeps the entries in lockstep.
 INSTALLERS["cargo"] = _RUSTUP_INSTALLER
 INSTALLERS["julia"] = _JULIAUP_INSTALLER
+
+
+# Apps that are known to be unsupported on a given platform, mapped to the
+# message the CLI should surface instead of the generic "no installer"
+# error. Nix doesn't run natively on Windows -- users need WSL2 -- so we
+# steer them there explicitly rather than letting them watch a download
+# fail.
+_PLATFORM_UNSUPPORTED: dict[str, dict[Platform, str]] = {
+    "nix": {
+        "windows": (
+            "Nix is not supported natively on Windows. Run Calkit inside "
+            "WSL2 (https://learn.microsoft.com/en-us/windows/wsl/install) "
+            "and install Nix there."
+        ),
+    },
+}
+
+
+def get_unsupported_message(app: str) -> str | None:
+    """Return a platform-unsupported message for ``app``, if any.
+
+    This is distinct from "no installer registered": the app is known but
+    cannot be installed on this platform via this tool. Callers should
+    surface this message before falling back to the generic "no installer"
+    error.
+    """
+    platform_messages = _PLATFORM_UNSUPPORTED.get(app)
+    if platform_messages is None:
+        return None
+    return platform_messages.get(_current_platform())
 
 
 def _current_platform() -> Platform:

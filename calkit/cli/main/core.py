@@ -2396,6 +2396,44 @@ def run_in_env(
             subprocess.check_call(cmd, cwd=env_dir, env=env_vars)
         except subprocess.CalledProcessError:
             raise_error("Failed to run in renv")
+    elif env["kind"] == "nix":
+        from calkit.cli.check import check_nix_env
+
+        env_path = env.get("path")
+        if env_path is None:
+            raise_error(
+                "Nix environments require a path pointing to flake.nix"
+            )
+        assert isinstance(env_path, str)
+        if os.path.basename(env_path) != "flake.nix":
+            raise_error(
+                "Nix environments require a path pointing to flake.nix"
+            )
+        if not no_check:
+            check_nix_env(env=env, verbose=verbose)
+        env_dir = os.path.dirname(os.path.abspath(env_path)) or "."
+        flake_ref = f"path:{env_dir}"
+        shell_name = env.get("shell")
+        if shell_name:
+            flake_ref = f"{flake_ref}#{shell_name}"
+        shell_cmd = _to_shell_cmd(cmd)
+        nix_cmd = [
+            "nix",
+            "--extra-experimental-features",
+            "nix-command flakes",
+            "develop",
+            flake_ref,
+            "--command",
+            "sh",
+            "-c",
+            shell_cmd,
+        ]
+        if verbose:
+            typer.echo(f"Running command: {nix_cmd}")
+        try:
+            subprocess.check_call(nix_cmd, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in Nix environment")
     elif env["kind"] == "matlab":
         if not no_check:
             check_matlab_env(
@@ -2468,6 +2506,11 @@ def install_app(
 ) -> None:
     from calkit import install as _install
 
+    # Surface a platform-specific "use X instead" message before the
+    # generic "no installer" error -- e.g., Nix on Windows needs WSL2.
+    unsupported = _install.get_unsupported_message(name)
+    if unsupported:
+        raise_error(unsupported)
     entry = _install.get_installer(name)
     if entry is None:
         raise_error(

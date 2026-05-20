@@ -968,3 +968,88 @@ def test_scheduler_env_lock_files(tmp_dir):
         )
         is None
     )
+
+
+def test_nix_env(tmp_dir):
+    # Flake at the repo root: flake.lock should live next to flake.nix.
+    root_env = {"kind": "nix", "path": "flake.nix"}
+    assert (
+        calkit.environments.get_env_lock_fpath(
+            env=root_env, env_name="main", as_posix=True
+        )
+        == "flake.lock"
+    )
+    # Flake in a subdirectory: lock follows the flake into the same dir.
+    nested_env = {"kind": "nix", "path": "envs/myenv/flake.nix"}
+    assert (
+        calkit.environments.get_env_lock_fpath(
+            env=nested_env, env_name="myenv", as_posix=True
+        )
+        == "envs/myenv/flake.lock"
+    )
+    # A path that doesn't end with flake.nix is a config error.
+    with pytest.raises(ValueError):
+        calkit.environments.get_env_lock_fpath(
+            env={"kind": "nix", "path": "envs/myenv/shell.nix"},
+            env_name="myenv",
+        )
+    # Detect from a flake.nix file. The detector keys off the filename,
+    # so a placeholder body is enough.
+    os.makedirs("envs/foo", exist_ok=True)
+    with open("envs/foo/flake.nix", "w") as f:
+        f.write("{}\n")
+    res = calkit.environments.env_from_name_and_or_path(
+        name=None, path="envs/foo/flake.nix"
+    )
+    assert res.env["kind"] == "nix"
+    assert res.env["path"] == "envs/foo/flake.nix"
+    assert not res.exists
+    # The generated flake.nix template lists each requested package and
+    # pins nixpkgs via the input URL we asked for.
+    content = calkit.environments.create_nix_flake_content(
+        packages=["python3", "uv"],
+        description="dev shell",
+        nixpkgs_url="github:NixOS/nixpkgs/nixos-24.05",
+    )
+    assert "python3" in content
+    assert "uv" in content
+    assert "nixos-24.05" in content
+    assert "devShells" in content
+
+
+def test_add_packages_to_nix_flake(tmp_dir):
+    # Round-trip: generate a flake, add some packages, verify they appear
+    # in the packages list, that duplicates aren't re-inserted, and that
+    # we error cleanly when the anchor is missing.
+    initial = calkit.environments.create_nix_flake_content(
+        packages=["python3"],
+    )
+    with open("flake.nix", "w") as f:
+        f.write(initial)
+    added = calkit.environments.add_packages_to_nix_flake(
+        "flake.nix", ["R", "uv"]
+    )
+    assert added == ["R", "uv"]
+    with open("flake.nix") as f:
+        updated = f.read()
+    # All three packages now live in the packages list, in declaration
+    # order (existing first, then new).
+    pkgs_section = updated.split("packages = with pkgs;", 1)[1]
+    pkgs_section = pkgs_section.split("];", 1)[0]
+    assert pkgs_section.index("python3") < pkgs_section.index("R")
+    assert pkgs_section.index("R") < pkgs_section.index("uv")
+    # Adding a package that's already there is a no-op, not a duplicate.
+    again = calkit.environments.add_packages_to_nix_flake(
+        "flake.nix", ["R", "polars"]
+    )
+    assert again == ["polars"]
+    with open("flake.nix") as f:
+        after = f.read()
+    assert after.count("\n            R\n") == 1
+    # Unknown structure: raise rather than silently mangle the file.
+    with open("hand-rolled.nix", "w") as f:
+        f.write("{ outputs = { self }: { devShells = {}; }; }\n")
+    with pytest.raises(ValueError):
+        calkit.environments.add_packages_to_nix_flake(
+            "hand-rolled.nix", ["python3"]
+        )

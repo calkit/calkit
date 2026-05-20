@@ -71,6 +71,7 @@ class Environment(BaseModel):
         "docker",
         "julia",
         "matlab",
+        "nix",
         "pbs",
         "poetry",
         "npm",
@@ -111,6 +112,16 @@ class UvVenvEnvironment(Environment):
 class PixiEnvironment(Environment):
     kind: Literal["pixi"] = "pixi"
     name: str | None = None
+
+
+class NixEnvironment(Environment):
+    kind: Literal["nix"] = "nix"
+    # Path to the project's flake.nix (required). The flake.lock alongside
+    # it is the reproducibility-anchoring lock file we track as a DVC dep.
+    path: str
+    # Optional name of the dev shell to enter (passed as #<shell> to
+    # ``nix develop``). Defaults to the flake's default dev shell.
+    shell: str | None = None
 
 
 class DockerEnvironment(Environment):
@@ -353,6 +364,7 @@ class ProjectInfo(BaseModel):
         | VenvEnvironment
         | UvEnvironment
         | UvVenvEnvironment
+        | NixEnvironment
         | SSHEnvironment,
     ] = {}
     software: list[Software] = []

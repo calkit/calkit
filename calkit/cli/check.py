@@ -231,6 +231,61 @@ def _check_julia_env(
     return lock_fpath or os.path.join(env_dir, "Manifest.toml")
 
 
+def _require_nix_available() -> None:
+    """Ensure the ``nix`` CLI is on PATH, with a friendly error otherwise.
+
+    On Windows we steer users to WSL2 rather than attempting native Nix,
+    which isn't officially supported.
+    """
+    if shutil.which("nix") is not None:
+        return
+    if _platform.system() == "Windows":
+        raise_error(
+            "Nix is not available natively on Windows. Run Calkit inside "
+            "WSL2 (https://learn.microsoft.com/en-us/windows/wsl/install) "
+            "and install Nix there."
+        )
+    raise_error(
+        "The 'nix' command was not found. Install it with "
+        "'calkit install nix' or from https://nixos.org/download."
+    )
+
+
+def check_nix_env(env: dict, verbose: bool = False) -> str:
+    """Materialize / refresh ``flake.lock`` next to the flake.
+
+    Running ``nix flake lock`` writes ``flake.lock`` if missing and is a
+    no-op when the lock is already up-to-date. The lock file is what we
+    track as a DVC dep, so an out-of-date lock invalidates dependent
+    stages on the next ``calkit run``.
+    """
+    env_path = env.get("path")
+    if env_path is None:
+        raise_error("Nix environments require a path pointing to flake.nix")
+    assert isinstance(env_path, str)
+    if os.path.basename(env_path) != "flake.nix":
+        raise_error("Nix environments require a path pointing to flake.nix")
+    if not os.path.isfile(env_path):
+        raise_error(f"Nix flake not found: {env_path}")
+    _require_nix_available()
+    env_dir = os.path.dirname(os.path.abspath(env_path)) or "."
+    cmd = [
+        "nix",
+        "--extra-experimental-features",
+        "nix-command flakes",
+        "flake",
+        "lock",
+    ]
+    if verbose:
+        typer.echo(f"Running command: {cmd} (cwd={env_dir})")
+    try:
+        subprocess.check_call(cmd, cwd=env_dir)
+    except subprocess.CalledProcessError:
+        raise_error("Failed to lock Nix flake")
+    lock_fpath = os.path.join(os.path.dirname(env_path), "flake.lock")
+    return lock_fpath
+
+
 @check_app.command(name="repro")
 def check_repro(
     wdir: Annotated[
@@ -412,6 +467,8 @@ def check_environment(
         # env config so DVC stages that depend on the env get invalidated
         # when the config changes.
         write_scheduler_env_lock(env_name=env_name, env=env)
+    elif env["kind"] == "nix":
+        check_nix_env(env=env, verbose=verbose)
     else:
         raise_error(f"Environment kind '{env['kind']}' not supported")
     return get_env_lock_fpath(env=env, env_name=env_name, as_posix=False)

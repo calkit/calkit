@@ -828,6 +828,7 @@ Create a new Calkit object.
 | [`pixi-env`](#subcommand-new-create-pixi-env)                             | Create a new pixi virtual environment.                                |
 | [`julia-env`](#subcommand-new-create-julia-env)                           | Create a new Julia environment or add an existing one to calkit.yaml. |
 | [`renv`](#subcommand-new-create-renv)                                     | Create a new R environment with renv.                                 |
+| [`nix-env`](#subcommand-new-create-nix-env)                               | Create a new Nix flake-based environment.                             |
 | [`status`](#subcommand-new-create-status)                                 | Add a new project status to the log.                                  |
 | [`python-script-stage`](#subcommand-new-create-python-script-stage)       | Add a stage to the pipeline that runs a Python script.                |
 | [`julia-script-stage`](#subcommand-new-create-julia-script-stage)         | Add a stage to the pipeline that runs a Julia script.                 |
@@ -1341,6 +1342,36 @@ Options:
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.     |
 | `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation. |
 | `--no-commit`       | boolean | no       | False   | Do not commit changes.                                 |
+
+<a id="subcommand-new-create-nix-env"></a>
+
+#### `calkit new|create nix-env`
+
+Create a new Nix flake-based environment.
+
+Usage:
+
+```text
+calkit new|create nix-env [OPTIONS] PACKAGES...
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                            |
+| ---------- | ---- | -------- | ------- | ------------------------------------------------------ |
+| `packages` | text | yes      |         | Nixpkgs packages to include in the dev shell (e.g. R). |
+
+Options:
+
+| Option              | Type    | Required | Default                             | Description                                           |
+| ------------------- | ------- | -------- | ----------------------------------- | ----------------------------------------------------- |
+| `--name`, `-n`      | text    | yes      |                                     | Environment name.                                     |
+| `--path`            | text    | no       |                                     | Flake file path. Must end with 'flake.nix'.           |
+| `--nixpkgs-url`     | text    | no       | github:NixOS/nixpkgs/nixos-unstable | Flake input URL for nixpkgs.                          |
+| `--description`     | text    | no       |                                     | Description.                                          |
+| `--overwrite`, `-f` | boolean | no       | False                               | Overwrite any existing environment with this name.    |
+| `--no-check`        | boolean | no       | False                               | Do not run 'nix flake lock' after creating the flake. |
+| `--no-commit`       | boolean | no       | False                               | Do not commit changes.                                |
 
 <a id="subcommand-new-create-status"></a>
 
@@ -2196,7 +2227,7 @@ Options:
 
 Update an environment.
 
-Currently only supports adding packages to Julia environments.
+Currently supports adding packages to Julia and Nix (flake) envs.
 
 Usage:
 
@@ -2206,10 +2237,10 @@ calkit update env [OPTIONS]
 
 Options:
 
-| Option         | Type | Required | Default | Description                       |
-| -------------- | ---- | -------- | ------- | --------------------------------- |
-| `--name`, `-n` | text | yes      |         | Name of the environment to update |
-| `--add`        | text | no       |         | Add package to environment,       |
+| Option                   | Type | Required | Default | Description                                                               |
+| ------------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------- |
+| `--name`, `-n`           | text | yes      |         | Name of the environment to update                                         |
+| `--add`, `--add-package` | text | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
 
 <a id="subcommand-update-environment"></a>
 
@@ -2217,7 +2248,7 @@ Options:
 
 Update an environment.
 
-Currently only supports adding packages to Julia environments.
+Currently supports adding packages to Julia and Nix (flake) envs.
 
 Usage:
 
@@ -2227,10 +2258,10 @@ calkit update environment [OPTIONS]
 
 Options:
 
-| Option         | Type | Required | Default | Description                       |
-| -------------- | ---- | -------- | ------- | --------------------------------- |
-| `--name`, `-n` | text | yes      |         | Name of the environment to update |
-| `--add`        | text | no       |         | Add package to environment,       |
+| Option                   | Type | Required | Default | Description                                                               |
+| ------------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------- |
+| `--name`, `-n`           | text | yes      |         | Name of the environment to update                                         |
+| `--add`, `--add-package` | text | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
 
 <a id="command-group-check"></a>
 

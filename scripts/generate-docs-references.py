@@ -19,6 +19,7 @@ from calkit.models.core import (
     Environment,
     JuliaEnvironment,
     MatlabEnvironment,
+    NixEnvironment,
     PixiEnvironment,
     REnvironment,
     SlurmEnvironment,
@@ -508,6 +509,7 @@ def generate_environment_kinds_markdown() -> str:
         DockerEnvironment,
         JuliaEnvironment,
         MatlabEnvironment,
+        NixEnvironment,
         SlurmEnvironment,
         REnvironment,
         SSHEnvironment,
@@ -580,6 +582,12 @@ def generate_environment_kinds_markdown() -> str:
         "matlab": [
             ("kind", "Literal['matlab']", "required"),
             ("products", "list[str]", "optional"),
+            ("description", "str", "optional"),
+        ],
+        "nix": [
+            ("kind", "Literal['nix']", "required"),
+            ("path", "str (must end with 'flake.nix')", "required"),
+            ("shell", "str (name of devShell to enter)", "optional"),
             ("description", "str", "optional"),
         ],
         "slurm": [

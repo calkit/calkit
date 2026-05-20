@@ -143,6 +143,39 @@ def test_check_system_deps_orders_and_auto_installs(tmp_dir, monkeypatch):
     assert str(fake_bin_dir) in os.environ["PATH"].split(os.pathsep)
 
 
+def test_nix_installer_registered_only_on_unix():
+    # Nix has no native Windows installer; we expect get_installer to
+    # return None there and ``get_unsupported_message`` to surface the
+    # WSL2 hint so callers can give a useful error.
+    with mock.patch("calkit.install.sys.platform", "linux"):
+        entry = install.get_installer("nix")
+        assert entry is not None
+        assert "determinate.systems" in entry["script"]
+        assert entry["path_add"] == "/nix/var/nix/profiles/default/bin"
+        assert install.get_unsupported_message("nix") is None
+    with mock.patch("calkit.install.sys.platform", "win32"):
+        assert install.get_installer("nix") is None
+        msg = install.get_unsupported_message("nix")
+        assert msg is not None
+        assert "WSL2" in msg
+    # Apps without an explicit unsupported entry just return None.
+    assert install.get_unsupported_message("pixi") is None
+
+
+def test_install_nix_on_windows_surfaces_wsl2_message(monkeypatch):
+    # ``calkit install nix`` on Windows must give the WSL2 message rather
+    # than the generic "no registered installer" error.
+    from typer.testing import CliRunner
+
+    from calkit.cli.main.core import app as calkit_app
+
+    runner = CliRunner()
+    with mock.patch("calkit.install.sys.platform", "win32"):
+        result = runner.invoke(calkit_app, ["install", "nix"])
+    assert result.exit_code != 0
+    assert "WSL2" in (result.output + (result.stderr or ""))
+
+
 def test_install_cli_command(monkeypatch):
     # The ``calkit install <name>`` subcommand wires three paths:
     # unknown app -> error, --yes -> direct ``install`` (no prompt),

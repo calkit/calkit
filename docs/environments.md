@@ -565,6 +565,11 @@ Windows; run Calkit inside
 [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) and install
 Nix there.
 
+Calkit itself is also available as a flake — see
+[Nix in the installation guide](installation.md#nix) to add the Calkit
+CLI to your own Nix environments via `inputs.calkit.url =
+"github:calkit/calkit"`.
+
 ### R
 
 R environments can be managed with Conda, Pixi, or `renv` (recommended).

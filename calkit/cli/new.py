@@ -2279,8 +2279,8 @@ def new_nix_env(
             else:
                 warn(
                     "The 'nix' command was not found; skipping "
-                    "'nix flake lock'. Install Nix from "
-                    "https://nixos.org/download to generate flake.lock."
+                    "'nix flake lock'. Install it with "
+                    "'calkit install nix' or from https://nixos.org/download."
                 )
         else:
             res = subprocess.run(

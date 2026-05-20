@@ -545,12 +545,12 @@ Run a command in a Nix environment:
 calkit xenv -n my-nix-env -- python --version
 ```
 
-Nix is not supported natively on Windows; run Calkit inside
+On Linux and macOS, install Nix with `calkit install nix` — this runs the
+[Determinate Systems installer](https://install.determinate.systems),
+which enables flakes by default. Nix is not supported natively on
+Windows; run Calkit inside
 [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) and install
-Nix there. On Linux and macOS, install Nix from
-<https://nixos.org/download> (the
-[Determinate Systems installer](https://install.determinate.systems) is a
-good choice because it enables flakes by default).
+Nix there.
 
 ### R
 

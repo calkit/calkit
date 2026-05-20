@@ -2506,6 +2506,11 @@ def install_app(
 ) -> None:
     from calkit import install as _install
 
+    # Surface a platform-specific "use X instead" message before the
+    # generic "no installer" error -- e.g., Nix on Windows needs WSL2.
+    unsupported = _install.get_unsupported_message(name)
+    if unsupported:
+        raise_error(unsupported)
     entry = _install.get_installer(name)
     if entry is None:
         raise_error(

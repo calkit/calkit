@@ -246,10 +246,8 @@ def _require_nix_available() -> None:
             "and install Nix there."
         )
     raise_error(
-        "The 'nix' command was not found. Install Nix from "
-        "https://nixos.org/download (the Determinate Systems installer at "
-        "https://install.determinate.systems is recommended; it enables "
-        "flakes by default)."
+        "The 'nix' command was not found. Install it with "
+        "'calkit install nix' or from https://nixos.org/download."
     )
 
 

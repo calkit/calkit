@@ -2179,6 +2179,139 @@ def new_renv(
             repo.git.commit(["-m", f"Add renv environment {name}"])
 
 
+@new_app.command("nix-env")
+def new_nix_env(
+    packages: Annotated[
+        list[str],
+        typer.Argument(
+            help="Nixpkgs packages to include in the dev shell (e.g. R)."
+        ),
+    ],
+    name: Annotated[
+        str, typer.Option("--name", "-n", help="Environment name.")
+    ],
+    path: Annotated[
+        str | None,
+        typer.Option(
+            "--path",
+            help="Flake file path. Must end with 'flake.nix'.",
+        ),
+    ] = None,
+    nixpkgs_url: Annotated[
+        str,
+        typer.Option(
+            "--nixpkgs-url",
+            help="Flake input URL for nixpkgs.",
+        ),
+    ] = "github:NixOS/nixpkgs/nixos-unstable",
+    description: Annotated[
+        str | None, typer.Option("--description", help="Description.")
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite any existing environment with this name.",
+        ),
+    ] = False,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Do not run 'nix flake lock' after creating the flake.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
+):
+    """Create a new Nix flake-based environment."""
+    import platform as _platform
+
+    from calkit.environments import create_nix_flake_content
+
+    if path is not None and not path.endswith("flake.nix"):
+        raise_error("Environment path must end with 'flake.nix'")
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if name in envs and not overwrite:
+        raise_error(
+            f"Environment with name {name} already exists "
+            "(use -f to overwrite)"
+        )
+    if path is None:
+        # If no env exists yet, put the flake at the repo root; otherwise
+        # nest it under .calkit/envs/<name>/ to keep peer flakes from
+        # colliding on the same flake.lock.
+        if not envs:
+            envdir = "."
+            path = "flake.nix"
+        else:
+            envdir = f".calkit/envs/{name}"
+            os.makedirs(envdir, exist_ok=True)
+            path = os.path.join(envdir, "flake.nix")
+    else:
+        envdir = os.path.dirname(path) or "."
+        if envdir != ".":
+            os.makedirs(envdir, exist_ok=True)
+    if os.path.isfile(path) and not overwrite:
+        raise_error(f"{path} already exists (use -f to overwrite)")
+    content = create_nix_flake_content(
+        packages=packages,
+        description=description,
+        nixpkgs_url=nixpkgs_url,
+    )
+    with open(path, "w") as f:
+        f.write(content)
+    # Generate flake.lock for reproducibility unless skipped. The lock
+    # is what makes the environment reproducible across machines, so we
+    # want it committed alongside flake.nix.
+    lock_path = os.path.join(envdir, "flake.lock")
+    if not no_check:
+        if shutil.which("nix") is None:
+            if _platform.system() == "Windows":
+                warn(
+                    "Nix is not available natively on Windows; skipping "
+                    "'nix flake lock'. Run Calkit inside WSL2 to generate "
+                    "flake.lock."
+                )
+            else:
+                warn(
+                    "The 'nix' command was not found; skipping "
+                    "'nix flake lock'. Install Nix from "
+                    "https://nixos.org/download to generate flake.lock."
+                )
+        else:
+            res = subprocess.run(
+                [
+                    "nix",
+                    "--extra-experimental-features",
+                    "nix-command flakes",
+                    "flake",
+                    "lock",
+                ],
+                cwd=envdir,
+            )
+            if res.returncode != 0:
+                raise_error("Failed to generate flake.lock")
+    env_info: dict = dict(kind="nix", path=path)
+    if description:
+        env_info["description"] = description
+    envs[name] = env_info
+    ck_info["environments"] = envs
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    if not no_commit:
+        repo = calkit.git.get_repo()
+        repo.git.add(path)
+        if os.path.exists(lock_path):
+            repo.git.add(lock_path)
+        repo.git.add("calkit.yaml")
+        if repo.git.diff("--staged"):
+            repo.git.commit(["-m", f"Add nix environment {name}"])
+
+
 class Status(str, Enum):
     in_progress = "in-progress"
     on_hold = "on-hold"

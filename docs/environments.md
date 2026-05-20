@@ -42,6 +42,7 @@ Calkit supports the following environment types:
 - [`renv`](https://rstudio.github.io/renv/index.html)
 - [Julia](https://julialang.org/)
 - [MATLAB](https://www.mathworks.com/products/matlab.html)
+- [Nix](https://nixos.org/) (flake-based)
 - [SLURM](https://slurm.schedmd.com/documentation.html)
 - `ssh`
 
@@ -504,6 +505,53 @@ environments:
     path: pixi.toml
 ```
 
+### Nix
+
+Calkit supports [Nix](https://nixos.org/) environments via
+[flakes](https://nixos.wiki/wiki/Flakes).
+Reproducibility comes from `flake.lock`, which pins every input (including
+`nixpkgs`) to an exact revision. Calkit tracks `flake.lock` as a DVC
+dependency, so pipeline stages re-run when the environment changes.
+
+Create one with:
+
+```sh
+calkit new nix-env --name my-nix-env python3 R uv
+```
+
+In `calkit.yaml`:
+
+```yaml
+environments:
+  my-nix-env:
+    kind: nix
+    path: flake.nix
+```
+
+To enter a specific dev shell from the flake (instead of the default),
+set `shell`:
+
+```yaml
+environments:
+  my-nix-env:
+    kind: nix
+    path: envs/my-nix-env/flake.nix
+    shell: r-shell
+```
+
+Run a command in a Nix environment:
+
+```sh
+calkit xenv -n my-nix-env -- python --version
+```
+
+Nix is not supported natively on Windows; run Calkit inside
+[WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) and install
+Nix there. On Linux and macOS, install Nix from
+<https://nixos.org/download> (the
+[Determinate Systems installer](https://install.determinate.systems) is a
+good choice because it enables flakes by default).
+
 ### R
 
 R environments can be managed with Conda, Pixi, or `renv` (recommended).
@@ -638,6 +686,17 @@ Model class: `MatlabEnvironment`
 | kind        | Literal['matlab'] | yes      |
 | products    | list[str]         | no       |
 | description | str               | no       |
+
+#### `nix`
+
+Model class: `NixEnvironment`
+
+| Parameter   | Type                            | Required |
+| ----------- | ------------------------------- | -------- |
+| kind        | Literal['nix']                  | yes      |
+| path        | str (must end with 'flake.nix') | yes      |
+| shell       | str (name of devShell to enter) | no       |
+| description | str                             | no       |
 
 #### `slurm`
 

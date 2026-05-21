@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import socket
@@ -467,6 +468,14 @@ def _build_slurm_submit(
     return cmd, None
 
 
+def _sanitize_pbs_job_name(name: str) -> str:
+    # qsub rejects names containing characters outside a narrow safe set
+    # (e.g. ``@`` and ``,``), which is exactly what matrix-iterated stage
+    # names look like (``stage@arg1,arg2,...``). Replace any disallowed
+    # character with ``_`` and cap the length at PBS Pro's 236-char limit.
+    return re.sub(r"[^A-Za-z0-9._+-]", "_", name)[:236]
+
+
 def _build_pbs_submit(
     name: str,
     target: str,
@@ -493,7 +502,7 @@ def _build_pbs_submit(
         [
             "qsub",
             "-N",
-            name,
+            _sanitize_pbs_job_name(name),
             "-j",
             "oe",
             "-o",

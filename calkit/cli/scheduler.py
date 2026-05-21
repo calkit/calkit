@@ -492,10 +492,12 @@ def _build_pbs_submit(
                 _detect_interpreter(target) + [target] + args
             )
     target_invocation = shlex.join(target_invocation_parts)
-    if setup_cmds:
-        job_script = " && ".join([*setup_cmds, target_invocation])
-    else:
-        job_script = target_invocation
+    # PBS jobs start in ``$HOME`` by default (unlike SLURM, which inherits
+    # the submission directory). Both Torque/OpenPBS and PBS Pro export
+    # ``$PBS_O_WORKDIR``, so ``cd`` into it before anything else so
+    # relative paths in stage scripts resolve correctly.
+    cd_step = 'cd "$PBS_O_WORKDIR"'
+    job_script = " && ".join([cd_step, *setup_cmds, target_invocation])
     # `-` tells qsub to read the job script from stdin; without it most PBS
     # variants ignore the `input=` payload and wait for an interactive terminal.
     cmd = (

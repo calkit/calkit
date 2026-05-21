@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import socket
@@ -467,6 +468,14 @@ def _build_slurm_submit(
     return cmd, None
 
 
+def _sanitize_pbs_job_name(name: str) -> str:
+    # qsub rejects names containing characters outside a narrow safe set
+    # (e.g. ``@`` and ``,``), which is exactly what matrix-iterated stage
+    # names look like (``stage@arg1,arg2,...``). Replace any disallowed
+    # character with ``_`` and cap the length at PBS Pro's 236-char limit.
+    return re.sub(r"[^A-Za-z0-9._+-]", "_", name)[:236]
+
+
 def _build_pbs_submit(
     name: str,
     target: str,
@@ -483,17 +492,19 @@ def _build_pbs_submit(
                 _detect_interpreter(target) + [target] + args
             )
     target_invocation = shlex.join(target_invocation_parts)
-    if setup_cmds:
-        job_script = " && ".join([*setup_cmds, target_invocation])
-    else:
-        job_script = target_invocation
+    # PBS jobs start in ``$HOME`` by default (unlike SLURM, which inherits
+    # the submission directory). Both Torque/OpenPBS and PBS Pro export
+    # ``$PBS_O_WORKDIR``, so ``cd`` into it before anything else so
+    # relative paths in stage scripts resolve correctly.
+    cd_step = 'cd "$PBS_O_WORKDIR"'
+    job_script = " && ".join([cd_step, *setup_cmds, target_invocation])
     # `-` tells qsub to read the job script from stdin; without it most PBS
     # variants ignore the `input=` payload and wait for an interactive terminal.
     cmd = (
         [
             "qsub",
             "-N",
-            name,
+            _sanitize_pbs_job_name(name),
             "-j",
             "oe",
             "-o",

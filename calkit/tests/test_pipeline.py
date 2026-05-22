@@ -1908,7 +1908,9 @@ def test_get_matrix_item_targets(tmp_dir):
 
     subprocess.check_call(["git", "init"])
     subprocess.check_call([sys.executable, "-m", "dvc", "init"])
-    # A matrix stage 'work' depending on a shared upstream 'prep'.
+    # 'work' is a scalar matrix depending on a shared upstream 'prep';
+    # 'table' is a table-like matrix (dict values, as compiled from a list
+    # arg_name), which DVC names by index (table@_arg00, ...).
     dvc_yaml = {
         "stages": {
             "prep": {
@@ -1921,6 +1923,19 @@ def test_get_matrix_item_targets(tmp_dir):
                 "deps": ["shared.txt"],
                 "outs": ["out-${item.arg}.txt"],
             },
+            "table": {
+                "matrix": {
+                    "_arg0": [
+                        {"v1": 1, "v2": "a"},
+                        {"v1": 2, "v2": "b"},
+                    ]
+                },
+                "cmd": (
+                    "echo ${item._arg0.v1} "
+                    "> t-${item._arg0.v1}-${item._arg0.v2}.txt"
+                ),
+                "outs": ["t-${item._arg0.v1}-${item._arg0.v2}.txt"],
+            },
         }
     }
     with open("dvc.yaml", "w") as f:
@@ -1930,6 +1945,11 @@ def test_get_matrix_item_targets(tmp_dir):
     # caller can build it before fanning the items out concurrently.
     assert sorted(items) == ["work@a", "work@b", "work@c"]
     assert upstreams == ["prep"]
+    # Table-like (dict-valued) matrix items are still found via the stage@
+    # prefix even though DVC names them by index.
+    table_items, table_ups = calkit.pipeline.get_matrix_item_targets("table")
+    assert sorted(table_items) == ["table@_arg00", "table@_arg01"]
+    assert table_ups == []
     # A stage with no matrix has no item targets.
     items2, _ = calkit.pipeline.get_matrix_item_targets("prep")
     assert items2 == []

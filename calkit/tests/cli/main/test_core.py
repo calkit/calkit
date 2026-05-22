@@ -1257,3 +1257,50 @@ def test_run_concurrent_scheduler_stage_with_mock(tmp_dir):
         ["calkit", "scheduler", "queue"], env=env, text=True
     )
     assert "sweep@3" in queue
+
+
+def test_run_concurrent_scheduler_table_iteration_with_mock(tmp_dir):
+    # Table-like iteration (arg_name as a list) compiles to a dict-valued DVC
+    # matrix that DVC names by index (sweep@_arg00, ...) while the scheduler
+    # job names use the comma-joined values (sweep@1,a). Verify the concurrent
+    # path handles both naming schemes and multi-arg output templating.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        f.write('echo "$1 $2" > "out-$1-$2.txt"\n')
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm"}},
+        "pipeline": {
+            "stages": {
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{var1}", "{var2}"],
+                    "iterate_over": [
+                        {
+                            "arg_name": ["var1", "var2"],
+                            "values": [[1, "a"], [2, "b"], [3, "c"]],
+                        }
+                    ],
+                    "outputs": ["out-{var1}-{var2}.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(["calkit", "run"], env=env, text=True)
+    # Every (var1, var2) combination ran and wrote a correctly templated file.
+    assert "Submitting 3 'sweep' jobs" in out
+    for var1, var2 in [(1, "a"), (2, "b"), (3, "c")]:
+        path = f"out-{var1}-{var2}.txt"
+        assert os.path.exists(path)
+        with open(path) as f:
+            assert f.read().strip() == f"{var1} {var2}"
+    # Scheduler job names use the comma-joined values, not the DVC index.
+    queue = subprocess.check_output(
+        ["calkit", "scheduler", "queue"], env=env, text=True
+    )
+    assert "sweep@1,a" in queue
+    assert "sweep@3,c" in queue

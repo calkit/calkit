@@ -1382,3 +1382,45 @@ def test_run_concurrent_scheduler_resume_after_disconnect(tmp_dir):
     for x in (1, 2):
         with open(f"runs-{x}.txt") as f:
             assert len(f.read().splitlines()) == 1
+
+
+def test_run_downstream_does_not_submit_unrelated_sweep(tmp_dir):
+    # A narrowed run (e.g. --downstream) leaves positional targets empty, so
+    # the concurrent prepass must be skipped entirely---otherwise it would
+    # submit every iterate_over scheduler stage, launching cluster jobs the
+    # user never asked for. Here 'sweep' is unrelated to the requested 'other'
+    # stage and must not run.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("other.sh", "w") as f:
+        f.write("echo done > other.txt\n")
+    with open("run.sh", "w") as f:
+        f.write('echo "$1" > "out-$1.txt"\n')
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm"}},
+        "pipeline": {
+            "stages": {
+                "other": {
+                    "kind": "shell-script",
+                    "script_path": "other.sh",
+                    "environment": "slurm",
+                    "outputs": ["other.txt"],
+                },
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{x}"],
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2]}],
+                    "outputs": ["out-{x}.txt"],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run", "--downstream", "other"], env=env)
+    # The requested stage ran; the unrelated sweep did not.
+    assert os.path.exists("other.txt")
+    assert not os.path.exists("out-1.txt")
+    assert not os.path.exists("out-2.txt")

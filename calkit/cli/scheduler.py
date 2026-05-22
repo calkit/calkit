@@ -56,10 +56,17 @@ def _ensure_local_dir() -> None:
             f.write("*\n")
 
 
+# A generous busy timeout lets the many batch processes that fan out an
+# iterated stage wait for the SQLite write lock instead of failing with
+# "database is locked". We keep the default rollback journal (not WAL), which
+# is the safer choice on the network filesystems clusters typically use.
+JOBS_DB_TIMEOUT = 60
+
+
 def _load_jobs() -> dict:
     if not os.path.isfile(JOBS_DB_PATH):
         return {}
-    with SqliteDict(JOBS_DB_PATH) as jobs:
+    with SqliteDict(JOBS_DB_PATH, timeout=JOBS_DB_TIMEOUT) as jobs:
         return dict(jobs)
 
 
@@ -71,7 +78,9 @@ def _record_job(name: str, info: dict) -> None:
     uniquely named job without a separate lock or clobbering one another.
     """
     _ensure_local_dir()
-    with SqliteDict(JOBS_DB_PATH, autocommit=True) as jobs:
+    with SqliteDict(
+        JOBS_DB_PATH, autocommit=True, timeout=JOBS_DB_TIMEOUT
+    ) as jobs:
         jobs[name] = info
 
 

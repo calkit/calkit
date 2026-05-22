@@ -1844,8 +1844,15 @@ def run(
     # Pre-submit iterated scheduler-stage jobs concurrently; the main repro
     # below then records them. Skipped for --dry so the dry plan stays intact,
     # and for --force, which re-runs every item: those go serially through the
-    # main repro so we don't both pre-run and re-run each job.
-    if dvc_stages and not dry and not force:
+    # main repro so we don't both pre-run and re-run each job. Also skipped
+    # when a selector narrows the run (--downstream/--pipeline/--recursive/
+    # --glob/--all-pipelines): positional ``targets`` is empty then, so the
+    # prepass can't tell which sweeps will actually run and would otherwise
+    # submit all of them.
+    run_is_narrowed = bool(
+        downstream or pipeline or recursive or glob or all_pipelines
+    )
+    if dvc_stages and not dry and not force and not run_is_narrowed:
         _concurrent_scheduler_prepass(
             ck_info=ck_info,
             targets=targets,

@@ -1245,9 +1245,10 @@ def get_matrix_item_targets(
     for item in items:
         upstreams |= nx.descendants(repo.index.graph, item)
     upstreams -= item_set
+    # Sort for a deterministic order (upstreams come from a set).
     return (
-        [s.addressing for s in items],
-        [s.addressing for s in upstreams],
+        sorted(s.addressing for s in items),
+        sorted(s.addressing for s in upstreams),
     )
 
 

@@ -1944,13 +1944,14 @@ def test_get_matrix_item_targets(tmp_dir):
         calkit.ryaml.dump(dvc_yaml, f)
     items, upstreams = calkit.pipeline.get_matrix_item_targets("work")
     # Each iteration is addressable; the shared upstream is reported so the
-    # caller can build it before fanning the items out concurrently.
-    assert sorted(items) == ["work@a", "work@b", "work@c"]
+    # caller can build it before fanning the items out concurrently. Results
+    # come back in a deterministic (sorted) order.
+    assert items == ["work@a", "work@b", "work@c"]
     assert upstreams == ["prep"]
     # Table-like (dict-valued) matrix items are still found via the stage@
     # prefix even though DVC names them by index.
     table_items, table_ups = calkit.pipeline.get_matrix_item_targets("table")
-    assert sorted(table_items) == ["table@_arg00", "table@_arg01"]
+    assert table_items == ["table@_arg00", "table@_arg01"]
     assert table_ups == []
     # A stage with no matrix has no item targets.
     items2, _ = calkit.pipeline.get_matrix_item_targets("prep")

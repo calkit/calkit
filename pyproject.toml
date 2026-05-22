@@ -32,7 +32,6 @@ dependencies = [
   "docx2pdf",
   "dvc==3.67.1",
   "fastapi",
-  "filelock",
   "gitpython",
   "keyring",
   "nbconvert",
@@ -172,6 +171,11 @@ check_untyped_defs = true
 warn_return_any = true
 warn_unused_ignores = true
 show_error_codes = true
+
+# Third-party modules that ship no type stubs.
+[[tool.mypy.overrides]]
+module = ["sqlitedict", "networkx"]
+ignore_missing_imports = true
 
 [tool.ruff]
 target-version = "py310"

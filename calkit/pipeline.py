@@ -1233,7 +1233,7 @@ def get_matrix_item_targets(
     edge points from a stage to the stage it depends on, so a node's
     dependencies are its networkx descendants.
     """
-    import networkx as nx  # type: ignore[import-untyped]
+    import networkx as nx
 
     import calkit.dvc
 
@@ -1273,9 +1273,11 @@ def reproduce_targets_concurrently(
 
     args = extra_args or []
 
-    # Default runner shells out to an isolated `dvc repro --single-item`.
+    # Default runner shells out to an isolated `dvc repro --single-item`. Go
+    # through `calkit dvc` rather than `dvc` directly so Calkit's DVC patches
+    # (e.g. the ck:// remote scheme) are registered in the subprocess.
     def _default_run_one(target: str) -> int:
-        cmd = [sys.executable, "-m", "dvc", "repro", "--single-item"]
+        cmd = [sys.executable, "-m", "calkit", "dvc", "repro", "--single-item"]
         cmd += args + [target]
         return subprocess.run(cmd, cwd=wdir).returncode
 

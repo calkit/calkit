@@ -18,12 +18,14 @@ from calkit.cli.scheduler import (
 
 
 def test_record_job(tmp_dir):
-    # Sequential writes merge rather than overwrite the whole file.
+    # Reading before anything is recorded returns an empty mapping.
+    assert _load_jobs() == {}
+    # Writes accumulate by key rather than overwriting prior records.
     _record_job("a", {"job_id": "1"})
     _record_job("b", {"job_id": "2"})
     assert set(_load_jobs()) == {"a", "b"}
-    # Concurrent writers each persist their own uniquely named record; the
-    # lock + reload-merge prevents a slow writer from clobbering others.
+    # Concurrent writers each persist their own uniquely named record; SQLite
+    # gives atomic per-key writes so none clobber the others.
     names = [f"job{i}" for i in range(50)]
     with ThreadPoolExecutor(max_workers=10) as executor:
         list(
@@ -36,11 +38,8 @@ def test_record_job(tmp_dir):
     assert set(jobs) == {"a", "b", *names}
     for n in names:
         assert jobs[n] == {"job_id": n}
-    # The lock file is kept out of version control.
-    with open(".calkit/scheduler/.gitignore") as f:
-        ignored = f.read().splitlines()
-    assert "jobs.json" in ignored
-    assert "jobs.lock" in ignored
+    # Job records live under the always-ignored .calkit/local tree.
+    assert os.path.isfile(".calkit/local/scheduler-jobs.db")
 
 
 def test_sanitize_pbs_job_name():

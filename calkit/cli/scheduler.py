@@ -8,7 +8,6 @@ Registered as ``scheduler|sch``.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shlex
@@ -20,7 +19,7 @@ import time
 import uuid
 
 import typer
-from filelock import FileLock
+from sqlitedict import SqliteDict
 from typing_extensions import Annotated
 
 import calkit
@@ -35,59 +34,45 @@ _BINARIES = {
 }
 
 SCHEDULER_DIR = os.path.join(".calkit", "scheduler")
-JOBS_PATH = os.path.join(SCHEDULER_DIR, "jobs.json")
-JOBS_LOCK_PATH = os.path.join(SCHEDULER_DIR, "jobs.lock")
 LOGS_DIR = os.path.join(SCHEDULER_DIR, "logs")
-# Mock-job sentinels live under .calkit/local, which is always gitignored.
+# Local scheduler state lives under .calkit/local, which is always gitignored.
 LOCAL_DIR = os.path.join(".calkit", "local")
+# Job records are kept in SQLite so the parallel batch processes that fan out
+# an iterated stage can each write their own record atomically, and readers
+# (e.g. `scheduler queue`) never see a half-written file.
+JOBS_DB_PATH = os.path.join(LOCAL_DIR, "scheduler-jobs.db")
 MOCK_DIR = os.path.join(LOCAL_DIR, "mock-scheduler")
 # When set, scheduler commands run jobs on the local host instead of
 # dispatching to a real SLURM/PBS install (see _mock_enabled).
 MOCK_ENV_VAR = "CALKIT_MOCK_SCHEDULER"
 
 
-def _ensure_local_gitignore() -> None:
-    """Make sure ``.calkit/scheduler/jobs.json`` is ignored by Git.
-
-    Uses a directory-local ``.gitignore`` so we don't have to touch the
-    project-root ``.gitignore`` or call into the user's git repo.
-    """
-    os.makedirs(SCHEDULER_DIR, exist_ok=True)
-    gitignore_path = os.path.join(SCHEDULER_DIR, ".gitignore")
-    # jobs.lock is filelock's guard file for atomic jobs.json updates.
-    desired_entries = ["jobs.json", "jobs.lock"]
-    if os.path.isfile(gitignore_path):
-        with open(gitignore_path, "r") as f:
-            existing = f.read().splitlines()
-        if all(entry in existing for entry in desired_entries):
-            return
-    with open(gitignore_path, "w") as f:
-        f.write("\n".join(desired_entries) + "\n")
+def _ensure_local_dir() -> None:
+    # Everything under .calkit/local is gitignored via a "*" .gitignore.
+    os.makedirs(LOCAL_DIR, exist_ok=True)
+    gitignore_path = os.path.join(LOCAL_DIR, ".gitignore")
+    if not os.path.isfile(gitignore_path):
+        with open(gitignore_path, "w") as f:
+            f.write("*\n")
 
 
 def _load_jobs() -> dict:
-    if os.path.isfile(JOBS_PATH):
-        with open(JOBS_PATH, "r") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    return {}
+    if not os.path.isfile(JOBS_DB_PATH):
+        return {}
+    with SqliteDict(JOBS_DB_PATH) as jobs:
+        return dict(jobs)
 
 
 def _record_job(name: str, info: dict) -> None:
-    """Atomically merge a single job record into jobs.json.
+    """Persist a single job record.
 
-    Each iterated stage submits its items as separate processes that all
-    write the shared jobs.json; without a lock + reload-merge, a slow writer
-    would clobber records written by faster ones. Each process only touches
-    its own uniquely named key, so a per-key merge under the lock is safe.
+    SQLite gives atomic, concurrent-safe writes, so the parallel batch
+    processes that fan out an iterated stage each record their own
+    uniquely named job without a separate lock or clobbering one another.
     """
-    os.makedirs(SCHEDULER_DIR, exist_ok=True)
-    _ensure_local_gitignore()
-    with FileLock(JOBS_LOCK_PATH):
-        jobs = _load_jobs()
+    _ensure_local_dir()
+    with SqliteDict(JOBS_DB_PATH, autocommit=True) as jobs:
         jobs[name] = info
-        with open(JOBS_PATH, "w") as f:
-            json.dump(jobs, f, indent=4)
 
 
 def _mock_enabled() -> bool:
@@ -107,12 +92,8 @@ def _mock_enabled() -> bool:
 
 
 def _ensure_mock_dir() -> None:
-    # Everything under .calkit/local is gitignored via a "*" .gitignore.
+    _ensure_local_dir()
     os.makedirs(MOCK_DIR, exist_ok=True)
-    gitignore_path = os.path.join(LOCAL_DIR, ".gitignore")
-    if not os.path.isfile(gitignore_path):
-        with open(gitignore_path, "w") as f:
-            f.write("*\n")
 
 
 def _mock_status_path(job_id: str) -> str:

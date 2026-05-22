@@ -1377,14 +1377,26 @@ def _concurrent_scheduler_prepass(
         )
         if not item_targets:
             continue
+        # Each item holds a local polling process for the job's lifetime, so
+        # cap the fan-out to avoid exhausting local resources; a sweep larger
+        # than this should be split into multiple runs.
+        max_jobs = 100
+        if len(item_targets) > max_jobs:
+            raise_error(
+                f"Stage '{stage_name}' would submit {len(item_targets)} jobs "
+                f"at once, exceeding the limit of {max_jobs}. Each concurrent "
+                "submission holds a local process, so reduce the sweep size "
+                "or split it across multiple runs."
+            )
         if not quiet:
             calkit.echo(
-                f"⚡ Submitting {len(item_targets)} '{stage_name}' jobs"
+                f"🧵 Submitting {len(item_targets)} '{stage_name}' jobs"
             )
         # Build shared upstreams first; if two items raced to build the same
-        # stale dependency, one would fail with an rwlock "busy" error.
+        # stale dependency, one would fail with an rwlock "busy" error. Go
+        # through `calkit dvc` so the ck:// remote scheme is registered.
         if upstream_targets:
-            up_cmd = [sys.executable, "-m", "dvc", "repro"]
+            up_cmd = [sys.executable, "-m", "calkit", "dvc", "repro"]
             if force:
                 up_cmd.append("--force")
             up_cmd += upstream_targets

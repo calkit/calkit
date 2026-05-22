@@ -1304,3 +1304,39 @@ def test_run_concurrent_scheduler_table_iteration_with_mock(tmp_dir):
     )
     assert "sweep@1,a" in queue
     assert "sweep@3,c" in queue
+
+
+def test_run_concurrent_scheduler_force_runs_each_item_once(tmp_dir):
+    # --force must not run a sweep twice (once in the concurrent prepass and
+    # again in the main repro). Under --force the prepass is skipped, so each
+    # item runs exactly once per `calkit run`, serially via the main repro.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        # Append a line each execution so we can count how many times each
+        # item actually ran.
+        f.write('echo x >> "runs-$1.txt"\n')
+        f.write('echo "$1" > "out-$1.txt"\n')
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm"}},
+        "pipeline": {
+            "stages": {
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{x}"],
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2]}],
+                    "outputs": ["out-{x}.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"], env=env)
+    subprocess.check_call(["calkit", "run", "--force"], env=env)
+    # One run + one forced run = two executions per item (not three).
+    for x in (1, 2):
+        with open(f"runs-{x}.txt") as f:
+            assert len(f.read().splitlines()) == 2

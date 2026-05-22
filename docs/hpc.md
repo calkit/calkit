@@ -151,6 +151,9 @@ The four `Re` cases above are submitted together rather than back-to-back.
 Each iteration is still cached independently, so if one job fails you can
 simply rerun `calkit run` to pick up where it left off: the cases that
 succeeded are skipped and only the failed one is resubmitted.
+(`calkit run --force` re-runs every case serially instead, since it ignores
+the cache; just editing a script invalidates the affected cases without
+`--force`, so they still re-run concurrently.)
 
 ## Monitoring
 

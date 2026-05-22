@@ -1347,7 +1347,6 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
 def _concurrent_scheduler_prepass(
     ck_info: dict,
     targets: list[str],
-    force: bool,
     keep_going: bool,
     quiet: bool,
 ) -> None:
@@ -1360,7 +1359,7 @@ def _concurrent_scheduler_prepass(
     leaving it to the cluster's scheduler to queue them. The trailing
     ``dvc repro`` then sees the items as up-to-date and records them,
     preserving granular per-item caching so a failed sweep resumes only the
-    failed items.
+    failed items. Not used under --force (the caller runs those serially).
     """
     import sys
 
@@ -1397,16 +1396,13 @@ def _concurrent_scheduler_prepass(
         # through `calkit dvc` so the ck:// remote scheme is registered.
         if upstream_targets:
             up_cmd = [sys.executable, "-m", "calkit", "dvc", "repro"]
-            if force:
-                up_cmd.append("--force")
             up_cmd += upstream_targets
             if subprocess.run(up_cmd).returncode != 0:
                 raise_error(
                     f"Failed to build dependencies for stage '{stage_name}'"
                 )
-        extra_args = ["--force"] if force else []
         results = calkit.pipeline.reproduce_targets_concurrently(
-            item_targets, max_workers=len(item_targets), extra_args=extra_args
+            item_targets, max_workers=len(item_targets)
         )
         failed = [t for t, rc in results.items() if rc != 0]
         if failed:
@@ -1846,12 +1842,13 @@ def run(
         args.append("--downstream")
         args += downstream
     # Pre-submit iterated scheduler-stage jobs concurrently; the main repro
-    # below then records them. Skipped for --dry so the dry plan stays intact.
-    if dvc_stages and not dry:
+    # below then records them. Skipped for --dry so the dry plan stays intact,
+    # and for --force, which re-runs every item: those go serially through the
+    # main repro so we don't both pre-run and re-run each job.
+    if dvc_stages and not dry and not force:
         _concurrent_scheduler_prepass(
             ck_info=ck_info,
             targets=targets,
-            force=force,
             keep_going=keep_going,
             quiet=quiet,
         )

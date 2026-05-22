@@ -91,6 +91,12 @@ def _mock_enabled() -> bool:
     )
 
 
+def _require_posix_mock() -> None:
+    # The mock backend uses bash, new sessions, and process-group signals.
+    if os.name != "posix":
+        raise_error("CALKIT_MOCK_SCHEDULER is only supported on POSIX systems")
+
+
 def _ensure_mock_dir() -> None:
     _ensure_local_dir()
     os.makedirs(MOCK_DIR, exist_ok=True)
@@ -162,6 +168,7 @@ def _mock_submit(job_id: str, job_command: str, log_path: str) -> int:
     Completion is signaled by writing the exit code to a sentinel file, which
     keeps liveness checks independent of PID reuse.
     """
+    _require_posix_mock()
     _ensure_mock_dir()
     status_path = _mock_status_path(job_id)
     if os.path.exists(status_path):
@@ -181,6 +188,7 @@ def _mock_submit(job_id: str, job_command: str, log_path: str) -> int:
 
 
 def _mock_cancel(job_id: str) -> tuple[bool, str]:
+    _require_posix_mock()
     pid = _mock_pid(job_id)
     if pid is not None:
         try:

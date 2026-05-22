@@ -1344,6 +1344,72 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
     return res
 
 
+def _concurrent_scheduler_prepass(
+    ck_info: dict,
+    targets: list[str],
+    force: bool,
+    keep_going: bool,
+    quiet: bool,
+) -> None:
+    """Submit iterated scheduler-stage jobs concurrently before ``dvc repro``.
+
+    DVC's ``repro`` runs matrix items serially, so each scheduler item would
+    otherwise submit-and-wait one at a time. Here we build each eligible
+    stage's upstreams (serially, to avoid an rwlock race), then fan its items
+    out as concurrent ``dvc repro --single-item`` processes---all at once,
+    leaving it to the cluster's scheduler to queue them. The trailing
+    ``dvc repro`` then sees the items as up-to-date and records them,
+    preserving granular per-item caching so a failed sweep resumes only the
+    failed items.
+    """
+    import sys
+
+    import calkit.pipeline
+
+    eligible = calkit.pipeline.get_concurrent_scheduler_stages(ck_info)
+    if targets:
+        eligible = [name for name in eligible if name in targets]
+    if not eligible:
+        return
+    for stage_name in eligible:
+        item_targets, upstream_targets = (
+            calkit.pipeline.get_matrix_item_targets(stage_name)
+        )
+        if not item_targets:
+            continue
+        if not quiet:
+            calkit.echo(
+                f"⚡ Submitting {len(item_targets)} '{stage_name}' jobs"
+            )
+        # Build shared upstreams first; if two items raced to build the same
+        # stale dependency, one would fail with an rwlock "busy" error.
+        if upstream_targets:
+            up_cmd = [sys.executable, "-m", "dvc", "repro"]
+            if force:
+                up_cmd.append("--force")
+            up_cmd += upstream_targets
+            if subprocess.run(up_cmd).returncode != 0:
+                raise_error(
+                    f"Failed to build dependencies for stage '{stage_name}'"
+                )
+        extra_args = ["--force"] if force else []
+        results = calkit.pipeline.reproduce_targets_concurrently(
+            item_targets, max_workers=len(item_targets), extra_args=extra_args
+        )
+        failed = [t for t, rc in results.items() if rc != 0]
+        if failed:
+            msg = (
+                f"{len(failed)} of {len(item_targets)} '{stage_name}' jobs "
+                f"failed: {', '.join(failed)}"
+            )
+            if keep_going:
+                warn(msg)
+            else:
+                raise_error(
+                    msg + ". Successful jobs are cached; rerun to resume."
+                )
+
+
 @app.command(name="run")
 def run(
     targets: Annotated[
@@ -1767,6 +1833,16 @@ def run(
     if downstream is not None:
         args.append("--downstream")
         args += downstream
+    # Pre-submit iterated scheduler-stage jobs concurrently; the main repro
+    # below then records them. Skipped for --dry so the dry plan stays intact.
+    if dvc_stages and not dry:
+        _concurrent_scheduler_prepass(
+            ck_info=ck_info,
+            targets=targets,
+            force=force,
+            keep_going=keep_going,
+            quiet=quiet,
+        )
     start_time_no_tz = calkit.utcnow(remove_tz=True)
     start_time = calkit.utcnow(remove_tz=False)
     run_id = uuid.uuid4().hex

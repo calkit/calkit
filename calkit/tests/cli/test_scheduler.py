@@ -1,11 +1,17 @@
 """Tests for ``calkit.cli.scheduler``."""
 
+import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from calkit.cli.scheduler import (
+    _build_job_command,
     _build_pbs_submit,
     _build_slurm_submit,
+    _is_active,
     _load_jobs,
+    _mock_enabled,
+    _mock_submit,
     _record_job,
     _sanitize_pbs_job_name,
 )
@@ -57,6 +63,55 @@ def test_sanitize_pbs_job_name():
     assert _sanitize_pbs_job_name("ok-name_1.2+3") == "ok-name_1.2+3"
     # PBS Pro caps job names at 236 characters; sanitize truncates.
     assert len(_sanitize_pbs_job_name("a" * 500)) == 236
+
+
+def test_mock_enabled(monkeypatch):
+    # Absent or falsey values keep the real scheduler backend.
+    monkeypatch.delenv("CALKIT_MOCK_SCHEDULER", raising=False)
+    assert _mock_enabled() is False
+    for falsey in ("", "0", "false", "no"):
+        monkeypatch.setenv("CALKIT_MOCK_SCHEDULER", falsey)
+        assert _mock_enabled() is False
+    for truthy in ("1", "true", "yes"):
+        monkeypatch.setenv("CALKIT_MOCK_SCHEDULER", truthy)
+        assert _mock_enabled() is True
+
+
+def test_build_job_command():
+    # A command is run as-is (with its args), no interpreter prefix.
+    assert (
+        _build_job_command("echo", ["hi"], setup_cmds=[], is_command=True)
+        == "echo hi"
+    )
+    # Setup commands are chained before the target.
+    assert (
+        _build_job_command(
+            "echo", ["hi"], setup_cmds=["module load foo"], is_command=True
+        )
+        == "module load foo && echo hi"
+    )
+
+
+def test_mock_submit_runs_job_locally(tmp_dir, monkeypatch):
+    monkeypatch.setenv("CALKIT_MOCK_SCHEDULER", "1")
+    with open("job.sh", "w") as f:
+        f.write('echo "hello $1" > result.txt\n')
+    command = _build_job_command(
+        "job.sh", ["world"], setup_cmds=[], is_command=False
+    )
+    job_id = "testjob"
+    pid = _mock_submit(job_id=job_id, job_command=command, log_path="job.log")
+    # run_batch records the job so liveness checks can find its PID.
+    _record_job("sweep@x", {"job_id": job_id, "pid": pid, "kind": "slurm"})
+    # The job is briefly active, then the sentinel flips it to inactive.
+    deadline = time.time() + 10
+    while _is_active("slurm", job_id) and time.time() < deadline:
+        time.sleep(0.05)
+    assert not _is_active("slurm", job_id)
+    with open("result.txt") as f:
+        assert f.read().strip() == "hello world"
+    # Mock state stays under the always-ignored .calkit/local tree.
+    assert os.path.isfile(".calkit/local/mock-scheduler/testjob.status")
 
 
 def test_build_pbs_submit():

@@ -3,6 +3,7 @@
 import itertools
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import typer
@@ -1191,6 +1192,102 @@ def to_dvc(
                 typer.echo("Writing to dvc.yaml")
             calkit.ryaml.dump(dvc_yaml, f)
     return dvc_stages
+
+
+def get_concurrent_scheduler_stages(ck_info: dict) -> list[str]:
+    """Return iterated scheduler stages eligible for concurrent submission.
+
+    These are the ``iterate_over`` stages whose outer environment is a
+    SLURM/PBS env. Their iterations are independent jobs, so Calkit submits
+    them all at once and lets the cluster's own scheduler queue them; the
+    scheduler, not Calkit, decides how many run simultaneously. Non-iterated
+    stages keep DVC's normal serial repro.
+    """
+    from calkit.environments import COMPOSITE_ENV_SEP
+
+    environments = ck_info.get("environments", {})
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    result: list[str] = []
+    for name, stage in stages.items():
+        if not isinstance(stage, dict) or not stage.get("iterate_over"):
+            continue
+        env_name = stage.get("environment", "")
+        outer = env_name.split(COMPOSITE_ENV_SEP)[0]
+        env = environments.get(outer, {})
+        if env.get("kind") not in ("slurm", "pbs"):
+            continue
+        result.append(name)
+    return result
+
+
+def get_matrix_item_targets(
+    stage_name: str, wdir: str | None = None
+) -> tuple[list[str], list[str]]:
+    """Resolve a matrix stage into its item targets and upstream targets.
+
+    Uses the compiled DVC graph so DVC's own matrix naming and dependency
+    resolution are the source of truth. Returns ``(item_targets,
+    upstream_targets)`` where ``item_targets`` address each iteration
+    (e.g. ``stage@a``) and ``upstream_targets`` are every stage the items
+    depend on transitively, excluding the items themselves. In DVC's graph an
+    edge points from a stage to the stage it depends on, so a node's
+    dependencies are its networkx descendants.
+    """
+    import networkx as nx  # type: ignore[import-untyped]
+
+    import calkit.dvc
+
+    repo = calkit.dvc.get_dvc_repo(wdir)
+    prefix = stage_name + "@"
+    items = [s for s in repo.index.stages if (s.name or "").startswith(prefix)]
+    item_set = set(items)
+    upstreams: set = set()
+    for item in items:
+        upstreams |= nx.descendants(repo.index.graph, item)
+    upstreams -= item_set
+    return (
+        [s.addressing for s in items],
+        [s.addressing for s in upstreams],
+    )
+
+
+def reproduce_targets_concurrently(
+    targets: list[str],
+    max_workers: int,
+    extra_args: list[str] | None = None,
+    wdir: str | None = None,
+    run_one: Callable[[str], int] | None = None,
+) -> dict[str, int]:
+    """Reproduce DVC targets concurrently, each in its own ``dvc repro``.
+
+    Each target runs as ``dvc repro --single-item <target>`` in a separate
+    process, so DVC's path-level rwlock keeps disjoint matrix items safe while
+    they run in parallel. ``--single-item`` is required: without it two items
+    sharing a stale upstream would both try to build it and one would fail
+    with an rwlock "busy" error, so upstreams must already be built. Returns
+    ``{target: returncode}``. ``run_one`` is injectable for testing.
+    """
+    import subprocess
+    import sys
+    from concurrent.futures import ThreadPoolExecutor
+
+    args = extra_args or []
+
+    # Default runner shells out to an isolated `dvc repro --single-item`.
+    def _default_run_one(target: str) -> int:
+        cmd = [sys.executable, "-m", "dvc", "repro", "--single-item"]
+        cmd += args + [target]
+        return subprocess.run(cmd, cwd=wdir).returncode
+
+    runner = run_one if run_one is not None else _default_run_one
+    results: dict[str, int] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_target = {
+            executor.submit(runner, target): target for target in targets
+        }
+        for future, target in future_to_target.items():
+            results[target] = future.result()
+    return results
 
 
 def translate_run_targets(

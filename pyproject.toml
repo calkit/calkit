@@ -32,6 +32,7 @@ dependencies = [
   "docx2pdf",
   "dvc==3.67.1",
   "fastapi",
+  "filelock",
   "gitpython",
   "keyring",
   "nbconvert",

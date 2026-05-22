@@ -20,3 +20,4 @@ dist
 *.vsix
 vscode-ext/out
 .claude
+TODO.md

@@ -1199,3 +1199,61 @@ def test_use_version_without_uvx(monkeypatch):
     assert result.exit_code != 0
     # ``raise_error`` writes to stderr but typer's runner merges output.
     assert "uvx" in (result.output + (result.stderr or ""))
+
+
+def test_run_concurrent_scheduler_stage_with_mock(tmp_dir):
+    # Exercise the full concurrent-scheduler path on a plain host: an
+    # iterate_over stage on a SLURM env, run via the mock scheduler so jobs
+    # execute locally. Covers concurrent fan-out, granular per-item caching,
+    # resume-after-failure, and the queue command.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        # Fail for x==3 only while the FAIL sentinel exists. FAIL is not a
+        # declared dependency, so removing it leaves the other items cached.
+        f.write('if [ "$1" = "3" ] && [ -f FAIL ]; then exit 1; fi\n')
+        f.write('echo "$1" > "out-$1.txt"\n')
+    ck_info = {
+        "environments": {
+            "slurm": {"kind": "slurm"},
+        },
+        "pipeline": {
+            "stages": {
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{x}"],
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2, 3]}],
+                    "outputs": ["out-{x}.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # First run: x=3 fails, so the run aborts, but x=1 and x=2 succeed and
+    # are cached.
+    open("FAIL", "w").close()
+    result = subprocess.run(["calkit", "run"], env=env)
+    assert result.returncode != 0
+    assert os.path.exists("out-1.txt")
+    assert os.path.exists("out-2.txt")
+    assert not os.path.exists("out-3.txt")
+    # Mock job data is isolated under the always-ignored .calkit/local.
+    assert os.path.isdir(".calkit/local/mock-scheduler")
+    assert not subprocess.check_output(
+        ["git", "status", "--porcelain"], text=True
+    ).count("mock-scheduler")
+    # Resume: dropping the (non-dependency) sentinel reruns only the failed
+    # item; the cached items are skipped by DVC.
+    os.remove("FAIL")
+    out = subprocess.check_output(["calkit", "run"], env=env, text=True)
+    assert os.path.exists("out-3.txt")
+    assert "Running stage 'sweep@3'" in out
+    assert "Running stage 'sweep@1'" not in out
+    # The queue command reports the locally tracked mock jobs.
+    queue = subprocess.check_output(
+        ["calkit", "scheduler", "queue"], env=env, text=True
+    )
+    assert "sweep@3" in queue

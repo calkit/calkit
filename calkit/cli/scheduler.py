@@ -241,6 +241,24 @@ def _cancel(kind: str, job_id: str) -> tuple[bool, str]:
     return p.returncode == 0, p.stderr
 
 
+def _wait_until_done(kind: str, job_id: str, name: str) -> None:
+    """Poll until the job finishes, leaving it running on Ctrl+C.
+
+    The job is already submitted and tracked, so an interrupt should only stop
+    local waiting---the scheduler keeps running it and a later ``calkit run``
+    resumes from here.
+    """
+    try:
+        while _is_active(kind, job_id):
+            time.sleep(1)
+    except KeyboardInterrupt:
+        typer.echo(
+            f"Interrupted; job '{name}' ({job_id}) left running on the "
+            "scheduler. Resume with `calkit run`."
+        )
+        raise typer.Exit(130)
+
+
 @scheduler_app.command(name="batch")
 def run_batch(
     name: Annotated[
@@ -517,10 +535,31 @@ def run_batch(
                     break
             if should_wait:
                 typer.echo("Waiting for job to finish")
-            while running_or_queued and should_wait:
-                running_or_queued = _is_active(prev_kind, job_id)
-                time.sleep(1)
-            if should_wait:
+                _wait_until_done(prev_kind, job_id, name)
+                raise typer.Exit(0)
+        elif not os.environ.get("CALKIT_FORCE"):
+            # The job has left the queue. If nothing it depends on changed and
+            # its outputs are present, it already finished successfully (e.g.
+            # while the master process was disconnected), so treat it as done
+            # rather than resubmitting and discarding that work. Under --force
+            # (CALKIT_FORCE) we skip this check and resubmit.
+            job_dep_md5s = job_info.get("dep_md5s", {})
+            deps_unchanged = set(job_deps) == set(deps) and all(
+                current_dep_md5s.get(dep) == job_dep_md5s.get(dep)
+                for dep in deps
+            )
+            command_unchanged = (
+                job_target == target
+                and job_args == args
+                and job_setup == setup_cmds
+            )
+            outputs_present = bool(outs) and all(
+                os.path.exists(out) for out in outs
+            )
+            if deps_unchanged and command_unchanged and outputs_present:
+                typer.echo(
+                    f"Job '{name}' already completed; skipping resubmission"
+                )
                 raise typer.Exit(0)
     # Job is not running or queued, so we can submit. First, delete any
     # non-persistent outputs.
@@ -534,41 +573,58 @@ def run_batch(
                     shutil.rmtree(out)
             except Exception as e:
                 raise_error(f"Error deleting '{out}': {e}")
+    # Submit and record atomically with respect to Ctrl+C: a SIGINT here would
+    # otherwise kill the submit command mid-flight or leave a job submitted but
+    # never written to the database (so a re-run would resubmit it). Defer the
+    # signal until the job is safely recorded, then act on it.
     pid = None
-    if _mock_enabled():
-        job_id = uuid.uuid4().hex[:12]
-        pid = _mock_submit(
-            job_id=job_id, job_command=job_command, log_path=log_path
+    interrupted: list[bool] = []
+    prev_sigint = signal.signal(
+        signal.SIGINT, lambda *_: interrupted.append(True)
+    )
+    try:
+        if _mock_enabled():
+            job_id = uuid.uuid4().hex[:12]
+            pid = _mock_submit(
+                job_id=job_id, job_command=job_command, log_path=log_path
+            )
+        else:
+            # start_new_session shields the submit command from the terminal's
+            # Ctrl+C so the submission always completes.
+            p = subprocess.run(
+                submit_cmd,
+                input=submit_input,
+                capture_output=True,
+                check=False,
+                text=True,
+                start_new_session=True,
+            )
+            if p.returncode != 0:
+                raise_error(f"Failed to submit new job: {p.stderr}")
+            job_id = p.stdout.strip()
+        typer.echo(f"Submitted job with ID: {job_id}")
+        new_job = {
+            "kind": kind,
+            "job_id": job_id,
+            "deps": deps,
+            "target": target,
+            "args": args,
+            "setup": setup_cmds,
+            "dep_md5s": current_dep_md5s,
+        }
+        if pid is not None:
+            new_job["pid"] = pid
+        _record_job(name, new_job)
+    finally:
+        signal.signal(signal.SIGINT, prev_sigint)
+    if interrupted:
+        typer.echo(
+            f"Interrupted after submitting job '{name}' ({job_id}); it will "
+            "keep running. Resume with `calkit run`."
         )
-    else:
-        p = subprocess.run(
-            submit_cmd,
-            input=submit_input,
-            capture_output=True,
-            check=False,
-            text=True,
-        )
-        if p.returncode != 0:
-            raise_error(f"Failed to submit new job: {p.stderr}")
-        job_id = p.stdout.strip()
-    typer.echo(f"Submitted job with ID: {job_id}")
-    new_job = {
-        "kind": kind,
-        "job_id": job_id,
-        "deps": deps,
-        "target": target,
-        "args": args,
-        "setup": setup_cmds,
-        "dep_md5s": current_dep_md5s,
-    }
-    if pid is not None:
-        new_job["pid"] = pid
-    _record_job(name, new_job)
+        raise typer.Exit(130)
     typer.echo("Waiting for job to finish")
-    running_or_queued = True
-    while running_or_queued:
-        running_or_queued = _is_active(kind, job_id)
-        time.sleep(1)
+    _wait_until_done(kind, job_id, name)
 
 
 def _detect_interpreter(target: str) -> list[str]:

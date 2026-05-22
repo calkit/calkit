@@ -1879,7 +1879,14 @@ def run(
     dvc.repo.reproduce.logger.setLevel(logging.ERROR)
     # Disable other misc DVC output
     dvc.ui.ui.write = lambda *args, **kwargs: None
-    res = dvc_cli_main(["repro"] + args)
+    # Tell `calkit scheduler batch` to resubmit completed jobs under --force;
+    # otherwise it skips jobs it sees as already done.
+    if force:
+        os.environ["CALKIT_FORCE"] = "1"
+    try:
+        res = dvc_cli_main(["repro"] + args)
+    finally:
+        os.environ.pop("CALKIT_FORCE", None)
     failed = failed or res != 0
     # Parse log to get timing and which stages ran
     with open(log_fpath, "r") as f:

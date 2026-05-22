@@ -626,7 +626,9 @@ def test_sbatch_stage_to_dvc(tmp_dir):
     assert "something.jl" in stage2["deps"]
     assert "data/input2.txt" in stage2["deps"]
     assert slurm_lock in stage2["deps"]
-    assert "data/output3.txt" in stage2["outs"]
+    # Scheduler stages persist their outputs so DVC won't delete them before a
+    # re-run (the batch CLI manages deletion itself).
+    assert {"data/output3.txt": {"persist": True}} in stage2["outs"]
     # Even though the env defines default_setup, those entries don't end up
     # in the compiled stage cmd.
     assert "module purge" not in stage2["cmd"]
@@ -648,7 +650,7 @@ def test_sbatch_stage_to_dvc(tmp_dir):
     assert ".calkit/notebooks/cleaned/analysis.ipynb" in stage3["deps"]
     assert "data/input2.txt" in stage3["deps"]
     assert slurm_lock in stage3["deps"]
-    assert "data/notebook_output.txt" in stage3["outs"]
+    assert {"data/notebook_output.txt": {"persist": True}} in stage3["outs"]
     py_stage = stages["py-job"]
     print(py_stage)
     assert py_stage["cmd"] == (

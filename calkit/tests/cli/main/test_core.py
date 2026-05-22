@@ -1340,3 +1340,45 @@ def test_run_concurrent_scheduler_force_runs_each_item_once(tmp_dir):
     for x in (1, 2):
         with open(f"runs-{x}.txt") as f:
             assert len(f.read().splitlines()) == 2
+
+
+def test_run_concurrent_scheduler_resume_after_disconnect(tmp_dir):
+    # If the master process is killed while jobs run, a job that already
+    # finished on the scheduler must not be resubmitted on the next run: the
+    # jobs database plus persisted outputs let Calkit recognize completed work.
+    # We simulate the disconnect by deleting dvc.lock (so DVC re-runs the
+    # stage) while the outputs and job records remain on disk.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        f.write('echo x >> "runs-$1.txt"\n')
+        f.write('echo "$1" > "out-$1.txt"\n')
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm"}},
+        "pipeline": {
+            "stages": {
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{x}"],
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2]}],
+                    "outputs": ["out-{x}.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"], env=env)
+    for x in (1, 2):
+        with open(f"runs-{x}.txt") as f:
+            assert len(f.read().splitlines()) == 1
+    # Simulate a disconnect where dvc.lock never got updated.
+    os.remove("dvc.lock")
+    out = subprocess.check_output(["calkit", "run"], env=env, text=True)
+    assert "already completed" in out
+    # The completed jobs are not resubmitted, so the run counts stay at one.
+    for x in (1, 2):
+        with open(f"runs-{x}.txt") as f:
+            assert len(f.read().splitlines()) == 1

@@ -1357,12 +1357,29 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
     return res
 
 
+def _prune_run_logs(logs_dir: str, keep: int = 10) -> None:
+    """Keep only the most recent ``keep`` run logs in ``logs_dir``.
+
+    Run logs are named by their start timestamp, so sorting by name orders
+    them by time; the oldest beyond ``keep`` are removed so the private log
+    directory doesn't grow without bound.
+    """
+    if not os.path.isdir(logs_dir):
+        return
+    logs = sorted(f for f in os.listdir(logs_dir) if f.endswith(".log"))
+    for fname in logs[:-keep]:
+        try:
+            os.remove(os.path.join(logs_dir, fname))
+        except OSError:
+            pass
+
+
 def _get_latest_run_log_content() -> str | None:
     """Return the contents of the most recent run log, or ``None``.
 
     Looks in the private ``.calkit/local/logs`` directory (always written)
-    and the tracked ``.calkit/logs`` directory, choosing the most recently
-    modified ``.log`` file across both.
+    and the tracked ``.calkit/logs`` directory, choosing the latest ``.log``
+    file across both by name (logs are named by start timestamp).
     """
     candidates = []
     for d in [
@@ -1375,7 +1392,7 @@ def _get_latest_run_log_content() -> str | None:
             ]
     if not candidates:
         return None
-    latest = max(candidates, key=os.path.getmtime)
+    latest = max(candidates, key=os.path.basename)
     try:
         with open(latest) as f:
             return f.read()
@@ -1992,6 +2009,8 @@ def run(
         typer.echo(f"Saving logs to {log_fpath}")
     # Create a file handler for dvc.stage.run logger
     file_handler = logging.FileHandler(log_fpath, mode="w")
+    # Keep the private log directory bounded; the new log counts toward the cap
+    _prune_run_logs(local_logs_dir, keep=10)
     file_handler.setLevel(logging.DEBUG)
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     formatter.converter = time.gmtime  # Use UTC time for asctime

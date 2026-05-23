@@ -21,6 +21,7 @@ import calkit.cli.main
 from calkit.cli.core import complete_stage_names
 from calkit.cli.main.core import (
     _get_running_pipeline_status,
+    _prune_run_logs,
     _stage_run_info_from_log_content,
     _to_shell_cmd,
 )
@@ -1065,6 +1066,27 @@ def test_run_writes_private_logs(tmp_dir):
     tracked = [f for f in os.listdir(tracked_dir) if f.endswith(".log")]
     assert len(tracked) == 1
     assert os.path.isdir(os.path.join(".calkit", "runs"))
+
+
+def test_prune_run_logs(tmp_dir):
+    logs_dir = "logs"
+    os.makedirs(logs_dir)
+    # Logs are named by start timestamp, so name order is time order
+    names = [f"2026-05-23T10-00-{i:02d}-abc.log" for i in range(12)]
+    for n in names:
+        with open(os.path.join(logs_dir, n), "w") as f:
+            f.write("x")
+    # A non-log file should be left untouched
+    with open(os.path.join(logs_dir, "keep.txt"), "w") as f:
+        f.write("x")
+    _prune_run_logs(logs_dir, keep=10)
+    remaining = sorted(f for f in os.listdir(logs_dir) if f.endswith(".log"))
+    assert remaining == names[-10:]
+    assert os.path.isfile(os.path.join(logs_dir, "keep.txt"))
+    # Pruning is a no-op when at or below the cap, and when the dir is missing
+    _prune_run_logs(logs_dir, keep=10)
+    assert len([f for f in os.listdir(logs_dir) if f.endswith(".log")]) == 10
+    _prune_run_logs("does-not-exist", keep=10)
 
 
 def test_map_paths(tmp_dir):

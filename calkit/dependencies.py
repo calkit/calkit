@@ -143,16 +143,6 @@ def _hash_check_cmd(check: str | None) -> str:
     return hashlib.sha256((check or "").encode("utf-8")).hexdigest()
 
 
-def _ensure_local_dir(wdir: str | None) -> str:
-    base = os.path.join(wdir, LOCAL_DIR) if wdir else LOCAL_DIR
-    os.makedirs(base, exist_ok=True)
-    gitignore = os.path.join(base, ".gitignore")
-    if not os.path.isfile(gitignore):
-        with open(gitignore, "w") as f:
-            f.write("*\n")
-    return base
-
-
 def _cache_path(wdir: str | None) -> str:
     return (
         os.path.join(wdir, DEP_CHECK_CACHE_PATH)
@@ -165,7 +155,9 @@ def _cache_open(wdir: str | None):
     """Open the SqliteDict cache, creating the local dir on demand."""
     from sqlitedict import SqliteDict
 
-    _ensure_local_dir(wdir)
+    import calkit
+
+    calkit.ensure_local_dir(wdir)
     return SqliteDict(_cache_path(wdir), autocommit=True)
 
 

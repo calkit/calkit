@@ -1,5 +1,6 @@
 """Tests for ``cli.main.core``."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -19,7 +20,10 @@ import calkit
 import calkit.cli.main
 from calkit.cli.core import complete_stage_names
 from calkit.cli.main.core import (
+    _get_running_pipeline_status,
+    _prune_run_logs,
     _stage_run_info_from_log_content,
+    _stage_target_from_cmd,
     _to_shell_cmd,
 )
 from calkit.cli.main.core import (
@@ -967,6 +971,201 @@ def test_stage_run_info_from_log_content():
             "status": "failed",
         },
     }
+    # Stage names containing colons (e.g. inline subproject targets) must keep
+    # their colons, not have them stripped out.
+    colon_log = (
+        "2025-07-11 18:25:43,557 - INFO - Running stage "
+        "'sub1/dvc.yaml:stage-a':\n"
+        "2025-07-11 18:25:44,000 - INFO - Running stage 'next':\n"
+    )
+    colon_info = _stage_run_info_from_log_content(colon_log)
+    assert "sub1/dvc.yaml:stage-a" in colon_info
+    assert colon_info["sub1/dvc.yaml:stage-a"]["status"] == "completed"
+    assert "next" in colon_info
+
+
+def _write_fake_rwlock(pid: int) -> None:
+    """Write a DVC rwlock file owned by ``pid`` to simulate a run."""
+    tmp = os.path.join(".dvc", "tmp")
+    os.makedirs(tmp, exist_ok=True)
+    with open(os.path.join(tmp, "rwlock"), "w") as f:
+        json.dump({"write": {"out.txt": {"pid": pid, "cmd": "calkit run"}}}, f)
+
+
+def _write_fake_run_log() -> None:
+    """Write a run log with one finished and one in-progress stage."""
+    logs_dir = os.path.join(calkit.ensure_local_dir(), "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    now = calkit.utcnow(remove_tz=True)
+    ts = now.strftime("%Y-%m-%d %H:%M:%S,") + f"{now.microsecond // 1000:03d}"
+    lines = [
+        f"{ts} - INFO - Running stage 'preprocess':",
+        f"{ts} - INFO - > echo hi",
+        f"{ts} - INFO - Running stage 'train':",
+        f"{ts} - INFO - > echo train",
+    ]
+    with open(os.path.join(logs_dir, "20250101-000000-abc.log"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def test_get_running_pipeline_status(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # No rwlock present means no run is in progress
+    assert _get_running_pipeline_status() is None
+    # A stale rwlock (dead PID) should not register as a running pipeline
+    _write_fake_rwlock(pid=2**31 - 1)
+    assert calkit.dvc.get_running_pipeline_processes() == []
+    assert _get_running_pipeline_status() is None
+    # A live PID holding the lock means a run is in progress; the log shows
+    # which stage is currently running and which have finished
+    _write_fake_rwlock(pid=os.getpid())
+    _write_fake_run_log()
+    procs = calkit.dvc.get_running_pipeline_processes()
+    assert len(procs) == 1
+    assert procs[0]["pid"] == os.getpid()
+    status = _get_running_pipeline_status()
+    assert status is not None
+    assert status["running"] is True
+    assert status["running_stages"] == ["train"]
+    assert status["stages"]["preprocess"]["status"] == "completed"
+
+
+def test_stage_target_from_cmd():
+    assert (
+        _stage_target_from_cmd(
+            "/p/__main__.py dvc repro --single-item sweep@3"
+        )
+        == "sweep@3"
+    )
+    assert _stage_target_from_cmd("dvc repro stage-a") == "stage-a"
+    assert _stage_target_from_cmd("dvc repro --single-item -f my-stage") == (
+        "my-stage"
+    )
+    # No explicit target (full-pipeline repro) or non-repro commands
+    assert _stage_target_from_cmd("dvc repro") is None
+    assert _stage_target_from_cmd("/p/calkit run") is None
+
+
+def test_running_status_names_concurrent_sweep_items(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # Mimic the concurrent-scheduler prepass: several `dvc repro --single-item
+    # <item>` processes hold the lock before any run log exists. Use real
+    # sleeper processes so their PIDs register as alive.
+    # A stale log from a previous run reports every item as finished. The
+    # current sweep runs only items 1 and 3; the stale log must be ignored so
+    # finished items don't show as running (and vice versa).
+    _write_fake_run_log()
+    logs_dir = os.path.join(calkit.ensure_local_dir(), "logs")
+    now = calkit.utcnow(remove_tz=True)
+    ts = now.strftime("%Y-%m-%d %H:%M:%S,") + f"{now.microsecond // 1000:03d}"
+    with open(os.path.join(logs_dir, "20240101-000000-old.log"), "w") as f:
+        for item in ["sweep@1", "sweep@2", "sweep@3"]:
+            f.write(f"{ts} - INFO - Stage '{item}' didn't change, skipping\n")
+    running_now = ["sweep@1", "sweep@3"]
+    sleepers = [
+        subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        for _ in running_now
+    ]
+    try:
+        tmp = os.path.join(".dvc", "tmp")
+        os.makedirs(tmp, exist_ok=True)
+        write = {
+            f"out-{item}.txt": {
+                "pid": proc.pid,
+                "cmd": f"calkit/__main__.py dvc repro --single-item {item}",
+            }
+            for proc, item in zip(sleepers, running_now)
+        }
+        with open(os.path.join(tmp, "rwlock"), "w") as f:
+            json.dump({"write": write}, f)
+        status = _get_running_pipeline_status()
+        assert status is not None
+        assert status["running"] is True
+        # Only the items actually running now, and no stale log stages
+        assert set(status["running_stages"]) == set(running_now)
+        assert status["stages"] == {}
+    finally:
+        for p in sleepers:
+            p.terminate()
+            p.wait()
+
+
+def test_status_reports_running_pipeline(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    _write_fake_rwlock(pid=os.getpid())
+    _write_fake_run_log()
+    out = subprocess.check_output(
+        ["calkit", "status", "-c", "pipeline"], text=True
+    )
+    assert "Run in progress" in out
+    assert str(os.getpid()) in out
+    assert "preprocess" in out
+    assert "train" in out
+    # The same information is available as JSON for programmatic/agent use
+    out = subprocess.check_output(
+        ["calkit", "status", "-c", "pipeline", "--json"], text=True
+    )
+    data = json.loads(out)
+    assert data["pipeline"]["running"] is True
+    assert "train" in data["pipeline"]["running_stages"]
+
+
+def test_run_writes_private_logs(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    dvc_yaml = {
+        "stages": {
+            "s1": {
+                "cmd": "python -c \"open('out.txt', 'w').write('x')\"",
+                "outs": ["out.txt"],
+            }
+        }
+    }
+    with open("dvc.yaml", "w") as f:
+        yaml.dump(dvc_yaml, f)
+    # Without --log, the log is retained privately under .calkit/local/logs
+    # (gitignored) and not saved to the tracked .calkit/logs directory
+    subprocess.check_call(["calkit", "run"])
+    local_logs = os.path.join(".calkit", "local", "logs")
+    private = [f for f in os.listdir(local_logs) if f.endswith(".log")]
+    assert len(private) == 1
+    assert os.path.isfile(os.path.join(".calkit", "local", ".gitignore"))
+    tracked_dir = os.path.join(".calkit", "logs")
+    assert not os.path.isdir(tracked_dir) or not [
+        f for f in os.listdir(tracked_dir) if f.endswith(".log")
+    ]
+    # With --log, the log is also saved to the tracked directory plus run info
+    subprocess.check_call(["calkit", "run", "--log", "--force"])
+    tracked = [f for f in os.listdir(tracked_dir) if f.endswith(".log")]
+    assert len(tracked) == 1
+    assert os.path.isdir(os.path.join(".calkit", "runs"))
+
+
+def test_prune_run_logs(tmp_dir):
+    logs_dir = "logs"
+    os.makedirs(logs_dir)
+    # Logs are named by start timestamp, so name order is time order
+    names = [f"2026-05-23T10-00-{i:02d}-abc.log" for i in range(12)]
+    for n in names:
+        with open(os.path.join(logs_dir, n), "w") as f:
+            f.write("x")
+    # A non-log file should be left untouched
+    with open(os.path.join(logs_dir, "keep.txt"), "w") as f:
+        f.write("x")
+    _prune_run_logs(logs_dir, keep=10)
+    remaining = sorted(f for f in os.listdir(logs_dir) if f.endswith(".log"))
+    assert remaining == names[-10:]
+    assert os.path.isfile(os.path.join(logs_dir, "keep.txt"))
+    # Pruning is a no-op when at or below the cap, and when the dir is missing
+    _prune_run_logs(logs_dir, keep=10)
+    assert len([f for f in os.listdir(logs_dir) if f.endswith(".log")]) == 10
+    _prune_run_logs("does-not-exist", keep=10)
+    # The active log is never deleted, even if its name sorts oldest (e.g.
+    # clock skew or an unusual name).
+    old_active = "1999-01-01T00-00-00-active.log"
+    with open(os.path.join(logs_dir, old_active), "w") as f:
+        f.write("x")
+    _prune_run_logs(logs_dir, keep=10, protect=old_active)
+    assert os.path.isfile(os.path.join(logs_dir, old_active))
 
 
 def test_map_paths(tmp_dir):

@@ -1440,19 +1440,20 @@ def _print_running_pipeline_status(running_status: dict) -> None:
     ]
     running_stages = running_status["running_stages"]
     if finished:
-        typer.echo(f"  completed: {', '.join(finished)}")
+        typer.echo(f"        completed: {', '.join(finished)}")
     if running_stages:
         for name in running_stages:
             start = stages.get(name, {}).get("start_time")
             label = typer.style(name, fg="green")
             if start:
                 typer.echo(
-                    f"  running:   {label} ({_format_run_elapsed(start)})"
+                    f"        running:   {label} "
+                    f"({_format_run_elapsed(start)})"
                 )
             else:
-                typer.echo(f"  running:   {label}")
+                typer.echo(f"        running:   {label}")
     elif not finished:
-        typer.echo("  starting up...")
+        typer.echo("        starting up...")
 
 
 def _concurrent_scheduler_prepass(

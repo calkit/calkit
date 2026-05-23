@@ -1317,11 +1317,12 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
                 # If we were already running a stage, add its end time
                 add_stage_info(current_stage_name, "end_time", timestamp)
                 add_stage_info(current_stage_name, "status", "completed")
-            # This is a stage run
+            # This is a stage run. The line is ``Running stage '<name>':``;
+            # strip only the trailing ``:`` delimiter and surrounding quotes
+            # so colons inside the name (e.g. ``sub1/dvc.yaml:stage-a`` for an
+            # inline subproject target) are preserved.
             current_stage_name = (
-                message.removeprefix("Running stage ")
-                .replace("'", "")
-                .replace(":", "")
+                message.removeprefix("Running stage ").rstrip(":").strip("'")
             )
             current_stage_status = "running"
             add_stage_info(current_stage_name, "start_time", timestamp)
@@ -1357,17 +1358,23 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
     return res
 
 
-def _prune_run_logs(logs_dir: str, keep: int = 10) -> None:
+def _prune_run_logs(
+    logs_dir: str, keep: int = 10, protect: str | None = None
+) -> None:
     """Keep only the most recent ``keep`` run logs in ``logs_dir``.
 
     Run logs are named by their start timestamp, so sorting by name orders
     them by time; the oldest beyond ``keep`` are removed so the private log
-    directory doesn't grow without bound.
+    directory doesn't grow without bound. ``protect`` (the active run's log
+    filename) is never deleted, guarding against clock skew or odd names that
+    could otherwise sort the live log into the prune set.
     """
     if not os.path.isdir(logs_dir):
         return
     logs = sorted(f for f in os.listdir(logs_dir) if f.endswith(".log"))
     for fname in logs[:-keep]:
+        if fname == protect:
+            continue
         try:
             os.remove(os.path.join(logs_dir, fname))
         except OSError:
@@ -2046,8 +2053,9 @@ def run(
         typer.echo(f"Saving logs to {log_fpath}")
     # Create a file handler for dvc.stage.run logger
     file_handler = logging.FileHandler(log_fpath, mode="w")
-    # Keep the private log directory bounded; the new log counts toward the cap
-    _prune_run_logs(local_logs_dir, keep=10)
+    # Keep the private log directory bounded; the new log counts toward the
+    # cap and is protected so it can never be pruned out from under this run.
+    _prune_run_logs(local_logs_dir, keep=10, protect=log_fname)
     file_handler.setLevel(logging.DEBUG)
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     formatter.converter = time.gmtime  # Use UTC time for asctime

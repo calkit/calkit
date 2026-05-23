@@ -971,6 +971,17 @@ def test_stage_run_info_from_log_content():
             "status": "failed",
         },
     }
+    # Stage names containing colons (e.g. inline subproject targets) must keep
+    # their colons, not have them stripped out.
+    colon_log = (
+        "2025-07-11 18:25:43,557 - INFO - Running stage "
+        "'sub1/dvc.yaml:stage-a':\n"
+        "2025-07-11 18:25:44,000 - INFO - Running stage 'next':\n"
+    )
+    colon_info = _stage_run_info_from_log_content(colon_log)
+    assert "sub1/dvc.yaml:stage-a" in colon_info
+    assert colon_info["sub1/dvc.yaml:stage-a"]["status"] == "completed"
+    assert "next" in colon_info
 
 
 def _write_fake_rwlock(pid: int) -> None:
@@ -1148,6 +1159,13 @@ def test_prune_run_logs(tmp_dir):
     _prune_run_logs(logs_dir, keep=10)
     assert len([f for f in os.listdir(logs_dir) if f.endswith(".log")]) == 10
     _prune_run_logs("does-not-exist", keep=10)
+    # The active log is never deleted, even if its name sorts oldest (e.g.
+    # clock skew or an unusual name).
+    old_active = "1999-01-01T00-00-00-active.log"
+    with open(os.path.join(logs_dir, old_active), "w") as f:
+        f.write("x")
+    _prune_run_logs(logs_dir, keep=10, protect=old_active)
+    assert os.path.isfile(os.path.join(logs_dir, old_active))
 
 
 def test_map_paths(tmp_dir):

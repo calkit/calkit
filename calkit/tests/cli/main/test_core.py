@@ -23,6 +23,7 @@ from calkit.cli.main.core import (
     _get_running_pipeline_status,
     _prune_run_logs,
     _stage_run_info_from_log_content,
+    _stage_target_from_cmd,
     _to_shell_cmd,
 )
 from calkit.cli.main.core import (
@@ -1016,6 +1017,54 @@ def test_get_running_pipeline_status(tmp_dir):
     assert status["running"] is True
     assert status["running_stages"] == ["train"]
     assert status["stages"]["preprocess"]["status"] == "completed"
+
+
+def test_stage_target_from_cmd():
+    assert (
+        _stage_target_from_cmd(
+            "/p/__main__.py dvc repro --single-item sweep@3"
+        )
+        == "sweep@3"
+    )
+    assert _stage_target_from_cmd("dvc repro stage-a") == "stage-a"
+    assert _stage_target_from_cmd("dvc repro --single-item -f my-stage") == (
+        "my-stage"
+    )
+    # No explicit target (full-pipeline repro) or non-repro commands
+    assert _stage_target_from_cmd("dvc repro") is None
+    assert _stage_target_from_cmd("/p/calkit run") is None
+
+
+def test_running_status_names_concurrent_sweep_items(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # Mimic the concurrent-scheduler prepass: several `dvc repro --single-item
+    # <item>` processes hold the lock before any run log exists. Use real
+    # sleeper processes so their PIDs register as alive.
+    items = ["sweep@1", "sweep@2", "sweep@3"]
+    sleepers = [
+        subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        for _ in items
+    ]
+    try:
+        tmp = os.path.join(".dvc", "tmp")
+        os.makedirs(tmp, exist_ok=True)
+        write = {
+            f"out-{item}.txt": {
+                "pid": proc.pid,
+                "cmd": f"calkit/__main__.py dvc repro --single-item {item}",
+            }
+            for proc, item in zip(sleepers, items)
+        }
+        with open(os.path.join(tmp, "rwlock"), "w") as f:
+            json.dump({"write": write}, f)
+        status = _get_running_pipeline_status()
+        assert status is not None
+        assert status["running"] is True
+        assert set(status["running_stages"]) == set(items)
+    finally:
+        for p in sleepers:
+            p.terminate()
+            p.wait()
 
 
 def test_status_reports_running_pipeline(tmp_dir):

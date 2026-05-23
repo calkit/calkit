@@ -1417,12 +1417,32 @@ def _format_run_elapsed(start_iso: str) -> str:
     return f"{seconds}s"
 
 
+def _stage_target_from_cmd(cmd: str) -> str | None:
+    """Extract a DVC stage target from a ``dvc repro`` command string.
+
+    Concurrent scheduler items (an ``iterate_over`` sweep) run as separate
+    ``dvc repro --single-item <stage>`` processes whose stage name is the
+    trailing positional argument recorded in the DVC lock. This lets the
+    sweep items be named even before the main run log exists. Returns
+    ``None`` for commands without an explicit target (e.g. a full-pipeline
+    ``dvc repro`` or the parent ``calkit run``).
+    """
+    tokens = cmd.split()
+    if "repro" not in tokens:
+        return None
+    after = tokens[tokens.index("repro") + 1 :]
+    targets = [t for t in after if not t.startswith("-")]
+    return targets[-1] if targets else None
+
+
 def _get_running_pipeline_status() -> dict | None:
     """Return live pipeline run progress, or ``None`` if no run is running.
 
     A run is in progress when a live process holds DVC's rwlock. The most
     recent run log is then parsed to report which stages have finished and
-    which is currently running.
+    which is currently running. Concurrently-run scheduler items execute in
+    their own processes before the run log exists, so their stage names are
+    also recovered from the lock's command strings.
     """
     processes = calkit.dvc.get_running_pipeline_processes()
     if not processes:
@@ -1436,6 +1456,11 @@ def _get_running_pipeline_status() -> dict | None:
     running_stages = [
         name for name, info in stages.items() if "status" not in info
     ]
+    # Add any concurrent sweep items, named from the lock command strings
+    for proc in processes:
+        target = _stage_target_from_cmd(proc.get("cmd", ""))
+        if target is not None and target not in running_stages:
+            running_stages.append(target)
     return {
         "running": True,
         "processes": processes,

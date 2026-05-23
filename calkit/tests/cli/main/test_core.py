@@ -1040,10 +1040,20 @@ def test_running_status_names_concurrent_sweep_items(tmp_dir):
     # Mimic the concurrent-scheduler prepass: several `dvc repro --single-item
     # <item>` processes hold the lock before any run log exists. Use real
     # sleeper processes so their PIDs register as alive.
-    items = ["sweep@1", "sweep@2", "sweep@3"]
+    # A stale log from a previous run reports every item as finished. The
+    # current sweep runs only items 1 and 3; the stale log must be ignored so
+    # finished items don't show as running (and vice versa).
+    _write_fake_run_log()
+    logs_dir = os.path.join(calkit.ensure_local_dir(), "logs")
+    now = calkit.utcnow(remove_tz=True)
+    ts = now.strftime("%Y-%m-%d %H:%M:%S,") + f"{now.microsecond // 1000:03d}"
+    with open(os.path.join(logs_dir, "20240101-000000-old.log"), "w") as f:
+        for item in ["sweep@1", "sweep@2", "sweep@3"]:
+            f.write(f"{ts} - INFO - Stage '{item}' didn't change, skipping\n")
+    running_now = ["sweep@1", "sweep@3"]
     sleepers = [
         subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
-        for _ in items
+        for _ in running_now
     ]
     try:
         tmp = os.path.join(".dvc", "tmp")
@@ -1053,14 +1063,16 @@ def test_running_status_names_concurrent_sweep_items(tmp_dir):
                 "pid": proc.pid,
                 "cmd": f"calkit/__main__.py dvc repro --single-item {item}",
             }
-            for proc, item in zip(sleepers, items)
+            for proc, item in zip(sleepers, running_now)
         }
         with open(os.path.join(tmp, "rwlock"), "w") as f:
             json.dump({"write": write}, f)
         status = _get_running_pipeline_status()
         assert status is not None
         assert status["running"] is True
-        assert set(status["running_stages"]) == set(items)
+        # Only the items actually running now, and no stale log stages
+        assert set(status["running_stages"]) == set(running_now)
+        assert status["stages"] == {}
     finally:
         for p in sleepers:
             p.terminate()

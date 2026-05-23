@@ -1447,6 +1447,23 @@ def _get_running_pipeline_status() -> dict | None:
     processes = calkit.dvc.get_running_pipeline_processes()
     if not processes:
         return None
+    # Stage targets in the lock commands identify concurrently-run scheduler
+    # items (an iterate_over sweep). These run in their own processes during a
+    # prepass, before the current run's log exists, so the latest log on disk
+    # is from a previous run; report only the lock's items in that case to
+    # avoid mixing in stale stages.
+    concurrent_stages: list[str] = []
+    for proc in processes:
+        target = _stage_target_from_cmd(proc.get("cmd", ""))
+        if target is not None and target not in concurrent_stages:
+            concurrent_stages.append(target)
+    if concurrent_stages:
+        return {
+            "running": True,
+            "processes": processes,
+            "stages": {},
+            "running_stages": concurrent_stages,
+        }
     content = _get_latest_run_log_content()
     stages = (
         _stage_run_info_from_log_content(content)
@@ -1456,11 +1473,6 @@ def _get_running_pipeline_status() -> dict | None:
     running_stages = [
         name for name, info in stages.items() if "status" not in info
     ]
-    # Add any concurrent sweep items, named from the lock command strings
-    for proc in processes:
-        target = _stage_target_from_cmd(proc.get("cmd", ""))
-        if target is not None and target not in running_stages:
-            running_stages.append(target)
     return {
         "running": True,
         "processes": processes,

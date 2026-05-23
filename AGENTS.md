@@ -14,6 +14,11 @@ To run tests, use `uv run pytest`.
 
 To sync the docs and format all the code, run `make format`.
 
+Before finishing a change, type-check it. The CLI gate is mypy
+(`uv run mypy <changed files>`, or `make check` for the full suite), and the
+VS Code editor uses Pylance (Pyright). Keep new code clean under both, and do
+not introduce new type errors.
+
 Wrap prose at natural breakpoints in phrases or punctuation to keep max
 line length below 80 characters.
 

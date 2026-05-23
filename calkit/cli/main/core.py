@@ -1344,6 +1344,80 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
     return res
 
 
+def _concurrent_scheduler_prepass(
+    ck_info: dict,
+    targets: list[str],
+    keep_going: bool,
+    quiet: bool,
+) -> None:
+    """Submit iterated scheduler-stage jobs concurrently before ``dvc repro``.
+
+    DVC's ``repro`` runs matrix items serially, so each scheduler item would
+    otherwise submit-and-wait one at a time. Here we build each eligible
+    stage's upstreams (serially, to avoid an rwlock race), then fan its items
+    out as concurrent ``dvc repro --single-item`` processes---all at once,
+    leaving it to the cluster's scheduler to queue them. The trailing
+    ``dvc repro`` then sees the items as up-to-date and records them,
+    preserving granular per-item caching so a failed sweep resumes only the
+    failed items. Not used under --force (the caller runs those serially).
+    """
+    import sys
+
+    import calkit.pipeline
+
+    eligible = calkit.pipeline.get_concurrent_scheduler_stages(ck_info)
+    if targets:
+        eligible = [name for name in eligible if name in targets]
+    if not eligible:
+        return
+    for stage_name in eligible:
+        item_targets, upstream_targets = (
+            calkit.pipeline.get_matrix_item_targets(stage_name)
+        )
+        if not item_targets:
+            continue
+        # Each item holds a local polling process for the job's lifetime, so
+        # cap the fan-out to avoid exhausting local resources; a sweep larger
+        # than this should be split into multiple runs.
+        max_jobs = 100
+        if len(item_targets) > max_jobs:
+            raise_error(
+                f"Stage '{stage_name}' would submit {len(item_targets)} jobs "
+                f"at once, exceeding the limit of {max_jobs}. Each concurrent "
+                "submission holds a local process, so reduce the sweep size "
+                "or split it across multiple runs."
+            )
+        if not quiet:
+            calkit.echo(
+                f"🧵 Submitting {len(item_targets)} '{stage_name}' jobs"
+            )
+        # Build shared upstreams first; if two items raced to build the same
+        # stale dependency, one would fail with an rwlock "busy" error. Go
+        # through `calkit dvc` so the ck:// remote scheme is registered.
+        if upstream_targets:
+            up_cmd = [sys.executable, "-m", "calkit", "dvc", "repro"]
+            up_cmd += upstream_targets
+            if subprocess.run(up_cmd).returncode != 0:
+                raise_error(
+                    f"Failed to build dependencies for stage '{stage_name}'"
+                )
+        results = calkit.pipeline.reproduce_targets_concurrently(
+            item_targets, max_workers=len(item_targets)
+        )
+        failed = [t for t, rc in results.items() if rc != 0]
+        if failed:
+            msg = (
+                f"{len(failed)} of {len(item_targets)} '{stage_name}' jobs "
+                f"failed: {', '.join(failed)}"
+            )
+            if keep_going:
+                warn(msg)
+            else:
+                raise_error(
+                    msg + ". Successful jobs are cached; rerun to resume."
+                )
+
+
 @app.command(name="run")
 def run(
     targets: Annotated[
@@ -1767,6 +1841,24 @@ def run(
     if downstream is not None:
         args.append("--downstream")
         args += downstream
+    # Pre-submit iterated scheduler-stage jobs concurrently; the main repro
+    # below then records them. Skipped for --dry so the dry plan stays intact,
+    # and for --force, which re-runs every item: those go serially through the
+    # main repro so we don't both pre-run and re-run each job. Also skipped
+    # when a selector narrows the run (--downstream/--pipeline/--recursive/
+    # --glob/--all-pipelines): positional ``targets`` is empty then, so the
+    # prepass can't tell which sweeps will actually run and would otherwise
+    # submit all of them.
+    run_is_narrowed = bool(
+        downstream or pipeline or recursive or glob or all_pipelines
+    )
+    if dvc_stages and not dry and not force and not run_is_narrowed:
+        _concurrent_scheduler_prepass(
+            ck_info=ck_info,
+            targets=targets,
+            keep_going=keep_going,
+            quiet=quiet,
+        )
     start_time_no_tz = calkit.utcnow(remove_tz=True)
     start_time = calkit.utcnow(remove_tz=False)
     run_id = uuid.uuid4().hex
@@ -1794,7 +1886,14 @@ def run(
     dvc.repo.reproduce.logger.setLevel(logging.ERROR)
     # Disable other misc DVC output
     dvc.ui.ui.write = lambda *args, **kwargs: None
-    res = dvc_cli_main(["repro"] + args)
+    # Tell `calkit scheduler batch` to resubmit completed jobs under --force;
+    # otherwise it skips jobs it sees as already done.
+    if force:
+        os.environ["CALKIT_FORCE"] = "1"
+    try:
+        res = dvc_cli_main(["repro"] + args)
+    finally:
+        os.environ.pop("CALKIT_FORCE", None)
     failed = failed or res != 0
     # Parse log to get timing and which stages ran
     with open(log_fpath, "r") as f:

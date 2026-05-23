@@ -1199,3 +1199,228 @@ def test_use_version_without_uvx(monkeypatch):
     assert result.exit_code != 0
     # ``raise_error`` writes to stderr but typer's runner merges output.
     assert "uvx" in (result.output + (result.stderr or ""))
+
+
+def test_run_concurrent_scheduler_stage_with_mock(tmp_dir):
+    # Exercise the full concurrent-scheduler path on a plain host: an
+    # iterate_over stage on a SLURM env, run via the mock scheduler so jobs
+    # execute locally. Covers concurrent fan-out, granular per-item caching,
+    # resume-after-failure, and the queue command.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        # Fail for x==3 only while the FAIL sentinel exists. FAIL is not a
+        # declared dependency, so removing it leaves the other items cached.
+        f.write('if [ "$1" = "3" ] && [ -f FAIL ]; then exit 1; fi\n')
+        f.write('echo "$1" > "out-$1.txt"\n')
+    ck_info = {
+        "environments": {
+            "slurm": {"kind": "slurm"},
+        },
+        "pipeline": {
+            "stages": {
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{x}"],
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2, 3]}],
+                    "outputs": ["out-{x}.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # First run: x=3 fails, so the run aborts, but x=1 and x=2 succeed and
+    # are cached.
+    open("FAIL", "w").close()
+    result = subprocess.run(["calkit", "run"], env=env)
+    assert result.returncode != 0
+    assert os.path.exists("out-1.txt")
+    assert os.path.exists("out-2.txt")
+    assert not os.path.exists("out-3.txt")
+    # Mock job data is isolated under the always-ignored .calkit/local.
+    assert os.path.isdir(".calkit/local/mock-scheduler")
+    assert not subprocess.check_output(
+        ["git", "status", "--porcelain"], text=True
+    ).count("mock-scheduler")
+    # Resume: dropping the (non-dependency) sentinel reruns only the failed
+    # item; the cached items are skipped by DVC.
+    os.remove("FAIL")
+    out = subprocess.check_output(["calkit", "run"], env=env, text=True)
+    assert os.path.exists("out-3.txt")
+    assert "Running stage 'sweep@3'" in out
+    assert "Running stage 'sweep@1'" not in out
+    # The queue command reports the locally tracked mock jobs.
+    queue = subprocess.check_output(
+        ["calkit", "scheduler", "queue"], env=env, text=True
+    )
+    assert "sweep@3" in queue
+
+
+def test_run_concurrent_scheduler_table_iteration_with_mock(tmp_dir):
+    # Table-like iteration (arg_name as a list) compiles to a dict-valued DVC
+    # matrix that DVC names by index (sweep@_arg00, ...) while the scheduler
+    # job names use the comma-joined values (sweep@1,a). Verify the concurrent
+    # path handles both naming schemes and multi-arg output templating.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        f.write('echo "$1 $2" > "out-$1-$2.txt"\n')
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm"}},
+        "pipeline": {
+            "stages": {
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{var1}", "{var2}"],
+                    "iterate_over": [
+                        {
+                            "arg_name": ["var1", "var2"],
+                            "values": [[1, "a"], [2, "b"], [3, "c"]],
+                        }
+                    ],
+                    "outputs": ["out-{var1}-{var2}.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(["calkit", "run"], env=env, text=True)
+    # Every (var1, var2) combination ran and wrote a correctly templated file.
+    assert "Submitting 3 'sweep' jobs" in out
+    for var1, var2 in [(1, "a"), (2, "b"), (3, "c")]:
+        path = f"out-{var1}-{var2}.txt"
+        assert os.path.exists(path)
+        with open(path) as f:
+            assert f.read().strip() == f"{var1} {var2}"
+    # Scheduler job names use the comma-joined values, not the DVC index.
+    queue = subprocess.check_output(
+        ["calkit", "scheduler", "queue"], env=env, text=True
+    )
+    assert "sweep@1,a" in queue
+    assert "sweep@3,c" in queue
+
+
+def test_run_concurrent_scheduler_force_runs_each_item_once(tmp_dir):
+    # --force must not run a sweep twice (once in the concurrent prepass and
+    # again in the main repro). Under --force the prepass is skipped, so each
+    # item runs exactly once per `calkit run`, serially via the main repro.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        # Append a line each execution so we can count how many times each
+        # item actually ran.
+        f.write('echo x >> "runs-$1.txt"\n')
+        f.write('echo "$1" > "out-$1.txt"\n')
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm"}},
+        "pipeline": {
+            "stages": {
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{x}"],
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2]}],
+                    "outputs": ["out-{x}.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"], env=env)
+    subprocess.check_call(["calkit", "run", "--force"], env=env)
+    # One run + one forced run = two executions per item (not three).
+    for x in (1, 2):
+        with open(f"runs-{x}.txt") as f:
+            assert len(f.read().splitlines()) == 2
+
+
+def test_run_concurrent_scheduler_resume_after_disconnect(tmp_dir):
+    # If the master process is killed while jobs run, a job that already
+    # finished on the scheduler must not be resubmitted on the next run: the
+    # jobs database plus persisted outputs let Calkit recognize completed work.
+    # We simulate the disconnect by deleting dvc.lock (so DVC re-runs the
+    # stage) while the outputs and job records remain on disk.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        f.write('echo x >> "runs-$1.txt"\n')
+        f.write('echo "$1" > "out-$1.txt"\n')
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm"}},
+        "pipeline": {
+            "stages": {
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{x}"],
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2]}],
+                    "outputs": ["out-{x}.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"], env=env)
+    for x in (1, 2):
+        with open(f"runs-{x}.txt") as f:
+            assert len(f.read().splitlines()) == 1
+    # Simulate a disconnect where dvc.lock never got updated.
+    os.remove("dvc.lock")
+    out = subprocess.check_output(["calkit", "run"], env=env, text=True)
+    assert "already completed" in out
+    # The completed jobs are not resubmitted, so the run counts stay at one.
+    for x in (1, 2):
+        with open(f"runs-{x}.txt") as f:
+            assert len(f.read().splitlines()) == 1
+
+
+def test_run_downstream_does_not_submit_unrelated_sweep(tmp_dir):
+    # A narrowed run (e.g. --downstream) leaves positional targets empty, so
+    # the concurrent prepass must be skipped entirely---otherwise it would
+    # submit every iterate_over scheduler stage, launching cluster jobs the
+    # user never asked for. Here 'sweep' is unrelated to the requested 'other'
+    # stage and must not run.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("other.sh", "w") as f:
+        f.write("echo done > other.txt\n")
+    with open("run.sh", "w") as f:
+        f.write('echo "$1" > "out-$1.txt"\n')
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm"}},
+        "pipeline": {
+            "stages": {
+                "other": {
+                    "kind": "shell-script",
+                    "script_path": "other.sh",
+                    "environment": "slurm",
+                    "outputs": ["other.txt"],
+                },
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{x}"],
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2]}],
+                    "outputs": ["out-{x}.txt"],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run", "--downstream", "other"], env=env)
+    # The requested stage ran; the unrelated sweep did not.
+    assert os.path.exists("other.txt")
+    assert not os.path.exists("out-1.txt")
+    assert not os.path.exists("out-2.txt")

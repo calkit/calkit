@@ -626,7 +626,9 @@ def test_sbatch_stage_to_dvc(tmp_dir):
     assert "something.jl" in stage2["deps"]
     assert "data/input2.txt" in stage2["deps"]
     assert slurm_lock in stage2["deps"]
-    assert "data/output3.txt" in stage2["outs"]
+    # Scheduler stages persist their outputs so DVC won't delete them before a
+    # re-run (the batch CLI manages deletion itself).
+    assert {"data/output3.txt": {"persist": True}} in stage2["outs"]
     # Even though the env defines default_setup, those entries don't end up
     # in the compiled stage cmd.
     assert "module purge" not in stage2["cmd"]
@@ -648,7 +650,7 @@ def test_sbatch_stage_to_dvc(tmp_dir):
     assert ".calkit/notebooks/cleaned/analysis.ipynb" in stage3["deps"]
     assert "data/input2.txt" in stage3["deps"]
     assert slurm_lock in stage3["deps"]
-    assert "data/notebook_output.txt" in stage3["outs"]
+    assert {"data/notebook_output.txt": {"persist": True}} in stage3["outs"]
     py_stage = stages["py-job"]
     print(py_stage)
     assert py_stage["cmd"] == (
@@ -1456,8 +1458,7 @@ def test_get_status_excludes_frozen_stage(tmp_dir):
     # Modifying the script must not make the frozen stage stale either
     with open("something/my-cool-script.py", "w") as f:
         f.write(
-            "with open('my-output.out', 'w') as f:\n"
-            "    f.write('Changed!')\n"
+            "with open('my-output.out', 'w') as f:\n    f.write('Changed!')\n"
         )
     status = calkit.pipeline.get_status(ck_info=ck_info)
     assert not status.is_stale
@@ -1859,3 +1860,131 @@ def test_translate_run_targets(tmp_dir):
     )
     assert parent == ["inline-sp/dvc.yaml:stage-a", "my-parent-stage"]
     assert isolated == [("isolated-sp", "stage-b")]
+
+
+def test_get_concurrent_scheduler_stages():
+    ck_info = {
+        "environments": {
+            "slurm": {"kind": "slurm"},
+            "pbs": {"kind": "pbs"},
+            "py": {"kind": "uv", "path": "pyproject.toml"},
+        },
+        "pipeline": {
+            "stages": {
+                # Eligible: iterate_over on a slurm env.
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "r.sh",
+                    "environment": "slurm",
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2, 3]}],
+                },
+                # Eligible: pbs as the outer half of a composite env.
+                "sweep-pbs": {
+                    "kind": "python-script",
+                    "script_path": "r.py",
+                    "environment": "pbs:py",
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2]}],
+                },
+                # Excluded: not iterated, so DVC runs it serially as usual.
+                "single": {
+                    "kind": "shell-script",
+                    "script_path": "r.sh",
+                    "environment": "slurm",
+                },
+                # Excluded: non-scheduler environment.
+                "local-sweep": {
+                    "kind": "python-script",
+                    "script_path": "r.py",
+                    "environment": "py",
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2]}],
+                },
+            }
+        },
+    }
+    result = calkit.pipeline.get_concurrent_scheduler_stages(ck_info)
+    assert sorted(result) == ["sweep", "sweep-pbs"]
+
+
+def test_get_matrix_item_targets(tmp_dir):
+    import sys
+
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call([sys.executable, "-m", "dvc", "init"])
+    # 'work' is a scalar matrix depending on a shared upstream 'prep';
+    # 'table' is a table-like matrix (dict values, as compiled from a list
+    # arg_name), which DVC names by index (table@_arg00, ...).
+    dvc_yaml = {
+        "stages": {
+            "prep": {
+                "cmd": "echo shared > shared.txt",
+                "outs": ["shared.txt"],
+            },
+            "work": {
+                "matrix": {"arg": ["a", "b", "c"]},
+                "cmd": "cat shared.txt > out-${item.arg}.txt",
+                "deps": ["shared.txt"],
+                "outs": ["out-${item.arg}.txt"],
+            },
+            "table": {
+                "matrix": {
+                    "_arg0": [
+                        {"v1": 1, "v2": "a"},
+                        {"v1": 2, "v2": "b"},
+                    ]
+                },
+                "cmd": (
+                    "echo ${item._arg0.v1} "
+                    "> t-${item._arg0.v1}-${item._arg0.v2}.txt"
+                ),
+                "outs": ["t-${item._arg0.v1}-${item._arg0.v2}.txt"],
+            },
+        }
+    }
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(dvc_yaml, f)
+    items, upstreams = calkit.pipeline.get_matrix_item_targets("work")
+    # Each iteration is addressable; the shared upstream is reported so the
+    # caller can build it before fanning the items out concurrently. Results
+    # come back in a deterministic (sorted) order.
+    assert items == ["work@a", "work@b", "work@c"]
+    assert upstreams == ["prep"]
+    # Table-like (dict-valued) matrix items are still found via the stage@
+    # prefix even though DVC names them by index.
+    table_items, table_ups = calkit.pipeline.get_matrix_item_targets("table")
+    assert table_items == ["table@_arg00", "table@_arg01"]
+    assert table_ups == []
+    # A stage with no matrix has no item targets.
+    items2, _ = calkit.pipeline.get_matrix_item_targets("prep")
+    assert items2 == []
+
+
+def test_reproduce_targets_concurrently():
+    import threading
+    import time
+
+    state = {"active": 0, "peak": 0}
+    lock = threading.Lock()
+
+    def fake(target: str) -> int:
+        # Track peak simultaneous runners to confirm the worker bound holds.
+        with lock:
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        time.sleep(0.1)
+        with lock:
+            state["active"] -= 1
+        # One target "fails" so we confirm return codes propagate per target.
+        return 1 if target == "work@b" else 0
+
+    targets = ["work@a", "work@b", "work@c", "work@d", "work@e"]
+    results = calkit.pipeline.reproduce_targets_concurrently(
+        targets, max_workers=2, run_one=fake
+    )
+    assert results == {
+        "work@a": 0,
+        "work@b": 1,
+        "work@c": 0,
+        "work@d": 0,
+        "work@e": 0,
+    }
+    assert state["peak"] == 2

@@ -415,6 +415,22 @@ class Stage(BaseModel):
                 isinstance(o, dict) and log_out.path in o for o in outs
             ):
                 outs.append(log_entry)
+        # Scheduler-batched stages must persist their outputs: `calkit
+        # scheduler batch` deletes and recreates them itself, and persisting
+        # stops DVC from removing them before a re-run. That lets a job that
+        # finished while the run was disconnected be recognized as done on the
+        # next `calkit run` instead of being resubmitted.
+        if self.scheduler is not None:
+            persisted_outs: list[str | dict] = []
+            for out in outs:
+                if isinstance(out, str):
+                    persisted_outs.append({out: {"persist": True}})
+                else:
+                    out_path = list(out.keys())[0]
+                    out_opts = dict(out[out_path])
+                    out_opts["persist"] = True
+                    persisted_outs.append({out_path: out_opts})
+            outs = persisted_outs
         stage = {"cmd": cmd, "deps": deps, "outs": outs}
         if self.wdir is not None:
             stage["wdir"] = self.wdir

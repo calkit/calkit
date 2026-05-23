@@ -243,6 +243,48 @@ def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
     return dvc.repo.Repo(wdir)
 
 
+def get_running_pipeline_processes(wdir: str | None = None) -> list[dict]:
+    """Return live processes holding DVC's read/write lock.
+
+    While ``dvc repro`` runs a stage, DVC records the owning process in its
+    ``rwlock`` file (under ``.dvc/tmp/rwlock``); this is the same lock that
+    makes ``dvc status`` fail with a ``LockError`` mid-run. Each returned item
+    is ``{"pid": int, "cmd": str}``, with stale entries (PIDs that are no
+    longer running) filtered out. An empty list means no pipeline run is
+    currently in progress.
+    """
+    import psutil  # Always available as a DVC dependency
+
+    rwlock_path = os.path.join(wdir or ".", ".dvc", "tmp", "rwlock")
+    if not os.path.isfile(rwlock_path):
+        return []
+    try:
+        with open(rwlock_path) as f:
+            lock = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+    # The rwlock format is
+    # {"write": {path: {pid, cmd}}, "read": {path: [{pid, cmd}]}}
+    by_pid: dict[int, str] = {}
+    for info in lock.get("write", {}).values():
+        if isinstance(info, dict) and "pid" in info:
+            by_pid[info["pid"]] = info.get("cmd", "")
+    for infos in lock.get("read", {}).values():
+        for info in infos or []:
+            if isinstance(info, dict) and "pid" in info:
+                by_pid[info["pid"]] = info.get("cmd", "")
+    result = []
+    for pid, cmd in by_pid.items():
+        try:
+            alive = psutil.pid_exists(pid)
+        except Exception:
+            # If we can't tell, assume the process is still alive
+            alive = True
+        if alive:
+            result.append({"pid": pid, "cmd": cmd})
+    return result
+
+
 def run_dvc_command(argv: list[str], cwd: str | None = None) -> int:
     """Run a DVC command, optionally in a specific working directory.
 

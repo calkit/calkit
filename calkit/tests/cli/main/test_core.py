@@ -1,5 +1,6 @@
 """Tests for ``cli.main.core``."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -19,6 +20,7 @@ import calkit
 import calkit.cli.main
 from calkit.cli.core import complete_stage_names
 from calkit.cli.main.core import (
+    _get_running_pipeline_status,
     _stage_run_info_from_log_content,
     _to_shell_cmd,
 )
@@ -967,6 +969,102 @@ def test_stage_run_info_from_log_content():
             "status": "failed",
         },
     }
+
+
+def _write_fake_rwlock(pid: int) -> None:
+    """Write a DVC rwlock file owned by ``pid`` to simulate a run."""
+    tmp = os.path.join(".dvc", "tmp")
+    os.makedirs(tmp, exist_ok=True)
+    with open(os.path.join(tmp, "rwlock"), "w") as f:
+        json.dump({"write": {"out.txt": {"pid": pid, "cmd": "calkit run"}}}, f)
+
+
+def _write_fake_run_log() -> None:
+    """Write a run log with one finished and one in-progress stage."""
+    logs_dir = os.path.join(calkit.ensure_local_dir(), "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    now = calkit.utcnow(remove_tz=True)
+    ts = now.strftime("%Y-%m-%d %H:%M:%S,") + f"{now.microsecond // 1000:03d}"
+    lines = [
+        f"{ts} - INFO - Running stage 'preprocess':",
+        f"{ts} - INFO - > echo hi",
+        f"{ts} - INFO - Running stage 'train':",
+        f"{ts} - INFO - > echo train",
+    ]
+    with open(os.path.join(logs_dir, "20250101-000000-abc.log"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def test_get_running_pipeline_status(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # No rwlock present means no run is in progress
+    assert _get_running_pipeline_status() is None
+    # A stale rwlock (dead PID) should not register as a running pipeline
+    _write_fake_rwlock(pid=2**31 - 1)
+    assert calkit.dvc.get_running_pipeline_processes() == []
+    assert _get_running_pipeline_status() is None
+    # A live PID holding the lock means a run is in progress; the log shows
+    # which stage is currently running and which have finished
+    _write_fake_rwlock(pid=os.getpid())
+    _write_fake_run_log()
+    procs = calkit.dvc.get_running_pipeline_processes()
+    assert len(procs) == 1
+    assert procs[0]["pid"] == os.getpid()
+    status = _get_running_pipeline_status()
+    assert status is not None
+    assert status["running"] is True
+    assert status["running_stages"] == ["train"]
+    assert status["stages"]["preprocess"]["status"] == "completed"
+
+
+def test_status_reports_running_pipeline(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    _write_fake_rwlock(pid=os.getpid())
+    _write_fake_run_log()
+    out = subprocess.check_output(
+        ["calkit", "status", "-c", "pipeline"], text=True
+    )
+    assert "Run in progress" in out
+    assert str(os.getpid()) in out
+    assert "preprocess" in out
+    assert "train" in out
+    # The same information is available as JSON for programmatic/agent use
+    out = subprocess.check_output(
+        ["calkit", "status", "-c", "pipeline", "--json"], text=True
+    )
+    data = json.loads(out)
+    assert data["pipeline"]["running"] is True
+    assert "train" in data["pipeline"]["running_stages"]
+
+
+def test_run_writes_private_logs(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    dvc_yaml = {
+        "stages": {
+            "s1": {
+                "cmd": "python -c \"open('out.txt', 'w').write('x')\"",
+                "outs": ["out.txt"],
+            }
+        }
+    }
+    with open("dvc.yaml", "w") as f:
+        yaml.dump(dvc_yaml, f)
+    # Without --log, the log is retained privately under .calkit/local/logs
+    # (gitignored) and not saved to the tracked .calkit/logs directory
+    subprocess.check_call(["calkit", "run"])
+    local_logs = os.path.join(".calkit", "local", "logs")
+    private = [f for f in os.listdir(local_logs) if f.endswith(".log")]
+    assert len(private) == 1
+    assert os.path.isfile(os.path.join(".calkit", "local", ".gitignore"))
+    tracked_dir = os.path.join(".calkit", "logs")
+    assert not os.path.isdir(tracked_dir) or not [
+        f for f in os.listdir(tracked_dir) if f.endswith(".log")
+    ]
+    # With --log, the log is also saved to the tracked directory plus run info
+    subprocess.check_call(["calkit", "run", "--log", "--force"])
+    tracked = [f for f in os.listdir(tracked_dir) if f.endswith(".log")]
+    assert len(tracked) == 1
+    assert os.path.isdir(os.path.join(".calkit", "runs"))
 
 
 def test_map_paths(tmp_dir):

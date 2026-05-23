@@ -191,6 +191,24 @@ def utcnow(remove_tz=True) -> datetime:
     return dt
 
 
+LOCAL_DIR = ".calkit/local"
+
+
+def ensure_local_dir(wdir: str | None = None) -> str:
+    """Ensure the gitignored ``.calkit/local`` directory exists; return it.
+
+    Everything under ``.calkit/local`` is private to the machine and kept out
+    of version control via a ``*`` .gitignore.
+    """
+    base = os.path.join(wdir, LOCAL_DIR) if wdir else LOCAL_DIR
+    os.makedirs(base, exist_ok=True)
+    gitignore = os.path.join(base, ".gitignore")
+    if not os.path.isfile(gitignore):
+        with open(gitignore, "w") as f:
+            f.write("*\n")
+    return base
+
+
 NOTEBOOK_STAGE_OUT_FORMATS = ["pickle", "parquet", "json", "yaml", "csv"]
 
 

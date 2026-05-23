@@ -47,15 +47,6 @@ MOCK_DIR = os.path.join(LOCAL_DIR, "mock-scheduler")
 MOCK_ENV_VAR = "CALKIT_MOCK_SCHEDULER"
 
 
-def _ensure_local_dir() -> None:
-    # Everything under .calkit/local is gitignored via a "*" .gitignore.
-    os.makedirs(LOCAL_DIR, exist_ok=True)
-    gitignore_path = os.path.join(LOCAL_DIR, ".gitignore")
-    if not os.path.isfile(gitignore_path):
-        with open(gitignore_path, "w") as f:
-            f.write("*\n")
-
-
 # A generous busy timeout lets the many batch processes that fan out an
 # iterated stage wait for the SQLite write lock instead of failing with
 # "database is locked". We keep the default rollback journal (not WAL), which
@@ -77,7 +68,7 @@ def _record_job(name: str, info: dict) -> None:
     processes that fan out an iterated stage each record their own
     uniquely named job without a separate lock or clobbering one another.
     """
-    _ensure_local_dir()
+    calkit.ensure_local_dir()
     with SqliteDict(
         JOBS_DB_PATH, autocommit=True, timeout=JOBS_DB_TIMEOUT
     ) as jobs:
@@ -107,7 +98,7 @@ def _require_posix_mock() -> None:
 
 
 def _ensure_mock_dir() -> None:
-    _ensure_local_dir()
+    calkit.ensure_local_dir()
     os.makedirs(MOCK_DIR, exist_ok=True)
 
 

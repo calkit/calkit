@@ -421,7 +421,15 @@ def get_status(
     else:
         categories = valid_categories
     pipeline_status = None
+    running_status = None
     if "pipeline" in categories or "dvc" in categories:
+        # If a run is in progress it holds the DVC lock, so computing the full
+        # status would just error out (and would mutate files like dvc.yaml or
+        # notebooks mid-run). Report the running stage from the run log instead.
+        running_status = _get_running_pipeline_status()
+    if running_status is None and (
+        "pipeline" in categories or "dvc" in categories
+    ):
         # Sync zips so the zip files reflect current workspace state before
         # reporting status
         calkit.dvc.zip.sync_all(direction="to-zip")
@@ -501,7 +509,9 @@ def get_status(
             except Exception as e:
                 status_dict["dvc"] = {"error": f"{e.__class__.__name__}: {e}"}
         if "pipeline" in categories or "dvc" in categories:
-            if pipeline_status is None:
+            if running_status is not None:
+                status_dict["pipeline"] = running_status
+            elif pipeline_status is None:
                 status_dict["pipeline"] = None
             else:
                 status_dict["pipeline"] = pipeline_status.model_dump(
@@ -550,6 +560,9 @@ def get_status(
             typer.echo(_format_dvc_data_status(raw, zip_path_map))
     if "pipeline" in categories or "dvc" in categories:
         print_sep("Pipeline")
+        if running_status is not None:
+            _print_running_pipeline_status(running_status)
+            return
         # Nicely format the results from pipeline status
         if pipeline_status and pipeline_status.errors:
             warn("Pipeline status unavailable due to errors:")
@@ -1344,6 +1357,104 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
     return res
 
 
+def _get_latest_run_log_content() -> str | None:
+    """Return the contents of the most recent run log, or ``None``.
+
+    Looks in the private ``.calkit/local/logs`` directory (always written)
+    and the tracked ``.calkit/logs`` directory, choosing the most recently
+    modified ``.log`` file across both.
+    """
+    candidates = []
+    for d in [
+        os.path.join(".calkit", "local", "logs"),
+        os.path.join(".calkit", "logs"),
+    ]:
+        if os.path.isdir(d):
+            candidates += [
+                os.path.join(d, f) for f in os.listdir(d) if f.endswith(".log")
+            ]
+    if not candidates:
+        return None
+    latest = max(candidates, key=os.path.getmtime)
+    try:
+        with open(latest) as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _format_run_elapsed(start_iso: str) -> str:
+    """Format the time elapsed since ``start_iso`` (a UTC ISO timestamp)."""
+    try:
+        start = datetime.fromisoformat(start_iso)
+    except ValueError:
+        return "?"
+    total = int((calkit.utcnow(remove_tz=True) - start).total_seconds())
+    total = max(total, 0)
+    hours, rem = divmod(total, 3600)
+    minutes, seconds = divmod(rem, 60)
+    if hours:
+        return f"{hours}h{minutes}m{seconds}s"
+    if minutes:
+        return f"{minutes}m{seconds}s"
+    return f"{seconds}s"
+
+
+def _get_running_pipeline_status() -> dict | None:
+    """Return live pipeline run progress, or ``None`` if no run is running.
+
+    A run is in progress when a live process holds DVC's rwlock. The most
+    recent run log is then parsed to report which stages have finished and
+    which is currently running.
+    """
+    processes = calkit.dvc.get_running_pipeline_processes()
+    if not processes:
+        return None
+    content = _get_latest_run_log_content()
+    stages = (
+        _stage_run_info_from_log_content(content)
+        if content is not None
+        else {}
+    )
+    running_stages = [
+        name for name, info in stages.items() if "status" not in info
+    ]
+    return {
+        "running": True,
+        "processes": processes,
+        "stages": stages,
+        "running_stages": running_stages,
+    }
+
+
+def _print_running_pipeline_status(running_status: dict) -> None:
+    """Print a human-readable summary of an in-progress pipeline run."""
+    processes = running_status["processes"]
+    pids = ", ".join(str(p["pid"]) for p in processes)
+    typer.echo(f"Run in progress (PID {pids})")
+    stages = running_status["stages"]
+    finished = [
+        name
+        for name, info in stages.items()
+        if info.get("status") in ("completed", "skipped")
+    ]
+    running_stages = running_status["running_stages"]
+    if finished:
+        typer.echo(f"  completed: {', '.join(finished)}")
+    if running_stages:
+        for name in running_stages:
+            start = stages.get(name, {}).get("start_time")
+            label = typer.style(name, fg="green")
+            if start:
+                typer.echo(
+                    f"  running:   {label} ({_format_run_elapsed(start)})"
+                )
+            else:
+                typer.echo(f"  running:   {label}")
+    elif not finished:
+        typer.echo("  starting up...")
+
+
 def _concurrent_scheduler_prepass(
     ck_info: dict,
     targets: list[str],
@@ -1862,19 +1973,22 @@ def run(
     start_time_no_tz = calkit.utcnow(remove_tz=True)
     start_time = calkit.utcnow(remove_tz=False)
     run_id = uuid.uuid4().hex
-    # Always log output, but only save systems/run data if specified
-    log_fpath = os.path.join(
-        ".calkit",
-        "logs",
+    log_fname = (
         start_time_no_tz.isoformat(timespec="seconds").replace(":", "-")
         + "-"
         + run_id
-        + ".log",
+        + ".log"
     )
+    # Always write the run log under the gitignored .calkit/local/logs so
+    # `calkit status` can report which stage is running while the pipeline
+    # holds the DVC lock. With --log, the log is additionally saved to the
+    # tracked .calkit/logs directory along with run information.
+    local_logs_dir = os.path.join(calkit.ensure_local_dir(), "logs")
+    os.makedirs(local_logs_dir, exist_ok=True)
+    log_fpath = os.path.join(local_logs_dir, log_fname)
     if verbose:
         typer.echo(f"Starting run ID: {run_id}")
         typer.echo(f"Saving logs to {log_fpath}")
-    os.makedirs(os.path.dirname(log_fpath), exist_ok=True)
     # Create a file handler for dvc.stage.run logger
     file_handler = logging.FileHandler(log_fpath, mode="w")
     file_handler.setLevel(logging.DEBUG)
@@ -1976,8 +2090,12 @@ def run(
         os.makedirs(os.path.dirname(run_info_fpath), exist_ok=True)
         with open(run_info_fpath, "w") as f:
             json.dump(run_info, f, indent=2)
-    else:
-        os.remove(log_fpath)
+        # Also keep the raw log in the tracked .calkit/logs directory
+        saved_log_fpath = os.path.join(".calkit", "logs", log_fname)
+        os.makedirs(os.path.dirname(saved_log_fpath), exist_ok=True)
+        shutil.copy2(log_fpath, saved_log_fpath)
+    # The private log under .calkit/local/logs is retained either way so the
+    # last run's status stays inspectable; it is gitignored.
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
     if failed:
         raise_error("Pipeline failed")

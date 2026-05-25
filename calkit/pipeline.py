@@ -751,7 +751,7 @@ def get_status(
                 )
             # DVC reports subproject stage paths relative to the repo root
             # (e.g., "sub1/out.txt"), but calkit.yaml stores them relative to
-            # the subproject dir ("out.txt").  Prefix with the subproject path
+            # the subproject dir ("out.txt"). Prefix with the subproject path
             # so configured_outputs matches DVC's reported paths.
             raw_outputs = [
                 output.get("path", str(output))
@@ -1239,7 +1239,7 @@ def get_matrix_item_targets(
 
     repo = calkit.dvc.get_dvc_repo(wdir)
     prefix = stage_name + "@"
-    items = [s for s in repo.index.stages if (s.name or "").startswith(prefix)]
+    items = [s for s in repo.index.stages if (s.name or "").startswith(prefix)] # type: ignore
     item_set = set(items)
     upstreams: set = set()
     for item in items:

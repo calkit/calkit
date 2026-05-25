@@ -614,3 +614,22 @@ def hash_path(path: str) -> dict:
         return hash_file(path)
     else:
         raise ValueError(f"Path does not exist: {path}")
+
+
+def data_status_as_posix(data_status: dict) -> dict:
+    """Convert all paths in DVC data status to posix format.
+
+    We skip the ``git`` entry since Git already formats as posix.
+    """
+    data_status_fmt = {}
+    for cat, obj in data_status.items():
+        if cat == "git":
+            data_status_fmt[cat] = obj
+        if isinstance(obj, list):
+            data_status_fmt[cat] = [str(Path(p).as_posix()) for p in obj]
+        elif isinstance(obj, dict):
+            obj_fmt = {}
+            for cat2, obj_i in obj.items():
+                obj_fmt[cat2] = [str(Path(p).as_posix()) for p in obj_i]
+            data_status_fmt[cat] = obj_fmt
+    return data_status_fmt

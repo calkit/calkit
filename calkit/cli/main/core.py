@@ -505,21 +505,9 @@ def get_status(
                 data_status = dvc_repo.data_status()
                 if isinstance(data_status, dict):
                     data_status.pop("git", None)
-                # Convert paths to posix format
-                data_status_fmt = {}
-                for cat, obj in data_status.items():
-                    if isinstance(obj, list):
-                        data_status_fmt[cat] = [
-                            str(Path(p).as_posix()) for p in obj
-                        ]
-                    elif isinstance(obj, dict):
-                        obj_fmt = {}
-                        for cat2, obj_i in obj.items():
-                            obj_fmt[cat2] = [
-                                str(Path(p).as_posix()) for p in obj_i
-                            ]
-                        data_status_fmt[cat] = obj_fmt
-                status_dict["dvc"] = data_status_fmt
+                status_dict["dvc"] = calkit.dvc.data_status_as_posix(
+                    data_status
+                )
             except Exception as e:
                 status_dict["dvc"] = {"error": f"{e.__class__.__name__}: {e}"}
         if "pipeline" in categories or "dvc" in categories:
@@ -571,6 +559,7 @@ def get_status(
             dvc_repo = calkit.dvc.get_dvc_repo()
             raw = dict(dvc_repo.data_status())
             raw.pop("git", None)
+            raw = calkit.dvc.data_status_as_posix(raw)
             typer.echo(_format_dvc_data_status(raw, zip_path_map))
     if "pipeline" in categories or "dvc" in categories:
         print_sep("Pipeline")

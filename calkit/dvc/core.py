@@ -633,3 +633,23 @@ def data_status_as_posix(data_status: dict) -> dict:
                 obj_fmt[cat2] = [str(Path(p).as_posix()) for p in obj_i]
             data_status_fmt[cat] = obj_fmt
     return data_status_fmt
+
+
+def status_as_posix(status: dict) -> dict:
+    """Convert all paths in repo status to posix format."""
+    status_fmt = {}
+    for stage_name, st_list in status.items():
+        st_list_fmt = []
+        for st_dict in st_list:
+            if isinstance(st_dict, str):
+                st_list_fmt.append(st_dict)
+                continue
+            st_dict_fmt = {}
+            for st_cat, path_st_dict in st_dict.items():
+                path_st_dict_fmt = {}
+                for p, st in path_st_dict.items():
+                    path_st_dict_fmt[Path(p).as_posix()] = st
+                st_dict_fmt[st_cat] = path_st_dict_fmt
+            st_list_fmt.append(st_dict_fmt)
+        status_fmt[stage_name] = st_list_fmt
+    return status_fmt

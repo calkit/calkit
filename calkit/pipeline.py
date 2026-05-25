@@ -598,6 +598,7 @@ def get_status(
             dvc_status_logger.addFilter(frozen_filter)
             try:
                 raw_status = dvc_repo.status(targets=targets)
+                raw_status = calkit.dvc.status_as_posix(raw_status)
             finally:
                 dvc_status_logger.removeFilter(frozen_filter)
         except Exception as e:
@@ -636,6 +637,7 @@ def get_status(
             try:
                 sp_dvc_repo = calkit.dvc.get_dvc_repo(sp)
                 sp_raw_status = sp_dvc_repo.status()
+                sp_raw_status = calkit.dvc.status_as_posix(raw_status)
             except Exception:
                 sp_raw_status = {}
             if sp_raw_status:

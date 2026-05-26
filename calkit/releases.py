@@ -164,7 +164,7 @@ def ls_files() -> list[str]:
             for filename in files:
                 fpath = os.path.join(root, filename)
                 if os.path.isfile(fpath):
-                    cache_files.append(fpath)
+                    cache_files.append(Path(fpath).as_posix())
     # Include files from unzipped dvc-zip workspace folders, which are
     # ignored by both Git and DVC and would otherwise be missing from the
     # release archive
@@ -185,7 +185,7 @@ def ls_files() -> list[str]:
                     abs_fpath = Path(root) / filename
                     if abs_fpath.is_file():
                         dvc_zip_files.append(
-                            str(abs_fpath.relative_to(repo_root))
+                            abs_fpath.relative_to(repo_root).as_posix()
                         )
         elif abs_workspace.exists():
             raise ValueError(

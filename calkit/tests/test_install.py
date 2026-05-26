@@ -4,12 +4,23 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from unittest import mock
 
 import pytest
 
 import calkit
 from calkit import install
+
+# These tests fabricate a unix-shebang shell script as a fake installed binary
+# and rely on shutil.which finding it without a Windows extension; that does
+# not translate to Windows, where PATHEXT lookup needs .exe/.bat/.cmd. The
+# behavior under test is platform-independent — only the test fixtures need a
+# Windows port.
+skipif_windows_fake_binary = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: port fake-binary fixture to Windows (needs .bat/.cmd)",
+)
 
 
 @pytest.fixture
@@ -47,6 +58,7 @@ def test_get_installer():
     assert "powershell" in win_entry["script"].lower()
 
 
+@skipif_windows_fake_binary
 def test_install_and_path_injection(tmp_dir, monkeypatch):
     # Simulate a successful installer that drops a binary into a known
     # directory; ``install()`` should prepend that directory to PATH and
@@ -104,6 +116,7 @@ def test_prompt_and_install(monkeypatch):
     assert install.prompt_and_install("nope", interactive=True) is False
 
 
+@skipif_windows_fake_binary
 def test_check_system_deps_orders_and_auto_installs(tmp_dir, monkeypatch):
     # Mixed-order deps: a setup step listed first, an env-var, and an
     # app. Verify the env-var is prompted first, then the missing app is

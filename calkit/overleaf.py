@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import warnings
 from copy import deepcopy
 from functools import cached_property
@@ -23,7 +24,9 @@ def get_git_remote_url(project_id: str, token: str) -> str:
     If running against a test environment, this will use a local directory.
     """
     if calkit.config.get_env() == "test":
-        return os.path.join("/tmp", "overleaf", project_id)
+        return (
+            Path(tempfile.gettempdir()) / "overleaf" / project_id
+        ).as_posix()
     return f"https://git:{token}@git.overleaf.com/{project_id}"
 
 

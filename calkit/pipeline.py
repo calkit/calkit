@@ -245,18 +245,15 @@ class StaleStage(BaseModel):
         # parent-relative.  Use normpath to collapse any "../" segments that
         # arise from cross-subproject deps (e.g. sp + "../shared.txt").
         if path_prefix:
-            modified_inputs = [
-                os.path.normpath(os.path.join(path_prefix, p))
-                for p in modified_inputs
-            ]
-            output_paths = [
-                os.path.normpath(os.path.join(path_prefix, p))
-                for p in output_paths
-            ]
-            modified_outputs = [
-                os.path.normpath(os.path.join(path_prefix, p))
-                for p in modified_outputs
-            ]
+
+            def _prefix(p: str) -> str:
+                return Path(
+                    os.path.normpath(os.path.join(path_prefix, p))
+                ).as_posix()
+
+            modified_inputs = [_prefix(p) for p in modified_inputs]
+            output_paths = [_prefix(p) for p in output_paths]
+            modified_outputs = [_prefix(p) for p in modified_outputs]
         configured_outputs = [str(path) for path in (configured_outputs or [])]
         stale_outputs = []
         if modified_inputs or modified_command:

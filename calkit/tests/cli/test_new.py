@@ -3,6 +3,7 @@
 import os
 import re
 import subprocess
+import sys
 
 import git
 import pytest
@@ -622,6 +623,10 @@ def test_new_matlab_script_stage(tmp_dir):
     ]
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
+)
 def test_new_julia_env(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(

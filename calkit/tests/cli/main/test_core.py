@@ -824,6 +824,9 @@ def test_run(tmp_dir):
     repo.git.checkout("HEAD^")
     out = subprocess.check_output(["calkit", "run"], text=True)
     # Test that we can run a Julia script
+    if sys.platform == "win32":
+        # TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)
+        pytest.skip("Julia portion of test_run not yet supported on Windows")
     with open("julia_script.jl", "w") as f:
         f.write('println("Hello from julia_script.jl")')
     subprocess.check_call(

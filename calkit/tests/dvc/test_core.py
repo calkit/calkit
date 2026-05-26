@@ -245,3 +245,57 @@ def test_set_remote_auth_ck_remote_clears_local_http_auth(
     assert "custom_auth_header" not in section
     assert "password" not in section
     assert section["url"] == "https://example.com"  # type: ignore
+
+
+def test_data_status_as_posix():
+    # Path.as_posix() only converts backslashes on Windows (where they're the
+    # path separator), so we test structure preservation, regression cases, and
+    # that posix inputs round-trip unchanged.
+    data_status = {
+        "git": {"is_dirty": True, "untracked": ["sub/file.txt"]},
+        "uncommitted": {
+            "added": ["data/a.csv"],
+            "modified": ["data/b.csv"],
+            "renamed": [{"old": "data/old.csv", "new": "data/new.csv"}],
+        },
+        "not_in_remote": ["figs/a.png", "figs/b.png"],
+        "scalar": "ignored",
+    }
+    out = calkit.dvc.data_status_as_posix(data_status)
+    # Git entry passes through untouched (no normalization applied).
+    assert out["git"] == {"is_dirty": True, "untracked": ["sub/file.txt"]}
+    # Top-level list of paths preserved.
+    assert out["not_in_remote"] == ["figs/a.png", "figs/b.png"]
+    # Nested dict of lists preserved.
+    assert out["uncommitted"]["added"] == ["data/a.csv"]
+    assert out["uncommitted"]["modified"] == ["data/b.csv"]
+    # Renamed entries are dicts — must not crash and must preserve old/new.
+    assert out["uncommitted"]["renamed"] == [
+        {"old": "data/old.csv", "new": "data/new.csv"}
+    ]
+    # Unknown scalar values pass through.
+    assert out["scalar"] == "ignored"
+
+
+def test_status_as_posix():
+    # Stages with: bare-string entries, normal path/status dicts, and scalar
+    # category values like "changed command" (which must not crash).
+    status = {
+        "stage1": ["always changed"],
+        "stage2": [
+            {
+                "changed outs": {"data/out.csv": "modified"},
+                "changed deps": {"src/foo.py": "modified"},
+            }
+        ],
+        "stage3": [{"changed command": "python src/new-script.py"}],
+    }
+    out = calkit.dvc.status_as_posix(status)
+    assert out["stage1"] == ["always changed"]
+    assert out["stage2"] == [
+        {
+            "changed outs": {"data/out.csv": "modified"},
+            "changed deps": {"src/foo.py": "modified"},
+        }
+    ]
+    assert out["stage3"] == [{"changed command": "python src/new-script.py"}]

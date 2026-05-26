@@ -637,7 +637,7 @@ def get_status(
             try:
                 sp_dvc_repo = calkit.dvc.get_dvc_repo(sp)
                 sp_raw_status = sp_dvc_repo.status()
-                sp_raw_status = calkit.dvc.status_as_posix(raw_status)
+                sp_raw_status = calkit.dvc.status_as_posix(sp_raw_status)
             except Exception:
                 sp_raw_status = {}
             if sp_raw_status:

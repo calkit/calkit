@@ -31,6 +31,8 @@ jobs:
           conda-remove-defaults: true
       - name: Setup Pixi
         uses: prefix-dev/setup-pixi@v0.9.6
+        with:
+          run-install: false
       - name: Install Juliaup
         uses: julia-actions/install-juliaup@v2
         with:

@@ -10,6 +10,7 @@ import os
 import re
 import shlex
 import sys
+from pathlib import Path
 from typing import Literal
 
 NotebookLanguage = Literal["python", "julia", "r"]
@@ -421,26 +422,29 @@ def detect_latex_io(tex_path: str) -> dict[str, list[str]]:
     for pattern, pattern_type in patterns:
         matches = re.findall(pattern, content)
         for match in matches:
+
+            def _resolve(name: str) -> str:
+                return Path(
+                    os.path.normpath(os.path.join(tex_dir, name))
+                ).as_posix()
+
             if pattern_type == "bib":
                 files = [f.strip() for f in match.split(",")]
                 for f in files:
                     if not f.endswith(".bib"):
                         f += ".bib"
                     # Resolve relative to the document directory
-                    resolved = os.path.normpath(os.path.join(tex_dir, f))
-                    inputs.append(resolved)
+                    inputs.append(_resolve(f))
             elif pattern_type == "tex":
                 filename = match
                 if not filename.endswith(".tex"):
                     filename += ".tex"
                 # Resolve relative to the document directory
-                resolved = os.path.normpath(os.path.join(tex_dir, filename))
-                inputs.append(resolved)
+                inputs.append(_resolve(filename))
             else:
                 # Include graphics or other files
                 # Resolve relative to the document directory
-                resolved = os.path.normpath(os.path.join(tex_dir, match))
-                inputs.append(resolved)
+                inputs.append(_resolve(match))
     # Filter and deduplicate inputs
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     inputs = list(dict.fromkeys(inputs))
@@ -774,6 +778,9 @@ def _detect_python_code_io(
         except ValueError:
             # If paths are on different drives (Windows), use normalized path
             rel_path = full_path
+        # Always emit posix separators so downstream comparisons are stable
+        # across platforms.
+        rel_path = Path(rel_path).as_posix()
         # Strip leading ../ for paths outside project root
         while rel_path.startswith("../"):
             rel_path = rel_path[3:]

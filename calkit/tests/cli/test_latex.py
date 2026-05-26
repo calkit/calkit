@@ -3,10 +3,16 @@
 import json
 import os
 import subprocess
+import sys
 
+import pytest
 from pypdf import PdfReader
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: LaTeX (texlive) not installed on windows-latest GHA runners",
+)
 def test_from_json(tmp_dir):
     os.makedirs("paper")
     tex_doc_content = r"""

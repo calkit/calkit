@@ -1,8 +1,11 @@
 """Tests for ``calkit.cli.scheduler``."""
 
 import os
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+
+import pytest
 
 from calkit.cli.scheduler import (
     _build_job_command,
@@ -91,6 +94,10 @@ def test_build_job_command():
     )
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: mock scheduler invokes a .sh script directly; not portable to Windows",
+)
 def test_mock_submit_runs_job_locally(tmp_dir, monkeypatch):
     monkeypatch.setenv("CALKIT_MOCK_SCHEDULER", "1")
     with open("job.sh", "w") as f:

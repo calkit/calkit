@@ -13,9 +13,6 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
-    defaults:
-      run:
-        shell: bash -el {0}
     steps:
       - uses: actions/checkout@v4
       - name: Configure Git Credentials
@@ -49,7 +46,6 @@ jobs:
           r-version: latest
       - name: Run tests
         run: |
-          source ~/.bashrc
           pixi --version
           conda --version
           docker --version || true

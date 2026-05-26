@@ -47,8 +47,8 @@ def get_julia_packages_dir() -> str:
     depot_env = os.getenv("JULIA_DEPOT_PATH", "")
     first_depot = depot_env.split(os.pathsep)[0].strip() if depot_env else ""
     if not first_depot:
-        first_depot = (Path("~") / ".julia").as_posix()
-    return (Path(os.path.expanduser(first_depot)) / "packages").as_posix()
+        first_depot = os.path.join("~", ".julia")
+    return os.path.join(os.path.expanduser(first_depot), "packages")
 
 
 def _calc_dir_sig_shallow(path: str, max_depth: int = 1) -> str:
@@ -96,10 +96,10 @@ def calc_julia_depot_sig() -> str | None:
     depot_root = os.path.dirname(packages_dir)
     packages_sig = _calc_dir_sig_shallow(packages_dir, max_depth=1)
     artifacts_sig = _calc_dir_sig_shallow(
-        (Path(depot_root) / "artifacts").as_posix(), max_depth=1
+        os.path.join(depot_root, "artifacts"), max_depth=1
     )
     registries_sig = _calc_dir_sig_shallow(
-        (Path(depot_root) / "registries").as_posix(), max_depth=1
+        os.path.join(depot_root, "registries"), max_depth=1
     )
     if not any([packages_sig, artifacts_sig, registries_sig]):
         return None
@@ -156,9 +156,9 @@ def _get_julia_version() -> str:
 
 
 def get_env_lock_dir(wdir: str | None = None) -> str:
-    env_lock_dir = (Path(".calkit") / "env-locks").as_posix()
+    env_lock_dir = os.path.join(".calkit", "env-locks")
     if wdir is not None:
-        env_lock_dir = (Path(wdir) / env_lock_dir).as_posix()
+        env_lock_dir = os.path.join(wdir, env_lock_dir)
     return env_lock_dir
 
 
@@ -216,10 +216,9 @@ def get_all_docker_lock_fpaths(
     legacy handling is performed separately.
     """
     env_lock_dir = get_env_lock_dir(wdir=wdir)
-    docker_dir = (Path(env_lock_dir) / env_name).as_posix()
+    docker_dir = os.path.join(env_lock_dir, env_name)
     fpaths = [
-        (Path(docker_dir) / (arch + ".json")).as_posix()
-        for arch in DOCKER_ARCHS
+        os.path.join(docker_dir, arch + ".json") for arch in DOCKER_ARCHS
     ]
     if as_posix:
         fpaths = [Path(p).as_posix() for p in fpaths]
@@ -235,10 +234,9 @@ def get_all_conda_lock_fpaths(
     architecture.
     """
     env_lock_dir = get_env_lock_dir(wdir=wdir)
-    env_lock_dir = (Path(env_lock_dir) / env_name).as_posix()
+    env_lock_dir = os.path.join(env_lock_dir, env_name)
     fpaths = [
-        (Path(env_lock_dir) / (arch + ".yml")).as_posix()
-        for arch in CONDA_VENV_ARCHS
+        os.path.join(env_lock_dir, arch + ".yml") for arch in CONDA_VENV_ARCHS
     ]
     if as_posix:
         fpaths = [Path(p).as_posix() for p in fpaths]
@@ -254,10 +252,9 @@ def get_all_venv_lock_fpaths(
     architecture.
     """
     env_lock_dir = get_env_lock_dir(wdir=wdir)
-    venv_dir = (Path(env_lock_dir) / env_name).as_posix()
+    venv_dir = os.path.join(env_lock_dir, env_name)
     fpaths = [
-        (Path(venv_dir) / (arch + ".txt")).as_posix()
-        for arch in CONDA_VENV_ARCHS
+        os.path.join(venv_dir, arch + ".txt") for arch in CONDA_VENV_ARCHS
     ]
     if as_posix:
         fpaths = [Path(p).as_posix() for p in fpaths]
@@ -274,15 +271,15 @@ def _get_julia_manifest_fpath(
     We prefer the versioned file when it exists.
     """
     base_dir = env_dir or "."
-    full_dir = (Path(wdir) / base_dir).as_posix() if wdir else base_dir
+    full_dir = os.path.join(wdir, base_dir) if wdir else base_dir
     if julia_version:
         parts = julia_version.split(".")
         if len(parts) >= 2:
             major_minor = f"{parts[0]}.{parts[1]}"
             versioned_name = f"Manifest-v{major_minor}.toml"
-            if os.path.isfile((Path(full_dir) / versioned_name).as_posix()):
-                return (Path(base_dir) / versioned_name).as_posix()
-    return (Path(base_dir) / "Manifest.toml").as_posix()
+            if os.path.isfile(os.path.join(full_dir, versioned_name)):
+                return os.path.join(base_dir, versioned_name)
+    return os.path.join(base_dir, "Manifest.toml")
 
 
 def get_env_lock_fpath(
@@ -301,42 +298,42 @@ def get_env_lock_fpath(
     """
     env_lock_dir = get_env_lock_dir(wdir=wdir)
     env_kind = env.get("kind")
-    lock_fpath = (Path(env_lock_dir) / env_name).as_posix()
+    lock_fpath = os.path.join(env_lock_dir, env_name)
     if env_kind == "docker":
         if legacy:
             lock_fpath += ".json"
         else:
-            lock_fpath = (
-                Path(env_lock_dir) / env_name / (_docker_platform() + ".json")
-            ).as_posix()
+            lock_fpath = os.path.join(
+                env_lock_dir, env_name, _docker_platform() + ".json"
+            )
             if for_dvc:
                 lock_fpath = os.path.dirname(lock_fpath)
     elif env_kind == "uv":
         env_dir = os.path.dirname(env.get("path", ""))
         if env_dir:
-            lock_fpath = (Path(env_dir) / "uv.lock").as_posix()
+            lock_fpath = os.path.join(env_dir, "uv.lock")
         else:
             lock_fpath = "uv.lock"
     elif env_kind in ["venv", "uv-venv"]:
         if legacy:
             lock_fpath += ".txt"
         else:
-            lock_fpath = (
-                Path(env_lock_dir)
-                / env_name
-                / (_conda_venv_platform() + ".txt")
-            ).as_posix()
+            lock_fpath = os.path.join(
+                env_lock_dir,
+                env_name,
+                _conda_venv_platform() + ".txt",
+            )
             if for_dvc:
                 lock_fpath = os.path.dirname(lock_fpath)
     elif env_kind == "conda":
         if legacy:
             lock_fpath += ".yml"
         else:
-            lock_fpath = (
-                Path(env_lock_dir)
-                / env_name
-                / (_conda_venv_platform() + ".yml")
-            ).as_posix()
+            lock_fpath = os.path.join(
+                env_lock_dir,
+                env_name,
+                _conda_venv_platform() + ".yml",
+            )
             if for_dvc:
                 lock_fpath = os.path.dirname(lock_fpath)
     elif env_kind == "matlab":
@@ -369,7 +366,7 @@ def get_env_lock_fpath(
             )
         # Replace DESCRIPTION with renv.lock
         env_dir = os.path.dirname(env_path)
-        lock_fpath = (Path(env_dir) / "renv.lock").as_posix()
+        lock_fpath = os.path.join(env_dir, "renv.lock")
     elif env_kind == "nix":
         env_path = env.get("path")
         if env_path is None:
@@ -383,14 +380,14 @@ def get_env_lock_fpath(
             )
         # flake.lock is generated by ``nix flake lock`` next to flake.nix.
         env_dir = os.path.dirname(env_path)
-        lock_fpath = (Path(env_dir) / "flake.lock").as_posix()
+        lock_fpath = os.path.join(env_dir, "flake.lock")
     elif env_kind in ("slurm", "pbs"):
         # Job-scheduler envs have no external dependency manifest, so the
         # "lock" is just a JSON dump of the env config. The file is
         # written by ``write_scheduler_env_lock`` during environment
         # checks (e.g., ``calkit check env``) and stage compilation
         # references it as a DVC dep so changes invalidate cached runs.
-        lock_fpath = (Path(env_lock_dir) / env_name / "info.json").as_posix()
+        lock_fpath = os.path.join(env_lock_dir, env_name, "info.json")
         if for_dvc:
             lock_fpath = os.path.dirname(lock_fpath)
     else:
@@ -435,9 +432,7 @@ def write_scheduler_env_lock(
     if lock_fpath is None:
         return None
     full_path = (
-        (Path(wdir) / lock_fpath).as_posix()
-        if wdir is not None
-        else lock_fpath
+        os.path.join(wdir, lock_fpath) if wdir is not None else lock_fpath
     )
     parent = os.path.dirname(full_path)
     if parent:
@@ -454,13 +449,11 @@ def write_scheduler_env_lock(
 
 
 def get_cache_db(name="cache") -> SqliteDict:
-    env_check_cache_dir = (
-        Path(os.path.expanduser("~")) / ".calkit" / "env-checks"
-    ).as_posix()
+    env_check_cache_dir = os.path.join(
+        os.path.expanduser("~"), ".calkit", "env-checks"
+    )
     os.makedirs(env_check_cache_dir, exist_ok=True)
-    env_check_cache_path = (
-        Path(env_check_cache_dir) / f"{name}.sqlite"
-    ).as_posix()
+    env_check_cache_path = os.path.join(env_check_cache_dir, f"{name}.sqlite")
     return SqliteDict(env_check_cache_path)
 
 
@@ -532,13 +525,13 @@ def calc_data_for_env(
     env_path = env.get("path", "")
     env_path_hash = None
     if env_path:
-        env_path_full = (Path(wdir) / env_path).as_posix()
+        env_path_full = os.path.join(wdir, env_path)
         if os.path.isfile(env_path_full):
             env_path_hash = calkit.get_md5(env_path_full)
     env_prefix = env.get("prefix", "")
     env_prefix_hash = None
     if env_prefix:
-        env_prefix_full = (Path(wdir) / env_prefix).as_posix()
+        env_prefix_full = os.path.join(wdir, env_prefix)
         if os.path.exists(env_prefix_full):
             env_prefix_hash = get_cached_md5(env_prefix_full)
         else:
@@ -549,7 +542,7 @@ def calc_data_for_env(
     env_lock_hash = None
     env_lock_fpath = get_env_lock_fpath(env_name=env_name, env=env, wdir=wdir)
     if env_lock_fpath is not None:
-        env_lock_full = (Path(wdir) / env_lock_fpath).as_posix()
+        env_lock_full = os.path.join(wdir, env_lock_fpath)
         if os.path.isfile(env_lock_full):
             env_lock_hash = calkit.get_md5(env_lock_full)
     return {
@@ -852,9 +845,9 @@ def env_from_name_or_path(
                     "kind": "uv-venv",
                     "path": env_path,
                     "python": DEFAULT_PYTHON_VERSION,
-                    "prefix": (
-                        Path(os.path.split(env_path)[0]) / ".venv"
-                    ).as_posix(),
+                    "prefix": os.path.join(
+                        os.path.split(env_path)[0], ".venv"
+                    ),
                 },
                 exists=False,
             )
@@ -1862,9 +1855,7 @@ def detect_env_for_stage(
         }
         for spec_path in spec_candidates.get(stage_language, []):
             if "*" in spec_path:
-                matches = sorted(
-                    Path(m).as_posix() for m in glob.glob(spec_path)
-                )
+                matches = sorted(glob.glob(spec_path))
                 if matches:
                     spec_path = matches[0]
                 else:

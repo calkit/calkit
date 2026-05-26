@@ -158,11 +158,11 @@ def ls_files() -> list[str]:
     git_files = repo.git.ls_files(".", recurse_submodules=True).splitlines()
     dvc_files = calkit.dvc.list_paths(recursive=True)
     cache_files: list[str] = []
-    cache_root = (Path(".dvc") / "cache").as_posix()
+    cache_root = os.path.join(".dvc", "cache")
     if os.path.isdir(cache_root):
         for root, _, files in os.walk(cache_root):
             for filename in files:
-                fpath = (Path(root) / filename).as_posix()
+                fpath = os.path.join(root, filename)
                 if os.path.isfile(fpath):
                     cache_files.append(Path(fpath).as_posix())
     # Include files from unzipped dvc-zip workspace folders, which are
@@ -230,7 +230,7 @@ def zip_paths(zip_path: str, paths: list[str]) -> None:
             if os.path.isdir(path):
                 for root, _, files in os.walk(path):
                     for filename in files:
-                        fpath = (Path(root) / filename).as_posix()
+                        fpath = os.path.join(root, filename)
                         zipf.write(fpath)
             elif os.path.isfile(path):
                 zipf.write(path)
@@ -268,7 +268,7 @@ def check_project_release_archive(
             zipf.extractall(tmpdir)
         ck_info = calkit.load_calkit_info(wdir=tmpdir)
         has_pipeline = bool(ck_info.get("pipeline")) or os.path.isfile(
-            (Path(tmpdir) / "dvc.yaml").as_posix()
+            os.path.join(tmpdir, "dvc.yaml")
         )
         if not has_pipeline:
             return

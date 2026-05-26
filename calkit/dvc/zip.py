@@ -47,14 +47,14 @@ ZIP_USE_SYSTEM_CLI = False
 
 
 def _local_dir(wdir: str | None = None) -> str:
-    return (Path(wdir) / LOCAL_DIR).as_posix() if wdir else LOCAL_DIR
+    return os.path.join(wdir, LOCAL_DIR) if wdir else LOCAL_DIR
 
 
 def _check_local_dir(wdir: str | None = None) -> Path:
     local_dir = _local_dir(wdir)
     if not os.path.isdir(local_dir):
         os.makedirs(local_dir, exist_ok=True)
-    gitignore_path = (Path(local_dir) / ".gitignore").as_posix()
+    gitignore_path = os.path.join(local_dir, ".gitignore")
     if not os.path.isfile(gitignore_path):
         with open(gitignore_path, "w") as f:
             f.write("*\n")
@@ -75,9 +75,7 @@ def is_zip_candidate(path: str) -> bool:
     for foldername, _, filenames in os.walk(path):
         for filename in filenames:
             file_count += 1
-            total_size += os.stat(
-                (Path(foldername) / filename).as_posix()
-            ).st_size
+            total_size += os.stat(os.path.join(foldername, filename)).st_size
     if (
         file_count < ZIP_CANDIDATE_MIN_FILE_COUNT
         or total_size <= DVC_SIZE_THRESH_BYTES
@@ -115,11 +113,11 @@ class SyncRecord(BaseModel):
 
 def make_zip_path(workspace_path: str) -> str:
     """Make a zip path for a given workspace path."""
-    return (Path(ZIPS_DIR) / "files" / (workspace_path + ".zip")).as_posix()
+    return os.path.join(ZIPS_DIR, "files", workspace_path + ".zip")
 
 
 def _path_map_path(wdir: str | None = None) -> str:
-    return (Path(wdir) / PATH_MAP_PATH).as_posix() if wdir else PATH_MAP_PATH
+    return os.path.join(wdir, PATH_MAP_PATH) if wdir else PATH_MAP_PATH
 
 
 def get_zip_path_map(wdir: str | None = None) -> dict[str, str]:
@@ -207,7 +205,7 @@ def calc_dir_sig(path: str) -> str:
     latest_mtime = 0
     for foldername, _, filenames in os.walk(path):
         for filename in filenames:
-            fpath = (Path(foldername) / filename).as_posix()
+            fpath = os.path.join(foldername, filename)
             try:
                 st = os.stat(fpath)
             except OSError:
@@ -232,7 +230,7 @@ def get_hash(path: str, alg="md5", wdir: str | None = None) -> str | None:
     size = st.st_size
     dir_sig = calc_dir_sig(path)
     hash_cache_path = (
-        (Path(wdir) / HASH_CACHE_PATH).as_posix() if wdir else HASH_CACHE_PATH
+        os.path.join(wdir, HASH_CACHE_PATH) if wdir else HASH_CACHE_PATH
     )
     with SqliteDict(hash_cache_path) as cache:
         record = None
@@ -266,11 +264,7 @@ def get_hash(path: str, alg="md5", wdir: str | None = None) -> str | None:
 
 
 def _sync_records_path(wdir: str | None = None) -> str:
-    return (
-        (Path(wdir) / SYNC_RECORDS_PATH).as_posix()
-        if wdir
-        else SYNC_RECORDS_PATH
-    )
+    return os.path.join(wdir, SYNC_RECORDS_PATH) if wdir else SYNC_RECORDS_PATH
 
 
 def get_sync_record(
@@ -278,9 +272,8 @@ def get_sync_record(
 ) -> SyncRecord | None:
     """Get a sync record for a given workspace path."""
     _check_local_dir(wdir)
-    key = Path(workspace_path).as_posix()
     with SqliteDict(_sync_records_path(wdir)) as db:
-        raw = db.get(key)
+        raw = db.get(workspace_path)
     if raw is not None:
         return SyncRecord.model_validate(raw)
     return None
@@ -289,19 +282,17 @@ def get_sync_record(
 def write_sync_record(record: SyncRecord, wdir: str | None = None):
     """Write a sync record."""
     _check_local_dir(wdir)
-    key = Path(record.workspace_path).as_posix()
     with SqliteDict(_sync_records_path(wdir)) as db:
-        db[key] = record.model_dump()
+        db[record.workspace_path] = record.model_dump()
         db.commit()
 
 
 def delete_sync_record(workspace_path: str, wdir: str | None = None):
     """Delete a sync record."""
     _check_local_dir(wdir)
-    key = Path(workspace_path).as_posix()
     with SqliteDict(_sync_records_path(wdir)) as db:
-        if key in db:
-            del db[key]
+        if workspace_path in db:
+            del db[workspace_path]
             db.commit()
 
 
@@ -349,7 +340,7 @@ def _should_use_system_zip_cli() -> bool:
 def _iter_files(path: str):
     for foldername, _, filenames in os.walk(path):
         for filename in filenames:
-            yield (Path(foldername) / filename).as_posix()
+            yield os.path.join(foldername, filename)
 
 
 def zip_(workspace_path: str, zip_path: str):
@@ -408,7 +399,7 @@ def unzip(workspace_path: str, zip_path: str):
         members = zip_file.infolist()
         for member in tqdm(members, desc="Unzipping", unit="file"):
             target = os.path.normpath(
-                (Path(workspace_abs) / member.filename).as_posix()
+                os.path.join(workspace_abs, member.filename)
             )
             if not os.path.realpath(target).startswith(workspace_abs + os.sep):
                 raise ValueError(
@@ -472,9 +463,9 @@ def sync_one(
 ) -> SyncRecord | None:
     """Process a single zip."""
     if wdir:
-        workspace_path = (Path(wdir) / workspace_path).as_posix()
+        workspace_path = os.path.join(wdir, workspace_path)
         if zip_path is not None:
-            zip_path = (Path(wdir) / zip_path).as_posix()
+            zip_path = os.path.join(wdir, zip_path)
     return _sync_one(workspace_path, zip_path, direction, wdir=wdir)
 
 

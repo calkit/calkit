@@ -79,27 +79,21 @@ def _find_exe(exe_name: str) -> str | None:
         expanded_dir = os.path.expanduser(base_dir)
         # Windows locations (Library/bin for .BAT files, Scripts for .exe)
         possible_locations.append(
-            (
-                Path(expanded_dir) / "Library" / "bin" / f"{exe_name}.BAT"
-            ).as_posix()
+            os.path.join(expanded_dir, "Library", "bin", f"{exe_name}.BAT")
         )
         possible_locations.append(
-            (
-                Path(expanded_dir) / "Library" / "bin" / f"{exe_name}.exe"
-            ).as_posix()
+            os.path.join(expanded_dir, "Library", "bin", f"{exe_name}.exe")
         )
         possible_locations.append(
-            (Path(expanded_dir) / "Scripts" / f"{exe_name}.exe").as_posix()
+            os.path.join(expanded_dir, "Scripts", f"{exe_name}.exe")
         )
         possible_locations.append(
-            (Path(expanded_dir) / "Scripts" / f"{exe_name}.BAT").as_posix()
+            os.path.join(expanded_dir, "Scripts", f"{exe_name}.BAT")
         )
         # Unix locations
+        possible_locations.append(os.path.join(expanded_dir, "bin", exe_name))
         possible_locations.append(
-            (Path(expanded_dir) / "bin" / exe_name).as_posix()
-        )
-        possible_locations.append(
-            (Path(expanded_dir) / "condabin" / exe_name).as_posix()
+            os.path.join(expanded_dir, "condabin", exe_name)
         )
     for loc in possible_locations:
         if os.path.isfile(loc) and os.access(loc, os.X_OK):
@@ -121,16 +115,16 @@ def _editable_package_name_from_dir(dir_path: str) -> str:
     """Get the package name from a directory containing ``setup.py`` or
     ``pyproject.toml``.
     """
-    if os.path.isfile((Path(dir_path) / "setup.py").as_posix()):
+    if os.path.isfile(os.path.join(dir_path, "setup.py")):
         # Read setup.py to get the package name
-        with open((Path(dir_path) / "setup.py").as_posix()) as f:
+        with open(os.path.join(dir_path, "setup.py")) as f:
             setup_contents = f.read()
         match = re.search(r"name\s*=\s*['\"]([^'\"]+)['\"]", setup_contents)
         if match:
             return match.group(1)
-    elif os.path.isfile((Path(dir_path) / "pyproject.toml").as_posix()):
+    elif os.path.isfile(os.path.join(dir_path, "pyproject.toml")):
         # Read pyproject.toml to get the package name
-        with open((Path(dir_path) / "pyproject.toml").as_posix()) as f:
+        with open(os.path.join(dir_path, "pyproject.toml")) as f:
             try:
                 pyproject = toml.load(f)
             except Exception as e:
@@ -152,9 +146,9 @@ def _run_pip_freeze(env_prefix: str) -> list[str]:
     This captures git URLs and exact refs that ``conda env export`` drops.
     """
     if sys.platform == "win32":
-        pip_exe = (Path(env_prefix) / "Scripts" / "pip.exe").as_posix()
+        pip_exe = os.path.join(env_prefix, "Scripts", "pip.exe")
     else:
-        pip_exe = (Path(env_prefix) / "bin" / "pip").as_posix()
+        pip_exe = os.path.join(env_prefix, "bin", "pip")
     if not os.path.isfile(pip_exe):
         return []
     output = subprocess.check_output([pip_exe, "freeze"]).decode()
@@ -229,7 +223,7 @@ def _check_single(
             req = req.split("#", 1)[0]
         req = req.strip()
         # Create path relative to env spec dir
-        req = (Path(env_spec_dir) / req).as_posix()
+        req = os.path.join(env_spec_dir, req)
         req = _editable_package_name_from_dir(req)
         editable = True
     # Handle git-based requirements — both legacy "pkg@git+url" and PEP 508
@@ -436,7 +430,7 @@ def check_env(
         raise RuntimeError("Cannot find Conda executable")
     info = json.loads(subprocess.check_output([conda_exe, "info", "--json"]))
     root_prefix = info["root_prefix"]
-    envs_dir = (Path(root_prefix) / "envs").as_posix()
+    envs_dir = os.path.join(root_prefix, "envs")
     mamba_exe = find_mamba_exe()
     if mamba_exe is not None:
         # Use mamba by default because it's faster and produces less output
@@ -462,15 +456,15 @@ def check_env(
     if prefix is not None:
         prefix = os.path.abspath(prefix)
         env_prefix_path = prefix
-        env_check_fpath = (Path(prefix) / "env-export.yml").as_posix()
+        env_check_fpath = os.path.join(prefix, "env-export.yml")
     else:
-        env_prefix_path = (Path(envs_dir) / env_name).as_posix()
-        env_check_fpath = (
-            Path(os.path.expanduser("~"))
-            / ".calkit"
-            / "conda-env-checks"
-            / (env_name + ".yml")
-        ).as_posix()
+        env_prefix_path = os.path.join(envs_dir, env_name)
+        env_check_fpath = os.path.join(
+            os.path.expanduser("~"),
+            ".calkit",
+            "conda-env-checks",
+            env_name + ".yml",
+        )
     env_check_dir = os.path.dirname(env_check_fpath)
     os.makedirs(env_check_dir, exist_ok=True)
     env_spec_dir = os.path.dirname(os.path.abspath(env_fpath))
@@ -744,7 +738,7 @@ def check_env(
                 if "#" in dir_path:
                     dir_path = dir_path.split("#", 1)[0]
                 dir_path = dir_path.strip()
-                dir_path = (Path(env_spec_dir) / dir_path).as_posix()
+                dir_path = os.path.join(env_spec_dir, dir_path)
                 pkg_name = _editable_package_name_from_dir(dir_path)
                 if verbose:
                     log_func(

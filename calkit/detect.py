@@ -113,7 +113,7 @@ def detect_julia_script_io(
     include_matches = re.findall(include_pattern, content)
     for match in include_matches:
         if not os.path.isabs(match):
-            full_path = (Path(script_dir) / match).as_posix()
+            full_path = os.path.join(script_dir, match)
             if os.path.exists(full_path):
                 inputs.append(os.path.relpath(full_path))
             elif _is_valid_project_path(match):
@@ -297,7 +297,7 @@ def _extract_directory_changes(code: str, current_dir: str = ".") -> str:
             chdir_path = chdir_path.strip("'\"")
             if chdir_path:
                 working_dir = os.path.normpath(
-                    (Path(working_dir) / chdir_path).as_posix()
+                    os.path.join(working_dir, chdir_path)
                 )
     # Handle os.chdir() calls
     try:
@@ -314,7 +314,7 @@ def _extract_directory_changes(code: str, current_dir: str = ".") -> str:
                         chdir_path = _extract_string_from_node(node.args[0])
                         if chdir_path:
                             working_dir = os.path.normpath(
-                                (Path(working_dir) / chdir_path).as_posix()
+                                os.path.join(working_dir, chdir_path)
                             )
     except SyntaxError:
         pass
@@ -425,7 +425,7 @@ def detect_latex_io(tex_path: str) -> dict[str, list[str]]:
 
             def _resolve(name: str) -> str:
                 return Path(
-                    os.path.normpath((Path(tex_dir) / name).as_posix())
+                    os.path.normpath(os.path.join(tex_dir, name))
                 ).as_posix()
 
             if pattern_type == "bib":
@@ -535,7 +535,7 @@ def _resolve_join_call(
         parts.append(part)
     if not parts:
         return "."
-    return Path(*parts).as_posix()
+    return os.path.join(*parts)
 
 
 def _resolve_path_expr(node: ast.AST, variables: dict[str, str]) -> str | None:
@@ -552,7 +552,7 @@ def _resolve_path_expr(node: ast.AST, variables: dict[str, str]) -> str | None:
             left = _resolve_path_expr(node.left, variables)
             right = _resolve_path_expr(node.right, variables)
             if left and right:
-                return (Path(left) / right).as_posix()
+                return os.path.join(left, right)
     # Path attribute access
     if isinstance(node, ast.Attribute):
         if node.attr == "parent":
@@ -581,7 +581,7 @@ def _resolve_path_expr(node: ast.AST, variables: dict[str, str]) -> str | None:
                         if part is None:
                             return None
                         parts.append(part)
-                    return Path(*parts).as_posix()
+                    return os.path.join(*parts)
             if node.func.attr in ["absolute", "resolve"]:
                 base = _resolve_path_expr(node.func.value, variables)
                 if base:
@@ -730,7 +730,7 @@ def _detect_python_code_io(
             chdir_path = chdir_path.strip("'\"")
             if chdir_path:
                 current_dir = os.path.normpath(
-                    (Path(current_dir) / chdir_path).as_posix()
+                    os.path.join(current_dir, chdir_path)
                 )
     # Remove Jupyter magic commands from code before parsing
     # (they are not valid Python syntax)
@@ -762,13 +762,13 @@ def _detect_python_code_io(
                     )
                     if chdir_path:
                         current_dir = os.path.normpath(
-                            (Path(current_dir) / chdir_path).as_posix()
+                            os.path.join(current_dir, chdir_path)
                         )
 
     # Helper to resolve a relative path back to project root
     def resolve_to_root(path: str) -> str:
         """Resolve a path from current_dir to project root."""
-        full_path = os.path.normpath((Path(current_dir) / path).as_posix())
+        full_path = os.path.normpath(os.path.join(current_dir, path))
         # Handle paths that reference parent directories
         # by computing the real path
         abs_path = os.path.abspath(full_path)
@@ -943,7 +943,7 @@ def _detect_julia_code_io(
     include_matches = re.findall(include_pattern, code)
     for match in include_matches:
         if not os.path.isabs(match):
-            full_path = (Path(script_dir) / match).as_posix()
+            full_path = os.path.join(script_dir, match)
             if os.path.exists(full_path):
                 inputs.append(os.path.relpath(full_path))
             elif _is_valid_project_path(match):
@@ -981,16 +981,16 @@ def _resolve_python_import(
 ) -> str | None:
     """Resolve a Python import to a local file path if it exists."""
     module_path = module_name.replace(".", os.sep)
-    file_path = (Path(search_dir) / (module_path + ".py")).as_posix()
+    file_path = os.path.join(search_dir, module_path + ".py")
     if os.path.exists(file_path) and _is_valid_project_path(
         os.path.relpath(file_path)
     ):
-        return Path(os.path.relpath(file_path)).as_posix()
-    init_path = (Path(search_dir) / module_path / "__init__.py").as_posix()
+        return os.path.relpath(file_path)
+    init_path = os.path.join(search_dir, module_path, "__init__.py")
     if os.path.exists(init_path) and _is_valid_project_path(
         os.path.relpath(init_path)
     ):
-        return Path(os.path.relpath(init_path)).as_posix()
+        return os.path.relpath(init_path)
     return None
 
 
@@ -1023,7 +1023,7 @@ def _detect_r_code_io(
     source_matches = re.findall(source_pattern, code, flags=re.IGNORECASE)
     for match in source_matches:
         if not os.path.isabs(match):
-            full_path = (Path(script_dir) / match).as_posix()
+            full_path = os.path.join(script_dir, match)
             if os.path.exists(full_path):
                 inputs.append(os.path.relpath(full_path))
             elif _is_valid_project_path(match):
@@ -1094,7 +1094,7 @@ def _detect_r_code_io(
                     if not resolved.startswith(
                         (fig_dir_norm + os.sep, fig_dir_norm + "/")
                     ):
-                        resolved = (Path(fig_dir) / resolved).as_posix()
+                        resolved = os.path.join(fig_dir, resolved)
                 outputs.append(resolved)
     inputs = [p for p in inputs if _is_valid_project_path(p)]
     outputs = [p for p in outputs if _is_valid_project_path(p)]
@@ -1169,7 +1169,7 @@ def _resolve_r_path_expr(expr: str, variables: dict[str, str]) -> str | None:
                 parts.append(variables[arg])
             else:
                 return None
-        return Path(*parts).as_posix()
+        return os.path.join(*parts)
     return None
 
 

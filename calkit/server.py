@@ -7,7 +7,6 @@ import os
 import platform
 import re
 import subprocess
-from pathlib import Path
 from typing import Literal
 
 import dvc
@@ -168,7 +167,7 @@ def get_ls(owner_name: str, project_name: str) -> list[dict]:
     for item in contents:
         if item == ".git" or repo.ignored(item):
             continue
-        if os.path.isfile((Path(project.wdir) / item).as_posix()):
+        if os.path.isfile(os.path.join(project.wdir, item)):
             kind = "file"
         else:
             kind = "dir"
@@ -367,7 +366,7 @@ def put_git_ignored(
     if git_repo.ignored(path):
         logger.info(f"{path} is already ignored")
         return Message(message=f"{path} is already ignored")
-    ignore_fpath = (Path(git_repo.working_dir) / ".gitignore").as_posix()
+    ignore_fpath = os.path.join(git_repo.working_dir, ".gitignore")
     if os.path.isfile(ignore_fpath):
         with open(ignore_fpath) as f:
             txt = f.read()
@@ -507,7 +506,7 @@ class Pipeline(BaseModel):
 @app.get("/projects/{owner_name}/{project_name}/pipeline")
 def get_pipeline(owner_name: str, project_name: str) -> Pipeline:
     project = get_local_project(owner_name, project_name)
-    fpath = (Path(project.wdir) / "dvc.yaml").as_posix()
+    fpath = os.path.join(project.wdir, "dvc.yaml")
     if os.path.isfile(fpath):
         with open(fpath) as f:
             raw_yaml = f.read()
@@ -550,7 +549,7 @@ def post_pipeline_stage(
     owner_name: str, project_name: str, req: StagePost
 ) -> Message:
     project = get_local_project(owner_name, project_name)
-    dvc_fpath = (Path(project.wdir) / "dvc.yaml").as_posix()
+    dvc_fpath = os.path.join(project.wdir, "dvc.yaml")
     if req.calkit_type is not None and req.calkit_object is None:
         raise HTTPException(422, "Calkit object info must be provided")
     if req.calkit_type is not None:
@@ -603,7 +602,7 @@ def post_pipeline_stage(
         )
         ck_objs.append(new_obj)
         ck_info[req.calkit_type + "s"] = ck_objs
-        with open((Path(project.wdir) / "calkit.yaml").as_posix(), "w") as f:
+        with open(os.path.join(project.wdir, "calkit.yaml"), "w") as f:
             calkit.ryaml.dump(ck_info, f)
         repo.git.add("calkit.yaml")
     if req.commit:
@@ -632,10 +631,10 @@ class ClonePost(BaseModel):
 
 @app.post("/calkit/clone")
 def clone_repo(req: ClonePost) -> Message:
-    parent_dir = (Path(os.path.expanduser("~")) / "calkit").as_posix()
+    parent_dir = os.path.join(os.path.expanduser("~"), "calkit")
     os.makedirs(parent_dir, exist_ok=True)
     dest_dir = req.git_repo_url.split("/")[-1].removesuffix(".git")
-    abs_dest_dir = (Path(parent_dir) / dest_dir).as_posix()
+    abs_dest_dir = os.path.join(parent_dir, dest_dir)
     if os.path.exists(abs_dest_dir):
         raise HTTPException(400, "Destination directory already exists")
     if req.protocol == "ssh":

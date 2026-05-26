@@ -7,7 +7,6 @@ import fnmatch
 import json
 import os
 from copy import deepcopy
-from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -174,7 +173,7 @@ def import_dataset(
             fname = os.path.basename(f)
             dirname = os.path.dirname(f) if dest_path is None else dest_path
             os.makedirs(dirname, exist_ok=True)
-            out_path = (Path(dirname) / fname).as_posix()
+            out_path = os.path.join(dirname, fname)
             if content is not None:
                 # Decode base64 content and save locally
                 with open(out_path, "wb") as f:
@@ -425,9 +424,7 @@ def import_from_zenodo(
         raise_error("No files matched the specified name filters")
     # Download files
     for fname, url in filtered_urls.items():
-        out_path = (
-            Path(dest_dir) / fname
-        ).as_posix()  # fname may include subdirs
+        out_path = os.path.join(dest_dir, fname)  # fname may include subdirs
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         typer.echo(f"Downloading {fname} to {out_path}")
         resp = requests.get(url, stream=True)
@@ -495,7 +492,7 @@ def import_from_zenodo(
         "name_not_like": name_not_like,
     }
     os.makedirs(".calkit", exist_ok=True)
-    imports_fpath = (Path(".calkit") / "imports.json").as_posix()
+    imports_fpath = os.path.join(".calkit", "imports.json")
     commit_paths.append(imports_fpath)
     if os.path.isfile(imports_fpath):
         with open(imports_fpath) as f:

@@ -48,9 +48,7 @@ def get_executed_notebook_path(
     else:
         fname_out = nb_fname
     subdirs = {"html": "html", "notebook": "executed"}
-    p = (
-        Path(".calkit") / "notebooks" / subdirs[to] / nb_dir / fname_out
-    ).as_posix()
+    p = os.path.join(".calkit", "notebooks", subdirs[to], nb_dir, fname_out)
     if as_posix:
         p = Path(p).as_posix()
     return p
@@ -58,7 +56,7 @@ def get_executed_notebook_path(
 
 def get_cleaned_notebook_path(path: str, as_posix: bool = True) -> str:
     """Return the path of a cleaned notebook."""
-    p = (Path(".calkit") / "notebooks" / "cleaned" / path).as_posix()
+    p = os.path.join(".calkit", "notebooks", "cleaned", path)
     if as_posix:
         p = Path(p).as_posix()
     return p
@@ -165,7 +163,7 @@ def declare_notebook(
     # Detect the project root directory so we ensure calkit.yaml lives there
     repo = calkit.git.get_repo()
     wdir = repo.working_dir
-    if not os.path.isfile((Path(wdir) / path).as_posix()):
+    if not os.path.isfile(os.path.join(wdir, path)):
         raise FileNotFoundError(
             f"Notebook '{path}' does not exist in the project directory"
         )
@@ -244,7 +242,7 @@ def declare_notebook(
             }
         )
     # Write calkit.yaml
-    fpath = (Path(wdir) / "calkit.yaml").as_posix()
+    fpath = os.path.join(wdir, "calkit.yaml")
     ck_info["pipeline"] = pipeline_dict
     ck_info["notebooks"] = notebooks
     with open(fpath, "w") as f:

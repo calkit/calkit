@@ -153,7 +153,7 @@ def ensure_path_is_ignored(
     # Read gitignore first to check if the path is already ignored
     # If not, we don't want to add a line for it since it was added
     # TODO: Add an option to remove cached (`git rm --cached`)
-    gitignore_path = (Path(target_repo.working_dir) / ".gitignore").as_posix()
+    gitignore_path = os.path.join(target_repo.working_dir, ".gitignore")
     if os.path.isfile(gitignore_path):
         with open(gitignore_path) as f:
             gitignore_txt = f.read()
@@ -169,7 +169,7 @@ def ensure_path_is_ignored(
             for n in stale:
                 lines.remove(n)
             with open(gitignore_path, "w") as f:
-                f.write("\n".join(lines) + "\n")
+                f.write(os.linesep.join(lines))
             return True
         # Remove any stale negations for this path so the ignore rule takes
         # effect cleanly without accumulating contradictory entries.
@@ -180,7 +180,7 @@ def ensure_path_is_ignored(
                 lines.remove(n)
             lines.append(target_path)
             with open(gitignore_path, "w") as f:
-                f.write("\n".join(lines) + "\n")
+                f.write(os.linesep.join(lines))
             return True
     with open(gitignore_path, "a") as f:
         if (
@@ -213,9 +213,7 @@ def ensure_path_is_not_ignored(
             .as_posix()
         )
     else:
-        gitignore_path = (
-            Path(target_repo.working_dir) / ".gitignore"
-        ).as_posix()
+        gitignore_path = os.path.join(target_repo.working_dir, ".gitignore")
         path_for_gitignore = target_path
     if not os.path.isfile(gitignore_path):
         with open(gitignore_path, "w") as f:
@@ -331,7 +329,7 @@ def ensure_path_is_not_ignored(
                 lines.remove(no_ignore_line)
             lines.append(no_ignore_line)
     with open(gitignore_path, "w") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write(os.linesep.join(lines))
     # If the path is still ignored after updating this gitignore file (e.g.,
     # because a subdirectory .gitignore also contains a matching rule), fix
     # that file as well. Depth-limit guards against pathological gitignore

@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
@@ -59,7 +58,7 @@ def complete_stage_names(
             if not isinstance(sp_cfg, dict) or not sp_cfg.get("path"):
                 continue
             sp_path = sp_cfg["path"]
-            sp_calkit = (Path(sp_path) / "calkit.yaml").as_posix()
+            sp_calkit = os.path.join(sp_path, "calkit.yaml")
             sp_name = os.path.basename(sp_path.rstrip("/"))
             candidates.append(sp_name)
             if os.path.isfile(sp_calkit):

@@ -7,7 +7,6 @@ import os
 import shutil
 from datetime import datetime
 from importlib import resources
-from pathlib import Path
 
 import typer
 from typing_extensions import Annotated
@@ -47,15 +46,15 @@ def update_devcontainer(
     )
     typer.echo(f"Downloading {url}")
     resp = requests.get(url)
-    out_dir = (Path(wdir or ".") / ".devcontainer").as_posix()
+    out_dir = os.path.join(wdir or ".", ".devcontainer")
     os.makedirs(out_dir, exist_ok=True)
-    out_fpath = (Path(out_dir) / "devcontainer.json").as_posix()
+    out_fpath = os.path.join(out_dir, "devcontainer.json")
     typer.echo(f"Writing to {out_fpath}")
     with open(out_fpath, "w") as f:
         f.write(resp.text)
     if not no_commit:
         repo = calkit.git.get_repo(wdir)
-        rel_path = (Path(".devcontainer") / "devcontainer.json").as_posix()
+        rel_path = os.path.join(".devcontainer", "devcontainer.json")
         repo.git.add(rel_path)
         if repo.git.diff(["--staged", "--", rel_path]):
             repo.git.commit([rel_path, "-m", "Update devcontainer"])
@@ -302,7 +301,7 @@ def update_release(
                     as_json=False,  # We only get a 204 back
                 )
             typer.echo(f"Uploading {filename}")
-            fpath = (Path(release_files_dir) / filename).as_posix()
+            fpath = os.path.join(release_files_dir, filename)
             # First, initiate the file upload
             calkit.invenio.post(
                 f"/records/{record_id}/draft/files",
@@ -353,7 +352,7 @@ def update_vscode_config(
     """
     import requests
 
-    out_dir = (Path(wdir or ".") / ".vscode").as_posix()
+    out_dir = os.path.join(wdir or ".", ".vscode")
     os.makedirs(out_dir, exist_ok=True)
     repo = calkit.git.get_repo(wdir)
     for fname in ["settings.json", "extensions.json"]:
@@ -363,13 +362,13 @@ def update_vscode_config(
         )
         typer.echo(f"Downloading {url}")
         resp = requests.get(url)
-        out_dir = (Path(wdir or ".") / ".vscode").as_posix()
+        out_dir = os.path.join(wdir or ".", ".vscode")
         os.makedirs(out_dir, exist_ok=True)
-        out_fpath = (Path(out_dir) / fname).as_posix()
+        out_fpath = os.path.join(out_dir, fname)
         typer.echo(f"Writing to {out_fpath}")
         with open(out_fpath, "w") as f:
             f.write(resp.text)
-        repo.git.add((Path(".vscode") / fname).as_posix())
+        repo.git.add(os.path.join(".vscode", fname))
     if not no_commit and repo.git.diff(["--staged", "--", ".vscode"]):
         repo.git.commit([".vscode", "-m", "Update VS Code config"])
 
@@ -402,11 +401,11 @@ def update_github_actions(
     # First look for any existing workflows that run Calkit to use as the
     # output file name
     fname_out = "run-calkit.yml"
-    out_dir = (Path(wdir or ".") / ".github" / "workflows").as_posix()
+    out_dir = os.path.join(wdir or ".", ".github", "workflows")
     os.makedirs(out_dir, exist_ok=True)
     for fname in os.listdir(out_dir):
         if fname.endswith(".yaml") or fname.endswith(".yml"):
-            fpath = (Path(out_dir) / fname).as_posix()
+            fpath = os.path.join(out_dir, fname)
             with open(fpath) as f:
                 if "calkit" in f.read().lower():
                     fname_out = fname
@@ -417,12 +416,12 @@ def update_github_actions(
     )
     typer.echo(f"Downloading {url}")
     resp = requests.get(url)
-    out_fpath = (Path(out_dir) / fname_out).as_posix()
+    out_fpath = os.path.join(out_dir, fname_out)
     typer.echo(f"Writing to {out_fpath}")
     with open(out_fpath, "w") as f:
         f.write(resp.text)
     if not no_commit:
-        rel_path = (Path(".github") / "workflows" / fname_out).as_posix()
+        rel_path = os.path.join(".github", "workflows", fname_out)
         repo = calkit.git.get_repo(wdir)
         repo.git.add(rel_path)
         if repo.git.diff(["--staged", "--", rel_path]):
@@ -528,24 +527,22 @@ def update_agent_skills(
     """Copy packaged Calkit agent skills to `~/.agents/skills`."""
     source = resources.files("calkit").joinpath("agent_skills")
     source_repo = os.path.abspath(
-        (
-            Path(os.path.dirname(__file__))
-            / ".."
-            / ".."
-            / "agent-plugin"
-            / "skills"
-        ).as_posix()
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "..",
+            "agent-plugin",
+            "skills",
+        )
     )
     use_packaged = source.is_dir()
     if not use_packaged and not os.path.isdir(source_repo):
         raise_error("Bundled agent skills are missing from this installation")
-    dest_root = (
-        Path(os.path.expanduser("~")) / ".agents" / "skills"
-    ).as_posix()
+    dest_root = os.path.join(os.path.expanduser("~"), ".agents", "skills")
     os.makedirs(dest_root, exist_ok=True)
 
     def _fix_skill_name(dest_dir: str, prefixed_name: str) -> None:
-        skill_md = (Path(dest_dir) / "SKILL.md").as_posix()
+        skill_md = os.path.join(dest_dir, "SKILL.md")
         if not os.path.isfile(skill_md):
             return
         with open(skill_md) as f:
@@ -568,18 +565,18 @@ def update_agent_skills(
             if not entry.is_dir():
                 continue
             prefixed = f"calkit-{entry.name}"
-            dest = (Path(dest_root) / prefixed).as_posix()
+            dest = os.path.join(dest_root, prefixed)
             with resources.as_file(entry) as source_dir:
                 shutil.copytree(source_dir, dest, dirs_exist_ok=True)
             _fix_skill_name(dest, prefixed)
             copied += 1
     else:
         for name in os.listdir(source_repo):
-            source_dir = (Path(source_repo) / name).as_posix()
+            source_dir = os.path.join(source_repo, name)
             if not os.path.isdir(source_dir):
                 continue
             prefixed = f"calkit-{name}"
-            dest = (Path(dest_root) / prefixed).as_posix()
+            dest = os.path.join(dest_root, prefixed)
             shutil.copytree(source_dir, dest, dirs_exist_ok=True)
             _fix_skill_name(dest, prefixed)
             copied += 1
@@ -700,7 +697,7 @@ def update_environment(
         # Commit the updated flake + lock so the change is captured.
         repo = calkit.git.get_repo()
         repo.git.add(flake_path)
-        lock_path = (Path(env_dir) / "flake.lock").as_posix()
+        lock_path = os.path.join(env_dir, "flake.lock")
         if os.path.exists(lock_path):
             repo.git.add(lock_path)
         if repo.git.diff("--staged"):

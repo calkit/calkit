@@ -96,9 +96,9 @@ def get_sync_info(
                 info_in_ck["push_paths"] = info["push_paths"]
             overleaf_sync_for_ck_info[synced_dir] = info_in_ck
         ck_info["overleaf_sync"] = overleaf_sync_for_ck_info
-        with open((Path(wdir) / "calkit.yaml").as_posix(), "w") as f:
+        with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
             calkit.ryaml.dump(ck_info, f)
-        os.makedirs((Path(wdir) / ".calkit").as_posix(), exist_ok=True)
+        os.makedirs(os.path.join(wdir, ".calkit"), exist_ok=True)
         private_info = {}
         for synced_dir, info in overleaf_info.items():
             private_info[synced_dir] = {k: info.get(k) for k in PRIVATE_KEYS}
@@ -110,7 +110,7 @@ def get_sync_info(
 def get_sync_info_fpath(wdir: str | PathLike | None = None) -> str:
     if wdir is None:
         wdir = ""
-    return (Path(wdir) / ".calkit" / "overleaf-sync.json").as_posix()
+    return os.path.join(wdir, ".calkit", "overleaf-sync.json")
 
 
 def write_sync_info(
@@ -136,9 +136,7 @@ def write_sync_info(
 def get_conflict_fpath(wdir: str | PathLike | None = None) -> str:
     if wdir is None:
         wdir = ""
-    return (
-        Path(str(wdir)) / ".calkit" / "overleaf" / "CONFLICT.json"
-    ).as_posix()
+    return os.path.join(str(wdir), ".calkit", "overleaf", "CONFLICT.json")
 
 
 class OverleafSyncPaths:
@@ -183,9 +181,7 @@ class OverleafSyncPaths:
         res = []
         for fpath in all_ol_files:
             fpath_posix = Path(fpath).as_posix()
-            relpath_main = (
-                Path(self.path_in_project) / fpath_posix
-            ).as_posix()
+            relpath_main = os.path.join(self.path_in_project, fpath_posix)
             # Skip anything ignored in main repo
             if self.main_repo.ignored(relpath_main):
                 continue
@@ -207,14 +203,12 @@ class OverleafSyncPaths:
 
         These files should all be relative to the path in the project.
         """
-        root = (
-            Path(self.main_repo.working_dir) / self.path_in_project
-        ).as_posix()
+        root = os.path.join(self.main_repo.working_dir, self.path_in_project)
         if not os.path.isdir(root):
             return []
         # Determine main PDF name (prefer main.tex if present at root)
         main_stem: str | None = None
-        main_tex_path = (Path(root) / "main.tex").as_posix()
+        main_tex_path = os.path.join(root, "main.tex")
         if os.path.isfile(main_tex_path):
             main_stem = "main"
         else:
@@ -222,7 +216,7 @@ class OverleafSyncPaths:
             top_level_files = [
                 f
                 for f in os.listdir(root)
-                if os.path.isfile((Path(root) / f).as_posix())
+                if os.path.isfile(os.path.join(root, f))
             ]
             root_tex = [f for f in top_level_files if f.endswith(".tex")]
             if len(root_tex) == 1:
@@ -264,7 +258,7 @@ class OverleafSyncPaths:
                 # Skip hidden files
                 if fname.startswith("."):
                     continue
-                f_abs = (Path(dirpath) / fname).as_posix()
+                f_abs = os.path.join(dirpath, fname)
                 rel = os.path.relpath(f_abs, root)
                 rel_posix = Path(rel).as_posix()
                 if has_hidden_component(rel_posix):
@@ -430,9 +424,7 @@ def sync(
     )
     res["project_commit_before"] = main_repo.head.commit.hexsha
     res["overleaf_commit_before"] = overleaf_repo.head.commit.hexsha
-    path_in_project_abs = (
-        Path(main_repo.working_dir) / path_in_project
-    ).as_posix()
+    path_in_project_abs = os.path.join(main_repo.working_dir, path_in_project)
     overleaf_project_dir_abs = overleaf_repo.working_dir
     conflict_fpath = get_conflict_fpath(wdir=main_repo.working_dir)
     # Determine which paths to sync and push
@@ -531,8 +523,8 @@ def sync(
         files_to_copy_from_overleaf = paths.files_to_copy_from_overleaf
         res["files_to_copy_from_overleaf"] = files_to_copy_from_overleaf
         for sync_path in files_to_copy_from_overleaf:
-            src = (Path(overleaf_project_dir_abs) / sync_path).as_posix()
-            dst = (Path(path_in_project_abs) / sync_path).as_posix()
+            src = os.path.join(overleaf_project_dir_abs, sync_path)
+            dst = os.path.join(path_in_project_abs, sync_path)
             if os.path.isdir(src):
                 # Copy the directory and its contents
                 shutil.copytree(src, dst, dirs_exist_ok=True)
@@ -554,8 +546,8 @@ def sync(
             f"{files_to_copy_to_overleaf}"
         )
     for sync_push_path in files_to_copy_to_overleaf:
-        src = (Path(path_in_project_abs) / sync_push_path).as_posix()
-        dst = (Path(overleaf_project_dir_abs) / sync_push_path).as_posix()
+        src = os.path.join(path_in_project_abs, sync_push_path)
+        dst = os.path.join(overleaf_project_dir_abs, sync_push_path)
         if os.path.isdir(src):
             # Remove destination directory if it exists
             if os.path.isdir(dst):
@@ -577,7 +569,7 @@ def sync(
     res["files_to_keep_on_overleaf"] = sorted(paths.files_to_keep_on_overleaf)
     res["stale_files_in_overleaf"] = paths.stale_files_in_overleaf
     for stale_path in paths.stale_files_in_overleaf:
-        file_path = (Path(overleaf_project_dir_abs) / stale_path).as_posix()
+        file_path = os.path.join(overleaf_project_dir_abs, stale_path)
         if os.path.isfile(file_path):
             os.remove(file_path)
     # Stage the changes in the Overleaf project

@@ -46,9 +46,6 @@ def test_get_remotes(tmp_dir):
 
 
 def test_hash_directory():
-    # The test fixture's md5 only matches when the file is checked out with LF
-    # line endings (.gitattributes pins eol=lf); verifies calkit's directory
-    # hashing matches DVC's algorithm byte-for-byte.
     this_dir = os.path.dirname(__file__)
     fpath = os.path.join(this_dir, "..", "..", "..", "test", "dvc-md5-dir")
     res = calkit.dvc.hash_directory(fpath)

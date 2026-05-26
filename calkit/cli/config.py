@@ -5,7 +5,6 @@ from __future__ import annotations
 import glob
 import os
 import subprocess
-from pathlib import Path
 
 import typer
 from typing_extensions import Annotated
@@ -168,7 +167,7 @@ def config_github_ssh():
     # If we can, ask the user if they still want to add a new key
     # First check if the user has any SSH keys
     ssh_dir = os.path.expanduser("~/.ssh")
-    existing_pub_keys = glob.glob((Path(ssh_dir) / "*.pub").as_posix())
+    existing_pub_keys = glob.glob(os.path.join(ssh_dir, "*.pub"))
     # If not run ssh-keygen
     if existing_pub_keys:
         # Ask the user if they want to use an existing key or create a new one
@@ -197,13 +196,13 @@ def config_github_ssh():
         else:
             key_path = typer.prompt(
                 "Enter the path to save the new SSH key",
-                default=(Path(ssh_dir) / "id_ed25519").as_posix(),
+                default=os.path.join(ssh_dir, "id_ed25519"),
             )
     else:
         typer.echo("No existing SSH keys found")
         key_path = typer.prompt(
             "Enter the path to save the new SSH key",
-            default=(Path(ssh_dir) / "id_ed25519").as_posix(),
+            default=os.path.join(ssh_dir, "id_ed25519"),
         )
     # Get the user's email from their Git config, and ask them if they want to
     # use that or a different one

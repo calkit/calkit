@@ -244,7 +244,7 @@ def _resolve_fullfile_expr(expr: str, variables: dict[str, str]) -> str | None:
     if not resolved_parts:
         return None
     # Join with os.path.join
-    return Path(*resolved_parts).as_posix()
+    return os.path.join(*resolved_parts)
 
 
 def _resolve_matlab_path_expr(
@@ -305,7 +305,7 @@ def _detect_matlab_io_static(
     run_matches = re.findall(run_pattern, content)
     for match in run_matches:
         if not os.path.isabs(match):
-            full_path = (Path(script_dir) / match).as_posix()
+            full_path = os.path.join(script_dir, match)
             if os.path.exists(full_path):
                 rel_path = os.path.relpath(full_path)
                 # Convert to POSIX format for cross-platform compatibility
@@ -389,7 +389,7 @@ def _detect_matlab_io_static(
             return None
         # MATLAB paths are relative to the script directory, not wdir
         # (since that's where MATLAB interprets relative paths from)
-        normalized = os.path.normpath((Path(script_dir) / path).as_posix())
+        normalized = os.path.normpath(os.path.join(script_dir, path))
         normalized_abs = os.path.abspath(normalized)
         try:
             common = os.path.commonpath([cwd, normalized_abs])
@@ -620,7 +620,7 @@ def detect_matlab_command_io(
             if os.path.isabs(dep):
                 dep_full = os.path.realpath(dep)
             else:
-                dep_full = os.path.realpath((Path(root_dir) / dep).as_posix())
+                dep_full = os.path.realpath(os.path.join(root_dir, dep))
             # Filter out dependencies outside the working directory
             try:
                 common = os.path.commonpath([root_dir, dep_full])

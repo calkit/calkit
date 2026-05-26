@@ -8,7 +8,6 @@ import pathlib
 import shutil
 import subprocess
 from enum import Enum
-from pathlib import Path
 
 import typer
 from typing_extensions import Annotated
@@ -156,7 +155,7 @@ def new_project(
         if name is None and git_repo_url is not None:
             name = git_repo_url.split("/")[-1].lower()
         # If this isn't a DVC repo, run `dvc init`
-        if not os.path.isfile((Path(abs_path) / ".dvc" / "config").as_posix()):
+        if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
             typer.echo("Initializing DVC repository")
             if verbose:
                 typer.echo("Running 'dvc init'")
@@ -173,7 +172,7 @@ def new_project(
             if not no_commit:
                 repo.git.add(".dvc")
                 repo.git.commit(["-m", "Initialize DVC"])
-    ck_info_fpath = (Path(abs_path) / "calkit.yaml").as_posix()
+    ck_info_fpath = os.path.join(abs_path, "calkit.yaml")
     if os.path.isfile(ck_info_fpath) and not overwrite:
         ck_info = calkit.load_calkit_info(wdir=abs_path)
         # Prefer values explicitly passed on the CLI; fall back to calkit.yaml
@@ -256,7 +255,7 @@ def new_project(
                 raise_error(f"Failed to check out main branch: {e}")
         else:
             # Create a calkit.yaml file if one does not exist
-            calkit_fpath = (Path(abs_path) / "calkit.yaml").as_posix()
+            calkit_fpath = os.path.join(abs_path, "calkit.yaml")
             if not os.path.isfile(calkit_fpath):
                 typer.echo("Creating calkit.yaml file")
                 with open(calkit_fpath, "w") as f:
@@ -321,7 +320,7 @@ def new_project(
             remote_name = calkit.dvc.configure_remote(wdir=abs_path)
             calkit.dvc.set_remote_auth(remote_name=remote_name, wdir=abs_path)
             if not no_commit and repo is not None:
-                dvc_config = (Path(abs_path) / ".dvc" / "config").as_posix()
+                dvc_config = os.path.join(abs_path, ".dvc", "config")
                 if os.path.isfile(dvc_config) and repo.git.diff(dvc_config):
                     repo.git.add(dvc_config)
                     repo.git.commit(
@@ -376,10 +375,10 @@ def new_project(
         _ = ck_info.pop("questions", None)
         _ = ck_info.pop("owner", None)
         # Write Calkit info
-        with open((Path(abs_path) / "calkit.yaml").as_posix(), "w") as f:
+        with open(os.path.join(abs_path, "calkit.yaml"), "w") as f:
             ryaml.dump(ck_info, f)
         # Update README
-        readme_fpath = (Path(abs_path) / "README.md").as_posix()
+        readme_fpath = os.path.join(abs_path, "README.md")
         typer.echo("Generating README.md")
         readme_txt = calkit.make_readme_content(
             project_name=name,
@@ -425,7 +424,7 @@ def new_project(
         typer.echo("Initializing Git repository")
         subprocess.run(["git", "init", "-q"], cwd=abs_path)
     repo = calkit.git.get_repo(abs_path)
-    if not os.path.isfile((Path(abs_path) / ".dvc" / "config").as_posix()):
+    if not os.path.isfile(os.path.join(abs_path, ".dvc", "config")):
         typer.echo("Initializing DVC repository")
         result = run_dvc_command(
             ["init", "-q"],
@@ -436,14 +435,14 @@ def new_project(
     # Create calkit.yaml file
     ck_info = calkit.load_calkit_info(wdir=abs_path)
     ck_info = dict(name=name, title=title, description=description) | ck_info
-    with open((Path(abs_path) / "calkit.yaml").as_posix(), "w") as f:
+    with open(os.path.join(abs_path, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
     # Create dev container spec
     update_devcontainer(wdir=abs_path)
     repo.git.add(".devcontainer")
     # Create README
-    readme_fpath = (Path(abs_path) / "README.md").as_posix()
+    readme_fpath = os.path.join(abs_path, "README.md")
     if os.path.isfile(readme_fpath) and not overwrite:
         warn("README.md already exists; not modifying")
     else:
@@ -1153,10 +1152,10 @@ def new_publication(
             deps += stage.get("outs", [])
     # Create publication object
     if template_type == "latex":
-        pub_fpath = (
-            Path(path)  # type: ignore
-            / (template_obj.target.removesuffix(".tex") + ".pdf")
-        ).as_posix()
+        pub_fpath = os.path.join(
+            path,
+            template_obj.target.removesuffix(".tex") + ".pdf",  # type: ignore
+        )
     else:
         pub_fpath = path
     if not overwrite and pub_fpath in pub_paths:
@@ -1191,7 +1190,7 @@ def new_publication(
         stage = LatexStage(
             kind="latex",
             environment=env_name,
-            target_path=(Path(path) / template_obj.target).as_posix(),  # type: ignore
+            target_path=os.path.join(path, template_obj.target),  # type: ignore
             outputs=[pub_fpath],
         ).model_dump()
         if "pipeline" not in ck_info:
@@ -1382,7 +1381,7 @@ def new_uv_env(
         else:
             envdir = f".calkit/envs/{name}"
             os.makedirs(envdir, exist_ok=True)
-            path = (Path(envdir) / "pyproject.toml").as_posix()
+            path = os.path.join(envdir, "pyproject.toml")
     else:
         envdir = os.path.dirname(path)
         if envdir:
@@ -2018,7 +2017,7 @@ def new_julia_env(
         if packages or created_project_file:
             repo.git.add(path)
         if packages:
-            repo.git.add((Path(env_dir) / "Manifest.toml").as_posix())
+            repo.git.add(os.path.join(env_dir, "Manifest.toml"))
         if not no_check and packages:
             env_lock_fpath = check_environment(env_name=name)
             if env_lock_fpath is not None:
@@ -2087,7 +2086,7 @@ def new_renv(
         else:
             envdir = f".calkit/envs/{name}"
             os.makedirs(envdir, exist_ok=True)
-            path = (Path(envdir) / "DESCRIPTION").as_posix()
+            path = os.path.join(envdir, "DESCRIPTION")
     else:
         envdir = os.path.dirname(path)
         if envdir:
@@ -2113,7 +2112,7 @@ def new_renv(
         with open(path, "w") as f:
             f.write(desc_content)
     # Check if renv is already initialized
-    lock_path = (Path(envdir) / "renv.lock").as_posix()
+    lock_path = os.path.join(envdir, "renv.lock")
     renv_already_initialized = os.path.isfile(lock_path)
     # Initialize renv if not already initialized
     if not renv_already_initialized:
@@ -2172,7 +2171,7 @@ def new_renv(
         if os.path.exists(lock_path):
             repo.git.add(lock_path)
         # Also add .Rprofile if it exists
-        rprofile_path = (Path(envdir) / ".Rprofile").as_posix()
+        rprofile_path = os.path.join(envdir, ".Rprofile")
         if os.path.exists(rprofile_path):
             repo.git.add(rprofile_path)
         repo.git.add("calkit.yaml")
@@ -2251,7 +2250,7 @@ def new_nix_env(
         else:
             envdir = f".calkit/envs/{name}"
             os.makedirs(envdir, exist_ok=True)
-            path = (Path(envdir) / "flake.nix").as_posix()
+            path = os.path.join(envdir, "flake.nix")
     else:
         envdir = os.path.dirname(path) or "."
         if envdir != ".":
@@ -2279,7 +2278,7 @@ def new_nix_env(
     # Generate flake.lock for reproducibility unless skipped. The lock
     # is what makes the environment reproducible across machines, so we
     # want it committed alongside flake.nix.
-    lock_path = (Path(envdir) / "flake.lock").as_posix()
+    lock_path = os.path.join(envdir, "flake.lock")
     if not no_check:
         if shutil.which("nix") is None:
             if _platform.system() == "Windows":
@@ -2353,7 +2352,7 @@ def new_status(
 ):
     """Add a new project status to the log."""
     typer.echo(f"Adding {status.value} status log entry")
-    fpath = (Path(".calkit") / "status.csv").as_posix()
+    fpath = os.path.join(".calkit", "status.csv")
     os.makedirs(".calkit", exist_ok=True)
     now = calkit.utcnow(remove_tz=False)
     # Append to end of CSV
@@ -3304,7 +3303,7 @@ def new_release(
         files = os.listdir(release_files_dir)
         for filename in files:
             typer.echo(f"Uploading {filename}")
-            fpath = (Path(release_files_dir) / filename).as_posix()
+            fpath = os.path.join(release_files_dir, filename)
             # First, initiate the file upload
             calkit.invenio.post(
                 f"/records/{record_id}/draft/files",

@@ -17,6 +17,7 @@ import socket
 import subprocess
 import time
 import uuid
+from pathlib import Path
 
 import typer
 from sqlitedict import SqliteDict
@@ -33,15 +34,15 @@ _BINARIES = {
     "pbs": {"submit": "qsub", "query": "qstat", "cancel": "qdel"},
 }
 
-SCHEDULER_DIR = os.path.join(".calkit", "scheduler")
-LOGS_DIR = os.path.join(SCHEDULER_DIR, "logs")
+SCHEDULER_DIR = (Path(".calkit") / "scheduler").as_posix()
+LOGS_DIR = (Path(SCHEDULER_DIR) / "logs").as_posix()
 # Local scheduler state lives under .calkit/local, which is always gitignored.
-LOCAL_DIR = os.path.join(".calkit", "local")
+LOCAL_DIR = (Path(".calkit") / "local").as_posix()
 # Job records are kept in SQLite so the parallel batch processes that fan out
 # an iterated stage can each write their own record atomically, and readers
 # (e.g. `scheduler queue`) never see a half-written file.
-JOBS_DB_PATH = os.path.join(LOCAL_DIR, "scheduler-jobs.db")
-MOCK_DIR = os.path.join(LOCAL_DIR, "mock-scheduler")
+JOBS_DB_PATH = (Path(LOCAL_DIR) / "scheduler-jobs.db").as_posix()
+MOCK_DIR = (Path(LOCAL_DIR) / "mock-scheduler").as_posix()
 # When set, scheduler commands run jobs on the local host instead of
 # dispatching to a real SLURM/PBS install (see _mock_enabled).
 MOCK_ENV_VAR = "CALKIT_MOCK_SCHEDULER"
@@ -104,7 +105,7 @@ def _ensure_mock_dir() -> None:
 
 def _mock_status_path(job_id: str) -> str:
     # Absolute so the sentinel resolves even if the job cd's elsewhere.
-    return os.path.abspath(os.path.join(MOCK_DIR, f"{job_id}.status"))
+    return os.path.abspath((Path(MOCK_DIR) / f"{job_id}.status").as_posix())
 
 
 def _pid_alive(pid: int) -> bool:
@@ -405,7 +406,7 @@ def run_batch(
             f"'{kind}')"
         )
     if log_path is None:
-        log_path = os.path.join(LOGS_DIR, f"{name}.out")
+        log_path = (Path(LOGS_DIR) / f"{name}.out").as_posix()
     if is_command is None:
         is_command = not os.path.isfile(target)
     # Host check
@@ -818,7 +819,7 @@ def get_logs(
         names = list(_load_jobs().keys())
     log_fpaths: list[str] = []
     for name in names:
-        log_fpath = os.path.join(LOGS_DIR, f"{name}.out")
+        log_fpath = (Path(LOGS_DIR) / f"{name}.out").as_posix()
         if os.path.isfile(log_fpath):
             log_fpaths.append(log_fpath)
     if not log_fpaths:

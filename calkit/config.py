@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import platform
 import warnings
+from pathlib import Path
 from typing import Any, Literal
 from typing import get_args as get_type_args
 
@@ -83,15 +84,15 @@ def get_app_name() -> str:
 
 
 def get_local_config_path() -> str:
-    return os.path.join(".calkit", "config.yaml")
+    return (Path(".calkit") / "config.yaml").as_posix()
 
 
 def get_config_yaml_fpath() -> str:
-    return os.path.join(
-        os.path.expanduser("~"),
-        ".calkit",
-        f"config{get_env_suffix()}.yaml",
-    )
+    return (
+        Path(os.path.expanduser("~"))
+        / ".calkit"
+        / f"config{get_env_suffix()}.yaml"
+    ).as_posix()
 
 
 def set_secret(key: str, value: str) -> None:

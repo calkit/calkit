@@ -255,7 +255,7 @@ def get_running_pipeline_processes(wdir: str | None = None) -> list[dict]:
     """
     import psutil  # Always available as a DVC dependency
 
-    rwlock_path = os.path.join(wdir or ".", ".dvc", "tmp", "rwlock")
+    rwlock_path = (Path(wdir or ".") / ".dvc" / "tmp" / "rwlock").as_posix()
     if not os.path.isfile(rwlock_path):
         return []
     try:
@@ -481,7 +481,7 @@ def add_external_remote(
 
 
 def read_pipeline(wdir: str = ".") -> dict:
-    fpath = os.path.join(wdir, "dvc.yaml")
+    fpath = (Path(wdir) / "dvc.yaml").as_posix()
     if not os.path.isfile(fpath):
         return {}
     with open(fpath) as f:
@@ -582,7 +582,7 @@ def hash_directory(path: str) -> dict:
         dirs.sort()
         # Sort files within each directory
         for name in sorted(files):
-            file_path = os.path.join(root, name)
+            file_path = (Path(root) / name).as_posix()
             try:
                 rel_path = Path(os.path.relpath(file_path, path)).as_posix()
                 file_info = hash_file(file_path)

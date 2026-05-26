@@ -8,7 +8,6 @@ import json
 import logging
 import os
 import platform as _platform
-import posixpath
 import shutil
 import subprocess
 import sys
@@ -402,7 +401,7 @@ def get_status(
         # Likewise, if this isn't a DVC repo, initialize one so the pipeline
         # can be compiled and its status reported. DVC init requires a Git
         # repo, which the block above ensures exists.
-        if not os.path.isfile(os.path.join(".dvc", "config")):
+        if not os.path.isfile((Path(".dvc") / "config").as_posix()):
             typer.echo("Initializing DVC repository")
             try:
                 result = calkit.dvc.run_dvc_command(["init", "-q"])
@@ -1169,7 +1168,7 @@ def pull(
             if not isinstance(sp, dict) or not sp.get("path"):
                 continue
             sp_path = sp["path"]
-            if not os.path.isdir(os.path.join(sp_path, ".dvc")):
+            if not os.path.isdir((Path(sp_path) / ".dvc").as_posix()):
                 continue
             typer.echo(f"DVC pulling subproject: {sp_path}")
             sp_result = calkit.dvc.run_dvc_command(
@@ -1379,7 +1378,7 @@ def _prune_run_logs(
         if fname == protect:
             continue
         try:
-            os.remove(os.path.join(logs_dir, fname))
+            os.remove((Path(logs_dir) / fname).as_posix())
         except OSError:
             pass
 
@@ -1393,12 +1392,14 @@ def _get_latest_run_log_content() -> str | None:
     """
     candidates = []
     for d in [
-        os.path.join(".calkit", "local", "logs"),
-        os.path.join(".calkit", "logs"),
+        (Path(".calkit") / "local" / "logs").as_posix(),
+        (Path(".calkit") / "logs").as_posix(),
     ]:
         if os.path.isdir(d):
             candidates += [
-                os.path.join(d, f) for f in os.listdir(d) if f.endswith(".log")
+                (Path(d) / f).as_posix()
+                for f in os.listdir(d)
+                if f.endswith(".log")
             ]
     if not candidates:
         return None
@@ -1795,9 +1796,9 @@ def run(
         if verbose:
             typer.echo("Saving system information:")
             typer.echo(system_info)
-        sysinfo_fpath = os.path.join(
-            ".calkit", "systems", system_info["id"] + ".json"
-        )
+        sysinfo_fpath = (
+            Path(".calkit") / "systems" / (system_info["id"] + ".json")
+        ).as_posix()
         os.makedirs(os.path.dirname(sysinfo_fpath), exist_ok=True)
         with open(sysinfo_fpath, "w") as f:
             json.dump(system_info, f, indent=2)
@@ -1980,7 +1981,7 @@ def run(
         for sp in subprojects
         if isinstance(sp, dict)
         and sp.get("path")
-        and not os.path.isdir(os.path.join(sp["path"], ".dvc"))
+        and not os.path.isdir((Path(sp["path"]) / ".dvc").as_posix())
     ]
     translated_targets_have_dvc_yaml = any(
         "dvc.yaml" in t for t in args if not t.startswith("--")
@@ -2048,9 +2049,9 @@ def run(
     # `calkit status` can report which stage is running while the pipeline
     # holds the DVC lock. With --log, the log is additionally saved to the
     # tracked .calkit/logs directory along with run information.
-    local_logs_dir = os.path.join(calkit.ensure_local_dir(), "logs")
+    local_logs_dir = (Path(calkit.ensure_local_dir()) / "logs").as_posix()
     os.makedirs(local_logs_dir, exist_ok=True)
-    log_fpath = os.path.join(local_logs_dir, log_fname)
+    log_fpath = (Path(local_logs_dir) / log_fname).as_posix()
     if verbose:
         typer.echo(f"Starting run ID: {run_id}")
         typer.echo(f"Saving logs to {log_fpath}")
@@ -2147,19 +2148,23 @@ def run(
             "dvc_status_after": dvc_status_after,
             "dvc_data_status_after": dvc_data_status_after,
         }
-        run_info_fpath = os.path.join(
-            ".calkit",
-            "runs",
-            start_time_no_tz.isoformat(timespec="seconds").replace(":", "-")
-            + "-"
-            + run_id
-            + ".json",
-        )
+        run_info_fpath = (
+            Path(".calkit")
+            / "runs"
+            / (
+                start_time_no_tz.isoformat(timespec="seconds").replace(
+                    ":", "-"
+                )
+                + "-"
+                + run_id
+                + ".json"
+            )
+        ).as_posix()
         os.makedirs(os.path.dirname(run_info_fpath), exist_ok=True)
         with open(run_info_fpath, "w") as f:
             json.dump(run_info, f, indent=2)
         # Also keep the raw log in the tracked .calkit/logs directory
-        saved_log_fpath = os.path.join(".calkit", "logs", log_fname)
+        saved_log_fpath = (Path(".calkit") / "logs" / log_fname).as_posix()
         os.makedirs(os.path.dirname(saved_log_fpath), exist_ok=True)
         shutil.copy2(log_fpath, saved_log_fpath)
     # The private log under .calkit/local/logs is retained either way so the
@@ -2303,7 +2308,7 @@ def run_in_env(
     docker_wdir = env.get("wdir", "/work")
     docker_wdir_mount = docker_wdir
     if wdir is not None:
-        docker_wdir = posixpath.join(docker_wdir, wdir)
+        docker_wdir = (Path(docker_wdir) / wdir).as_posix()
     shell = env.get("shell", "sh")
     platform = env.get("platform")
     if env["kind"] == "docker":
@@ -2661,7 +2666,7 @@ def run_in_env(
         if cmd and cmd[0] == "Rscript" and len(cmd) > 1:
             script_path = cmd[1]
             script_abspath = os.path.abspath(
-                os.path.join(abs_wdir, script_path)
+                (Path(abs_wdir) / script_path).as_posix()
             )
             # Use -e to inline the setwd + source command instead of a temp
             # file
@@ -3223,7 +3228,7 @@ def map_paths(
             raise_error(f"Destination path '{dest_dir}' is a file")
         if not os.path.isdir(dest_dir):
             os.makedirs(dest_dir, exist_ok=True)
-        dest_path = os.path.join(dest_dir, os.path.basename(src_path))
+        dest_path = (Path(dest_dir) / os.path.basename(src_path)).as_posix()
         shutil.copy2(src_path, dest_path)
         calkit.git.ensure_path_is_ignored(repo, path=dest_path)
     for replace_dir_with_dir in dir_to_dir_replace:
@@ -3250,8 +3255,8 @@ def map_paths(
         for item in os.listdir(src_dir):
             if item.startswith("."):
                 continue
-            src_item = os.path.join(src_dir, item)
-            dest_item = os.path.join(dest_dir, item)
+            src_item = (Path(src_dir) / item).as_posix()
+            dest_item = (Path(dest_dir) / item).as_posix()
             if os.path.isdir(src_item):
                 shutil.copytree(src_item, dest_item, dirs_exist_ok=True)
             else:

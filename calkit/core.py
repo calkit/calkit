@@ -18,6 +18,7 @@ import sys
 import uuid
 import warnings
 from os import PathLike
+from pathlib import Path
 
 import calkit
 
@@ -52,7 +53,7 @@ AUTO_IGNORE_SUFFIXES = [
     ".synctex.gz",
     ".ipynb_checkpoints",
 ]
-AUTO_IGNORE_PATHS = [os.path.join(".dvc", "config.local")]
+AUTO_IGNORE_PATHS = [(Path(".dvc") / "config.local").as_posix()]
 AUTO_IGNORE_PREFIXES = [
     ".venv",
     "__pycache__",
@@ -103,11 +104,15 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
         start = os.path.expanduser("~")
     res = []
     for i in range(max_depth):
-        pattern = os.path.join(start, *["*"] * (i + 1), "calkit.yaml")
+        pattern = (
+            Path(start).joinpath(*["*"] * (i + 1), "calkit.yaml").as_posix()
+        )
         res += glob.glob(pattern)
         # Check GitHub documents for users who use GitHub Desktop
-        pattern = os.path.join(
-            start, "*", "GitHub", *["*"] * (i + 1), "calkit.yaml"
+        pattern = (
+            Path(start)
+            .joinpath("*", "GitHub", *["*"] * (i + 1), "calkit.yaml")
+            .as_posix()
         )
         res += glob.glob(pattern)
     final_res = []
@@ -141,7 +146,7 @@ def load_calkit_info(
     info = {}
     fpath = "calkit.yaml"
     if wdir is not None:
-        fpath = os.path.join(wdir, fpath)
+        fpath = (Path(wdir) / fpath).as_posix()
     if os.path.isfile(fpath):
         with open(fpath) as f:
             info = ryaml.load(f)
@@ -163,7 +168,9 @@ def load_calkit_info(
                     if "_include" in obj:
                         include_fpath = obj.pop("_include")
                         if wdir is not None:
-                            include_fpath = os.path.join(wdir, include_fpath)
+                            include_fpath = (
+                                Path(wdir) / include_fpath
+                            ).as_posix()
                         if os.path.isfile(include_fpath):
                             with open(include_fpath) as f:
                                 include_data = ryaml.load(f)
@@ -200,9 +207,9 @@ def ensure_local_dir(wdir: str | None = None) -> str:
     Everything under ``.calkit/local`` is private to the machine and kept out
     of version control via a ``*`` .gitignore.
     """
-    base = os.path.join(wdir, LOCAL_DIR) if wdir else LOCAL_DIR
+    base = (Path(wdir) / LOCAL_DIR).as_posix() if wdir else LOCAL_DIR
     os.makedirs(base, exist_ok=True)
-    gitignore = os.path.join(base, ".gitignore")
+    gitignore = (Path(base) / ".gitignore").as_posix()
     if not os.path.isfile(gitignore):
         with open(gitignore, "w") as f:
             f.write("*\n")
@@ -213,15 +220,15 @@ NOTEBOOK_STAGE_OUT_FORMATS = ["pickle", "parquet", "json", "yaml", "csv"]
 
 
 def get_notebook_stage_dir(stage_name: str) -> str:
-    return os.path.join(".calkit", "notebook-stages", stage_name)
+    return (Path(".calkit") / "notebook-stages" / stage_name).as_posix()
 
 
 def get_notebook_stage_script_path(stage_name: str) -> str:
-    return os.path.join(get_notebook_stage_dir(stage_name), "script.py")
+    return (Path(get_notebook_stage_dir(stage_name)) / "script.py").as_posix()
 
 
 def get_notebook_stage_out_dir(stage_name: str) -> str:
-    return os.path.join(get_notebook_stage_dir(stage_name), "outs")
+    return (Path(get_notebook_stage_dir(stage_name)) / "outs").as_posix()
 
 
 def get_notebook_stage_out_path(
@@ -231,9 +238,9 @@ def get_notebook_stage_out_path(
 ) -> str:
     if fmt not in NOTEBOOK_STAGE_OUT_FORMATS:
         raise ValueError(f"Invalid output format '{fmt}'")
-    return os.path.join(
-        get_notebook_stage_out_dir(stage_name), f"{out_name}.{fmt}"
-    )
+    return (
+        Path(get_notebook_stage_out_dir(stage_name)) / f"{out_name}.{fmt}"
+    ).as_posix()
 
 
 def load_notebook_stage_out(
@@ -619,7 +626,7 @@ def get_size(path: str):
     total_size = 0
     for dirpath, dirnames, filenames in os.walk(path):
         for f in filenames:
-            fp = os.path.join(dirpath, f)
+            fp = (Path(dirpath) / f).as_posix()
             # skip if it is symbolic link
             if not os.path.islink(fp):
                 total_size += os.path.getsize(fp)
@@ -635,9 +642,9 @@ def get_project_status_history(wdir: str | None = None, as_pydantic=True):
     from calkit.models import ProjectStatus
 
     statuses = []
-    fpath = os.path.join(".calkit", "status.csv")
+    fpath = (Path(".calkit") / "status.csv").as_posix()
     if wdir is not None:
-        fpath = os.path.join(wdir, fpath)
+        fpath = (Path(wdir) / fpath).as_posix()
     if os.path.isfile(fpath):
         with open(fpath) as f:
             reader = csv.reader(f)

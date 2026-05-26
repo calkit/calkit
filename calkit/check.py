@@ -1,6 +1,7 @@
 """Checking things."""
 
 import os
+from pathlib import Path
 from typing import Callable
 
 from pydantic import BaseModel, computed_field
@@ -184,14 +185,18 @@ def check_reproducibility(
         res["is_git_repo"] = True
     except InvalidGitRepositoryError:
         res["is_git_repo"] = False
-    res["is_dvc_repo"] = os.path.isfile(os.path.join(wdir, ".dvc", "config"))
-    res["has_pipeline"] = os.path.isfile(os.path.join(wdir, "dvc.yaml"))
-    res["has_calkit_info"] = os.path.isfile(os.path.join(wdir, "calkit.yaml"))
+    res["is_dvc_repo"] = os.path.isfile(
+        (Path(wdir) / ".dvc" / "config").as_posix()
+    )
+    res["has_pipeline"] = os.path.isfile((Path(wdir) / "dvc.yaml").as_posix())
+    res["has_calkit_info"] = os.path.isfile(
+        (Path(wdir) / "calkit.yaml").as_posix()
+    )
     res["has_dev_container"] = os.path.isfile(
-        os.path.join(wdir, ".devcontainer", "devcontainer.json")
+        (Path(wdir) / ".devcontainer" / "devcontainer.json").as_posix()
     )
     # Check README for at least minimal instructions
-    readme_path = os.path.join(wdir, "README.md")
+    readme_path = (Path(wdir) / "README.md").as_posix()
     if os.path.isfile(readme_path):
         res["has_readme"] = True
         with open(readme_path, encoding="utf-8") as f:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel
@@ -76,11 +77,11 @@ def use_template(name: str, dest_dir: str, **kwargs):
     """
     template = get_template(name)
     if template.loc is None:
-        loc = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            template.kind,
-            template.name,
-        )
+        loc = (
+            Path(os.path.dirname(os.path.abspath(__file__)))
+            / template.kind
+            / template.name
+        ).as_posix()
         print(loc)
     else:
         loc = template.loc
@@ -100,21 +101,21 @@ def use_template(name: str, dest_dir: str, **kwargs):
         os.makedirs(dest_dir)
     # Copy files into destination
     for fname in files:
-        fpath = os.path.join(loc, fname)
+        fpath = (Path(loc) / fname).as_posix()
         shutil.copy(src=fpath, dst=dest_dir)
     # Write gitignore if applicable
     if template.gitignore is not None:
-        with open(os.path.join(dest_dir, ".gitignore"), "w") as f:
+        with open((Path(dest_dir) / ".gitignore").as_posix(), "w") as f:
             f.write(template.gitignore)
     # If there's a title in kwargs and we're using a LaTeX template,
     # replace that line
     if isinstance(template, LatexTemplate) and "title" in kwargs:
-        with open(os.path.join(dest_dir, template.target)) as f:
+        with open((Path(dest_dir) / template.target).as_posix()) as f:
             lines = f.readlines()
         txt = ""
         for line in lines:
             if line.strip().startswith(r"\title{"):
                 line = r"\title{" + kwargs["title"] + "}\n"
             txt += line
-        with open(os.path.join(dest_dir, template.target), "w") as f:
+        with open((Path(dest_dir) / template.target).as_posix(), "w") as f:
             f.write(txt)

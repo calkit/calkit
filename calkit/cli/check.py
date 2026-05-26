@@ -8,6 +8,7 @@ import os
 import platform as _platform
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Annotated, Callable
 
 import dotenv
@@ -95,7 +96,7 @@ def _check_julia_env(
             wdir=env_dir,
             as_posix=False,
         )
-        return lock_fpath or os.path.join(env_dir, "Manifest.toml")
+        return lock_fpath or (Path(env_dir) / "Manifest.toml").as_posix()
     if julia_version:
         if shutil.which("juliaup") is not None:
             if _juliaup_version_installed(julia_version):
@@ -228,7 +229,7 @@ def _check_julia_env(
         wdir=env_dir,
         as_posix=False,
     )
-    return lock_fpath or os.path.join(env_dir, "Manifest.toml")
+    return lock_fpath or (Path(env_dir) / "Manifest.toml").as_posix()
 
 
 def _require_nix_available() -> None:
@@ -282,7 +283,7 @@ def check_nix_env(env: dict, verbose: bool = False) -> str:
         subprocess.check_call(cmd, cwd=env_dir)
     except subprocess.CalledProcessError:
         raise_error("Failed to lock Nix flake")
-    lock_fpath = os.path.join(os.path.dirname(env_path), "flake.lock")
+    lock_fpath = (Path(os.path.dirname(env_path)) / "flake.lock").as_posix()
     return lock_fpath
 
 
@@ -585,8 +586,8 @@ def check_renv(
     except subprocess.CalledProcessError:
         raise_error("Failed to install renv package")
     # Check if DESCRIPTION and renv.lock exist
-    lock_path = os.path.join(env_dir, "renv.lock")
-    description_path = os.path.join(env_dir, "DESCRIPTION")
+    lock_path = (Path(env_dir) / "renv.lock").as_posix()
+    description_path = (Path(env_dir) / "DESCRIPTION").as_posix()
     # Verify DESCRIPTION exists
     if not os.path.isfile(description_path):
         raise_error(
@@ -1161,7 +1162,9 @@ def check_venv(
         except subprocess.CalledProcessError:
             raise_error(f"Failed to create {kind} at {prefix}")
         # Put a gitignore file in the env dir if one doesn't exist
-        gitignore_fpath = os.path.join(wdir or ".", prefix, ".gitignore")
+        gitignore_fpath = (
+            Path(wdir or ".") / prefix / ".gitignore"
+        ).as_posix()
         if not os.path.isfile(gitignore_fpath):
             with open(gitignore_fpath, "w") as f:
                 f.write("*\n")
@@ -1238,7 +1241,7 @@ def check_venv(
             prefix_full_path = (
                 prefix
                 if os.path.isabs(prefix)
-                else os.path.join(wdir or ".", prefix)
+                else (Path(wdir or ".") / prefix).as_posix()
             )
             if os.path.isdir(prefix_full_path):
                 shutil.rmtree(prefix_full_path)
@@ -1278,9 +1281,9 @@ def check_matlab_env(
         raise_error("A MATLAB version must be specified")
     typer.echo(f"Checking MATLAB environment '{env_name}'")
     # First generate a Dockerfile for this environment
-    out_dir = os.path.join(".calkit", "envs", env_name)
+    out_dir = (Path(".calkit") / "envs" / env_name).as_posix()
     os.makedirs(out_dir, exist_ok=True)
-    dockerfile_fpath = os.path.join(out_dir, "Dockerfile")
+    dockerfile_fpath = (Path(out_dir) / "Dockerfile").as_posix()
     calkit.matlab.create_dockerfile(
         matlab_version=env["version"],
         additional_products=env.get("products", []),

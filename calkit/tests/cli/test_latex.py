@@ -109,6 +109,10 @@ Result 3 is \theresults[result3].
     )
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: LaTeX (texlive) not installed on windows-latest GHA runners",
+)
 def test_build(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     os.makedirs("paper", exist_ok=True)

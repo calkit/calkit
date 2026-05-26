@@ -199,10 +199,12 @@ def import_publication(
     repo = calkit.git.get_repo()
     # Clone the Overleaf project into .calkit/overleaf if it doesn't exist
     # otherwise pull
-    overleaf_dir = os.path.join(".calkit", "overleaf")
+    overleaf_dir = (Path(".calkit") / "overleaf").as_posix()
     os.makedirs(overleaf_dir, exist_ok=True)
     git_ignore(overleaf_dir, no_commit=no_commit)
-    overleaf_project_dir = os.path.join(overleaf_dir, overleaf_project_id)
+    overleaf_project_dir = (
+        Path(overleaf_dir) / overleaf_project_id
+    ).as_posix()
     git_clone_url = calkit.overleaf.get_git_remote_url(
         project_id=overleaf_project_id, token=overleaf_token
     )
@@ -234,9 +236,9 @@ def import_publication(
         return
     # Try to extract title from the target LaTeX file if not provided
     if not title:
-        target_tex_path = os.path.join(
-            dest_dir if push_only else overleaf_project_dir, target_path
-        )
+        target_tex_path = (
+            Path(dest_dir if push_only else overleaf_project_dir) / target_path
+        ).as_posix()
         extracted_title = _extract_title_from_tex(target_tex_path)
         if extracted_title:
             typer.echo(f"Detected title: {extracted_title}")
@@ -309,7 +311,8 @@ def import_publication(
             environment=tex_env_name,
             target_path=target_tex_path,
             inputs=[
-                os.path.join(dest_dir, p) for p in sync_paths + push_paths
+                (Path(dest_dir) / p).as_posix()
+                for p in sync_paths + push_paths
             ],
             no_check=True,
             no_commit=True,
@@ -494,9 +497,9 @@ def sync(
                     "please commit or stash them before syncing with Overleaf"
                 )
         # Ensure we've cloned the Overleaf project
-        overleaf_project_dir = os.path.join(
-            ".calkit", "overleaf", overleaf_project_id
-        )
+        overleaf_project_dir = (
+            Path(".calkit") / "overleaf" / overleaf_project_id
+        ).as_posix()
         overleaf_remote_url = calkit.overleaf.get_git_remote_url(
             project_id=overleaf_project_id, token=str(overleaf_token)
         )
@@ -572,7 +575,7 @@ def compare_folders_recursively(
     for category in ["left_only", "right_only", "diff_files", "same_files"]:
         items = getattr(dcmp, category)
         for item in items:
-            relpath = os.path.join(dirname, item)
+            relpath = (Path(dirname) / item).as_posix()
             if relpath in paths:
                 res[category].append(relpath)
     # Recursively compare subdirectories
@@ -627,9 +630,9 @@ def get_status(
         )
         wdir = path_in_project
         # Ensure we've cloned the Overleaf project
-        overleaf_project_dir = os.path.join(
-            ".calkit", "overleaf", overleaf_project_id
-        )
+        overleaf_project_dir = (
+            Path(".calkit") / "overleaf" / overleaf_project_id
+        ).as_posix()
         overleaf_remote_url = calkit.overleaf.get_git_remote_url(
             project_id=overleaf_project_id, token=str(overleaf_token)
         )
@@ -677,7 +680,7 @@ def get_status(
         )
 
         def print_path(p, fg_color=None):
-            txt = f"    {os.path.join(wdir, p)}"
+            txt = f"    {(Path(wdir) / p).as_posix()}"
             typer.echo(typer.style(txt, fg=fg_color))
 
         if status["left_only"]:

@@ -248,7 +248,7 @@ class StaleStage(BaseModel):
 
             def _prefix(p: str) -> str:
                 return Path(
-                    os.path.normpath(os.path.join(path_prefix, p))
+                    os.path.normpath((Path(path_prefix) / p).as_posix())
                 ).as_posix()
 
             modified_inputs = [_prefix(p) for p in modified_inputs]
@@ -614,7 +614,7 @@ def get_status(
             if not isinstance(sp_cfg, dict) or not sp_cfg.get("path"):
                 continue
             sp = Path(sp_cfg["path"]).as_posix()
-            if os.path.isdir(os.path.join(sp, ".dvc")):
+            if os.path.isdir((Path(sp) / ".dvc").as_posix()):
                 sp_by_stage_name[Path(sp).name] = sp
                 isolated_sp_paths.add(sp)
         # Root-level stage keys have the form "stage_name" (no dvc.yaml: prefix).
@@ -641,7 +641,7 @@ def get_status(
                 # Sub-project has its own stale stages: replace the wrapper key
                 # with individual stage keys so the user sees {sp}:stage_name.
                 del raw_status[wrapper_key]
-                sp_is_isolated = os.path.isdir(os.path.join(sp, ".dvc"))
+                sp_is_isolated = os.path.isdir((Path(sp) / ".dvc").as_posix())
                 for k, v in sp_raw_status.items():
                     # For isolated subprojects the DVC repo is rooted at sp, so
                     # keys are sp-relative and need the sp/ prefix.
@@ -865,7 +865,7 @@ def to_dvc(
         sp = Path(subproject["path"]).as_posix()
         if not os.path.isdir(sp):
             raise NotADirectoryError(f"Subproject path '{sp}' does not exist")
-        sp_is_isolated = os.path.isdir(os.path.join(sp, ".dvc"))
+        sp_is_isolated = os.path.isdir((Path(sp) / ".dvc").as_posix())
         # Always compile the subproject's dvc.yaml recursively.
         # Inline subprojects need their dvc.yaml written so DVC discovers them
         # via --all-pipelines; isolated subprojects get a wrapper stage instead.
@@ -906,7 +906,7 @@ def to_dvc(
     if "pipeline" not in ck_info:
         if write and wrapper_stages:
             dvc_yaml_fpath = (
-                os.path.join(wdir, "dvc.yaml") if wdir else "dvc.yaml"
+                (Path(wdir) / "dvc.yaml").as_posix() if wdir else "dvc.yaml"
             )
             existing = {}
             if os.path.isfile(dvc_yaml_fpath):
@@ -939,7 +939,9 @@ def to_dvc(
     # Read existing dvc.yaml now so we can clean up stale .gitignore entries
     # when stage outputs are renamed or removed
     if write:
-        dvc_yaml_path = os.path.join(wdir, "dvc.yaml") if wdir else "dvc.yaml"
+        dvc_yaml_path = (
+            (Path(wdir) / "dvc.yaml").as_posix() if wdir else "dvc.yaml"
+        )
         if os.path.isfile(dvc_yaml_path):
             with open(dvc_yaml_path) as f:
                 existing_dvc_yaml = calkit.ryaml.load(f)
@@ -999,7 +1001,7 @@ def to_dvc(
                 "in calkit.yaml"
             )
         ck_yaml_path = (
-            os.path.join(wdir, "calkit.yaml") if wdir else "calkit.yaml"
+            (Path(wdir) / "calkit.yaml").as_posix() if wdir else "calkit.yaml"
         )
         with open(ck_yaml_path) as _f:
             ck_yaml_data = calkit.ryaml.load(_f) or {}
@@ -1185,7 +1187,9 @@ def to_dvc(
             ).startswith("Automatically generated"):
                 dvc_stages[stage_name] = stage
         dvc_yaml["stages"] = dvc_stages
-        dvc_yaml_fpath = os.path.join(wdir, "dvc.yaml") if wdir else "dvc.yaml"
+        dvc_yaml_fpath = (
+            (Path(wdir) / "dvc.yaml").as_posix() if wdir else "dvc.yaml"
+        )
         with open(dvc_yaml_fpath, "w") as f:
             if verbose:
                 typer.echo("Writing to dvc.yaml")
@@ -1338,7 +1342,7 @@ def translate_run_targets(
             continue
         sp_cfg = sp_map[sp_part]
         sp = Path(sp_cfg["path"]).as_posix()
-        sp_is_isolated = os.path.isdir(os.path.join(sp, ".dvc"))
+        sp_is_isolated = os.path.isdir((Path(sp) / ".dvc").as_posix())
         if sp_is_isolated:
             if stage_part:
                 isolated_sp_targets.append((sp, stage_part))

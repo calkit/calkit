@@ -32,6 +32,7 @@ import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 # Path constants are duplicated from ``calkit/dvc/zip.py`` rather than
@@ -145,7 +146,7 @@ def _hash_check_cmd(check: str | None) -> str:
 
 def _cache_path(wdir: str | None) -> str:
     return (
-        os.path.join(wdir, DEP_CHECK_CACHE_PATH)
+        (Path(wdir) / DEP_CHECK_CACHE_PATH).as_posix()
         if wdir
         else DEP_CHECK_CACHE_PATH
     )

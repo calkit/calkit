@@ -248,28 +248,42 @@ def test_set_remote_auth_ck_remote_clears_local_http_auth(
 
 
 def test_data_status_as_posix():
-    # Path.as_posix() only converts backslashes on Windows (where they're the
-    # path separator), so we test structure preservation, regression cases, and
-    # that posix inputs round-trip unchanged.
+    # Use os.path.join so on Windows the inputs contain real backslash
+    # separators (exercising the \ -> / conversion), and on POSIX they're
+    # already forward-slashes (testing structure preservation + regressions).
     data_status = {
-        "git": {"is_dirty": True, "untracked": ["sub/file.txt"]},
-        "uncommitted": {
-            "added": ["data/a.csv"],
-            "modified": ["data/b.csv"],
-            "renamed": [{"old": "data/old.csv", "new": "data/new.csv"}],
+        "git": {
+            "is_dirty": True,
+            "untracked": [os.path.join("sub", "file.txt")],
         },
-        "not_in_remote": ["figs/a.png", "figs/b.png"],
+        "uncommitted": {
+            "added": [os.path.join("data", "a.csv")],
+            "modified": [os.path.join("data", "b.csv")],
+            "renamed": [
+                {
+                    "old": os.path.join("data", "old.csv"),
+                    "new": os.path.join("data", "new.csv"),
+                }
+            ],
+        },
+        "not_in_remote": [
+            os.path.join("figs", "a.png"),
+            os.path.join("figs", "b.png"),
+        ],
         "scalar": "ignored",
     }
     out = calkit.dvc.data_status_as_posix(data_status)
-    # Git entry passes through untouched (no normalization applied).
-    assert out["git"] == {"is_dirty": True, "untracked": ["sub/file.txt"]}
-    # Top-level list of paths preserved.
+    # Git entry passes through untouched (no normalization applied), including
+    # whatever separator the OS uses.
+    assert out["git"] == {
+        "is_dirty": True,
+        "untracked": [os.path.join("sub", "file.txt")],
+    }
+    # All other paths come out in posix form regardless of platform.
     assert out["not_in_remote"] == ["figs/a.png", "figs/b.png"]
-    # Nested dict of lists preserved.
     assert out["uncommitted"]["added"] == ["data/a.csv"]
     assert out["uncommitted"]["modified"] == ["data/b.csv"]
-    # Renamed entries are dicts — must not crash and must preserve old/new.
+    # Renamed entries are dicts — must not crash and must convert old/new.
     assert out["uncommitted"]["renamed"] == [
         {"old": "data/old.csv", "new": "data/new.csv"}
     ]
@@ -278,14 +292,15 @@ def test_data_status_as_posix():
 
 
 def test_status_as_posix():
-    # Stages with: bare-string entries, normal path/status dicts, and scalar
-    # category values like "changed command" (which must not crash).
+    # Stages with: bare-string entries, normal path/status dicts (using
+    # os.path.join so Windows runs see real backslashes), and scalar category
+    # values like "changed command" (which must not crash).
     status = {
         "stage1": ["always changed"],
         "stage2": [
             {
-                "changed outs": {"data/out.csv": "modified"},
-                "changed deps": {"src/foo.py": "modified"},
+                "changed outs": {os.path.join("data", "out.csv"): "modified"},
+                "changed deps": {os.path.join("src", "foo.py"): "modified"},
             }
         ],
         "stage3": [{"changed command": "python src/new-script.py"}],

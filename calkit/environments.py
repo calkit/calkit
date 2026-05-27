@@ -314,6 +314,12 @@ def get_env_lock_fpath(
             lock_fpath = os.path.join(env_dir, "uv.lock")
         else:
             lock_fpath = "uv.lock"
+    elif env_kind == "pixi":
+        env_dir = os.path.dirname(env.get("path") or "")
+        if env_dir:
+            lock_fpath = os.path.join(env_dir, "pixi.lock")
+        else:
+            lock_fpath = "pixi.lock"
     elif env_kind in ["venv", "uv-venv"]:
         if legacy:
             lock_fpath += ".txt"

@@ -91,7 +91,32 @@ class PipelineStatus(BaseModel):
     @computed_field
     @property
     def stale_stage_names(self) -> list[str]:
-        return list(self.stale_stages.keys())
+        # Pure always-run stages aren't truly stale; surface them via
+        # always_run_stage_names instead.
+        return [
+            name
+            for name, stage in self.stale_stages.items()
+            if not stage.always_run
+            or stage.modified_command
+            or stage.modified_inputs
+            or stage.modified_outputs
+            or stage.stale_outputs
+        ]
+
+    @computed_field
+    @property
+    def always_run_stage_names(self) -> list[str]:
+        # Only list stages whose sole change indicator is always_run; stages
+        # that also have real changes are reported under stale_stage_names.
+        return [
+            name
+            for name, stage in self.stale_stages.items()
+            if stage.always_run
+            and not stage.modified_command
+            and not stage.modified_inputs
+            and not stage.modified_outputs
+            and not stage.stale_outputs
+        ]
 
     @computed_field
     @property
@@ -107,7 +132,20 @@ class PipelineStatus(BaseModel):
     @computed_field
     @property
     def is_stale(self) -> bool:
-        return bool(self.stale_stages)
+        # A stage whose only listed change is "always_run" is not actually
+        # stale — it just always re-executes by design. Treat the pipeline
+        # as stale only if some stage has real change indicators.
+        for stage in self.stale_stages.values():
+            if not stage.always_run:
+                return True
+            if (
+                stage.modified_command
+                or stage.modified_inputs
+                or stage.modified_outputs
+                or stage.stale_outputs
+            ):
+                return True
+        return False
 
 
 class StaleStage(BaseModel):
@@ -118,6 +156,7 @@ class StaleStage(BaseModel):
     modified_inputs: list[str] = Field(default_factory=list)
     modified_outputs: list[str] = Field(default_factory=list)
     modified_command: bool = False
+    always_run: bool = False
 
     @staticmethod
     def _as_path_list(paths: object) -> list[str]:
@@ -206,17 +245,22 @@ class StaleStage(BaseModel):
         modified_outputs = []
         status_blocks = []
         modified_command = False
+        always_run = False
         if isinstance(status_data, dict):
             status_blocks = [status_data]
         elif isinstance(status_data, list):
             status_blocks = [
                 item for item in status_data if isinstance(item, dict)
             ]
-            # DVC may return plain markers like ["changed command"].
+            # DVC may return plain markers like ["changed command"] or
+            # ["always changed"], possibly alongside other change blocks.
             if "changed command" in status_data:
                 modified_command = True
+            if "always changed" in status_data:
+                always_run = True
         elif isinstance(status_data, str):
             modified_command = status_data == "changed command"
+            always_run = status_data == "always changed"
         for block in status_blocks:
             if "changed command" in block:
                 changed_command_value = block.get("changed command")
@@ -264,7 +308,16 @@ class StaleStage(BaseModel):
         stale_outputs.extend(
             [path for path in output_paths if path not in modified_outputs]
         )
-        if not stale_outputs and not modified_outputs and configured_outputs:
+        # Fallback: if DVC flagged the stage but we couldn't attribute the
+        # change to specific paths, mark all configured outputs as stale.
+        # Skip the fallback for pure "always_run" stages — they always
+        # re-execute by design, not because outputs are out of date.
+        if (
+            not stale_outputs
+            and not modified_outputs
+            and configured_outputs
+            and not always_run
+        ):
             stale_outputs.extend(configured_outputs)
         stale_outputs = list(dict.fromkeys(stale_outputs))
         return cls(
@@ -273,6 +326,7 @@ class StaleStage(BaseModel):
             modified_inputs=modified_inputs,
             modified_outputs=modified_outputs,
             modified_command=modified_command,
+            always_run=always_run,
         )
 
 
@@ -666,7 +720,10 @@ def get_status(
         # collisions when a subproject stage shares a name with a root stage.
         raw_stale_stages: dict[str, tuple[str, str | None, list]] = {}
         for k, v in raw_status.items():
-            if v == ["always changed"] or k.endswith(".dvc"):
+            # Skip DVC-tracked files (.dvc entries) — they are not pipeline
+            # stages. Stages marked ["always changed"] are kept so the user
+            # sees them in the pipeline status output.
+            if k.endswith(".dvc"):
                 continue
             if "dvc.yaml:" in k:
                 prefix, bare_name = k.split("dvc.yaml:", 1)

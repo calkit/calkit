@@ -1017,6 +1017,40 @@ def test_nix_env(tmp_dir):
     assert "devShells" in content
 
 
+def test_pixi_env_lock_fpath(tmp_dir):
+    # Manifest at the repo root: pixi.lock lives next to pixi.toml.
+    root_env = {"kind": "pixi", "path": "pixi.toml"}
+    assert (
+        calkit.environments.get_env_lock_fpath(
+            env=root_env, env_name="main", as_posix=True
+        )
+        == "pixi.lock"
+    )
+    # Manifest in a subdirectory: lock follows the manifest.
+    nested_env = {"kind": "pixi", "path": ".calkit/envs/my-env/pixi.toml"}
+    assert (
+        calkit.environments.get_env_lock_fpath(
+            env=nested_env, env_name="my-env", as_posix=True
+        )
+        == ".calkit/envs/my-env/pixi.lock"
+    )
+    # path may be omitted/None without raising.
+    assert (
+        calkit.environments.get_env_lock_fpath(
+            env={"kind": "pixi"}, env_name="main", as_posix=True
+        )
+        == "pixi.lock"
+    )
+    assert (
+        calkit.environments.get_env_lock_fpath(
+            env={"kind": "pixi", "path": None},
+            env_name="main",
+            as_posix=True,
+        )
+        == "pixi.lock"
+    )
+
+
 def test_add_packages_to_nix_flake(tmp_dir):
     # Round-trip: generate a flake, add some packages, verify they appear
     # in the packages list, that duplicates aren't re-inserted, and that

@@ -106,10 +106,16 @@ class PipelineStatus(BaseModel):
     @computed_field
     @property
     def always_run_stage_names(self) -> list[str]:
+        # Only list stages whose sole change indicator is always_run; stages
+        # that also have real changes are reported under stale_stage_names.
         return [
             name
             for name, stage in self.stale_stages.items()
             if stage.always_run
+            and not stage.modified_command
+            and not stage.modified_inputs
+            and not stage.modified_outputs
+            and not stage.stale_outputs
         ]
 
     @computed_field

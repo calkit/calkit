@@ -8,6 +8,14 @@ import sys
 import pytest
 from pypdf import PdfReader
 
+skipif_windows_docker = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "TODO: Docker Linux images are unavailable on windows-latest GHA "
+        "runners"
+    ),
+)
+
 
 @pytest.mark.skipif(
     sys.platform == "win32",
@@ -109,6 +117,7 @@ Result 3 is \theresults[result3].
     )
 
 
+@skipif_windows_docker
 def test_build(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     os.makedirs("paper", exist_ok=True)

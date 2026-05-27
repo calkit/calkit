@@ -113,7 +113,7 @@ class SyncRecord(BaseModel):
 
 def make_zip_path(workspace_path: str) -> str:
     """Make a zip path for a given workspace path."""
-    return os.path.join(ZIPS_DIR, "files", workspace_path + ".zip")
+    return Path(ZIPS_DIR, "files", f"{workspace_path}.zip").as_posix()
 
 
 def _path_map_path(wdir: str | None = None) -> str:

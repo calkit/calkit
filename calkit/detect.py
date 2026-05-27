@@ -115,7 +115,7 @@ def detect_julia_script_io(
         if not os.path.isabs(match):
             full_path = os.path.join(script_dir, match)
             if os.path.exists(full_path):
-                inputs.append(os.path.relpath(full_path))
+                inputs.append(Path(os.path.relpath(full_path)).as_posix())
             elif _is_valid_project_path(match):
                 inputs.append(match)
     read_patterns = [
@@ -945,7 +945,7 @@ def _detect_julia_code_io(
         if not os.path.isabs(match):
             full_path = os.path.join(script_dir, match)
             if os.path.exists(full_path):
-                inputs.append(os.path.relpath(full_path))
+                inputs.append(Path(os.path.relpath(full_path)).as_posix())
             elif _is_valid_project_path(match):
                 inputs.append(match)
     read_patterns = [
@@ -985,12 +985,12 @@ def _resolve_python_import(
     if os.path.exists(file_path) and _is_valid_project_path(
         os.path.relpath(file_path)
     ):
-        return os.path.relpath(file_path)
+        return Path(os.path.relpath(file_path)).as_posix()
     init_path = os.path.join(search_dir, module_path, "__init__.py")
     if os.path.exists(init_path) and _is_valid_project_path(
         os.path.relpath(init_path)
     ):
-        return os.path.relpath(init_path)
+        return Path(os.path.relpath(init_path)).as_posix()
     return None
 
 
@@ -1025,7 +1025,7 @@ def _detect_r_code_io(
         if not os.path.isabs(match):
             full_path = os.path.join(script_dir, match)
             if os.path.exists(full_path):
-                inputs.append(os.path.relpath(full_path))
+                inputs.append(Path(os.path.relpath(full_path)).as_posix())
             elif _is_valid_project_path(match):
                 inputs.append(match)
     # Read patterns that capture variables, file.path() expressions, or literals

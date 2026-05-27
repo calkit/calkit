@@ -903,11 +903,14 @@ class PipelineStatusRouteHandler(APIHandler):
             pipeline_status = {
                 k.split("dvc.yaml:")[-1]: v
                 for k, v in raw_status.items()
-                if v != ["always changed"]
-                and not k.endswith(".dvc")
+                if not k.endswith(".dvc")
                 and k.split("dvc.yaml:")[-1].split("@")[0] not in frozen_stages
             }
-            is_outdated = len(pipeline_status) > 0
+            # Always-run-only stages are surfaced in pipeline_status but do
+            # not count toward is_outdated, matching the CLI's is_stale logic.
+            is_outdated = any(
+                v != ["always changed"] for v in pipeline_status.values()
+            )
             self.finish(
                 json.dumps(
                     {

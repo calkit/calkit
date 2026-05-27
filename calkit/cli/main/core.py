@@ -582,6 +582,8 @@ def get_status(
                 if stale_stage is None:
                     continue
                 typer.echo(f"        {typer.style(stage_name, fg='yellow')}:")
+                if stale_stage.always_run:
+                    typer.echo("          always runs")
                 if stale_stage.modified_command:
                     typer.echo("          modified command")
                 # Show stale outputs for this stage
@@ -599,8 +601,16 @@ def get_status(
                     typer.echo("          modified inputs:")
                     for input_path in stale_stage.modified_inputs:
                         typer.echo(f"            {input_path}")
+            if pipeline_status.always_run_stage_names:
+                typer.echo("Always-run stages:")
+                for stage_name in pipeline_status.always_run_stage_names:
+                    typer.echo(f"        {typer.style(stage_name, fg='cyan')}")
         elif pipeline_status:
             typer.echo("Pipeline is up to date.")
+            if pipeline_status.always_run_stage_names:
+                typer.echo("Always-run stages:")
+                for stage_name in pipeline_status.always_run_stage_names:
+                    typer.echo(f"        {typer.style(stage_name, fg='cyan')}")
 
 
 @app.command(name="diff")
@@ -2424,7 +2434,10 @@ def run_in_env(
     elif env["kind"] == "pixi":
         env_cmd = []
         if "name" in env:
-            env_cmd = ["--environment", env["name"]]
+            env_cmd += ["--environment", env["name"]]
+        env_path = env.get("path")
+        if env_path and os.path.dirname(env_path):
+            env_cmd += ["--manifest-path", os.path.abspath(env_path)]
         cmd = ["pixi", "run"] + env_cmd + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")

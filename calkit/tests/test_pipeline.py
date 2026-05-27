@@ -1465,6 +1465,98 @@ def test_get_status_excludes_frozen_stage(tmp_dir):
     assert "get-data" not in status.stale_stage_names
 
 
+def test_get_status_includes_always_run_stage(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "environments": {
+            "py": {
+                "kind": "uv-venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+            }
+        },
+        "pipeline": {
+            "stages": {
+                "ticker": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "something/my-cool-script.py",
+                    "outputs": ["ticker.out"],
+                    "always_run": True,
+                },
+                "normal": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "something/normal-script.py",
+                    "outputs": ["normal.out"],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("requirements.txt", "w") as f:
+        f.write("requests\n")
+    os.makedirs("something", exist_ok=True)
+    with open("something/my-cool-script.py", "w") as f:
+        f.write("open('ticker.out', 'w').write('tick')\n")
+    with open("something/normal-script.py", "w") as f:
+        f.write("open('normal.out', 'w').write('hi')\n")
+    # The compiled DVC stage must carry always_changed: true so DVC's status
+    # actually emits the "always changed" marker
+    dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info)
+    assert dvc_stages["ticker"]["always_changed"] is True
+    # Initial status: outputs missing, both stages are stale for real reasons.
+    # The always-run stage carries the always_run flag too.
+    status = calkit.pipeline.get_status(ck_info=ck_info)
+    assert status.is_stale
+    assert "ticker" in status.stale_stages
+    assert status.stale_stages["ticker"].always_run
+    assert "normal" in status.stale_stage_names
+    assert "ticker" in status.stale_stage_names
+    # Run the pipeline so outputs exist and nothing is "really" stale
+    subprocess.check_call(["calkit", "run"])
+    status = calkit.pipeline.get_status(ck_info=ck_info)
+    # The always-run stage must still be visible — that was the bug
+    assert "ticker" in status.stale_stages
+    assert status.stale_stages["ticker"].always_run
+    assert status.stale_stages["ticker"].stale_outputs == []
+    assert status.stale_stages["ticker"].modified_outputs == []
+    assert status.stale_stages["ticker"].modified_inputs == []
+    assert not status.stale_stages["ticker"].modified_command
+    assert status.always_run_stage_names == ["ticker"]
+    # A pipeline whose only "stale" stage is always_run must not be marked
+    # stale — calkit update relies on is_stale to gate release publication
+    assert not status.is_stale
+    assert "ticker" not in status.stale_stage_names
+
+
+def test_stale_stage_detects_always_changed_marker():
+    stale_stage = calkit.pipeline.StaleStage.from_status_data(
+        status_data=["always changed"],
+        configured_outputs=["ticker.out"],
+    )
+    assert stale_stage.always_run
+    assert not stale_stage.modified_command
+    assert stale_stage.stale_outputs == []
+    assert stale_stage.modified_outputs == []
+    assert stale_stage.modified_inputs == []
+
+
+def test_stale_stage_always_changed_with_missing_output():
+    # Mirrors DVC's actual output for an always_changed stage whose output
+    # is missing from cache: ["always changed"] coexists with a change block.
+    stale_stage = calkit.pipeline.StaleStage.from_status_data(
+        status_data=[
+            {"changed outs": {"ticker.out": "deleted"}},
+            "always changed",
+        ],
+        configured_outputs=["ticker.out"],
+    )
+    assert stale_stage.always_run
+    assert stale_stage.stale_outputs == ["ticker.out"]
+
+
 def test_stale_stage_detects_changed_command():
     stale_stage = calkit.pipeline.StaleStage.from_status_data(
         status_data=[{"changed command": "python src/new-script.py"}],

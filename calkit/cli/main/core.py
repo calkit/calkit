@@ -2431,7 +2431,10 @@ def run_in_env(
     elif env["kind"] == "pixi":
         env_cmd = []
         if "name" in env:
-            env_cmd = ["--environment", env["name"]]
+            env_cmd += ["--environment", env["name"]]
+        env_path = env.get("path")
+        if env_path and os.path.dirname(env_path):
+            env_cmd += ["--manifest-path", os.path.abspath(env_path)]
         cmd = ["pixi", "run"] + env_cmd + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")

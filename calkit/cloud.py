@@ -31,15 +31,43 @@ _refresh_lock = threading.Lock()
 # Seconds before JWT expiry at which we proactively refresh.
 _REFRESH_BUFFER_SECONDS = 60
 
-# Lock + flag used so that only one thread runs the interactive device login
-# flow at a time, and so requests made *during* the flow itself don't
-# recursively try to trigger another one.
+# Serializes interactive device-login attempts so that, when several
+# concurrent requests all hit an auth failure, only one of them actually
+# prompts the user; the rest wait on the lock and then reuse the freshly
+# minted token. The device-flow's own polling calls use ``auth=False`` so
+# they don't recurse into the auth-retry paths in ``_request``.
 _device_login_lock = threading.Lock()
-_device_login_in_progress = False
+
+
+# Substrings the Calkit API uses in a 403 ``detail`` to indicate the request
+# was rejected because the *credentials* were invalid (vs. a permission
+# error where the credentials are fine but the action isn't allowed). Only
+# matches here should trigger a refresh / device login retry.
+_INVALID_CREDENTIALS_DETAIL_SUBSTRINGS = (
+    "Could not validate credentials",
+    "Not authenticated",
+    "Invalid token",
+    "Token has expired",
+)
 
 
 class DeviceLoginError(RuntimeError):
     """Raised when the OAuth device login flow cannot complete."""
+
+
+def _is_invalid_credentials_response(resp) -> bool:
+    """Return True if a 403 looks like a credential-rejection (not a
+    permission error). Reads ``detail`` from the response JSON; on any
+    parsing failure assume it is *not* a credential issue so we don't
+    hijack legitimate permission errors.
+    """
+    try:
+        detail = resp.json().get("detail")
+    except Exception:
+        return False
+    if not isinstance(detail, str):
+        return False
+    return any(s in detail for s in _INVALID_CREDENTIALS_DETAIL_SUBSTRINGS)
 
 
 def _interactive_login_allowed() -> bool:
@@ -63,7 +91,6 @@ def run_device_flow() -> str:
     token cache. Raises :class:`DeviceLoginError` on any failure (server
     error, expired/missing device code, timeout, etc.).
     """
-    global _device_login_in_progress
     # Serialize concurrent attempts (e.g. multiple fsspec threads all hitting
     # 403 at the same time): the first thread runs the flow, the rest wait
     # and then reuse the freshly minted token.
@@ -75,11 +102,7 @@ def run_device_flow() -> str:
         # another thread just completed a device flow — reuse its result.
         if token_after is not None and token_after != token_before:
             return token_after
-        _device_login_in_progress = True
-        try:
-            return _do_device_flow()
-        finally:
-            _device_login_in_progress = False
+        return _do_device_flow()
 
 
 def _do_device_flow() -> str:
@@ -334,11 +357,13 @@ def _request(
         except ValueError:
             # No token in config at all. If we can prompt the user, run
             # the device flow and try again; otherwise re-raise so callers
-            # see the original "no token" error.
+            # see the original "no token" error. ``run_device_flow``
+            # serializes concurrent callers via ``_device_login_lock`` and
+            # reuses the freshly minted token, so threads that arrive
+            # mid-flow simply wait their turn rather than re-prompting.
             if (
                 auth
                 and not device_login_attempted
-                and not _device_login_in_progress
                 and _interactive_login_allowed()
             ):
                 device_login_attempted = True
@@ -357,28 +382,38 @@ def _request(
             wait = min(base_delay_seconds * (2**retry_num), max_delay_seconds)
             time.sleep(wait)
             continue
-        # On any credential-rejection status (401 or 403 — the Calkit API
-        # returns 403 "Could not validate credentials" for bad/expired
-        # tokens), attempt a token refresh once. _try_refresh returns None
-        # when no refresh_token is stored (e.g. PAT-only sessions).
-        # get_headers() re-calls get_token() on the next iteration, so it
-        # will automatically pick up the new token stored in _tokens by
-        # _try_refresh.
-        if resp.status_code in (401, 403) and auth and not refresh_attempted:
+        # Decide whether this response is a credential rejection (vs. a
+        # permission/authorization failure that happens to also be 403).
+        # 401 is always a credential rejection. For 403, only treat it as
+        # one if the API's detail string identifies it as such — otherwise
+        # we'd hijack legitimate "you can't do that" errors and pop a
+        # browser-based login flow at the user.
+        looks_like_auth_failure = auth and (
+            resp.status_code == 401
+            or (
+                resp.status_code == 403
+                and _is_invalid_credentials_response(resp)
+            )
+        )
+        # On credential rejection, attempt a token refresh once.
+        # ``_try_refresh`` returns ``None`` when no refresh token is stored
+        # (e.g. PAT-only sessions). ``get_headers()`` re-calls
+        # ``get_token()`` on the next iteration, so it will automatically
+        # pick up the new token stored in ``_tokens`` by ``_try_refresh``.
+        if looks_like_auth_failure and not refresh_attempted:
             refresh_attempted = True
             new_token = _try_refresh()
             if new_token is not None:
                 continue
-        # If the request still looks like an auth failure (401 after a failed
-        # refresh, or 403 because the token was revoked / can't validate),
-        # fall back to the interactive device login flow once. This covers
-        # both HTTP remotes (where /user/tokens 403s) and ck:// remotes
-        # (which go through this same _request path).
+        # If refresh didn't help, fall back to the interactive device login
+        # flow once. This covers both HTTP remotes (where /user/tokens
+        # 401/403s) and ck:// remotes (which go through this same
+        # ``_request`` path). ``run_device_flow`` serializes via
+        # ``_device_login_lock`` and reuses the new token, so concurrent
+        # callers wait rather than each starting their own flow.
         if (
-            resp.status_code in (401, 403)
-            and auth
+            looks_like_auth_failure
             and not device_login_attempted
-            and not _device_login_in_progress
             and _interactive_login_allowed()
         ):
             device_login_attempted = True

@@ -272,6 +272,7 @@ def get_sync_record(
 ) -> SyncRecord | None:
     """Get a sync record for a given workspace path."""
     _check_local_dir(wdir)
+    workspace_path = Path(workspace_path).as_posix()
     with SqliteDict(_sync_records_path(wdir)) as db:
         raw = db.get(workspace_path)
     if raw is not None:
@@ -283,13 +284,14 @@ def write_sync_record(record: SyncRecord, wdir: str | None = None):
     """Write a sync record."""
     _check_local_dir(wdir)
     with SqliteDict(_sync_records_path(wdir)) as db:
-        db[record.workspace_path] = record.model_dump()
+        db[Path(record.workspace_path).as_posix()] = record.model_dump()
         db.commit()
 
 
 def delete_sync_record(workspace_path: str, wdir: str | None = None):
     """Delete a sync record."""
     _check_local_dir(wdir)
+    workspace_path = Path(workspace_path).as_posix()
     with SqliteDict(_sync_records_path(wdir)) as db:
         if workspace_path in db:
             del db[workspace_path]
@@ -466,6 +468,9 @@ def sync_one(
         workspace_path = os.path.join(wdir, workspace_path)
         if zip_path is not None:
             zip_path = os.path.join(wdir, zip_path)
+    workspace_path = Path(workspace_path).as_posix()
+    if zip_path is not None:
+        zip_path = Path(zip_path).as_posix()
     return _sync_one(workspace_path, zip_path, direction, wdir=wdir)
 
 

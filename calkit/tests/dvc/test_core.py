@@ -55,6 +55,25 @@ def test_hash_directory():
     assert res["md5"] == "ca2ffab71e00d528b974e583d789ec97.dir"
 
 
+def test_frozen_stage_reproduce_warning_is_suppressed(caplog):
+    # Import side effect: loading calkit.dvc installs the filter on the
+    # dvc.repo.reproduce logger.
+    import logging
+
+    import calkit.dvc  # noqa: F401
+
+    logger = logging.getLogger("dvc.repo.reproduce")
+    with caplog.at_level(logging.WARNING, logger="dvc.repo.reproduce"):
+        logger.warning(
+            "%s is frozen. Its dependencies are not going to be reproduced.",
+            "stage: 'foo@1'",
+        )
+        logger.warning("some other warning that must pass through")
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any("is frozen" in m for m in messages)
+    assert any("must pass through" in m for m in messages)
+
+
 def test_register_ck_scheme_updates_schema_and_registry():
     register_ck_scheme()
 

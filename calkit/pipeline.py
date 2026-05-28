@@ -1,7 +1,6 @@
 """Pipeline-related functionality."""
 
 import itertools
-import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -16,17 +15,6 @@ from calkit.models.pipeline import (
     PathOutput,
     Pipeline,
 )
-
-
-class _FrozenStageWarningFilter(logging.Filter):
-    """Drop only DVC's "stage is frozen" status warning.
-
-    Frozen stages are intentionally hidden from Calkit status output, so this
-    warning is noise; all other ``dvc.repo.status`` diagnostics pass through.
-    """
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        return "is frozen. Its dependencies are" not in record.getMessage()
 
 
 def _coerce_frozen(value: object) -> bool:
@@ -641,19 +629,9 @@ def get_status(
                 return PipelineStatus.model_validate(result)
         try:
             dvc_repo = calkit.dvc.get_dvc_repo()
-            # Frozen stages emit a "stage is frozen. Its dependencies are not
-            # going to be shown in the status output." warning from DVC's
-            # status module; suppress just that message since we intentionally
-            # hide frozen stages from the Calkit status output entirely.
-            # A targeted filter is used (rather than raising the logger level)
-            # so unrelated DVC diagnostics are still emitted.
-            dvc_status_logger = logging.getLogger("dvc.repo.status")
-            frozen_filter = _FrozenStageWarningFilter()
-            dvc_status_logger.addFilter(frozen_filter)
-            try:
-                raw_status = dvc_repo.status(targets=targets)
-            finally:
-                dvc_status_logger.removeFilter(frozen_filter)
+            # calkit.dvc.core installs a filter on dvc.repo.status that drops
+            # the noisy frozen-stage warning, so the call here stays quiet.
+            raw_status = dvc_repo.status(targets=targets)
         except Exception as e:
             result["errors"].append(
                 "Failed to get pipeline status from DVC: "
@@ -1296,7 +1274,7 @@ def get_matrix_item_targets(
 
     repo = calkit.dvc.get_dvc_repo(wdir)
     prefix = stage_name + "@"
-    items = [s for s in repo.index.stages if (s.name or "").startswith(prefix)]
+    items = [s for s in repo.index.stages if (s.name or "").startswith(prefix)]  # type: ignore
     item_set = set(items)
     upstreams: set = set()
     for item in items:

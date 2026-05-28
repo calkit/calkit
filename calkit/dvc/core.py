@@ -26,6 +26,24 @@ logger.setLevel(logging.INFO)
 USE_CK_REMOTE_BY_DEFAULT = True
 
 
+class _FrozenStageWarningFilter(logging.Filter):
+    """Drop DVC's "stage is frozen" warnings.
+
+    DVC emits these for every frozen stage on every ``status``/``repro`` call
+    ("... not going to be shown in the status output." and "... not going to
+    be reproduced."). Frozen stages are pinned by design, so the warnings are
+    noise — the substring shared by both variants is matched here.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "is frozen. Its dependencies are" not in record.getMessage()
+
+
+_frozen_stage_warning_filter = _FrozenStageWarningFilter()
+for _name in ("dvc.repo.reproduce", "dvc.repo.status"):
+    logging.getLogger(_name).addFilter(_frozen_stage_warning_filter)
+
+
 class CalkitDVCFileSystem(ObjectFileSystem):
     """DVC-facing filesystem wrapper for the ``ck://`` scheme."""
 

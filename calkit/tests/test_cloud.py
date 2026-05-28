@@ -238,6 +238,82 @@ def test_request_retries_on_401_with_refresh(monkeypatch):
     assert call_count["n"] == 2
 
 
+def test_request_invalid_credentials_403_triggers_refresh(monkeypatch):
+    """A 403 whose detail says credentials are invalid should be treated
+    like a 401 — refresh attempted, request retried."""
+    base_url = cloud.get_base_url()
+    fresh = _make_jwt(time.time() + 3600)
+    call_count = {"n": 0}
+
+    class Resp403:
+        status_code = 403
+
+        def raise_for_status(self):
+            from requests.exceptions import HTTPError
+
+            raise HTTPError("403")
+
+        def json(self):
+            return {"detail": "Could not validate credentials"}
+
+    class Resp200:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"ok": True}
+
+    def _fake_get(url, **kwargs):
+        call_count["n"] += 1
+        return Resp403() if call_count["n"] == 1 else Resp200()
+
+    monkeypatch.setattr(cloud.requests, "get", _fake_get)
+    monkeypatch.setitem(cloud._tokens, base_url, fresh)
+    monkeypatch.setattr(cloud, "_try_refresh", lambda: fresh)
+    result = cloud._request("get", "/test", base_url=base_url)
+    assert result == {"ok": True}
+    assert call_count["n"] == 2
+
+
+def test_request_permission_403_does_not_trigger_refresh(monkeypatch):
+    """A 403 that's a real permission denial (e.g. user not allowed to
+    create a project under an org) must surface as an HTTPError, not
+    silently trigger refresh/device login."""
+    base_url = cloud.get_base_url()
+    fresh = _make_jwt(time.time() + 3600)
+    call_count = {"n": 0}
+    refresh_calls = {"n": 0}
+
+    class Resp403Perm:
+        status_code = 403
+
+        def raise_for_status(self):
+            from requests.exceptions import HTTPError
+
+            raise HTTPError("403")
+
+        def json(self):
+            return {"detail": "You are not allowed to create projects here"}
+
+    def _fake_post(url, **kwargs):
+        call_count["n"] += 1
+        return Resp403Perm()
+
+    def _fake_refresh():
+        refresh_calls["n"] += 1
+        return fresh
+
+    monkeypatch.setattr(cloud.requests, "post", _fake_post)
+    monkeypatch.setitem(cloud._tokens, base_url, fresh)
+    monkeypatch.setattr(cloud, "_try_refresh", _fake_refresh)
+    with pytest.raises(Exception):
+        cloud._request("post", "/projects", base_url=base_url)
+    assert call_count["n"] == 1
+    assert refresh_calls["n"] == 0
+
+
 def test_concurrent_refresh_fires_only_once(monkeypatch):
     """Many threads calling get_token() on an expiring JWT should trigger
     exactly one refresh request, not one per thread."""

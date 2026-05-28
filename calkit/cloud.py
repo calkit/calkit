@@ -6,8 +6,11 @@ import base64
 import json
 import logging
 import os
+import socket
+import sys
 import threading
 import time
+import webbrowser
 from functools import partial
 from typing import Literal
 
@@ -27,6 +30,123 @@ _refresh_lock = threading.Lock()
 
 # Seconds before JWT expiry at which we proactively refresh.
 _REFRESH_BUFFER_SECONDS = 60
+
+# Serializes interactive device-login attempts so that, when several
+# concurrent requests all hit an auth failure, only one of them actually
+# prompts the user; the rest wait on the lock and then reuse the freshly
+# minted token. The device-flow's own polling calls use ``auth=False`` so
+# they don't recurse into the auth-retry paths in ``_request``.
+_device_login_lock = threading.Lock()
+
+
+class DeviceLoginError(RuntimeError):
+    """Raised when the OAuth device login flow cannot complete."""
+
+
+def run_device_flow() -> str:
+    """Run the OAuth device login flow and return the new access token.
+
+    On success the token is written to the config file and the in-memory
+    token cache. Raises :class:`DeviceLoginError` on any failure (server
+    error, expired/missing device code, timeout, etc.).
+    """
+    # Serialize concurrent attempts (e.g. multiple fsspec threads all hitting
+    # 403 at the same time): the first thread runs the flow, the rest wait
+    # and then reuse the freshly minted token.
+    base_url = get_base_url()
+    token_before = _tokens.get(base_url)
+    with _device_login_lock:
+        token_after = _tokens.get(base_url)
+        # If the cached token changed while we were waiting on the lock,
+        # another thread just completed a device flow — reuse its result.
+        if token_after is not None and token_after != token_before:
+            return token_after
+        try:
+            hostname = socket.gethostname()
+        except Exception:
+            hostname = None
+        print("Initiating device login flow", flush=True)
+        try:
+            resp = post(
+                "/login/device",
+                json={"hostname": hostname},
+                auth=False,
+            )
+            device_code = resp["device_code"]
+            verification_uri = resp["verification_uri"]
+            expires_in = int(resp["expires_in"])
+            interval = int(resp["interval"])
+        except Exception as e:
+            raise DeviceLoginError(
+                f"Failed to initiate device login flow: {e}"
+            ) from e
+        print("Authorize this device by opening this URL:", flush=True)
+        print(verification_uri, flush=True)
+        print("Waiting for authorization", flush=True)
+        try:
+            webbrowser.open(verification_uri)
+        except Exception:
+            pass
+        deadline = time.monotonic() + expires_in
+        while time.monotonic() < deadline:
+            try:
+                token_resp = post(
+                    "/login/device/token",
+                    json={"device_code": device_code},
+                    auth=False,
+                )
+            except Exception as e:
+                txt = str(e)
+                if "Device code has expired" in txt:
+                    raise DeviceLoginError(
+                        "Device code has expired; "
+                        "Run 'calkit cloud login' again"
+                    ) from e
+                if "Device code not found" in txt:
+                    raise DeviceLoginError(
+                        "Device code not found; "
+                        "Run 'calkit cloud login' again"
+                    ) from e
+                raise DeviceLoginError(
+                    f"Error while polling for device authorization: {e}"
+                ) from e
+            access_token = token_resp.get("access_token")
+            if access_token:
+                refresh_token = token_resp.get("refresh_token")
+                try:
+                    cfg = config.read()
+                    cfg.access_token = access_token
+                    if refresh_token:
+                        cfg.refresh_token = refresh_token
+                    # A stored PAT (``token``) takes priority over
+                    # ``access_token`` in get_token(), so a stale PAT would
+                    # keep being used by future processes and re-trigger
+                    # the device flow every time. The user just
+                    # re-authenticated, so device-flow credentials win.
+                    if getattr(cfg, "token", None) is not None:
+                        cfg.token = None
+                    # A stored DVC token may have been revoked alongside
+                    # the access token that just failed; clear it so the
+                    # next remote-auth check mints a fresh one.
+                    if getattr(cfg, "dvc_token", None) is not None:
+                        cfg.dvc_token = None
+                    cfg.write()
+                    _tokens[base_url] = access_token
+                except Exception as e:
+                    raise DeviceLoginError(
+                        f"Failed to save token in config: {e}"
+                    ) from e
+                print("Logged in successfully ✅", flush=True)
+                return access_token
+            sleep_seconds = min(
+                interval, max(0.0, deadline - time.monotonic())
+            )
+            if sleep_seconds > 0:
+                time.sleep(sleep_seconds)
+        raise DeviceLoginError(
+            "Timed out waiting for device authorization; "
+            "Run 'calkit cloud login' again"
+        )
 
 
 def get_base_url() -> str:
@@ -188,27 +308,91 @@ def _request(
     if base_url is None:
         base_url = get_base_url()
     refresh_attempted = False
+    device_login_attempted = False
+    # We may prompt the user via the device login flow only when stdin and
+    # stdout are TTYs (i.e. not in CI, daemons, or piped subprocesses) and
+    # the user hasn't opted out via the env var.
+    can_prompt = auth and not os.environ.get("CALKIT_NO_INTERACTIVE_LOGIN")
+    if can_prompt:
+        try:
+            can_prompt = sys.stdin.isatty() and sys.stdout.isatty()
+        except Exception:
+            can_prompt = False
     for retry_num in range(max_retries + 1):
+        try:
+            req_headers = get_headers(headers, auth=auth)
+        except ValueError:
+            # No token in config at all. If we can prompt the user, run
+            # the device flow and try again; otherwise re-raise so callers
+            # see the original "no token" error. ``run_device_flow``
+            # serializes concurrent callers via ``_device_login_lock`` and
+            # reuses the freshly minted token, so threads that arrive
+            # mid-flow simply wait their turn rather than re-prompting.
+            if can_prompt and not device_login_attempted:
+                device_login_attempted = True
+                run_device_flow()
+                continue
+            raise
         resp = func(
             base_url + path,
             params=params,
             json=json,
             data=data,
-            headers=get_headers(headers, auth=auth),
+            headers=req_headers,
             **kwargs,
         )
         if resp.status_code == 502 and retry_num < max_retries:
             wait = min(base_delay_seconds * (2**retry_num), max_delay_seconds)
             time.sleep(wait)
             continue
-        # On 401, attempt a token refresh once (only for access_token sessions,
-        # not PATs — _try_refresh returns None when no refresh_token is stored).
-        # get_headers() re-calls get_token() on the next iteration, so it will
-        # automatically pick up the new token stored in _tokens by _try_refresh.
-        if resp.status_code == 401 and auth and not refresh_attempted:
+        # Decide whether this response is a credential rejection (vs. a
+        # permission/authorization failure that happens to also be 403).
+        # 401 is always a credential rejection. For 403, only treat it as
+        # one if the API's ``detail`` identifies it as such — otherwise
+        # we'd hijack legitimate "you can't do that" errors and pop a
+        # browser-based login flow at the user.
+        looks_like_auth_failure = auth and resp.status_code == 401
+        if auth and resp.status_code == 403:
+            try:
+                detail = resp.json().get("detail")
+            except Exception:
+                detail = None
+            looks_like_auth_failure = isinstance(detail, str) and any(
+                s in detail
+                for s in (
+                    "Could not validate credentials",
+                    "Not authenticated",
+                    "Invalid token",
+                    "Token has expired",
+                )
+            )
+        # On credential rejection, attempt a token refresh once.
+        # ``_try_refresh`` returns ``None`` when no refresh token is stored
+        # (e.g. PAT-only sessions). ``get_headers()`` re-calls
+        # ``get_token()`` on the next iteration, so it will automatically
+        # pick up the new token stored in ``_tokens`` by ``_try_refresh``.
+        if looks_like_auth_failure and not refresh_attempted:
             refresh_attempted = True
             new_token = _try_refresh()
             if new_token is not None:
+                continue
+        # If refresh didn't help, fall back to the interactive device login
+        # flow once. This covers both HTTP remotes (where /user/tokens
+        # 401/403s) and ck:// remotes (which go through this same
+        # ``_request`` path). ``run_device_flow`` serializes via
+        # ``_device_login_lock`` and reuses the new token, so concurrent
+        # callers wait rather than each starting their own flow.
+        if (
+            looks_like_auth_failure
+            and can_prompt
+            and not device_login_attempted
+        ):
+            device_login_attempted = True
+            try:
+                run_device_flow()
+            except DeviceLoginError as e:
+                logger.warning("Device login failed: %s", e)
+            else:
                 continue
         try:
             resp.raise_for_status()

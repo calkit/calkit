@@ -381,7 +381,7 @@ def check_environment(
             quiet=not verbose,
         )
     elif env["kind"] == "pixi":
-        cmd = ["pixi", "lock"]
+        cmd = ["pixi", "install"]
         env_dir = os.path.dirname(env["path"])
         if env_dir:
             cmd += ["--manifest-path", env["path"]]

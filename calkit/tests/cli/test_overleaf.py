@@ -2,7 +2,9 @@
 
 import os
 import subprocess
+import tempfile
 import uuid
+from pathlib import Path
 
 import git
 
@@ -35,7 +37,9 @@ def test_overleaf(tmp_dir):
     ol_repo.git.config(["receive.denyCurrentBranch", "ignore"])
     subprocess.run(["calkit", "init"], check=True)
     repo = git.Repo()
-    tmp_remote = f"/tmp/overleaf-sync-remotes/{pid}"
+    tmp_remote = (
+        Path(tempfile.gettempdir()) / "overleaf-sync-remotes" / pid
+    ).as_posix()
     os.makedirs(tmp_remote, exist_ok=True)
     remote_repo = git.Repo.init(path=tmp_remote, bare=True)
     remote_repo.git.config(["receive.denyCurrentBranch", "ignore"])

@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -92,6 +93,10 @@ def test_check_env_vars(tmp_dir):
 @pytest.mark.skipif(
     shutil.which("julia") is None, reason="Julia not installed"
 )
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
+)
 def test_check_julia_env_caches_second_run(tmp_dir):
     """Second run of ``calkit check julia-env`` should skip Pkg.instantiate."""
     with open("Project.toml", "w") as f:
@@ -124,6 +129,10 @@ def test_check_julia_env_caches_second_run(tmp_dir):
     assert "skipping Pkg.instantiate" not in result3.stdout
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
 def test_check_docker_env(tmp_dir):
     # First create a Dockerfile with a known base image
     with open("Dockerfile", "w") as f:

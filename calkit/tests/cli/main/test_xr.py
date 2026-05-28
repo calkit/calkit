@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 
 import pytest
 import toml
@@ -77,6 +78,10 @@ print("Processing complete")
     assert "output.txt" in output_paths
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
 def test_xr_shell_command(tmp_dir):
     """Test xr command with shell command."""
     subprocess.check_call(["calkit", "init"])

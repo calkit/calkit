@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -139,6 +140,10 @@ def test_execute_notebook(tmp_dir):
     assert params_out["my_dict"] == params["my_dict"]
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
+)
 def test_execute_notebook_julia(tmp_dir):
     subprocess.check_call(
         [
@@ -174,6 +179,10 @@ def test_execute_notebook_julia(tmp_dir):
     )
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
+)
 def test_check_env_kernel_julia(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(

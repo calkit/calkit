@@ -614,3 +614,55 @@ def hash_path(path: str) -> dict:
         return hash_file(path)
     else:
         raise ValueError(f"Path does not exist: {path}")
+
+
+def _path_item_as_posix(item):
+    # Renamed entries are dicts like {"old": ..., "new": ...}.
+    if isinstance(item, dict):
+        return {k: Path(v).as_posix() for k, v in item.items()}
+    return Path(item).as_posix()
+
+
+def data_status_as_posix(data_status: dict) -> dict:
+    """Convert all paths in DVC data status to posix format.
+
+    We skip the ``git`` entry since Git already formats as posix.
+    """
+    data_status_fmt = {}
+    for cat, obj in data_status.items():
+        if cat == "git":
+            data_status_fmt[cat] = obj
+        elif isinstance(obj, list):
+            data_status_fmt[cat] = [_path_item_as_posix(p) for p in obj]
+        elif isinstance(obj, dict):
+            obj_fmt = {}
+            for cat2, obj_i in obj.items():
+                obj_fmt[cat2] = [_path_item_as_posix(p) for p in obj_i]
+            data_status_fmt[cat] = obj_fmt
+        else:
+            data_status_fmt[cat] = obj
+    return data_status_fmt
+
+
+def status_as_posix(status: dict) -> dict:
+    """Convert all paths in repo status to posix format."""
+    status_fmt = {}
+    for stage_name, st_list in status.items():
+        st_list_fmt = []
+        for st_dict in st_list:
+            if isinstance(st_dict, str):
+                st_list_fmt.append(st_dict)
+                continue
+            st_dict_fmt = {}
+            for st_cat, path_st_dict in st_dict.items():
+                if not isinstance(path_st_dict, dict):
+                    # e.g. {"changed command": "python src/new-script.py"}
+                    st_dict_fmt[st_cat] = path_st_dict
+                    continue
+                path_st_dict_fmt = {}
+                for p, st in path_st_dict.items():
+                    path_st_dict_fmt[Path(p).as_posix()] = st
+                st_dict_fmt[st_cat] = path_st_dict_fmt
+            st_list_fmt.append(st_dict_fmt)
+        status_fmt[stage_name] = st_list_fmt
+    return status_fmt

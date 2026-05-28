@@ -92,9 +92,9 @@ def _mock_enabled() -> bool:
 
 
 def _require_posix_mock() -> None:
-    # The mock backend uses bash, new sessions, and process-group signals.
-    if os.name != "posix":
-        raise_error("CALKIT_MOCK_SCHEDULER is only supported on POSIX systems")
+    # The mock backend uses bash; if that is missing, the mock cannot run.
+    if shutil.which("bash") is None:
+        raise_error("CALKIT_MOCK_SCHEDULER requires bash on PATH")
 
 
 def _ensure_mock_dir() -> None:
@@ -177,12 +177,18 @@ def _mock_submit(job_id: str, job_command: str, log_path: str) -> int:
     env = dict(os.environ)
     env.setdefault("PBS_O_WORKDIR", os.getcwd())
     with open(log_path, "w") as log_file:
-        proc = subprocess.Popen(
-            ["bash", "-c", wrapped],
+        popen_kwargs = dict(
             stdout=log_file,
             stderr=subprocess.STDOUT,
-            start_new_session=True,
             env=env,
+        )
+        if os.name == "posix":
+            popen_kwargs["start_new_session"] = True
+        elif hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        proc = subprocess.Popen(
+            ["bash", "-c", wrapped],
+            **popen_kwargs,
         )
     return proc.pid
 
@@ -192,7 +198,10 @@ def _mock_cancel(job_id: str) -> tuple[bool, str]:
     pid = _mock_pid(job_id)
     if pid is not None:
         try:
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
+            if os.name == "posix":
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+            else:
+                os.kill(pid, signal.SIGTERM)
         except (ProcessLookupError, PermissionError):
             pass
     # Drop a sentinel so later liveness checks report the job as finished.

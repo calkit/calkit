@@ -1,6 +1,7 @@
 """Tests for ``cli.update``."""
 
 import subprocess
+import sys
 
 import pytest
 from typer.testing import CliRunner
@@ -10,6 +11,10 @@ from calkit.cli.update import update_app
 runner = CliRunner()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
+)
 def test_update_environment(tmp_dir):
     # Test we can update an environment
     subprocess.check_call(["calkit", "init"])

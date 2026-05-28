@@ -1152,10 +1152,10 @@ def new_publication(
             deps += stage.get("outs", [])
     # Create publication object
     if template_type == "latex":
-        pub_fpath = os.path.join(
+        pub_fpath = pathlib.Path(
             path,
             template_obj.target.removesuffix(".tex") + ".pdf",  # type: ignore
-        )
+        ).as_posix()
     else:
         pub_fpath = path
     if not overwrite and pub_fpath in pub_paths:
@@ -1190,7 +1190,7 @@ def new_publication(
         stage = LatexStage(
             kind="latex",
             environment=env_name,
-            target_path=os.path.join(path, template_obj.target),  # type: ignore
+            target_path=pathlib.Path(path, template_obj.target).as_posix(),  # type: ignore
             outputs=[pub_fpath],
         ).model_dump()
         if "pipeline" not in ck_info:

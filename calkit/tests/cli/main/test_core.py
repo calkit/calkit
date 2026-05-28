@@ -30,6 +30,18 @@ from calkit.cli.main.core import (
     app as calkit_app,
 )
 
+skipif_windows_docker = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "TODO: Docker Linux images are unavailable on windows-latest GHA "
+        "runners"
+    ),
+)
+skipif_windows_mock_scheduler = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: mock scheduler is not yet Windows-compatible",
+)
+
 
 def _repo_test_file(name: str) -> Path:
     """Find a file in the repository-level ``test`` directory."""
@@ -42,6 +54,7 @@ def _repo_test_file(name: str) -> Path:
     )
 
 
+@skipif_windows_docker
 def test_run_in_env(tmp_dir):
     # If running on Windows we need to set stdin for the subprocesses to
     # ensure sys.stdin.isatty() is False, otherwise we will run docker with
@@ -273,6 +286,10 @@ def test_run_in_venv(tmp_dir):
     assert out == "2.0.0"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
+)
 def test_run_in_julia_env(tmp_dir):
     subprocess.check_call("calkit init", shell=True)
     subprocess.check_call(
@@ -824,6 +841,9 @@ def test_run(tmp_dir):
     repo.git.checkout("HEAD^")
     out = subprocess.check_output(["calkit", "run"], text=True)
     # Test that we can run a Julia script
+    if sys.platform == "win32":
+        # TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)
+        pytest.skip("Julia portion of test_run not yet supported on Windows")
     with open("julia_script.jl", "w") as f:
         f.write('println("Hello from julia_script.jl")')
     subprocess.check_call(
@@ -1400,6 +1420,7 @@ def test_use_version_without_uvx(monkeypatch):
     assert "uvx" in (result.output + (result.stderr or ""))
 
 
+@skipif_windows_mock_scheduler
 def test_run_concurrent_scheduler_stage_with_mock(tmp_dir):
     # Exercise the full concurrent-scheduler path on a plain host: an
     # iterate_over stage on a SLURM env, run via the mock scheduler so jobs
@@ -1458,6 +1479,7 @@ def test_run_concurrent_scheduler_stage_with_mock(tmp_dir):
     assert "sweep@3" in queue
 
 
+@skipif_windows_mock_scheduler
 def test_run_concurrent_scheduler_table_iteration_with_mock(tmp_dir):
     # Table-like iteration (arg_name as a list) compiles to a dict-valued DVC
     # matrix that DVC names by index (sweep@_arg00, ...) while the scheduler
@@ -1505,6 +1527,7 @@ def test_run_concurrent_scheduler_table_iteration_with_mock(tmp_dir):
     assert "sweep@3,c" in queue
 
 
+@skipif_windows_mock_scheduler
 def test_run_concurrent_scheduler_force_runs_each_item_once(tmp_dir):
     # --force must not run a sweep twice (once in the concurrent prepass and
     # again in the main repro). Under --force the prepass is skipped, so each
@@ -1541,6 +1564,7 @@ def test_run_concurrent_scheduler_force_runs_each_item_once(tmp_dir):
             assert len(f.read().splitlines()) == 2
 
 
+@skipif_windows_mock_scheduler
 def test_run_concurrent_scheduler_resume_after_disconnect(tmp_dir):
     # If the master process is killed while jobs run, a job that already
     # finished on the scheduler must not be resubmitted on the next run: the
@@ -1583,6 +1607,7 @@ def test_run_concurrent_scheduler_resume_after_disconnect(tmp_dir):
             assert len(f.read().splitlines()) == 1
 
 
+@skipif_windows_mock_scheduler
 def test_run_downstream_does_not_submit_unrelated_sweep(tmp_dir):
     # A narrowed run (e.g. --downstream) leaves positional targets empty, so
     # the concurrent prepass must be skipped entirely---otherwise it would

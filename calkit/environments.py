@@ -38,6 +38,12 @@ CONDA_VENV_ARCHS = [
 ]
 ENV_CHECK_CACHE_TTL_SECONDS = 3600
 KINDS_NO_CHECK = ["_system", "ssh"]
+
+
+def _as_posix_path(path: str) -> str:
+    return Path(path).as_posix()
+
+
 COMPOSITE_ENV_SEP = ":"
 VALID_OUTER_ENV_KINDS = ["slurm", "pbs"]
 
@@ -717,7 +723,7 @@ def make_env_name(path: str, all_env_names: list[str], kind: str) -> str:
     str
         A unique environment name.
     """
-    dirname = os.path.basename(os.path.dirname(path))
+    dirname = Path(path).parent.name
     # If this is the first env in the project, call it main
     if not all_env_names:
         return dirname or "main"
@@ -841,7 +847,7 @@ def env_from_name_or_path(
             exists=True,
         )
     # Check if name_or_path is a file and detect environment type
-    env_path = name_or_path
+    env_path = _as_posix_path(name_or_path)
     if os.path.isfile(env_path):
         if env_path.endswith("requirements.txt"):
             # TODO: Detect if uv is installed, and use a plain venv if not
@@ -851,9 +857,9 @@ def env_from_name_or_path(
                     "kind": "uv-venv",
                     "path": env_path,
                     "python": DEFAULT_PYTHON_VERSION,
-                    "prefix": os.path.join(
-                        os.path.split(env_path)[0], ".venv"
-                    ),
+                    "prefix": Path(env_path)
+                    .parent.joinpath(".venv")
+                    .as_posix(),
                 },
                 exists=False,
             )
@@ -942,9 +948,10 @@ def env_from_name_and_or_path(
     if ck_info is None:
         ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
+    path = _as_posix_path(path) if path else None
     if name and name in envs:
         env = envs[name]
-        if path and env.get("path") != path:
+        if path and _as_posix_path(env.get("path", "")) != path:
             raise ValueError(
                 f"Environment '{name}' exists but has a different path "
                 f"('{env.get('path')}') than provided ('{path}')"
@@ -958,7 +965,7 @@ def env_from_name_and_or_path(
             # Look for a sub-environment with the given name and path
             for sub_name, sub_env in envs.items():
                 if (sub_name == sub_env_name) or (
-                    path and sub_env.get("path") == path
+                    path and _as_posix_path(sub_env.get("path", "")) == path
                 ):
                     return EnvDetectResult(
                         name=sub_name,
@@ -995,12 +1002,13 @@ def env_from_notebook_path(
     """
     if ck_info is None:
         ck_info = calkit.load_calkit_info()
+    notebook_path = _as_posix_path(notebook_path)
     stages = ck_info.get("pipeline", {}).get("stages", {})
     envs = ck_info.get("environments", {})
     for stage in stages.values():
         if (
             stage.get("kind") == "jupyter-notebook"
-            and stage.get("notebook_path") == notebook_path
+            and _as_posix_path(stage.get("notebook_path", "")) == notebook_path
         ):
             env_name = stage.get("environment")
             if env_name:
@@ -1008,7 +1016,7 @@ def env_from_notebook_path(
                 if env:
                     return EnvDetectResult(name=env_name, env=env, exists=True)
     for nb in ck_info.get("notebooks", []):
-        if nb.get("path") == notebook_path:
+        if _as_posix_path(nb.get("path", "")) == notebook_path:
             env_name = nb.get("environment")
             if env_name:
                 env = envs.get(env_name)

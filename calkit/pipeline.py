@@ -277,18 +277,15 @@ class StaleStage(BaseModel):
         # parent-relative.  Use normpath to collapse any "../" segments that
         # arise from cross-subproject deps (e.g. sp + "../shared.txt").
         if path_prefix:
-            modified_inputs = [
-                os.path.normpath(os.path.join(path_prefix, p))
-                for p in modified_inputs
-            ]
-            output_paths = [
-                os.path.normpath(os.path.join(path_prefix, p))
-                for p in output_paths
-            ]
-            modified_outputs = [
-                os.path.normpath(os.path.join(path_prefix, p))
-                for p in modified_outputs
-            ]
+
+            def _prefix(p: str) -> str:
+                return Path(
+                    os.path.normpath(os.path.join(path_prefix, p))
+                ).as_posix()
+
+            modified_inputs = [_prefix(p) for p in modified_inputs]
+            output_paths = [_prefix(p) for p in output_paths]
+            modified_outputs = [_prefix(p) for p in modified_outputs]
         configured_outputs = [str(path) for path in (configured_outputs or [])]
         stale_outputs = []
         if modified_inputs or modified_command:
@@ -632,6 +629,7 @@ def get_status(
             # calkit.dvc.core installs a filter on dvc.repo.status that drops
             # the noisy frozen-stage warning, so the call here stays quiet.
             raw_status = dvc_repo.status(targets=targets)
+            raw_status = calkit.dvc.status_as_posix(raw_status)
         except Exception as e:
             result["errors"].append(
                 "Failed to get pipeline status from DVC: "
@@ -668,6 +666,7 @@ def get_status(
             try:
                 sp_dvc_repo = calkit.dvc.get_dvc_repo(sp)
                 sp_raw_status = sp_dvc_repo.status()
+                sp_raw_status = calkit.dvc.status_as_posix(sp_raw_status)
             except Exception:
                 sp_raw_status = {}
             if sp_raw_status:
@@ -786,7 +785,7 @@ def get_status(
                 )
             # DVC reports subproject stage paths relative to the repo root
             # (e.g., "sub1/out.txt"), but calkit.yaml stores them relative to
-            # the subproject dir ("out.txt").  Prefix with the subproject path
+            # the subproject dir ("out.txt"). Prefix with the subproject path
             # so configured_outputs matches DVC's reported paths.
             raw_outputs = [
                 output.get("path", str(output))

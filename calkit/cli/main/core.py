@@ -502,9 +502,8 @@ def get_status(
         if "dvc" in categories:
             try:
                 dvc_repo = calkit.dvc.get_dvc_repo()
-                data_status = dvc_repo.data_status()
-                if isinstance(data_status, dict):
-                    data_status.pop("git", None)
+                data_status = dict(dvc_repo.data_status())
+                data_status.pop("git", None)
                 status_dict["dvc"] = calkit.dvc.data_status_as_posix(
                     data_status
                 )

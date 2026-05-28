@@ -139,6 +139,13 @@ def _do_device_flow() -> str:
                 cfg.access_token = access_token
                 if refresh_token:
                     cfg.refresh_token = refresh_token
+                # A stored PAT (``token``) takes priority over
+                # ``access_token`` in get_token(), so a stale PAT would keep
+                # being used by future processes and re-trigger the device
+                # flow every time. The user just re-authenticated via the
+                # device flow, so the device-flow credentials should win.
+                if getattr(cfg, "token", None) is not None:
+                    cfg.token = None
                 # A stored DVC token may have been revoked alongside the
                 # access token that just failed; clear it so the next
                 # remote-auth check mints a fresh one.
@@ -350,11 +357,14 @@ def _request(
             wait = min(base_delay_seconds * (2**retry_num), max_delay_seconds)
             time.sleep(wait)
             continue
-        # On 401, attempt a token refresh once (only for access_token sessions,
-        # not PATs — _try_refresh returns None when no refresh_token is stored).
-        # get_headers() re-calls get_token() on the next iteration, so it will
-        # automatically pick up the new token stored in _tokens by _try_refresh.
-        if resp.status_code == 401 and auth and not refresh_attempted:
+        # On any credential-rejection status (401 or 403 — the Calkit API
+        # returns 403 "Could not validate credentials" for bad/expired
+        # tokens), attempt a token refresh once. _try_refresh returns None
+        # when no refresh_token is stored (e.g. PAT-only sessions).
+        # get_headers() re-calls get_token() on the next iteration, so it
+        # will automatically pick up the new token stored in _tokens by
+        # _try_refresh.
+        if resp.status_code in (401, 403) and auth and not refresh_attempted:
             refresh_attempted = True
             new_token = _try_refresh()
             if new_token is not None:

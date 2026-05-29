@@ -2034,6 +2034,11 @@ def test_get_matrix_item_targets(tmp_dir):
     }
     with open("dvc.yaml", "w") as f:
         calkit.ryaml.dump(dvc_yaml, f)
+    # A single-file `.dvc` stage exposes a base `Stage` with no `name` attr;
+    # the matrix lookup must skip it instead of raising AttributeError.
+    with open("tracked.txt", "w") as f:
+        f.write("tracked\n")
+    subprocess.check_call([sys.executable, "-m", "dvc", "add", "tracked.txt"])
     items, upstreams = calkit.pipeline.get_matrix_item_targets("work")
     # Each iteration is addressable; the shared upstream is reported so the
     # caller can build it before fanning the items out concurrently. Results

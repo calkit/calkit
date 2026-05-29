@@ -1273,7 +1273,11 @@ def get_matrix_item_targets(
 
     repo = calkit.dvc.get_dvc_repo(wdir)
     prefix = stage_name + "@"
-    items = [s for s in repo.index.stages if (s.name or "").startswith(prefix)]  # type: ignore
+    items = [
+        s
+        for s in repo.index.stages
+        if (getattr(s, "name", None) or "").startswith(prefix)
+    ]
     item_set = set(items)
     upstreams: set = set()
     for item in items:

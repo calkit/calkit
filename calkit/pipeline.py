@@ -1315,8 +1315,20 @@ def reproduce_targets_concurrently(
     # Default runner shells out to an isolated `dvc repro --single-item`. Go
     # through `calkit dvc` rather than `dvc` directly so Calkit's DVC patches
     # (e.g. the ck:// remote scheme) are registered in the subprocess.
+    # `--wait-for-lock` is a top-level DVC flag (must precede `repro`): each
+    # subprocess briefly acquires the repo-level lock for its status check and
+    # dvc.lock update, and DVC's 3s default timeout is too short when many
+    # iterations race to acquire it at once.
     def _default_run_one(target: str) -> int:
-        cmd = [sys.executable, "-m", "calkit", "dvc", "repro", "--single-item"]
+        cmd = [
+            sys.executable,
+            "-m",
+            "calkit",
+            "dvc",
+            "--wait-for-lock",
+            "repro",
+            "--single-item",
+        ]
         cmd += args + [target]
         return subprocess.run(cmd, cwd=wdir).returncode
 

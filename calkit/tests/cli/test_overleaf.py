@@ -94,6 +94,22 @@ def test_overleaf(tmp_dir):
         f.write("\nHere's another line from Overleaf")
     ol_repo.git.commit(["main.tex", "-m", "Update on Overleaf"])
     subprocess.run(["calkit", "overleaf", "sync"], check=True)
+    # Test that --no-commit pulls changes from Overleaf but does not create a
+    # commit in the main repo, leaving the pulled changes staged instead
+    with open(os.path.join(ol_repo.working_dir, "main.tex"), "a") as f:
+        f.write("\nA line that should be pulled but not committed")
+    ol_repo.git.commit(["main.tex", "-m", "Update on Overleaf"])
+    head_before = repo.head.commit.hexsha
+    subprocess.run(["calkit", "overleaf", "sync", "--no-commit"], check=True)
+    # No new commit should have been created
+    assert repo.head.commit.hexsha == head_before
+    # The change should be present locally and staged
+    with open("ol-project/main.tex") as f:
+        assert "A line that should be pulled but not committed" in f.read()
+    assert repo.git.diff(["--staged", "ol-project/main.tex"])
+    assert not repo.git.diff(["ol-project/main.tex"])
+    # Commit the staged changes so the working tree is clean for the next step
+    repo.git.commit(["-m", "Commit pulled Overleaf changes"])
     # Test that if we add a file on Overleaf, it syncs back to the main repo
     with open(os.path.join(ol_repo.working_dir, "ol-new.txt"), "w") as f:
         f.write("Created on Overleaf")
@@ -149,6 +165,19 @@ def test_overleaf(tmp_dir):
     assert "main.pdf" not in ol_repo_git_show
     assert "main.log" not in ol_repo_git_show
     assert "main.aux" not in ol_repo_git_show
+    # Test that an untracked LaTeX build artifact (e.g., a .auxlock file) in
+    # the synced folder is auto-ignored rather than committed during a sync,
+    # and is not pushed to Overleaf
+    auxlock_rel = "ol-project/out/main.auxlock"
+    os.makedirs(os.path.join(repo.working_dir, "ol-project", "out"))
+    with open(os.path.join(repo.working_dir, auxlock_rel), "w") as f:
+        f.write("\\def \\tikzexternallocked {0}")
+    subprocess.run(["calkit", "overleaf", "sync"], check=True)
+    assert auxlock_rel not in ls_files(repo)
+    with open(os.path.join(repo.working_dir, ".gitignore")) as f:
+        assert auxlock_rel in f.read()
+    assert not repo.git.status("--porcelain", "ol-project/out")
+    assert "main.auxlock" not in ol_repo.git.show()
     # Test that if we add a file locally, sync to Overleaf, then delete from
     # local, it is deleted on Overleaf as well
     with open(

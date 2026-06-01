@@ -242,6 +242,7 @@ class OverleafSyncPaths:
             ".vrb",
             ".dvi",
             ".xdv",
+            ".auxlock",
         }
         # Multi-part extension handled via endswith
         aux_endswith = (".synctex.gz",)
@@ -598,29 +599,55 @@ def sync(
     main_repo.git.add(overleaf_sync_data_fpath)
     if resolving_conflict and os.path.isfile(conflict_fpath):
         os.remove(conflict_fpath)
+    # Auto-ignore any untracked build artifacts (e.g., LaTeX aux files like
+    # .auxlock) in the synced folder so they don't get committed during sync
+    gitignore_modified = False
+    path_prefix = path_in_project.rstrip("/") + "/"
+    for untracked in main_repo.untracked_files:
+        untracked_posix = Path(untracked).as_posix()
+        if not untracked_posix.startswith(path_prefix):
+            continue
+        if (
+            any(
+                untracked_posix.endswith(s)
+                for s in calkit.AUTO_IGNORE_SUFFIXES
+            )
+            or any(
+                untracked_posix.startswith(p)
+                for p in calkit.AUTO_IGNORE_PREFIXES
+            )
+            or untracked_posix in calkit.AUTO_IGNORE_PATHS
+        ):
+            if calkit.git.ensure_path_is_ignored(main_repo, untracked_posix):
+                print_info(f"Automatically ignoring {untracked_posix}")
+                main_repo.git.add(".gitignore")
+                gitignore_modified = True
     # Stage the changes in the project repo
     res["committed_project"] = False
     main_repo.git.add(path_in_project)
-    if (
-        main_repo.git.diff(
-            [
-                "--staged",
-                path_in_project,
-                "calkit.yaml",
-                overleaf_sync_data_fpath,
-            ],
-        )
-        and not no_commit
-    ):
+    paths_to_commit = [
+        path_in_project,
+        "calkit.yaml",
+        overleaf_sync_data_fpath,
+    ]
+    if gitignore_modified:
+        paths_to_commit.append(".gitignore")
+    staged_diff = main_repo.git.diff(["--staged"] + paths_to_commit)
+    if staged_diff and not no_commit:
         print_info("Committing changes to project repo")
         commit_message = f"Sync {path_in_project} with Overleaf project"
-        main_repo.git.commit(
-            path_in_project,
-            "calkit.yaml",
-            overleaf_sync_data_fpath,
-            "-m",
-            commit_message,
-        )
+        main_repo.git.commit(*paths_to_commit, "-m", commit_message)
         res["committed_project"] = True
+    elif no_commit and (
+        main_repo.head.commit.hexsha != res["project_commit_before"]
+    ):
+        # Changes pulled from Overleaf are applied via 'git am', which creates
+        # commits in the main repo. Since --no-commit was requested, undo
+        # those commits while keeping their changes staged.
+        print_info(
+            "Resetting commits created while applying Overleaf changes "
+            "(leaving them staged)"
+        )
+        main_repo.git.reset("--soft", res["project_commit_before"])
     res["project_commit_after"] = main_repo.head.commit.hexsha
     return res

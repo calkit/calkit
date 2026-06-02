@@ -488,7 +488,11 @@ def sync(
 ) -> dict:
     """Sync between the main project repo and Overleaf repo.
 
-    Both must be up-to-date (pulled).
+    Both must be up-to-date (pulled). The synced path in the main repo must
+    also have no uncommitted changes, since incoming Overleaf edits are
+    applied with ``git am``, which refuses to run against a dirty working
+    tree (the calling CLI enforces this, optionally committing first with
+    ``--auto-commit``).
 
     Only "stored" files in the main project -- those tracked by Git or cached
     by DVC -- are synced. They are synced bidirectionally, except for files
@@ -502,6 +506,14 @@ def sync(
     When push_only is True, only push local files to Overleaf without pulling
     or applying changes from Overleaf to local. Useful for initializing a new
     Overleaf project from local files.
+
+    When no_commit is True, changes are still pulled from Overleaf and pushed
+    to Overleaf, but no commit is created in the main project repo; the pulled
+    changes are left staged instead. Overleaf changes are applied with
+    ``git am``, which necessarily creates commits, so those commits are undone
+    with a soft reset back to ``project_commit_before`` (which keeps their
+    changes staged). See the ``--no-commit`` handling near the end of this
+    function.
     """
     res = {}
     # Normalize ``path_in_project`` as a posix path

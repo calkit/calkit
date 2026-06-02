@@ -369,8 +369,11 @@ def sync(
         typer.Option(
             "--no-commit",
             help=(
-                "Do not commit the changes to the project repo. "
-                "Changes will always be committed to Overleaf."
+                "Do not create a commit in the project repo for this sync. "
+                "Changes pulled from Overleaf are still applied, but are "
+                "left staged so you can review or commit them yourself. "
+                "Changes are always committed and pushed to Overleaf "
+                "regardless."
             ),
         ),
     ] = False,

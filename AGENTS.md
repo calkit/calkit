@@ -22,6 +22,11 @@ not introduce new type errors.
 Wrap prose at natural breakpoints in phrases or punctuation to keep max
 line length below 80 characters.
 
+In the docs, MkDocs Material admonitions (`!!! note`, `!!! tip`, etc.) must be
+preceded by a `<!-- prettier-ignore -->` comment. Otherwise Prettier reformats
+the block and strips the 4-space indentation of the admonition body, which
+breaks rendering.
+
 Agents should never make commits to Git.
 
 Prefer tests that include multiple scenarios to comprehensively test

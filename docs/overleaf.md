@@ -107,7 +107,7 @@ calkit overleaf sync --auto-commit
 ### What gets synced
 
 Calkit only syncs **stored** files, i.e., files that are tracked by Git or
-stored by DVC.
+stored with DVC.
 These are synced bidirectionally, except for files under `push_paths`
 (see [importing](#importing-an-overleaf-project)), which are pushed to
 Overleaf one-way only.
@@ -122,11 +122,7 @@ In particular, this includes:
   These can be tracked by the pipeline but not stored, so Calkit leaves them
   alone on both sides.
 
-If you want a generated file (like a figure) to be sent to Overleaf, make
-sure it is stored, e.g., by adding it to `push_paths` and giving its pipeline
-output `storage: dvc` or `git`.
-
-A file is only **deleted** from Overleaf when a previously-synced stored file
+A file is only deleted from Overleaf when a previously-synced stored file
 is genuinely removed from the project (deleted from Git and DVC).
 A file that merely disappears from disk because it hasn't been pulled, or
 that became an ignored/`storage: null` output, is left in place on Overleaf.
@@ -169,7 +165,7 @@ made them yourself.
     metadata).
     Because `--no-commit` rewinds those commits and leaves only their net
     changes staged, committing them yourself collapses everything into a
-    single commit authored by **you** -- the per-commit Overleaf authorship
+    single commit authored by **you**--the per-commit Overleaf authorship
     and history are not retained.
     Omit `--no-commit` (the default) if preserving Overleaf editors'
     authorship matters to you.

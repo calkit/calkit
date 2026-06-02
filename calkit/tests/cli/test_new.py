@@ -766,7 +766,7 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
         ]
     )
     # TODO: Add project description?
-    # Add authors
+    # Add authors to CITATION.cff (the single source of truth for authors)
     authors = [
         {
             "first_name": "Alice",
@@ -781,10 +781,7 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
             "orcid": None,
         },
     ]
-    ck_info = calkit.load_calkit_info()
-    ck_info["authors"] = authors
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(ck_info, f)
+    calkit.releases.set_cff_authors(authors)
     # Add a default license
     subprocess.check_call(
         [
@@ -868,14 +865,6 @@ def test_new_release_is_runnable(tmp_dir, monkeypatch):
                 "name": "test-project",
                 "owner": "test-user",
                 "git_repo_url": "https://github.com/test-user/test-project",
-                "authors": [
-                    {
-                        "first_name": "Alice",
-                        "last_name": "Smith",
-                        "affiliation": "SomeU",
-                        "orcid": "0000-0001-2345-6789",
-                    }
-                ],
                 "environments": {
                     "main": {
                         "kind": "uv-venv",
@@ -897,6 +886,17 @@ def test_new_release_is_runnable(tmp_dir, monkeypatch):
             },
             f,
         )
+    # Authors live in CITATION.cff, the single source of truth
+    calkit.releases.set_cff_authors(
+        [
+            {
+                "first_name": "Alice",
+                "last_name": "Smith",
+                "affiliation": "SomeU",
+                "orcid": "0000-0001-2345-6789",
+            }
+        ]
+    )
     with open("requirements.txt", "w") as f:
         f.write("requests\n")
     with open("get_data.py", "w") as f:
@@ -948,3 +948,101 @@ def test_new_release_is_runnable(tmp_dir, monkeypatch):
     )
     print(out)
     assert "running running running" not in out
+
+
+def test_new_release_license_and_cff_authors(tmp_dir, monkeypatch):
+    # Covers two edge cases via a dry-run release: detecting a standard
+    # (non-Calkit) MIT license (regression for issue 919) and reading authors
+    # from a CITATION.cff file when none are defined in calkit.yaml.
+    monkeypatch.setenv("ZENODO_TOKEN", "test-token")
+    subprocess.check_call(["calkit", "init"])
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "title": "Test project",
+                "name": "test-project",
+                "owner": "test-user",
+                "git_repo_url": "https://github.com/test-user/test-project",
+                "environments": {
+                    "main": {
+                        "kind": "uv-venv",
+                        "path": "requirements.txt",
+                        "prefix": ".venv",
+                        "python": "3.13",
+                    }
+                },
+                "pipeline": {
+                    "stages": {
+                        "get-data": {
+                            "kind": "python-script",
+                            "script_path": "get_data.py",
+                            "environment": "main",
+                            "outputs": ["results"],
+                        }
+                    }
+                },
+            },
+            f,
+        )
+    with open("requirements.txt", "w") as f:
+        f.write("requests\n")
+    with open("get_data.py", "w") as f:
+        f.write("import os\n")
+        f.write("os.makedirs('results', exist_ok=True)\n")
+        f.write("open('results/data.txt', 'w').write('hello world')\n")
+    # Write a standard MIT license, which says "MIT License" (not "The MIT
+    # License") and previously failed to be detected
+    with open("LICENSE", "w") as f:
+        f.write(
+            "MIT License\n\nCopyright (c) 2026 Alice Smith\n\n"
+            "Permission is hereby granted, free of charge, to any person "
+            "obtaining a copy of this software and associated documentation "
+            'files (the "Software"), to deal in the Software without '
+            "restriction.\n"
+        )
+    # Declare authors only in CITATION.cff, not calkit.yaml
+    with open("CITATION.cff", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "cff-version": "1.2.0",
+                "title": "Test project",
+                "authors": [
+                    {
+                        "family-names": "Smith",
+                        "given-names": "Alice",
+                        "orcid": "https://orcid.org/0000-0001-2345-6789",
+                    }
+                ],
+            },
+            f,
+        )
+    subprocess.check_call(["calkit", "run"])
+    repo = git.Repo()
+    repo.git.add(
+        [
+            "calkit.yaml",
+            "dvc.yaml",
+            "dvc.lock",
+            "requirements.txt",
+            "get_data.py",
+            "LICENSE",
+            "CITATION.cff",
+        ]
+    )
+    repo.git.commit("-m", "Add pipeline for release test")
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "new",
+            "release",
+            "--name",
+            "v0.1.0",
+            "--dry-run",
+            "--draft",
+            "--no-github",
+        ],
+        text=True,
+    )
+    print(out)
+    assert "Detected license(s): mit" in out
+    assert "Read 1 author(s) from CITATION.cff" in out

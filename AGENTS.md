@@ -22,6 +22,11 @@ not introduce new type errors.
 Wrap prose at natural breakpoints in phrases or punctuation to keep max
 line length below 80 characters.
 
+In the docs, MkDocs Material admonitions (`!!! note`, `!!! tip`, etc.) must be
+preceded by a `<!-- prettier-ignore -->` comment. Otherwise Prettier reformats
+the block and strips the 4-space indentation of the admonition body, which
+breaks rendering.
+
 Agents should never make commits to Git.
 
 Prefer tests that include multiple scenarios to comprehensively test
@@ -36,3 +41,5 @@ Functions should usually be used ~3 times before abstracting.
 Otherwise, split up long ones into logical sections with comments.
 The only exception here is if splitting up a function makes it easier to
 write meaningful unit tests.
+If a function is only used inside one other function, nest it inside the
+caller at the top.

@@ -50,6 +50,7 @@ AUTO_IGNORE_SUFFIXES = [
     ".env",
     ".pyc",
     ".synctex.gz",
+    ".auxlock",
     ".ipynb_checkpoints",
 ]
 AUTO_IGNORE_PATHS = [os.path.join(".dvc", "config.local")]

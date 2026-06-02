@@ -2671,11 +2671,11 @@ Options:
 
 Interact with Overleaf.
 
-| Command                                    | Description                                                    |
-| ------------------------------------------ | -------------------------------------------------------------- |
-| [`import`](#subcommand-overleaf-ol-import) | Import a publication from an Overleaf project.                 |
-| [`sync`](#subcommand-overleaf-ol-sync)     | Sync folders with Overleaf.                                    |
-| [`status`](#subcommand-overleaf-ol-status) | Check the status of folders synced with Overleaf in a project. |
+| Command                                           | Description                                                    |
+| ------------------------------------------------- | -------------------------------------------------------------- |
+| [`import`](#subcommand-overleaf-ol-import)        | Import a publication from an Overleaf project.                 |
+| [`sync`](#subcommand-overleaf-ol-sync)            | Sync folders with Overleaf.                                    |
+| [`status\|st`](#subcommand-overleaf-ol-status-st) | Check the status of folders synced with Overleaf in a project. |
 
 <a id="subcommand-overleaf-ol-import"></a>
 
@@ -2730,25 +2730,25 @@ Arguments:
 
 Options:
 
-| Option              | Type    | Required | Default | Description                                                                                                                        |
-| ------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `--no-commit`       | boolean | no       | False   | Do not commit the changes to the project repo. Changes will always be committed to Overleaf.                                       |
-| `--auto-commit`     | boolean | no       | False   | Automatically commit changes to the project repo if a synced folder has changes.                                                   |
-| `--no-push`         | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                     |
-| `--verbose`         | boolean | no       | False   | Enable verbose output.                                                                                                             |
-| `--resolve`, `-r`   | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                |
-| `--push-only`, `-P` | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files. |
+| Option                | Type    | Required | Default | Description                                                                                                                                                                                                                              |
+| --------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-commit`         | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
+| `--auto-commit`, `-a` | boolean | no       | False   | Automatically commit changes to the project repo if a synced folder has changes.                                                                                                                                                         |
+| `--no-push`           | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
+| `--verbose`           | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
+| `--resolve`, `-r`     | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
+| `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
 
-<a id="subcommand-overleaf-ol-status"></a>
+<a id="subcommand-overleaf-ol-status-st"></a>
 
-#### `calkit overleaf|ol status`
+#### `calkit overleaf|ol status|st`
 
 Check the status of folders synced with Overleaf in a project.
 
 Usage:
 
 ```text
-calkit overleaf|ol status [PATHS...]
+calkit overleaf|ol status|st [PATHS...]
 ```
 
 Arguments:

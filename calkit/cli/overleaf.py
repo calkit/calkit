@@ -381,6 +381,7 @@ def sync(
         bool,
         typer.Option(
             "--auto-commit",
+            "-a",
             help=(
                 "Automatically commit changes to the project repo if a synced "
                 "folder has changes."
@@ -493,8 +494,9 @@ def sync(
                 )
             else:
                 raise_error(
-                    f"Uncommitted changes found in {wdir}; "
-                    "please commit or stash them before syncing with Overleaf"
+                    f"Uncommitted changes found in {wdir}. "
+                    "Commit or stash them before syncing with Overleaf, "
+                    "or use --auto-commit/-a to automatically commit them."
                 )
         # Ensure we've cloned the Overleaf project
         overleaf_project_dir = os.path.join(

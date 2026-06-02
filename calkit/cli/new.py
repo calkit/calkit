@@ -3181,20 +3181,13 @@ def new_release(
         )
     invenio_metadata["related_identifiers"] = related_identifiers
     # TODO: Add calkit.io URL if applicable?
-    # Determine creators from authors, adding to project if not present
-    authors = ck_info.get("authors", [])
-    if not authors:
-        # Fall back to authors declared in a CITATION.cff file, if present
-        cff_authors = calkit.releases.read_authors_from_cff()
-        if cff_authors:
-            typer.echo(f"Read {len(cff_authors)} author(s) from CITATION.cff")
-            authors = cff_authors
-            ck_info["authors"] = authors
-            if not dry_run:
-                typer.echo("Adding authors to calkit.yaml")
-                with open("calkit.yaml", "w") as f:
-                    calkit.ryaml.dump(ck_info, f)
-    if not authors:
+    # Determine creators from authors. CITATION.cff is the single source of
+    # truth for authors, so read them from there; if none are defined yet,
+    # prompt for them and persist them to CITATION.cff.
+    authors = calkit.releases.read_authors_from_cff()
+    if authors:
+        typer.echo(f"Read {len(authors)} author(s) from CITATION.cff")
+    else:
         warn("No authors defined for the project")
         still_entering_authors = True
         n = 0
@@ -3221,16 +3214,15 @@ def new_release(
             still_entering_authors = typer.confirm(
                 "Are there more authors to enter?", default=True
             )
-        ck_info["authors"] = authors
-        # Write authors out to calkit.yaml
+        # Write authors out to CITATION.cff
         if not dry_run:
-            typer.echo("Adding authors to calkit.yaml")
-            with open("calkit.yaml", "w") as f:
-                calkit.ryaml.dump(ck_info, f)
+            typer.echo("Writing authors to CITATION.cff")
+            calkit.releases.set_cff_authors(authors, ck_info=ck_info)
+            repo.git.add("CITATION.cff")
     invenio_creators = []
     for author in authors:
         orcid = author.get("orcid")
-        creator = {
+        creator: dict = {
             "person_or_org": {
                 "type": "personal",
                 "given_name": author["first_name"],
@@ -3430,10 +3422,13 @@ def new_release(
     )
     releases[name] = release
     ck_info["releases"] = releases
-    # Create CITATION.cff file
+    # Create/update CITATION.cff file, preserving existing authors
     if release_type == "project":
         cff = calkit.releases.create_citation_cff(
-            ck_info=ck_info, release_name=name, release_date=release_date
+            ck_info=ck_info,
+            release_name=name,
+            release_date=release_date,
+            authors=authors,
         )
         if dry_run:
             typer.echo(f"Would write CITATION.cff:\n{cff}")

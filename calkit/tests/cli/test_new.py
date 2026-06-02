@@ -766,7 +766,7 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
         ]
     )
     # TODO: Add project description?
-    # Add authors
+    # Add authors to CITATION.cff (the single source of truth for authors)
     authors = [
         {
             "first_name": "Alice",
@@ -781,10 +781,7 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
             "orcid": None,
         },
     ]
-    ck_info = calkit.load_calkit_info()
-    ck_info["authors"] = authors
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(ck_info, f)
+    calkit.releases.set_cff_authors(authors)
     # Add a default license
     subprocess.check_call(
         [
@@ -868,14 +865,6 @@ def test_new_release_is_runnable(tmp_dir, monkeypatch):
                 "name": "test-project",
                 "owner": "test-user",
                 "git_repo_url": "https://github.com/test-user/test-project",
-                "authors": [
-                    {
-                        "first_name": "Alice",
-                        "last_name": "Smith",
-                        "affiliation": "SomeU",
-                        "orcid": "0000-0001-2345-6789",
-                    }
-                ],
                 "environments": {
                     "main": {
                         "kind": "uv-venv",
@@ -897,6 +886,17 @@ def test_new_release_is_runnable(tmp_dir, monkeypatch):
             },
             f,
         )
+    # Authors live in CITATION.cff, the single source of truth
+    calkit.releases.set_cff_authors(
+        [
+            {
+                "first_name": "Alice",
+                "last_name": "Smith",
+                "affiliation": "SomeU",
+                "orcid": "0000-0001-2345-6789",
+            }
+        ]
+    )
     with open("requirements.txt", "w") as f:
         f.write("requests\n")
     with open("get_data.py", "w") as f:

@@ -87,9 +87,12 @@ You can also specify license(s) explicitly with one or more `--license`
 options using [SPDX identifiers](https://spdx.org/licenses), e.g.,
 `--license mit`.
 
-Authors are read from the `authors` section of `calkit.yaml`.
-If none are defined there, Calkit will read them from a `CITATION.cff` file
-if one is present, and otherwise prompt you to enter them.
+Authors are stored in the project's `CITATION.cff` file, which is the single
+source of truth for citation authors and is itself created/updated by Calkit
+on each project release.
+When creating a release, Calkit reads the authors from `CITATION.cff`; if
+none are defined yet, it will prompt you to enter them and write them to
+`CITATION.cff` (existing author entries are always preserved).
 
 ## Releasing other types of artifacts individually
 

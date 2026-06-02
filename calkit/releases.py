@@ -110,37 +110,93 @@ repository-code: "https://github.com/citation-file-format/my-research-software"
 """.strip()
 
 
-def create_citation_cff(
-    ck_info: dict, release_name: str, release_date: str
-) -> dict:
-    """Create content to put in a CITATION.cff file."""
-    content = {
-        "cff-version": "1.2.0",
-        "message": (
-            "If you use these files, please cite is using these metadata."
-        ),
-        "title": ck_info.get("title"),
-        "abstract": ck_info.get("description"),
-        "version": release_name,
-        "date-released": str(release_date),
-        "repository-code": ck_info.get("git_repo_url"),
+def to_cff_author(author: dict) -> dict:
+    """Convert a Calkit author dict to a CITATION.cff author entry."""
+    cff_author = {
+        "family-names": author["last_name"],
+        "given-names": author.get("first_name", ""),
     }
-    # Get authors from ck_info
-    authors = ck_info.get("authors", [])
-    cff_authors = []
-    for author in authors:
-        cff_author = {
-            "family-names": author["last_name"],
-            "given-names": author["first_name"],
-        }
-        if "orcid" in author:
-            cff_author["orcid"] = author["orcid"]
-        cff_authors.append(cff_author)
-    content["authors"] = cff_authors
-    # Get DOIs from ck_info
+    if author.get("affiliation"):
+        cff_author["affiliation"] = author["affiliation"]
+    orcid = author.get("orcid")
+    if orcid:
+        # CITATION.cff expects the ORCID as a full URL
+        if not str(orcid).startswith("http"):
+            orcid = f"https://orcid.org/{orcid}"
+        cff_author["orcid"] = orcid
+    return cff_author
+
+
+def set_cff_authors(
+    authors: list[dict],
+    ck_info: dict | None = None,
+    path: str = "CITATION.cff",
+) -> dict:
+    """Write authors into a CITATION.cff file, creating it if necessary.
+
+    Existing content (and any fields we don't manage) is preserved. Returns
+    the resulting CITATION.cff content.
+    """
+    content: dict = {}
+    if os.path.isfile(path):
+        with open(path) as f:
+            loaded = calkit.ryaml.load(f)
+        if isinstance(loaded, dict):
+            content = loaded
+    content.setdefault("cff-version", "1.2.0")
+    content.setdefault(
+        "message",
+        "If you use these files, please cite them using these metadata.",
+    )
+    if ck_info is not None and ck_info.get("title") is not None:
+        content.setdefault("title", ck_info.get("title"))
+    content["authors"] = [to_cff_author(a) for a in authors]
+    with open(path, "w") as f:
+        calkit.ryaml.dump(content, f)
+    return content
+
+
+def create_citation_cff(
+    ck_info: dict,
+    release_name: str,
+    release_date: str,
+    authors: list[dict] | None = None,
+    path: str = "CITATION.cff",
+) -> dict:
+    """Create content to put in a CITATION.cff file.
+
+    CITATION.cff is the single source of truth for authors, so if a file
+    already exists its ``authors`` block is preserved as-is. Only when no
+    authors are present is the provided ``authors`` list (in Calkit format)
+    used to populate them.
+    """
+    content: dict = {}
+    if os.path.isfile(path):
+        with open(path) as f:
+            loaded = calkit.ryaml.load(f)
+        if isinstance(loaded, dict):
+            content = loaded
+    content["cff-version"] = "1.2.0"
+    content.setdefault(
+        "message",
+        "If you use these files, please cite them using these metadata.",
+    )
+    if ck_info.get("title") is not None:
+        content["title"] = ck_info.get("title")
+    if ck_info.get("description") is not None:
+        content["abstract"] = ck_info.get("description")
+    content["version"] = release_name
+    content["date-released"] = str(release_date)
+    if ck_info.get("git_repo_url") is not None:
+        content["repository-code"] = ck_info.get("git_repo_url")
+    # Preserve existing authors (the source of truth); otherwise populate
+    # from the provided Calkit-format author list
+    if not content.get("authors"):
+        content["authors"] = [to_cff_author(a) for a in (authors or [])]
+    # Get DOIs from ck_info releases
     ids = []
-    for rname, release in ck_info["releases"].items():
-        if release["kind"] == "project" and "doi" in release:
+    for rname, release in ck_info.get("releases", {}).items():
+        if release.get("kind") == "project" and "doi" in release:
             ids.append(
                 {
                     "description": f"Release {rname}",

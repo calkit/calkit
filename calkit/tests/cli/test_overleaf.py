@@ -7,10 +7,19 @@ import uuid
 from pathlib import Path
 
 import git
+from typer.testing import CliRunner
 
 import calkit
-from calkit.cli.overleaf import _extract_title_from_tex
+from calkit.cli.overleaf import _extract_title_from_tex, overleaf_app
 from calkit.git import ls_files
+
+runner = CliRunner()
+
+
+def test_overleaf_status_alias_st_resolves():
+    result = runner.invoke(overleaf_app, ["st"])
+    assert result.exit_code == 1
+    assert "No Overleaf sync info found" in result.output
 
 
 def _make_temp_overleaf_project(project_id: str) -> git.Repo:

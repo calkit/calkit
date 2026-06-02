@@ -12,9 +12,9 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
-from calkit.cli import raise_error, warn
+from calkit.cli import AliasGroup, raise_error, warn
 
-overleaf_app = typer.Typer(no_args_is_help=True)
+overleaf_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
 
 def _extract_title_from_tex(tex_file_path: str) -> str | None:
@@ -588,7 +588,7 @@ def compare_folders_recursively(
     return res
 
 
-@overleaf_app.command(name="status")
+@overleaf_app.command(name="status|st")
 def get_status(
     paths: Annotated[
         list[str] | None,

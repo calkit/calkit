@@ -2671,11 +2671,11 @@ Options:
 
 Interact with Overleaf.
 
-| Command                                    | Description                                                    |
-| ------------------------------------------ | -------------------------------------------------------------- |
-| [`import`](#subcommand-overleaf-ol-import) | Import a publication from an Overleaf project.                 |
-| [`sync`](#subcommand-overleaf-ol-sync)     | Sync folders with Overleaf.                                    |
-| [`status`](#subcommand-overleaf-ol-status) | Check the status of folders synced with Overleaf in a project. |
+| Command                                           | Description                                                    |
+| ------------------------------------------------- | -------------------------------------------------------------- |
+| [`import`](#subcommand-overleaf-ol-import)        | Import a publication from an Overleaf project.                 |
+| [`sync`](#subcommand-overleaf-ol-sync)            | Sync folders with Overleaf.                                    |
+| [`status\|st`](#subcommand-overleaf-ol-status-st) | Check the status of folders synced with Overleaf in a project. |
 
 <a id="subcommand-overleaf-ol-import"></a>
 
@@ -2739,16 +2739,16 @@ Options:
 | `--resolve`, `-r`   | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
 | `--push-only`, `-P` | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
 
-<a id="subcommand-overleaf-ol-status"></a>
+<a id="subcommand-overleaf-ol-status-st"></a>
 
-#### `calkit overleaf|ol status`
+#### `calkit overleaf|ol status|st`
 
 Check the status of folders synced with Overleaf in a project.
 
 Usage:
 
 ```text
-calkit overleaf|ol status [PATHS...]
+calkit overleaf|ol status|st [PATHS...]
 ```
 
 Arguments:

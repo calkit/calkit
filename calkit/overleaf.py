@@ -236,6 +236,11 @@ class OverleafSyncPaths:
                 out_paths.extend(calkit.dvc.out_paths_from_stage(stage))
         return self._rel_under_folder(out_paths)
 
+    @cached_property
+    def _pipeline_output_path_list(self) -> list[str]:
+        """``pipeline_output_paths`` as a sorted list, computed once."""
+        return sorted(self.pipeline_output_paths)
+
     def _is_ignored_for_sync(self, rel_posix: str) -> bool:
         """Whether a path (relative to ``path_in_project``) should be treated
         as ignored, and therefore neither synced to/from nor deleted from
@@ -253,9 +258,7 @@ class OverleafSyncPaths:
         if rel_posix in self.stored_files:
             return False
         # A pipeline output that is not stored has storage: null
-        return self._path_matches(
-            rel_posix, sorted(self.pipeline_output_paths)
-        )
+        return self._path_matches(rel_posix, self._pipeline_output_path_list)
 
     @cached_property
     def files_to_copy_from_overleaf(self) -> list[str]:
@@ -708,6 +711,7 @@ def sync(
     # .auxlock) in the synced folder so they don't get committed during sync
     gitignore_modified = False
     path_prefix = path_in_project.rstrip("/") + "/"
+    auto_ignore_paths = {Path(p).as_posix() for p in calkit.AUTO_IGNORE_PATHS}
     for untracked in main_repo.untracked_files:
         untracked_posix = Path(untracked).as_posix()
         if not untracked_posix.startswith(path_prefix):
@@ -721,8 +725,7 @@ def sync(
                 untracked_posix.startswith(p)
                 for p in calkit.AUTO_IGNORE_PREFIXES
             )
-            or untracked_posix
-            in [Path(p).as_posix() for p in calkit.AUTO_IGNORE_PATHS]
+            or untracked_posix in auto_ignore_paths
         ):
             if calkit.git.ensure_path_is_ignored(main_repo, untracked_posix):
                 print_info(f"Automatically ignoring {untracked_posix}")

@@ -359,7 +359,11 @@ def check_project_release_archive(
     zip_path: str, verbose: bool = False
 ) -> None:
     """Ensure an extracted project release archive can run cleanly."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    # ignore_cleanup_errors avoids spurious failures on Windows, where files
+    # created by the inner `calkit run` (e.g., a freshly built virtual
+    # environment) can still be locked when the temporary directory is
+    # removed.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         with zipfile.ZipFile(zip_path) as zipf:
             zipf.extractall(tmpdir)
         ck_info = calkit.load_calkit_info(wdir=tmpdir)

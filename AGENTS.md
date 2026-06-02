@@ -41,3 +41,5 @@ Functions should usually be used ~3 times before abstracting.
 Otherwise, split up long ones into logical sections with comments.
 The only exception here is if splitting up a function makes it easier to
 write meaningful unit tests.
+If a function is only used inside one other function, nest it inside the
+caller at the top.

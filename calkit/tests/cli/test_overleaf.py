@@ -30,13 +30,12 @@ def _make_temp_overleaf_project(project_id: str) -> git.Repo:
     return repo
 
 
-def _overleaf_tree(repo: git.Repo) -> set[str]:
-    """List files tracked at the Overleaf repo's HEAD (post-push)."""
-    out = repo.git.ls_tree("-r", "--name-only", "HEAD")
-    return set(out.split("\n")) - {""}
-
-
 def test_overleaf(tmp_dir):
+    def get_overleaf_tree(repo: git.Repo) -> set[str]:
+        """List files tracked at the Overleaf repo's HEAD (post-push)."""
+        out = repo.git.ls_tree("-r", "--name-only", "HEAD")
+        return set(out.split("\n")) - {""}
+
     # First, create a temporary repo to represent the Overleaf project
     pid = str(uuid.uuid4())
     ol_repo = _make_temp_overleaf_project(pid)
@@ -158,7 +157,7 @@ def test_overleaf(tmp_dir):
     subprocess.run(["calkit", "overleaf", "sync"], check=True)
     ol_repo_git_show = ol_repo.git.show()
     print("Git show in OL repo:\n", ol_repo_git_show)
-    assert "figs/ignored-in-main.txt" not in _overleaf_tree(ol_repo)
+    assert "figs/ignored-in-main.txt" not in get_overleaf_tree(ol_repo)
     # Test that LaTeX aux build files and main PDFs don't make it to Overleaf
     for fname in ["main.pdf", "main.log", "main.aux"]:
         with open(

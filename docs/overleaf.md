@@ -84,8 +84,9 @@ Syncing requires the synced folder to have no uncommitted changes.
 If there are any (staged or unstaged), Calkit raises an error like:
 
 ```
-Uncommitted changes found in paper; please commit or stash them before
-syncing with Overleaf
+Uncommitted changes found in {wdir}.
+Commit or stash them before syncing with Overleaf,
+or use --auto-commit/-a to automatically commit them.
 ```
 
 This is because incoming Overleaf edits are applied to the synced path with
@@ -97,7 +98,7 @@ before the sync is a clean checkpoint, so Calkit can cleanly reset back to it
 failed patch without entangling or losing your in-progress edits.
 
 To let Calkit commit your local changes for you before syncing instead of
-erroring, pass `--auto-commit`:
+erroring, pass `--auto-commit`/`-a`:
 
 ```sh
 calkit overleaf sync --auto-commit

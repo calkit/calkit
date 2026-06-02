@@ -9,11 +9,15 @@ import bibtexparser
 import git
 import pytest
 
+import calkit
 from calkit.dvc.zip import write_zip_path_map
 from calkit.releases import (
     check_project_release_archive,
     create_bibtex,
+    create_citation_cff,
     ls_files,
+    read_authors_from_cff,
+    set_cff_authors,
     zip_paths,
 )
 
@@ -157,6 +161,120 @@ def test_create_bibtex():
     )
     entries = bibtexparser.loads(entry).entries
     assert len(entries) == 1
+
+
+def test_read_authors_from_cff(tmp_dir):
+    # No file present yields an empty list
+    assert read_authors_from_cff() == []
+    cff = {
+        "cff-version": "1.2.0",
+        "title": "My project",
+        "authors": [
+            {
+                "family-names": "Smith",
+                "given-names": "Alice",
+                "orcid": "https://orcid.org/0000-0001-2345-6789",
+                "affiliation": "SomeU",
+            },
+            {"family-names": "Jones", "given-names": "Bob"},
+            # An entity author without a family name should be skipped
+            {"name": "The Research Software Project"},
+        ],
+    }
+    with open("CITATION.cff", "w") as f:
+        calkit.ryaml.dump(cff, f)
+    authors = read_authors_from_cff()
+    assert authors == [
+        {
+            "first_name": "Alice",
+            "last_name": "Smith",
+            "affiliation": "SomeU",
+            # The full ORCID URL should be normalized to the bare identifier
+            "orcid": "0000-0001-2345-6789",
+        },
+        {"first_name": "Bob", "last_name": "Jones"},
+    ]
+    # A round trip through create_citation_cff should be readable again
+    ck_info = {"title": "My project", "authors": authors, "releases": {}}
+    generated = create_citation_cff(
+        ck_info=ck_info, release_name="v1", release_date="2026-01-01"
+    )
+    with open("CITATION.cff", "w") as f:
+        calkit.ryaml.dump(generated, f)
+    round_tripped = read_authors_from_cff()
+    assert round_tripped[0]["first_name"] == "Alice"
+    assert round_tripped[0]["last_name"] == "Smith"
+    assert round_tripped[0]["orcid"] == "0000-0001-2345-6789"
+
+
+def test_citation_cff_authors_round_trip(tmp_dir):
+    # set_cff_authors writes a CITATION.cff from Calkit-format authors,
+    # normalizing ORCIDs to full URLs and keeping affiliations
+    set_cff_authors(
+        [
+            {
+                "first_name": "Alice",
+                "last_name": "Smith",
+                "affiliation": "SomeU",
+                "orcid": "0000-0001-2345-6789",
+            },
+            {"first_name": "Bob", "last_name": "Jones"},
+        ],
+        ck_info={"title": "My project"},
+    )
+    cff = calkit.ryaml.load(open("CITATION.cff"))
+    assert cff["title"] == "My project"
+    assert cff["authors"][0]["orcid"] == (
+        "https://orcid.org/0000-0001-2345-6789"
+    )
+    assert cff["authors"][0]["affiliation"] == "SomeU"
+    assert "affiliation" not in cff["authors"][1]
+    # The authors are readable back as Calkit author dicts
+    assert read_authors_from_cff() == [
+        {
+            "first_name": "Alice",
+            "last_name": "Smith",
+            "affiliation": "SomeU",
+            "orcid": "0000-0001-2345-6789",
+        },
+        {"first_name": "Bob", "last_name": "Jones"},
+    ]
+    # create_citation_cff preserves the existing authors (the source of
+    # truth) and ignores the provided fallback list, while refreshing the
+    # version/date and adding DOIs from project releases
+    ck_info = {
+        "title": "My project",
+        "releases": {
+            "v1": {"kind": "project", "doi": "10.5281/zenodo.1"},
+            "fig": {"kind": "figure", "doi": "10.5281/zenodo.2"},
+        },
+    }
+    content = create_citation_cff(
+        ck_info=ck_info,
+        release_name="v2",
+        release_date="2026-02-02",
+        authors=[{"first_name": "Z", "last_name": "Ignored"}],
+    )
+    assert content["version"] == "v2"
+    assert content["date-released"] == "2026-02-02"
+    assert [a["family-names"] for a in content["authors"]] == [
+        "Smith",
+        "Jones",
+    ]
+    # Only project-release DOIs are included as identifiers
+    doi_values = [i["value"] for i in content["identifiers"]]
+    assert doi_values == ["10.5281/zenodo.1"]
+    # With no existing CITATION.cff, the provided author list is used
+    os.remove("CITATION.cff")
+    content = create_citation_cff(
+        ck_info={"title": "T", "releases": {}},
+        release_name="v1",
+        release_date="2026-01-01",
+        authors=[{"first_name": "Carol", "last_name": "Lee"}],
+    )
+    assert content["authors"] == [
+        {"family-names": "Lee", "given-names": "Carol"}
+    ]
 
 
 def test_zip_paths(tmp_dir):

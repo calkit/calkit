@@ -110,37 +110,93 @@ repository-code: "https://github.com/citation-file-format/my-research-software"
 """.strip()
 
 
-def create_citation_cff(
-    ck_info: dict, release_name: str, release_date: str
-) -> dict:
-    """Create content to put in a CITATION.cff file."""
-    content = {
-        "cff-version": "1.2.0",
-        "message": (
-            "If you use these files, please cite is using these metadata."
-        ),
-        "title": ck_info.get("title"),
-        "abstract": ck_info.get("description"),
-        "version": release_name,
-        "date-released": str(release_date),
-        "repository-code": ck_info.get("git_repo_url"),
+def to_cff_author(author: dict) -> dict:
+    """Convert a Calkit author dict to a CITATION.cff author entry."""
+    cff_author = {
+        "family-names": author["last_name"],
+        "given-names": author.get("first_name", ""),
     }
-    # Get authors from ck_info
-    authors = ck_info.get("authors", [])
-    cff_authors = []
-    for author in authors:
-        cff_author = {
-            "family-names": author["last_name"],
-            "given-names": author["first_name"],
-        }
-        if "orcid" in author:
-            cff_author["orcid"] = author["orcid"]
-        cff_authors.append(cff_author)
-    content["authors"] = cff_authors
-    # Get DOIs from ck_info
+    if author.get("affiliation"):
+        cff_author["affiliation"] = author["affiliation"]
+    orcid = author.get("orcid")
+    if orcid:
+        # CITATION.cff expects the ORCID as a full URL
+        if not str(orcid).startswith("http"):
+            orcid = f"https://orcid.org/{orcid}"
+        cff_author["orcid"] = orcid
+    return cff_author
+
+
+def set_cff_authors(
+    authors: list[dict],
+    ck_info: dict | None = None,
+    path: str = "CITATION.cff",
+) -> dict:
+    """Write authors into a CITATION.cff file, creating it if necessary.
+
+    Existing content (and any fields we don't manage) is preserved. Returns
+    the resulting CITATION.cff content.
+    """
+    content: dict = {}
+    if os.path.isfile(path):
+        with open(path) as f:
+            loaded = calkit.ryaml.load(f)
+        if isinstance(loaded, dict):
+            content = loaded
+    content.setdefault("cff-version", "1.2.0")
+    content.setdefault(
+        "message",
+        "If you use these files, please cite them using these metadata.",
+    )
+    if ck_info is not None and ck_info.get("title") is not None:
+        content.setdefault("title", ck_info.get("title"))
+    content["authors"] = [to_cff_author(a) for a in authors]
+    with open(path, "w") as f:
+        calkit.ryaml.dump(content, f)
+    return content
+
+
+def create_citation_cff(
+    ck_info: dict,
+    release_name: str,
+    release_date: str,
+    authors: list[dict] | None = None,
+    path: str = "CITATION.cff",
+) -> dict:
+    """Create content to put in a CITATION.cff file.
+
+    CITATION.cff is the single source of truth for authors, so if a file
+    already exists its ``authors`` block is preserved as-is. Only when no
+    authors are present is the provided ``authors`` list (in Calkit format)
+    used to populate them.
+    """
+    content: dict = {}
+    if os.path.isfile(path):
+        with open(path) as f:
+            loaded = calkit.ryaml.load(f)
+        if isinstance(loaded, dict):
+            content = loaded
+    content["cff-version"] = "1.2.0"
+    content.setdefault(
+        "message",
+        "If you use these files, please cite them using these metadata.",
+    )
+    if ck_info.get("title") is not None:
+        content["title"] = ck_info.get("title")
+    if ck_info.get("description") is not None:
+        content["abstract"] = ck_info.get("description")
+    content["version"] = release_name
+    content["date-released"] = str(release_date)
+    if ck_info.get("git_repo_url") is not None:
+        content["repository-code"] = ck_info.get("git_repo_url")
+    # Preserve existing authors (the source of truth); otherwise populate
+    # from the provided Calkit-format author list
+    if not content.get("authors"):
+        content["authors"] = [to_cff_author(a) for a in (authors or [])]
+    # Get DOIs from ck_info releases
     ids = []
-    for rname, release in ck_info["releases"].items():
-        if release["kind"] == "project" and "doi" in release:
+    for rname, release in ck_info.get("releases", {}).items():
+        if release.get("kind") == "project" and "doi" in release:
             ids.append(
                 {
                     "description": f"Release {rname}",
@@ -150,6 +206,46 @@ def create_citation_cff(
             )
     content["identifiers"] = ids
     return content
+
+
+def read_authors_from_cff(path: str = "CITATION.cff") -> list[dict]:
+    """Read authors from a ``CITATION.cff`` file into Calkit author dicts.
+
+    The citation file format stores names as ``given-names``/``family-names``
+    and ORCIDs as full URLs, whereas Calkit uses ``first_name``/``last_name``
+    and bare ORCID identifiers, so values are normalized here.
+    Authors without a family name (e.g., entity authors that only have a
+    ``name`` field) are skipped because they cannot be expressed as a
+    personal creator.
+    """
+    if not os.path.isfile(path):
+        return []
+    with open(path) as f:
+        cff = calkit.ryaml.load(f)
+    if not isinstance(cff, dict):
+        return []
+    authors = []
+    for cff_author in cff.get("authors", []) or []:
+        if not isinstance(cff_author, dict):
+            continue
+        last_name = cff_author.get("family-names")
+        if not last_name:
+            # Entity authors only have a "name"; skip since we can't build a
+            # personal creator from them
+            continue
+        author = {
+            "first_name": cff_author.get("given-names", ""),
+            "last_name": last_name,
+        }
+        affiliation = cff_author.get("affiliation")
+        if affiliation:
+            author["affiliation"] = affiliation
+        orcid = cff_author.get("orcid")
+        if orcid:
+            # CFF stores ORCID as a full URL; store the bare identifier
+            author["orcid"] = re.sub(r"^https?://orcid\.org/", "", str(orcid))
+        authors.append(author)
+    return authors
 
 
 def ls_files() -> list[str]:
@@ -263,7 +359,11 @@ def check_project_release_archive(
     zip_path: str, verbose: bool = False
 ) -> None:
     """Ensure an extracted project release archive can run cleanly."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    # ignore_cleanup_errors avoids spurious failures on Windows, where files
+    # created by the inner `calkit run` (e.g., a freshly built virtual
+    # environment) can still be locked when the temporary directory is
+    # removed.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         with zipfile.ZipFile(zip_path) as zipf:
             zipf.extractall(tmpdir)
         ck_info = calkit.load_calkit_info(wdir=tmpdir)

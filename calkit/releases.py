@@ -152,6 +152,46 @@ def create_citation_cff(
     return content
 
 
+def read_authors_from_cff(path: str = "CITATION.cff") -> list[dict]:
+    """Read authors from a ``CITATION.cff`` file into Calkit author dicts.
+
+    The citation file format stores names as ``given-names``/``family-names``
+    and ORCIDs as full URLs, whereas Calkit uses ``first_name``/``last_name``
+    and bare ORCID identifiers, so values are normalized here.
+    Authors without a family name (e.g., entity authors that only have a
+    ``name`` field) are skipped because they cannot be expressed as a
+    personal creator.
+    """
+    if not os.path.isfile(path):
+        return []
+    with open(path) as f:
+        cff = calkit.ryaml.load(f)
+    if not isinstance(cff, dict):
+        return []
+    authors = []
+    for cff_author in cff.get("authors", []) or []:
+        if not isinstance(cff_author, dict):
+            continue
+        last_name = cff_author.get("family-names")
+        if not last_name:
+            # Entity authors only have a "name"; skip since we can't build a
+            # personal creator from them
+            continue
+        author = {
+            "first_name": cff_author.get("given-names", ""),
+            "last_name": last_name,
+        }
+        affiliation = cff_author.get("affiliation")
+        if affiliation:
+            author["affiliation"] = affiliation
+        orcid = cff_author.get("orcid")
+        if orcid:
+            # CFF stores ORCID as a full URL; store the bare identifier
+            author["orcid"] = re.sub(r"^https?://orcid\.org/", "", str(orcid))
+        authors.append(author)
+    return authors
+
+
 def ls_files() -> list[str]:
     """List all files to be released."""
     repo = calkit.git.get_repo()

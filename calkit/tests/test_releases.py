@@ -9,11 +9,14 @@ import bibtexparser
 import git
 import pytest
 
+import calkit
 from calkit.dvc.zip import write_zip_path_map
 from calkit.releases import (
     check_project_release_archive,
     create_bibtex,
+    create_citation_cff,
     ls_files,
+    read_authors_from_cff,
     zip_paths,
 )
 
@@ -157,6 +160,50 @@ def test_create_bibtex():
     )
     entries = bibtexparser.loads(entry).entries
     assert len(entries) == 1
+
+
+def test_read_authors_from_cff(tmp_dir):
+    # No file present yields an empty list
+    assert read_authors_from_cff() == []
+    cff = {
+        "cff-version": "1.2.0",
+        "title": "My project",
+        "authors": [
+            {
+                "family-names": "Smith",
+                "given-names": "Alice",
+                "orcid": "https://orcid.org/0000-0001-2345-6789",
+                "affiliation": "SomeU",
+            },
+            {"family-names": "Jones", "given-names": "Bob"},
+            # An entity author without a family name should be skipped
+            {"name": "The Research Software Project"},
+        ],
+    }
+    with open("CITATION.cff", "w") as f:
+        calkit.ryaml.dump(cff, f)
+    authors = read_authors_from_cff()
+    assert authors == [
+        {
+            "first_name": "Alice",
+            "last_name": "Smith",
+            "affiliation": "SomeU",
+            # The full ORCID URL should be normalized to the bare identifier
+            "orcid": "0000-0001-2345-6789",
+        },
+        {"first_name": "Bob", "last_name": "Jones"},
+    ]
+    # A round trip through create_citation_cff should be readable again
+    ck_info = {"title": "My project", "authors": authors, "releases": {}}
+    generated = create_citation_cff(
+        ck_info=ck_info, release_name="v1", release_date="2026-01-01"
+    )
+    with open("CITATION.cff", "w") as f:
+        calkit.ryaml.dump(generated, f)
+    round_tripped = read_authors_from_cff()
+    assert round_tripped[0]["first_name"] == "Alice"
+    assert round_tripped[0]["last_name"] == "Smith"
+    assert round_tripped[0]["orcid"] == "0000-0001-2345-6789"
 
 
 def test_zip_paths(tmp_dir):

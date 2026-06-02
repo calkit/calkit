@@ -3124,18 +3124,7 @@ def new_release(
     record_id = None
     # Detect project license IDs if necessary
     if not license_ids:
-        license_file = None
-        license_txt = None
-        license_candidates = [
-            "LICENSE",
-            "LICENSE.rst",
-            "LICENSE.txt",
-            "LICENSE.md",
-        ]
-        for lc in license_candidates:
-            if os.path.isfile(lc):
-                license_file = lc
-                break
+        license_file = calkit.licenses.find_license_file()
         if license_file is None:
             typer.echo("No project license found.")
             use_default_license = typer.confirm(
@@ -3155,15 +3144,18 @@ def new_release(
                 f.write(license_txt)
                 repo.git.add("LICENSE")
             license_ids = ["mit", "cc-by-4.0"]
-        if license_txt is None and license_file is not None:
+        else:
+            typer.echo(f"Detecting license(s) from {license_file}")
             with open(license_file) as f:
                 license_txt = f.read()
-            # Try to detect licenses
-            if "the mit license" in license_txt.lower():
-                license_ids.append("mit")
-            if "cc by 4.0" in license_txt.lower():
-                license_ids.append("cc-by-4.0")
-            # TODO: Detect others
+            license_ids = calkit.licenses.detect_license_ids(license_txt)
+            if license_ids:
+                typer.echo(f"Detected license(s): {', '.join(license_ids)}")
+            else:
+                warn(
+                    f"Could not detect any known license in {license_file}; "
+                    "specify one explicitly with --license"
+                )
     if not license_ids:
         raise_error("Project has no license(s) defined")
     invenio_metadata = dict(
@@ -3191,6 +3183,17 @@ def new_release(
     # TODO: Add calkit.io URL if applicable?
     # Determine creators from authors, adding to project if not present
     authors = ck_info.get("authors", [])
+    if not authors:
+        # Fall back to authors declared in a CITATION.cff file, if present
+        cff_authors = calkit.releases.read_authors_from_cff()
+        if cff_authors:
+            typer.echo(f"Read {len(cff_authors)} author(s) from CITATION.cff")
+            authors = cff_authors
+            ck_info["authors"] = authors
+            if not dry_run:
+                typer.echo("Adding authors to calkit.yaml")
+                with open("calkit.yaml", "w") as f:
+                    calkit.ryaml.dump(ck_info, f)
     if not authors:
         warn("No authors defined for the project")
         still_entering_authors = True
@@ -3234,8 +3237,12 @@ def new_release(
                 "family_name": author["last_name"],
                 "identifiers": [{"identifier": orcid}] if orcid else [],
             },
-            "affiliations": [{"name": author["affiliation"]}],
         }
+        # Affiliation is optional (e.g., authors read from CITATION.cff may
+        # not specify one)
+        affiliation = author.get("affiliation")
+        if affiliation:
+            creator["affiliations"] = [{"name": affiliation}]
         invenio_creators.append(creator)
     invenio_metadata["creators"] = invenio_creators  # type: ignore
     # Set InvenioRDM resource_type based on release_type and artifact kind

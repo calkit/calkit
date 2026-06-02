@@ -73,6 +73,24 @@ When this is called, Calkit will:
   (`references.bib` by default).
 - Create a GitHub release with a link to the Zenodo record.
 
+## Licenses and authors
+
+The archived record needs both license and author metadata.
+
+Calkit detects the project's license(s) automatically from a `LICENSE` file
+(common names like `LICENSE.txt`, `LICENSE.md`, and `COPYING` are also
+recognized), supporting common licenses such as MIT, Apache-2.0, the BSD
+family, the GPL family, CC-BY-4.0, and others.
+If no license is found, you'll be prompted to generate a sensible default
+(MIT for code, CC-BY-4.0 for other content).
+You can also specify license(s) explicitly with one or more `--license`
+options using [SPDX identifiers](https://spdx.org/licenses), e.g.,
+`--license mit`.
+
+Authors are read from the `authors` section of `calkit.yaml`.
+If none are defined there, Calkit will read them from a `CITATION.cff` file
+if one is present, and otherwise prompt you to enter them.
+
 ## Releasing other types of artifacts individually
 
 To release only one artifact, e.g., a dataset or publication,

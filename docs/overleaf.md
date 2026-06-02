@@ -78,6 +78,33 @@ by calling `calkit run`, and if anything has changed,
 commit and push those changes to the cloud with
 `calkit save -am "Run pipeline"`.
 
+### What gets synced
+
+Calkit only syncs **stored** files, i.e., files that are tracked by Git or
+stored by DVC.
+These are synced bidirectionally, except for files under `push_paths`
+(see [importing](#importing-an-overleaf-project)), which are pushed to
+Overleaf one-way only.
+
+Everything else is treated as ignored and is never pushed to, pulled from,
+or deleted from Overleaf.
+In particular, this includes:
+
+- Files ignored by Git (e.g., via `.gitignore`) that are not stored by DVC.
+- DVC pipeline outputs with `storage: null`, such as LaTeX build artifacts
+  (`.aux`, aux PDFs, etc.).
+  These are tracked by the pipeline but not stored, so Calkit leaves them
+  alone on both sides.
+
+If you want a generated file (like a figure) to be sent to Overleaf, make
+sure it is stored, e.g., by adding it to `push_paths` and giving its pipeline
+output `storage: dvc` or `git`.
+
+A file is only **deleted** from Overleaf when a previously-synced stored file
+is genuinely removed from the project (deleted from Git and DVC).
+A file that merely disappears from disk because it hasn't been pulled, or
+that became an ignored/`storage: null` output, is left in place on Overleaf.
+
 ## Example
 
 You can view an example project that uses Overleaf integration on

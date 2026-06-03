@@ -567,33 +567,51 @@ def _status_target_matches(
     selects every iteration, consistent with how ``calkit run`` expands matrix
     targets.
     """
-    target = Path(target).as_posix().rstrip("/")
     base_name = bare_name.split("@")[0]
-    if target in {display_name, bare_name, base_name}:
-        return True
+    # Stage-name matching is done against the raw target so it covers all of
+    # calkit's stage-target forms as well as DVC's native ``dvc.yaml:stage``
+    # and ``<subproject>/dvc.yaml:stage`` forms (the latter is what
+    # translate_run_targets emits for inline subprojects).
+    stage_aliases = {display_name, bare_name, base_name}
     if subproject is not None:
         subproject_name = Path(subproject).name
         if target in {subproject, subproject_name}:
             return display_name.startswith(
                 f"{subproject}:"
             ) or display_name == (f"{subproject} (subproject)")
-        if target in {
+        stage_aliases |= {
             f"{subproject}:{bare_name}",
             f"{subproject_name}:{bare_name}",
             f"{subproject}:{base_name}",
             f"{subproject_name}:{base_name}",
-        }:
-            return display_name == f"{subproject}:{bare_name}"
-    elif target in {f"dvc.yaml:{bare_name}", f"dvc.yaml:{base_name}"}:
+            f"{subproject}/dvc.yaml:{bare_name}",
+            f"{subproject}/dvc.yaml:{base_name}",
+        }
+    else:
+        stage_aliases |= {
+            f"dvc.yaml:{bare_name}",
+            f"dvc.yaml:{base_name}",
+        }
+    if target in stage_aliases:
         return True
-    if "/" not in target and "\\" not in target:
+    # Otherwise treat the target as a repo path and match it against the
+    # stage's stale/modified inputs and outputs. A target is path-like if it
+    # exists on disk or contains a separator; this keeps root-level paths
+    # without separators (e.g. ``data`` or ``out.csv``) selectable, which a
+    # separator-only heuristic would miss. A target that looks like a stage
+    # selector (contains ``:``) but matched no stage above is not a path.
+    if ":" in target and not os.path.exists(target):
         return False
+    is_pathlike = os.path.exists(target) or "/" in target or "\\" in target
+    if not is_pathlike:
+        return False
+    norm_target = Path(target).as_posix().rstrip("/")
     candidate_paths = (
         stale_stage.stale_outputs
         + stale_stage.modified_inputs
         + stale_stage.modified_outputs
     )
-    return any(_paths_overlap(target, p) for p in candidate_paths)
+    return any(_paths_overlap(norm_target, p) for p in candidate_paths)
 
 
 def get_status(

@@ -1626,6 +1626,36 @@ def test_status_target_matches():
     assert _status_target_matches("sp", "sp:run", "run", "sp", ss)
     assert _status_target_matches("sp:sim", "sp:sim@a", "sim@a", "sp", ss)
     assert not _status_target_matches("sp:other", "sp:run", "run", "sp", ss)
+    # DVC's native inline-subproject stage form (what translate_run_targets
+    # emits for inline subprojects) must also select the stage.
+    assert _status_target_matches("sp/dvc.yaml:run", "sp:run", "run", "sp", ss)
+    assert _status_target_matches(
+        "sp/dvc.yaml:sim", "sp:sim@a", "sim@a", "sp", ss
+    )
+    assert not _status_target_matches(
+        "sp/dvc.yaml:other", "sp:run", "run", "sp", ss
+    )
+
+
+def test_status_target_matches_root_level_path(tmp_path, monkeypatch):
+    # A root-level path target without any separator (e.g. ``out.csv`` or a
+    # directory ``data``) must still be selectable when it exists on disk; a
+    # separator-only heuristic would wrongly treat it as a bare stage name.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "out.csv").write_text("x")
+    (tmp_path / "data").mkdir()
+    ss = StaleStage(
+        stale_outputs=["out.csv"],
+        modified_inputs=["data/in.csv"],
+    )
+    assert _status_target_matches("out.csv", "build", "build", None, ss)
+    assert _status_target_matches("./out.csv", "build", "build", None, ss)
+    # A directory target overlaps a modified input nested under it.
+    assert _status_target_matches("data", "build", "build", None, ss)
+    assert _status_target_matches("data/", "build", "build", None, ss)
+    # A separator-less target that is neither a stage name nor an existing
+    # path is not selected.
+    assert not _status_target_matches("missing", "build", "build", None, ss)
 
 
 def test_collapse_dvc_stages():

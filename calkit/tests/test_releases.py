@@ -12,6 +12,7 @@ import pytest
 import calkit
 from calkit.dvc.zip import write_zip_path_map
 from calkit.releases import (
+    add_bibtex_entry,
     check_project_release_archive,
     create_bibtex,
     create_citation_cff,
@@ -161,6 +162,44 @@ def test_create_bibtex():
     )
     entries = bibtexparser.loads(entry).entries
     assert len(entries) == 1
+
+
+def test_add_bibtex_entry():
+    new_entry = create_bibtex(
+        authors=[{"first_name": "Jane", "last_name": "Doe"}],
+        release_date="2026-06-03",
+        title="New release",
+        doi="10.5281/zenodo.999",
+        record_id="999",
+    )
+    # Appending to existing references preserves the original formatting
+    # (e.g., tab-indented fields) byte-for-byte and only adds the new entry
+    existing = (
+        "@article{smith2020,\n"
+        "\tauthor = {Smith, John},\n"
+        "\tdoi = {10.1/abc},\n"
+        "}\n"
+    )
+    appended = add_bibtex_entry(existing, new_entry, replace_ids=[])
+    assert "@article{smith2020,\n\tauthor = {Smith, John}," in appended
+    assert appended.count("@misc{Doe2026_999,") == 1
+    assert bibtexparser.loads(appended).entries[0]["doi"] == "10.1/abc"
+    # Appending to an empty/nonexistent file yields just the new entry
+    from_empty = add_bibtex_entry("", new_entry, replace_ids=[])
+    assert from_empty.strip().startswith("@misc{Doe2026_999,")
+    # A matching entry (by citation key) is replaced, while other entries are
+    # left untouched and keep their original formatting
+    with_old = existing + (
+        "\n@misc{old2021,\n"
+        "\tauthor = {Doe, Jane},\n"
+        "\ttitle = {Old release},\n"
+        "\tdoi = {10.5281/zenodo.999},\n"
+        "}\n"
+    )
+    replaced = add_bibtex_entry(with_old, new_entry, replace_ids=["old2021"])
+    assert "Old release" not in replaced
+    assert "@article{smith2020,\n\tauthor = {Smith, John}," in replaced
+    assert replaced.count("@misc{Doe2026_999,") == 1
 
 
 def test_read_authors_from_cff(tmp_dir):

@@ -86,6 +86,64 @@ def create_bibtex(
     )
 
 
+def _find_bibtex_entry_span(
+    text: str, entry_id: str
+) -> tuple[int, int] | None:
+    """Locate the raw character span of a BibTeX entry by its citation key.
+
+    Returns ``(start, end)`` offsets into ``text`` where ``end`` is exclusive
+    (just past the entry's closing brace), or ``None`` if no entry with that
+    key is found.
+    """
+    # Match e.g. ``@misc{the-key,`` allowing arbitrary surrounding whitespace
+    pattern = re.compile(
+        r"@\w+\s*\{\s*" + re.escape(entry_id) + r"\s*,", re.IGNORECASE
+    )
+    match = pattern.search(text)
+    if match is None:
+        return None
+    # Walk from the entry's opening brace to its matching close, counting depth
+    depth = 0
+    i = text.index("{", match.start())
+    while i < len(text):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return match.start(), i + 1
+        i += 1
+    return None
+
+
+def add_bibtex_entry(
+    existing_text: str, new_entry: str, replace_ids: list[str] | None = None
+) -> str:
+    """Append a BibTeX entry to existing references without reformatting them.
+
+    Any entries whose citation keys are in ``replace_ids`` are removed first
+    (so a re-released version replaces its prior entry); all other existing
+    content is preserved byte-for-byte. ``new_entry`` is appended at the end.
+    """
+    text = existing_text
+    # Remove replaced entries from the raw text, last-to-first so earlier spans
+    # stay valid as we splice
+    spans = []
+    for entry_id in replace_ids or []:
+        span = _find_bibtex_entry_span(text, entry_id)
+        if span is not None:
+            spans.append(span)
+    for start, end in sorted(spans, reverse=True):
+        # Consume any trailing newlines so we don't leave a gap behind
+        while end < len(text) and text[end] in "\r\n":
+            end += 1
+        text = text[:start] + text[end:]
+    text = text.rstrip()
+    if text:
+        text += "\n\n"
+    return text + new_entry.strip() + "\n"
+
+
 CITATION_CFF_TEMPLATE = """
 cff-version: 1.2.0
 message: If you use this software, please cite it using these metadata.

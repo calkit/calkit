@@ -10,7 +10,9 @@ import calkit
 import calkit.pipeline
 from calkit.environments import get_env_lock_fpath
 from calkit.pipeline import (
+    StaleStage,
     _expand_dep_excluding_subprojects,
+    _status_target_matches,
     collapse_dvc_stages,
     stages_are_similar,
 )
@@ -1593,6 +1595,115 @@ def test_stale_stage_path_prefix():
         path_prefix="solver",
     )
     assert stale_cross.modified_inputs == ["shared.txt"]
+
+
+def test_subproject_configured_outputs_posix_no_duplicate():
+    # A non-isolated subproject stage's configured outputs are prefixed with
+    # the subproject path. DVC reports those same outputs as repo-root-relative
+    # posix paths. Building the configured path with the OS-native separator
+    # produced, on Windows, a backslash variant ("sub\out.csv") that escaped
+    # path dedup and showed up as a duplicate stale output alongside DVC's
+    # posix path ("sub/out.csv"). The configured path must therefore be posix.
+    from pathlib import PureWindowsPath
+
+    # The exact construction get_status performs; as_posix() normalizes the
+    # separator regardless of platform (PureWindowsPath stands in for Windows).
+    configured_output = (
+        PureWindowsPath("example-basic") / "data/raw/data.csv"
+    ).as_posix()
+    assert configured_output == "example-basic/data/raw/data.csv"
+    # DVC flagged the stage via a changed command and reports the output as a
+    # modified out using the same posix, repo-root-relative path.
+    stale_stage = calkit.pipeline.StaleStage.from_status_data(
+        status_data=[
+            {"changed outs": {"example-basic/data/raw/data.csv": "modified"}},
+            "changed command",
+        ],
+        configured_outputs=[configured_output],
+    )
+    # The configured output and the DVC-reported output are the same file, so
+    # it must appear exactly once -- no separator-variant duplicate.
+    assert stale_stage.stale_outputs == ["example-basic/data/raw/data.csv"]
+
+
+def test_always_run_excludes_subproject_stages():
+    # A subproject wrapper stage is marked always-changed purely as a
+    # delegation mechanism, so it must not be advertised as an always-run
+    # stage of the parent project. A genuine root always-run stage still is.
+    status = calkit.pipeline.PipelineStatus(
+        has_pipeline=True,
+        stale_stages={
+            "ticker": StaleStage(always_run=True),
+            "example-basic (subproject)": StaleStage(
+                always_run=True, is_subproject=True
+            ),
+        },
+    )
+    assert status.always_run_stage_names == ["ticker"]
+    # The subproject wrapper isn't stale either (pure always-run delegation).
+    assert "example-basic (subproject)" not in status.stale_stage_names
+    assert not status.is_stale
+
+
+def test_status_target_matches():
+    ss = StaleStage(
+        stale_outputs=["data/out.csv"],
+        modified_inputs=["data/in.csv"],
+    )
+    # Root stage selected by its name, the dvc.yaml: form, but not by an
+    # unrelated name.
+    assert _status_target_matches("build", "build", "build", None, ss)
+    assert _status_target_matches("dvc.yaml:build", "build", "build", None, ss)
+    assert not _status_target_matches("other", "build", "build", None, ss)
+    # A path target (one containing a separator, so it isn't mistaken for a
+    # bare stage name) matches a stage with overlapping stale/modified paths.
+    assert _status_target_matches("data/out.csv", "build", "build", None, ss)
+    assert _status_target_matches("data/in.csv", "build", "build", None, ss)
+    assert not _status_target_matches(
+        "other/path.csv", "build", "build", None, ss
+    )
+    # Iterated/matrix stages use a name@param key — targeting the base name
+    # (or its dvc.yaml: form) must select each iteration, matching how DVC
+    # filtered matrix targets before status was filtered locally.
+    assert _status_target_matches("sim", "sim@a", "sim@a", None, ss)
+    assert _status_target_matches("dvc.yaml:sim", "sim@a", "sim@a", None, ss)
+    assert _status_target_matches("sim@a", "sim@a", "sim@a", None, ss)
+    # Subproject stages selected by sp:stage, the whole subproject, and the
+    # matrix base name in either form.
+    assert _status_target_matches("sp:run", "sp:run", "run", "sp", ss)
+    assert _status_target_matches("sp", "sp:run", "run", "sp", ss)
+    assert _status_target_matches("sp:sim", "sp:sim@a", "sim@a", "sp", ss)
+    assert not _status_target_matches("sp:other", "sp:run", "run", "sp", ss)
+    # DVC's native inline-subproject stage form (what translate_run_targets
+    # emits for inline subprojects) must also select the stage.
+    assert _status_target_matches("sp/dvc.yaml:run", "sp:run", "run", "sp", ss)
+    assert _status_target_matches(
+        "sp/dvc.yaml:sim", "sp:sim@a", "sim@a", "sp", ss
+    )
+    assert not _status_target_matches(
+        "sp/dvc.yaml:other", "sp:run", "run", "sp", ss
+    )
+
+
+def test_status_target_matches_root_level_path(tmp_path, monkeypatch):
+    # A root-level path target without any separator (e.g. ``out.csv`` or a
+    # directory ``data``) must still be selectable when it exists on disk; a
+    # separator-only heuristic would wrongly treat it as a bare stage name.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "out.csv").write_text("x")
+    (tmp_path / "data").mkdir()
+    ss = StaleStage(
+        stale_outputs=["out.csv"],
+        modified_inputs=["data/in.csv"],
+    )
+    assert _status_target_matches("out.csv", "build", "build", None, ss)
+    assert _status_target_matches("./out.csv", "build", "build", None, ss)
+    # A directory target overlaps a modified input nested under it.
+    assert _status_target_matches("data", "build", "build", None, ss)
+    assert _status_target_matches("data/", "build", "build", None, ss)
+    # A separator-less target that is neither a stage name nor an existing
+    # path is not selected.
+    assert not _status_target_matches("missing", "build", "build", None, ss)
 
 
 def test_collapse_dvc_stages():

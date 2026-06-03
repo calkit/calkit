@@ -2418,7 +2418,16 @@ def run_in_env(
             )
         # TODO: Prefix should only be in the env file or calkit.yaml, not both?
         prefix = env.get("prefix")
-        conda_cmd = ["conda", "run"]
+        # Conda is often not on the PATH (especially on Windows), so search
+        # typical install locations rather than relying on the bare name,
+        # which would fail with a confusing FileNotFoundError traceback.
+        conda_exe = calkit.conda.find_conda_exe()
+        if conda_exe is None:
+            raise_error(
+                "Cannot find Conda executable; "
+                "ensure Conda is installed and on the PATH"
+            )
+        conda_cmd = [conda_exe, "run"]
         if prefix is not None:
             conda_cmd += ["--prefix", os.path.abspath(prefix)]
         else:

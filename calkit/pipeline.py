@@ -96,10 +96,14 @@ class PipelineStatus(BaseModel):
     def always_run_stage_names(self) -> list[str]:
         # Only list stages whose sole change indicator is always_run; stages
         # that also have real changes are reported under stale_stage_names.
+        # Subproject stages are excluded: their always-changed status is a
+        # delegation detail, not a user-meaningful always-run stage of the
+        # parent project.
         return [
             name
             for name, stage in self.stale_stages.items()
             if stage.always_run
+            and not stage.is_subproject
             and not stage.modified_command
             and not stage.modified_inputs
             and not stage.modified_outputs
@@ -145,6 +149,12 @@ class StaleStage(BaseModel):
     modified_outputs: list[str] = Field(default_factory=list)
     modified_command: bool = False
     always_run: bool = False
+    # True for stages that originate from a subproject (either an individual
+    # "{sp}:{stage}" stage or a kept "{sp} (subproject)" wrapper). Subproject
+    # wrapper stages are marked always-changed purely as a delegation
+    # mechanism, so they should not be advertised as always-run stages of the
+    # parent project.
+    is_subproject: bool = False
 
     @staticmethod
     def _as_path_list(paths: object) -> list[str]:
@@ -227,6 +237,7 @@ class StaleStage(BaseModel):
         status_data: list | dict | str,
         configured_outputs: list[str] | None = None,
         path_prefix: str | None = None,
+        is_subproject: bool = False,
     ) -> "StaleStage":
         modified_inputs = []
         output_paths = []
@@ -312,6 +323,7 @@ class StaleStage(BaseModel):
             modified_outputs=modified_outputs,
             modified_command=modified_command,
             always_run=always_run,
+            is_subproject=is_subproject,
         )
 
 
@@ -546,6 +558,74 @@ def collapse_dvc_stages(
     return stage
 
 
+def _status_target_matches(
+    target: str,
+    display_name: str,
+    bare_name: str,
+    subproject: str | None,
+    stale_stage: StaleStage,
+) -> bool:
+    """Return True if a status ``target`` selects this stage.
+
+    Because the full DVC status is now computed and filtered locally (rather
+    than asking DVC to filter by target), this is where each ``target`` passed
+    to :func:`get_status` is resolved against a single stage. A ``target`` may
+    be a stage name in any of calkit's forms (``stage``, ``dvc.yaml:stage``,
+    ``subproject:stage``, or a whole ``subproject``) or a repo path, which is
+    matched against the stage's stale/modified inputs and outputs.
+
+    Iterated/matrix stages use a ``name@param`` key in DVC status, so the base
+    name (the part before ``@``) is matched too — targeting the base name
+    selects every iteration, consistent with how ``calkit run`` expands matrix
+    targets.
+    """
+    base_name = bare_name.split("@")[0]
+    # Stage-name matching is done against the raw target so it covers all of
+    # calkit's stage-target forms as well as DVC's native ``dvc.yaml:stage``
+    # and ``<subproject>/dvc.yaml:stage`` forms (the latter is what
+    # translate_run_targets emits for inline subprojects).
+    stage_aliases = {display_name, bare_name, base_name}
+    if subproject is not None:
+        subproject_name = Path(subproject).name
+        if target in {subproject, subproject_name}:
+            return display_name.startswith(
+                f"{subproject}:"
+            ) or display_name == (f"{subproject} (subproject)")
+        stage_aliases |= {
+            f"{subproject}:{bare_name}",
+            f"{subproject_name}:{bare_name}",
+            f"{subproject}:{base_name}",
+            f"{subproject_name}:{base_name}",
+            f"{subproject}/dvc.yaml:{bare_name}",
+            f"{subproject}/dvc.yaml:{base_name}",
+        }
+    else:
+        stage_aliases |= {
+            f"dvc.yaml:{bare_name}",
+            f"dvc.yaml:{base_name}",
+        }
+    if target in stage_aliases:
+        return True
+    # Otherwise treat the target as a repo path and match it against the
+    # stage's stale/modified inputs and outputs. A target is path-like if it
+    # exists on disk or contains a separator; this keeps root-level paths
+    # without separators (e.g. ``data`` or ``out.csv``) selectable, which a
+    # separator-only heuristic would miss. A target that looks like a stage
+    # selector (contains ``:``) but matched no stage above is not a path.
+    if ":" in target and not os.path.exists(target):
+        return False
+    is_pathlike = os.path.exists(target) or "/" in target or "\\" in target
+    if not is_pathlike:
+        return False
+    norm_target = Path(target).as_posix().rstrip("/")
+    candidate_paths = (
+        stale_stage.stale_outputs
+        + stale_stage.modified_inputs
+        + stale_stage.modified_outputs
+    )
+    return any(_paths_overlap(norm_target, p) for p in candidate_paths)
+
+
 def get_status(
     ck_info: dict | None = None,
     targets: list[str] | None = None,
@@ -628,7 +708,11 @@ def get_status(
             dvc_repo = calkit.dvc.get_dvc_repo()
             # calkit.dvc.core installs a filter on dvc.repo.status that drops
             # the noisy frozen-stage warning, so the call here stays quiet.
-            raw_status = dvc_repo.status(targets=targets)
+            # Ask DVC for the complete stale set, then filter locally.
+            # DVC's own target filtering can miss stale propagation from
+            # isolated subprojects, which makes targeted status disagree with
+            # the full-project status view.
+            raw_status = dvc_repo.status()
             raw_status = calkit.dvc.status_as_posix(raw_status)
         except Exception as e:
             result["errors"].append(
@@ -794,20 +878,47 @@ def get_status(
                 for output in stage_cfg.get("outputs", [])
             ]
             if subproject:
+                # Use posix separators so these match DVC's reported paths
+                # (which are always forward-slash, repo-root-relative). Using
+                # the OS-native separator here would, on Windows, produce a
+                # backslash variant that escapes path dedup and shows up as a
+                # duplicate stale output alongside DVC's posix path.
                 configured_outputs = [
-                    str(Path(subproject) / p) for p in raw_outputs
+                    (Path(subproject) / p).as_posix() for p in raw_outputs
                 ]
             else:
                 configured_outputs = raw_outputs
             # For isolated subprojects, DVC reports paths relative to the
             # subproject dir; prefix them so all paths are parent-relative.
+            # A stage is subproject-originating if it carries a subproject
+            # path ("{sp}:{stage}") or is a kept wrapper for a subproject
+            # ("{sp} (subproject)", whose bare name is a known subproject).
+            is_subproject = (
+                subproject is not None or bare_name in sp_by_stage_name
+            )
             ordered_stale_stages[display_name] = StaleStage.from_status_data(
                 status_data=status_data,
                 configured_outputs=configured_outputs,
                 path_prefix=subproject
                 if subproject in isolated_sp_paths
                 else None,
+                is_subproject=is_subproject,
             )
+        if targets:
+            ordered_stale_stages = {
+                display_name: stale_stage
+                for display_name, stale_stage in ordered_stale_stages.items()
+                if any(
+                    _status_target_matches(
+                        target,
+                        display_name,
+                        raw_stale_stages[display_name][0],
+                        raw_stale_stages[display_name][1],
+                        stale_stage,
+                    )
+                    for target in targets
+                )
+            }
         result["stale_stages"] = ordered_stale_stages
         return PipelineStatus(
             has_pipeline=result["has_pipeline"],

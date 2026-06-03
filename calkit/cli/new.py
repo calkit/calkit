@@ -3357,19 +3357,32 @@ def new_release(
             record_id = invenio_dep["id"]
             # Prefer the DOI from the publish response, but fall back to the
             # reserved DOI (and a fetch of the published record) since the
-            # publish action returns 202 and may not echo "pids" immediately
+            # publish action returns 202 and may not echo "pids" immediately.
+            # Polling failures are tolerated: we already have the reserved DOI,
+            # so a transient error while the record settles should not abort
+            # the release.
             published_doi = calkit.invenio.extract_doi(invenio_dep)
             for _ in range(10):
                 if published_doi is not None:
                     break
                 time.sleep(1)
-                record = calkit.invenio.get(
-                    f"/records/{record_id}",
-                    service=to,  # type: ignore
-                )
+                try:
+                    record = calkit.invenio.get(
+                        f"/records/{record_id}",
+                        service=to,  # type: ignore
+                    )
+                except Exception as e:
+                    if verbose:
+                        typer.echo(f"Polling for published DOI failed: {e}")
+                    continue
                 published_doi = calkit.invenio.extract_doi(record)
             if published_doi is not None:
                 doi = published_doi
+            else:
+                typer.echo(
+                    "Could not confirm minted DOI from published record; "
+                    f"falling back to reserved DOI {doi}"
+                )
             url = f"https://doi.org/{doi}"
             typer.echo(f"Published to {to} with DOI: {doi}")
     else:

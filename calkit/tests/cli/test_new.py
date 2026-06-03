@@ -853,6 +853,322 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     # )
 
 
+def test_new_release_publish_empty_pids(tmp_dir, monkeypatch, httpserver):
+    """Regression test for issue #927.
+
+    Zenodo's publish action returns 202 and its body may come back with an
+    empty ``pids`` payload, so the DOI cannot be read from the publish
+    response. We must not assume ``pids.doi.identifier`` is present: instead we
+    reserve the DOI on the draft beforehand and recover the minted DOI by
+    polling ``GET /records/{id}``. This mocks exactly that shape so a
+    regression back to ``resp["pids"]["doi"]["identifier"]`` would fail here.
+    """
+    record_id = "test-record-empty-pids"
+    reserved_doi = "10.5072/zenodo.reserved999"
+    monkeypatch.setenv(
+        "CALKIT_INVENIO_BASE_URL_ZENODO",
+        httpserver.url_for("").rstrip("/"),
+    )
+    monkeypatch.setenv("ZENODO_TOKEN", "test-token")
+    # Create draft
+    httpserver.expect_request(
+        re.compile(r"^/records$"), method="POST"
+    ).respond_with_json({"id": record_id, "pids": {}})
+    # File upload slot + content + commit
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/files$"), method="POST"
+    ).respond_with_json({"entries": []})
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/files/.+/content$"),
+        method="PUT",
+    ).respond_with_data("", status=200)
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/files/.+/commit$"),
+        method="POST",
+    ).respond_with_json({"key": "file", "status": "completed"})
+    # Reserve a DOI on the draft – this is where the identifier actually comes
+    # from in the #927 scenario
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/pids/doi$"), method="POST"
+    ).respond_with_json({"pids": {"doi": {"identifier": reserved_doi}}})
+    # Publish returns an EMPTY pids payload (the bug scenario)
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/actions/publish$"),
+        method="POST",
+    ).respond_with_json({"id": record_id, "pids": {}})
+    # The published record echoes the minted DOI, recovered by the poll
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}$"), method="GET"
+    ).respond_with_json(
+        {"id": record_id, "pids": {"doi": {"identifier": reserved_doi}}}
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "project",
+            ".",
+            "--title",
+            "Test project",
+            "--name",
+            "test-project",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/calkit/test-project.git",
+        ]
+    )
+    calkit.releases.set_cff_authors(
+        [{"first_name": "Alice", "last_name": "Smith", "affiliation": "SomeU"}]
+    )
+    subprocess.check_call(
+        ["calkit", "update", "license", "--copyright-holder", "Some Person"]
+    )
+    # One-shot publish (no --draft) so the new.py publish/poll path runs
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "--name",
+            "v0.1.0",
+            "--description",
+            "First release.",
+            "--no-github",
+            "--no-push",
+            "--verbose",
+        ]
+    )
+    release = calkit.load_calkit_info()["releases"]["v0.1.0"]
+    # Despite the empty pids in the publish response, the DOI is recovered
+    assert release["doi"] == reserved_doi
+    assert release["url"] == f"https://doi.org/{reserved_doi}"
+
+
+def _setup_zenodo_sandbox_project(monkeypatch):
+    """Shared setup for the live Zenodo sandbox tests.
+
+    Skips unless the test is explicitly opted into via
+    ``CALKIT_TEST_ZENODO_SANDBOX=1`` (so it never runs in CI -- GitHub Actions
+    doesn't set that variable) and a sandbox token is available. Resolves the
+    token (allowing it to live in a local ``.env``), points the client at the
+    sandbox, and creates a project with authors and a license ready to be
+    released. Must be called from within a ``tmp_dir`` test.
+    """
+    if os.getenv("CALKIT_TEST_ZENODO_SANDBOX") != "1":
+        pytest.skip(
+            "Live Zenodo sandbox test; set CALKIT_TEST_ZENODO_SANDBOX=1 "
+            "(and provide a sandbox ZENODO_TOKEN) to run it"
+        )
+    # Allow the token to live in a local .env file (the usual way calkit
+    # resolves credentials). The calkit subprocesses run in tmp_dir, outside
+    # the repo, so their own load_dotenv() won't find it -- we load it here and
+    # export it below so they inherit it.
+    import dotenv
+
+    dotenv.load_dotenv()
+    token = (
+        os.getenv("ZENODO_TOKEN")
+        or os.getenv("CALKIT_TEST_ZENODO_TOKEN")
+        or os.getenv("CALKIT_ZENODO_TOKEN")
+    )
+    if not token:
+        pytest.skip(
+            "No sandbox Zenodo token found; set ZENODO_TOKEN (or "
+            "CALKIT_TEST_ZENODO_TOKEN) to a sandbox.zenodo.org token"
+        )
+    # Export the token as ZENODO_TOKEN so every calkit subprocess picks it up,
+    # and make sure nothing forces us onto the production base URL.
+    monkeypatch.setenv("ZENODO_TOKEN", token)
+    monkeypatch.delenv("CALKIT_USE_PROD_FOR_TESTS", raising=False)
+    monkeypatch.delenv("CALKIT_INVENIO_BASE_URL_ZENODO", raising=False)
+    # Sanity check: in the test env we should be pointed at the sandbox
+    assert (
+        calkit.invenio.get_base_url("zenodo")
+        == "https://sandbox.zenodo.org/api"
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "project",
+            ".",
+            "--title",
+            "Test project",
+            "--name",
+            "test-project",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/calkit/test-project.git",
+        ]
+    )
+    calkit.releases.set_cff_authors(
+        [
+            {
+                "first_name": "Alice",
+                "last_name": "Smith",
+                "affiliation": "SomeU",
+                "orcid": "0000-0001-2345-6789",
+            },
+            {
+                "first_name": "Bob",
+                "last_name": "Jones",
+                "affiliation": None,
+                "orcid": None,
+            },
+        ]
+    )
+    subprocess.check_call(
+        ["calkit", "update", "license", "--copyright-holder", "Some Person"]
+    )
+
+
+def test_new_release_zenodo_sandbox(tmp_dir, monkeypatch):
+    """Live integration test against the real Zenodo sandbox API.
+
+    Unlike ``test_new_release`` (which mocks the Invenio API), this exercises
+    the full release flow against ``sandbox.zenodo.org`` so we can catch
+    regressions the mock can't -- e.g. metadata our client builds that the
+    real API rejects. It is deliberately gated behind
+    ``CALKIT_TEST_ZENODO_SANDBOX=1`` so it never runs in CI (GitHub Actions
+    does not set that variable); it's only for occasional manual local
+    verification.
+
+    Requirements to run locally::
+
+        CALKIT_TEST_ZENODO_SANDBOX=1
+        ZENODO_TOKEN=<a sandbox.zenodo.org personal access token with the
+                      deposit:write and deposit:actions scopes>
+
+    The test only ever creates (and then deletes) a *draft* record -- it never
+    publishes, because a published sandbox record cannot be removed via the
+    API and would litter the account.
+    """
+    _setup_zenodo_sandbox_project(monkeypatch)
+    record_id = None
+    try:
+        subprocess.check_call(
+            [
+                "calkit",
+                "new",
+                "release",
+                "--name",
+                "v0.1.0",
+                "--description",
+                "First release.",
+                "--draft",
+                "--no-github",
+                "--verbose",
+            ]
+        )
+        ck_info = calkit.load_calkit_info()
+        assert "v0.1.0" in ck_info["releases"]
+        release = ck_info["releases"]["v0.1.0"]
+        record_id = release["record_id"]
+        assert record_id is not None
+        # A DOI should have been reserved for the draft
+        assert release["doi"] is not None
+        # The draft really exists on the sandbox with the metadata we sent;
+        # fetching it confirms our client and the real API agree on shape
+        draft = calkit.invenio.get(f"/records/{record_id}/draft")
+        metadata = draft["metadata"]
+        assert metadata["title"] == "Test project"
+        # NOTE: our client POSTs the InvenioRDM metadata schema (creators with
+        # person_or_org/given_name/family_name), but the Zenodo draft GET
+        # endpoint echoes back the *legacy* Zenodo serialization, where each
+        # creator is a "Last, First" name string. Asserting on the real shape
+        # here is the whole point of this test -- the mock can't reveal it.
+        creators = metadata["creators"]
+        assert creators[0]["name"] == "Smith, Alice"
+        assert creators[0]["affiliation"] == "SomeU"
+        assert creators[1]["name"] == "Jones, Bob"
+        # License and the GitHub related-identifier round-trip correctly
+        assert metadata["license"]["id"] == "cc-by-4.0"
+        related = metadata["related_identifiers"]
+        assert (
+            related[0]["identifier"]
+            == "https://github.com/calkit/test-project"
+        )
+        # Reuploading the draft should also succeed against the real API
+        subprocess.check_call(
+            ["calkit", "update", "release", "--name", "v0.1.0", "--reupload"]
+        )
+    finally:
+        # Always clean up the draft so we don't accumulate records on the
+        # sandbox, even if an assertion above failed.
+        if record_id is not None:
+            try:
+                calkit.invenio.delete(
+                    f"/records/{record_id}/draft", as_json=False
+                )
+            except Exception as e:
+                print(f"Warning: failed to clean up sandbox draft: {e}")
+
+
+def test_new_release_zenodo_sandbox_publish(tmp_dir, monkeypatch):
+    """Live test of the full *publish* path against the Zenodo sandbox.
+
+    This is the companion to ``test_new_release_zenodo_sandbox``: instead of a
+    draft, it runs a one-shot ``new release`` (no ``--draft``), which is the
+    only path that exercises the DOI-minting logic this branch hardens --
+    reserving a DOI on the draft, publishing, and then (because the publish
+    action returns 202 and may not echo the DOI immediately) retrying a fetch
+    of the published record and pulling the DOI out with
+    ``invenio.extract_doi``.
+
+    Same opt-in gate as the draft test (``CALKIT_TEST_ZENODO_SANDBOX=1``), so
+    it never runs in CI. WARNING: unlike the draft test, this PUBLISHES a real
+    sandbox record, which cannot be deleted via the API, so each run leaves one
+    behind on the sandbox account. It is intentionally separate so the draft
+    test can stay self-cleaning.
+    """
+    _setup_zenodo_sandbox_project(monkeypatch)
+    # No --draft: reserve + publish + mint DOI in one shot. --no-push skips the
+    # git push and GitHub release entirely.
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "--name",
+            "v0.1.0",
+            "--description",
+            "First release.",
+            "--no-github",
+            "--no-push",
+            "--verbose",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert "v0.1.0" in ck_info["releases"]
+    release = ck_info["releases"]["v0.1.0"]
+    record_id = release["record_id"]
+    assert record_id is not None
+    # The minted DOI should have been resolved and saved (this is exactly what
+    # the publish-path fix is about)
+    doi = release["doi"]
+    assert doi is not None
+    assert doi.startswith("10.")
+    print(f"Published sandbox record {record_id} with DOI {doi}")
+    # The published record really exists and exposes the same DOI via the API,
+    # confirming extract_doi agrees with the real published record
+    record = calkit.invenio.get(f"/records/{record_id}")
+    assert calkit.invenio.extract_doi(record) == doi
+    # A Git tag for the release should have been created locally
+    assert "v0.1.0" in [tag.name for tag in git.Repo().tags]
+
+
 def test_new_release_is_runnable(tmp_dir, monkeypatch):
     # Provide a dummy Zenodo token so `new_release` can pass its early
     # token-validation step even in dry-run mode.

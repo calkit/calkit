@@ -3400,28 +3400,10 @@ def new_release(
             with open("README.md") as f:
                 readme_txt = f.read()
         else:
-            readme_txt = f"# {title}\n"
-        existing_lines = readme_txt.split("\n")
-        new_lines = []
-        first_content_line_index = None
-        for n, line in enumerate(existing_lines):
-            if line.startswith(doi_md[:6]):
-                pass  # Skip DOI lines
-            else:
-                if (
-                    n != 0
-                    and line.strip()
-                    and first_content_line_index is None
-                ):
-                    first_content_line_index = len(new_lines)
-                new_lines.append(line)
-        # Ensure first 3 lines are title, blank, DOI lines
-        new_lines = (
-            [new_lines[0]]
-            + ["", doi_md, ""]
-            + new_lines[first_content_line_index:]
+            readme_txt = ""
+        readme_txt = calkit.releases.add_doi_badge_to_readme(
+            readme_txt, badge=doi_md, title=title
         )
-        readme_txt = "\n".join(new_lines)
         if not dry_run:
             with open("README.md", "w") as f:
                 f.write(readme_txt)
@@ -3510,11 +3492,17 @@ def new_release(
             raise ValueError("Failed to parse generated BibTeX entry")
         new_entry = new_entries[0]
         # Search through existing entries for any with the same DOI, and
-        # replace them (by citation key) if there is a match
+        # replace them (by citation key) if there is a match. Tolerate parse
+        # errors here (e.g., non-standard or temporarily-invalid BibTeX) by
+        # skipping replacement detection and still appending the new entry.
         new_doi = new_entry.get("doi")
         replace_ids = []
         if new_doi:
-            existing_entries = bibtexparser.loads(existing_text).entries
+            try:
+                existing_entries = bibtexparser.loads(existing_text).entries
+            except Exception as e:
+                warn(f"Could not parse existing references to dedupe: {e}")
+                existing_entries = []
             replace_ids = [
                 entry["ID"]
                 for entry in existing_entries

@@ -13,6 +13,7 @@ import calkit
 from calkit.dvc.zip import write_zip_path_map
 from calkit.releases import (
     add_bibtex_entry,
+    add_doi_badge_to_readme,
     check_project_release_archive,
     create_bibtex,
     create_citation_cff,
@@ -181,7 +182,10 @@ def test_add_bibtex_entry():
         "}\n"
     )
     appended = add_bibtex_entry(existing, new_entry, replace_ids=[])
-    assert "@article{smith2020,\n\tauthor = {Smith, John}," in appended
+    # The existing content is preserved byte-for-byte at the start, with a
+    # single blank line separating it from the appended entry
+    assert appended.startswith(existing)
+    assert appended == existing + "\n" + new_entry.strip() + "\n"
     assert appended.count("@misc{Doe2026_999,") == 1
     assert bibtexparser.loads(appended).entries[0]["doi"] == "10.1/abc"
     # Appending to an empty/nonexistent file yields just the new entry
@@ -200,6 +204,48 @@ def test_add_bibtex_entry():
     assert "Old release" not in replaced
     assert "@article{smith2020,\n\tauthor = {Smith, John}," in replaced
     assert replaced.count("@misc{Doe2026_999,") == 1
+
+
+def test_add_doi_badge_to_readme():
+    badge = "[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.999.svg)](https://doi.org/10.5281/zenodo.999)"  # noqa: E501
+    # A README with a title and body gets the badge inserted directly beneath
+    # the title with exactly one blank line on either side, and no content is
+    # removed or duplicated
+    readme = "# My Project\nSome description.\n\n## Section\nDetails here.\n"
+    out = add_doi_badge_to_readme(readme, badge=badge, title="My Project")
+    assert out.startswith(f"# My Project\n\n{badge}\n\nSome description.")
+    assert out.count("# My Project\n") == 1
+    assert "Some description." in out
+    assert "## Section" in out
+    assert "Details here." in out
+    # The badge has exactly one blank line above and below it
+    lines = out.split("\n")
+    idx = lines.index(badge)
+    assert lines[idx - 1] == ""
+    assert lines[idx - 2] == "# My Project"
+    assert lines[idx + 1] == ""
+    assert lines[idx + 2].strip()
+    # A title-only README does not duplicate the title
+    title_only = add_doi_badge_to_readme(
+        "# My Project\n", badge=badge, title="My Project"
+    )
+    assert title_only == f"# My Project\n\n{badge}"
+    # An empty/missing README falls back to the provided project title
+    from_empty = add_doi_badge_to_readme("", badge=badge, title="My Project")
+    assert from_empty == f"# My Project\n\n{badge}"
+    # An existing DOI badge is replaced, not duplicated, and sibling badges are
+    # preserved in place
+    other_badge = "[![CI](https://example.com/ci.svg)](https://example.com)"
+    old_badge = "[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.111.svg)](https://doi.org/10.5281/zenodo.111)"  # noqa: E501
+    with_old = f"# My Project\n{other_badge}\n\n{old_badge}\n\nBody.\n"
+    refreshed = add_doi_badge_to_readme(
+        with_old, badge=badge, title="My Project"
+    )
+    assert refreshed.count("[![DOI](") == 1
+    assert badge in refreshed
+    assert "zenodo.111" not in refreshed
+    assert other_badge in refreshed
+    assert "Body." in refreshed
 
 
 def test_read_authors_from_cff(tmp_dir):

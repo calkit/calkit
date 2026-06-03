@@ -127,21 +127,66 @@ def add_bibtex_entry(
     """
     text = existing_text
     # Remove replaced entries from the raw text, last-to-first so earlier spans
-    # stay valid as we splice
-    spans = []
+    # stay valid as we splice. De-duplicate spans in case a key matched more
+    # than once.
+    spans = set()
     for entry_id in replace_ids or []:
         span = _find_bibtex_entry_span(text, entry_id)
         if span is not None:
-            spans.append(span)
+            spans.add(span)
     for start, end in sorted(spans, reverse=True):
         # Consume any trailing newlines so we don't leave a gap behind
         while end < len(text) and text[end] in "\r\n":
             end += 1
         text = text[:start] + text[end:]
-    text = text.rstrip()
-    if text:
-        text += "\n\n"
-    return text + new_entry.strip() + "\n"
+    # Append the new entry, leaving the existing content untouched and adding
+    # only the separator newlines needed for exactly one blank line between the
+    # last existing entry and the new one
+    if not text.strip():
+        return new_entry.strip() + "\n"
+    if text.endswith("\n\n"):
+        separator = ""
+    elif text.endswith("\n"):
+        separator = "\n"
+    else:
+        separator = "\n\n"
+    return text + separator + new_entry.strip() + "\n"
+
+
+def add_doi_badge_to_readme(
+    readme_text: str, badge: str, title: str | None
+) -> str:
+    """Insert (or refresh) a DOI badge near the top of a README.
+
+    The badge is placed directly beneath the title with exactly one blank line
+    on either side. Any pre-existing DOI badge line is replaced rather than
+    duplicated, the title is never duplicated, and all other existing content
+    is preserved.
+    """
+    # Drop any existing DOI badge line(s); the current badge is re-added below
+    lines = [
+        line
+        for line in (readme_text.split("\n") if readme_text else [])
+        if not line.startswith("[![DOI")
+    ]
+    # The first non-blank line is treated as the title; synthesize one from the
+    # project title if the README has no content yet
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    if lines:
+        title_line = lines[0]
+        rest = lines[1:]
+    else:
+        title_line = f"# {title}"
+        rest = []
+    # Drop leading blank lines from the remaining content so the spacing around
+    # the badge is controlled entirely here
+    while rest and not rest[0].strip():
+        rest.pop(0)
+    new_lines = [title_line, "", badge]
+    if rest:
+        new_lines += [""] + rest
+    return "\n".join(new_lines)
 
 
 CITATION_CFF_TEMPLATE = """

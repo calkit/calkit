@@ -7,6 +7,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import time
 from enum import Enum
 
 import typer
@@ -3325,22 +3326,23 @@ def new_release(
                 f"/records/{record_id}/draft/files/{filename}/commit",
                 service=to,  # type: ignore
             )
-        # Conditionally publish or reserve DOI based on --draft flag
-        if draft_only:
-            # Reserve a DOI for the draft record
-            typer.echo(f"Reserving DOI for {to} draft record ID {record_id}")
-            doi_resp = calkit.invenio.post(
-                f"/records/{record_id}/draft/pids/doi",
-                service=to,  # type: ignore
+        # Reserve a DOI on the draft before publishing. The publish action's
+        # response only echoes back the DOI under "pids" if one was reserved
+        # on the draft first (otherwise "pids" comes back empty), so always
+        # reserve here to get a stable identifier.
+        typer.echo(f"Reserving DOI for {to} draft record ID {record_id}")
+        doi_resp = calkit.invenio.post(
+            f"/records/{record_id}/draft/pids/doi",
+            service=to,  # type: ignore
+        )
+        if verbose:
+            typer.echo(f"DOI reservation response:\n{doi_resp}")
+        doi = calkit.invenio.extract_doi(doi_resp)
+        if doi is None:
+            raise_error(
+                f"Failed to reserve DOI for {to} draft record {record_id}"
             )
-            if verbose:
-                typer.echo(f"DOI response for draft:\n{doi_resp}")
-            try:
-                doi = doi_resp["pids"]["doi"]["identifier"]
-            except KeyError:
-                doi = doi_resp["doi"]
-            except Exception as e:
-                raise_error(f"Failed to reserve DOI for draft: {e}")
+        if draft_only:
             url = f"https://doi.org/{doi}"
             typer.echo(f"Created {to} draft with reserved DOI: {doi}")
         else:
@@ -3350,8 +3352,24 @@ def new_release(
                 f"/records/{record_id}/draft/actions/publish",
                 service=to,  # type: ignore
             )
+            if verbose:
+                typer.echo(f"Publish response:\n{invenio_dep}")
             record_id = invenio_dep["id"]
-            doi = invenio_dep["pids"]["doi"]["identifier"]
+            # Prefer the DOI from the publish response, but fall back to the
+            # reserved DOI (and a fetch of the published record) since the
+            # publish action returns 202 and may not echo "pids" immediately
+            published_doi = calkit.invenio.extract_doi(invenio_dep)
+            for _ in range(10):
+                if published_doi is not None:
+                    break
+                time.sleep(1)
+                record = calkit.invenio.get(
+                    f"/records/{record_id}",
+                    service=to,  # type: ignore
+                )
+                published_doi = calkit.invenio.extract_doi(record)
+            if published_doi is not None:
+                doi = published_doi
             url = f"https://doi.org/{doi}"
             typer.echo(f"Published to {to} with DOI: {doi}")
     else:

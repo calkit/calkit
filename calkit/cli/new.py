@@ -3143,7 +3143,7 @@ def new_release(
             )
             with open("LICENSE", "w") as f:
                 f.write(license_txt)
-                repo.git.add("LICENSE")
+            repo.git.add("LICENSE")
             license_ids = ["mit", "cc-by-4.0"]
         else:
             typer.echo(f"Detecting license(s) from {license_file}")
@@ -3394,38 +3394,23 @@ def new_release(
         doi_base_url = calkit.releases.SERVICES[to]["url"]
         doi_md = (
             f"[![DOI]({doi_base_url}/badge/DOI/{doi}.svg)]"
-            f"(https://handle.stage.datacite.org/{doi})"
+            f"(https://doi.org/{doi})"
         )
         if os.path.isfile("README.md"):
             with open("README.md") as f:
                 readme_txt = f.read()
         else:
-            readme_txt = f"# {title}\n"
-        existing_lines = readme_txt.split("\n")
-        new_lines = []
-        first_content_line_index = None
-        for n, line in enumerate(existing_lines):
-            if line.startswith(doi_md[:6]):
-                pass  # Skip DOI lines
-            else:
-                if (
-                    n != 0
-                    and line.strip()
-                    and first_content_line_index is None
-                ):
-                    first_content_line_index = len(new_lines)
-                new_lines.append(line)
-        # Ensure first 3 lines are title, blank, DOI lines
-        new_lines = (
-            [new_lines[0]]
-            + ["", doi_md, ""]
-            + new_lines[first_content_line_index:]
+            readme_txt = ""
+        readme_txt = calkit.releases.add_doi_badge_to_readme(
+            readme_txt, badge=doi_md, title=title
         )
-        readme_txt = "\n".join(new_lines)
         if not dry_run:
             with open("README.md", "w") as f:
                 f.write(readme_txt)
-                repo.git.add("README.md")
+            # Stage only after the file is closed; otherwise the buffered
+            # contents may not be flushed to disk yet and Git would stage an
+            # empty file
+            repo.git.add("README.md")
         else:
             typer.echo(f"Would have updated README.md to:\n{readme_txt}")
     # Create Git tag
@@ -3480,11 +3465,13 @@ def new_release(
         references = reference_collections[0]
     ref_path = references.get("path", "references.bib")
     try:
+        # Read the existing references as raw text so we can append the new
+        # entry without reformatting the user's existing entries
         if os.path.isfile(ref_path):
             with open(ref_path) as f:
-                reflib = bibtexparser.load(f)
+                existing_text = f.read()
         else:
-            reflib = bibtexparser.bibdatabase.BibDatabase()
+            existing_text = ""
         bibtex_doi = doi
         if bibtex_doi is None and dry_run:
             mock_suffix = "".join(
@@ -3504,31 +3491,38 @@ def new_release(
         if not new_entries:
             raise ValueError("Failed to parse generated BibTeX entry")
         new_entry = new_entries[0]
-        # Search through entries for one with the same DOI, and replace if
-        # there is a match
+        # Search through existing entries for any with the same DOI, and
+        # replace them (by citation key) if there is a match. Tolerate parse
+        # errors here (e.g., non-standard or temporarily-invalid BibTeX) by
+        # skipping replacement detection and still appending the new entry.
         new_doi = new_entry.get("doi")
-        matching_indices = []
+        replace_ids = []
         if new_doi:
-            matching_indices = [
-                n
-                for n, entry in enumerate(reflib.entries)
+            try:
+                existing_entries = bibtexparser.loads(existing_text).entries
+            except Exception as e:
+                warn(f"Could not parse existing references to dedupe: {e}")
+                existing_entries = []
+            replace_ids = [
+                entry["ID"]
+                for entry in existing_entries
                 if entry.get("doi") == new_doi
             ]
-        if matching_indices:
+        if replace_ids:
             typer.echo(
                 "Found matching DOI in existing references "
-                f"({len(matching_indices)} entr"
-                f"{'y' if len(matching_indices) == 1 else 'ies'}); "
+                f"({len(replace_ids)} entr"
+                f"{'y' if len(replace_ids) == 1 else 'ies'}); "
                 "replacing"
             )
-            for n in reversed(matching_indices):
-                _ = reflib.entries.pop(n)
-        reflib.entries.append(new_entry)
+        new_text = calkit.releases.add_bibtex_entry(
+            existing_text, invenio_bibtex, replace_ids=replace_ids
+        )
         if dry_run:
             typer.echo(f"Would write updated references to {ref_path}")
         else:
             with open(ref_path, "w") as f:
-                bibtexparser.dump(reflib, f)
+                f.write(new_text)
             repo.git.add(ref_path)
     except Exception as e:
         warn(f"Failed to add to references: {e}")

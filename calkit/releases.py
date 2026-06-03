@@ -86,6 +86,109 @@ def create_bibtex(
     )
 
 
+def _find_bibtex_entry_span(
+    text: str, entry_id: str
+) -> tuple[int, int] | None:
+    """Locate the raw character span of a BibTeX entry by its citation key.
+
+    Returns ``(start, end)`` offsets into ``text`` where ``end`` is exclusive
+    (just past the entry's closing brace), or ``None`` if no entry with that
+    key is found.
+    """
+    # Match e.g. ``@misc{the-key,`` allowing arbitrary surrounding whitespace
+    pattern = re.compile(
+        r"@\w+\s*\{\s*" + re.escape(entry_id) + r"\s*,", re.IGNORECASE
+    )
+    match = pattern.search(text)
+    if match is None:
+        return None
+    # Walk from the entry's opening brace to its matching close, counting depth
+    depth = 0
+    i = text.index("{", match.start())
+    while i < len(text):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return match.start(), i + 1
+        i += 1
+    return None
+
+
+def add_bibtex_entry(
+    existing_text: str, new_entry: str, replace_ids: list[str] | None = None
+) -> str:
+    """Append a BibTeX entry to existing references without reformatting them.
+
+    Any entries whose citation keys are in ``replace_ids`` are removed first
+    (so a re-released version replaces its prior entry); all other existing
+    content is preserved byte-for-byte. ``new_entry`` is appended at the end.
+    """
+    text = existing_text
+    # Remove replaced entries from the raw text, last-to-first so earlier spans
+    # stay valid as we splice. De-duplicate spans in case a key matched more
+    # than once.
+    spans = set()
+    for entry_id in replace_ids or []:
+        span = _find_bibtex_entry_span(text, entry_id)
+        if span is not None:
+            spans.add(span)
+    for start, end in sorted(spans, reverse=True):
+        # Consume any trailing newlines so we don't leave a gap behind
+        while end < len(text) and text[end] in "\r\n":
+            end += 1
+        text = text[:start] + text[end:]
+    # Append the new entry, leaving the existing content untouched and adding
+    # only the separator newlines needed for exactly one blank line between the
+    # last existing entry and the new one
+    if not text.strip():
+        return new_entry.strip() + "\n"
+    if text.endswith("\n\n"):
+        separator = ""
+    elif text.endswith("\n"):
+        separator = "\n"
+    else:
+        separator = "\n\n"
+    return text + separator + new_entry.strip() + "\n"
+
+
+def add_doi_badge_to_readme(
+    readme_text: str, badge: str, title: str | None
+) -> str:
+    """Insert (or refresh) a DOI badge near the top of a README.
+
+    The badge is placed directly beneath the title with exactly one blank line
+    on either side. Any pre-existing DOI badge line is replaced rather than
+    duplicated, the title is never duplicated, and all other existing content
+    is preserved.
+    """
+    # Drop any existing DOI badge line(s); the current badge is re-added below
+    lines = [
+        line
+        for line in (readme_text.split("\n") if readme_text else [])
+        if not line.startswith("[![DOI")
+    ]
+    # The first non-blank line is treated as the title; synthesize one from the
+    # project title if the README has no content yet
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    if lines:
+        title_line = lines[0]
+        rest = lines[1:]
+    else:
+        title_line = f"# {title}"
+        rest = []
+    # Drop leading blank lines from the remaining content so the spacing around
+    # the badge is controlled entirely here
+    while rest and not rest[0].strip():
+        rest.pop(0)
+    new_lines = [title_line, "", badge]
+    if rest:
+        new_lines += [""] + rest
+    return "\n".join(new_lines)
+
+
 CITATION_CFF_TEMPLATE = """
 cff-version: 1.2.0
 message: If you use this software, please cite it using these metadata.

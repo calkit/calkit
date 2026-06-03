@@ -810,6 +810,21 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     assert "v0.1.0" in ck_info["releases"]
     release = ck_info["releases"]["v0.1.0"]
     assert release["doi"] is not None
+    # Regression test for issue #931: the README must not be emptied, the
+    # committed README must match the working tree (otherwise it shows up as a
+    # spurious unstaged change), and the DOI badge must link to doi.org rather
+    # than the DataCite staging host (which 502s)
+    repo = git.Repo()
+    readme_working = (tmp_dir / "README.md").read_text()
+    assert readme_working.strip()
+    readme_committed = repo.git.show("HEAD:README.md")
+    assert readme_committed.strip() == readme_working.strip()
+    badge_link = f"](https://doi.org/{release['doi']})"
+    assert badge_link in readme_working
+    assert "datacite.org" not in readme_working
+    # The release BibTeX entry should be added to references.bib
+    references = (tmp_dir / "references.bib").read_text()
+    assert release["doi"] in references
     # TODO: Test that the GitHub link is in the related works
     # Test that we can update this release
     # Side note: This is revealing some design weirdness where we're grouping

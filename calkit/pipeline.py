@@ -96,10 +96,14 @@ class PipelineStatus(BaseModel):
     def always_run_stage_names(self) -> list[str]:
         # Only list stages whose sole change indicator is always_run; stages
         # that also have real changes are reported under stale_stage_names.
+        # Subproject stages are excluded: their always-changed status is a
+        # delegation detail, not a user-meaningful always-run stage of the
+        # parent project.
         return [
             name
             for name, stage in self.stale_stages.items()
             if stage.always_run
+            and not stage.is_subproject
             and not stage.modified_command
             and not stage.modified_inputs
             and not stage.modified_outputs
@@ -145,6 +149,12 @@ class StaleStage(BaseModel):
     modified_outputs: list[str] = Field(default_factory=list)
     modified_command: bool = False
     always_run: bool = False
+    # True for stages that originate from a subproject (either an individual
+    # "{sp}:{stage}" stage or a kept "{sp} (subproject)" wrapper). Subproject
+    # wrapper stages are marked always-changed purely as a delegation
+    # mechanism, so they should not be advertised as always-run stages of the
+    # parent project.
+    is_subproject: bool = False
 
     @staticmethod
     def _as_path_list(paths: object) -> list[str]:
@@ -227,6 +237,7 @@ class StaleStage(BaseModel):
         status_data: list | dict | str,
         configured_outputs: list[str] | None = None,
         path_prefix: str | None = None,
+        is_subproject: bool = False,
     ) -> "StaleStage":
         modified_inputs = []
         output_paths = []
@@ -312,6 +323,7 @@ class StaleStage(BaseModel):
             modified_outputs=modified_outputs,
             modified_command=modified_command,
             always_run=always_run,
+            is_subproject=is_subproject,
         )
 
 
@@ -866,19 +878,31 @@ def get_status(
                 for output in stage_cfg.get("outputs", [])
             ]
             if subproject:
+                # Use posix separators so these match DVC's reported paths
+                # (which are always forward-slash, repo-root-relative). Using
+                # the OS-native separator here would, on Windows, produce a
+                # backslash variant that escapes path dedup and shows up as a
+                # duplicate stale output alongside DVC's posix path.
                 configured_outputs = [
-                    str(Path(subproject) / p) for p in raw_outputs
+                    (Path(subproject) / p).as_posix() for p in raw_outputs
                 ]
             else:
                 configured_outputs = raw_outputs
             # For isolated subprojects, DVC reports paths relative to the
             # subproject dir; prefix them so all paths are parent-relative.
+            # A stage is subproject-originating if it carries a subproject
+            # path ("{sp}:{stage}") or is a kept wrapper for a subproject
+            # ("{sp} (subproject)", whose bare name is a known subproject).
+            is_subproject = (
+                subproject is not None or bare_name in sp_by_stage_name
+            )
             ordered_stale_stages[display_name] = StaleStage.from_status_data(
                 status_data=status_data,
                 configured_outputs=configured_outputs,
                 path_prefix=subproject
                 if subproject in isolated_sp_paths
                 else None,
+                is_subproject=is_subproject,
             )
         if targets:
             ordered_stale_stages = {

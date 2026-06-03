@@ -1597,6 +1597,54 @@ def test_stale_stage_path_prefix():
     assert stale_cross.modified_inputs == ["shared.txt"]
 
 
+def test_subproject_configured_outputs_posix_no_duplicate():
+    # A non-isolated subproject stage's configured outputs are prefixed with
+    # the subproject path. DVC reports those same outputs as repo-root-relative
+    # posix paths. Building the configured path with the OS-native separator
+    # produced, on Windows, a backslash variant ("sub\out.csv") that escaped
+    # path dedup and showed up as a duplicate stale output alongside DVC's
+    # posix path ("sub/out.csv"). The configured path must therefore be posix.
+    from pathlib import PureWindowsPath
+
+    # The exact construction get_status performs; as_posix() normalizes the
+    # separator regardless of platform (PureWindowsPath stands in for Windows).
+    configured_output = (
+        PureWindowsPath("example-basic") / "data/raw/data.csv"
+    ).as_posix()
+    assert configured_output == "example-basic/data/raw/data.csv"
+    # DVC flagged the stage via a changed command and reports the output as a
+    # modified out using the same posix, repo-root-relative path.
+    stale_stage = calkit.pipeline.StaleStage.from_status_data(
+        status_data=[
+            {"changed outs": {"example-basic/data/raw/data.csv": "modified"}},
+            "changed command",
+        ],
+        configured_outputs=[configured_output],
+    )
+    # The configured output and the DVC-reported output are the same file, so
+    # it must appear exactly once -- no separator-variant duplicate.
+    assert stale_stage.stale_outputs == ["example-basic/data/raw/data.csv"]
+
+
+def test_always_run_excludes_subproject_stages():
+    # A subproject wrapper stage is marked always-changed purely as a
+    # delegation mechanism, so it must not be advertised as an always-run
+    # stage of the parent project. A genuine root always-run stage still is.
+    status = calkit.pipeline.PipelineStatus(
+        has_pipeline=True,
+        stale_stages={
+            "ticker": StaleStage(always_run=True),
+            "example-basic (subproject)": StaleStage(
+                always_run=True, is_subproject=True
+            ),
+        },
+    )
+    assert status.always_run_stage_names == ["ticker"]
+    # The subproject wrapper isn't stale either (pure always-run delegation).
+    assert "example-basic (subproject)" not in status.stale_stage_names
+    assert not status.is_stale
+
+
 def test_status_target_matches():
     ss = StaleStage(
         stale_outputs=["data/out.csv"],

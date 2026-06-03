@@ -341,6 +341,14 @@ def check_dep_exists(
         return True
     if system_info is not None and system_info.get(f"{name}_version"):
         return True
+    # Conda and mamba are frequently installed but not on the PATH (most
+    # commonly on Windows), so search their typical install locations
+    # rather than relying on the bare name being directly executable.
+    if name in ("conda", "mamba"):
+        from calkit.conda import find_conda_exe, find_mamba_exe
+
+        exe = find_conda_exe() if name == "conda" else find_mamba_exe()
+        return exe is not None
     cmd = [name]
     # Executables with non-conventional CLIs
     if name == "matlab":

@@ -10,7 +10,9 @@ import calkit
 import calkit.pipeline
 from calkit.environments import get_env_lock_fpath
 from calkit.pipeline import (
+    StaleStage,
     _expand_dep_excluding_subprojects,
+    _status_target_matches,
     collapse_dvc_stages,
     stages_are_similar,
 )
@@ -1593,6 +1595,37 @@ def test_stale_stage_path_prefix():
         path_prefix="solver",
     )
     assert stale_cross.modified_inputs == ["shared.txt"]
+
+
+def test_status_target_matches():
+    ss = StaleStage(
+        stale_outputs=["data/out.csv"],
+        modified_inputs=["data/in.csv"],
+    )
+    # Root stage selected by its name, the dvc.yaml: form, but not by an
+    # unrelated name.
+    assert _status_target_matches("build", "build", "build", None, ss)
+    assert _status_target_matches("dvc.yaml:build", "build", "build", None, ss)
+    assert not _status_target_matches("other", "build", "build", None, ss)
+    # A path target (one containing a separator, so it isn't mistaken for a
+    # bare stage name) matches a stage with overlapping stale/modified paths.
+    assert _status_target_matches("data/out.csv", "build", "build", None, ss)
+    assert _status_target_matches("data/in.csv", "build", "build", None, ss)
+    assert not _status_target_matches(
+        "other/path.csv", "build", "build", None, ss
+    )
+    # Iterated/matrix stages use a name@param key — targeting the base name
+    # (or its dvc.yaml: form) must select each iteration, matching how DVC
+    # filtered matrix targets before status was filtered locally.
+    assert _status_target_matches("sim", "sim@a", "sim@a", None, ss)
+    assert _status_target_matches("dvc.yaml:sim", "sim@a", "sim@a", None, ss)
+    assert _status_target_matches("sim@a", "sim@a", "sim@a", None, ss)
+    # Subproject stages selected by sp:stage, the whole subproject, and the
+    # matrix base name in either form.
+    assert _status_target_matches("sp:run", "sp:run", "run", "sp", ss)
+    assert _status_target_matches("sp", "sp:run", "run", "sp", ss)
+    assert _status_target_matches("sp:sim", "sp:sim@a", "sim@a", "sp", ss)
+    assert not _status_target_matches("sp:other", "sp:run", "run", "sp", ss)
 
 
 def test_collapse_dvc_stages():

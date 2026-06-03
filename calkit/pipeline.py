@@ -546,6 +546,56 @@ def collapse_dvc_stages(
     return stage
 
 
+def _status_target_matches(
+    target: str,
+    display_name: str,
+    bare_name: str,
+    subproject: str | None,
+    stale_stage: StaleStage,
+) -> bool:
+    """Return True if a status ``target`` selects this stage.
+
+    Because the full DVC status is now computed and filtered locally (rather
+    than asking DVC to filter by target), this is where each ``target`` passed
+    to :func:`get_status` is resolved against a single stage. A ``target`` may
+    be a stage name in any of calkit's forms (``stage``, ``dvc.yaml:stage``,
+    ``subproject:stage``, or a whole ``subproject``) or a repo path, which is
+    matched against the stage's stale/modified inputs and outputs.
+
+    Iterated/matrix stages use a ``name@param`` key in DVC status, so the base
+    name (the part before ``@``) is matched too — targeting the base name
+    selects every iteration, consistent with how ``calkit run`` expands matrix
+    targets.
+    """
+    target = Path(target).as_posix().rstrip("/")
+    base_name = bare_name.split("@")[0]
+    if target in {display_name, bare_name, base_name}:
+        return True
+    if subproject is not None:
+        subproject_name = Path(subproject).name
+        if target in {subproject, subproject_name}:
+            return display_name.startswith(
+                f"{subproject}:"
+            ) or display_name == (f"{subproject} (subproject)")
+        if target in {
+            f"{subproject}:{bare_name}",
+            f"{subproject_name}:{bare_name}",
+            f"{subproject}:{base_name}",
+            f"{subproject_name}:{base_name}",
+        }:
+            return display_name == f"{subproject}:{bare_name}"
+    elif target in {f"dvc.yaml:{bare_name}", f"dvc.yaml:{base_name}"}:
+        return True
+    if "/" not in target and "\\" not in target:
+        return False
+    candidate_paths = (
+        stale_stage.stale_outputs
+        + stale_stage.modified_inputs
+        + stale_stage.modified_outputs
+    )
+    return any(_paths_overlap(target, p) for p in candidate_paths)
+
+
 def get_status(
     ck_info: dict | None = None,
     targets: list[str] | None = None,
@@ -628,7 +678,11 @@ def get_status(
             dvc_repo = calkit.dvc.get_dvc_repo()
             # calkit.dvc.core installs a filter on dvc.repo.status that drops
             # the noisy frozen-stage warning, so the call here stays quiet.
-            raw_status = dvc_repo.status(targets=targets)
+            # Ask DVC for the complete stale set, then filter locally.
+            # DVC's own target filtering can miss stale propagation from
+            # isolated subprojects, which makes targeted status disagree with
+            # the full-project status view.
+            raw_status = dvc_repo.status()
             raw_status = calkit.dvc.status_as_posix(raw_status)
         except Exception as e:
             result["errors"].append(
@@ -808,6 +862,21 @@ def get_status(
                 if subproject in isolated_sp_paths
                 else None,
             )
+        if targets:
+            ordered_stale_stages = {
+                display_name: stale_stage
+                for display_name, stale_stage in ordered_stale_stages.items()
+                if any(
+                    _status_target_matches(
+                        target,
+                        display_name,
+                        raw_stale_stages[display_name][0],
+                        raw_stale_stages[display_name][1],
+                        stale_stage,
+                    )
+                    for target in targets
+                )
+            }
         result["stale_stages"] = ordered_stale_stages
         return PipelineStatus(
             has_pipeline=result["has_pipeline"],

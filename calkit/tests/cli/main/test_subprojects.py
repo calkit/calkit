@@ -296,3 +296,56 @@ def test_isolated_subproject_external_dep(tmp_dir):
         check_environments=False, compile_to_dvc=False
     )
     assert not status.is_stale
+
+
+def test_targeted_status_uses_full_subproject_status_for_stage_targets(
+    tmp_dir, monkeypatch
+):
+    os.makedirs("solver/.dvc", exist_ok=True)
+    root_ck = {
+        "subprojects": [{"path": "solver"}],
+        "pipeline": {
+            "stages": {
+                "post-process": {
+                    "outputs": [{"path": "final.txt", "storage": "git"}]
+                }
+            }
+        },
+    }
+    solver_ck = {
+        "pipeline": {
+            "stages": {
+                "package-paper": {
+                    "outputs": [{"path": "paper.txt", "storage": "git"}]
+                }
+            }
+        }
+    }
+
+    class FakeRepo:
+        def status(self, targets=None):
+            if targets is None:
+                return {
+                    "solver/dvc.yaml:package-paper": ["always changed"],
+                    "post-process": [
+                        {"changed deps": {"solver/docs/figs": "modified"}}
+                    ],
+                }
+            return {}
+
+    monkeypatch.setattr(
+        calkit,
+        "load_calkit_info",
+        lambda wdir=None: solver_ck if wdir == "solver" else root_ck,
+    )
+    monkeypatch.setattr(calkit.dvc, "get_dvc_repo", lambda *args: FakeRepo())
+    monkeypatch.setattr(calkit.dvc, "status_as_posix", lambda status: status)
+    status = calkit.pipeline.get_status(
+        ck_info=root_ck,
+        targets=["post-process"],
+        check_environments=False,
+        clean_notebooks=False,
+        compile_to_dvc=False,
+    )
+    assert status.is_stale
+    assert status.stale_stage_names == ["post-process"]

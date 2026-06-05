@@ -55,6 +55,25 @@ def test_hash_directory():
     assert res["md5"] == "ca2ffab71e00d528b974e583d789ec97.dir"
 
 
+def test_frozen_stage_reproduce_warning_is_suppressed(caplog):
+    # Import side effect: loading calkit.dvc installs the filter on the
+    # dvc.repo.reproduce logger.
+    import logging
+
+    import calkit.dvc  # noqa: F401
+
+    logger = logging.getLogger("dvc.repo.reproduce")
+    with caplog.at_level(logging.WARNING, logger="dvc.repo.reproduce"):
+        logger.warning(
+            "%s is frozen. Its dependencies are not going to be reproduced.",
+            "stage: 'foo@1'",
+        )
+        logger.warning("some other warning that must pass through")
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any("is frozen" in m for m in messages)
+    assert any("must pass through" in m for m in messages)
+
+
 def test_register_ck_scheme_updates_schema_and_registry():
     register_ck_scheme()
 
@@ -245,3 +264,72 @@ def test_set_remote_auth_ck_remote_clears_local_http_auth(
     assert "custom_auth_header" not in section
     assert "password" not in section
     assert section["url"] == "https://example.com"  # type: ignore
+
+
+def test_data_status_as_posix():
+    # Use os.path.join so on Windows the inputs contain real backslash
+    # separators (exercising the \ -> / conversion), and on POSIX they're
+    # already forward-slashes (testing structure preservation + regressions).
+    data_status = {
+        "git": {
+            "is_dirty": True,
+            "untracked": [os.path.join("sub", "file.txt")],
+        },
+        "uncommitted": {
+            "added": [os.path.join("data", "a.csv")],
+            "modified": [os.path.join("data", "b.csv")],
+            "renamed": [
+                {
+                    "old": os.path.join("data", "old.csv"),
+                    "new": os.path.join("data", "new.csv"),
+                }
+            ],
+        },
+        "not_in_remote": [
+            os.path.join("figs", "a.png"),
+            os.path.join("figs", "b.png"),
+        ],
+        "scalar": "ignored",
+    }
+    out = calkit.dvc.data_status_as_posix(data_status)
+    # Git entry passes through untouched (no normalization applied), including
+    # whatever separator the OS uses.
+    assert out["git"] == {
+        "is_dirty": True,
+        "untracked": [os.path.join("sub", "file.txt")],
+    }
+    # All other paths come out in posix form regardless of platform.
+    assert out["not_in_remote"] == ["figs/a.png", "figs/b.png"]
+    assert out["uncommitted"]["added"] == ["data/a.csv"]
+    assert out["uncommitted"]["modified"] == ["data/b.csv"]
+    # Renamed entries are dicts — must not crash and must convert old/new.
+    assert out["uncommitted"]["renamed"] == [
+        {"old": "data/old.csv", "new": "data/new.csv"}
+    ]
+    # Unknown scalar values pass through.
+    assert out["scalar"] == "ignored"
+
+
+def test_status_as_posix():
+    # Stages with: bare-string entries, normal path/status dicts (using
+    # os.path.join so Windows runs see real backslashes), and scalar category
+    # values like "changed command" (which must not crash).
+    status = {
+        "stage1": ["always changed"],
+        "stage2": [
+            {
+                "changed outs": {os.path.join("data", "out.csv"): "modified"},
+                "changed deps": {os.path.join("src", "foo.py"): "modified"},
+            }
+        ],
+        "stage3": [{"changed command": "python src/new-script.py"}],
+    }
+    out = calkit.dvc.status_as_posix(status)
+    assert out["stage1"] == ["always changed"]
+    assert out["stage2"] == [
+        {
+            "changed outs": {"data/out.csv": "modified"},
+            "changed deps": {"src/foo.py": "modified"},
+        }
+    ]
+    assert out["stage3"] == [{"changed command": "python src/new-script.py"}]

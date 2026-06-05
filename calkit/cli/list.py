@@ -98,6 +98,34 @@ def list_templates():
             typer.echo(f"{kind}/{name}")
 
 
+@list_app.command(name="installers")
+def list_installers():
+    """List apps with a registered native installer.
+
+    These can be declared as ``kind: app`` dependencies in ``calkit.yaml``
+    and Calkit will offer to install them via ``calkit install <name>`` or
+    automatically during ``calkit run`` on an interactive TTY.
+    """
+    # Group entries that share the same underlying installer (e.g.,
+    # ``cargo``/``rustup``, ``julia``/``juliaup``) so the listing reflects
+    # the alias relationship rather than implying separate scripts.
+    groups: dict[int, list[str]] = {}
+    for name, entry in calkit.install.INSTALLERS.items():
+        groups.setdefault(id(entry), []).append(name)
+    for names in groups.values():
+        names.sort()
+        canonical = names[0]
+        entry = calkit.install.INSTALLERS[canonical]
+        aliases = ", ".join(names[1:])
+        header = canonical + (f"  (aliases: {aliases})" if aliases else "")
+        typer.echo(header)
+        for platform in ("unix", "windows"):
+            ins = entry.get(platform)  # type: ignore[arg-type]
+            if ins is None:
+                continue
+            typer.echo(f"  {platform}: {ins['script']}")
+
+
 @list_app.command(name="procedures")
 def list_procedures():
     """List procedures in the current project."""

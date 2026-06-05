@@ -12,9 +12,9 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
-from calkit.cli import raise_error, warn
+from calkit.cli import AliasGroup, raise_error, warn
 
-overleaf_app = typer.Typer(no_args_is_help=True)
+overleaf_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
 
 def _extract_title_from_tex(tex_file_path: str) -> str | None:
@@ -369,8 +369,11 @@ def sync(
         typer.Option(
             "--no-commit",
             help=(
-                "Do not commit the changes to the project repo. "
-                "Changes will always be committed to Overleaf."
+                "Do not create a commit in the project repo for this sync. "
+                "Changes pulled from Overleaf are still applied, but are "
+                "left staged so you can review or commit them yourself. "
+                "Changes are always committed and pushed to Overleaf "
+                "regardless."
             ),
         ),
     ] = False,
@@ -378,6 +381,7 @@ def sync(
         bool,
         typer.Option(
             "--auto-commit",
+            "-a",
             help=(
                 "Automatically commit changes to the project repo if a synced "
                 "folder has changes."
@@ -490,8 +494,9 @@ def sync(
                 )
             else:
                 raise_error(
-                    f"Uncommitted changes found in {wdir}; "
-                    "please commit or stash them before syncing with Overleaf"
+                    f"Uncommitted changes found in {wdir}. "
+                    "Commit or stash them before syncing with Overleaf, "
+                    "or use --auto-commit/-a to automatically commit them."
                 )
         # Ensure we've cloned the Overleaf project
         overleaf_project_dir = os.path.join(
@@ -585,7 +590,7 @@ def compare_folders_recursively(
     return res
 
 
-@overleaf_app.command(name="status")
+@overleaf_app.command(name="status|st")
 def get_status(
     paths: Annotated[
         list[str] | None,

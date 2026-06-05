@@ -118,6 +118,43 @@ pipeline:
         - results/summary.csv
 ```
 
+## Running jobs in parallel
+
+By default, Calkit submits scheduler jobs one at a time, waiting for each to
+finish before submitting the next.
+This keeps execution predictable for ordinary stages.
+
+The exception is a stage that uses `iterate_over` to sweep over a list of
+values.
+Because each iteration is an independent job, Calkit submits them all at once
+and lets the cluster's own scheduler queue them according to available
+resources---the scheduler, not Calkit, decides how many actually run at the
+same time.
+
+```yaml
+pipeline:
+  stages:
+    sweep:
+      kind: shell-script
+      environment: cluster1
+      script_path: scripts/run-case.sh
+      args:
+        - "--Re={Re}"
+      iterate_over:
+        - arg_name: Re
+          values: [1000, 2000, 4000, 8000]
+      outputs:
+        - results/Re-{Re}.csv
+```
+
+The four `Re` cases above are submitted together rather than back-to-back.
+Each iteration is still cached independently, so if one job fails you can
+simply rerun `calkit run` to pick up where it left off: the cases that
+succeeded are skipped and only the failed one is resubmitted.
+(`calkit run --force` re-runs every case serially instead, since it ignores
+the cache; just editing a script invalidates the affected cases without
+`--force`, so they still re-run concurrently.)
+
 ## Monitoring
 
 Inside a project folder, you can check on any of the current project's jobs
@@ -140,3 +177,27 @@ ck sch logs
 ```
 
 See the `--help` output of each command for arguments and options.
+
+## Testing locally without a scheduler
+
+To develop or test a scheduler-based pipeline on a machine that has no SLURM or
+PBS installation, set the `CALKIT_MOCK_SCHEDULER` environment variable.
+Calkit then runs each job as a regular local process---writing to the same log
+files and showing up in `calkit scheduler queue`---as if it had been submitted
+to a real cluster:
+
+```sh
+CALKIT_MOCK_SCHEDULER=1 calkit run
+```
+
+<!-- prettier-ignore -->
+!!! tip
+    Add `--dry` to preview the exact commands Calkit would run before executing
+    anything, then drop it to actually run them locally:
+
+    ```sh
+    CALKIT_MOCK_SCHEDULER=1 calkit run --dry
+    ```
+
+Mock job state lives under `.calkit/local/`, which is always ignored by Git,
+so it never makes its way into your project history.

@@ -7,47 +7,48 @@
 
 ## Top-level commands
 
-| Command                                          | Description                                                        |
-| ------------------------------------------------ | ------------------------------------------------------------------ |
-| [`init`](#top-command-init)                      | Initialize the current working directory.                          |
-| [`clone`](#top-command-clone)                    | Clone or download a copy of a project.                             |
-| [`status\|st`](#top-command-status-st)           | View status (project, version control, and/or pipeline).           |
-| [`diff`](#top-command-diff)                      | Get a unified Git and DVC diff.                                    |
-| [`add`](#top-command-add)                        | Add paths to the repo.                                             |
-| [`commit`](#top-command-commit)                  | Commit a change to the repo.                                       |
-| [`save\|sv`](#top-command-save-sv)               | Save paths by committing and pushing.                              |
-| [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                        |
-| [`push`](#top-command-push)                      | Push with both Git and DVC.                                        |
-| [`sync`](#top-command-sync)                      | Sync the project repo by pulling and then pushing.                 |
-| [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.               |
-| [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                        |
-| [`run`](#top-command-run)                        | Check dependencies and run the pipeline.                           |
-| [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                             |
-| [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                               |
-| [`xproc\|runproc`](#top-command-xproc-runproc)   | Execute a procedure.                                               |
-| [`calc`](#top-command-calc)                      | Run a project's calculation.                                       |
-| [`set-env-var`](#top-command-set-env-var)        | Set an environmental variable for the project in its '.env' file.  |
-| [`upgrade`](#top-command-upgrade)                | Upgrade Calkit.                                                    |
-| [`switch-branch`](#top-command-switch-branch)    | Switch to a different branch.                                      |
-| [`stash`](#top-command-stash)                    | Stash or restore workspace changes including dvc-zip tracked dirs. |
-| [`dvc`](#top-command-dvc)                        | Run a command with the DVC CLI.                                    |
-| [`jupyter`](#top-command-jupyter)                | Run a command with the Jupyter CLI.                                |
-| [`map-paths`](#top-command-map-paths)            | Map paths in a project.                                            |
-| [`xr`](#top-command-xr)                          | Execute a command and if successful, record in the pipeline.       |
-| [`config`](#command-group-config)                | Configure Calkit.                                                  |
-| [`new\|create`](#command-group-new-create)       | Create a new Calkit object.                                        |
-| [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with Jupyter notebooks.                                       |
-| [`list\|ls`](#command-group-list-ls)             | List Calkit objects.                                               |
-| [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                   |
-| [`import`](#command-group-import)                | Import objects.                                                    |
-| [`office`](#command-group-office)                | Work with Microsoft Office.                                        |
-| [`update`](#command-group-update)                | Update objects.                                                    |
-| [`check`](#command-group-check)                  | Check things.                                                      |
-| [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                   |
-| [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                            |
-| [`cloud`](#command-group-cloud)                  | Interact with a Calkit Cloud.                                      |
-| [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                          |
-| [`dev`](#command-group-dev)                      | Developer tools.                                                   |
+| Command                                          | Description                                                                                                  |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| [`init`](#top-command-init)                      | Initialize the current working directory.                                                                    |
+| [`clone`](#top-command-clone)                    | Clone or download a copy of a project.                                                                       |
+| [`status\|st`](#top-command-status-st)           | View status (project, version control, and/or pipeline).                                                     |
+| [`diff`](#top-command-diff)                      | Get a unified Git and DVC diff.                                                                              |
+| [`add`](#top-command-add)                        | Add paths to the repo.                                                                                       |
+| [`commit`](#top-command-commit)                  | Commit a change to the repo.                                                                                 |
+| [`save\|sv`](#top-command-save-sv)               | Save paths by committing and pushing.                                                                        |
+| [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                                                                  |
+| [`push`](#top-command-push)                      | Push with both Git and DVC.                                                                                  |
+| [`sync`](#top-command-sync)                      | Sync the project repo by pulling and then pushing.                                                           |
+| [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                         |
+| [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                                                                  |
+| [`run`](#top-command-run)                        | Check dependencies and run the pipeline.                                                                     |
+| [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                       |
+| [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                                                                         |
+| [`install`](#top-command-install)                | Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform. |
+| [`xproc\|runproc`](#top-command-xproc-runproc)   | Execute a procedure.                                                                                         |
+| [`calc`](#top-command-calc)                      | Run a project's calculation.                                                                                 |
+| [`set-env-var`](#top-command-set-env-var)        | Set an environmental variable for the project in its '.env' file.                                            |
+| [`upgrade`](#top-command-upgrade)                | Upgrade Calkit.                                                                                              |
+| [`switch-branch`](#top-command-switch-branch)    | Switch to a different branch.                                                                                |
+| [`stash`](#top-command-stash)                    | Stash or restore workspace changes including dvc-zip tracked dirs.                                           |
+| [`dvc`](#top-command-dvc)                        | Run a command with the DVC CLI.                                                                              |
+| [`jupyter`](#top-command-jupyter)                | Run a command with the Jupyter CLI.                                                                          |
+| [`map-paths`](#top-command-map-paths)            | Map paths in a project.                                                                                      |
+| [`xr`](#top-command-xr)                          | Execute a command and if successful, record in the pipeline.                                                 |
+| [`config`](#command-group-config)                | Configure Calkit.                                                                                            |
+| [`new\|create`](#command-group-new-create)       | Create a new Calkit object.                                                                                  |
+| [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with Jupyter notebooks.                                                                                 |
+| [`list\|ls`](#command-group-list-ls)             | List Calkit objects.                                                                                         |
+| [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
+| [`import`](#command-group-import)                | Import objects.                                                                                              |
+| [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
+| [`update`](#command-group-update)                | Update objects.                                                                                              |
+| [`check`](#command-group-check)                  | Check things.                                                                                                |
+| [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
+| [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
+| [`cloud`](#command-group-cloud)                  | Interact with a Calkit Cloud.                                                                                |
+| [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
+| [`dev`](#command-group-dev)                      | Developer tools.                                                                                             |
 
 ## Top-level command details
 
@@ -426,6 +427,30 @@ Options:
 | `--relaxed`        | boolean | no       | False   | Check the environment in a relaxed way, if applicable.                                                           |
 | `--verbose`, `-v`  | boolean | no       | False   | Print verbose output.                                                                                            |
 
+<a id="top-command-install"></a>
+
+### `calkit install`
+
+Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform.
+
+Usage:
+
+```text
+calkit install [OPTIONS] NAME
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                              |
+| -------- | ---- | -------- | ------- | ---------------------------------------- |
+| `name`   | text | yes      |         | The app to install (e.g., 'pixi', 'uv'). |
+
+Options:
+
+| Option        | Type    | Required | Default | Description                                           |
+| ------------- | ------- | -------- | ------- | ----------------------------------------------------- |
+| `--yes`, `-y` | boolean | no       | False   | Skip the confirmation prompt and install immediately. |
+
 <a id="top-command-xproc-runproc"></a>
 
 ### `calkit xproc|runproc`
@@ -803,6 +828,7 @@ Create a new Calkit object.
 | [`pixi-env`](#subcommand-new-create-pixi-env)                             | Create a new pixi virtual environment.                                |
 | [`julia-env`](#subcommand-new-create-julia-env)                           | Create a new Julia environment or add an existing one to calkit.yaml. |
 | [`renv`](#subcommand-new-create-renv)                                     | Create a new R environment with renv.                                 |
+| [`nix-env`](#subcommand-new-create-nix-env)                               | Create a new Nix flake-based environment.                             |
 | [`status`](#subcommand-new-create-status)                                 | Add a new project status to the log.                                  |
 | [`python-script-stage`](#subcommand-new-create-python-script-stage)       | Add a stage to the pipeline that runs a Python script.                |
 | [`julia-script-stage`](#subcommand-new-create-julia-script-stage)         | Add a stage to the pipeline that runs a Julia script.                 |
@@ -1317,6 +1343,36 @@ Options:
 | `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation. |
 | `--no-commit`       | boolean | no       | False   | Do not commit changes.                                 |
 
+<a id="subcommand-new-create-nix-env"></a>
+
+#### `calkit new|create nix-env`
+
+Create a new Nix flake-based environment.
+
+Usage:
+
+```text
+calkit new|create nix-env [OPTIONS] PACKAGES...
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                            |
+| ---------- | ---- | -------- | ------- | ------------------------------------------------------ |
+| `packages` | text | yes      |         | Nixpkgs packages to include in the dev shell (e.g. R). |
+
+Options:
+
+| Option              | Type    | Required | Default                             | Description                                           |
+| ------------------- | ------- | -------- | ----------------------------------- | ----------------------------------------------------- |
+| `--name`, `-n`      | text    | yes      |                                     | Environment name.                                     |
+| `--path`            | text    | no       |                                     | Flake file path. Must end with 'flake.nix'.           |
+| `--nixpkgs-url`     | text    | no       | github:NixOS/nixpkgs/nixos-unstable | Flake input URL for nixpkgs.                          |
+| `--description`     | text    | no       |                                     | Description.                                          |
+| `--overwrite`, `-f` | boolean | no       | False                               | Overwrite any existing environment with this name.    |
+| `--no-check`        | boolean | no       | False                               | Do not run 'nix flake lock' after creating the flake. |
+| `--no-commit`       | boolean | no       | False                               | Do not commit changes.                                |
+
 <a id="subcommand-new-create-status"></a>
 
 #### `calkit new|create status`
@@ -1653,19 +1709,20 @@ Options:
 
 List Calkit objects.
 
-| Command                                                       | Description                                |
-| ------------------------------------------------------------- | ------------------------------------------ |
-| [`notebooks\|nb`](#subcommand-list-ls-notebooks-nb)           | List notebooks in the project.             |
-| [`figures\|figs`](#subcommand-list-ls-figures-figs)           | List figures in the project.               |
-| [`datasets`](#subcommand-list-ls-datasets)                    | List datasets in the project.              |
-| [`publications\|pubs`](#subcommand-list-ls-publications-pubs) | List publications in the project.          |
-| [`references\|refs`](#subcommand-list-ls-references-refs)     | List reference collections in the project. |
-| [`environments\|envs`](#subcommand-list-ls-environments-envs) | List environments in the project.          |
-| [`templates`](#subcommand-list-ls-templates)                  | List all available Calkit templates.       |
-| [`procedures`](#subcommand-list-ls-procedures)                | List procedures in the current project.    |
-| [`releases`](#subcommand-list-ls-releases)                    | List releases.                             |
-| [`stages`](#subcommand-list-ls-stages)                        | List pipeline stages.                      |
-| [`remotes`](#subcommand-list-ls-remotes)                      | List Git and DVC remotes.                  |
+| Command                                                       | Description                                   |
+| ------------------------------------------------------------- | --------------------------------------------- |
+| [`notebooks\|nb`](#subcommand-list-ls-notebooks-nb)           | List notebooks in the project.                |
+| [`figures\|figs`](#subcommand-list-ls-figures-figs)           | List figures in the project.                  |
+| [`datasets`](#subcommand-list-ls-datasets)                    | List datasets in the project.                 |
+| [`publications\|pubs`](#subcommand-list-ls-publications-pubs) | List publications in the project.             |
+| [`references\|refs`](#subcommand-list-ls-references-refs)     | List reference collections in the project.    |
+| [`environments\|envs`](#subcommand-list-ls-environments-envs) | List environments in the project.             |
+| [`templates`](#subcommand-list-ls-templates)                  | List all available Calkit templates.          |
+| [`installers`](#subcommand-list-ls-installers)                | List apps with a registered native installer. |
+| [`procedures`](#subcommand-list-ls-procedures)                | List procedures in the current project.       |
+| [`releases`](#subcommand-list-ls-releases)                    | List releases.                                |
+| [`stages`](#subcommand-list-ls-stages)                        | List pipeline stages.                         |
+| [`remotes`](#subcommand-list-ls-remotes)                      | List Git and DVC remotes.                     |
 
 <a id="subcommand-list-ls-notebooks-nb"></a>
 
@@ -1749,6 +1806,20 @@ Usage:
 
 ```text
 calkit list|ls templates
+```
+
+<a id="subcommand-list-ls-installers"></a>
+
+#### `calkit list|ls installers`
+
+List apps with a registered native installer.
+
+These can be declared as `kind: app` dependencies in `calkit.yaml` and Calkit will offer to install them via `calkit install <name>` or automatically during `calkit run` on an interactive TTY.
+
+Usage:
+
+```text
+calkit list|ls installers
 ```
 
 <a id="subcommand-list-ls-procedures"></a>
@@ -2039,8 +2110,8 @@ Update objects.
 | [`conda-env`](#subcommand-update-conda-env)           | Update a conda environment spec file.                                               |
 | [`docker-env`](#subcommand-update-docker-env)         | Update a docker environment.                                                        |
 | [`slurm-env`](#subcommand-update-slurm-env)           | Update a SLURM environment.                                                         |
-| [`env`](#subcommand-update-env)                       | Update an environment (generic; use update [kind]-env for full options).            |
-| [`environment`](#subcommand-update-environment)       | Update an environment (generic; use update [kind]-env for full options).            |
+| [`env`](#subcommand-update-env)                       | Update an environment.                                                              |
+| [`environment`](#subcommand-update-environment)       | Update an environment.                                                              |
 | [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                             |
 | [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                               |
 | [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                              |
@@ -2303,7 +2374,9 @@ Options:
 
 #### `calkit update env`
 
-Update an environment (generic; use update [kind]-env for full options).
+Update an environment.
+
+Currently supports adding packages to Julia and Nix (flake) envs.
 
 Usage:
 
@@ -2313,16 +2386,18 @@ calkit update env [OPTIONS]
 
 Options:
 
-| Option         | Type | Required | Default | Description                       |
-| -------------- | ---- | -------- | ------- | --------------------------------- |
-| `--name`, `-n` | text | yes      |         | Name of the environment to update |
-| `--add`        | text | no       |         | Add package (julia only).         |
+| Option                   | Type | Required | Default | Description                                                               |
+| ------------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------- |
+| `--name`, `-n`           | text | yes      |         | Name of the environment to update                                         |
+| `--add`, `--add-package` | text | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
 
 <a id="subcommand-update-environment"></a>
 
 #### `calkit update environment`
 
-Update an environment (generic; use update [kind]-env for full options).
+Update an environment.
+
+Currently supports adding packages to Julia and Nix (flake) envs.
 
 Usage:
 
@@ -2332,10 +2407,10 @@ calkit update environment [OPTIONS]
 
 Options:
 
-| Option         | Type | Required | Default | Description                       |
-| -------------- | ---- | -------- | ------- | --------------------------------- |
-| `--name`, `-n` | text | yes      |         | Name of the environment to update |
-| `--add`        | text | no       |         | Add package (julia only).         |
+| Option                   | Type | Required | Default | Description                                                               |
+| ------------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------- |
+| `--name`, `-n`           | text | yes      |         | Name of the environment to update                                         |
+| `--add`, `--add-package` | text | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
 
 <a id="subcommand-update-stage"></a>
 
@@ -2424,23 +2499,22 @@ Options:
 
 Check things.
 
-| Command                                          | Description                                                                                                  |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| [`repro`](#subcommand-check-repro)               | Check the reproducibility of a project.                                                                      |
-| [`environment`](#subcommand-check-environment)   | Check that an environment is up-to-date.                                                                     |
-| [`julia-env`](#subcommand-check-julia-env)       | Check a Julia environment and instantiate only when project, manifest, and package cache state have changed. |
-| [`environments`](#subcommand-check-environments) |                                                                                                              |
-| [`envs`](#subcommand-check-envs)                 | Check that all environments are up-to-date.                                                                  |
-| [`renv`](#subcommand-check-renv)                 | Check an renv R environment, initializing if needed.                                                         |
-| [`docker-env`](#subcommand-check-docker-env)     | Check that Docker environment is up-to-date.                                                                 |
-| [`conda-env`](#subcommand-check-conda-env)       | Check a conda environment and rebuild if necessary.                                                          |
-| [`venv`](#subcommand-check-venv)                 | Check a Python virtual environment (uv or virtualenv).                                                       |
-| [`matlab-env`](#subcommand-check-matlab-env)     | Check a MATLAB environment matches its spec and export a JSON lock file.                                     |
-| [`deps`](#subcommand-check-deps)                 | Check that a project's system-level dependencies are set up correctly.                                       |
-| [`dependencies`](#subcommand-check-dependencies) | Check that a project's system-level dependencies are set up correctly.                                       |
-| [`env-vars`](#subcommand-check-env-vars)         | Check that the project's required environmental variables exist.                                             |
-| [`pipeline`](#subcommand-check-pipeline)         | Check that the project pipeline is defined correctly.                                                        |
-| [`call`](#subcommand-check-call)                 | Check that a command succeeds and run an alternate if not.                                                   |
+| Command                                                     | Description                                                                                                  |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| [`repro`](#subcommand-check-repro)                          | Check the reproducibility of a project.                                                                      |
+| [`environment`](#subcommand-check-environment)              | Check that an environment is up-to-date.                                                                     |
+| [`julia-env`](#subcommand-check-julia-env)                  | Check a Julia environment and instantiate only when project, manifest, and package cache state have changed. |
+| [`environments`](#subcommand-check-environments)            |                                                                                                              |
+| [`envs`](#subcommand-check-envs)                            | Check that all environments are up-to-date.                                                                  |
+| [`renv`](#subcommand-check-renv)                            | Check an renv R environment, initializing if needed.                                                         |
+| [`docker-env`](#subcommand-check-docker-env)                | Check that Docker environment is up-to-date.                                                                 |
+| [`conda-env`](#subcommand-check-conda-env)                  | Check a conda environment and rebuild if necessary.                                                          |
+| [`venv`](#subcommand-check-venv)                            | Check a Python virtual environment (uv or virtualenv).                                                       |
+| [`matlab-env`](#subcommand-check-matlab-env)                | Check a MATLAB environment matches its spec and export a JSON lock file.                                     |
+| [`deps\|dependencies`](#subcommand-check-deps-dependencies) | Check that a project's system-level dependencies are set up correctly.                                       |
+| [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
+| [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
+| [`call`](#subcommand-check-call)                            | Check that a command succeeds and run an alternate if not.                                                   |
 
 <a id="subcommand-check-repro"></a>
 
@@ -2672,41 +2746,24 @@ Options:
 | `--name`, `-n`   | text | yes      |         | Environment name in calkit.yaml. |
 | `--output`, `-o` | text | yes      |         |                                  |
 
-<a id="subcommand-check-deps"></a>
+<a id="subcommand-check-deps-dependencies"></a>
 
-#### `calkit check deps`
-
-Check that a project's system-level dependencies are set up correctly.
-
-Usage:
-
-```text
-calkit check deps [OPTIONS]
-```
-
-Options:
-
-| Option            | Type    | Required | Default | Description          |
-| ----------------- | ------- | -------- | ------- | -------------------- |
-| `--verbose`, `-v` | boolean | no       | False   | Print verbose output |
-
-<a id="subcommand-check-dependencies"></a>
-
-#### `calkit check dependencies`
+#### `calkit check deps|dependencies`
 
 Check that a project's system-level dependencies are set up correctly.
 
 Usage:
 
 ```text
-calkit check dependencies [OPTIONS]
+calkit check deps|dependencies [OPTIONS]
 ```
 
 Options:
 
-| Option            | Type    | Required | Default | Description          |
-| ----------------- | ------- | -------- | ------- | -------------------- |
-| `--verbose`, `-v` | boolean | no       | False   | Print verbose output |
+| Option            | Type    | Required | Default | Description                                                                                            |
+| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `--verbose`, `-v` | boolean | no       | False   | Print verbose output                                                                                   |
+| `--no-cache`      | boolean | no       | False   | Re-probe every setup dependency, ignoring (and clearing) the cache at .calkit/local/dep-checks.sqlite. |
 
 <a id="subcommand-check-env-vars"></a>
 
@@ -2844,11 +2901,11 @@ Options:
 
 Interact with Overleaf.
 
-| Command                                    | Description                                                    |
-| ------------------------------------------ | -------------------------------------------------------------- |
-| [`import`](#subcommand-overleaf-ol-import) | Import a publication from an Overleaf project.                 |
-| [`sync`](#subcommand-overleaf-ol-sync)     | Sync folders with Overleaf.                                    |
-| [`status`](#subcommand-overleaf-ol-status) | Check the status of folders synced with Overleaf in a project. |
+| Command                                           | Description                                                    |
+| ------------------------------------------------- | -------------------------------------------------------------- |
+| [`import`](#subcommand-overleaf-ol-import)        | Import a publication from an Overleaf project.                 |
+| [`sync`](#subcommand-overleaf-ol-sync)            | Sync folders with Overleaf.                                    |
+| [`status\|st`](#subcommand-overleaf-ol-status-st) | Check the status of folders synced with Overleaf in a project. |
 
 <a id="subcommand-overleaf-ol-import"></a>
 
@@ -2903,25 +2960,25 @@ Arguments:
 
 Options:
 
-| Option              | Type    | Required | Default | Description                                                                                                                        |
-| ------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `--no-commit`       | boolean | no       | False   | Do not commit the changes to the project repo. Changes will always be committed to Overleaf.                                       |
-| `--auto-commit`     | boolean | no       | False   | Automatically commit changes to the project repo if a synced folder has changes.                                                   |
-| `--no-push`         | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                     |
-| `--verbose`         | boolean | no       | False   | Enable verbose output.                                                                                                             |
-| `--resolve`, `-r`   | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                |
-| `--push-only`, `-P` | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files. |
+| Option                | Type    | Required | Default | Description                                                                                                                                                                                                                              |
+| --------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-commit`         | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
+| `--auto-commit`, `-a` | boolean | no       | False   | Automatically commit changes to the project repo if a synced folder has changes.                                                                                                                                                         |
+| `--no-push`           | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
+| `--verbose`           | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
+| `--resolve`, `-r`     | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
+| `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
 
-<a id="subcommand-overleaf-ol-status"></a>
+<a id="subcommand-overleaf-ol-status-st"></a>
 
-#### `calkit overleaf|ol status`
+#### `calkit overleaf|ol status|st`
 
 Check the status of folders synced with Overleaf in a project.
 
 Usage:
 
 ```text
-calkit overleaf|ol status [PATHS...]
+calkit overleaf|ol status|st [PATHS...]
 ```
 
 Arguments:

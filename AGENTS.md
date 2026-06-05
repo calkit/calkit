@@ -14,8 +14,18 @@ To run tests, use `uv run pytest`.
 
 To sync the docs and format all the code, run `make format`.
 
+Before finishing a change, type-check it. The CLI gate is mypy
+(`uv run mypy <changed files>`, or `make check` for the full suite), and the
+VS Code editor uses Pylance (Pyright). Keep new code clean under both, and do
+not introduce new type errors.
+
 Wrap prose at natural breakpoints in phrases or punctuation to keep max
 line length below 80 characters.
+
+In the docs, MkDocs Material admonitions (`!!! note`, `!!! tip`, etc.) must be
+preceded by a `<!-- prettier-ignore -->` comment. Otherwise Prettier reformats
+the block and strips the 4-space indentation of the admonition body, which
+breaks rendering.
 
 Agents should never make commits to Git.
 
@@ -25,3 +35,11 @@ a feature in one function over many different test functions.
 Do not write docstrings in test functions.
 
 For prose, only use one space after punctuation.
+
+Don't overzealously split up functions just because they're long.
+Functions should usually be used ~3 times before abstracting.
+Otherwise, split up long ones into logical sections with comments.
+The only exception here is if splitting up a function makes it easier to
+write meaningful unit tests.
+If a function is only used inside one other function, nest it inside the
+caller at the top.

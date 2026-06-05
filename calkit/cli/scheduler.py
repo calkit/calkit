@@ -8,15 +8,18 @@ Registered as ``scheduler|sch``.
 
 from __future__ import annotations
 
-import json
 import os
+import re
 import shlex
 import shutil
+import signal
 import socket
 import subprocess
 import time
+import uuid
 
 import typer
+from sqlitedict import SqliteDict
 from typing_extensions import Annotated
 
 import calkit
@@ -31,42 +34,188 @@ _BINARIES = {
 }
 
 SCHEDULER_DIR = os.path.join(".calkit", "scheduler")
-JOBS_PATH = os.path.join(SCHEDULER_DIR, "jobs.json")
 LOGS_DIR = os.path.join(SCHEDULER_DIR, "logs")
+# Local scheduler state lives under .calkit/local, which is always gitignored.
+LOCAL_DIR = os.path.join(".calkit", "local")
+# Job records are kept in SQLite so the parallel batch processes that fan out
+# an iterated stage can each write their own record atomically, and readers
+# (e.g. `scheduler queue`) never see a half-written file.
+JOBS_DB_PATH = os.path.join(LOCAL_DIR, "scheduler-jobs.db")
+MOCK_DIR = os.path.join(LOCAL_DIR, "mock-scheduler")
+# When set, scheduler commands run jobs on the local host instead of
+# dispatching to a real SLURM/PBS install (see _mock_enabled).
+MOCK_ENV_VAR = "CALKIT_MOCK_SCHEDULER"
 
 
-def _ensure_local_gitignore() -> None:
-    """Make sure ``.calkit/scheduler/jobs.json`` is ignored by Git.
-
-    Uses a directory-local ``.gitignore`` so we don't have to touch the
-    project-root ``.gitignore`` or call into the user's git repo.
-    """
-    os.makedirs(SCHEDULER_DIR, exist_ok=True)
-    gitignore_path = os.path.join(SCHEDULER_DIR, ".gitignore")
-    desired = "jobs.json\n"
-    if os.path.isfile(gitignore_path):
-        with open(gitignore_path, "r") as f:
-            if "jobs.json" in f.read().splitlines():
-                return
-    with open(gitignore_path, "w") as f:
-        f.write(desired)
+# A generous busy timeout lets the many batch processes that fan out an
+# iterated stage wait for the SQLite write lock instead of failing with
+# "database is locked". We keep the default rollback journal (not WAL), which
+# is the safer choice on the network filesystems clusters typically use.
+JOBS_DB_TIMEOUT = 60
 
 
 def _load_jobs() -> dict:
-    if os.path.isfile(JOBS_PATH):
-        with open(JOBS_PATH, "r") as f:
-            return json.load(f)
-    return {}
+    if not os.path.isfile(JOBS_DB_PATH):
+        return {}
+    with SqliteDict(JOBS_DB_PATH, timeout=JOBS_DB_TIMEOUT) as jobs:
+        return dict(jobs)
 
 
-def _save_jobs(jobs: dict) -> None:
-    os.makedirs(SCHEDULER_DIR, exist_ok=True)
-    _ensure_local_gitignore()
-    with open(JOBS_PATH, "w") as f:
-        json.dump(jobs, f, indent=4)
+def _record_job(name: str, info: dict) -> None:
+    """Persist a single job record.
+
+    SQLite gives atomic, concurrent-safe writes, so the parallel batch
+    processes that fan out an iterated stage each record their own
+    uniquely named job without a separate lock or clobbering one another.
+    """
+    calkit.ensure_local_dir()
+    with SqliteDict(
+        JOBS_DB_PATH, autocommit=True, timeout=JOBS_DB_TIMEOUT
+    ) as jobs:
+        jobs[name] = info
+
+
+def _mock_enabled() -> bool:
+    """Whether scheduler commands should run jobs locally.
+
+    Enabled via the ``CALKIT_MOCK_SCHEDULER`` env var. Lets scheduler
+    workflows (and their tests) run on a plain host with no SLURM/PBS install:
+    jobs execute in the background, their output goes to the usual log files,
+    and queue/cancel act on locally tracked processes.
+    """
+    return os.environ.get(MOCK_ENV_VAR, "").strip().lower() not in (
+        "",
+        "0",
+        "false",
+        "no",
+    )
+
+
+def _require_posix_mock() -> None:
+    # The mock backend uses bash; if that is missing, the mock cannot run.
+    if shutil.which("bash") is None:
+        raise_error("CALKIT_MOCK_SCHEDULER requires bash on PATH")
+
+
+def _ensure_mock_dir() -> None:
+    calkit.ensure_local_dir()
+    os.makedirs(MOCK_DIR, exist_ok=True)
+
+
+def _mock_status_path(job_id: str) -> str:
+    # Absolute so the sentinel resolves even if the job cd's elsewhere.
+    return os.path.abspath(os.path.join(MOCK_DIR, f"{job_id}.status"))
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _mock_pid(job_id: str) -> int | None:
+    for record in _load_jobs().values():
+        if record.get("job_id") == job_id:
+            pid = record.get("pid")
+            return pid if isinstance(pid, int) else None
+    return None
+
+
+def _mock_active(job_id: str) -> bool:
+    # A finished job writes its exit code to the sentinel before exiting, so
+    # the sentinel is authoritative; fall back to process liveness only when
+    # it is absent (e.g. the job was killed without recording a status).
+    if os.path.exists(_mock_status_path(job_id)):
+        return False
+    pid = _mock_pid(job_id)
+    if pid is None:
+        return False
+    return _pid_alive(pid)
+
+
+def _build_job_command(
+    target: str,
+    args: list[str],
+    setup_cmds: list[str],
+    is_command: bool,
+) -> str:
+    """Build the shell command a mock job runs on the host.
+
+    Mirrors what the real submit builders hand the scheduler: setup commands
+    chained before the target, with a non-executable script invoked through
+    its shebang interpreter (or bash).
+    """
+    parts = [target] + list(args)
+    if (
+        not is_command
+        and os.path.isfile(target)
+        and not os.access(target, os.X_OK)
+    ):
+        parts = _detect_interpreter(target) + parts
+    invocation = shlex.join(parts)
+    if setup_cmds:
+        return " && ".join([*setup_cmds, invocation])
+    return invocation
+
+
+def _mock_submit(job_id: str, job_command: str, log_path: str) -> int:
+    """Run a job locally in the background, returning its PID.
+
+    Completion is signaled by writing the exit code to a sentinel file, which
+    keeps liveness checks independent of PID reuse.
+    """
+    _require_posix_mock()
+    _ensure_mock_dir()
+    status_path = _mock_status_path(job_id)
+    if os.path.exists(status_path):
+        os.remove(status_path)
+    wrapped = f"{job_command}; echo $? > {shlex.quote(status_path)}"
+    env = dict(os.environ)
+    env.setdefault("PBS_O_WORKDIR", os.getcwd())
+    with open(log_path, "w") as log_file:
+        popen_kwargs = dict(
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            env=env,
+        )
+        if os.name == "posix":
+            popen_kwargs["start_new_session"] = True
+        elif hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        proc = subprocess.Popen(
+            ["bash", "-c", wrapped],
+            **popen_kwargs,
+        )
+    return proc.pid
+
+
+def _mock_cancel(job_id: str) -> tuple[bool, str]:
+    _require_posix_mock()
+    pid = _mock_pid(job_id)
+    if pid is not None:
+        try:
+            if os.name == "posix":
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+            else:
+                os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+    # Drop a sentinel so later liveness checks report the job as finished.
+    status_path = _mock_status_path(job_id)
+    _ensure_mock_dir()
+    if not os.path.exists(status_path):
+        with open(status_path, "w") as f:
+            f.write("canceled\n")
+    return True, ""
 
 
 def _is_active(kind: str, job_id: str) -> bool:
+    if _mock_enabled():
+        return _mock_active(job_id)
     if kind == "slurm":
         p = subprocess.run(
             ["squeue", "--job", job_id], capture_output=True, text=True
@@ -92,11 +241,31 @@ def _is_active(kind: str, job_id: str) -> bool:
 
 
 def _cancel(kind: str, job_id: str) -> tuple[bool, str]:
+    if _mock_enabled():
+        return _mock_cancel(job_id)
     cancel_bin = _BINARIES[kind]["cancel"]
     p = subprocess.run(
         [cancel_bin, job_id], capture_output=True, text=True, check=False
     )
     return p.returncode == 0, p.stderr
+
+
+def _wait_until_done(kind: str, job_id: str, name: str) -> None:
+    """Poll until the job finishes, leaving it running on Ctrl+C.
+
+    The job is already submitted and tracked, so an interrupt should only stop
+    local waiting---the scheduler keeps running it and a later ``calkit run``
+    resumes from here.
+    """
+    try:
+        while _is_active(kind, job_id):
+            time.sleep(1)
+    except KeyboardInterrupt:
+        typer.echo(
+            f"Interrupted; job '{name}' ({job_id}) left running on the "
+            "scheduler. Resume with `calkit run`."
+        )
+        raise typer.Exit(130)
 
 
 @scheduler_app.command(name="batch")
@@ -274,8 +443,16 @@ def run_batch(
         options = [opt for opt in [*env_default_opts, *options] if opt.strip()]
     elif env_default_options == "replace" and not options:
         options = [opt for opt in env_default_opts if opt.strip()]
-    # Build the submit command (kind-specific)
-    if kind == "slurm":
+    # Build the submit command (kind-specific), or the local job command when
+    # the scheduler is mocked.
+    if _mock_enabled():
+        job_command = _build_job_command(
+            target=target,
+            args=args,
+            setup_cmds=setup_cmds,
+            is_command=is_command,
+        )
+    elif kind == "slurm":
         submit_cmd, submit_input = _build_slurm_submit(
             name=name,
             target=target,
@@ -367,10 +544,31 @@ def run_batch(
                     break
             if should_wait:
                 typer.echo("Waiting for job to finish")
-            while running_or_queued and should_wait:
-                running_or_queued = _is_active(prev_kind, job_id)
-                time.sleep(1)
-            if should_wait:
+                _wait_until_done(prev_kind, job_id, name)
+                raise typer.Exit(0)
+        elif not os.environ.get("CALKIT_FORCE"):
+            # The job has left the queue. If nothing it depends on changed and
+            # its outputs are present, it already finished successfully (e.g.
+            # while the master process was disconnected), so treat it as done
+            # rather than resubmitting and discarding that work. Under --force
+            # (CALKIT_FORCE) we skip this check and resubmit.
+            job_dep_md5s = job_info.get("dep_md5s", {})
+            deps_unchanged = set(job_deps) == set(deps) and all(
+                current_dep_md5s.get(dep) == job_dep_md5s.get(dep)
+                for dep in deps
+            )
+            command_unchanged = (
+                job_target == target
+                and job_args == args
+                and job_setup == setup_cmds
+            )
+            outputs_present = bool(outs) and all(
+                os.path.exists(out) for out in outs
+            )
+            if deps_unchanged and command_unchanged and outputs_present:
+                typer.echo(
+                    f"Job '{name}' already completed; skipping resubmission"
+                )
                 raise typer.Exit(0)
     # Job is not running or queued, so we can submit. First, delete any
     # non-persistent outputs.
@@ -384,33 +582,58 @@ def run_batch(
                     shutil.rmtree(out)
             except Exception as e:
                 raise_error(f"Error deleting '{out}': {e}")
-    p = subprocess.run(
-        submit_cmd,
-        input=submit_input,
-        capture_output=True,
-        check=False,
-        text=True,
+    # Submit and record atomically with respect to Ctrl+C: a SIGINT here would
+    # otherwise kill the submit command mid-flight or leave a job submitted but
+    # never written to the database (so a re-run would resubmit it). Defer the
+    # signal until the job is safely recorded, then act on it.
+    pid = None
+    interrupted: list[bool] = []
+    prev_sigint = signal.signal(
+        signal.SIGINT, lambda *_: interrupted.append(True)
     )
-    if p.returncode != 0:
-        raise_error(f"Failed to submit new job: {p.stderr}")
-    job_id = p.stdout.strip()
-    typer.echo(f"Submitted job with ID: {job_id}")
-    new_job = {
-        "kind": kind,
-        "job_id": job_id,
-        "deps": deps,
-        "target": target,
-        "args": args,
-        "setup": setup_cmds,
-        "dep_md5s": current_dep_md5s,
-    }
-    jobs[name] = new_job
-    _save_jobs(jobs)
+    try:
+        if _mock_enabled():
+            job_id = uuid.uuid4().hex[:12]
+            pid = _mock_submit(
+                job_id=job_id, job_command=job_command, log_path=log_path
+            )
+        else:
+            # start_new_session shields the submit command from the terminal's
+            # Ctrl+C so the submission always completes.
+            p = subprocess.run(
+                submit_cmd,
+                input=submit_input,
+                capture_output=True,
+                check=False,
+                text=True,
+                start_new_session=True,
+            )
+            if p.returncode != 0:
+                raise_error(f"Failed to submit new job: {p.stderr}")
+            job_id = p.stdout.strip()
+        typer.echo(f"Submitted job with ID: {job_id}")
+        new_job = {
+            "kind": kind,
+            "job_id": job_id,
+            "deps": deps,
+            "target": target,
+            "args": args,
+            "setup": setup_cmds,
+            "dep_md5s": current_dep_md5s,
+        }
+        if pid is not None:
+            new_job["pid"] = pid
+        _record_job(name, new_job)
+    finally:
+        signal.signal(signal.SIGINT, prev_sigint)
+    if interrupted:
+        typer.echo(
+            f"Interrupted after submitting job '{name}' ({job_id}); it will "
+            "keep running. Resume with `calkit run`."
+        )
+        raise typer.Exit(130)
     typer.echo("Waiting for job to finish")
-    running_or_queued = True
-    while running_or_queued:
-        running_or_queued = _is_active(kind, job_id)
-        time.sleep(1)
+    _wait_until_done(kind, job_id, name)
 
 
 def _detect_interpreter(target: str) -> list[str]:
@@ -467,6 +690,14 @@ def _build_slurm_submit(
     return cmd, None
 
 
+def _sanitize_pbs_job_name(name: str) -> str:
+    # qsub rejects names containing characters outside a narrow safe set
+    # (e.g. ``@`` and ``,``), which is exactly what matrix-iterated stage
+    # names look like (``stage@arg1,arg2,...``). Replace any disallowed
+    # character with ``_`` and cap the length at PBS Pro's 236-char limit.
+    return re.sub(r"[^A-Za-z0-9._+-]", "_", name)[:236]
+
+
 def _build_pbs_submit(
     name: str,
     target: str,
@@ -483,17 +714,19 @@ def _build_pbs_submit(
                 _detect_interpreter(target) + [target] + args
             )
     target_invocation = shlex.join(target_invocation_parts)
-    if setup_cmds:
-        job_script = " && ".join([*setup_cmds, target_invocation])
-    else:
-        job_script = target_invocation
+    # PBS jobs start in ``$HOME`` by default (unlike SLURM, which inherits
+    # the submission directory). Both Torque/OpenPBS and PBS Pro export
+    # ``$PBS_O_WORKDIR``, so ``cd`` into it before anything else so
+    # relative paths in stage scripts resolve correctly.
+    cd_step = 'cd "$PBS_O_WORKDIR"'
+    job_script = " && ".join([cd_step, *setup_cmds, target_invocation])
     # `-` tells qsub to read the job script from stdin; without it most PBS
     # variants ignore the `input=` payload and wait for an interactive terminal.
     cmd = (
         [
             "qsub",
             "-N",
-            name,
+            _sanitize_pbs_job_name(name),
             "-j",
             "oe",
             "-o",
@@ -512,6 +745,13 @@ def get_queue() -> None:
     jobs = _load_jobs()
     if not jobs:
         typer.echo("No jobs found for this project")
+        raise typer.Exit(0)
+    if _mock_enabled():
+        typer.echo(f"{'NAME':<32}{'JOBID':<16}STATUS")
+        for job_name, info in jobs.items():
+            job_id = info.get("job_id", "")
+            status = "RUNNING" if _mock_active(job_id) else "DONE"
+            typer.echo(f"{job_name:<32}{job_id:<16}{status}")
         raise typer.Exit(0)
     by_kind: dict[str, list[str]] = {}
     for info in jobs.values():
@@ -557,8 +797,7 @@ def cancel_jobs(
         job_id = job_info["job_id"]
         if not _is_active(kind, job_id):
             typer.echo(
-                f"Job '{name}' ({kind} ID: {job_id}) "
-                "is not running or queued"
+                f"Job '{name}' ({kind} ID: {job_id}) is not running or queued"
             )
             continue
         ok, stderr = _cancel(kind, job_id)

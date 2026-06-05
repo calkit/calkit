@@ -32,11 +32,16 @@ class AliasGroup(TyperGroup):
 
 
 def complete_stage_names(
-    ctx: "click.Context",
-    param: "click.Parameter",
+    ctx: "click.Context | None",
+    param: "click.Parameter | None",
     incomplete: str,
 ) -> list:
-    """Return pipeline stage names for shell tab-completion."""
+    """Return pipeline stage names for shell tab-completion.
+
+    ``ctx`` and ``param`` are part of the Click completion-callback signature
+    but are unused here, so they accept ``None`` (e.g. when called directly in
+    tests).
+    """
     if not os.path.isfile("calkit.yaml"):
         return []
     try:

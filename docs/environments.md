@@ -42,6 +42,7 @@ Calkit supports the following environment types:
 - [`renv`](https://rstudio.github.io/renv/index.html)
 - [Julia](https://julialang.org/)
 - [MATLAB](https://www.mathworks.com/products/matlab.html)
+- [Nix](https://nixos.org/) (flake-based)
 - [SLURM](https://slurm.schedmd.com/documentation.html)
 - `ssh`
 
@@ -504,6 +505,71 @@ environments:
     path: pixi.toml
 ```
 
+### Nix
+
+Calkit supports [Nix](https://nixos.org/) environments via
+[flakes](https://nixos.wiki/wiki/Flakes).
+Reproducibility comes from `flake.lock`, which pins every input (including
+`nixpkgs`) to an exact revision. Calkit tracks `flake.lock` as a DVC
+dependency, so pipeline stages re-run when the environment changes.
+
+Create one with:
+
+```sh
+calkit new nix-env --name my-nix-env python3 R uv
+```
+
+In `calkit.yaml`:
+
+```yaml
+environments:
+  my-nix-env:
+    kind: nix
+    path: flake.nix
+```
+
+Projects can contain multiple Nix envs. The first one lands at the repo
+root (`flake.nix`); subsequent ones get nested under
+`.calkit/envs/{name}/flake.nix` so each env has its own independent
+`flake.lock`. You can override the path with `--path` if you want a
+different layout.
+
+To enter a specific dev shell from the flake (instead of the default),
+set `shell`:
+
+```yaml
+environments:
+  my-nix-env:
+    kind: nix
+    path: envs/my-nix-env/flake.nix
+    shell: r-shell
+```
+
+Run a command in a Nix environment:
+
+```sh
+calkit xenv -n my-nix-env -- python --version
+```
+
+Add more packages to an existing Nix env (this edits the flake's
+`packages = with pkgs; [ ... ]` list, refreshes `flake.lock`, and commits):
+
+```sh
+calkit update env --name my-nix-env --add-package R --add-package polars
+```
+
+On Linux and macOS, install Nix with `calkit install nix` — this runs the
+[Determinate Systems installer](https://install.determinate.systems),
+which enables flakes by default. Nix is not supported natively on
+Windows; run Calkit inside
+[WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) and install
+Nix there.
+
+Calkit itself is also available as a flake — see
+[Nix in the installation guide](installation.md#nix) to add the Calkit
+CLI to your own Nix environments via `inputs.calkit.url =
+"github:calkit/calkit"`.
+
 ### R
 
 R environments can be managed with Conda, Pixi, or `renv` (recommended).
@@ -638,6 +704,17 @@ Model class: `MatlabEnvironment`
 | kind        | Literal['matlab'] | yes      |
 | products    | list[str]         | no       |
 | description | str               | no       |
+
+#### `nix`
+
+Model class: `NixEnvironment`
+
+| Parameter   | Type                            | Required |
+| ----------- | ------------------------------- | -------- |
+| kind        | Literal['nix']                  | yes      |
+| path        | str (must end with 'flake.nix') | yes      |
+| shell       | str (name of devShell to enter) | no       |
+| description | str                             | no       |
 
 #### `slurm`
 

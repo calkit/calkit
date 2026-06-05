@@ -168,6 +168,7 @@ class Stage(BaseModel):
     kind: Literal[
         "python-script",
         "latex",
+        "quarto",
         "matlab-script",
         "matlab-command",
         "command",
@@ -414,6 +415,22 @@ class Stage(BaseModel):
                 isinstance(o, dict) and log_out.path in o for o in outs
             ):
                 outs.append(log_entry)
+        # Scheduler-batched stages must persist their outputs: `calkit
+        # scheduler batch` deletes and recreates them itself, and persisting
+        # stops DVC from removing them before a re-run. That lets a job that
+        # finished while the run was disconnected be recognized as done on the
+        # next `calkit run` instead of being resubmitted.
+        if self.scheduler is not None:
+            persisted_outs: list[str | dict] = []
+            for out in outs:
+                if isinstance(out, str):
+                    persisted_outs.append({out: {"persist": True}})
+                else:
+                    out_path = list(out.keys())[0]
+                    out_opts = dict(out[out_path])
+                    out_opts["persist"] = True
+                    persisted_outs.append({out_path: out_opts})
+            outs = persisted_outs
         stage = {"cmd": cmd, "deps": deps, "outs": outs}
         if self.wdir is not None:
             stage["wdir"] = self.wdir
@@ -578,6 +595,41 @@ class LatexStage(Stage):
         else:
             outs.append(out_path)
         return outs
+
+
+class QuartoStage(Stage):
+    """A stage that renders a Quarto document.
+
+    Calkit controls only what belongs on the CLI: which environment to
+    render in, the target document, and (optionally) the output format and
+    extra ``quarto render`` arguments. The output format(s) and any other
+    rendering behavior are left to the document/``_quarto.yml`` metadata, so
+    there is no redundancy between the pipeline definition and the doc.
+
+    Outputs are declared explicitly via ``outputs`` rather than parsed out
+    of the Quarto document, since a document can emit multiple formats to
+    arbitrary paths. As with other stages, plain string outputs are
+    DVC-cached by default; use a ``PathOutput`` to store an output with Git
+    instead.
+    """
+
+    kind: Literal["quarto"] = "quarto"
+    target_path: str
+    to: str | None = None
+    args: list[str] = []
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f"{self.xenv_cmd} quarto render {self.target_path}"
+        if self.to is not None:
+            cmd += f" --to {self.to}"
+        for arg in self.args:
+            cmd += f" {arg}"
+        return cmd.strip()
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        return [self.target_path] + super().dvc_deps
 
 
 class JsonToLatexStage(Stage):
@@ -1038,6 +1090,7 @@ class Pipeline(BaseModel):
             (
                 PythonScriptStage
                 | LatexStage
+                | QuartoStage
                 | JsonToLatexStage
                 | MatlabScriptStage
                 | MatlabCommandStage

@@ -62,8 +62,12 @@ def test_cloud_login_device_flow_success(monkeypatch, capsys):
     monkeypatch.setattr(cloud_cli.calkit.cloud, "get", _get)
     monkeypatch.setattr(cloud_cli.calkit.cloud, "post", _post)
     monkeypatch.setattr(cloud_cli.calkit.config, "read", lambda: cfg)
-    monkeypatch.setattr(cloud_cli.webbrowser, "open", lambda _url: True)
-    monkeypatch.setattr(cloud_cli.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        cloud_cli.calkit.cloud.webbrowser, "open", lambda _url: True
+    )
+    monkeypatch.setattr(
+        cloud_cli.calkit.cloud.time, "sleep", lambda _seconds: None
+    )
     cloud_cli.login()
     out = capsys.readouterr().out
     assert "Authorize this device by opening this URL:" in out
@@ -114,8 +118,10 @@ def test_cloud_login_force_re_authenticates(monkeypatch, capsys):
     monkeypatch.setattr(cloud_cli.calkit.cloud, "get", _get)
     monkeypatch.setattr(cloud_cli.calkit.cloud, "post", _post)
     monkeypatch.setattr(cloud_cli.calkit.config, "read", lambda: cfg)
-    monkeypatch.setattr(cloud_cli.webbrowser, "open", lambda _url: True)
-    monkeypatch.setattr(cloud_cli.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(
+        cloud_cli.calkit.cloud.webbrowser, "open", lambda _url: True
+    )
+    monkeypatch.setattr(cloud_cli.calkit.cloud.time, "sleep", lambda _s: None)
     cloud_cli.login(force=True)
     out = capsys.readouterr().out
     assert "Logged in successfully" in out
@@ -140,8 +146,10 @@ def test_cloud_login_device_code_expired(monkeypatch):
 
     monkeypatch.setattr(cloud_cli.calkit.cloud, "get", _get)
     monkeypatch.setattr(cloud_cli.calkit.cloud, "post", _post)
-    monkeypatch.setattr(cloud_cli.webbrowser, "open", lambda _url: True)
-    monkeypatch.setattr(cloud_cli.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(
+        cloud_cli.calkit.cloud.webbrowser, "open", lambda _url: True
+    )
+    monkeypatch.setattr(cloud_cli.calkit.cloud.time, "sleep", lambda _s: None)
     with pytest.raises(typer.Exit):
         cloud_cli.login()
 
@@ -164,7 +172,9 @@ def test_cloud_login_device_code_not_found(monkeypatch):
 
     monkeypatch.setattr(cloud_cli.calkit.cloud, "get", _get)
     monkeypatch.setattr(cloud_cli.calkit.cloud, "post", _post)
-    monkeypatch.setattr(cloud_cli.webbrowser, "open", lambda _url: True)
-    monkeypatch.setattr(cloud_cli.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(
+        cloud_cli.calkit.cloud.webbrowser, "open", lambda _url: True
+    )
+    monkeypatch.setattr(cloud_cli.calkit.cloud.time, "sleep", lambda _s: None)
     with pytest.raises(typer.Exit):
         cloud_cli.login()

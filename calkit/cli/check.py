@@ -14,10 +14,10 @@ import dotenv
 import typer
 
 import calkit
-from calkit.cli import raise_error, warn
+from calkit.cli import AliasGroup, raise_error, warn
 from calkit.core import get_md5
 
-check_app = typer.Typer(no_args_is_help=True)
+check_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
 
 def _juliaup_version_installed(julia_version: str) -> bool:
@@ -231,6 +231,61 @@ def _check_julia_env(
     return lock_fpath or os.path.join(env_dir, "Manifest.toml")
 
 
+def _require_nix_available() -> None:
+    """Ensure the ``nix`` CLI is on PATH, with a friendly error otherwise.
+
+    On Windows we steer users to WSL2 rather than attempting native Nix,
+    which isn't officially supported.
+    """
+    if shutil.which("nix") is not None:
+        return
+    if _platform.system() == "Windows":
+        raise_error(
+            "Nix is not available natively on Windows. Run Calkit inside "
+            "WSL2 (https://learn.microsoft.com/en-us/windows/wsl/install) "
+            "and install Nix there."
+        )
+    raise_error(
+        "The 'nix' command was not found. Install it with "
+        "'calkit install nix' or from https://nixos.org/download."
+    )
+
+
+def check_nix_env(env: dict, verbose: bool = False) -> str:
+    """Materialize / refresh ``flake.lock`` next to the flake.
+
+    Running ``nix flake lock`` writes ``flake.lock`` if missing and is a
+    no-op when the lock is already up-to-date. The lock file is what we
+    track as a DVC dep, so an out-of-date lock invalidates dependent
+    stages on the next ``calkit run``.
+    """
+    env_path = env.get("path")
+    if env_path is None:
+        raise_error("Nix environments require a path pointing to flake.nix")
+    assert isinstance(env_path, str)
+    if os.path.basename(env_path) != "flake.nix":
+        raise_error("Nix environments require a path pointing to flake.nix")
+    if not os.path.isfile(env_path):
+        raise_error(f"Nix flake not found: {env_path}")
+    _require_nix_available()
+    env_dir = os.path.dirname(os.path.abspath(env_path)) or "."
+    cmd = [
+        "nix",
+        "--extra-experimental-features",
+        "nix-command flakes",
+        "flake",
+        "lock",
+    ]
+    if verbose:
+        typer.echo(f"Running command: {cmd} (cwd={env_dir})")
+    try:
+        subprocess.check_call(cmd, cwd=env_dir)
+    except subprocess.CalledProcessError:
+        raise_error("Failed to lock Nix flake")
+    lock_fpath = os.path.join(os.path.dirname(env_path), "flake.lock")
+    return lock_fpath
+
+
 @check_app.command(name="repro")
 def check_repro(
     wdir: Annotated[
@@ -326,7 +381,7 @@ def check_environment(
             quiet=not verbose,
         )
     elif env["kind"] == "pixi":
-        cmd = ["pixi", "lock"]
+        cmd = ["pixi", "install"]
         env_dir = os.path.dirname(env["path"])
         if env_dir:
             cmd += ["--manifest-path", env["path"]]
@@ -412,6 +467,8 @@ def check_environment(
         # env config so DVC stages that depend on the env get invalidated
         # when the config changes.
         write_scheduler_env_lock(env_name=env_name, env=env)
+    elif env["kind"] == "nix":
+        check_nix_env(env=env, verbose=verbose)
     else:
         raise_error(f"Environment kind '{env['kind']}' not supported")
     return get_env_lock_fpath(env=env, env_name=env_name, as_posix=False)
@@ -1243,11 +1300,20 @@ def check_matlab_env(
     )
 
 
-@check_app.command(name="dependencies")
-@check_app.command(name="deps")
+@check_app.command(name="deps|dependencies")
 def check_dependencies(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output")
+    ] = False,
+    no_cache: Annotated[
+        bool,
+        typer.Option(
+            "--no-cache",
+            help=(
+                "Re-probe every setup dependency, ignoring (and clearing) "
+                "the cache at .calkit/local/dep-checks.sqlite."
+            ),
+        ),
     ] = False,
 ) -> None:
     """Check that a project's system-level dependencies are set up
@@ -1255,8 +1321,10 @@ def check_dependencies(
     """
     typer.echo("Checking project dependencies")
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    if no_cache:
+        calkit.dependencies.cache_clear()
     try:
-        calkit.check_system_deps()
+        calkit.check_system_deps(use_cache=not no_cache)
     except Exception as e:
         raise_error(str(e))
     message = "✅ All set!"
@@ -1278,32 +1346,22 @@ def check_env_vars(
     for name in env_var_dep_names:
         if verbose:
             typer.echo(f"Checking for environmental variable '{name}'")
-        attrs = {}
+        # Pull the dep's attrs to honor any per-var default.
+        attrs: dict = {}
         for dep in deps:
-            if isinstance(dep, dict) and "name" in dep:
+            if isinstance(dep, dict) and dep.get("name") == name:
                 attrs = dep
                 break
-            elif isinstance(dep, dict) and list(dep.keys()) == [name]:
-                attrs = dep[name]
+            if isinstance(dep, dict) and list(dep.keys()) == [name]:
+                attrs = dep[name] or {}
                 break
         if name not in os.environ:
             typer.echo(f"Missing env var '{name}'")
-            if "default" in attrs:
-                default = attrs["default"]
-            else:
-                default = None
-            value = typer.prompt(
-                f"Enter a value for {name}", default=default, type=str
+            value = calkit.dependencies.prompt_and_store_env_var(
+                name, default=attrs.get("default")
             )
-            dotenv.set_key(
-                dotenv_path=".env", key_to_set=name, value_to_set=value
-            )
-    # Ensure that .env is ignored by git
-    repo = calkit.git.get_repo()
-    if not repo.ignored(".env"):
-        typer.echo("Adding .env to .gitignore")
-        with open(".gitignore", "a") as f:
-            f.write("\n.env\n")
+            if value is None:
+                raise_error(f"No value provided for '{name}'")
     message = "✅ All set!"
     calkit.echo(message)
 

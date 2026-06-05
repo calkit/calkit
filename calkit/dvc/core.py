@@ -26,6 +26,24 @@ logger.setLevel(logging.INFO)
 USE_CK_REMOTE_BY_DEFAULT = True
 
 
+class _FrozenStageWarningFilter(logging.Filter):
+    """Drop DVC's "stage is frozen" warnings.
+
+    DVC emits these for every frozen stage on every ``status``/``repro`` call
+    ("... not going to be shown in the status output." and "... not going to
+    be reproduced."). Frozen stages are pinned by design, so the warnings are
+    noise — the substring shared by both variants is matched here.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "is frozen. Its dependencies are" not in record.getMessage()
+
+
+_frozen_stage_warning_filter = _FrozenStageWarningFilter()
+for _name in ("dvc.repo.reproduce", "dvc.repo.status"):
+    logging.getLogger(_name).addFilter(_frozen_stage_warning_filter)
+
+
 class CalkitDVCFileSystem(ObjectFileSystem):
     """DVC-facing filesystem wrapper for the ``ck://`` scheme."""
 
@@ -241,6 +259,48 @@ def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
     """Return a DVC repo with ``ck://`` scheme support registered."""
     register_ck_scheme()
     return dvc.repo.Repo(wdir)
+
+
+def get_running_pipeline_processes(wdir: str | None = None) -> list[dict]:
+    """Return live processes holding DVC's read/write lock.
+
+    While ``dvc repro`` runs a stage, DVC records the owning process in its
+    ``rwlock`` file (under ``.dvc/tmp/rwlock``); this is the same lock that
+    makes ``dvc status`` fail with a ``LockError`` mid-run. Each returned item
+    is ``{"pid": int, "cmd": str}``, with stale entries (PIDs that are no
+    longer running) filtered out. An empty list means no pipeline run is
+    currently in progress.
+    """
+    import psutil  # Always available as a DVC dependency
+
+    rwlock_path = os.path.join(wdir or ".", ".dvc", "tmp", "rwlock")
+    if not os.path.isfile(rwlock_path):
+        return []
+    try:
+        with open(rwlock_path) as f:
+            lock = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+    # The rwlock format is
+    # {"write": {path: {pid, cmd}}, "read": {path: [{pid, cmd}]}}
+    by_pid: dict[int, str] = {}
+    for info in lock.get("write", {}).values():
+        if isinstance(info, dict) and "pid" in info:
+            by_pid[info["pid"]] = info.get("cmd", "")
+    for infos in lock.get("read", {}).values():
+        for info in infos or []:
+            if isinstance(info, dict) and "pid" in info:
+                by_pid[info["pid"]] = info.get("cmd", "")
+    result = []
+    for pid, cmd in by_pid.items():
+        try:
+            alive = psutil.pid_exists(pid)
+        except Exception:
+            # If we can't tell, assume the process is still alive
+            alive = True
+        if alive:
+            result.append({"pid": pid, "cmd": cmd})
+    return result
 
 
 def run_dvc_command(argv: list[str], cwd: str | None = None) -> int:
@@ -572,3 +632,55 @@ def hash_path(path: str) -> dict:
         return hash_file(path)
     else:
         raise ValueError(f"Path does not exist: {path}")
+
+
+def _path_item_as_posix(item):
+    # Renamed entries are dicts like {"old": ..., "new": ...}.
+    if isinstance(item, dict):
+        return {k: Path(v).as_posix() for k, v in item.items()}
+    return Path(item).as_posix()
+
+
+def data_status_as_posix(data_status: dict) -> dict:
+    """Convert all paths in DVC data status to posix format.
+
+    We skip the ``git`` entry since Git already formats as posix.
+    """
+    data_status_fmt = {}
+    for cat, obj in data_status.items():
+        if cat == "git":
+            data_status_fmt[cat] = obj
+        elif isinstance(obj, list):
+            data_status_fmt[cat] = [_path_item_as_posix(p) for p in obj]
+        elif isinstance(obj, dict):
+            obj_fmt = {}
+            for cat2, obj_i in obj.items():
+                obj_fmt[cat2] = [_path_item_as_posix(p) for p in obj_i]
+            data_status_fmt[cat] = obj_fmt
+        else:
+            data_status_fmt[cat] = obj
+    return data_status_fmt
+
+
+def status_as_posix(status: dict) -> dict:
+    """Convert all paths in repo status to posix format."""
+    status_fmt = {}
+    for stage_name, st_list in status.items():
+        st_list_fmt = []
+        for st_dict in st_list:
+            if isinstance(st_dict, str):
+                st_list_fmt.append(st_dict)
+                continue
+            st_dict_fmt = {}
+            for st_cat, path_st_dict in st_dict.items():
+                if not isinstance(path_st_dict, dict):
+                    # e.g. {"changed command": "python src/new-script.py"}
+                    st_dict_fmt[st_cat] = path_st_dict
+                    continue
+                path_st_dict_fmt = {}
+                for p, st in path_st_dict.items():
+                    path_st_dict_fmt[Path(p).as_posix()] = st
+                st_dict_fmt[st_cat] = path_st_dict_fmt
+            st_list_fmt.append(st_dict_fmt)
+        status_fmt[stage_name] = st_list_fmt
+    return status_fmt

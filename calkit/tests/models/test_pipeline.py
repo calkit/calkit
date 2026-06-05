@@ -3,6 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
+from calkit.models.io import PathOutput
 from calkit.models.pipeline import (
     JsonToLatexStage,
     JuliaCommandStage,
@@ -13,6 +14,7 @@ from calkit.models.pipeline import (
     MatlabCommandStage,
     MatlabScriptStage,
     PythonScriptStage,
+    QuartoStage,
     StageIteration,
     WordToPdfStage,
 )
@@ -94,6 +96,50 @@ def test_latexstage():
         outputs=["my-paper.pdf"],
     )
     assert s.dvc_outs == ["my-paper.pdf"]
+
+
+def test_quartostage():
+    s = QuartoStage(
+        name="render-report",
+        environment="analysis",
+        target_path="report/report.qmd",
+        inputs=["report/results.json", "figures"],
+        outputs=["report/report.html"],
+    )
+    sd = s.to_dvc()
+    assert sd["cmd"] == (
+        "calkit xenv -n analysis --no-check -- "
+        "quarto render report/report.qmd"
+    )
+    assert "report/report.qmd" in sd["deps"]
+    assert "report/results.json" in sd["deps"]
+    assert "figures" in sd["deps"]
+    # Plain string outputs are DVC-cached by default
+    assert "report/report.html" in sd["outs"]
+    # The format and extra args are passed through to the CLI
+    s = QuartoStage(
+        name="render-report",
+        environment="analysis",
+        target_path="report/report.qmd",
+        to="pdf",
+        args=["--no-clean"],
+        # A PathOutput can be used to store with Git instead
+        outputs=[PathOutput(path="report/report.pdf", storage="git")],
+    )
+    assert s.dvc_cmd.endswith(
+        "quarto render report/report.qmd --to pdf --no-clean"
+    )
+    assert s.dvc_outs == [
+        {"report/report.pdf": {"cache": False, "persist": False}}
+    ]
+    # System environment renders without an xenv wrapper
+    s = QuartoStage(
+        name="render-report",
+        environment="_system",
+        target_path="report/report.qmd",
+        outputs=["report/report.html"],
+    )
+    assert s.dvc_cmd == "quarto render report/report.qmd"
 
 
 def test_jupyternotebookstage():

@@ -7,6 +7,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import time
 from enum import Enum
 
 import typer
@@ -124,22 +125,30 @@ def new_project(
     if repo is not None and git_repo_url is None:
         if verbose:
             typer.echo("Detecting Git repo URL from existing repo")
-        try:
-            remote_names = [r.name for r in repo.remotes]
-            remote = repo.remotes[
-                remote_names.index("origin") if "origin" in remote_names else 0
-            ]
-            git_repo_url = remote.url
-            # Convert to HTTPS if it's SSH
-            if git_repo_url.startswith("git@"):
-                git_repo_url = git_repo_url.replace(
-                    "git@github.com:", "https://github.com/"
+        remote_names = [r.name for r in repo.remotes]
+        if remote_names:
+            try:
+                remote = repo.remotes[
+                    remote_names.index("origin")
+                    if "origin" in remote_names
+                    else 0
+                ]
+                git_repo_url = remote.url
+                # Convert to HTTPS if it's SSH
+                if git_repo_url.startswith("git@"):
+                    git_repo_url = git_repo_url.replace(
+                        "git@github.com:", "https://github.com/"
+                    )
+                git_repo_url = git_repo_url.removesuffix(".git")
+            except Exception as e:
+                git_repo_url = None
+                raise_error(
+                    f"Could not detect Git repo URL from existing repo: {e}"
                 )
-            git_repo_url = git_repo_url.removesuffix(".git")
-        except Exception as e:
-            git_repo_url = None
+        elif not cloud:
             raise_error(
-                f"Could not detect Git repo URL from existing repo: {e}"
+                "Existing Git repo has no remotes; "
+                "specify --git-url or use --cloud to create one"
             )
         # We don't have a project name but do have a Git repo URL, the
         # project name will be the Git repo name lowercased, since that's
@@ -167,9 +176,10 @@ def new_project(
     ck_info_fpath = os.path.join(abs_path, "calkit.yaml")
     if os.path.isfile(ck_info_fpath) and not overwrite:
         ck_info = calkit.load_calkit_info(wdir=abs_path)
-        name = ck_info.get("name", name)
-        title = ck_info.get("title", title)
-        description = ck_info.get("description", description)
+        # Prefer values explicitly passed on the CLI; fall back to calkit.yaml
+        name = name or ck_info.get("name")
+        title = title or ck_info.get("title")
+        description = description or ck_info.get("description")
         typer.echo(
             "Destination is already a Calkit project; "
             "will use existing project info where possible"
@@ -191,6 +201,15 @@ def new_project(
         # Cloud should allow None, which will allow us to post just the name
         # NOTE: This will fail if the user hasn't logged into the Calkit Cloud
         # in 6 months, since their GitHub refresh token stored is expired
+        # Strip control characters (e.g., stray newlines) the API rejects
+        if description is not None:
+            description = (
+                "".join(
+                    " " if (ord(c) < 32 and c != "\t") or ord(c) == 127 else c
+                    for c in description
+                ).strip()
+                or None
+            )
         typer.echo("Creating project in Calkit Cloud")
         try:
             resp = calkit.cloud.post(
@@ -1134,10 +1153,10 @@ def new_publication(
             deps += stage.get("outs", [])
     # Create publication object
     if template_type == "latex":
-        pub_fpath = os.path.join(
+        pub_fpath = pathlib.Path(
             path,
             template_obj.target.removesuffix(".tex") + ".pdf",  # type: ignore
-        )
+        ).as_posix()
     else:
         pub_fpath = path
     if not overwrite and pub_fpath in pub_paths:
@@ -1172,7 +1191,7 @@ def new_publication(
         stage = LatexStage(
             kind="latex",
             environment=env_name,
-            target_path=os.path.join(path, template_obj.target),  # type: ignore
+            target_path=pathlib.Path(path, template_obj.target).as_posix(),  # type: ignore
             outputs=[pub_fpath],
         ).model_dump()
         if "pipeline" not in ck_info:
@@ -2161,6 +2180,150 @@ def new_renv(
             repo.git.commit(["-m", f"Add renv environment {name}"])
 
 
+@new_app.command("nix-env")
+def new_nix_env(
+    packages: Annotated[
+        list[str],
+        typer.Argument(
+            help="Nixpkgs packages to include in the dev shell (e.g. R)."
+        ),
+    ],
+    name: Annotated[
+        str, typer.Option("--name", "-n", help="Environment name.")
+    ],
+    path: Annotated[
+        str | None,
+        typer.Option(
+            "--path",
+            help="Flake file path. Must end with 'flake.nix'.",
+        ),
+    ] = None,
+    nixpkgs_url: Annotated[
+        str,
+        typer.Option(
+            "--nixpkgs-url",
+            help="Flake input URL for nixpkgs.",
+        ),
+    ] = "github:NixOS/nixpkgs/nixos-unstable",
+    description: Annotated[
+        str | None, typer.Option("--description", help="Description.")
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite any existing environment with this name.",
+        ),
+    ] = False,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Do not run 'nix flake lock' after creating the flake.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool, typer.Option("--no-commit", help="Do not commit changes.")
+    ] = False,
+):
+    """Create a new Nix flake-based environment."""
+    import platform as _platform
+
+    from calkit.environments import create_nix_flake_content
+
+    if path is not None and not path.endswith("flake.nix"):
+        raise_error("Environment path must end with 'flake.nix'")
+    ck_info = calkit.load_calkit_info()
+    envs = ck_info.get("environments", {})
+    if name in envs and not overwrite:
+        raise_error(
+            f"Environment with name {name} already exists "
+            "(use -f to overwrite)"
+        )
+    if path is None:
+        # If no env exists yet, put the flake at the repo root; otherwise
+        # nest it under .calkit/envs/<name>/ to keep peer flakes from
+        # colliding on the same flake.lock.
+        if not envs:
+            envdir = "."
+            path = "flake.nix"
+        else:
+            envdir = f".calkit/envs/{name}"
+            os.makedirs(envdir, exist_ok=True)
+            path = os.path.join(envdir, "flake.nix")
+    else:
+        envdir = os.path.dirname(path) or "."
+        if envdir != ".":
+            os.makedirs(envdir, exist_ok=True)
+    if os.path.isfile(path) and not overwrite:
+        raise_error(f"{path} already exists (use -f to overwrite)")
+    content = create_nix_flake_content(
+        packages=packages,
+        description=description,
+        nixpkgs_url=nixpkgs_url,
+    )
+    with open(path, "w") as f:
+        f.write(content)
+    # ``nix flake lock`` refuses to see files that aren't tracked by Git
+    # when run inside a Git repo. Stage the new flake before locking so
+    # the brand-new (still untracked) file is visible to Nix. Staging is
+    # harmless when ``--no-commit`` is set -- the commit step is what we
+    # gate on, not the staging.
+    try:
+        _flake_repo = calkit.git.get_repo()
+    except calkit.git.InvalidGitRepositoryError:
+        _flake_repo = None
+    if _flake_repo is not None:
+        _flake_repo.git.add(path)
+    # Generate flake.lock for reproducibility unless skipped. The lock
+    # is what makes the environment reproducible across machines, so we
+    # want it committed alongside flake.nix.
+    lock_path = os.path.join(envdir, "flake.lock")
+    if not no_check:
+        if shutil.which("nix") is None:
+            if _platform.system() == "Windows":
+                warn(
+                    "Nix is not available natively on Windows; skipping "
+                    "'nix flake lock'. Run Calkit inside WSL2 to generate "
+                    "flake.lock."
+                )
+            else:
+                warn(
+                    "The 'nix' command was not found; skipping "
+                    "'nix flake lock'. Install it with "
+                    "'calkit install nix' or from https://nixos.org/download."
+                )
+        else:
+            res = subprocess.run(
+                [
+                    "nix",
+                    "--extra-experimental-features",
+                    "nix-command flakes",
+                    "flake",
+                    "lock",
+                ],
+                cwd=envdir,
+            )
+            if res.returncode != 0:
+                raise_error("Failed to generate flake.lock")
+    env_info: dict = dict(kind="nix", path=path)
+    if description:
+        env_info["description"] = description
+    envs[name] = env_info
+    ck_info["environments"] = envs
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    if not no_commit and _flake_repo is not None:
+        # ``path`` was already staged earlier so ``nix flake lock`` could
+        # see it; just add the lock file (if produced) and calkit.yaml.
+        if os.path.exists(lock_path):
+            _flake_repo.git.add(lock_path)
+        _flake_repo.git.add("calkit.yaml")
+        if _flake_repo.git.diff("--staged"):
+            _flake_repo.git.commit(["-m", f"Add nix environment {name}"])
+
+
 class Status(str, Enum):
     in_progress = "in-progress"
     on_hold = "on-hold"
@@ -2962,18 +3125,7 @@ def new_release(
     record_id = None
     # Detect project license IDs if necessary
     if not license_ids:
-        license_file = None
-        license_txt = None
-        license_candidates = [
-            "LICENSE",
-            "LICENSE.rst",
-            "LICENSE.txt",
-            "LICENSE.md",
-        ]
-        for lc in license_candidates:
-            if os.path.isfile(lc):
-                license_file = lc
-                break
+        license_file = calkit.licenses.find_license_file()
         if license_file is None:
             typer.echo("No project license found.")
             use_default_license = typer.confirm(
@@ -2991,17 +3143,20 @@ def new_release(
             )
             with open("LICENSE", "w") as f:
                 f.write(license_txt)
-                repo.git.add("LICENSE")
+            repo.git.add("LICENSE")
             license_ids = ["mit", "cc-by-4.0"]
-        if license_txt is None and license_file is not None:
+        else:
+            typer.echo(f"Detecting license(s) from {license_file}")
             with open(license_file) as f:
                 license_txt = f.read()
-            # Try to detect licenses
-            if "the mit license" in license_txt.lower():
-                license_ids.append("mit")
-            if "cc by 4.0" in license_txt.lower():
-                license_ids.append("cc-by-4.0")
-            # TODO: Detect others
+            license_ids = calkit.licenses.detect_license_ids(license_txt)
+            if license_ids:
+                typer.echo(f"Detected license(s): {', '.join(license_ids)}")
+            else:
+                warn(
+                    f"Could not detect any known license in {license_file}; "
+                    "specify one explicitly with --license"
+                )
     if not license_ids:
         raise_error("Project has no license(s) defined")
     invenio_metadata = dict(
@@ -3027,9 +3182,13 @@ def new_release(
         )
     invenio_metadata["related_identifiers"] = related_identifiers
     # TODO: Add calkit.io URL if applicable?
-    # Determine creators from authors, adding to project if not present
-    authors = ck_info.get("authors", [])
-    if not authors:
+    # Determine creators from authors. CITATION.cff is the single source of
+    # truth for authors, so read them from there; if none are defined yet,
+    # prompt for them and persist them to CITATION.cff.
+    authors = calkit.releases.read_authors_from_cff()
+    if authors:
+        typer.echo(f"Read {len(authors)} author(s) from CITATION.cff")
+    else:
         warn("No authors defined for the project")
         still_entering_authors = True
         n = 0
@@ -3056,24 +3215,27 @@ def new_release(
             still_entering_authors = typer.confirm(
                 "Are there more authors to enter?", default=True
             )
-        ck_info["authors"] = authors
-        # Write authors out to calkit.yaml
+        # Write authors out to CITATION.cff
         if not dry_run:
-            typer.echo("Adding authors to calkit.yaml")
-            with open("calkit.yaml", "w") as f:
-                calkit.ryaml.dump(ck_info, f)
+            typer.echo("Writing authors to CITATION.cff")
+            calkit.releases.set_cff_authors(authors, ck_info=ck_info)
+            repo.git.add("CITATION.cff")
     invenio_creators = []
     for author in authors:
         orcid = author.get("orcid")
-        creator = {
+        creator: dict = {
             "person_or_org": {
                 "type": "personal",
                 "given_name": author["first_name"],
                 "family_name": author["last_name"],
                 "identifiers": [{"identifier": orcid}] if orcid else [],
             },
-            "affiliations": [{"name": author["affiliation"]}],
         }
+        # Affiliation is optional (e.g., authors read from CITATION.cff may
+        # not specify one)
+        affiliation = author.get("affiliation")
+        if affiliation:
+            creator["affiliations"] = [{"name": affiliation}]
         invenio_creators.append(creator)
     invenio_metadata["creators"] = invenio_creators  # type: ignore
     # Set InvenioRDM resource_type based on release_type and artifact kind
@@ -3164,22 +3326,23 @@ def new_release(
                 f"/records/{record_id}/draft/files/{filename}/commit",
                 service=to,  # type: ignore
             )
-        # Conditionally publish or reserve DOI based on --draft flag
-        if draft_only:
-            # Reserve a DOI for the draft record
-            typer.echo(f"Reserving DOI for {to} draft record ID {record_id}")
-            doi_resp = calkit.invenio.post(
-                f"/records/{record_id}/draft/pids/doi",
-                service=to,  # type: ignore
+        # Reserve a DOI on the draft before publishing. The publish action's
+        # response only echoes back the DOI under "pids" if one was reserved
+        # on the draft first (otherwise "pids" comes back empty), so always
+        # reserve here to get a stable identifier.
+        typer.echo(f"Reserving DOI for {to} draft record ID {record_id}")
+        doi_resp = calkit.invenio.post(
+            f"/records/{record_id}/draft/pids/doi",
+            service=to,  # type: ignore
+        )
+        if verbose:
+            typer.echo(f"DOI reservation response:\n{doi_resp}")
+        doi = calkit.invenio.extract_doi(doi_resp)
+        if doi is None:
+            raise_error(
+                f"Failed to reserve DOI for {to} draft record {record_id}"
             )
-            if verbose:
-                typer.echo(f"DOI response for draft:\n{doi_resp}")
-            try:
-                doi = doi_resp["pids"]["doi"]["identifier"]
-            except KeyError:
-                doi = doi_resp["doi"]
-            except Exception as e:
-                raise_error(f"Failed to reserve DOI for draft: {e}")
+        if draft_only:
             url = f"https://doi.org/{doi}"
             typer.echo(f"Created {to} draft with reserved DOI: {doi}")
         else:
@@ -3189,8 +3352,37 @@ def new_release(
                 f"/records/{record_id}/draft/actions/publish",
                 service=to,  # type: ignore
             )
+            if verbose:
+                typer.echo(f"Publish response:\n{invenio_dep}")
             record_id = invenio_dep["id"]
-            doi = invenio_dep["pids"]["doi"]["identifier"]
+            # Prefer the DOI from the publish response, but fall back to the
+            # reserved DOI (and a fetch of the published record) since the
+            # publish action returns 202 and may not echo "pids" immediately.
+            # Polling failures are tolerated: we already have the reserved DOI,
+            # so a transient error while the record settles should not abort
+            # the release.
+            published_doi = calkit.invenio.extract_doi(invenio_dep)
+            for _ in range(10):
+                if published_doi is not None:
+                    break
+                time.sleep(1)
+                try:
+                    record = calkit.invenio.get(
+                        f"/records/{record_id}",
+                        service=to,  # type: ignore
+                    )
+                except Exception as e:
+                    if verbose:
+                        typer.echo(f"Polling for published DOI failed: {e}")
+                    continue
+                published_doi = calkit.invenio.extract_doi(record)
+            if published_doi is not None:
+                doi = published_doi
+            else:
+                typer.echo(
+                    "Could not confirm minted DOI from published record; "
+                    f"falling back to reserved DOI {doi}"
+                )
             url = f"https://doi.org/{doi}"
             typer.echo(f"Published to {to} with DOI: {doi}")
     else:
@@ -3202,38 +3394,23 @@ def new_release(
         doi_base_url = calkit.releases.SERVICES[to]["url"]
         doi_md = (
             f"[![DOI]({doi_base_url}/badge/DOI/{doi}.svg)]"
-            f"(https://handle.stage.datacite.org/{doi})"
+            f"(https://doi.org/{doi})"
         )
         if os.path.isfile("README.md"):
             with open("README.md") as f:
                 readme_txt = f.read()
         else:
-            readme_txt = f"# {title}\n"
-        existing_lines = readme_txt.split("\n")
-        new_lines = []
-        first_content_line_index = None
-        for n, line in enumerate(existing_lines):
-            if line.startswith(doi_md[:6]):
-                pass  # Skip DOI lines
-            else:
-                if (
-                    n != 0
-                    and line.strip()
-                    and first_content_line_index is None
-                ):
-                    first_content_line_index = len(new_lines)
-                new_lines.append(line)
-        # Ensure first 3 lines are title, blank, DOI lines
-        new_lines = (
-            [new_lines[0]]
-            + ["", doi_md, ""]
-            + new_lines[first_content_line_index:]
+            readme_txt = ""
+        readme_txt = calkit.releases.add_doi_badge_to_readme(
+            readme_txt, badge=doi_md, title=title
         )
-        readme_txt = "\n".join(new_lines)
         if not dry_run:
             with open("README.md", "w") as f:
                 f.write(readme_txt)
-                repo.git.add("README.md")
+            # Stage only after the file is closed; otherwise the buffered
+            # contents may not be flushed to disk yet and Git would stage an
+            # empty file
+            repo.git.add("README.md")
         else:
             typer.echo(f"Would have updated README.md to:\n{readme_txt}")
     # Create Git tag
@@ -3261,10 +3438,13 @@ def new_release(
     )
     releases[name] = release
     ck_info["releases"] = releases
-    # Create CITATION.cff file
+    # Create/update CITATION.cff file, preserving existing authors
     if release_type == "project":
         cff = calkit.releases.create_citation_cff(
-            ck_info=ck_info, release_name=name, release_date=release_date
+            ck_info=ck_info,
+            release_name=name,
+            release_date=release_date,
+            authors=authors,
         )
         if dry_run:
             typer.echo(f"Would write CITATION.cff:\n{cff}")
@@ -3285,11 +3465,13 @@ def new_release(
         references = reference_collections[0]
     ref_path = references.get("path", "references.bib")
     try:
+        # Read the existing references as raw text so we can append the new
+        # entry without reformatting the user's existing entries
         if os.path.isfile(ref_path):
             with open(ref_path) as f:
-                reflib = bibtexparser.load(f)
+                existing_text = f.read()
         else:
-            reflib = bibtexparser.bibdatabase.BibDatabase()
+            existing_text = ""
         bibtex_doi = doi
         if bibtex_doi is None and dry_run:
             mock_suffix = "".join(
@@ -3309,31 +3491,38 @@ def new_release(
         if not new_entries:
             raise ValueError("Failed to parse generated BibTeX entry")
         new_entry = new_entries[0]
-        # Search through entries for one with the same DOI, and replace if
-        # there is a match
+        # Search through existing entries for any with the same DOI, and
+        # replace them (by citation key) if there is a match. Tolerate parse
+        # errors here (e.g., non-standard or temporarily-invalid BibTeX) by
+        # skipping replacement detection and still appending the new entry.
         new_doi = new_entry.get("doi")
-        matching_indices = []
+        replace_ids = []
         if new_doi:
-            matching_indices = [
-                n
-                for n, entry in enumerate(reflib.entries)
+            try:
+                existing_entries = bibtexparser.loads(existing_text).entries
+            except Exception as e:
+                warn(f"Could not parse existing references to dedupe: {e}")
+                existing_entries = []
+            replace_ids = [
+                entry["ID"]
+                for entry in existing_entries
                 if entry.get("doi") == new_doi
             ]
-        if matching_indices:
+        if replace_ids:
             typer.echo(
                 "Found matching DOI in existing references "
-                f"({len(matching_indices)} entr"
-                f"{'y' if len(matching_indices) == 1 else 'ies'}); "
+                f"({len(replace_ids)} entr"
+                f"{'y' if len(replace_ids) == 1 else 'ies'}); "
                 "replacing"
             )
-            for n in reversed(matching_indices):
-                _ = reflib.entries.pop(n)
-        reflib.entries.append(new_entry)
+        new_text = calkit.releases.add_bibtex_entry(
+            existing_text, invenio_bibtex, replace_ids=replace_ids
+        )
         if dry_run:
             typer.echo(f"Would write updated references to {ref_path}")
         else:
             with open(ref_path, "w") as f:
-                bibtexparser.dump(reflib, f)
+                f.write(new_text)
             repo.git.add(ref_path)
     except Exception as e:
         warn(f"Failed to add to references: {e}")

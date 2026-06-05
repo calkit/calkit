@@ -111,10 +111,63 @@ def main(
         bool,
         typer.Option("--version", help="Show version and exit."),
     ] = False,
+    use_version: Annotated[
+        Optional[str],
+        typer.Option(
+            "--use-version",
+            help=(
+                "Re-invoke the CLI under a specific calkit-python version "
+                "via 'uvx --from'."
+            ),
+        ),
+    ] = None,
 ):
     if version:
         typer.echo(f"Calkit {calkit.__version__}")
         raise typer.Exit()
+    if use_version:
+        _exec_with_version(use_version)
+
+
+def _exec_with_version(version_spec: str) -> None:
+    """Replace this process with ``uvx --from calkit-python<spec> calkit ...``.
+
+    Strips ``--use-version`` from ``sys.argv`` before re-invoking so the
+    child process doesn't loop. Requires ``uv`` to be available on PATH.
+    """
+    from calkit.dependencies import _format_uvx_from
+
+    if shutil.which("uvx") is None:
+        raise_error(
+            "'--use-version' requires 'uvx' (install uv: "
+            "https://docs.astral.sh/uv/)."
+        )
+    cleaned: list[str] = []
+    argv = sys.argv[1:]
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--use-version":
+            i += 2
+            continue
+        if a.startswith("--use-version="):
+            i += 1
+            continue
+        cleaned.append(a)
+        i += 1
+    # A leading ``--`` was only needed to escape *our* option parser
+    # (e.g. ``ck --use-version 0.3 -- --version``). Forwarding it would
+    # leave the child CLI to interpret it as a positional, so older
+    # versions error with "No such command '--version'".
+    if cleaned and cleaned[0] == "--":
+        cleaned = cleaned[1:]
+    cmd = [
+        "uvx",
+        "--from",
+        _format_uvx_from(version_spec),
+        "calkit",
+    ] + cleaned
+    os.execvp(cmd[0], cmd)
 
 
 @app.command(name="init")
@@ -346,6 +399,17 @@ def get_status(
             calkit.git.get_repo()
         except InvalidGitRepositoryError:
             git.Repo.init()
+        # Likewise, if this isn't a DVC repo, initialize one so the pipeline
+        # can be compiled and its status reported. DVC init requires a Git
+        # repo, which the block above ensures exists.
+        if not os.path.isfile(os.path.join(".dvc", "config")):
+            typer.echo("Initializing DVC repository")
+            try:
+                result = calkit.dvc.run_dvc_command(["init", "-q"])
+                if result != 0:
+                    raise subprocess.CalledProcessError(result, "dvc init")
+            except subprocess.CalledProcessError as e:
+                raise_error(f"Failed to initialize DVC repository: {e}")
     valid_categories = ["project", "git", "dvc", "pipeline"]
     if categories is not None:
         for category in categories:
@@ -357,7 +421,15 @@ def get_status(
     else:
         categories = valid_categories
     pipeline_status = None
+    running_status = None
     if "pipeline" in categories or "dvc" in categories:
+        # If a run is in progress it holds the DVC lock, so computing the full
+        # status would just error out (and would mutate files like dvc.yaml or
+        # notebooks mid-run). Report the running stage from the run log instead.
+        running_status = _get_running_pipeline_status()
+    if running_status is None and (
+        "pipeline" in categories or "dvc" in categories
+    ):
         # Sync zips so the zip files reflect current workspace state before
         # reporting status
         calkit.dvc.zip.sync_all(direction="to-zip")
@@ -430,14 +502,17 @@ def get_status(
         if "dvc" in categories:
             try:
                 dvc_repo = calkit.dvc.get_dvc_repo()
-                data_status = dvc_repo.data_status()
-                if isinstance(data_status, dict):
-                    data_status.pop("git", None)
-                status_dict["dvc"] = data_status
+                data_status = dict(dvc_repo.data_status())
+                data_status.pop("git", None)
+                status_dict["dvc"] = calkit.dvc.data_status_as_posix(
+                    data_status
+                )
             except Exception as e:
                 status_dict["dvc"] = {"error": f"{e.__class__.__name__}: {e}"}
         if "pipeline" in categories or "dvc" in categories:
-            if pipeline_status is None:
+            if running_status is not None:
+                status_dict["pipeline"] = running_status
+            elif pipeline_status is None:
                 status_dict["pipeline"] = None
             else:
                 status_dict["pipeline"] = pipeline_status.model_dump(
@@ -483,9 +558,13 @@ def get_status(
             dvc_repo = calkit.dvc.get_dvc_repo()
             raw = dict(dvc_repo.data_status())
             raw.pop("git", None)
+            raw = calkit.dvc.data_status_as_posix(raw)
             typer.echo(_format_dvc_data_status(raw, zip_path_map))
     if "pipeline" in categories or "dvc" in categories:
         print_sep("Pipeline")
+        if running_status is not None:
+            _print_running_pipeline_status(running_status)
+            return
         # Nicely format the results from pipeline status
         if pipeline_status and pipeline_status.errors:
             warn("Pipeline status unavailable due to errors:")
@@ -502,6 +581,8 @@ def get_status(
                 if stale_stage is None:
                     continue
                 typer.echo(f"        {typer.style(stage_name, fg='yellow')}:")
+                if stale_stage.always_run:
+                    typer.echo("          always runs")
                 if stale_stage.modified_command:
                     typer.echo("          modified command")
                 # Show stale outputs for this stage
@@ -519,8 +600,16 @@ def get_status(
                     typer.echo("          modified inputs:")
                     for input_path in stale_stage.modified_inputs:
                         typer.echo(f"            {input_path}")
+            if pipeline_status.always_run_stage_names:
+                typer.echo("Always-run stages:")
+                for stage_name in pipeline_status.always_run_stage_names:
+                    typer.echo(f"        {typer.style(stage_name, fg='cyan')}")
         elif pipeline_status:
             typer.echo("Pipeline is up to date.")
+            if pipeline_status.always_run_stage_names:
+                typer.echo("Always-run stages:")
+                for stage_name in pipeline_status.always_run_stage_names:
+                    typer.echo(f"        {typer.style(stage_name, fg='cyan')}")
 
 
 @app.command(name="diff")
@@ -1240,11 +1329,12 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
                 # If we were already running a stage, add its end time
                 add_stage_info(current_stage_name, "end_time", timestamp)
                 add_stage_info(current_stage_name, "status", "completed")
-            # This is a stage run
+            # This is a stage run. The line is ``Running stage '<name>':``;
+            # strip only the trailing ``:`` delimiter and surrounding quotes
+            # so colons inside the name (e.g. ``sub1/dvc.yaml:stage-a`` for an
+            # inline subproject target) are preserved.
             current_stage_name = (
-                message.removeprefix("Running stage ")
-                .replace("'", "")
-                .replace(":", "")
+                message.removeprefix("Running stage ").rstrip(":").strip("'")
             )
             current_stage_status = "running"
             add_stage_info(current_stage_name, "start_time", timestamp)
@@ -1278,6 +1368,239 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
                 add_stage_info(stage_name, "status", "failed")
                 break
     return res
+
+
+def _prune_run_logs(
+    logs_dir: str, keep: int = 10, protect: str | None = None
+) -> None:
+    """Keep only the most recent ``keep`` run logs in ``logs_dir``.
+
+    Run logs are named by their start timestamp, so sorting by name orders
+    them by time; the oldest beyond ``keep`` are removed so the private log
+    directory doesn't grow without bound. ``protect`` (the active run's log
+    filename) is never deleted, guarding against clock skew or odd names that
+    could otherwise sort the live log into the prune set.
+    """
+    if not os.path.isdir(logs_dir):
+        return
+    logs = sorted(f for f in os.listdir(logs_dir) if f.endswith(".log"))
+    for fname in logs[:-keep]:
+        if fname == protect:
+            continue
+        try:
+            os.remove(os.path.join(logs_dir, fname))
+        except OSError:
+            pass
+
+
+def _get_latest_run_log_content() -> str | None:
+    """Return the contents of the most recent run log, or ``None``.
+
+    Looks in the private ``.calkit/local/logs`` directory (always written)
+    and the tracked ``.calkit/logs`` directory, choosing the latest ``.log``
+    file across both by name (logs are named by start timestamp).
+    """
+    candidates = []
+    for d in [
+        os.path.join(".calkit", "local", "logs"),
+        os.path.join(".calkit", "logs"),
+    ]:
+        if os.path.isdir(d):
+            candidates += [
+                os.path.join(d, f) for f in os.listdir(d) if f.endswith(".log")
+            ]
+    if not candidates:
+        return None
+    latest = max(candidates, key=os.path.basename)
+    try:
+        with open(latest) as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _format_run_elapsed(start_iso: str) -> str:
+    """Format the time elapsed since ``start_iso`` (a UTC ISO timestamp)."""
+    try:
+        start = datetime.fromisoformat(start_iso)
+    except ValueError:
+        return "?"
+    total = int((calkit.utcnow(remove_tz=True) - start).total_seconds())
+    total = max(total, 0)
+    hours, rem = divmod(total, 3600)
+    minutes, seconds = divmod(rem, 60)
+    if hours:
+        return f"{hours}h{minutes}m{seconds}s"
+    if minutes:
+        return f"{minutes}m{seconds}s"
+    return f"{seconds}s"
+
+
+def _stage_target_from_cmd(cmd: str) -> str | None:
+    """Extract a DVC stage target from a ``dvc repro`` command string.
+
+    Concurrent scheduler items (an ``iterate_over`` sweep) run as separate
+    ``dvc repro --single-item <stage>`` processes whose stage name is the
+    trailing positional argument recorded in the DVC lock. This lets the
+    sweep items be named even before the main run log exists. Returns
+    ``None`` for commands without an explicit target (e.g. a full-pipeline
+    ``dvc repro`` or the parent ``calkit run``).
+    """
+    tokens = cmd.split()
+    if "repro" not in tokens:
+        return None
+    after = tokens[tokens.index("repro") + 1 :]
+    targets = [t for t in after if not t.startswith("-")]
+    return targets[-1] if targets else None
+
+
+def _get_running_pipeline_status() -> dict | None:
+    """Return live pipeline run progress, or ``None`` if no run is running.
+
+    A run is in progress when a live process holds DVC's rwlock. The most
+    recent run log is then parsed to report which stages have finished and
+    which is currently running. Concurrently-run scheduler items execute in
+    their own processes before the run log exists, so their stage names are
+    also recovered from the lock's command strings.
+    """
+    processes = calkit.dvc.get_running_pipeline_processes()
+    if not processes:
+        return None
+    # Stage targets in the lock commands identify concurrently-run scheduler
+    # items (an iterate_over sweep). These run in their own processes during a
+    # prepass, before the current run's log exists, so the latest log on disk
+    # is from a previous run; report only the lock's items in that case to
+    # avoid mixing in stale stages.
+    concurrent_stages: list[str] = []
+    for proc in processes:
+        target = _stage_target_from_cmd(proc.get("cmd", ""))
+        if target is not None and target not in concurrent_stages:
+            concurrent_stages.append(target)
+    if concurrent_stages:
+        return {
+            "running": True,
+            "processes": processes,
+            "stages": {},
+            "running_stages": concurrent_stages,
+        }
+    content = _get_latest_run_log_content()
+    stages = (
+        _stage_run_info_from_log_content(content)
+        if content is not None
+        else {}
+    )
+    running_stages = [
+        name for name, info in stages.items() if "status" not in info
+    ]
+    return {
+        "running": True,
+        "processes": processes,
+        "stages": stages,
+        "running_stages": running_stages,
+    }
+
+
+def _print_running_pipeline_status(running_status: dict) -> None:
+    """Print a human-readable summary of an in-progress pipeline run."""
+    processes = running_status["processes"]
+    pids = ", ".join(str(p["pid"]) for p in processes)
+    typer.echo(f"Run in progress (PID {pids})")
+    stages = running_status["stages"]
+    finished = [
+        name
+        for name, info in stages.items()
+        if info.get("status") in ("completed", "skipped")
+    ]
+    running_stages = running_status["running_stages"]
+    if finished:
+        typer.echo(f"        completed: {', '.join(finished)}")
+    if running_stages:
+        for name in running_stages:
+            start = stages.get(name, {}).get("start_time")
+            label = typer.style(name, fg="green")
+            if start:
+                typer.echo(
+                    f"        running:   {label} "
+                    f"({_format_run_elapsed(start)})"
+                )
+            else:
+                typer.echo(f"        running:   {label}")
+    elif not finished:
+        typer.echo("        starting up...")
+
+
+def _concurrent_scheduler_prepass(
+    ck_info: dict,
+    targets: list[str],
+    keep_going: bool,
+    quiet: bool,
+) -> None:
+    """Submit iterated scheduler-stage jobs concurrently before ``dvc repro``.
+
+    DVC's ``repro`` runs matrix items serially, so each scheduler item would
+    otherwise submit-and-wait one at a time. Here we build each eligible
+    stage's upstreams (serially, to avoid an rwlock race), then fan its items
+    out as concurrent ``dvc repro --single-item`` processes---all at once,
+    leaving it to the cluster's scheduler to queue them. The trailing
+    ``dvc repro`` then sees the items as up-to-date and records them,
+    preserving granular per-item caching so a failed sweep resumes only the
+    failed items. Not used under --force (the caller runs those serially).
+    """
+    import sys
+
+    import calkit.pipeline
+
+    eligible = calkit.pipeline.get_concurrent_scheduler_stages(ck_info)
+    if targets:
+        eligible = [name for name in eligible if name in targets]
+    if not eligible:
+        return
+    for stage_name in eligible:
+        item_targets, upstream_targets = (
+            calkit.pipeline.get_matrix_item_targets(stage_name)
+        )
+        if not item_targets:
+            continue
+        # Each item holds a local polling process for the job's lifetime, so
+        # cap the fan-out to avoid exhausting local resources; a sweep larger
+        # than this should be split into multiple runs.
+        max_jobs = 100
+        if len(item_targets) > max_jobs:
+            raise_error(
+                f"Stage '{stage_name}' would submit {len(item_targets)} jobs "
+                f"at once, exceeding the limit of {max_jobs}. Each concurrent "
+                "submission holds a local process, so reduce the sweep size "
+                "or split it across multiple runs."
+            )
+        if not quiet:
+            calkit.echo(
+                f"🧵 Submitting {len(item_targets)} '{stage_name}' jobs"
+            )
+        # Build shared upstreams first; if two items raced to build the same
+        # stale dependency, one would fail with an rwlock "busy" error. Go
+        # through `calkit dvc` so the ck:// remote scheme is registered.
+        if upstream_targets:
+            up_cmd = [sys.executable, "-m", "calkit", "dvc", "repro"]
+            up_cmd += upstream_targets
+            if subprocess.run(up_cmd).returncode != 0:
+                raise_error(
+                    f"Failed to build dependencies for stage '{stage_name}'"
+                )
+        results = calkit.pipeline.reproduce_targets_concurrently(
+            item_targets, max_workers=len(item_targets)
+        )
+        failed = [t for t, rc in results.items() if rc != 0]
+        if failed:
+            msg = (
+                f"{len(failed)} of {len(item_targets)} '{stage_name}' jobs "
+                f"failed: {', '.join(failed)}"
+            )
+            if keep_going:
+                warn(msg)
+            else:
+                raise_error(
+                    msg + ". Successful jobs are cached; rerun to resume."
+                )
 
 
 @app.command(name="run")
@@ -1703,24 +2026,48 @@ def run(
     if downstream is not None:
         args.append("--downstream")
         args += downstream
+    # Pre-submit iterated scheduler-stage jobs concurrently; the main repro
+    # below then records them. Skipped for --dry so the dry plan stays intact,
+    # and for --force, which re-runs every item: those go serially through the
+    # main repro so we don't both pre-run and re-run each job. Also skipped
+    # when a selector narrows the run (--downstream/--pipeline/--recursive/
+    # --glob/--all-pipelines): positional ``targets`` is empty then, so the
+    # prepass can't tell which sweeps will actually run and would otherwise
+    # submit all of them.
+    run_is_narrowed = bool(
+        downstream or pipeline or recursive or glob or all_pipelines
+    )
+    if dvc_stages and not dry and not force and not run_is_narrowed:
+        _concurrent_scheduler_prepass(
+            ck_info=ck_info,
+            targets=targets,
+            keep_going=keep_going,
+            quiet=quiet,
+        )
     start_time_no_tz = calkit.utcnow(remove_tz=True)
     start_time = calkit.utcnow(remove_tz=False)
     run_id = uuid.uuid4().hex
-    # Always log output, but only save systems/run data if specified
-    log_fpath = os.path.join(
-        ".calkit",
-        "logs",
+    log_fname = (
         start_time_no_tz.isoformat(timespec="seconds").replace(":", "-")
         + "-"
         + run_id
-        + ".log",
+        + ".log"
     )
+    # Always write the run log under the gitignored .calkit/local/logs so
+    # `calkit status` can report which stage is running while the pipeline
+    # holds the DVC lock. With --log, the log is additionally saved to the
+    # tracked .calkit/logs directory along with run information.
+    local_logs_dir = os.path.join(calkit.ensure_local_dir(), "logs")
+    os.makedirs(local_logs_dir, exist_ok=True)
+    log_fpath = os.path.join(local_logs_dir, log_fname)
     if verbose:
         typer.echo(f"Starting run ID: {run_id}")
         typer.echo(f"Saving logs to {log_fpath}")
-    os.makedirs(os.path.dirname(log_fpath), exist_ok=True)
     # Create a file handler for dvc.stage.run logger
     file_handler = logging.FileHandler(log_fpath, mode="w")
+    # Keep the private log directory bounded; the new log counts toward the
+    # cap and is protected so it can never be pruned out from under this run.
+    _prune_run_logs(local_logs_dir, keep=10, protect=log_fname)
     file_handler.setLevel(logging.DEBUG)
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     formatter.converter = time.gmtime  # Use UTC time for asctime
@@ -1730,7 +2077,14 @@ def run(
     dvc.repo.reproduce.logger.setLevel(logging.ERROR)
     # Disable other misc DVC output
     dvc.ui.ui.write = lambda *args, **kwargs: None
-    res = dvc_cli_main(["repro"] + args)
+    # Tell `calkit scheduler batch` to resubmit completed jobs under --force;
+    # otherwise it skips jobs it sees as already done.
+    if force:
+        os.environ["CALKIT_FORCE"] = "1"
+    try:
+        res = dvc_cli_main(["repro"] + args)
+    finally:
+        os.environ.pop("CALKIT_FORCE", None)
     failed = failed or res != 0
     # Parse log to get timing and which stages ran
     with open(log_fpath, "r") as f:
@@ -1813,8 +2167,12 @@ def run(
         os.makedirs(os.path.dirname(run_info_fpath), exist_ok=True)
         with open(run_info_fpath, "w") as f:
             json.dump(run_info, f, indent=2)
-    else:
-        os.remove(log_fpath)
+        # Also keep the raw log in the tracked .calkit/logs directory
+        saved_log_fpath = os.path.join(".calkit", "logs", log_fname)
+        os.makedirs(os.path.dirname(saved_log_fpath), exist_ok=True)
+        shutil.copy2(log_fpath, saved_log_fpath)
+    # The private log under .calkit/local/logs is retained either way so the
+    # last run's status stays inspectable; it is gitignored.
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
     if failed:
         raise_error("Pipeline failed")
@@ -2060,7 +2418,16 @@ def run_in_env(
             )
         # TODO: Prefix should only be in the env file or calkit.yaml, not both?
         prefix = env.get("prefix")
-        conda_cmd = ["conda", "run"]
+        # Conda is often not on the PATH (especially on Windows), so search
+        # typical install locations rather than relying on the bare name,
+        # which would fail with a confusing FileNotFoundError traceback.
+        conda_exe = calkit.conda.find_conda_exe()
+        if conda_exe is None:
+            raise_error(
+                "Cannot find Conda executable; "
+                "ensure Conda is installed and on the PATH"
+            )
+        conda_cmd = [conda_exe, "run"]
         if prefix is not None:
             conda_cmd += ["--prefix", os.path.abspath(prefix)]
         else:
@@ -2075,7 +2442,10 @@ def run_in_env(
     elif env["kind"] == "pixi":
         env_cmd = []
         if "name" in env:
-            env_cmd = ["--environment", env["name"]]
+            env_cmd += ["--environment", env["name"]]
+        env_path = env.get("path")
+        if env_path and os.path.dirname(env_path):
+            env_cmd += ["--manifest-path", os.path.abspath(env_path)]
         cmd = ["pixi", "run"] + env_cmd + cmd
         if verbose:
             typer.echo(f"Running command: {cmd}")
@@ -2332,6 +2702,44 @@ def run_in_env(
             subprocess.check_call(cmd, cwd=env_dir, env=env_vars)
         except subprocess.CalledProcessError:
             raise_error("Failed to run in renv")
+    elif env["kind"] == "nix":
+        from calkit.cli.check import check_nix_env
+
+        env_path = env.get("path")
+        if env_path is None:
+            raise_error(
+                "Nix environments require a path pointing to flake.nix"
+            )
+        assert isinstance(env_path, str)
+        if os.path.basename(env_path) != "flake.nix":
+            raise_error(
+                "Nix environments require a path pointing to flake.nix"
+            )
+        if not no_check:
+            check_nix_env(env=env, verbose=verbose)
+        env_dir = os.path.dirname(os.path.abspath(env_path)) or "."
+        flake_ref = f"path:{env_dir}"
+        shell_name = env.get("shell")
+        if shell_name:
+            flake_ref = f"{flake_ref}#{shell_name}"
+        shell_cmd = _to_shell_cmd(cmd)
+        nix_cmd = [
+            "nix",
+            "--extra-experimental-features",
+            "nix-command flakes",
+            "develop",
+            flake_ref,
+            "--command",
+            "sh",
+            "-c",
+            shell_cmd,
+        ]
+        if verbose:
+            typer.echo(f"Running command: {nix_cmd}")
+        try:
+            subprocess.check_call(nix_cmd, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in Nix environment")
     elif env["kind"] == "matlab":
         if not no_check:
             check_matlab_env(
@@ -2377,6 +2785,55 @@ def run_in_env(
             raise_error("Failed to run in MATLAB environment")
     else:
         raise_error("Environment kind not supported")
+
+
+@app.command(
+    name="install",
+    help=(
+        "Install a registered native dependency (e.g., pixi, uv) via its "
+        "upstream installer for the current platform."
+    ),
+)
+def install_app(
+    name: Annotated[
+        str,
+        typer.Argument(
+            help="The app to install (e.g., 'pixi', 'uv').",
+        ),
+    ],
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="Skip the confirmation prompt and install immediately.",
+        ),
+    ] = False,
+) -> None:
+    from calkit import install as _install
+
+    # Surface a platform-specific "use X instead" message before the
+    # generic "no installer" error -- e.g., Nix on Windows needs WSL2.
+    unsupported = _install.get_unsupported_message(name)
+    if unsupported:
+        raise_error(unsupported)
+    entry = _install.get_installer(name)
+    if entry is None:
+        raise_error(
+            f"No registered installer for '{name}'. Known apps: "
+            + ", ".join(sorted(_install.INSTALLERS))
+        )
+    # ``--yes`` makes this scriptable (CI, provisioning) without losing
+    # the safety prompt for plain interactive use.
+    if yes:
+        ok = _install.install(name)
+    else:
+        from calkit.dependencies import _is_interactive
+
+        ok = _install.prompt_and_install(name, interactive=_is_interactive())
+    if not ok:
+        raise_error(f"Failed to install '{name}'")
+    typer.echo(f"✅ Installed '{name}'")
 
 
 @app.command(name="xproc|runproc", help="Execute a procedure.")

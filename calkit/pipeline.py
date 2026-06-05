@@ -1,8 +1,8 @@
 """Pipeline-related functionality."""
 
 import itertools
-import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import typer
@@ -15,17 +15,6 @@ from calkit.models.pipeline import (
     PathOutput,
     Pipeline,
 )
-
-
-class _FrozenStageWarningFilter(logging.Filter):
-    """Drop only DVC's "stage is frozen" status warning.
-
-    Frozen stages are intentionally hidden from Calkit status output, so this
-    warning is noise; all other ``dvc.repo.status`` diagnostics pass through.
-    """
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        return "is frozen. Its dependencies are" not in record.getMessage()
 
 
 def _coerce_frozen(value: object) -> bool:
@@ -90,7 +79,36 @@ class PipelineStatus(BaseModel):
     @computed_field
     @property
     def stale_stage_names(self) -> list[str]:
-        return list(self.stale_stages.keys())
+        # Pure always-run stages aren't truly stale; surface them via
+        # always_run_stage_names instead.
+        return [
+            name
+            for name, stage in self.stale_stages.items()
+            if not stage.always_run
+            or stage.modified_command
+            or stage.modified_inputs
+            or stage.modified_outputs
+            or stage.stale_outputs
+        ]
+
+    @computed_field
+    @property
+    def always_run_stage_names(self) -> list[str]:
+        # Only list stages whose sole change indicator is always_run; stages
+        # that also have real changes are reported under stale_stage_names.
+        # Subproject stages are excluded: their always-changed status is a
+        # delegation detail, not a user-meaningful always-run stage of the
+        # parent project.
+        return [
+            name
+            for name, stage in self.stale_stages.items()
+            if stage.always_run
+            and not stage.is_subproject
+            and not stage.modified_command
+            and not stage.modified_inputs
+            and not stage.modified_outputs
+            and not stage.stale_outputs
+        ]
 
     @computed_field
     @property
@@ -106,7 +124,20 @@ class PipelineStatus(BaseModel):
     @computed_field
     @property
     def is_stale(self) -> bool:
-        return bool(self.stale_stages)
+        # A stage whose only listed change is "always_run" is not actually
+        # stale — it just always re-executes by design. Treat the pipeline
+        # as stale only if some stage has real change indicators.
+        for stage in self.stale_stages.values():
+            if not stage.always_run:
+                return True
+            if (
+                stage.modified_command
+                or stage.modified_inputs
+                or stage.modified_outputs
+                or stage.stale_outputs
+            ):
+                return True
+        return False
 
 
 class StaleStage(BaseModel):
@@ -117,6 +148,13 @@ class StaleStage(BaseModel):
     modified_inputs: list[str] = Field(default_factory=list)
     modified_outputs: list[str] = Field(default_factory=list)
     modified_command: bool = False
+    always_run: bool = False
+    # True for stages that originate from a subproject (either an individual
+    # "{sp}:{stage}" stage or a kept "{sp} (subproject)" wrapper). Subproject
+    # wrapper stages are marked always-changed purely as a delegation
+    # mechanism, so they should not be advertised as always-run stages of the
+    # parent project.
+    is_subproject: bool = False
 
     @staticmethod
     def _as_path_list(paths: object) -> list[str]:
@@ -199,23 +237,29 @@ class StaleStage(BaseModel):
         status_data: list | dict | str,
         configured_outputs: list[str] | None = None,
         path_prefix: str | None = None,
+        is_subproject: bool = False,
     ) -> "StaleStage":
         modified_inputs = []
         output_paths = []
         modified_outputs = []
         status_blocks = []
         modified_command = False
+        always_run = False
         if isinstance(status_data, dict):
             status_blocks = [status_data]
         elif isinstance(status_data, list):
             status_blocks = [
                 item for item in status_data if isinstance(item, dict)
             ]
-            # DVC may return plain markers like ["changed command"].
+            # DVC may return plain markers like ["changed command"] or
+            # ["always changed"], possibly alongside other change blocks.
             if "changed command" in status_data:
                 modified_command = True
+            if "always changed" in status_data:
+                always_run = True
         elif isinstance(status_data, str):
             modified_command = status_data == "changed command"
+            always_run = status_data == "always changed"
         for block in status_blocks:
             if "changed command" in block:
                 changed_command_value = block.get("changed command")
@@ -244,18 +288,15 @@ class StaleStage(BaseModel):
         # parent-relative.  Use normpath to collapse any "../" segments that
         # arise from cross-subproject deps (e.g. sp + "../shared.txt").
         if path_prefix:
-            modified_inputs = [
-                os.path.normpath(os.path.join(path_prefix, p))
-                for p in modified_inputs
-            ]
-            output_paths = [
-                os.path.normpath(os.path.join(path_prefix, p))
-                for p in output_paths
-            ]
-            modified_outputs = [
-                os.path.normpath(os.path.join(path_prefix, p))
-                for p in modified_outputs
-            ]
+
+            def _prefix(p: str) -> str:
+                return Path(
+                    os.path.normpath(os.path.join(path_prefix, p))
+                ).as_posix()
+
+            modified_inputs = [_prefix(p) for p in modified_inputs]
+            output_paths = [_prefix(p) for p in output_paths]
+            modified_outputs = [_prefix(p) for p in modified_outputs]
         configured_outputs = [str(path) for path in (configured_outputs or [])]
         stale_outputs = []
         if modified_inputs or modified_command:
@@ -263,7 +304,16 @@ class StaleStage(BaseModel):
         stale_outputs.extend(
             [path for path in output_paths if path not in modified_outputs]
         )
-        if not stale_outputs and not modified_outputs and configured_outputs:
+        # Fallback: if DVC flagged the stage but we couldn't attribute the
+        # change to specific paths, mark all configured outputs as stale.
+        # Skip the fallback for pure "always_run" stages — they always
+        # re-execute by design, not because outputs are out of date.
+        if (
+            not stale_outputs
+            and not modified_outputs
+            and configured_outputs
+            and not always_run
+        ):
             stale_outputs.extend(configured_outputs)
         stale_outputs = list(dict.fromkeys(stale_outputs))
         return cls(
@@ -272,6 +322,8 @@ class StaleStage(BaseModel):
             modified_inputs=modified_inputs,
             modified_outputs=modified_outputs,
             modified_command=modified_command,
+            always_run=always_run,
+            is_subproject=is_subproject,
         )
 
 
@@ -312,8 +364,8 @@ def stages_are_similar(stage1: dict, stage2: dict) -> bool:
     elif kind == "jupyter-notebook":
         if stage1.get("notebook_path") != stage2.get("notebook_path"):
             return False
-    # For latex
-    elif kind == "latex":
+    # For latex and quarto
+    elif kind in ["latex", "quarto"]:
         if stage1.get("target_path") != stage2.get("target_path"):
             return False
     # For command stages, check the command
@@ -506,6 +558,74 @@ def collapse_dvc_stages(
     return stage
 
 
+def _status_target_matches(
+    target: str,
+    display_name: str,
+    bare_name: str,
+    subproject: str | None,
+    stale_stage: StaleStage,
+) -> bool:
+    """Return True if a status ``target`` selects this stage.
+
+    Because the full DVC status is now computed and filtered locally (rather
+    than asking DVC to filter by target), this is where each ``target`` passed
+    to :func:`get_status` is resolved against a single stage. A ``target`` may
+    be a stage name in any of calkit's forms (``stage``, ``dvc.yaml:stage``,
+    ``subproject:stage``, or a whole ``subproject``) or a repo path, which is
+    matched against the stage's stale/modified inputs and outputs.
+
+    Iterated/matrix stages use a ``name@param`` key in DVC status, so the base
+    name (the part before ``@``) is matched too — targeting the base name
+    selects every iteration, consistent with how ``calkit run`` expands matrix
+    targets.
+    """
+    base_name = bare_name.split("@")[0]
+    # Stage-name matching is done against the raw target so it covers all of
+    # calkit's stage-target forms as well as DVC's native ``dvc.yaml:stage``
+    # and ``<subproject>/dvc.yaml:stage`` forms (the latter is what
+    # translate_run_targets emits for inline subprojects).
+    stage_aliases = {display_name, bare_name, base_name}
+    if subproject is not None:
+        subproject_name = Path(subproject).name
+        if target in {subproject, subproject_name}:
+            return display_name.startswith(
+                f"{subproject}:"
+            ) or display_name == (f"{subproject} (subproject)")
+        stage_aliases |= {
+            f"{subproject}:{bare_name}",
+            f"{subproject_name}:{bare_name}",
+            f"{subproject}:{base_name}",
+            f"{subproject_name}:{base_name}",
+            f"{subproject}/dvc.yaml:{bare_name}",
+            f"{subproject}/dvc.yaml:{base_name}",
+        }
+    else:
+        stage_aliases |= {
+            f"dvc.yaml:{bare_name}",
+            f"dvc.yaml:{base_name}",
+        }
+    if target in stage_aliases:
+        return True
+    # Otherwise treat the target as a repo path and match it against the
+    # stage's stale/modified inputs and outputs. A target is path-like if it
+    # exists on disk or contains a separator; this keeps root-level paths
+    # without separators (e.g. ``data`` or ``out.csv``) selectable, which a
+    # separator-only heuristic would miss. A target that looks like a stage
+    # selector (contains ``:``) but matched no stage above is not a path.
+    if ":" in target and not os.path.exists(target):
+        return False
+    is_pathlike = os.path.exists(target) or "/" in target or "\\" in target
+    if not is_pathlike:
+        return False
+    norm_target = Path(target).as_posix().rstrip("/")
+    candidate_paths = (
+        stale_stage.stale_outputs
+        + stale_stage.modified_inputs
+        + stale_stage.modified_outputs
+    )
+    return any(_paths_overlap(norm_target, p) for p in candidate_paths)
+
+
 def get_status(
     ck_info: dict | None = None,
     targets: list[str] | None = None,
@@ -586,19 +706,14 @@ def get_status(
                 return PipelineStatus.model_validate(result)
         try:
             dvc_repo = calkit.dvc.get_dvc_repo()
-            # Frozen stages emit a "stage is frozen. Its dependencies are not
-            # going to be shown in the status output." warning from DVC's
-            # status module; suppress just that message since we intentionally
-            # hide frozen stages from the Calkit status output entirely.
-            # A targeted filter is used (rather than raising the logger level)
-            # so unrelated DVC diagnostics are still emitted.
-            dvc_status_logger = logging.getLogger("dvc.repo.status")
-            frozen_filter = _FrozenStageWarningFilter()
-            dvc_status_logger.addFilter(frozen_filter)
-            try:
-                raw_status = dvc_repo.status(targets=targets)
-            finally:
-                dvc_status_logger.removeFilter(frozen_filter)
+            # calkit.dvc.core installs a filter on dvc.repo.status that drops
+            # the noisy frozen-stage warning, so the call here stays quiet.
+            # Ask DVC for the complete stale set, then filter locally.
+            # DVC's own target filtering can miss stale propagation from
+            # isolated subprojects, which makes targeted status disagree with
+            # the full-project status view.
+            raw_status = dvc_repo.status()
+            raw_status = calkit.dvc.status_as_posix(raw_status)
         except Exception as e:
             result["errors"].append(
                 "Failed to get pipeline status from DVC: "
@@ -635,6 +750,7 @@ def get_status(
             try:
                 sp_dvc_repo = calkit.dvc.get_dvc_repo(sp)
                 sp_raw_status = sp_dvc_repo.status()
+                sp_raw_status = calkit.dvc.status_as_posix(sp_raw_status)
             except Exception:
                 sp_raw_status = {}
             if sp_raw_status:
@@ -665,7 +781,10 @@ def get_status(
         # collisions when a subproject stage shares a name with a root stage.
         raw_stale_stages: dict[str, tuple[str, str | None, list]] = {}
         for k, v in raw_status.items():
-            if v == ["always changed"] or k.endswith(".dvc"):
+            # Skip DVC-tracked files (.dvc entries) — they are not pipeline
+            # stages. Stages marked ["always changed"] are kept so the user
+            # sees them in the pipeline status output.
+            if k.endswith(".dvc"):
                 continue
             if "dvc.yaml:" in k:
                 prefix, bare_name = k.split("dvc.yaml:", 1)
@@ -750,7 +869,7 @@ def get_status(
                 )
             # DVC reports subproject stage paths relative to the repo root
             # (e.g., "sub1/out.txt"), but calkit.yaml stores them relative to
-            # the subproject dir ("out.txt").  Prefix with the subproject path
+            # the subproject dir ("out.txt"). Prefix with the subproject path
             # so configured_outputs matches DVC's reported paths.
             raw_outputs = [
                 output.get("path", str(output))
@@ -759,20 +878,47 @@ def get_status(
                 for output in stage_cfg.get("outputs", [])
             ]
             if subproject:
+                # Use posix separators so these match DVC's reported paths
+                # (which are always forward-slash, repo-root-relative). Using
+                # the OS-native separator here would, on Windows, produce a
+                # backslash variant that escapes path dedup and shows up as a
+                # duplicate stale output alongside DVC's posix path.
                 configured_outputs = [
-                    str(Path(subproject) / p) for p in raw_outputs
+                    (Path(subproject) / p).as_posix() for p in raw_outputs
                 ]
             else:
                 configured_outputs = raw_outputs
             # For isolated subprojects, DVC reports paths relative to the
             # subproject dir; prefix them so all paths are parent-relative.
+            # A stage is subproject-originating if it carries a subproject
+            # path ("{sp}:{stage}") or is a kept wrapper for a subproject
+            # ("{sp} (subproject)", whose bare name is a known subproject).
+            is_subproject = (
+                subproject is not None or bare_name in sp_by_stage_name
+            )
             ordered_stale_stages[display_name] = StaleStage.from_status_data(
                 status_data=status_data,
                 configured_outputs=configured_outputs,
                 path_prefix=subproject
                 if subproject in isolated_sp_paths
                 else None,
+                is_subproject=is_subproject,
             )
+        if targets:
+            ordered_stale_stages = {
+                display_name: stale_stage
+                for display_name, stale_stage in ordered_stale_stages.items()
+                if any(
+                    _status_target_matches(
+                        target,
+                        display_name,
+                        raw_stale_stages[display_name][0],
+                        raw_stale_stages[display_name][1],
+                        stale_stage,
+                    )
+                    for target in targets
+                )
+            }
         result["stale_stages"] = ordered_stale_stages
         return PipelineStatus(
             has_pipeline=result["has_pipeline"],
@@ -1191,6 +1337,121 @@ def to_dvc(
                 typer.echo("Writing to dvc.yaml")
             calkit.ryaml.dump(dvc_yaml, f)
     return dvc_stages
+
+
+def get_concurrent_scheduler_stages(ck_info: dict) -> list[str]:
+    """Return iterated scheduler stages eligible for concurrent submission.
+
+    These are the ``iterate_over`` stages whose outer environment is a
+    SLURM/PBS env. Their iterations are independent jobs, so Calkit submits
+    them all at once and lets the cluster's own scheduler queue them; the
+    scheduler, not Calkit, decides how many run simultaneously. Non-iterated
+    stages keep DVC's normal serial repro.
+    """
+    from calkit.environments import COMPOSITE_ENV_SEP
+
+    environments = ck_info.get("environments", {})
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    result: list[str] = []
+    for name, stage in stages.items():
+        if not isinstance(stage, dict) or not stage.get("iterate_over"):
+            continue
+        env_name = stage.get("environment", "")
+        outer = env_name.split(COMPOSITE_ENV_SEP)[0]
+        env = environments.get(outer, {})
+        if env.get("kind") not in ("slurm", "pbs"):
+            continue
+        result.append(name)
+    return result
+
+
+def get_matrix_item_targets(
+    stage_name: str, wdir: str | None = None
+) -> tuple[list[str], list[str]]:
+    """Resolve a matrix stage into its item targets and upstream targets.
+
+    Uses the compiled DVC graph so DVC's own matrix naming and dependency
+    resolution are the source of truth. Returns ``(item_targets,
+    upstream_targets)`` where ``item_targets`` address each iteration
+    (e.g. ``stage@a``) and ``upstream_targets`` are every stage the items
+    depend on transitively, excluding the items themselves. In DVC's graph an
+    edge points from a stage to the stage it depends on, so a node's
+    dependencies are its networkx descendants.
+    """
+    import networkx as nx
+
+    import calkit.dvc
+
+    repo = calkit.dvc.get_dvc_repo(wdir)
+    prefix = stage_name + "@"
+    items = [
+        s
+        for s in repo.index.stages
+        if (getattr(s, "name", None) or "").startswith(prefix)
+    ]
+    item_set = set(items)
+    upstreams: set = set()
+    for item in items:
+        upstreams |= nx.descendants(repo.index.graph, item)
+    upstreams -= item_set
+    # Sort for a deterministic order (upstreams come from a set).
+    return (
+        sorted(s.addressing for s in items),
+        sorted(s.addressing for s in upstreams),
+    )
+
+
+def reproduce_targets_concurrently(
+    targets: list[str],
+    max_workers: int,
+    extra_args: list[str] | None = None,
+    wdir: str | None = None,
+    run_one: Callable[[str], int] | None = None,
+) -> dict[str, int]:
+    """Reproduce DVC targets concurrently, each in its own ``dvc repro``.
+
+    Each target runs as ``dvc repro --single-item <target>`` in a separate
+    process, so DVC's path-level rwlock keeps disjoint matrix items safe while
+    they run in parallel. ``--single-item`` is required: without it two items
+    sharing a stale upstream would both try to build it and one would fail
+    with an rwlock "busy" error, so upstreams must already be built. Returns
+    ``{target: returncode}``. ``run_one`` is injectable for testing.
+    """
+    import subprocess
+    import sys
+    from concurrent.futures import ThreadPoolExecutor
+
+    args = extra_args or []
+
+    # Default runner shells out to an isolated `dvc repro --single-item`. Go
+    # through `calkit dvc` rather than `dvc` directly so Calkit's DVC patches
+    # (e.g. the ck:// remote scheme) are registered in the subprocess.
+    # `--wait-for-lock` is a top-level DVC flag (must precede `repro`): each
+    # subprocess briefly acquires the repo-level lock for its status check and
+    # dvc.lock update, and DVC's 3s default timeout is too short when many
+    # iterations race to acquire it at once.
+    def _default_run_one(target: str) -> int:
+        cmd = [
+            sys.executable,
+            "-m",
+            "calkit",
+            "dvc",
+            "--wait-for-lock",
+            "repro",
+            "--single-item",
+        ]
+        cmd += args + [target]
+        return subprocess.run(cmd, cwd=wdir).returncode
+
+    runner = run_one if run_one is not None else _default_run_one
+    results: dict[str, int] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_target = {
+            executor.submit(runner, target): target for target in targets
+        }
+        for future, target in future_to_target.items():
+            results[target] = future.result()
+    return results
 
 
 def translate_run_targets(

@@ -10,7 +10,9 @@ import calkit
 import calkit.pipeline
 from calkit.environments import get_env_lock_fpath
 from calkit.pipeline import (
+    StaleStage,
     _expand_dep_excluding_subprojects,
+    _status_target_matches,
     collapse_dvc_stages,
     stages_are_similar,
 )
@@ -626,7 +628,9 @@ def test_sbatch_stage_to_dvc(tmp_dir):
     assert "something.jl" in stage2["deps"]
     assert "data/input2.txt" in stage2["deps"]
     assert slurm_lock in stage2["deps"]
-    assert "data/output3.txt" in stage2["outs"]
+    # Scheduler stages persist their outputs so DVC won't delete them before a
+    # re-run (the batch CLI manages deletion itself).
+    assert {"data/output3.txt": {"persist": True}} in stage2["outs"]
     # Even though the env defines default_setup, those entries don't end up
     # in the compiled stage cmd.
     assert "module purge" not in stage2["cmd"]
@@ -648,7 +652,7 @@ def test_sbatch_stage_to_dvc(tmp_dir):
     assert ".calkit/notebooks/cleaned/analysis.ipynb" in stage3["deps"]
     assert "data/input2.txt" in stage3["deps"]
     assert slurm_lock in stage3["deps"]
-    assert "data/notebook_output.txt" in stage3["outs"]
+    assert {"data/notebook_output.txt": {"persist": True}} in stage3["outs"]
     py_stage = stages["py-job"]
     print(py_stage)
     assert py_stage["cmd"] == (
@@ -1456,12 +1460,103 @@ def test_get_status_excludes_frozen_stage(tmp_dir):
     # Modifying the script must not make the frozen stage stale either
     with open("something/my-cool-script.py", "w") as f:
         f.write(
-            "with open('my-output.out', 'w') as f:\n"
-            "    f.write('Changed!')\n"
+            "with open('my-output.out', 'w') as f:\n    f.write('Changed!')\n"
         )
     status = calkit.pipeline.get_status(ck_info=ck_info)
     assert not status.is_stale
     assert "get-data" not in status.stale_stage_names
+
+
+def test_get_status_includes_always_run_stage(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "environments": {
+            "py": {
+                "kind": "uv-venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+            }
+        },
+        "pipeline": {
+            "stages": {
+                "ticker": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "something/my-cool-script.py",
+                    "outputs": ["ticker.out"],
+                    "always_run": True,
+                },
+                "normal": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "something/normal-script.py",
+                    "outputs": ["normal.out"],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("requirements.txt", "w") as f:
+        f.write("requests\n")
+    os.makedirs("something", exist_ok=True)
+    with open("something/my-cool-script.py", "w") as f:
+        f.write("open('ticker.out', 'w').write('tick')\n")
+    with open("something/normal-script.py", "w") as f:
+        f.write("open('normal.out', 'w').write('hi')\n")
+    # The compiled DVC stage must carry always_changed: true so DVC's status
+    # actually emits the "always changed" marker
+    dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info)
+    assert dvc_stages["ticker"]["always_changed"] is True
+    # Initial status: outputs missing, both stages are stale for real reasons.
+    # The always-run stage carries the always_run flag too.
+    status = calkit.pipeline.get_status(ck_info=ck_info)
+    assert status.is_stale
+    assert "ticker" in status.stale_stages
+    assert status.stale_stages["ticker"].always_run
+    assert "normal" in status.stale_stage_names
+    assert "ticker" in status.stale_stage_names
+    # Run the pipeline so outputs exist and nothing is "really" stale
+    subprocess.check_call(["calkit", "run"])
+    status = calkit.pipeline.get_status(ck_info=ck_info)
+    # The always-run stage must still be visible — that was the bug
+    assert "ticker" in status.stale_stages
+    assert status.stale_stages["ticker"].always_run
+    assert status.stale_stages["ticker"].stale_outputs == []
+    assert status.stale_stages["ticker"].modified_outputs == []
+    assert status.stale_stages["ticker"].modified_inputs == []
+    assert not status.stale_stages["ticker"].modified_command
+    assert status.always_run_stage_names == ["ticker"]
+    # A pipeline whose only "stale" stage is always_run must not be marked
+    # stale — calkit update relies on is_stale to gate release publication
+    assert not status.is_stale
+    assert "ticker" not in status.stale_stage_names
+
+
+def test_stale_stage_detects_always_changed_marker():
+    stale_stage = calkit.pipeline.StaleStage.from_status_data(
+        status_data=["always changed"],
+        configured_outputs=["ticker.out"],
+    )
+    assert stale_stage.always_run
+    assert not stale_stage.modified_command
+    assert stale_stage.stale_outputs == []
+    assert stale_stage.modified_outputs == []
+    assert stale_stage.modified_inputs == []
+
+
+def test_stale_stage_always_changed_with_missing_output():
+    # Mirrors DVC's actual output for an always_changed stage whose output
+    # is missing from cache: ["always changed"] coexists with a change block.
+    stale_stage = calkit.pipeline.StaleStage.from_status_data(
+        status_data=[
+            {"changed outs": {"ticker.out": "deleted"}},
+            "always changed",
+        ],
+        configured_outputs=["ticker.out"],
+    )
+    assert stale_stage.always_run
+    assert stale_stage.stale_outputs == ["ticker.out"]
 
 
 def test_stale_stage_detects_changed_command():
@@ -1500,6 +1595,115 @@ def test_stale_stage_path_prefix():
         path_prefix="solver",
     )
     assert stale_cross.modified_inputs == ["shared.txt"]
+
+
+def test_subproject_configured_outputs_posix_no_duplicate():
+    # A non-isolated subproject stage's configured outputs are prefixed with
+    # the subproject path. DVC reports those same outputs as repo-root-relative
+    # posix paths. Building the configured path with the OS-native separator
+    # produced, on Windows, a backslash variant ("sub\out.csv") that escaped
+    # path dedup and showed up as a duplicate stale output alongside DVC's
+    # posix path ("sub/out.csv"). The configured path must therefore be posix.
+    from pathlib import PureWindowsPath
+
+    # The exact construction get_status performs; as_posix() normalizes the
+    # separator regardless of platform (PureWindowsPath stands in for Windows).
+    configured_output = (
+        PureWindowsPath("example-basic") / "data/raw/data.csv"
+    ).as_posix()
+    assert configured_output == "example-basic/data/raw/data.csv"
+    # DVC flagged the stage via a changed command and reports the output as a
+    # modified out using the same posix, repo-root-relative path.
+    stale_stage = calkit.pipeline.StaleStage.from_status_data(
+        status_data=[
+            {"changed outs": {"example-basic/data/raw/data.csv": "modified"}},
+            "changed command",
+        ],
+        configured_outputs=[configured_output],
+    )
+    # The configured output and the DVC-reported output are the same file, so
+    # it must appear exactly once -- no separator-variant duplicate.
+    assert stale_stage.stale_outputs == ["example-basic/data/raw/data.csv"]
+
+
+def test_always_run_excludes_subproject_stages():
+    # A subproject wrapper stage is marked always-changed purely as a
+    # delegation mechanism, so it must not be advertised as an always-run
+    # stage of the parent project. A genuine root always-run stage still is.
+    status = calkit.pipeline.PipelineStatus(
+        has_pipeline=True,
+        stale_stages={
+            "ticker": StaleStage(always_run=True),
+            "example-basic (subproject)": StaleStage(
+                always_run=True, is_subproject=True
+            ),
+        },
+    )
+    assert status.always_run_stage_names == ["ticker"]
+    # The subproject wrapper isn't stale either (pure always-run delegation).
+    assert "example-basic (subproject)" not in status.stale_stage_names
+    assert not status.is_stale
+
+
+def test_status_target_matches():
+    ss = StaleStage(
+        stale_outputs=["data/out.csv"],
+        modified_inputs=["data/in.csv"],
+    )
+    # Root stage selected by its name, the dvc.yaml: form, but not by an
+    # unrelated name.
+    assert _status_target_matches("build", "build", "build", None, ss)
+    assert _status_target_matches("dvc.yaml:build", "build", "build", None, ss)
+    assert not _status_target_matches("other", "build", "build", None, ss)
+    # A path target (one containing a separator, so it isn't mistaken for a
+    # bare stage name) matches a stage with overlapping stale/modified paths.
+    assert _status_target_matches("data/out.csv", "build", "build", None, ss)
+    assert _status_target_matches("data/in.csv", "build", "build", None, ss)
+    assert not _status_target_matches(
+        "other/path.csv", "build", "build", None, ss
+    )
+    # Iterated/matrix stages use a name@param key — targeting the base name
+    # (or its dvc.yaml: form) must select each iteration, matching how DVC
+    # filtered matrix targets before status was filtered locally.
+    assert _status_target_matches("sim", "sim@a", "sim@a", None, ss)
+    assert _status_target_matches("dvc.yaml:sim", "sim@a", "sim@a", None, ss)
+    assert _status_target_matches("sim@a", "sim@a", "sim@a", None, ss)
+    # Subproject stages selected by sp:stage, the whole subproject, and the
+    # matrix base name in either form.
+    assert _status_target_matches("sp:run", "sp:run", "run", "sp", ss)
+    assert _status_target_matches("sp", "sp:run", "run", "sp", ss)
+    assert _status_target_matches("sp:sim", "sp:sim@a", "sim@a", "sp", ss)
+    assert not _status_target_matches("sp:other", "sp:run", "run", "sp", ss)
+    # DVC's native inline-subproject stage form (what translate_run_targets
+    # emits for inline subprojects) must also select the stage.
+    assert _status_target_matches("sp/dvc.yaml:run", "sp:run", "run", "sp", ss)
+    assert _status_target_matches(
+        "sp/dvc.yaml:sim", "sp:sim@a", "sim@a", "sp", ss
+    )
+    assert not _status_target_matches(
+        "sp/dvc.yaml:other", "sp:run", "run", "sp", ss
+    )
+
+
+def test_status_target_matches_root_level_path(tmp_path, monkeypatch):
+    # A root-level path target without any separator (e.g. ``out.csv`` or a
+    # directory ``data``) must still be selectable when it exists on disk; a
+    # separator-only heuristic would wrongly treat it as a bare stage name.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "out.csv").write_text("x")
+    (tmp_path / "data").mkdir()
+    ss = StaleStage(
+        stale_outputs=["out.csv"],
+        modified_inputs=["data/in.csv"],
+    )
+    assert _status_target_matches("out.csv", "build", "build", None, ss)
+    assert _status_target_matches("./out.csv", "build", "build", None, ss)
+    # A directory target overlaps a modified input nested under it.
+    assert _status_target_matches("data", "build", "build", None, ss)
+    assert _status_target_matches("data/", "build", "build", None, ss)
+    # A separator-less target that is neither a stage name nor an existing
+    # path is not selected.
+    assert not _status_target_matches("missing", "build", "build", None, ss)
 
 
 def test_collapse_dvc_stages():
@@ -1859,3 +2063,136 @@ def test_translate_run_targets(tmp_dir):
     )
     assert parent == ["inline-sp/dvc.yaml:stage-a", "my-parent-stage"]
     assert isolated == [("isolated-sp", "stage-b")]
+
+
+def test_get_concurrent_scheduler_stages():
+    ck_info = {
+        "environments": {
+            "slurm": {"kind": "slurm"},
+            "pbs": {"kind": "pbs"},
+            "py": {"kind": "uv", "path": "pyproject.toml"},
+        },
+        "pipeline": {
+            "stages": {
+                # Eligible: iterate_over on a slurm env.
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "r.sh",
+                    "environment": "slurm",
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2, 3]}],
+                },
+                # Eligible: pbs as the outer half of a composite env.
+                "sweep-pbs": {
+                    "kind": "python-script",
+                    "script_path": "r.py",
+                    "environment": "pbs:py",
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2]}],
+                },
+                # Excluded: not iterated, so DVC runs it serially as usual.
+                "single": {
+                    "kind": "shell-script",
+                    "script_path": "r.sh",
+                    "environment": "slurm",
+                },
+                # Excluded: non-scheduler environment.
+                "local-sweep": {
+                    "kind": "python-script",
+                    "script_path": "r.py",
+                    "environment": "py",
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2]}],
+                },
+            }
+        },
+    }
+    result = calkit.pipeline.get_concurrent_scheduler_stages(ck_info)
+    assert sorted(result) == ["sweep", "sweep-pbs"]
+
+
+def test_get_matrix_item_targets(tmp_dir):
+    import sys
+
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call([sys.executable, "-m", "dvc", "init"])
+    # 'work' is a scalar matrix depending on a shared upstream 'prep';
+    # 'table' is a table-like matrix (dict values, as compiled from a list
+    # arg_name), which DVC names by index (table@_arg00, ...).
+    dvc_yaml = {
+        "stages": {
+            "prep": {
+                "cmd": "echo shared > shared.txt",
+                "outs": ["shared.txt"],
+            },
+            "work": {
+                "matrix": {"arg": ["a", "b", "c"]},
+                "cmd": "cat shared.txt > out-${item.arg}.txt",
+                "deps": ["shared.txt"],
+                "outs": ["out-${item.arg}.txt"],
+            },
+            "table": {
+                "matrix": {
+                    "_arg0": [
+                        {"v1": 1, "v2": "a"},
+                        {"v1": 2, "v2": "b"},
+                    ]
+                },
+                "cmd": (
+                    "echo ${item._arg0.v1} "
+                    "> t-${item._arg0.v1}-${item._arg0.v2}.txt"
+                ),
+                "outs": ["t-${item._arg0.v1}-${item._arg0.v2}.txt"],
+            },
+        }
+    }
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(dvc_yaml, f)
+    # A single-file `.dvc` stage exposes a base `Stage` with no `name` attr;
+    # the matrix lookup must skip it instead of raising AttributeError.
+    with open("tracked.txt", "w") as f:
+        f.write("tracked\n")
+    subprocess.check_call([sys.executable, "-m", "dvc", "add", "tracked.txt"])
+    items, upstreams = calkit.pipeline.get_matrix_item_targets("work")
+    # Each iteration is addressable; the shared upstream is reported so the
+    # caller can build it before fanning the items out concurrently. Results
+    # come back in a deterministic (sorted) order.
+    assert items == ["work@a", "work@b", "work@c"]
+    assert upstreams == ["prep"]
+    # Table-like (dict-valued) matrix items are still found via the stage@
+    # prefix even though DVC names them by index.
+    table_items, table_ups = calkit.pipeline.get_matrix_item_targets("table")
+    assert table_items == ["table@_arg00", "table@_arg01"]
+    assert table_ups == []
+    # A stage with no matrix has no item targets.
+    items2, _ = calkit.pipeline.get_matrix_item_targets("prep")
+    assert items2 == []
+
+
+def test_reproduce_targets_concurrently():
+    import threading
+    import time
+
+    state = {"active": 0, "peak": 0}
+    lock = threading.Lock()
+
+    def fake(target: str) -> int:
+        # Track peak simultaneous runners to confirm the worker bound holds.
+        with lock:
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        time.sleep(0.1)
+        with lock:
+            state["active"] -= 1
+        # One target "fails" so we confirm return codes propagate per target.
+        return 1 if target == "work@b" else 0
+
+    targets = ["work@a", "work@b", "work@c", "work@d", "work@e"]
+    results = calkit.pipeline.reproduce_targets_concurrently(
+        targets, max_workers=2, run_one=fake
+    )
+    assert results == {
+        "work@a": 0,
+        "work@b": 1,
+        "work@c": 0,
+        "work@d": 0,
+        "work@e": 0,
+    }
+    assert state["peak"] == 2

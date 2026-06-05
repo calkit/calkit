@@ -86,6 +86,109 @@ def create_bibtex(
     )
 
 
+def _find_bibtex_entry_span(
+    text: str, entry_id: str
+) -> tuple[int, int] | None:
+    """Locate the raw character span of a BibTeX entry by its citation key.
+
+    Returns ``(start, end)`` offsets into ``text`` where ``end`` is exclusive
+    (just past the entry's closing brace), or ``None`` if no entry with that
+    key is found.
+    """
+    # Match e.g. ``@misc{the-key,`` allowing arbitrary surrounding whitespace
+    pattern = re.compile(
+        r"@\w+\s*\{\s*" + re.escape(entry_id) + r"\s*,", re.IGNORECASE
+    )
+    match = pattern.search(text)
+    if match is None:
+        return None
+    # Walk from the entry's opening brace to its matching close, counting depth
+    depth = 0
+    i = text.index("{", match.start())
+    while i < len(text):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return match.start(), i + 1
+        i += 1
+    return None
+
+
+def add_bibtex_entry(
+    existing_text: str, new_entry: str, replace_ids: list[str] | None = None
+) -> str:
+    """Append a BibTeX entry to existing references without reformatting them.
+
+    Any entries whose citation keys are in ``replace_ids`` are removed first
+    (so a re-released version replaces its prior entry); all other existing
+    content is preserved byte-for-byte. ``new_entry`` is appended at the end.
+    """
+    text = existing_text
+    # Remove replaced entries from the raw text, last-to-first so earlier spans
+    # stay valid as we splice. De-duplicate spans in case a key matched more
+    # than once.
+    spans = set()
+    for entry_id in replace_ids or []:
+        span = _find_bibtex_entry_span(text, entry_id)
+        if span is not None:
+            spans.add(span)
+    for start, end in sorted(spans, reverse=True):
+        # Consume any trailing newlines so we don't leave a gap behind
+        while end < len(text) and text[end] in "\r\n":
+            end += 1
+        text = text[:start] + text[end:]
+    # Append the new entry, leaving the existing content untouched and adding
+    # only the separator newlines needed for exactly one blank line between the
+    # last existing entry and the new one
+    if not text.strip():
+        return new_entry.strip() + "\n"
+    if text.endswith("\n\n"):
+        separator = ""
+    elif text.endswith("\n"):
+        separator = "\n"
+    else:
+        separator = "\n\n"
+    return text + separator + new_entry.strip() + "\n"
+
+
+def add_doi_badge_to_readme(
+    readme_text: str, badge: str, title: str | None
+) -> str:
+    """Insert (or refresh) a DOI badge near the top of a README.
+
+    The badge is placed directly beneath the title with exactly one blank line
+    on either side. Any pre-existing DOI badge line is replaced rather than
+    duplicated, the title is never duplicated, and all other existing content
+    is preserved.
+    """
+    # Drop any existing DOI badge line(s); the current badge is re-added below
+    lines = [
+        line
+        for line in (readme_text.split("\n") if readme_text else [])
+        if not line.startswith("[![DOI")
+    ]
+    # The first non-blank line is treated as the title; synthesize one from the
+    # project title if the README has no content yet
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    if lines:
+        title_line = lines[0]
+        rest = lines[1:]
+    else:
+        title_line = f"# {title}"
+        rest = []
+    # Drop leading blank lines from the remaining content so the spacing around
+    # the badge is controlled entirely here
+    while rest and not rest[0].strip():
+        rest.pop(0)
+    new_lines = [title_line, "", badge]
+    if rest:
+        new_lines += [""] + rest
+    return "\n".join(new_lines)
+
+
 CITATION_CFF_TEMPLATE = """
 cff-version: 1.2.0
 message: If you use this software, please cite it using these metadata.
@@ -110,37 +213,93 @@ repository-code: "https://github.com/citation-file-format/my-research-software"
 """.strip()
 
 
-def create_citation_cff(
-    ck_info: dict, release_name: str, release_date: str
-) -> dict:
-    """Create content to put in a CITATION.cff file."""
-    content = {
-        "cff-version": "1.2.0",
-        "message": (
-            "If you use these files, please cite is using these metadata."
-        ),
-        "title": ck_info.get("title"),
-        "abstract": ck_info.get("description"),
-        "version": release_name,
-        "date-released": str(release_date),
-        "repository-code": ck_info.get("git_repo_url"),
+def to_cff_author(author: dict) -> dict:
+    """Convert a Calkit author dict to a CITATION.cff author entry."""
+    cff_author = {
+        "family-names": author["last_name"],
+        "given-names": author.get("first_name", ""),
     }
-    # Get authors from ck_info
-    authors = ck_info.get("authors", [])
-    cff_authors = []
-    for author in authors:
-        cff_author = {
-            "family-names": author["last_name"],
-            "given-names": author["first_name"],
-        }
-        if "orcid" in author:
-            cff_author["orcid"] = author["orcid"]
-        cff_authors.append(cff_author)
-    content["authors"] = cff_authors
-    # Get DOIs from ck_info
+    if author.get("affiliation"):
+        cff_author["affiliation"] = author["affiliation"]
+    orcid = author.get("orcid")
+    if orcid:
+        # CITATION.cff expects the ORCID as a full URL
+        if not str(orcid).startswith("http"):
+            orcid = f"https://orcid.org/{orcid}"
+        cff_author["orcid"] = orcid
+    return cff_author
+
+
+def set_cff_authors(
+    authors: list[dict],
+    ck_info: dict | None = None,
+    path: str = "CITATION.cff",
+) -> dict:
+    """Write authors into a CITATION.cff file, creating it if necessary.
+
+    Existing content (and any fields we don't manage) is preserved. Returns
+    the resulting CITATION.cff content.
+    """
+    content: dict = {}
+    if os.path.isfile(path):
+        with open(path) as f:
+            loaded = calkit.ryaml.load(f)
+        if isinstance(loaded, dict):
+            content = loaded
+    content.setdefault("cff-version", "1.2.0")
+    content.setdefault(
+        "message",
+        "If you use these files, please cite them using these metadata.",
+    )
+    if ck_info is not None and ck_info.get("title") is not None:
+        content.setdefault("title", ck_info.get("title"))
+    content["authors"] = [to_cff_author(a) for a in authors]
+    with open(path, "w") as f:
+        calkit.ryaml.dump(content, f)
+    return content
+
+
+def create_citation_cff(
+    ck_info: dict,
+    release_name: str,
+    release_date: str,
+    authors: list[dict] | None = None,
+    path: str = "CITATION.cff",
+) -> dict:
+    """Create content to put in a CITATION.cff file.
+
+    CITATION.cff is the single source of truth for authors, so if a file
+    already exists its ``authors`` block is preserved as-is. Only when no
+    authors are present is the provided ``authors`` list (in Calkit format)
+    used to populate them.
+    """
+    content: dict = {}
+    if os.path.isfile(path):
+        with open(path) as f:
+            loaded = calkit.ryaml.load(f)
+        if isinstance(loaded, dict):
+            content = loaded
+    content["cff-version"] = "1.2.0"
+    content.setdefault(
+        "message",
+        "If you use these files, please cite them using these metadata.",
+    )
+    if ck_info.get("title") is not None:
+        content["title"] = ck_info.get("title")
+    if ck_info.get("description") is not None:
+        content["abstract"] = ck_info.get("description")
+    content["version"] = release_name
+    content["date-released"] = str(release_date)
+    if ck_info.get("git_repo_url") is not None:
+        content["repository-code"] = ck_info.get("git_repo_url")
+    # Preserve existing authors (the source of truth); otherwise populate
+    # from the provided Calkit-format author list
+    if not content.get("authors"):
+        content["authors"] = [to_cff_author(a) for a in (authors or [])]
+    # Get DOIs from ck_info releases
     ids = []
-    for rname, release in ck_info["releases"].items():
-        if release["kind"] == "project" and "doi" in release:
+    for rname, release in ck_info.get("releases", {}).items():
+        if release.get("kind") == "project" and "doi" in release:
             ids.append(
                 {
                     "description": f"Release {rname}",
@@ -150,6 +309,46 @@ def create_citation_cff(
             )
     content["identifiers"] = ids
     return content
+
+
+def read_authors_from_cff(path: str = "CITATION.cff") -> list[dict]:
+    """Read authors from a ``CITATION.cff`` file into Calkit author dicts.
+
+    The citation file format stores names as ``given-names``/``family-names``
+    and ORCIDs as full URLs, whereas Calkit uses ``first_name``/``last_name``
+    and bare ORCID identifiers, so values are normalized here.
+    Authors without a family name (e.g., entity authors that only have a
+    ``name`` field) are skipped because they cannot be expressed as a
+    personal creator.
+    """
+    if not os.path.isfile(path):
+        return []
+    with open(path) as f:
+        cff = calkit.ryaml.load(f)
+    if not isinstance(cff, dict):
+        return []
+    authors = []
+    for cff_author in cff.get("authors", []) or []:
+        if not isinstance(cff_author, dict):
+            continue
+        last_name = cff_author.get("family-names")
+        if not last_name:
+            # Entity authors only have a "name"; skip since we can't build a
+            # personal creator from them
+            continue
+        author = {
+            "first_name": cff_author.get("given-names", ""),
+            "last_name": last_name,
+        }
+        affiliation = cff_author.get("affiliation")
+        if affiliation:
+            author["affiliation"] = affiliation
+        orcid = cff_author.get("orcid")
+        if orcid:
+            # CFF stores ORCID as a full URL; store the bare identifier
+            author["orcid"] = re.sub(r"^https?://orcid\.org/", "", str(orcid))
+        authors.append(author)
+    return authors
 
 
 def ls_files() -> list[str]:
@@ -164,7 +363,7 @@ def ls_files() -> list[str]:
             for filename in files:
                 fpath = os.path.join(root, filename)
                 if os.path.isfile(fpath):
-                    cache_files.append(fpath)
+                    cache_files.append(Path(fpath).as_posix())
     # Include files from unzipped dvc-zip workspace folders, which are
     # ignored by both Git and DVC and would otherwise be missing from the
     # release archive
@@ -185,7 +384,7 @@ def ls_files() -> list[str]:
                     abs_fpath = Path(root) / filename
                     if abs_fpath.is_file():
                         dvc_zip_files.append(
-                            str(abs_fpath.relative_to(repo_root))
+                            abs_fpath.relative_to(repo_root).as_posix()
                         )
         elif abs_workspace.exists():
             raise ValueError(
@@ -263,7 +462,11 @@ def check_project_release_archive(
     zip_path: str, verbose: bool = False
 ) -> None:
     """Ensure an extracted project release archive can run cleanly."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    # ignore_cleanup_errors avoids spurious failures on Windows, where files
+    # created by the inner `calkit run` (e.g., a freshly built virtual
+    # environment) can still be locked when the temporary directory is
+    # removed.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         with zipfile.ZipFile(zip_path) as zipf:
             zipf.extractall(tmpdir)
         ck_info = calkit.load_calkit_info(wdir=tmpdir)

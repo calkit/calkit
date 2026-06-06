@@ -54,6 +54,13 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "calkit-sidebar",
+        "contents": "This folder is not yet a Calkit project.\n[Initialize Calkit Project](command:calkit-vscode.initProject)\nThis creates a calkit.yaml file and initializes Git and DVC.",
+        "when": "!calkit-vscode.hasProject"
+      }
+    ],
     "commands": [
       {
         "command": "calkit-vscode.selectCalkitEnvironment",
@@ -202,13 +209,19 @@
         "title": "View File History",
         "category": "Calkit",
         "icon": "$(history)"
+      },
+      {
+        "command": "calkit-vscode.initProject",
+        "title": "Initialize Calkit Project",
+        "category": "Calkit",
+        "icon": "$(rocket)"
       }
     ],
     "menus": {
       "view/title": [
         {
           "command": "calkit-vscode.openCalkitYaml",
-          "when": "view == calkit-sidebar",
+          "when": "view == calkit-sidebar && calkit-vscode.hasProject",
           "group": "navigation"
         },
         {

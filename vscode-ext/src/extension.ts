@@ -47,6 +47,7 @@ const COMMAND_REFRESH_SIDEBAR = "calkit-vscode.refreshSidebar";
 const COMMAND_OPEN_CALKIT_YAML = "calkit-vscode.openCalkitYaml";
 const COMMAND_OPEN_FIGURES_CAROUSEL = "calkit-vscode.openFiguresCarousel";
 const COMMAND_OPEN_FILE_HISTORY = "calkit-vscode.openFileHistory";
+const COMMAND_INIT_PROJECT = "calkit-vscode.initProject";
 const FIGURE_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -603,6 +604,23 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_INIT_PROJECT, () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        void vscode.window.showErrorMessage(
+          "Open a folder before initializing a Calkit project.",
+        );
+        return;
+      }
+      // `calkit init` creates calkit.yaml; the calkit.yaml watcher then
+      // refreshes the sidebar, replacing the welcome view with the project.
+      const terminal = getOrCreateTerminal("calkit: init", workspaceRoot);
+      terminal.show();
+      terminal.sendText("calkit init");
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand(
       COMMAND_OPEN_FIGURES_CAROUSEL,
       (item?: import("./sidebar").SidebarItem) => {
@@ -622,12 +640,19 @@ export function activate(context: vscode.ExtensionContext): void {
           void vscode.window.showInformationMessage("No figures found.");
           return;
         }
-        // If triggered from a specific figure item, start at that index
+        // If triggered from a specific figure item, jump straight into the
+        // carousel at that figure; otherwise open the gallery grid.
         const startPath = item?.nodeKind === "figure" ? item.nodeId : undefined;
         const startIndex = startPath
           ? Math.max(0, allPaths.indexOf(startPath))
           : 0;
-        openFiguresCarousel(context, workspaceRoot, allPaths, startIndex);
+        openFiguresCarousel(
+          context,
+          workspaceRoot,
+          allPaths,
+          startIndex,
+          startPath !== undefined,
+        );
       },
     ),
   );
@@ -1157,6 +1182,16 @@ async function refreshPipelineOutputContext(
   currentDvcYaml = dvcYaml;
   currentCalkitConfig = calkitConfig;
   currentEnvDescriptions = envDescriptions;
+  // Gate the sidebar on the presence of a calkit.yaml file. When absent, the
+  // tree is left empty so the "Initialize Calkit Project" welcome view shows.
+  const calkitYamlExists = await fileExists(
+    path.join(workspaceRoot, "calkit.yaml"),
+  );
+  void vscode.commands.executeCommand(
+    "setContext",
+    "calkit-vscode.hasProject",
+    calkitYamlExists,
+  );
   const outputMap = buildPipelineOutputMapFromYaml(workspaceRoot, dvcYaml);
   const prevPaths = new Set([
     ...pipelineOutputUris,
@@ -1201,7 +1236,7 @@ async function refreshPipelineOutputContext(
   await scanDetectedFiles(workspaceRoot);
   sidebarProvider?.refresh(
     workspaceRoot,
-    calkitConfig,
+    calkitYamlExists ? calkitConfig : undefined,
     dvcYaml,
     staleStageNames,
     envDescriptions,
@@ -1332,7 +1367,7 @@ function buildDagHtml(nonce: string): string {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: blob:;">
 <title>Pipeline DAG</title>
 <style>
   body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); padding: 16px; margin: 0; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; }
@@ -2087,6 +2122,7 @@ function openFiguresCarousel(
   workspaceRoot: string,
   figurePaths: string[],
   startIndex: number,
+  openCarousel: boolean,
 ): void {
   const panel = vscode.window.createWebviewPanel(
     "calkit.figuresCarousel",
@@ -2139,6 +2175,7 @@ function openFiguresCarousel(
     figures,
     startIndex,
     panel.webview.cspSource,
+    openCarousel,
   );
 }
 
@@ -2155,6 +2192,7 @@ function buildCarouselHtml(
   }[],
   startIndex: number,
   cspSource: string,
+  openCarousel: boolean,
 ): string {
   const RENDERABLE = new Set([
     ".png",
@@ -2178,6 +2216,22 @@ function buildCarouselHtml(
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; overflow: hidden; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); }
+  .hidden { display: none !important; }
+  /* Gallery grid */
+  #gallery-view { display: flex; flex-direction: column; height: 100vh; }
+  #gallery-header { display: flex; align-items: baseline; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--vscode-panel-border, #444); flex-shrink: 0; }
+  #gallery-title { font-size: 1.1em; font-weight: 600; }
+  #gallery-count { color: var(--vscode-descriptionForeground); font-size: 0.85em; }
+  #gallery { flex: 1; overflow: auto; padding: 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; align-content: start; }
+  #gallery-empty { color: var(--vscode-descriptionForeground); padding: 24px; font-style: italic; }
+  .thumb { display: flex; flex-direction: column; border: 1px solid var(--vscode-panel-border, #444); border-radius: 6px; overflow: hidden; cursor: pointer; background: var(--vscode-editorWidget-background, rgba(128,128,128,0.06)); }
+  .thumb:hover { border-color: var(--vscode-focusBorder, #007fd4); }
+  .thumb-media { height: 120px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--vscode-editor-background); }
+  .thumb-media img { width: 100%; height: 100%; object-fit: contain; }
+  .thumb-placeholder { color: var(--vscode-descriptionForeground); font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.05em; }
+  .thumb-caption { padding: 6px 8px; font-size: 0.78em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-top: 1px solid var(--vscode-panel-border, #444); }
+  /* Carousel modal */
+  #modal { position: fixed; inset: 0; z-index: 10; background: var(--vscode-editor-background); }
   #root { display: flex; flex-direction: column; height: 100vh; }
   #toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--vscode-panel-border, #444); flex-shrink: 0; }
   #counter { color: var(--vscode-descriptionForeground); font-size: 0.85em; white-space: nowrap; }
@@ -2190,6 +2244,7 @@ function buildCarouselHtml(
   .nav-btn { background: var(--vscode-button-secondaryBackground, rgba(128,128,128,0.2)); color: var(--vscode-button-secondaryForeground, inherit); border: none; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-size: 1.1em; flex-shrink: 0; }
   .nav-btn:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.35)); }
   .nav-btn:disabled { opacity: 0.35; cursor: default; }
+  #btn-back { font-size: 0.85em; }
   #metadata { flex-shrink: 0; padding: 8px 12px; border-top: 1px solid var(--vscode-panel-border, #444); font-size: 0.82em; display: flex; gap: 16px; flex-wrap: wrap; }
   .meta-item { display: flex; gap: 4px; }
   .meta-label { color: var(--vscode-descriptionForeground); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.85em; }
@@ -2200,18 +2255,28 @@ function buildCarouselHtml(
 </style>
 </head>
 <body>
-<div id="root">
-  <div id="toolbar">
-    <button class="nav-btn" id="btn-prev">&#8592;</button>
-    <div id="dots"></div>
-    <button class="nav-btn" id="btn-next">&#8594;</button>
-    <span id="counter"></span>
-    <span id="path-label"></span>
+<div id="gallery-view">
+  <div id="gallery-header">
+    <span id="gallery-title">Figures</span>
+    <span id="gallery-count"></span>
   </div>
-  <div id="viewer">
-    <div id="fig-content"></div>
+  <div id="gallery"></div>
+</div>
+<div id="modal" class="hidden">
+  <div id="root">
+    <div id="toolbar">
+      <button class="nav-btn" id="btn-back" title="Back to gallery">&#8592; Gallery</button>
+      <button class="nav-btn" id="btn-prev">&#8592;</button>
+      <div id="dots"></div>
+      <button class="nav-btn" id="btn-next">&#8594;</button>
+      <span id="counter"></span>
+      <span id="path-label"></span>
+    </div>
+    <div id="viewer">
+      <div id="fig-content"></div>
+    </div>
+    <div id="metadata"></div>
   </div>
-  <div id="metadata" id="metadata"></div>
 </div>
 <script nonce="${nonce}">
   const RENDERABLE = ${JSON.stringify([...RENDERABLE])};
@@ -2220,11 +2285,52 @@ function buildCarouselHtml(
 
   const btnPrev = document.getElementById('btn-prev');
   const btnNext = document.getElementById('btn-next');
+  const btnBack = document.getElementById('btn-back');
   const counter = document.getElementById('counter');
   const pathLabel = document.getElementById('path-label');
   const figContent = document.getElementById('fig-content');
   const metadata = document.getElementById('metadata');
   const dotsEl = document.getElementById('dots');
+  const modal = document.getElementById('modal');
+  const galleryEl = document.getElementById('gallery');
+  const galleryCount = document.getElementById('gallery-count');
+
+  const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.svg'];
+
+  // Build the gallery grid of thumbnails
+  galleryCount.textContent =
+    figures.length + (figures.length === 1 ? ' figure' : ' figures');
+  if (figures.length === 0) {
+    const empty = document.createElement('div');
+    empty.id = 'gallery-empty';
+    empty.textContent = 'No figures found.';
+    galleryEl.appendChild(empty);
+  }
+  figures.forEach(function(fig, i) {
+    const thumb = document.createElement('div');
+    thumb.className = 'thumb';
+    thumb.title = fig.path;
+    const media = document.createElement('div');
+    media.className = 'thumb-media';
+    if (IMAGE_EXTS.indexOf(fig.ext) !== -1) {
+      const img = document.createElement('img');
+      img.src = fig.uriStr;
+      img.alt = fig.path;
+      media.appendChild(img);
+    } else {
+      const ph = document.createElement('div');
+      ph.className = 'thumb-placeholder';
+      ph.textContent = fig.ext.replace('.', '') || 'file';
+      media.appendChild(ph);
+    }
+    const caption = document.createElement('div');
+    caption.className = 'thumb-caption';
+    caption.textContent = fig.title || fig.path.split('/').pop();
+    thumb.appendChild(media);
+    thumb.appendChild(caption);
+    thumb.addEventListener('click', function() { openModal(i); });
+    galleryEl.appendChild(thumb);
+  });
 
   // Build dots
   figures.forEach(function(_, i) {
@@ -2233,6 +2339,20 @@ function buildCarouselHtml(
     dot.addEventListener('click', function() { navigate(i); });
     dotsEl.appendChild(dot);
   });
+
+  function openModal(newIdx) {
+    idx = newIdx;
+    modal.classList.remove('hidden');
+    render();
+  }
+
+  function closeModal() {
+    modal.classList.add('hidden');
+  }
+
+  function modalOpen() {
+    return !modal.classList.contains('hidden');
+  }
 
   function navigate(newIdx) {
     idx = newIdx;
@@ -2303,13 +2423,20 @@ function buildCarouselHtml(
 
   btnPrev.addEventListener('click', function() { if (idx > 0) navigate(idx - 1); });
   btnNext.addEventListener('click', function() { if (idx < figures.length - 1) navigate(idx + 1); });
+  btnBack.addEventListener('click', closeModal);
 
   document.addEventListener('keydown', function(e) {
+    if (!modalOpen()) return;
+    if (e.key === 'Escape') closeModal();
     if (e.key === 'ArrowLeft' && idx > 0) navigate(idx - 1);
     if (e.key === 'ArrowRight' && idx < figures.length - 1) navigate(idx + 1);
   });
 
-  render();
+  // Open straight into the carousel when launched from a specific figure;
+  // otherwise show the gallery grid.
+  if (${openCarousel ? "true" : "false"} && figures.length > 0) {
+    openModal(idx);
+  }
 </script>
 </body>
 </html>`;
@@ -3163,6 +3290,15 @@ async function readCalkitConfig(
       `Failed to read calkit.yaml: ${String(error)}`,
     );
     return undefined;
+  }
+}
+
+async function fileExists(fsPath: string): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.stat(vscode.Uri.file(fsPath));
+    return true;
+  } catch {
+    return false;
   }
 }
 

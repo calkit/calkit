@@ -193,6 +193,11 @@ export class CalkitSidebarProvider
 
   getChildren(element?: SidebarItem): SidebarItem[] {
     if (!element) {
+      // No calkit.yaml: leave the tree empty so the "Initialize Calkit
+      // Project" welcome view (contributed in package.json) is shown instead.
+      if (this.calkitConfig === undefined) {
+        return [];
+      }
       return [
         this.envsSectionItem,
         this.pipelineSectionItem,

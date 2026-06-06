@@ -261,6 +261,25 @@ def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
     return dvc.repo.Repo(wdir)
 
 
+def ensure_dvc_lock_not_ignored(wdir: str | None = None) -> bool:
+    """Ensure ``dvc.lock`` is not Git-ignored.
+
+    DVC raises ``FileIsGitIgnored`` when ``dvc.lock`` is excluded by Git, which
+    breaks ``dvc status`` and pipeline runs. This un-ignores it (editing the
+    relevant ``.gitignore`` as needed) so those operations keep working.
+
+    Returns True if a ``.gitignore`` was modified.
+    """
+    import calkit.git
+
+    lock_path = os.path.join(wdir, "dvc.lock") if wdir else "dvc.lock"
+    try:
+        repo = calkit.git.get_repo(wdir)
+    except Exception:
+        return False
+    return bool(calkit.git.ensure_path_is_not_ignored(repo, path=lock_path))
+
+
 def get_running_pipeline_processes(wdir: str | None = None) -> list[dict]:
     """Return live processes holding DVC's read/write lock.
 

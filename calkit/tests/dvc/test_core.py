@@ -45,6 +45,19 @@ def test_get_remotes(tmp_dir):
     }
 
 
+def test_ensure_dvc_lock_not_ignored(tmp_dir):
+    subprocess.check_call(["git", "init"])
+    repo = git.Repo()
+    # No-op (and no .gitignore created) when dvc.lock isn't ignored
+    assert not calkit.dvc.ensure_dvc_lock_not_ignored()
+    # Once dvc.lock is ignored, the helper un-ignores it
+    with open(".gitignore", "w") as f:
+        f.write("dvc.lock\n")
+    assert repo.ignored("dvc.lock")
+    assert calkit.dvc.ensure_dvc_lock_not_ignored()
+    assert not repo.ignored("dvc.lock")
+
+
 def test_hash_directory():
     this_dir = os.path.dirname(__file__)
     fpath = os.path.join(this_dir, "..", "..", "..", "test", "dvc-md5-dir")

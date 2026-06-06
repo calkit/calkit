@@ -1216,7 +1216,7 @@ Options:
 | ------------------- | ------- | -------- | ---------------- | ------------------------------------------------------ |
 | `--name`, `-n`      | text    | yes      |                  | Environment name.                                      |
 | `--path`            | text    | no       | requirements.txt | Path for requirements file.                            |
-| `--prefix`          | text    | no       | .venv            | Prefix for environment location.                       |
+| `--prefix`          | text    | no       |                  | Prefix for environment location (defaults to .venv).   |
 | `--python`, `-p`    | text    | no       |                  | Python version.                                        |
 | `--description`     | text    | no       |                  | Description.                                           |
 | `--overwrite`, `-f` | boolean | no       | False            | Overwrite any existing environment with this name.     |
@@ -1247,7 +1247,7 @@ Options:
 | ------------------- | ------- | -------- | ---------------- | ------------------------------------------------------ |
 | `--name`, `-n`      | text    | yes      |                  | Environment name.                                      |
 | `--path`            | text    | no       | requirements.txt | Path for requirements file.                            |
-| `--prefix`          | text    | no       | .venv            | Prefix for environment location.                       |
+| `--prefix`          | text    | no       |                  | Prefix for environment location (defaults to .venv).   |
 | `--description`     | text    | no       |                  | Description.                                           |
 | `--overwrite`, `-f` | boolean | no       | False            | Overwrite any existing environment with this name.     |
 | `--no-commit`       | boolean | no       | False            | Do not commit changes.                                 |

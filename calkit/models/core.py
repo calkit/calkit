@@ -97,7 +97,9 @@ class CondaEnvironment(Environment):
 
 class VenvEnvironment(Environment):
     kind: Literal["venv"] = "venv"
-    prefix: str
+    # If unset, the prefix is resolved on the fly (defaults to .venv next to
+    # the spec file, nesting under .calkit/envs/{name}/.venv on conflict)
+    prefix: str | None = None
 
 
 class UvEnvironment(Environment):
@@ -106,7 +108,9 @@ class UvEnvironment(Environment):
 
 class UvVenvEnvironment(Environment):
     kind: Literal["uv-venv"] = "uv-venv"
-    prefix: str
+    # If unset, the prefix is resolved on the fly (defaults to .venv next to
+    # the spec file, nesting under .calkit/envs/{name}/.venv on conflict)
+    prefix: str | None = None
 
 
 class PixiEnvironment(Environment):
@@ -355,8 +359,10 @@ class ProjectInfo(BaseModel):
     references: list[ReferenceCollection] = []
     environments: dict[
         str,
-        Environment
-        | DockerEnvironment
+        # The specific subclasses must precede the catch-all Environment so a
+        # dict that validates against both (e.g. a prefix-less uv-venv, whose
+        # only fields are kind and path) resolves to the specific subclass
+        DockerEnvironment
         | JuliaEnvironment
         | MatlabEnvironment
         | SlurmEnvironment
@@ -365,7 +371,8 @@ class ProjectInfo(BaseModel):
         | UvEnvironment
         | UvVenvEnvironment
         | NixEnvironment
-        | SSHEnvironment,
+        | SSHEnvironment
+        | Environment,
     ] = {}
     software: list[Software] = []
     notebooks: list[Notebook] = []

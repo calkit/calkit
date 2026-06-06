@@ -318,6 +318,7 @@ def check_environment(
         get_all_conda_lock_fpaths,
         get_all_docker_lock_fpaths,
         get_all_venv_lock_fpaths,
+        get_default_venv_prefix,
         get_env_lock_fpath,
         write_scheduler_env_lock,
     )
@@ -403,12 +404,14 @@ def check_environment(
         except subprocess.CalledProcessError:
             raise_error("Failed to check uv environment")
     elif (kind := env["kind"]) in ["uv-venv", "venv"]:
-        if "prefix" not in env:
-            raise_error("venv environments require a prefix")
         if "path" not in env:
             raise_error("venv environments require a path")
-        prefix = os.path.expandvars(env["prefix"])
         path = os.path.expandvars(env["path"])
+        # Resolve the prefix on the fly if it isn't pinned in calkit.yaml
+        prefix = env.get("prefix")
+        if prefix is None:
+            prefix = get_default_venv_prefix(envs, path, env_name)
+        prefix = os.path.expandvars(prefix)
         lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=False
         )

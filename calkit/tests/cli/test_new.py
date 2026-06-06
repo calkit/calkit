@@ -226,7 +226,8 @@ def test_new_uv_venv(tmp_dir):
     env = envs["my-uv-venv"]
     assert isinstance(env, calkit.models.UvVenvEnvironment)
     assert env.path == "requirements.txt"
-    assert env.prefix == ".venv"
+    # No prefix is pinned by default; it is resolved on the fly to .venv
+    assert env.prefix is None
     assert env.kind == "uv-venv"
     subprocess.check_call(
         [

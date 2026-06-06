@@ -1762,6 +1762,17 @@ def run(
             "--no-push", help="Do not push to Git and DVC after saving."
         ),
     ] = False,
+    mock_scheduler: Annotated[
+        bool,
+        typer.Option(
+            "--mock-scheduler",
+            "-K",
+            help=(
+                "Run job-scheduler (SLURM/PBS) stages locally instead of "
+                "submitting them to a real scheduler."
+            ),
+        ),
+    ] = False,
 ) -> dict:
     """Check dependencies and run the pipeline."""
     import dvc.log
@@ -1779,6 +1790,10 @@ def run(
     if (target_inputs or target_outputs) and targets:
         raise_error("Cannot specify both targets and inputs")
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
+    # Mock the scheduler for this run (and any subprocesses) so SLURM/PBS
+    # stages execute locally; child processes inherit it via os.environ
+    if mock_scheduler:
+        os.environ[calkit.cli.scheduler.MOCK_ENV_VAR] = "1"
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info()
     # Ensure Git is initialized so DVC can be used.

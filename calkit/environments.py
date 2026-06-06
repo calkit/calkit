@@ -449,7 +449,15 @@ def write_scheduler_env_lock(
     parent = os.path.dirname(full_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    content = json.dumps(env, indent=2, sort_keys=True) + "\n"
+    lock_data = dict(env)
+    # Record when the scheduler is mocked so switching between a mocked run
+    # (executed locally) and a real scheduler run changes the lock file and
+    # invalidates the cached result
+    from calkit.cli.scheduler import _mock_enabled
+
+    if _mock_enabled():
+        lock_data["mocked"] = True
+    content = json.dumps(lock_data, indent=2, sort_keys=True) + "\n"
     if os.path.isfile(full_path):
         with open(full_path, "r") as f:
             existing = f.read()

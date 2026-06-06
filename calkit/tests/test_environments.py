@@ -951,7 +951,7 @@ def test_env_from_notebook_path(tmp_dir):
     assert res.exists
 
 
-def test_scheduler_env_lock_files(tmp_dir):
+def test_scheduler_env_lock_files(tmp_dir, monkeypatch):
     """Cover scheduler env lock-file behavior (slurm and pbs).
 
     Scenarios:
@@ -960,6 +960,8 @@ def test_scheduler_env_lock_files(tmp_dir):
     - re-running with unchanged content leaves the file untouched,
     - changing ``default_options`` produces different content (so DVC will
       treat dependent stages as stale),
+    - a mocked scheduler records ``"mocked": true`` so mocked and real runs
+      produce different lock content,
     - non-scheduler envs return ``None``.
     """
     slurm_env = {
@@ -1002,6 +1004,23 @@ def test_scheduler_env_lock_files(tmp_dir):
     with open(slurm_lock) as f:
         loaded = json.load(f)
     assert loaded["default_options"] == ["--time=02:00:00"]
+    # When the scheduler is mocked, the lock records "mocked": true
+    monkeypatch.setenv("CALKIT_MOCK_SCHEDULER", "1")
+    calkit.environments.write_scheduler_env_lock(
+        env_name="cluster", env=slurm_env
+    )
+    with open(slurm_lock) as f:
+        loaded = json.load(f)
+    assert loaded["mocked"] is True
+    assert {k: v for k, v in loaded.items() if k != "mocked"} == slurm_env
+    # Without the mock, the key is absent again (so content differs)
+    monkeypatch.delenv("CALKIT_MOCK_SCHEDULER")
+    calkit.environments.write_scheduler_env_lock(
+        env_name="cluster", env=slurm_env
+    )
+    with open(slurm_lock) as f:
+        loaded = json.load(f)
+    assert "mocked" not in loaded
     other = {"kind": "uv", "path": "pyproject.toml"}
     assert (
         calkit.environments.write_scheduler_env_lock(

@@ -6,6 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+import typer
 
 from calkit.cli.scheduler import (
     _build_job_command,
@@ -17,6 +18,7 @@ from calkit.cli.scheduler import (
     _mock_submit,
     _record_job,
     _sanitize_pbs_job_name,
+    _wait_until_done,
 )
 
 
@@ -118,6 +120,35 @@ def test_mock_submit_runs_job_locally(tmp_dir, monkeypatch):
         assert f.read().strip() == "hello world"
     # Mock state stays under the always-ignored .calkit/local tree.
     assert os.path.isfile(".calkit/local/mock-scheduler/testjob.status")
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: mock scheduler invokes a .sh script directly; not portable to Windows",
+)
+def test_wait_until_done_cancels_on_interrupt(tmp_dir, monkeypatch):
+    import calkit.cli.scheduler as sched
+
+    monkeypatch.setenv("CALKIT_MOCK_SCHEDULER", "1")
+    # A long-running job stays active while we wait on it
+    with open("job.sh", "w") as f:
+        f.write("sleep 30\n")
+    command = _build_job_command("job.sh", [], setup_cmds=[], is_command=False)
+    job_id = "waitjob"
+    pid = _mock_submit(job_id=job_id, job_command=command, log_path="job.log")
+    _record_job("sweep@x", {"job_id": job_id, "pid": pid, "kind": "slurm"})
+    assert _is_active("slurm", job_id)
+
+    # Simulate Ctrl+C while waiting by raising from the poll sleep
+    def _interrupt(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(sched.time, "sleep", _interrupt)
+    with pytest.raises(typer.Exit) as exc:
+        _wait_until_done("slurm", job_id, "sweep@x")
+    assert exc.value.exit_code == 130
+    # The interrupt should have canceled the job rather than leaving it running
+    assert not _is_active("slurm", job_id)
 
 
 def test_build_pbs_submit():

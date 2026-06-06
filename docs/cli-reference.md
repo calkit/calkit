@@ -349,33 +349,34 @@ Arguments:
 
 Options:
 
-| Option                  | Type    | Required | Default | Description                                                               |
-| ----------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------- |
-| `-q`, `--quiet`         | boolean | no       | False   | Be quiet.                                                                 |
-| `-v`, `--verbose`       | boolean | no       | False   | Print verbose output.                                                     |
-| `-f`, `--force`         | boolean | no       | False   | Run even if stages or inputs have not changed.                            |
-| `-i`, `--interactive`   | boolean | no       | False   | Ask for confirmation before running each stage.                           |
-| `-s`, `--single-item`   | boolean | no       | False   | Run only a single stage without any dependents.                           |
-| `-p`, `--pipeline`      | text    | no       |         |                                                                           |
-| `-P`, `--all-pipelines` | boolean | no       | False   | Run all pipelines in the repo.                                            |
-| `-R`, `--recursive`     | boolean | no       | False   | Run pipelines in subdirectories.                                          |
-| `--downstream`          | text    | no       |         | Start from the specified stage and run all downstream.                    |
-| `--force-downstream`    | boolean | no       | False   | Force downstream stages to run even if they are still up-to-date.         |
-| `--pull`                | boolean | no       | False   | Try automatically pulling missing data.                                   |
-| `--allow-missing`       | boolean | no       | False   | Skip stages with missing data.                                            |
-| `--dry`, `--dry-run`    | boolean | no       | False   | Only print commands that would execute.                                   |
-| `--keep-going`, `-k`    | boolean | no       | False   | Continue executing, skipping stages with failed inputs from other stages. |
-| `--ignore-errors`       | boolean | no       | False   | Ignore errors from stages.                                                |
-| `--glob`                | boolean | no       | False   | Match stages with glob-style patterns.                                    |
-| `--no-commit`           | boolean | no       | False   | Do not save to the run cache.                                             |
-| `--no-run-cache`        | boolean | no       | False   | Ignore the run cache.                                                     |
-| `--log`, `-l`           | boolean | no       | False   | Log the run and system information.                                       |
-| `--save`, `-S`          | boolean | no       | False   | Save the project after running.                                           |
-| `--save-message`, `-m`  | text    | no       |         | Commit message for saving.                                                |
-| `--input`, `--dep`      | text    | no       |         | Run stages that depend on given input dependency path.                    |
-| `--output`, `--out`     | text    | no       |         | Run stages that produce the given output path.                            |
-| `--overleaf`, `-O`      | boolean | no       | False   | Sync with Overleaf before and after running.                              |
-| `--no-push`             | boolean | no       | False   | Do not push to Git and DVC after saving.                                  |
+| Option                   | Type    | Required | Default | Description                                                                                  |
+| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------- |
+| `-q`, `--quiet`          | boolean | no       | False   | Be quiet.                                                                                    |
+| `-v`, `--verbose`        | boolean | no       | False   | Print verbose output.                                                                        |
+| `-f`, `--force`          | boolean | no       | False   | Run even if stages or inputs have not changed.                                               |
+| `-i`, `--interactive`    | boolean | no       | False   | Ask for confirmation before running each stage.                                              |
+| `-s`, `--single-item`    | boolean | no       | False   | Run only a single stage without any dependents.                                              |
+| `-p`, `--pipeline`       | text    | no       |         |                                                                                              |
+| `-P`, `--all-pipelines`  | boolean | no       | False   | Run all pipelines in the repo.                                                               |
+| `-R`, `--recursive`      | boolean | no       | False   | Run pipelines in subdirectories.                                                             |
+| `--downstream`           | text    | no       |         | Start from the specified stage and run all downstream.                                       |
+| `--force-downstream`     | boolean | no       | False   | Force downstream stages to run even if they are still up-to-date.                            |
+| `--pull`                 | boolean | no       | False   | Try automatically pulling missing data.                                                      |
+| `--allow-missing`        | boolean | no       | False   | Skip stages with missing data.                                                               |
+| `--dry`, `--dry-run`     | boolean | no       | False   | Only print commands that would execute.                                                      |
+| `--keep-going`, `-k`     | boolean | no       | False   | Continue executing, skipping stages with failed inputs from other stages.                    |
+| `--ignore-errors`        | boolean | no       | False   | Ignore errors from stages.                                                                   |
+| `--glob`                 | boolean | no       | False   | Match stages with glob-style patterns.                                                       |
+| `--no-commit`            | boolean | no       | False   | Do not save to the run cache.                                                                |
+| `--no-run-cache`         | boolean | no       | False   | Ignore the run cache.                                                                        |
+| `--log`, `-l`            | boolean | no       | False   | Log the run and system information.                                                          |
+| `--save`, `-S`           | boolean | no       | False   | Save the project after running.                                                              |
+| `--save-message`, `-m`   | text    | no       |         | Commit message for saving.                                                                   |
+| `--input`, `--dep`       | text    | no       |         | Run stages that depend on given input dependency path.                                       |
+| `--output`, `--out`      | text    | no       |         | Run stages that produce the given output path.                                               |
+| `--overleaf`, `-O`       | boolean | no       | False   | Sync with Overleaf before and after running.                                                 |
+| `--no-push`              | boolean | no       | False   | Do not push to Git and DVC after saving.                                                     |
+| `--mock-scheduler`, `-K` | boolean | no       | False   | Run job-scheduler (SLURM/PBS) stages locally instead of submitting them to a real scheduler. |
 
 <a id="top-command-manual-step"></a>
 

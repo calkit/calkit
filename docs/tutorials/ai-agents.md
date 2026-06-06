@@ -10,7 +10,7 @@ can generate artifacts, while keeping the processes easy to verify
 and iterate on.
 
 If you don't have a Calkit project already, you can create one with
-`calkit new project`, or if you've already been working in a AI chat session,
+`calkit new project`, or if you've already been working in an AI chat session,
 ask it to export a Calkit project for the work it's done so far---literally
 just:
 

@@ -2543,7 +2543,7 @@ def run_in_env(
         # specifying the project
         cmd = [arg for arg in cmd if not arg.startswith("--project=")]
         julia_cmd = [
-            "julia",
+            calkit.julia.get_julia_exe(),
             f"+{julia_version}",
             "--project=" + env_dir,
         ] + cmd

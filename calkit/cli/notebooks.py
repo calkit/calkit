@@ -90,7 +90,7 @@ def _check_ijulia_available(
     env_dir: str,
 ) -> bool:
     ijulia_check_cmd = [
-        "julia",
+        calkit.julia.get_julia_exe(),
         f"+{julia_version}",
         "--project=" + env_dir,
         "-e",
@@ -322,7 +322,7 @@ def check_env_kernel(
             "println(kp);"
         )
         cmd = [
-            "julia",
+            calkit.julia.get_julia_exe(),
             f"+{julia_version}",
             "--project=" + env_dir,
             "-e",

@@ -163,7 +163,7 @@ def _check_julia_env(
         deps_to_add = []
     if deps_to_add:
         pkg_list = ", ".join(f'"{dep}"' for dep in deps_to_add)
-        cmd = ["julia"]
+        cmd = [calkit.julia.get_julia_exe()]
         if julia_version:
             cmd.append(f"+{julia_version}")
         cmd += [
@@ -190,7 +190,7 @@ def _check_julia_env(
                 success=False,
             )
             raise_error("Failed to add Julia dependencies")
-    cmd = ["julia"]
+    cmd = [calkit.julia.get_julia_exe()]
     if julia_version:
         cmd.append(f"+{julia_version}")
     cmd += [

@@ -138,7 +138,7 @@ def _get_julia_version() -> str:
     """
     try:
         result = subprocess.run(
-            ["julia", "--version"],
+            [calkit.julia.get_julia_exe(), "--version"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -1381,7 +1381,7 @@ end
         # Run Julia with the script
         result = subprocess.run(
             [
-                "julia",
+                calkit.julia.get_julia_exe(),
                 script_path,
                 ",".join(package_names),
             ],

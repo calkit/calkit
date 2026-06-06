@@ -1213,16 +1213,16 @@ Arguments:
 
 Options:
 
-| Option              | Type    | Required | Default          | Description                                            |
-| ------------------- | ------- | -------- | ---------------- | ------------------------------------------------------ |
-| `--name`, `-n`      | text    | yes      |                  | Environment name.                                      |
-| `--path`            | text    | no       | requirements.txt | Path for requirements file.                            |
-| `--prefix`          | text    | no       |                  | Prefix for environment location (defaults to .venv).   |
-| `--python`, `-p`    | text    | no       |                  | Python version.                                        |
-| `--description`     | text    | no       |                  | Description.                                           |
-| `--overwrite`, `-f` | boolean | no       | False            | Overwrite any existing environment with this name.     |
-| `--no-commit`       | boolean | no       | False            | Do not commit changes.                                 |
-| `--no-check`        | boolean | no       | False            | Do not check environment is up-to-date after creation. |
+| Option              | Type    | Required | Default          | Description                                                                                                  |
+| ------------------- | ------- | -------- | ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| `--name`, `-n`      | text    | yes      |                  | Environment name.                                                                                            |
+| `--path`            | text    | no       | requirements.txt | Path for requirements file.                                                                                  |
+| `--prefix`          | text    | no       |                  | Prefix for environment location (defaults to .venv, or .calkit/envs/<name>/.venv if .venv is already taken). |
+| `--python`, `-p`    | text    | no       |                  | Python version.                                                                                              |
+| `--description`     | text    | no       |                  | Description.                                                                                                 |
+| `--overwrite`, `-f` | boolean | no       | False            | Overwrite any existing environment with this name.                                                           |
+| `--no-commit`       | boolean | no       | False            | Do not commit changes.                                                                                       |
+| `--no-check`        | boolean | no       | False            | Do not check environment is up-to-date after creation.                                                       |
 
 <a id="subcommand-new-create-venv"></a>
 
@@ -1244,15 +1244,15 @@ Arguments:
 
 Options:
 
-| Option              | Type    | Required | Default          | Description                                            |
-| ------------------- | ------- | -------- | ---------------- | ------------------------------------------------------ |
-| `--name`, `-n`      | text    | yes      |                  | Environment name.                                      |
-| `--path`            | text    | no       | requirements.txt | Path for requirements file.                            |
-| `--prefix`          | text    | no       |                  | Prefix for environment location (defaults to .venv).   |
-| `--description`     | text    | no       |                  | Description.                                           |
-| `--overwrite`, `-f` | boolean | no       | False            | Overwrite any existing environment with this name.     |
-| `--no-commit`       | boolean | no       | False            | Do not commit changes.                                 |
-| `--no-check`        | boolean | no       | False            | Do not check environment is up-to-date after creation. |
+| Option              | Type    | Required | Default          | Description                                                                                                  |
+| ------------------- | ------- | -------- | ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| `--name`, `-n`      | text    | yes      |                  | Environment name.                                                                                            |
+| `--path`            | text    | no       | requirements.txt | Path for requirements file.                                                                                  |
+| `--prefix`          | text    | no       |                  | Prefix for environment location (defaults to .venv, or .calkit/envs/<name>/.venv if .venv is already taken). |
+| `--description`     | text    | no       |                  | Description.                                                                                                 |
+| `--overwrite`, `-f` | boolean | no       | False            | Overwrite any existing environment with this name.                                                           |
+| `--no-commit`       | boolean | no       | False            | Do not commit changes.                                                                                       |
+| `--no-check`        | boolean | no       | False            | Do not check environment is up-to-date after creation.                                                       |
 
 <a id="subcommand-new-create-pixi-env"></a>
 

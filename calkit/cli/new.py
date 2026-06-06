@@ -1607,7 +1607,10 @@ def new_uv_venv(
         str | None,
         typer.Option(
             "--prefix",
-            help="Prefix for environment location (defaults to .venv).",
+            help=(
+                "Prefix for environment location (defaults to .venv, or "
+                ".calkit/envs/<name>/.venv if .venv is already taken)."
+            ),
         ),
     ] = None,
     python_version: Annotated[
@@ -1713,7 +1716,10 @@ def new_venv(
         str | None,
         typer.Option(
             "--prefix",
-            help="Prefix for environment location (defaults to .venv).",
+            help=(
+                "Prefix for environment location (defaults to .venv, or "
+                ".calkit/envs/<name>/.venv if .venv is already taken)."
+            ),
         ),
     ] = None,
     description: Annotated[

@@ -12,6 +12,8 @@ import {
   getDefaultSlurmOptions,
   kernelRegistrationKinds,
   makeCalkitEnvKernelSourceCandidates,
+  parsePixiPackages,
+  parseUvPackages,
   slurmOptionsToOptionList,
   type CalkitEnvNotebookKernelSource,
   type CalkitEnvironment,
@@ -22,12 +24,6 @@ import {
   getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath,
   getExecutedNotebookHtmlPath,
 } from "./notebooks";
-import {
-  collapseDatasetFolders,
-  hasAncestorIn,
-  isUnderAnyDir,
-} from "./detection";
-import { parsePixiPackages, parseUvPackages } from "./specs";
 import type { CalkitInfo, DvcYaml, EnvDescription } from "./types";
 import { CalkitSidebarProvider } from "./sidebar";
 
@@ -1134,6 +1130,52 @@ const DATA_DIR_NAMES = new Set([
   "outputs",
   "results",
 ]);
+
+// True if any ancestor directory of a "/"-separated relative path matches one
+// of the given (lower-cased) directory names.
+function hasAncestorIn(relPath: string, names: Set<string>): boolean {
+  return relPath
+    .split("/")
+    .slice(0, -1)
+    .some((p) => names.has(p.toLowerCase()));
+}
+
+// True if a relative path equals, or lives inside, any of the given directories.
+function isUnderAnyDir(relPath: string, dirs: string[]): boolean {
+  return dirs.some((d) => relPath === d || relPath.startsWith(d + "/"));
+}
+
+// Collapse detected data files into their containing folder: a folder holding
+// multiple data files is reported as a single dataset rather than each file
+// individually. Folders nested inside another detected folder are dropped so
+// only the outermost dataset folder remains.
+function collapseDatasetFolders(files: string[]): string[] {
+  const byDir = new Map<string, string[]>();
+  for (const file of files) {
+    const slash = file.lastIndexOf("/");
+    const dir = slash === -1 ? "" : file.slice(0, slash);
+    const group = byDir.get(dir);
+    if (group) {
+      group.push(file);
+    } else {
+      byDir.set(dir, [file]);
+    }
+  }
+  const collapsed = new Set<string>();
+  for (const [dir, group] of byDir) {
+    if (dir !== "" && group.length >= 2) {
+      collapsed.add(dir);
+    } else {
+      for (const file of group) {
+        collapsed.add(file);
+      }
+    }
+  }
+  const all = [...collapsed];
+  return all.filter(
+    (p) => !all.some((other) => other !== p && p.startsWith(other + "/")),
+  );
+}
 
 // Repo-relative paths of any Git submodules, read from .gitmodules. Artifacts
 // living inside a submodule belong to that submodule's project, not this one,

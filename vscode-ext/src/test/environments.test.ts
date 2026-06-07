@@ -4,7 +4,11 @@ import {
   findCalkitEnvKernelSourceCandidate,
   getDefaultSlurmOptions,
   makeCalkitEnvKernelSourceCandidates,
+  parsePixiPackages,
+  parseProjectDependencies,
+  parseRequirementsTxt,
   parseSlurmOptionList,
+  parseUvPackages,
   slurmOptionsToOptionList,
 } from "../environments";
 
@@ -127,4 +131,94 @@ test("findCalkitEnvKernelSourceCandidate resolves standalone and nested names", 
   assert.equal(nested?.environmentName, "slurmOuter:juliaEnv");
   assert.equal(nested?.outerSlurmEnvironment, "slurmOuter");
   assert.equal(outerOnly, undefined);
+});
+
+test("parseProjectDependencies reads deps past bracketed [project] fields", () => {
+  // A realistic uv pyproject: array-valued fields (authors, classifiers)
+  // appear before dependencies and must not break the scan.
+  const pyproject = [
+    "[project]",
+    'name = "demo"',
+    'version = "0.1.0"',
+    'authors = [{ name = "A. Person", email = "a@example.com" }]',
+    'classifiers = ["Private :: Do Not Upload"]',
+    "dependencies = [",
+    '  "requests>=2",',
+    '  "numpy",',
+    "]",
+    "",
+    "[tool.uv]",
+    'dev-dependencies = ["pytest"]',
+  ].join("\n");
+  assert.deepEqual(parseProjectDependencies(pyproject), [
+    "requests>=2",
+    "numpy",
+  ]);
+  // Inline single-line array also works.
+  assert.deepEqual(
+    parseProjectDependencies('[project]\ndependencies = ["a", "b"]\n'),
+    ["a", "b"],
+  );
+});
+
+test("parseRequirementsTxt reads one package per line, skipping noise", () => {
+  const reqs = [
+    "# editable deps",
+    "gitpython",
+    "ipykernel  # for notebooks",
+    "",
+    "-e .",
+    "numpy>=1.0",
+  ].join("\n");
+  assert.deepEqual(parseRequirementsTxt(reqs), [
+    "gitpython",
+    "ipykernel",
+    "numpy>=1.0",
+  ]);
+});
+
+test("parseUvPackages picks the parser by file shape", () => {
+  // pyproject.toml shape
+  assert.deepEqual(parseUvPackages('[project]\ndependencies = ["a"]\n'), ["a"]);
+  // requirements.txt shape (no [project] table)
+  assert.deepEqual(parseUvPackages("gitpython\nipykernel\n"), [
+    "gitpython",
+    "ipykernel",
+  ]);
+});
+
+test("parsePixiPackages merges default and feature tables", () => {
+  // pixi.toml with packages in the default [dependencies] table.
+  const defaultLayout = [
+    "[workspace]",
+    'name = "clima-data"',
+    "",
+    "[dependencies]",
+    'python = ">=3.11"',
+    'gh = ">=2.40"',
+    "",
+    "[pypi-dependencies]",
+    'requests = "*"',
+  ].join("\n");
+  assert.deepEqual(parsePixiPackages(defaultLayout, "clima-data"), {
+    conda: ["python", "gh"],
+    pip: ["requests"],
+  });
+  // pixi.toml with packages under a feature named after the env.
+  const featureLayout = [
+    "[feature.main.dependencies]",
+    'numpy = "*"',
+    "",
+    "[feature.main.pypi-dependencies]",
+    'rich = "*"',
+  ].join("\n");
+  assert.deepEqual(parsePixiPackages(featureLayout, "main"), {
+    conda: ["numpy"],
+    pip: ["rich"],
+  });
+  // "[dependencies]" must not be matched inside "[feature.x.dependencies]".
+  assert.deepEqual(parsePixiPackages(featureLayout, "other"), {
+    conda: [],
+    pip: [],
+  });
 });

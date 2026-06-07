@@ -392,10 +392,9 @@ export class CalkitSidebarProvider
           : `${nbPath} — env: ${envName}`;
         item.contextValue = "notebook";
       }
-      if (
-        this.workspaceRoot &&
-        collapsible === vscode.TreeItemCollapsibleState.None
-      ) {
+      // Clicking a notebook opens it (and expands its section if collapsible),
+      // matching how figures and datasets behave.
+      if (this.workspaceRoot) {
         const absPath = path.join(this.workspaceRoot, nbPath);
         item.command = {
           command: "vscode.openWith",
@@ -475,23 +474,9 @@ export class CalkitSidebarProvider
       }
     }
     if (this.workspaceRoot) {
-      const openItem = new SidebarItem(
-        "Open",
-        vscode.TreeItemCollapsibleState.None,
-        "notebook-open",
-        nbPath,
-      );
-      openItem.iconPath = new vscode.ThemeIcon("go-to-file");
-      openItem.command = {
-        command: "vscode.openWith",
-        title: "Open",
-        arguments: [
-          vscode.Uri.file(path.join(this.workspaceRoot, nbPath)),
-          "jupyter-notebook",
-        ],
-      };
-      items.push(openItem);
-      // Offer to view the executed HTML only when it has been generated.
+      // The notebook itself opens when clicked in the tree, so no separate
+      // "Open" child is needed. Offer the executed HTML when it has been
+      // generated.
       const htmlRel = getExecutedNotebookHtmlPath(nbPath);
       if (fs.existsSync(path.join(this.workspaceRoot, htmlRel))) {
         const htmlItem = new SidebarItem(

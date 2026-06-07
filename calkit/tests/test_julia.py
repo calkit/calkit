@@ -7,7 +7,41 @@ import pytest
 from calkit.julia import (
     check_version_in_command,
     ensure_startup_file_disabled_in_command,
+    get_julia_exe,
 )
+
+
+def test_get_julia_exe(monkeypatch, tmp_path):
+    # Prefer julia on the PATH when present
+    def which_julia(name):
+        return "/usr/bin/julia" if name == "julia" else None
+
+    monkeypatch.setattr("calkit.julia.shutil.which", which_julia)
+    assert get_julia_exe() == "/usr/bin/julia"
+    # When julia is absent but juliaup is installed, fall back to juliaup's
+    # julialauncher (the binary the julia shim normally points to)
+    juliaup_bin = tmp_path / "bin"
+    juliaup_bin.mkdir()
+    juliaup_path = juliaup_bin / "juliaup"
+    juliaup_path.write_text("")
+    launcher_path = juliaup_bin / "julialauncher"
+    launcher_path.write_text("")
+
+    def which_juliaup(name):
+        return str(juliaup_path) if name == "juliaup" else None
+
+    monkeypatch.setattr("calkit.julia.shutil.which", which_juliaup)
+    assert get_julia_exe() == str(launcher_path)
+    # The resolved launcher path is still accepted as a Julia command
+    cmd = ensure_startup_file_disabled_in_command(
+        [get_julia_exe(), "--version"]
+    )
+    assert cmd[0] == str(launcher_path)
+    assert "--startup-file=no" in cmd
+    # Neither julia nor juliaup available: fall back to a bare "julia" so the
+    # caller surfaces a clear not-found error
+    monkeypatch.setattr("calkit.julia.shutil.which", lambda name: None)
+    assert get_julia_exe() == "julia"
 
 
 def test_check_version_in_command():

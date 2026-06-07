@@ -61,6 +61,18 @@
         "when": "!calkit-vscode.hasProject"
       }
     ],
+    "customEditors": [
+      {
+        "viewType": "calkit.plotlyPreview",
+        "displayName": "Plotly Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.json"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
     "commands": [
       {
         "command": "calkit-vscode.selectCalkitEnvironment",
@@ -221,6 +233,24 @@
         "title": "Open Executed HTML",
         "category": "Calkit",
         "icon": "$(file-pdf)"
+      },
+      {
+        "command": "calkit-vscode.previewPlotlyFigure",
+        "title": "Open Plotly Preview",
+        "category": "Calkit",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "calkit-vscode.previewPlotlyFigureToSide",
+        "title": "Open Plotly Preview to the Side",
+        "category": "Calkit",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "calkit-vscode.openPlotlyAsSource",
+        "title": "Reopen as Text",
+        "category": "Calkit",
+        "icon": "$(go-to-file)"
       }
     ],
     "menus": {
@@ -341,6 +371,26 @@
         }
       ],
       "editor/title": [
+        {
+          "command": "calkit-vscode.previewPlotlyFigure",
+          "when": "calkit.activeFileIsPlotly",
+          "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.previewPlotlyFigureToSide",
+          "when": "calkit.activeFileIsPlotly",
+          "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.openPlotlyAsSource",
+          "when": "calkit.plotlyPreviewActive",
+          "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.showProvenance",
+          "when": "calkit.activeFileIsPipelineOutput || (calkit.plotlyPreviewActive && calkit.plotlyPreviewIsPipelineOutput)",
+          "group": "navigation"
+        },
         {
           "command": "calkit-vscode.runStageForFile",
           "when": "calkit.activeFileHasStage && !calkit.isSettingKernel",
@@ -469,6 +519,18 @@
         },
         {
           "command": "calkit-vscode.openNotebookHtml"
+        },
+        {
+          "command": "calkit-vscode.previewPlotlyFigure",
+          "when": "calkit.activeFileIsPlotly"
+        },
+        {
+          "command": "calkit-vscode.previewPlotlyFigureToSide",
+          "when": "calkit.activeFileIsPlotly"
+        },
+        {
+          "command": "calkit-vscode.openPlotlyAsSource",
+          "when": "calkit.plotlyPreviewActive"
         },
         {
           "command": "calkit-vscode.refreshSidebar"

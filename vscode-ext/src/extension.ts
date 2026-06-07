@@ -54,6 +54,10 @@ const COMMAND_OPEN_FIGURES_CAROUSEL = "calkit-vscode.openFiguresCarousel";
 const COMMAND_OPEN_FILE_HISTORY = "calkit-vscode.openFileHistory";
 const COMMAND_INIT_PROJECT = "calkit-vscode.initProject";
 const COMMAND_OPEN_NOTEBOOK_HTML = "calkit-vscode.openNotebookHtml";
+const COMMAND_PREVIEW_PLOTLY = "calkit-vscode.previewPlotlyFigure";
+const COMMAND_PREVIEW_PLOTLY_TO_SIDE =
+  "calkit-vscode.previewPlotlyFigureToSide";
+const COMMAND_OPEN_PLOTLY_SOURCE = "calkit-vscode.openPlotlyAsSource";
 const FIGURE_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -293,6 +297,62 @@ export function activate(context: vscode.ExtensionContext): void {
             focus: true,
             expand: true,
           });
+        }
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(
+      PLOTLY_PREVIEW_VIEW_TYPE,
+      new PlotlyPreviewProvider(context),
+      { supportsMultipleEditorsPerDocument: true },
+    ),
+  );
+
+  const activeTabUri = (uri?: vscode.Uri): vscode.Uri | undefined =>
+    uri ??
+    vscode.window.activeTextEditor?.document.uri ??
+    tabResourceUri(vscode.window.tabGroups.activeTabGroup.activeTab);
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_PREVIEW_PLOTLY,
+      (uri?: vscode.Uri) => {
+        const fileUri = activeTabUri(uri);
+        if (fileUri) {
+          // Replace the source in the same tab (toggleable back to source).
+          void reopenEditorInPlace(fileUri, PLOTLY_PREVIEW_VIEW_TYPE);
+        }
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_PREVIEW_PLOTLY_TO_SIDE,
+      (uri?: vscode.Uri) => {
+        const fileUri = activeTabUri(uri);
+        if (fileUri) {
+          void vscode.commands.executeCommand(
+            "vscode.openWith",
+            fileUri,
+            PLOTLY_PREVIEW_VIEW_TYPE,
+            { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+          );
+        }
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_OPEN_PLOTLY_SOURCE,
+      (uri?: vscode.Uri) => {
+        // Reopen the previewed figure as a plain text editor in the same tab.
+        const fileUri = activeTabUri(uri);
+        if (fileUri) {
+          void reopenEditorInPlace(fileUri, "default");
         }
       },
     ),
@@ -737,7 +797,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor((editor) => {
-      void refreshActiveFileStageContext(editor?.document.uri);
+      void refreshActiveFileStageContext(editor?.document);
     }),
   );
 
@@ -759,6 +819,7 @@ export function activate(context: vscode.ExtensionContext): void {
   void refreshNotebookToolbarContext(context);
   void autoSelectEnvironmentForActiveNotebook(context);
   void refreshPipelineOutputContext(context);
+  void refreshActiveFileStageContext(vscode.window.activeTextEditor?.document);
 
   // Watch for changes to dvc.yaml/calkit.yaml to keep pipeline output context fresh.
   const dvcYamlWatcher =
@@ -3107,12 +3168,61 @@ async function findStageForFile(
     if (
       stage.notebook_path === relPath ||
       stage.script_path === relPath ||
-      stage.target_path === relPath
+      stage.target_path === relPath ||
+      pipelineStageOutputPaths(stage).includes(relPath)
     ) {
       return stageName;
     }
   }
   return undefined;
+}
+
+// Repo-relative output paths declared on a calkit pipeline stage.
+function pipelineStageOutputPaths(
+  stage: import("./types").PipelineStage,
+): string[] {
+  return (Array.isArray(stage.outputs) ? stage.outputs : []).map((out) =>
+    typeof out === "string" ? out : out.path,
+  );
+}
+
+// Name of the pipeline stage that produces the given file as an output (via a
+// calkit pipeline stage's outputs or a dvc.yaml stage's outs), if any.
+async function findStageProducingOutput(
+  workspaceRoot: string,
+  fileUri: vscode.Uri,
+): Promise<string | undefined> {
+  const relPath = path
+    .relative(workspaceRoot, fileUri.fsPath)
+    .replace(/\\/g, "/");
+  const [dvcYaml, calkitConfig] = await Promise.all([
+    readDvcYaml(workspaceRoot),
+    readCalkitConfig(workspaceRoot),
+  ]);
+  for (const [stageName, stage] of Object.entries(
+    calkitConfig?.pipeline?.stages ?? {},
+  )) {
+    if (pipelineStageOutputPaths(stage).includes(relPath)) {
+      return stageName;
+    }
+  }
+  for (const [stageName, stage] of Object.entries(dvcYaml?.stages ?? {})) {
+    if (dvcStageOutputPaths(stage).includes(relPath)) {
+      return stageName;
+    }
+  }
+  return undefined;
+}
+
+// Whether the text is a Plotly figure spec: a JSON object whose top-level
+// "data" is an array of traces (the defining feature of a Plotly figure).
+function isPlotlyJsonText(text: string): boolean {
+  try {
+    const obj = JSON.parse(text) as { data?: unknown };
+    return typeof obj === "object" && obj !== null && Array.isArray(obj.data);
+  } catch {
+    return false;
+  }
 }
 
 async function selectCalkitEnvironment(
@@ -3469,6 +3579,31 @@ async function fileExists(fsPath: string): Promise<boolean> {
   }
 }
 
+// The resource backing a tab, for text and custom editor tabs (both expose a
+// `uri` on their input).
+function tabResourceUri(tab: vscode.Tab | undefined): vscode.Uri | undefined {
+  const input = tab?.input;
+  if (input && typeof input === "object" && "uri" in input) {
+    return (input as { uri?: vscode.Uri }).uri;
+  }
+  return undefined;
+}
+
+// Open a resource with a given editor in place of the active tab, so source and
+// preview share one tab (toggle), like the built-in image/markdown editors.
+// Closing the active tab first avoids opening a second tab for the same file.
+async function reopenEditorInPlace(
+  fileUri: vscode.Uri,
+  viewType: string,
+): Promise<void> {
+  const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+  const activeUri = tabResourceUri(activeTab);
+  if (activeTab && activeUri?.toString() === fileUri.toString()) {
+    await vscode.window.tabGroups.close(activeTab);
+  }
+  await vscode.commands.executeCommand("vscode.openWith", fileUri, viewType);
+}
+
 // Render a notebook's executed HTML in a webview, embedding the (self-contained
 // nbconvert) document in an iframe so its own scripts and styles load normally.
 async function openNotebookHtmlPreview(
@@ -3495,6 +3630,132 @@ async function openNotebookHtmlPreview(
     panel.webview.html = `<!DOCTYPE html><body style="font-family: var(--vscode-font-family); padding: 16px;">Could not read ${escHtml(
       htmlRelPath,
     )}.</body>`;
+  }
+}
+
+// Webview HTML that renders a Plotly figure (a JSON spec whose "data" is an
+// array of traces) by fetching the file and handing it to Plotly.js.
+function buildPlotlyPreviewHtml(
+  webview: vscode.Webview,
+  fileUri: vscode.Uri,
+): string {
+  const nonce = getNonce();
+  const src = webview.asWebviewUri(fileUri);
+  const cspSource = webview.cspSource;
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src ${cspSource} data:; connect-src ${cspSource};">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--vscode-editor-background); color: var(--vscode-foreground); font-family: var(--vscode-font-family); }
+  #plot { width: 100%; }
+  #err { padding: 16px; color: var(--vscode-errorForeground); white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="plot"></div>
+<div id="err" style="display:none"></div>
+<script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2/plotly.min.js"></script>
+<script nonce="${nonce}">
+  fetch(${JSON.stringify(src.toString())})
+    .then(function(r) { return r.json(); })
+    .then(function(spec) {
+      if (typeof Plotly === 'undefined') { throw new Error('Plotly failed to load.'); }
+      const layout = Object.assign({}, spec.layout || {});
+      // Keep the figure's own height (or Plotly's ~450px default), shrinking it
+      // to fit the viewport if it would otherwise overflow.
+      const avail = window.innerHeight - 16;
+      const desired = layout.height || 450;
+      if (desired > avail) { layout.height = avail; }
+      Plotly.newPlot('plot', spec.data || [], layout, {responsive: true});
+    })
+    .catch(function(e) {
+      document.getElementById('plot').style.display = 'none';
+      const err = document.getElementById('err');
+      err.style.display = 'block';
+      err.textContent = 'Could not render Plotly figure: ' + e.message;
+    });
+</script>
+</body>
+</html>`;
+}
+
+// Custom editor that previews a Plotly JSON figure in place of the text editor,
+// so it can be toggled with "Reopen as Source" like the built-in image/markdown
+// editors. Registered with "option" priority so plain text stays the default.
+const PLOTLY_PREVIEW_VIEW_TYPE = "calkit.plotlyPreview";
+// Context key tracking whether a Plotly preview is the active editor, used to
+// show the "Reopen as Source" title-bar button.
+const PLOTLY_PREVIEW_ACTIVE_CONTEXT = "calkit.plotlyPreviewActive";
+// Context key tracking whether the active Plotly preview's figure is a pipeline
+// output, used to show the "Show Source" (reveal producing stage) button.
+const PLOTLY_PREVIEW_IS_OUTPUT_CONTEXT = "calkit.plotlyPreviewIsPipelineOutput";
+
+class PlotlyPreviewProvider
+  implements vscode.CustomReadonlyEditorProvider<vscode.CustomDocument>
+{
+  constructor(private readonly context: vscode.ExtensionContext) {}
+
+  openCustomDocument(uri: vscode.Uri): vscode.CustomDocument {
+    return { uri, dispose: () => {} };
+  }
+
+  resolveCustomEditor(
+    document: vscode.CustomDocument,
+    webviewPanel: vscode.WebviewPanel,
+  ): void {
+    const workspaceRoot = getWorkspaceRoot();
+    webviewPanel.webview.options = {
+      enableScripts: true,
+      localResourceRoots: workspaceRoot
+        ? [vscode.Uri.file(workspaceRoot)]
+        : undefined,
+    };
+    webviewPanel.webview.html = buildPlotlyPreviewHtml(
+      webviewPanel.webview,
+      document.uri,
+    );
+    // Drive context keys from this panel's active state so the title-bar
+    // buttons ("Reopen as Source", and "Show Source" for pipeline outputs)
+    // appear whenever a preview is focused.
+    const updateContext = async (): Promise<void> => {
+      const active = webviewPanel.active;
+      const workspaceRoot = getWorkspaceRoot();
+      const isOutput =
+        active && workspaceRoot
+          ? (await findStageProducingOutput(workspaceRoot, document.uri)) !==
+            undefined
+          : false;
+      await Promise.all([
+        vscode.commands.executeCommand(
+          "setContext",
+          PLOTLY_PREVIEW_ACTIVE_CONTEXT,
+          active,
+        ),
+        vscode.commands.executeCommand(
+          "setContext",
+          PLOTLY_PREVIEW_IS_OUTPUT_CONTEXT,
+          isOutput,
+        ),
+      ]);
+    };
+    void updateContext();
+    this.context.subscriptions.push(
+      webviewPanel.onDidChangeViewState(() => void updateContext()),
+      webviewPanel.onDidDispose(() => {
+        void vscode.commands.executeCommand(
+          "setContext",
+          PLOTLY_PREVIEW_ACTIVE_CONTEXT,
+          false,
+        );
+        void vscode.commands.executeCommand(
+          "setContext",
+          PLOTLY_PREVIEW_IS_OUTPUT_CONTEXT,
+          false,
+        );
+      }),
+    );
   }
 }
 
@@ -7037,18 +7298,41 @@ async function restartCalkitJobForActiveNotebook(
 }
 
 async function refreshActiveFileStageContext(
-  fileUri: vscode.Uri | undefined,
+  document: vscode.TextDocument | undefined,
 ): Promise<void> {
   const workspaceRoot = getWorkspaceRoot();
+  const fileUri = document?.uri;
   let hasStage = false;
+  let isPipelineOutput = false;
   if (workspaceRoot && fileUri) {
-    hasStage = (await findStageForFile(workspaceRoot, fileUri)) !== undefined;
+    const [stageForFile, producingStage] = await Promise.all([
+      findStageForFile(workspaceRoot, fileUri),
+      findStageProducingOutput(workspaceRoot, fileUri),
+    ]);
+    hasStage = stageForFile !== undefined;
+    isPipelineOutput = producingStage !== undefined;
   }
-  await vscode.commands.executeCommand(
-    "setContext",
-    "calkit.activeFileHasStage",
-    hasStage,
-  );
+  const isPlotly =
+    document !== undefined &&
+    path.extname(document.uri.fsPath).toLowerCase() === ".json" &&
+    isPlotlyJsonText(document.getText());
+  await Promise.all([
+    vscode.commands.executeCommand(
+      "setContext",
+      "calkit.activeFileHasStage",
+      hasStage,
+    ),
+    vscode.commands.executeCommand(
+      "setContext",
+      "calkit.activeFileIsPipelineOutput",
+      isPipelineOutput,
+    ),
+    vscode.commands.executeCommand(
+      "setContext",
+      "calkit.activeFileIsPlotly",
+      isPlotly,
+    ),
+  ]);
 }
 
 async function refreshNotebookToolbarContext(

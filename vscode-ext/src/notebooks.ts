@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import {
   findCalkitEnvKernelSourceCandidate,
   type CalkitEnvNotebookKernelSource,
@@ -9,6 +10,18 @@ export type { NotebookEntry } from "./types";
 
 function normalizeNotebookPath(notebookPath: string): string {
   return notebookPath.replace(/\\/g, "/");
+}
+
+// Repo-relative path of a notebook's executed HTML, mirroring
+// calkit.notebooks.get_executed_notebook_path (the no-parameters case).
+export function getExecutedNotebookHtmlPath(notebookRelPath: string): string {
+  const dir = path.dirname(notebookRelPath);
+  const htmlName =
+    path.basename(notebookRelPath).replace(/\.ipynb$/, "") + ".html";
+  // path.dirname returns "." for a bare filename; drop it so the result is
+  // ".calkit/notebooks/html/<name>.html", not ".../html/./<name>.html".
+  const rel = dir === "." ? htmlName : path.join(dir, htmlName);
+  return path.join(".calkit", "notebooks", "html", rel);
 }
 
 function getNotebookEnvironmentFromPipelineStages(

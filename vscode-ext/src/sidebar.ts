@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
+import * as fs from "node:fs";
 import type {
   CalkitInfo,
   DatasetEntry,
@@ -9,6 +10,7 @@ import type {
   NotebookEntry,
   PipelineStage,
 } from "./types";
+import { getExecutedNotebookHtmlPath } from "./notebooks";
 
 function outputEntryPath(
   output: string | { path: string; [key: string]: unknown },
@@ -125,30 +127,14 @@ export class CalkitSidebarProvider
     }
     // Figures with no provenance or stale stage
     const outputToStage = this.buildOutputToStageMap();
-    const figList = this.calkitConfig?.figures ?? [];
-    const knownFigPaths = new Set(figList.map((f) => f.path));
-    const allFigPaths = [...knownFigPaths];
-    for (const p of this.detectedFigures) {
-      if (!knownFigPaths.has(p)) {
-        allFigPaths.push(p);
-      }
-    }
-    for (const figPath of allFigPaths) {
+    for (const figPath of this.mergedArtifactPaths("figures")) {
       const entry = this.resolveArtifactEntry(figPath, "figure", outputToStage);
       if (!entry.stage && !entry.imported_from) {
         count++;
       }
     }
     // Datasets with no provenance
-    const dataList = this.calkitConfig?.datasets ?? [];
-    const knownDataPaths = new Set(dataList.map((d) => d.path));
-    const allDataPaths = [...knownDataPaths];
-    for (const p of this.detectedDatasets) {
-      if (!knownDataPaths.has(p)) {
-        allDataPaths.push(p);
-      }
-    }
-    for (const dataPath of allDataPaths) {
+    for (const dataPath of this.mergedArtifactPaths("datasets")) {
       const entry = this.resolveArtifactEntry(
         dataPath,
         "dataset",
@@ -505,6 +491,23 @@ export class CalkitSidebarProvider
         ],
       };
       items.push(openItem);
+      // Offer to view the executed HTML only when it has been generated.
+      const htmlRel = getExecutedNotebookHtmlPath(nbPath);
+      if (fs.existsSync(path.join(this.workspaceRoot, htmlRel))) {
+        const htmlItem = new SidebarItem(
+          "Open executed HTML",
+          vscode.TreeItemCollapsibleState.None,
+          "notebook-html",
+          nbPath,
+        );
+        htmlItem.iconPath = new vscode.ThemeIcon("file-pdf");
+        htmlItem.command = {
+          command: "calkit-vscode.openNotebookHtml",
+          title: "Open executed HTML",
+          arguments: [nbPath],
+        };
+        items.push(htmlItem);
+      }
     }
     return items;
   }
@@ -552,8 +555,11 @@ export class CalkitSidebarProvider
     return fromList ?? { path: artifactPath };
   }
 
-  private getArtifactItems(kind: "figures" | "datasets"): SidebarItem[] {
-    const nodeKind = kind === "figures" ? "figure" : "dataset";
+  // Registered artifact paths for a kind plus any newly detected ones. Detected
+  // paths are already filtered at the detection source (submodules, files
+  // inside registered figure/dataset/output folders, and folder collapsing), so
+  // here we only need to drop exact duplicates of the registered entries.
+  mergedArtifactPaths(kind: "figures" | "datasets"): string[] {
     const list: (FigureEntry | DatasetEntry)[] =
       this.calkitConfig?.[kind] ?? [];
     const knownPaths = new Set(list.map((e) => e.path));
@@ -565,6 +571,12 @@ export class CalkitSidebarProvider
         allPaths.push(p);
       }
     }
+    return allPaths;
+  }
+
+  private getArtifactItems(kind: "figures" | "datasets"): SidebarItem[] {
+    const nodeKind = kind === "figures" ? "figure" : "dataset";
+    const allPaths = this.mergedArtifactPaths(kind);
     if (allPaths.length === 0) {
       return [
         new SidebarItem(

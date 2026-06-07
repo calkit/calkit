@@ -215,6 +215,12 @@
         "title": "Initialize Calkit Project",
         "category": "Calkit",
         "icon": "$(rocket)"
+      },
+      {
+        "command": "calkit-vscode.openNotebookHtml",
+        "title": "Open Executed HTML",
+        "category": "Calkit",
+        "icon": "$(file-pdf)"
       }
     ],
     "menus": {
@@ -390,6 +396,11 @@
           "command": "calkit-vscode.defineNotebookStage",
           "when": "notebookType == 'jupyter-notebook' && !calkit.notebookHasStage && !calkit.isSettingKernel",
           "group": "navigation@103"
+        },
+        {
+          "command": "calkit-vscode.openNotebookHtml",
+          "when": "notebookType == 'jupyter-notebook' && !calkit.isSettingKernel",
+          "group": "navigation@105"
         }
       ],
       "commandPalette": [
@@ -455,6 +466,9 @@
         },
         {
           "command": "calkit-vscode.defineNotebookStage"
+        },
+        {
+          "command": "calkit-vscode.openNotebookHtml"
         },
         {
           "command": "calkit-vscode.refreshSidebar"

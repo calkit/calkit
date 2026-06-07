@@ -18,7 +18,16 @@ import {
   type EnvKind,
   type SlurmLaunchOptions,
 } from "./environments";
-import { getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath } from "./notebooks";
+import {
+  getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath,
+  getExecutedNotebookHtmlPath,
+} from "./notebooks";
+import {
+  collapseDatasetFolders,
+  hasAncestorIn,
+  isUnderAnyDir,
+} from "./detection";
+import { parsePixiPackages, parseUvPackages } from "./specs";
 import type { CalkitInfo, DvcYaml, EnvDescription } from "./types";
 import { CalkitSidebarProvider } from "./sidebar";
 
@@ -48,6 +57,7 @@ const COMMAND_OPEN_CALKIT_YAML = "calkit-vscode.openCalkitYaml";
 const COMMAND_OPEN_FIGURES_CAROUSEL = "calkit-vscode.openFiguresCarousel";
 const COMMAND_OPEN_FILE_HISTORY = "calkit-vscode.openFileHistory";
 const COMMAND_INIT_PROJECT = "calkit-vscode.initProject";
+const COMMAND_OPEN_NOTEBOOK_HTML = "calkit-vscode.openNotebookHtml";
 const FIGURE_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -76,7 +86,7 @@ const DATASET_EXTENSIONS = new Set([
 const NOTEBOOK_EXTENSION = ".ipynb";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
 const execFileAsync = promisify(execFile);
-const DEFAULT_MIN_CALKIT_VERSION = "0.38.3";
+const DEFAULT_MIN_CALKIT_VERSION = "0.41.11";
 const DEFAULT_NOTEBOOK_SLURM_TIME = "120";
 const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
 const MISSING_IJULIA_ERROR_TEXT =
@@ -583,6 +593,43 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_OPEN_NOTEBOOK_HTML,
+      async (nbPath?: string) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        // From the sidebar we receive the notebook's relative path; from the
+        // notebook toolbar we fall back to the active notebook editor.
+        let relPath = nbPath;
+        if (!relPath) {
+          const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
+          if (!notebookUri) {
+            return;
+          }
+          relPath = path
+            .relative(workspaceRoot, notebookUri.fsPath)
+            .replace(/\\/g, "/");
+        }
+        const htmlRelPath = getExecutedNotebookHtmlPath(relPath);
+        if (!(await fileExists(path.join(workspaceRoot, htmlRelPath)))) {
+          void vscode.window.showInformationMessage(
+            `No executed HTML found for ${relPath}. Run the notebook to generate it.`,
+          );
+          return;
+        }
+        await openNotebookHtmlPreview(
+          context,
+          workspaceRoot,
+          htmlRelPath,
+          path.basename(relPath),
+        );
+      },
+    ),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_OPEN_CALKIT_YAML, () => {
       const workspaceRoot = getWorkspaceRoot();
       if (!workspaceRoot) {
@@ -628,14 +675,10 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!workspaceRoot) {
           return;
         }
-        const figList = currentCalkitConfig?.figures ?? [];
-        const knownPaths = new Set(figList.map((f) => f.path));
-        const allPaths = [...knownPaths];
-        for (const p of currentDetectedFigures) {
-          if (!knownPaths.has(p)) {
-            allPaths.push(p);
-          }
-        }
+        // Use the sidebar's merged set so the carousel matches the tree
+        // (registered figures plus detected ones, minus those inside
+        // already-registered figure/dataset folders).
+        const allPaths = sidebarProvider?.mergedArtifactPaths("figures") ?? [];
         if (allPaths.length === 0) {
           void vscode.window.showInformationMessage("No figures found.");
           return;
@@ -1092,11 +1135,56 @@ const DATA_DIR_NAMES = new Set([
   "results",
 ]);
 
-function hasAncestorIn(relPath: string, names: Set<string>): boolean {
-  return relPath
-    .split("/")
-    .slice(0, -1)
-    .some((p) => names.has(p.toLowerCase()));
+// Repo-relative paths of any Git submodules, read from .gitmodules. Artifacts
+// living inside a submodule belong to that submodule's project, not this one,
+// so they shouldn't be auto-detected here.
+async function getSubmodulePaths(workspaceRoot: string): Promise<string[]> {
+  try {
+    const raw = await vscode.workspace.fs.readFile(
+      vscode.Uri.file(path.join(workspaceRoot, ".gitmodules")),
+    );
+    const paths: string[] = [];
+    for (const line of Buffer.from(raw).toString("utf8").split(/\r?\n/)) {
+      const match = line.match(/^\s*path\s*=\s*(.+?)\s*$/);
+      if (match) {
+        paths.push(match[1].replace(/\\/g, "/"));
+      }
+    }
+    return paths;
+  } catch {
+    // No .gitmodules (or unreadable): no submodules to exclude.
+    return [];
+  }
+}
+
+// Repo-relative paths already accounted for as artifacts: registered figures
+// and datasets, plus pipeline/DVC stage outputs. Files inside one of these
+// belong to that artifact, so they shouldn't be auto-detected individually.
+function getRegisteredArtifactPaths(): string[] {
+  const paths: string[] = [];
+  for (const f of currentCalkitConfig?.figures ?? []) {
+    if (typeof f.path === "string") {
+      paths.push(f.path);
+    }
+  }
+  for (const d of currentCalkitConfig?.datasets ?? []) {
+    if (typeof d.path === "string") {
+      paths.push(d.path);
+    }
+  }
+  for (const stage of Object.values(
+    currentCalkitConfig?.pipeline?.stages ?? {},
+  )) {
+    for (const out of stage.outputs ?? []) {
+      paths.push(typeof out === "string" ? out : out.path);
+    }
+  }
+  for (const stage of Object.values(currentDvcYaml?.stages ?? {})) {
+    for (const out of dvcStageOutputPaths(stage)) {
+      paths.push(out.replace(/\\/g, "/"));
+    }
+  }
+  return paths;
 }
 
 const ARTIFACT_GLOB = `**/*.{${[...FIGURE_EXTENSIONS, ...DATASET_EXTENSIONS]
@@ -1104,55 +1192,55 @@ const ARTIFACT_GLOB = `**/*.{${[...FIGURE_EXTENSIONS, ...DATASET_EXTENSIONS]
   .join(",")}}`;
 
 async function scanDetectedFiles(workspaceRoot: string): Promise<void> {
-  const [notebookUris, allUris] = await Promise.all([
+  const [notebookUris, allUris, submodulePaths] = await Promise.all([
     vscode.workspace.findFiles(
       `**/*${NOTEBOOK_EXTENSION}`,
       DETECTED_FILES_EXCLUDE,
     ),
     vscode.workspace.findFiles(ARTIFACT_GLOB, DETECTED_FILES_EXCLUDE),
+    getSubmodulePaths(workspaceRoot),
   ]);
-  const toRelative = (
-    uris: vscode.Uri[],
-    exts: Set<string>,
-    filter?: (rel: string) => boolean,
-  ): string[] =>
-    uris
-      .filter((u) => exts.has(path.extname(u.fsPath).toLowerCase()))
-      .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
-      .filter((rel) => !filter || filter(rel))
-      .sort();
+  const registeredPaths = getRegisteredArtifactPaths();
+  // A file is redundant if it lives inside a submodule or is the same as, or
+  // inside, an already-registered figure/dataset/output path.
+  const isRedundant = (rel: string): boolean =>
+    isUnderAnyDir(rel, submodulePaths) || isUnderAnyDir(rel, registeredPaths);
+  const toRel = (u: vscode.Uri): string =>
+    path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/");
+  // Plotly figures are stored as JSON. Treat a .json under a figure-specific
+  // folder (one that isn't also a data folder) as a figure; .json elsewhere
+  // stays a dataset.
+  const figureOnlyDirNames = new Set(
+    [...FIGURE_DIR_NAMES].filter((n) => !DATA_DIR_NAMES.has(n)),
+  );
+  const isFigure = (rel: string, ext: string): boolean =>
+    (FIGURE_EXTENSIONS.has(ext) && hasAncestorIn(rel, FIGURE_DIR_NAMES)) ||
+    (ext === ".json" && hasAncestorIn(rel, figureOnlyDirNames));
+  const isDataset = (rel: string, ext: string): boolean =>
+    DATASET_EXTENSIONS.has(ext) &&
+    hasAncestorIn(rel, DATA_DIR_NAMES) &&
+    !isFigure(rel, ext);
   currentDetectedNotebooks = notebookUris
-    .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
+    .map(toRel)
+    .filter((rel) => !isUnderAnyDir(rel, submodulePaths))
     .sort();
-  const figuresFromFs = toRelative(allUris, FIGURE_EXTENSIONS, (rel) =>
-    hasAncestorIn(rel, FIGURE_DIR_NAMES),
-  );
-  const datasetsFromFs = toRelative(allUris, DATASET_EXTENSIONS, (rel) =>
-    hasAncestorIn(rel, DATA_DIR_NAMES),
-  );
-  // Also include pipeline outputs from dvc.yaml that match figure/dataset
-  // extensions even if they don't exist on disk yet (e.g. stale DVC outputs).
-  const figureSet = new Set(figuresFromFs);
-  const datasetSet = new Set(datasetsFromFs);
-  for (const stage of Object.values(currentDvcYaml?.stages ?? {})) {
-    for (const rel of dvcStageOutputPaths(stage)) {
-      const normalized = rel.replace(/\\/g, "/");
-      const ext = path.extname(rel).toLowerCase();
-      if (
-        FIGURE_EXTENSIONS.has(ext) &&
-        hasAncestorIn(normalized, FIGURE_DIR_NAMES)
-      ) {
-        figureSet.add(normalized);
-      } else if (
-        DATASET_EXTENSIONS.has(ext) &&
-        hasAncestorIn(normalized, DATA_DIR_NAMES)
-      ) {
-        datasetSet.add(normalized);
-      }
+  const figureSet = new Set<string>();
+  const datasetFiles = new Set<string>();
+  for (const u of allUris) {
+    const rel = toRel(u);
+    if (isRedundant(rel)) {
+      continue;
+    }
+    const ext = path.extname(rel).toLowerCase();
+    if (isFigure(rel, ext)) {
+      figureSet.add(rel);
+    } else if (isDataset(rel, ext)) {
+      datasetFiles.add(rel);
     }
   }
   currentDetectedFigures = [...figureSet].sort();
-  currentDetectedDatasets = [...datasetSet].sort();
+  // A folder full of data files is reported as one dataset, not file-by-file.
+  currentDetectedDatasets = collapseDatasetFolders([...datasetFiles]).sort();
 }
 
 function scheduleRefreshPipelineOutputContext(
@@ -2203,15 +2291,24 @@ function buildCarouselHtml(
     ".pdf",
     ".html",
     ".htm",
+    ".json",
   ]);
   const figuresJson = JSON.stringify(figures);
+  // Plotly figures are stored as JSON; only pull in the (large) Plotly library
+  // when at least one figure needs it.
+  const hasPlotly = figures.some((f) => f.ext === ".json");
+  const plotlyScript = hasPlotly
+    ? `<script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2/plotly.min.js"></script>`
+    : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${
     figures.length > 0 ? cspSource : "'none'"
-  } data:; frame-src ${cspSource}; object-src ${cspSource}; script-src 'nonce-${nonce}'; style-src 'unsafe-inline';">
+  } data:; frame-src ${cspSource}; object-src ${cspSource}; script-src 'nonce-${nonce}'${
+    hasPlotly ? " https://cdn.jsdelivr.net" : ""
+  }; style-src 'unsafe-inline'; connect-src ${cspSource};">
 <title>Figures</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -2278,6 +2375,7 @@ function buildCarouselHtml(
     <div id="metadata"></div>
   </div>
 </div>
+${plotlyScript}
 <script nonce="${nonce}">
   const RENDERABLE = ${JSON.stringify([...RENDERABLE])};
   const figures = ${figuresJson};
@@ -2320,7 +2418,7 @@ function buildCarouselHtml(
     } else {
       const ph = document.createElement('div');
       ph.className = 'thumb-placeholder';
-      ph.textContent = fig.ext.replace('.', '') || 'file';
+      ph.textContent = fig.ext === '.json' ? 'plotly' : (fig.ext.replace('.', '') || 'file');
       media.appendChild(ph);
     }
     const caption = document.createElement('div');
@@ -2393,6 +2491,33 @@ function buildCarouselHtml(
       frame.style.height = 'calc(100vh - 140px)';
       frame.style.border = 'none';
       figContent.appendChild(frame);
+    } else if (ext === '.json') {
+      // Plotly figure: fetch the JSON spec and render it interactively.
+      const plotDiv = document.createElement('div');
+      plotDiv.style.width = '100%';
+      figContent.appendChild(plotDiv);
+      const target = fig.uriStr;
+      fetch(target)
+        .then(function(r) { return r.json(); })
+        .then(function(spec) {
+          if (figures[idx].uriStr !== target) return; // navigated away
+          if (typeof Plotly === 'undefined') {
+            throw new Error('Plotly failed to load.');
+          }
+          const layout = Object.assign({}, spec.layout || {});
+          // Keep the figure's own height (or Plotly's ~450px default), but
+          // shrink it to fit the viewport if it would otherwise overflow.
+          const avail = window.innerHeight - 140;
+          const desired = layout.height || 450;
+          if (desired > avail) {
+            layout.height = avail;
+          }
+          Plotly.newPlot(plotDiv, spec.data || [], layout, {responsive: true});
+        })
+        .catch(function(err) {
+          plotDiv.className = 'no-render';
+          plotDiv.textContent = 'Could not render Plotly figure: ' + err.message;
+        });
     } else {
       const msg = document.createElement('div');
       msg.className = 'no-render';
@@ -3302,6 +3427,35 @@ async function fileExists(fsPath: string): Promise<boolean> {
   }
 }
 
+// Render a notebook's executed HTML in a webview, embedding the (self-contained
+// nbconvert) document in an iframe so its own scripts and styles load normally.
+async function openNotebookHtmlPreview(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+  htmlRelPath: string,
+  title: string,
+): Promise<void> {
+  const panel = vscode.window.createWebviewPanel(
+    "calkit.notebookHtml",
+    title,
+    vscode.ViewColumn.Active,
+    { enableScripts: true },
+  );
+  context.subscriptions.push(panel);
+  const absUri = vscode.Uri.file(path.join(workspaceRoot, htmlRelPath));
+  // nbconvert output is a self-contained document (inline styles, base64
+  // images, scripts from CDNs), so render it as the webview's own content.
+  // Loading it via an iframe + asWebviewUri renders blank, so embed it directly.
+  try {
+    const bytes = await vscode.workspace.fs.readFile(absUri);
+    panel.webview.html = Buffer.from(bytes).toString("utf8");
+  } catch {
+    panel.webview.html = `<!DOCTYPE html><body style="font-family: var(--vscode-font-family); padding: 16px;">Could not read ${escHtml(
+      htmlRelPath,
+    )}.</body>`;
+  }
+}
+
 function isFileNotFoundError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
@@ -3451,13 +3605,7 @@ async function readUvPackages(
     const raw = (
       await vscode.workspace.fs.readFile(vscode.Uri.file(absPath))
     ).toString();
-    const match = raw.match(
-      /\[project\][^\[]*?dependencies\s*=\s*\[([\s\S]*?)\]/,
-    );
-    if (!match) {
-      return [];
-    }
-    return Array.from(match[1].matchAll(/"([^"]+)"/g)).map((m) => m[1]);
+    return parseUvPackages(raw);
   } catch {
     return [];
   }
@@ -3512,6 +3660,24 @@ async function readCondaPackages(
   }
 }
 
+// Read a pixi feature's conda and PyPI package names from pixi.toml. Packages
+// for a calkit pixi env live under a feature named after the environment.
+async function readPixiPackages(
+  workspaceRoot: string,
+  specPath: string,
+  featureName: string,
+): Promise<{ conda: string[]; pip: string[] }> {
+  try {
+    const absPath = path.join(workspaceRoot, specPath);
+    const raw = (
+      await vscode.workspace.fs.readFile(vscode.Uri.file(absPath))
+    ).toString();
+    return parsePixiPackages(raw, featureName);
+  } catch {
+    return { conda: [], pip: [] };
+  }
+}
+
 async function showEnvCreatorWebview(
   context: vscode.ExtensionContext,
   workspaceRoot: string,
@@ -3530,6 +3696,12 @@ async function showEnvCreatorWebview(
   if (isEdit && specPath) {
     if (kind === "conda") {
       condaPackages = await readCondaPackages(workspaceRoot, specPath);
+    } else if (kind === "pixi") {
+      condaPackages = await readPixiPackages(
+        workspaceRoot,
+        specPath,
+        editEnvName,
+      );
     } else if (kind === "uv" || kind === "uv-venv") {
       uvPackages = await readUvPackages(workspaceRoot, specPath);
     } else if (kind === "julia") {
@@ -3577,8 +3749,11 @@ async function showEnvCreatorWebview(
       }
       const args: string[] = [];
       if (msg.command === "save") {
-        if (msg.kind === "conda") {
-          args.push("update", "conda-env", "-n", msg.name);
+        if (msg.kind === "conda" || msg.kind === "pixi") {
+          // conda and pixi share the same conda + pip package interface; only
+          // the update subcommand differs.
+          const subcommand = msg.kind === "pixi" ? "pixi-env" : "conda-env";
+          args.push("update", subcommand, "-n", msg.name);
           const origSet = new Set(msg.origPackages);
           const newSet = new Set(msg.packages);
           for (const p of msg.packages) {
@@ -3879,7 +4054,7 @@ ${
   const pipPackagesJson = JSON.stringify(editPipPackages);
 
   const condaSection =
-    isEdit && kind !== "conda"
+    isEdit && kind !== "conda" && kind !== "pixi"
       ? ""
       : `
 <div id="section-conda"${!isEdit ? ' style="display:none"' : ""}>
@@ -4168,7 +4343,7 @@ ${slurmSection}
       packages = uvPkgList ? getListValues(uvPkgList) : [];
     } else if (kind === 'julia') {
       packages = juliaPkgList ? getListValues(juliaPkgList) : [];
-    } else if (kind === 'conda') {
+    } else if (kind === 'conda' || kind === 'pixi') {
       packages = condaPkgList ? getListValues(condaPkgList) : [];
     }
     const pipPackages = pipPkgList ? getListValues(pipPkgList) : [];

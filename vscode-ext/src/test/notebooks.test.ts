@@ -1,10 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as path from "node:path";
 import {
   getConfiguredCandidateForNotebookPath,
+  getExecutedNotebookHtmlPath,
   resolveNotebookEnvironmentName,
   type CalkitInfo,
 } from "../notebooks";
+
+test("getExecutedNotebookHtmlPath mirrors calkit's executed HTML location", () => {
+  // Notebook in a subdirectory keeps its directory under the html dir.
+  assert.equal(
+    getExecutedNotebookHtmlPath("notebooks/analysis.ipynb"),
+    path.join(".calkit", "notebooks", "html", "notebooks", "analysis.html"),
+  );
+  // Bare filename has no leading "./" segment.
+  assert.equal(
+    getExecutedNotebookHtmlPath("analysis.ipynb"),
+    path.join(".calkit", "notebooks", "html", "analysis.html"),
+  );
+});
 
 test("resolveNotebookEnvironmentName uses jupyter pipeline stages directly", () => {
   const config: CalkitInfo = {

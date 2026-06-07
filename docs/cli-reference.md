@@ -2107,6 +2107,7 @@ Update objects.
 | [`notebook`](#subcommand-update-notebook)             | Update notebook information.                                                        |
 | [`agent-skills`](#subcommand-update-agent-skills)     | Copy packaged Calkit agent skills to `~/.agents/skills`.                            |
 | [`uv-env`](#subcommand-update-uv-env)                 | Update a uv environment.                                                            |
+| [`pixi-env`](#subcommand-update-pixi-env)             | Update a pixi environment.                                                          |
 | [`julia-env`](#subcommand-update-julia-env)           | Update a Julia environment.                                                         |
 | [`conda-env`](#subcommand-update-conda-env)           | Update a conda environment spec file.                                               |
 | [`docker-env`](#subcommand-update-docker-env)         | Update a docker environment.                                                        |
@@ -2282,6 +2283,29 @@ Options:
 | `--add`            | text    | no       |         | Add a package.                                          |
 | `--remove`, `--rm` | text    | no       |         | Remove a package.                                       |
 | `--no-check`       | boolean | no       | False   | Skip checking (syncing) the environment after updating. |
+
+<a id="subcommand-update-pixi-env"></a>
+
+#### `calkit update pixi-env`
+
+Update a pixi environment.
+
+Usage:
+
+```text
+calkit update pixi-env [OPTIONS]
+```
+
+Options:
+
+| Option                     | Type    | Required | Default | Description                                             |
+| -------------------------- | ------- | -------- | ------- | ------------------------------------------------------- |
+| `--name`, `-n`             | text    | yes      |         | Environment name.                                       |
+| `--add`                    | text    | no       |         | Add a conda package.                                    |
+| `--remove`, `--rm`         | text    | no       |         | Remove a conda package.                                 |
+| `--add-pip`                | text    | no       |         | Add a PyPI package.                                     |
+| `--remove-pip`, `--rm-pip` | text    | no       |         | Remove a PyPI package.                                  |
+| `--no-check`               | boolean | no       | False   | Skip checking (syncing) the environment after updating. |
 
 <a id="subcommand-update-julia-env"></a>
 

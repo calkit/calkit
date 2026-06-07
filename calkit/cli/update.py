@@ -637,6 +637,83 @@ def update_uv_env(
         check_environment(env_name=env_name)
 
 
+@update_app.command(name="pixi-env")
+def update_pixi_env(
+    env_name: Annotated[
+        str,
+        typer.Option("--name", "-n", help="Environment name."),
+    ],
+    add: Annotated[
+        list[str],
+        typer.Option("--add", help="Add a conda package."),
+    ] = [],
+    remove: Annotated[
+        list[str],
+        typer.Option("--remove", "--rm", help="Remove a conda package."),
+    ] = [],
+    add_pip: Annotated[
+        list[str],
+        typer.Option("--add-pip", help="Add a PyPI package."),
+    ] = [],
+    remove_pip: Annotated[
+        list[str],
+        typer.Option(
+            "--remove-pip", "--rm-pip", help="Remove a PyPI package."
+        ),
+    ] = [],
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check",
+            help="Skip checking (syncing) the environment after updating.",
+        ),
+    ] = False,
+) -> None:
+    """Update a pixi environment."""
+    import subprocess
+
+    import toml
+
+    ck_info, env = _load_env(env_name)
+    if env.get("kind") != "pixi":
+        raise_error(f"Environment '{env_name}' is not a pixi environment")
+    # Packages may live under a pixi feature named after the environment, or in
+    # the default tables; only target a feature if that table actually exists
+    feature = env.get("name", env_name)
+    spec_path = env.get("path", "pixi.toml")
+    feature_args = []
+    try:
+        with open(spec_path) as f:
+            pixi_cfg = toml.load(f)
+        if feature in pixi_cfg.get("feature", {}):
+            feature_args = ["--feature", feature]
+    except FileNotFoundError:
+        pass
+    # Build one pixi command per add/remove so a single failure is reported
+    commands = []
+    for pkg in remove:
+        commands.append((["pixi", "remove"] + feature_args + [pkg], pkg))
+    for pkg in add:
+        commands.append((["pixi", "add"] + feature_args + [pkg], pkg))
+    for pkg in remove_pip:
+        commands.append(
+            (["pixi", "remove", "--pypi"] + feature_args + [pkg], pkg)
+        )
+    for pkg in add_pip:
+        commands.append(
+            (["pixi", "add", "--pypi"] + feature_args + [pkg], pkg)
+        )
+    for cmd, pkg in commands:
+        if subprocess.run(cmd).returncode != 0:
+            raise_error(f"Failed to update package '{pkg}'")
+    typer.echo(f"Updated pixi environment '{env_name}'")
+    if not no_check:
+        typer.echo(f"Checking environment '{env_name}'")
+        from calkit.cli.check import check_environment
+
+        check_environment(env_name=env_name)
+
+
 @update_app.command(name="julia-env")
 def update_julia_env(
     env_name: Annotated[

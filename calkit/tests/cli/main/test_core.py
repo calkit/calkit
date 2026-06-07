@@ -768,7 +768,7 @@ def test_status(tmp_dir):
 def test_save(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     repo = git.Repo()
-    assert repo.head.commit.message.strip() == "Initialize DVC"
+    assert repo.head.commit.message.strip() == "Initialize Calkit"
     with open("test.txt", "w") as f:
         f.write("sup")
     subprocess.check_call(["calkit", "save", "-aM", "--no-push"])

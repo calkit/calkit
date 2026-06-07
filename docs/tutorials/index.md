@@ -13,3 +13,4 @@
 - [Using Calkit with MATLAB](matlab.md)
 - [Automation with GitHub Actions](github-actions.md)
 - [Connect a Jupyter Notebook to a SLURM environment in VS Code](vscode-slurm-notebook.md)
+- [Declarative, structured prompting to make AI agents work reproducibly](ai-agents.md)

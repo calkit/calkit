@@ -3739,10 +3739,9 @@ async function showEnvCreatorWebview(
                   outputChannel.show(true);
                 }
               });
-            void panel.webview.postMessage({
-              command: "error",
-              message: errMsg,
-            });
+            // Reset the form's submit button/spinner; the failure is shown
+            // in the error popup above, not as inline text in the webview.
+            void panel.webview.postMessage({ command: "error" });
           }
         },
       );
@@ -4198,10 +4197,10 @@ ${slurmSection}
   window.addEventListener('message', function(event) {
     const msg = event.data;
     if (msg.command === 'error') {
+      // The host shows the failure in an error popup; just reset the form
+      // state here without duplicating the message as red inline text.
       btnSubmit.disabled = false;
       spinnerText.style.display = 'none';
-      errorMsg.textContent = msg.message;
-      errorMsg.style.display = 'block';
     }
   });
 </script>

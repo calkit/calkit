@@ -1495,6 +1495,39 @@ def test_run_concurrent_scheduler_stage_with_mock(tmp_dir):
 
 
 @skipif_windows_mock_scheduler
+def test_run_with_mock_scheduler_flag(tmp_dir):
+    # The --mock-scheduler/-K flag runs scheduler stages locally without
+    # needing CALKIT_MOCK_SCHEDULER in the environment, and records
+    # "mocked": true in the scheduler env lock so a mocked run and a real run
+    # produce different lock content.
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        f.write("echo hello > out.txt\n")
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm"}},
+        "pipeline": {
+            "stages": {
+                "do-thing": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "outputs": ["out.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # Ensure the env var is absent so the flag is what enables the mock
+    env = {k: v for k, v in os.environ.items() if k != "CALKIT_MOCK_SCHEDULER"}
+    subprocess.check_call(["calkit", "run", "-K"], env=env)
+    assert os.path.exists("out.txt")
+    with open(".calkit/env-locks/slurm/info.json") as f:
+        lock = json.load(f)
+    assert lock["mocked"] is True
+
+
+@skipif_windows_mock_scheduler
 def test_run_concurrent_scheduler_table_iteration_with_mock(tmp_dir):
     # Table-like iteration (arg_name as a list) compiles to a dict-valued DVC
     # matrix that DVC names by index (sweep@_arg00, ...) while the scheduler

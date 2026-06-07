@@ -1767,6 +1767,17 @@ def run(
             "--no-push", help="Do not push to Git and DVC after saving."
         ),
     ] = False,
+    mock_scheduler: Annotated[
+        bool,
+        typer.Option(
+            "--mock-scheduler",
+            "-K",
+            help=(
+                "Run job-scheduler (SLURM/PBS) stages locally instead of "
+                "submitting them to a real scheduler."
+            ),
+        ),
+    ] = False,
 ) -> dict:
     """Check dependencies and run the pipeline."""
     import dvc.log
@@ -1784,6 +1795,10 @@ def run(
     if (target_inputs or target_outputs) and targets:
         raise_error("Cannot specify both targets and inputs")
     os.environ["CALKIT_PIPELINE_RUNNING"] = "1"
+    # Mock the scheduler for this run (and any subprocesses) so SLURM/PBS
+    # stages execute locally; child processes inherit it via os.environ
+    if mock_scheduler:
+        os.environ[calkit.cli.scheduler.MOCK_ENV_VAR] = "1"
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info()
     # Ensure Git is initialized so DVC can be used.
@@ -2468,12 +2483,15 @@ def run_in_env(
         except subprocess.CalledProcessError:
             raise_error("Failed to run in uv environment")
     elif (kind := env["kind"]) in ["uv-venv", "venv"]:
-        if "prefix" not in env:
-            raise_error("venv environments require a prefix")
         if "path" not in env:
             raise_error("venv environments require a path")
-        prefix = env["prefix"]
         path = env["path"]
+        # Resolve the prefix on the fly if it isn't pinned in calkit.yaml
+        prefix = env.get("prefix")
+        if prefix is None:
+            prefix = calkit.environments.get_default_venv_prefix(
+                envs, path, env_name
+            )
         shell_cmd = _to_shell_cmd(cmd)
         if _platform.system() == "Windows":
             activate_cmd = f"{prefix}\\Scripts\\activate"
@@ -2530,7 +2548,7 @@ def run_in_env(
         # specifying the project
         cmd = [arg for arg in cmd if not arg.startswith("--project=")]
         julia_cmd = [
-            "julia",
+            calkit.julia.get_julia_exe(),
             f"+{julia_version}",
             "--project=" + env_dir,
         ] + cmd

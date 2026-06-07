@@ -74,6 +74,7 @@ nav:
       - tutorials/matlab.md
       - tutorials/github-actions.md
       - tutorials/vscode-slurm-notebook.md
+      - tutorials/ai-agents.md
   - CLI reference: cli-reference.md
   - Help and support: help.md
   - Reproducibility: reproducibility.md

@@ -138,7 +138,7 @@ def _get_julia_version() -> str:
     """
     try:
         result = subprocess.run(
-            ["julia", "--version"],
+            [calkit.julia.get_julia_exe(), "--version"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -449,7 +449,15 @@ def write_scheduler_env_lock(
     parent = os.path.dirname(full_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    content = json.dumps(env, indent=2, sort_keys=True) + "\n"
+    lock_data = dict(env)
+    # Record when the scheduler is mocked so switching between a mocked run
+    # (executed locally) and a real scheduler run changes the lock file and
+    # invalidates the cached result
+    from calkit.cli.scheduler import _mock_enabled
+
+    if _mock_enabled():
+        lock_data["mocked"] = True
+    content = json.dumps(lock_data, indent=2, sort_keys=True) + "\n"
     if os.path.isfile(full_path):
         with open(full_path, "r") as f:
             existing = f.read()
@@ -744,6 +752,55 @@ def make_env_name(path: str, all_env_names: list[str], kind: str) -> str:
     return name
 
 
+def get_default_venv_prefix(envs: dict, path: str, name: str) -> str:
+    """Return the default prefix for a venv or uv-venv environment.
+
+    The prefix defaults to ``.venv`` in the same directory as ``path``,
+    unless that location is already claimed by another environment, in which
+    case the virtualenv is nested under ``.calkit/envs/{name}/.venv``. This
+    is resolved on the fly so that the prefix need not be stored in
+    ``calkit.yaml``.
+
+    A location is considered claimed by another environment if it pins that
+    explicit ``prefix``, or if it is a ``uv``, ``venv``, or ``uv-venv``
+    environment whose ``.venv`` would live there (``uv`` always creates its
+    virtualenv at ``.venv`` in its project directory, so a flexible venv
+    yields to it). Sibling venvs that would otherwise collide all nest under
+    their own name-scoped location, which is collision-free.
+
+    Parameters
+    ----------
+    envs : dict
+        All environments, keyed by name.
+    path : str
+        Path to the spec file the environment lives alongside.
+    name : str
+        Name of the environment being resolved, used both to exclude it from
+        the claimed locations and for the nested fallback.
+
+    Returns
+    -------
+    str
+        A POSIX-style prefix that does not collide with another environment.
+    """
+    base = os.path.join(os.path.dirname(path), ".venv")
+    # Collect .venv locations claimed by the other environments
+    claimed = set()
+    for other_name, env in envs.items():
+        if other_name == name:
+            continue
+        prefix = env.get("prefix")
+        if prefix is not None:
+            claimed.add(os.path.normpath(prefix))
+        elif env.get("kind") in ("uv", "venv", "uv-venv"):
+            other_dir = os.path.dirname(env.get("path", ""))
+            claimed.add(os.path.normpath(os.path.join(other_dir, ".venv")))
+    # Nest under .calkit/envs/{name} if the default location is taken
+    if os.path.normpath(base) in claimed:
+        base = os.path.join(".calkit", "envs", name, ".venv")
+    return Path(base).as_posix()
+
+
 def env_from_name_or_path(
     name_or_path: str | None = None,
     ck_info: dict | None = None,
@@ -851,15 +908,14 @@ def env_from_name_or_path(
     if os.path.isfile(env_path):
         if env_path.endswith("requirements.txt"):
             # TODO: Detect if uv is installed, and use a plain venv if not
+            # The prefix is left unset and resolved on the fly at check/run
+            # time via get_default_venv_prefix
             return EnvDetectResult(
                 name=make_env_name(env_path, all_env_names, kind="uv-venv"),
                 env={
                     "kind": "uv-venv",
                     "path": env_path,
                     "python": DEFAULT_PYTHON_VERSION,
-                    "prefix": Path(env_path)
-                    .parent.joinpath(".venv")
-                    .as_posix(),
                 },
                 exists=False,
             )
@@ -1325,7 +1381,7 @@ end
         # Run Julia with the script
         result = subprocess.run(
             [
-                "julia",
+                calkit.julia.get_julia_exe(),
                 script_path,
                 ",".join(package_names),
             ],

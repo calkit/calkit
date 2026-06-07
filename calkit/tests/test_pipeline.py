@@ -488,6 +488,39 @@ def test_remove_stage(tmp_dir):
     assert "process-data" in dvc_yaml["stages"]
 
 
+def test_to_dvc_unignores_dvc_lock(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "environments": {
+            "py": {
+                "kind": "venv",
+                "path": "requirements.txt",
+                "prefix": ".venv",
+            }
+        },
+        "pipeline": {
+            "stages": {
+                "get-data": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "script.py",
+                    "outputs": ["out.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # Git-ignore dvc.lock, which would otherwise make DVC fail with
+    # FileIsGitIgnored when getting status or running the pipeline
+    with open(".gitignore", "a") as f:
+        f.write("\ndvc.lock\n")
+    repo = git.Repo()
+    assert repo.ignored("dvc.lock")
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert not repo.ignored("dvc.lock")
+
+
 def test_sbatch_stage_to_dvc(tmp_dir):
     """Cover the SLURM stage compilation paths.
 

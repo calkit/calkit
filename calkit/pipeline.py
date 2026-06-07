@@ -1336,6 +1336,9 @@ def to_dvc(
             if verbose:
                 typer.echo("Writing to dvc.yaml")
             calkit.ryaml.dump(dvc_yaml, f)
+        # DVC errors out (FileIsGitIgnored) if dvc.lock is Git-ignored, so make
+        # sure it isn't---this keeps both status and pipeline runs working
+        calkit.dvc.ensure_dvc_lock_not_ignored(wdir)
     return dvc_stages
 
 

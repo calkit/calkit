@@ -1604,8 +1604,15 @@ def new_uv_venv(
         str, typer.Option("--path", help="Path for requirements file.")
     ] = "requirements.txt",
     prefix: Annotated[
-        str, typer.Option("--prefix", help="Prefix for environment location.")
-    ] = ".venv",
+        str | None,
+        typer.Option(
+            "--prefix",
+            help=(
+                "Prefix for environment location (defaults to .venv, or "
+                ".calkit/envs/<name>/.venv if .venv is already taken)."
+            ),
+        ),
+    ] = None,
     python_version: Annotated[
         str | None, typer.Option("--python", "-p", help="Python version.")
     ] = None,
@@ -1654,12 +1661,13 @@ def new_uv_venv(
             f"Environment with name {name} already exists "
             "(use -f to overwrite)"
         )
-    # Check prefixes
-    if not overwrite:
-        for env_name, env in envs.items():
-            if env.get("prefix") == prefix:
+    # Only pin a prefix if one was explicitly given; otherwise it is resolved
+    # on the fly (defaulting to .venv) at check/run time
+    if prefix is not None and not overwrite:
+        for other_name, other_env in envs.items():
+            if other_env.get("prefix") == prefix:
                 raise_error(
-                    f"Environment '{env_name}' already exists with "
+                    f"Environment '{other_name}' already exists with "
                     f"prefix '{prefix}'"
                 )
     if packages is not None:
@@ -1669,7 +1677,9 @@ def new_uv_venv(
         with open(path, "w") as f:
             f.write(packages_txt)
     typer.echo("Adding environment to calkit.yaml")
-    env = dict(path=path, kind="uv-venv", prefix=prefix)
+    env = dict(path=path, kind="uv-venv")
+    if prefix is not None:
+        env["prefix"] = prefix
     if python_version is not None:
         env["python"] = python_version
     if description is not None:
@@ -1703,8 +1713,15 @@ def new_venv(
         str, typer.Option("--path", help="Path for requirements file.")
     ] = "requirements.txt",
     prefix: Annotated[
-        str, typer.Option("--prefix", help="Prefix for environment location.")
-    ] = ".venv",
+        str | None,
+        typer.Option(
+            "--prefix",
+            help=(
+                "Prefix for environment location (defaults to .venv, or "
+                ".calkit/envs/<name>/.venv if .venv is already taken)."
+            ),
+        ),
+    ] = None,
     description: Annotated[
         str | None, typer.Option("--description", help="Description.")
     ] = None,
@@ -1745,12 +1762,13 @@ def new_venv(
             f"Environment with name {name} already exists "
             "(use -f to overwrite)"
         )
-    # Check prefixes
-    if not overwrite:
-        for env_name, env in envs.items():
-            if env.get("prefix") == prefix:
+    # Only pin a prefix if one was explicitly given; otherwise it is resolved
+    # on the fly (defaulting to .venv) at check/run time
+    if prefix is not None and not overwrite:
+        for other_name, other_env in envs.items():
+            if other_env.get("prefix") == prefix:
                 raise_error(
-                    f"Environment '{env_name}' already exists with "
+                    f"Environment '{other_name}' already exists with "
                     f"prefix '{prefix}'"
                 )
     packages_txt = "\n".join(packages)
@@ -1760,7 +1778,9 @@ def new_venv(
         f.write(packages_txt)
     repo.git.add(path)
     typer.echo("Adding environment to calkit.yaml")
-    env = dict(path=path, kind="venv", prefix=prefix)
+    env = dict(path=path, kind="venv")
+    if prefix is not None:
+        env["prefix"] = prefix
     if description is not None:
         env["description"] = description
     envs[name] = env

@@ -235,6 +235,46 @@ def test_check_cache_can_bypass_ttl(tmp_dir):
     )
 
 
+def test_get_default_venv_prefix():
+    get_default_venv_prefix = calkit.environments.get_default_venv_prefix
+    # With no existing environments, default to .venv next to the spec file
+    assert get_default_venv_prefix({}, "requirements.txt", "main") == ".venv"
+    assert (
+        get_default_venv_prefix({}, "sub/requirements.txt", "myenv")
+        == "sub/.venv"
+    )
+    # A uv environment in the same directory occupies .venv, so nest the new
+    # virtualenv under .calkit/envs/{name}
+    envs = {"main": {"kind": "uv", "path": "pyproject.toml"}}
+    assert (
+        get_default_venv_prefix(envs, "requirements.txt", "myenv")
+        == ".calkit/envs/myenv/.venv"
+    )
+    # A uv environment in another directory does not collide
+    envs = {"sub": {"kind": "uv", "path": "sub/pyproject.toml"}}
+    assert get_default_venv_prefix(envs, "requirements.txt", "main") == ".venv"
+    # An explicit prefix on an existing environment is respected
+    envs = {"a": {"kind": "venv", "prefix": ".venv"}}
+    assert (
+        get_default_venv_prefix(envs, "requirements.txt", "myenv")
+        == ".calkit/envs/myenv/.venv"
+    )
+    # An environment does not collide with itself, so a prefix-less venv that
+    # is already in the dict still resolves to .venv
+    envs = {"main": {"kind": "uv-venv", "path": "requirements.txt"}}
+    assert get_default_venv_prefix(envs, "requirements.txt", "main") == ".venv"
+    # Two prefix-less venvs in the same directory both nest under their own
+    # name, which is collision-free
+    envs = {
+        "a": {"kind": "venv", "path": "requirements.txt"},
+        "b": {"kind": "venv", "path": "requirements.txt"},
+    }
+    assert (
+        get_default_venv_prefix(envs, "requirements.txt", "b")
+        == ".calkit/envs/b/.venv"
+    )
+
+
 def test_env_from_name_or_path(tmp_dir):
     # Test with typical venvs
     with open("requirements.txt", "w") as f:
@@ -245,7 +285,8 @@ def test_env_from_name_or_path(tmp_dir):
     assert res.name == "main"
     assert res.env["path"] == "requirements.txt"
     assert not res.exists
-    assert res.env["prefix"] == ".venv"
+    # The prefix is left unset and resolved on the fly
+    assert "prefix" not in res.env
     res = calkit.environments.env_from_name_or_path(
         name_or_path="requirements.txt"
     )
@@ -261,7 +302,7 @@ def test_env_from_name_or_path(tmp_dir):
         name=None, path="envs/myenv/requirements.txt"
     )
     assert res.name == "myenv"
-    assert res.env["prefix"] == "envs/myenv/.venv"
+    assert "prefix" not in res.env
     # Test with a conda env
     with open("environment.yml", "w") as f:
         calkit.ryaml.dump({"name": "myenv", "dependencies": ["pandas"]}, f)
@@ -910,7 +951,7 @@ def test_env_from_notebook_path(tmp_dir):
     assert res.exists
 
 
-def test_scheduler_env_lock_files(tmp_dir):
+def test_scheduler_env_lock_files(tmp_dir, monkeypatch):
     """Cover scheduler env lock-file behavior (slurm and pbs).
 
     Scenarios:
@@ -919,6 +960,8 @@ def test_scheduler_env_lock_files(tmp_dir):
     - re-running with unchanged content leaves the file untouched,
     - changing ``default_options`` produces different content (so DVC will
       treat dependent stages as stale),
+    - a mocked scheduler records ``"mocked": true`` so mocked and real runs
+      produce different lock content,
     - non-scheduler envs return ``None``.
     """
     slurm_env = {
@@ -961,6 +1004,23 @@ def test_scheduler_env_lock_files(tmp_dir):
     with open(slurm_lock) as f:
         loaded = json.load(f)
     assert loaded["default_options"] == ["--time=02:00:00"]
+    # When the scheduler is mocked, the lock records "mocked": true
+    monkeypatch.setenv("CALKIT_MOCK_SCHEDULER", "1")
+    calkit.environments.write_scheduler_env_lock(
+        env_name="cluster", env=slurm_env
+    )
+    with open(slurm_lock) as f:
+        loaded = json.load(f)
+    assert loaded["mocked"] is True
+    assert {k: v for k, v in loaded.items() if k != "mocked"} == slurm_env
+    # Without the mock, the key is absent again (so content differs)
+    monkeypatch.delenv("CALKIT_MOCK_SCHEDULER")
+    calkit.environments.write_scheduler_env_lock(
+        env_name="cluster", env=slurm_env
+    )
+    with open(slurm_lock) as f:
+        loaded = json.load(f)
+    assert "mocked" not in loaded
     other = {"kind": "uv", "path": "pyproject.toml"}
     assert (
         calkit.environments.write_scheduler_env_lock(

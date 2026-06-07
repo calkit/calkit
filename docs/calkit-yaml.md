@@ -10,7 +10,8 @@ for the project's important metadata, which includes its:
 - [The pipeline](pipeline/index.md)
 - [Datasets](datasets.md)
 - Figures
-- Publications (journal articles, conference papers, presentations, posters)
+- Publications (journal articles, conference papers, and theses)
+- Presentations (slides and posters)
 - [Procedures](tutorials/procedures.md)
 - [References](references.md)
 - Subprojects (smaller projects executed as part of the main project)

@@ -251,20 +251,19 @@ def _cancel(kind: str, job_id: str) -> tuple[bool, str]:
 
 
 def _wait_until_done(kind: str, job_id: str, name: str) -> None:
-    """Poll until the job finishes, leaving it running on Ctrl+C.
+    """Poll until the job finishes, canceling it on Ctrl+C.
 
-    The job is already submitted and tracked, so an interrupt should only stop
-    local waiting---the scheduler keeps running it and a later ``calkit run``
-    resumes from here.
+    The job is submitted and tracked, so interrupting the local wait cancels
+    the scheduler job before exiting rather than leaving it orphaned.
     """
     try:
         while _is_active(kind, job_id):
             time.sleep(1)
     except KeyboardInterrupt:
-        typer.echo(
-            f"Interrupted; job '{name}' ({job_id}) left running on the "
-            "scheduler. Resume with `calkit run`."
-        )
+        typer.echo(f"Interrupted; canceling job '{name}' ({job_id})")
+        ok, stderr = _cancel(kind, job_id)
+        if not ok:
+            typer.echo(f"Failed to cancel job '{name}' ({job_id}): {stderr}")
         raise typer.Exit(130)
 
 

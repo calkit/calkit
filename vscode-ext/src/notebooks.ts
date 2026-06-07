@@ -24,17 +24,14 @@ export function getExecutedNotebookHtmlPath(notebookRelPath: string): string {
   return path.join(".calkit", "notebooks", "html", rel);
 }
 
+// Environment of the pipeline stage whose notebook_path matches this notebook.
+// Any stage that references the notebook counts; we don't require a specific
+// "kind", since the notebook_path is what ties the stage to the notebook.
 function getNotebookEnvironmentFromPipelineStages(
-  stages: Record<string, PipelineStage> | undefined,
+  stages: Record<string, PipelineStage>,
   normalizedPath: string,
 ): string | undefined {
-  if (!stages) {
-    return undefined;
-  }
   for (const stage of Object.values(stages)) {
-    if (stage.kind !== "jupyter-notebook") {
-      continue;
-    }
     const stagePath = stage.notebook_path ?? stage.script_path ?? stage.path;
     if (
       typeof stagePath === "string" &&
@@ -52,15 +49,10 @@ export function resolveNotebookEnvironmentName(
   notebookRelativePath: string,
 ): string | undefined {
   const normalizedPath = normalizeNotebookPath(notebookRelativePath);
+  const stages = info.pipeline?.stages ?? {};
 
-  const pipelineEnvironment = getNotebookEnvironmentFromPipelineStages(
-    info.pipeline?.stages,
-    normalizedPath,
-  );
-  if (pipelineEnvironment) {
-    return pipelineEnvironment;
-  }
-
+  // 1. From the notebooks section: an explicit environment, or the environment
+  //    of the pipeline stage the entry references by name.
   for (const notebook of info.notebooks ?? []) {
     if (normalizeNotebookPath(notebook.path) !== normalizedPath) {
       continue;
@@ -68,9 +60,13 @@ export function resolveNotebookEnvironmentName(
     if (notebook.environment) {
       return notebook.environment;
     }
+    if (notebook.stage && stages[notebook.stage]?.environment) {
+      return stages[notebook.stage].environment;
+    }
   }
 
-  return undefined;
+  // 2. From the pipeline stage whose notebook_path matches this notebook.
+  return getNotebookEnvironmentFromPipelineStages(stages, normalizedPath);
 }
 
 export function getConfiguredCandidateForNotebookPath(

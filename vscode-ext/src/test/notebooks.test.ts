@@ -52,6 +52,47 @@ test("resolveNotebookEnvironmentName uses jupyter pipeline stages directly", () 
   );
 });
 
+test("resolveNotebookEnvironmentName resolves the notebooks-section sources", () => {
+  const config: CalkitInfo = {
+    environments: {
+      analyze: { kind: "uv-venv", path: "envs/analyze.txt" },
+      main: { kind: "uv-venv", path: "envs/main.txt" },
+    },
+    pipeline: {
+      stages: {
+        // A non-jupyter kind that still references the notebook by name.
+        analyze: {
+          kind: "python-script",
+          notebook_path: "notebooks/analyze.ipynb",
+          environment: "analyze",
+        },
+      },
+    },
+    notebooks: [
+      // References a stage by name, with no explicit environment of its own.
+      { path: "notebooks/analyze.ipynb", stage: "analyze" },
+      // Carries an explicit environment.
+      { path: "notebooks/main.ipynb", environment: "main" },
+    ],
+  };
+  // Resolved via the referenced stage's environment, even though the stage's
+  // kind isn't "jupyter-notebook".
+  assert.equal(
+    resolveNotebookEnvironmentName(config, "notebooks/analyze.ipynb"),
+    "analyze",
+  );
+  // Resolved via the notebook entry's explicit environment.
+  assert.equal(
+    resolveNotebookEnvironmentName(config, "notebooks/main.ipynb"),
+    "main",
+  );
+  // Unknown notebook resolves to nothing.
+  assert.equal(
+    resolveNotebookEnvironmentName(config, "notebooks/missing.ipynb"),
+    undefined,
+  );
+});
+
 test("getConfiguredCandidateForNotebookPath resolves nested slurm notebook envs from pipeline stages", () => {
   const config: CalkitInfo = {
     environments: {

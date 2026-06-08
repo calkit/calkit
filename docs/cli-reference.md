@@ -1861,9 +1861,10 @@ calkit list|ls stages [OPTIONS]
 
 Options:
 
-| Option         | Type | Required | Default | Description            |
-| -------------- | ---- | -------- | ------- | ---------------------- |
-| `--kind`, `-k` | text | no       |         | Filter stages by kind. |
+| Option         | Type    | Required | Default | Description             |
+| -------------- | ------- | -------- | ------- | ----------------------- |
+| `--kind`, `-k` | text    | no       |         | Filter stages by kind.  |
+| `--stale`      | boolean | no       | False   | Show only stale stages. |
 
 <a id="subcommand-list-ls-remotes"></a>
 

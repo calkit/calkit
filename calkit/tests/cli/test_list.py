@@ -19,11 +19,21 @@ def test_list_stages(tmp_dir):
     ck_info = {
         "pipeline": {
             "stages": {
-                "stage1": {"kind": "python-script", "script_path": "train.py"},
-                "stage2": {"kind": "shell-command", "command": "echo Hello"},
+                "stage1": {
+                    "kind": "python-script",
+                    "script_path": "train.py",
+                    "environment": "_system",
+                },
+                "stage2": {
+                    "kind": "shell-command",
+                    "command": "echo Hello",
+                    "environment": "_system",
+                },
             }
         }
     }
+    with open("train.py", "w") as f:
+        f.write("print('Training...')\n")
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     out = subprocess.check_output("calkit list stages", shell=True, text=True)
@@ -34,6 +44,13 @@ def test_list_stages(tmp_dir):
     )
     assert "stage1" in out
     assert "stage2" not in out
+    # Test the --stale option by making stage2 stale
+    subprocess.check_call(["ck", "run", "stage1"])
+    out = subprocess.check_output(
+        ["calkit", "list", "stages", "--stale"], text=True
+    )
+    assert "stage1" not in out
+    assert "stage2" in out
 
 
 def test_list_remotes(tmp_dir):

@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 import typer
 
 import calkit
-from calkit.cli import AliasGroup, warn
+from calkit.cli import AliasGroup, raise_error, warn
 
 list_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
@@ -167,11 +167,27 @@ def list_stages(
         list[str] | None,
         typer.Option("--kind", "-k", help="Filter stages by kind."),
     ] = None,
+    stale_only: Annotated[
+        bool, typer.Option("--stale", help="Show only stale stages.")
+    ] = False,
 ):
     """List pipeline stages."""
-    stages = calkit.load_calkit_info().get("pipeline", {}).get("stages", {})
+    ck_info = calkit.load_calkit_info()
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    # If we only want stale stages, we need to get the status first.
+    # This compiles the pipeline, cleans notebooks, and checks environments,
+    # all of which can affect whether a stage is stale, so we don't skip them.
+    if stale_only:
+        status = calkit.pipeline.get_status(ck_info=ck_info)
+        if status.errors:
+            raise_error(
+                "Failed to determine stale stages: " + "; ".join(status.errors)
+            )
+        stale_stage_names = status.stale_stage_names
     for name, stage in stages.items():
         if kinds is not None and stage.get("kind") not in kinds:
+            continue
+        if stale_only and name not in stale_stage_names:
             continue
         typer.echo(name)
 

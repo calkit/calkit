@@ -1188,6 +1188,10 @@ def _detect_r_code_io(
     # Resolve paths relative to working directory
     inputs = _resolve_paths_to_wdir(inputs, script_dir, wdir)
     outputs = _resolve_paths_to_wdir(outputs, script_dir, wdir)
+    # Normalize to POSIX separators for persistence/display, since paths built
+    # from here::here()/file.path() use the host OS separator
+    inputs = [Path(p).as_posix() for p in inputs]
+    outputs = [Path(p).as_posix() for p in outputs]
     inputs = list(dict.fromkeys(inputs))
     outputs = list(dict.fromkeys(outputs))
     # A file produced within this stage is not an external input, even if it is

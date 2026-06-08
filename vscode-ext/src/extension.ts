@@ -107,7 +107,6 @@ const staleOutputUris = new Set<string>();
 const staleStageNames = new Set<string>();
 const importedFigureUris = new Set<string>();
 const pipelineNotebookUris = new Set<string>();
-let pipelineDecorationProvider: vscode.Disposable | undefined;
 let currentCalkitConfig: CalkitInfo | undefined;
 let currentDvcYaml: DvcYaml | undefined;
 let currentEnvDescriptions: Record<string, EnvDescription> | undefined;
@@ -1396,7 +1395,7 @@ async function refreshPipelineOutputContext(
     pipelineOutputUris.add(absPath);
   }
   for (const fig of calkitConfig?.figures ?? []) {
-    if (fig.imported_from != null) {
+    if (fig.imported_from) {
       importedFigureUris.add(path.join(workspaceRoot, fig.path));
     }
   }
@@ -1410,10 +1409,9 @@ async function refreshPipelineOutputContext(
   }
   if (!decorationProvider) {
     decorationProvider = new PipelineOutputDecorationProvider();
-    const disposable =
-      vscode.window.registerFileDecorationProvider(decorationProvider);
-    pipelineDecorationProvider = disposable;
-    context.subscriptions.push(disposable);
+    context.subscriptions.push(
+      vscode.window.registerFileDecorationProvider(decorationProvider),
+    );
   }
   const changedUris = [
     ...new Set([
@@ -1672,8 +1670,6 @@ async function defineProvenance(
   const artifactKind: "figure" | "dataset" = DATASET_EXTENSIONS.has(ext)
     ? "dataset"
     : "figure";
-  const envs = currentCalkitConfig?.environments ?? {};
-  const envNames = Object.keys(envs);
 
   const choiceStage = "$(play) Produced by a script or notebook";
   const choiceImported = "$(cloud-download) Imported from an external source";
@@ -1979,10 +1975,6 @@ function buildStageEditorHtml(
     ),
     `<option value="__new__">New environment (enter spec path below)…</option>`,
   ].join("\n");
-
-  const datalistOptions = allProjectFiles
-    .map((f) => `<option value="${escHtml(f)}">`)
-    .join("\n");
 
   const inputsJson = JSON.stringify(existingInputs);
   const outputsJson = JSON.stringify(existingOutputs); // [{path, storage}]
@@ -2341,13 +2333,12 @@ function openFiguresCarousel(
     const absUri = vscode.Uri.file(path.join(workspaceRoot, p));
     const webviewUri = panel.webview.asWebviewUri(absUri);
     const entry = figList.find((f) => f.path === p);
-    const importedFrom =
-      entry?.imported_from != null
-        ? typeof entry.imported_from === "object" &&
-          "url" in (entry.imported_from as object)
-          ? (entry.imported_from as { url: string }).url
-          : JSON.stringify(entry.imported_from)
-        : undefined;
+    const importedFrom = entry?.imported_from
+      ? typeof entry.imported_from === "object" &&
+        "url" in (entry.imported_from as object)
+        ? (entry.imported_from as { url: string }).url
+        : JSON.stringify(entry.imported_from)
+      : undefined;
     return {
       path: p,
       uriStr: webviewUri.toString(),
@@ -3855,7 +3846,6 @@ async function runCreateEnvironmentWizard(
     if (kindPick.label === "conda") {
       const created = await runCreateCondaEnvironmentWizard(
         workspaceRoot,
-        config,
         environments,
       );
       if (created === "__back__") {
@@ -3867,7 +3857,6 @@ async function runCreateEnvironmentWizard(
     if (kindPick.label === "julia") {
       const created = await runCreateJuliaEnvironmentWizard(
         workspaceRoot,
-        config,
         environments,
       );
       if (created === "__back__") {
@@ -3889,7 +3878,6 @@ async function runCreateEnvironmentWizard(
 
     const created = await runCreateUvEnvironmentWizard(
       workspaceRoot,
-      config,
       environments,
     );
     if (created === "__back__") {
@@ -4926,7 +4914,6 @@ async function runCreateNotebookEnvironmentCreationFlow(
 
 async function runCreateJuliaEnvironmentWizard(
   workspaceRoot: string,
-  config: CalkitInfo,
   environments: Record<string, CalkitEnvironment>,
 ): Promise<string | "__back__" | undefined> {
   const detectedJulia = await detectJuliaVersion(workspaceRoot);
@@ -5275,7 +5262,6 @@ async function askForSlurmOptionsWizard(
 
 async function runCreateCondaEnvironmentWizard(
   workspaceRoot: string,
-  config: CalkitInfo,
   environments: Record<string, CalkitEnvironment>,
 ): Promise<string | "__back__" | undefined> {
   let name = "my-conda-env";
@@ -5370,7 +5356,6 @@ async function runCreateCondaEnvironmentWizard(
 
 async function runCreateUvEnvironmentWizard(
   workspaceRoot: string,
-  config: CalkitInfo,
   environments: Record<string, CalkitEnvironment>,
 ): Promise<string | "__back__" | undefined> {
   let name = "my-uv-env";

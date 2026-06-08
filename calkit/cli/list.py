@@ -167,11 +167,22 @@ def list_stages(
         list[str] | None,
         typer.Option("--kind", "-k", help="Filter stages by kind."),
     ] = None,
+    stale_only: Annotated[
+        bool, typer.Option("--stale", help="Show only stale stages.")
+    ] = False,
 ):
     """List pipeline stages."""
-    stages = calkit.load_calkit_info().get("pipeline", {}).get("stages", {})
+    ck_info = calkit.load_calkit_info()
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    # If we only want stale stages, we need to get the status first
+    if stale_only:
+        # First compile pipeline
+        status = calkit.pipeline.get_status(ck_info=ck_info)
+        stale_stage_names = status.stale_stage_names
     for name, stage in stages.items():
         if kinds is not None and stage.get("kind") not in kinds:
+            continue
+        if stale_only and name not in stale_stage_names:
             continue
         typer.echo(name)
 

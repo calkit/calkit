@@ -1570,6 +1570,7 @@ def test_stale_stage_detects_always_changed_marker():
     stale_stage = calkit.pipeline.StaleStage.from_status_data(
         status_data=["always changed"],
         configured_outputs=["ticker.out"],
+        declared_always_run=True,
     )
     assert stale_stage.always_run
     assert not stale_stage.modified_command
@@ -1587,6 +1588,7 @@ def test_stale_stage_always_changed_with_missing_output():
             "always changed",
         ],
         configured_outputs=["ticker.out"],
+        declared_always_run=True,
     )
     assert stale_stage.always_run
     assert stale_stage.stale_outputs == ["ticker.out"]

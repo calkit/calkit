@@ -17,12 +17,13 @@ from calkit.models.pipeline import (
 )
 
 
-def _coerce_frozen(value: object) -> bool:
-    """Interpret a raw ``frozen`` value the same way the Stage model would.
+def _coerce_bool(value: object) -> bool:
+    """Interpret a raw YAML value the same way the Stage model would.
 
-    ``ck_info`` holds unvalidated YAML, so a quoted ``frozen: "false"`` is a
-    truthy string here; defer to Pydantic's bool parsing so status filtering
-    matches the compiled pipeline's behavior.
+    ``ck_info`` holds unvalidated YAML, so a quoted ``"false"`` (e.g.
+    ``frozen: "false"`` or ``always_run: "false"``) is a truthy string here;
+    defer to Pydantic's bool parsing so status filtering matches the compiled
+    pipeline's behavior.
     """
     from pydantic import TypeAdapter, ValidationError
 
@@ -47,7 +48,7 @@ def frozen_stage_base_names(
     stages = ck_info.get("pipeline", {}).get("stages", {})
     if isinstance(stages, dict):
         for name, cfg in stages.items():
-            if isinstance(cfg, dict) and _coerce_frozen(
+            if isinstance(cfg, dict) and _coerce_bool(
                 cfg.get("frozen", False)
             ):
                 names.add(name)
@@ -868,7 +869,7 @@ def get_status(
             else:
                 sp_cfg = sp_stages_config.get(subproject, {})
                 frozen_cfg = sp_cfg.get(bare_name, sp_cfg.get(base_name, {}))
-            if isinstance(frozen_cfg, dict) and _coerce_frozen(
+            if isinstance(frozen_cfg, dict) and _coerce_bool(
                 frozen_cfg.get("frozen", False)
             ):
                 continue
@@ -914,7 +915,7 @@ def get_status(
                 if subproject in isolated_sp_paths
                 else None,
                 is_subproject=is_subproject,
-                declared_always_run=bool(stage_cfg.get("always_run"))
+                declared_always_run=_coerce_bool(stage_cfg.get("always_run"))
                 if isinstance(stage_cfg, dict)
                 else False,
             )

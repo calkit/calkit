@@ -196,7 +196,12 @@ def init(
     repo = calkit.git.get_repo()
     repo.git.add(".dvc")
     repo.git.commit("-m", "Initialize DVC")
-    # TODO: Initialize `calkit.yaml`
+    # Create an empty calkit.yaml if one doesn't already exist
+    if not os.path.isfile("calkit.yaml"):
+        with open("calkit.yaml", "w"):
+            pass
+        repo.git.add("calkit.yaml")
+        repo.git.commit("-m", "Initialize Calkit")
     # TODO: Initialize `dvc.yaml`
     # TODO: Add a sane .gitignore file
     # TODO: Add a sane LICENSE file?

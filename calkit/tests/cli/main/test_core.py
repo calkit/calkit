@@ -54,6 +54,21 @@ def _repo_test_file(name: str) -> Path:
     )
 
 
+def test_init(tmp_dir):
+    # With no calkit.yaml present, init creates an empty one
+    assert not os.path.isfile("calkit.yaml")
+    subprocess.check_call(["calkit", "init"])
+    assert os.path.isfile("calkit.yaml")
+    assert calkit.load_calkit_info() == {}
+    # init must not clobber a pre-existing calkit.yaml
+    os.makedirs("sub")
+    ck_info = {"name": "test-project"}
+    with open(os.path.join("sub", "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "init"], cwd="sub")
+    assert calkit.load_calkit_info(wdir="sub") == ck_info
+
+
 @skipif_windows_docker
 def test_run_in_env(tmp_dir):
     # If running on Windows we need to set stdin for the subprocesses to
@@ -753,7 +768,7 @@ def test_status(tmp_dir):
 def test_save(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     repo = git.Repo()
-    assert repo.head.commit.message.strip() == "Initialize DVC"
+    assert repo.head.commit.message.strip() == "Initialize Calkit"
     with open("test.txt", "w") as f:
         f.write("sup")
     subprocess.check_call(["calkit", "save", "-aM", "--no-push"])

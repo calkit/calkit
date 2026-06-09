@@ -703,12 +703,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_REFRESH_SIDEBAR, async () => {
-      const workspaceRoot = getWorkspaceRoot();
-      if (workspaceRoot) {
-        await scanDetectedFiles(workspaceRoot);
-      }
-      // Force the staleness check even if auto-refresh is disabled: the user
-      // explicitly asked to refresh.
+      // refreshPipelineOutputContext already re-scans detected files; force the
+      // staleness check too, since the user explicitly asked to refresh.
       void refreshPipelineOutputContext(context, true);
     }),
   );
@@ -1236,10 +1232,10 @@ async function getSubmodulePaths(workspaceRoot: string): Promise<string[]> {
 
 // Auto-detected figure/dataset paths from the calkit CLI. `calkit list
 // figures|datasets --json` applies the shared detection heuristic (narrow
-// figure/data directory names, gitignored files excluded, declared artifacts
-// and stage outputs reserved) and flags auto-detected entries with
-// `detected: true`; we keep only those, since declared artifacts already come
-// from calkit.yaml.
+// figure/data directory names; git- and DVC-tracked files considered; declared
+// artifacts reserved so they aren't listed twice) and flags auto-detected
+// entries with `detected: true`; we keep only those, since declared artifacts
+// already come from calkit.yaml.
 async function listDetectedArtifacts(
   workspaceRoot: string,
   kind: "figures" | "datasets",
@@ -1263,7 +1259,19 @@ async function listDetectedArtifacts(
   }
 }
 
-async function scanDetectedFiles(workspaceRoot: string): Promise<void> {
+async function scanDetectedFiles(
+  workspaceRoot: string,
+  calkitYamlExists: boolean,
+): Promise<void> {
+  // Outside a Calkit project the sidebar shows the welcome view, so detected
+  // files are never displayed. Skip the scan (including the `calkit list`
+  // subprocesses, which would otherwise run and fail on every refresh).
+  if (!calkitYamlExists) {
+    currentDetectedNotebooks = [];
+    currentDetectedFigures = [];
+    currentDetectedDatasets = [];
+    return;
+  }
   const [notebookUris, submodulePaths, detectedFigures, detectedDatasets] =
     await Promise.all([
       vscode.workspace.findFiles(
@@ -1386,7 +1394,7 @@ async function refreshPipelineOutputContext(
     ]),
   ].map((p) => vscode.Uri.file(p));
   decorationProvider.refresh(changedUris);
-  await scanDetectedFiles(workspaceRoot);
+  await scanDetectedFiles(workspaceRoot, calkitYamlExists);
   sidebarProvider?.refresh(
     workspaceRoot,
     calkitYamlExists ? calkitConfig : undefined,
@@ -1737,7 +1745,7 @@ async function getGitVisibleFiles(
     const { stdout } = await execFileAsync(
       "git",
       ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-      { cwd: workspaceRoot, maxBuffer: 64 * 1024 * 1024 },
+      { cwd: workspaceRoot, maxBuffer: 64 * 1024 * 1024, timeout: 30_000 },
     );
     return new Set(
       stdout

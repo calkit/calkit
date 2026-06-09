@@ -50,7 +50,7 @@ def _list_objects(
 ):
     """List objects."""
     ck_info = calkit.load_calkit_info()
-    for obj in ck_info.get(kind, []):
+    for obj in ck_info.get(kind, []) or []:
         _echo_object(obj)
 
 

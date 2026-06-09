@@ -49,6 +49,8 @@ const COMMAND_RUN_NOTEBOOK_STAGE = "calkit-vscode.runNotebookStage";
 const COMMAND_EDIT_NOTEBOOK_STAGE = "calkit-vscode.editNotebookStage";
 const COMMAND_DEFINE_NOTEBOOK_STAGE = "calkit-vscode.defineNotebookStage";
 const COMMAND_REFRESH_SIDEBAR = "calkit-vscode.refreshSidebar";
+const COMMAND_ENABLE_AUTO_REFRESH = "calkit-vscode.enableAutoRefresh";
+const COMMAND_DISABLE_AUTO_REFRESH = "calkit-vscode.disableAutoRefresh";
 const COMMAND_OPEN_CALKIT_YAML = "calkit-vscode.openCalkitYaml";
 const COMMAND_OPEN_FIGURES_CAROUSEL = "calkit-vscode.openFiguresCarousel";
 const COMMAND_OPEN_FILE_HISTORY = "calkit-vscode.openFileHistory";
@@ -86,7 +88,7 @@ const DATASET_EXTENSIONS = new Set([
 const NOTEBOOK_EXTENSION = ".ipynb";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
 const execFileAsync = promisify(execFile);
-const DEFAULT_MIN_CALKIT_VERSION = "0.41.11";
+const DEFAULT_MIN_CALKIT_VERSION = "0.41.12";
 const DEFAULT_NOTEBOOK_SLURM_TIME = "120";
 const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
 const MISSING_IJULIA_ERROR_TEXT =
@@ -108,6 +110,10 @@ const staleStageNames = new Set<string>();
 const importedFigureUris = new Set<string>();
 const pipelineNotebookUris = new Set<string>();
 let currentCalkitConfig: CalkitInfo | undefined;
+// Whether a calkit.yaml exists in the workspace. The sidebar is gated on this:
+// when false, the config passed to the sidebar is treated as undefined so the
+// "Initialize Calkit Project" welcome view shows and no badge is displayed.
+let currentCalkitYamlExists = false;
 let currentDvcYaml: DvcYaml | undefined;
 let currentEnvDescriptions: Record<string, EnvDescription> | undefined;
 let currentDetectedNotebooks: string[] = [];
@@ -697,12 +703,32 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_REFRESH_SIDEBAR, async () => {
-      const workspaceRoot = getWorkspaceRoot();
-      if (workspaceRoot) {
-        await scanDetectedFiles(workspaceRoot);
-      }
-      void refreshPipelineOutputContext(context);
+      // refreshPipelineOutputContext already re-scans detected files; force the
+      // staleness check too, since the user explicitly asked to refresh.
+      void refreshPipelineOutputContext(context, true);
     }),
+  );
+
+  // Two commands rather than one toggle: the sidebar menu shows whichever is
+  // applicable (gated by the calkit-vscode.autoRefreshStatus context key), with
+  // the "on" entry carrying a check glyph. This conveys state reliably in the
+  // view-title overflow menu, where a `toggled` checkmark isn't rendered.
+  const setAutoRefreshStatus = async (enabled: boolean): Promise<void> => {
+    await vscode.workspace
+      .getConfiguration("calkit")
+      .update("autoRefreshStatus", enabled, vscode.ConfigurationTarget.Global);
+    if (enabled) {
+      // Just re-enabled: run a refresh now so status is current.
+      void refreshPipelineOutputContext(context, true);
+    }
+  };
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_ENABLE_AUTO_REFRESH, () =>
+      setAutoRefreshStatus(true),
+    ),
+    vscode.commands.registerCommand(COMMAND_DISABLE_AUTO_REFRESH, () =>
+      setAutoRefreshStatus(false),
+    ),
   );
 
   context.subscriptions.push(
@@ -814,6 +840,16 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   void ensureCalkitCliReady();
+
+  // Keep the "Auto-refresh status" menu checkmark in sync with the setting.
+  updateAutoRefreshContext();
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("calkit.autoRefreshStatus")) {
+        updateAutoRefreshContext();
+      }
+    }),
+  );
 
   void refreshNotebookToolbarContext(context);
   void autoSelectEnvironmentForActiveNotebook(context);
@@ -1167,74 +1203,9 @@ function updateSidebarBadge(): void {
 const DETECTED_FILES_EXCLUDE =
   "**/{.*,__pycache__,node_modules,venv,env,site-packages}/**";
 
-const FIGURE_DIR_NAMES = new Set([
-  "figures",
-  "figs",
-  "fig",
-  "plots",
-  "plot",
-  "images",
-  "img",
-  "output",
-  "outputs",
-  "results",
-]);
-
-const DATA_DIR_NAMES = new Set([
-  "data",
-  "dataset",
-  "datasets",
-  "input",
-  "inputs",
-  "output",
-  "outputs",
-  "results",
-]);
-
-// True if any ancestor directory of a "/"-separated relative path matches one
-// of the given (lower-cased) directory names.
-function hasAncestorIn(relPath: string, names: Set<string>): boolean {
-  return relPath
-    .split("/")
-    .slice(0, -1)
-    .some((p) => names.has(p.toLowerCase()));
-}
-
 // True if a relative path equals, or lives inside, any of the given directories.
 function isUnderAnyDir(relPath: string, dirs: string[]): boolean {
   return dirs.some((d) => relPath === d || relPath.startsWith(d + "/"));
-}
-
-// Collapse detected data files into their containing folder: a folder holding
-// multiple data files is reported as a single dataset rather than each file
-// individually. Folders nested inside another detected folder are dropped so
-// only the outermost dataset folder remains.
-function collapseDatasetFolders(files: string[]): string[] {
-  const byDir = new Map<string, string[]>();
-  for (const file of files) {
-    const slash = file.lastIndexOf("/");
-    const dir = slash === -1 ? "" : file.slice(0, slash);
-    const group = byDir.get(dir);
-    if (group) {
-      group.push(file);
-    } else {
-      byDir.set(dir, [file]);
-    }
-  }
-  const collapsed = new Set<string>();
-  for (const [dir, group] of byDir) {
-    if (dir !== "" && group.length >= 2) {
-      collapsed.add(dir);
-    } else {
-      for (const file of group) {
-        collapsed.add(file);
-      }
-    }
-  }
-  const all = [...collapsed];
-  return all.filter(
-    (p) => !all.some((other) => other !== p && p.startsWith(other + "/")),
-  );
 }
 
 // Repo-relative paths of any Git submodules, read from .gitmodules. Artifacts
@@ -1259,90 +1230,66 @@ async function getSubmodulePaths(workspaceRoot: string): Promise<string[]> {
   }
 }
 
-// Repo-relative paths already accounted for as artifacts: registered figures
-// and datasets, plus pipeline/DVC stage outputs. Files inside one of these
-// belong to that artifact, so they shouldn't be auto-detected individually.
-function getRegisteredArtifactPaths(): string[] {
-  const paths: string[] = [];
-  for (const f of currentCalkitConfig?.figures ?? []) {
-    if (typeof f.path === "string") {
-      paths.push(f.path);
-    }
+// Auto-detected figure/dataset paths from the calkit CLI. `calkit list
+// figures|datasets --json` applies the shared detection heuristic (narrow
+// figure/data directory names; git- and DVC-tracked files considered; declared
+// artifacts reserved so they aren't listed twice) and flags auto-detected
+// entries with `detected: true`; we keep only those, since declared artifacts
+// already come from calkit.yaml.
+async function listDetectedArtifacts(
+  workspaceRoot: string,
+  kind: "figures" | "datasets",
+): Promise<string[]> {
+  try {
+    const { stdout } = await execFileAsync("calkit", ["list", kind, "--json"], {
+      cwd: workspaceRoot,
+      timeout: 30_000,
+    });
+    const entries = JSON.parse(stdout) as {
+      path?: string;
+      detected?: boolean;
+    }[];
+    return entries
+      .filter((e) => e.detected === true && typeof e.path === "string")
+      .map((e) => e.path as string)
+      .sort();
+  } catch (error) {
+    log(`Failed to list detected ${kind}: ${String(error)}`);
+    return [];
   }
-  for (const d of currentCalkitConfig?.datasets ?? []) {
-    if (typeof d.path === "string") {
-      paths.push(d.path);
-    }
-  }
-  for (const stage of Object.values(
-    currentCalkitConfig?.pipeline?.stages ?? {},
-  )) {
-    for (const out of stage.outputs ?? []) {
-      paths.push(typeof out === "string" ? out : out.path);
-    }
-  }
-  for (const stage of Object.values(currentDvcYaml?.stages ?? {})) {
-    for (const out of dvcStageOutputPaths(stage)) {
-      paths.push(out.replace(/\\/g, "/"));
-    }
-  }
-  return paths;
 }
 
-const ARTIFACT_GLOB = `**/*.{${[...FIGURE_EXTENSIONS, ...DATASET_EXTENSIONS]
-  .map((e) => e.replace(/^\./, ""))
-  .join(",")}}`;
-
-async function scanDetectedFiles(workspaceRoot: string): Promise<void> {
-  const [notebookUris, allUris, submodulePaths] = await Promise.all([
-    vscode.workspace.findFiles(
-      `**/*${NOTEBOOK_EXTENSION}`,
-      DETECTED_FILES_EXCLUDE,
-    ),
-    vscode.workspace.findFiles(ARTIFACT_GLOB, DETECTED_FILES_EXCLUDE),
-    getSubmodulePaths(workspaceRoot),
-  ]);
-  const registeredPaths = getRegisteredArtifactPaths();
-  // A file is redundant if it lives inside a submodule or is the same as, or
-  // inside, an already-registered figure/dataset/output path.
-  const isRedundant = (rel: string): boolean =>
-    isUnderAnyDir(rel, submodulePaths) || isUnderAnyDir(rel, registeredPaths);
+async function scanDetectedFiles(
+  workspaceRoot: string,
+  calkitYamlExists: boolean,
+): Promise<void> {
+  // Outside a Calkit project the sidebar shows the welcome view, so detected
+  // files are never displayed. Skip the scan (including the `calkit list`
+  // subprocesses, which would otherwise run and fail on every refresh).
+  if (!calkitYamlExists) {
+    currentDetectedNotebooks = [];
+    currentDetectedFigures = [];
+    currentDetectedDatasets = [];
+    return;
+  }
+  const [notebookUris, submodulePaths, detectedFigures, detectedDatasets] =
+    await Promise.all([
+      vscode.workspace.findFiles(
+        `**/*${NOTEBOOK_EXTENSION}`,
+        DETECTED_FILES_EXCLUDE,
+      ),
+      getSubmodulePaths(workspaceRoot),
+      listDetectedArtifacts(workspaceRoot, "figures"),
+      listDetectedArtifacts(workspaceRoot, "datasets"),
+    ]);
   const toRel = (u: vscode.Uri): string =>
     path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/");
-  // Plotly figures are stored as JSON. Treat a .json under a figure-specific
-  // folder (one that isn't also a data folder) as a figure; .json elsewhere
-  // stays a dataset.
-  const figureOnlyDirNames = new Set(
-    [...FIGURE_DIR_NAMES].filter((n) => !DATA_DIR_NAMES.has(n)),
-  );
-  const isFigure = (rel: string, ext: string): boolean =>
-    (FIGURE_EXTENSIONS.has(ext) && hasAncestorIn(rel, FIGURE_DIR_NAMES)) ||
-    (ext === ".json" && hasAncestorIn(rel, figureOnlyDirNames));
-  const isDataset = (rel: string, ext: string): boolean =>
-    DATASET_EXTENSIONS.has(ext) &&
-    hasAncestorIn(rel, DATA_DIR_NAMES) &&
-    !isFigure(rel, ext);
   currentDetectedNotebooks = notebookUris
     .map(toRel)
     .filter((rel) => !isUnderAnyDir(rel, submodulePaths))
     .sort();
-  const figureSet = new Set<string>();
-  const datasetFiles = new Set<string>();
-  for (const u of allUris) {
-    const rel = toRel(u);
-    if (isRedundant(rel)) {
-      continue;
-    }
-    const ext = path.extname(rel).toLowerCase();
-    if (isFigure(rel, ext)) {
-      figureSet.add(rel);
-    } else if (isDataset(rel, ext)) {
-      datasetFiles.add(rel);
-    }
-  }
-  currentDetectedFigures = [...figureSet].sort();
-  // A folder full of data files is reported as one dataset, not file-by-file.
-  currentDetectedDatasets = collapseDatasetFolders([...datasetFiles]).sort();
+  currentDetectedFigures = detectedFigures;
+  currentDetectedDatasets = detectedDatasets;
 }
 
 function scheduleRefreshPipelineOutputContext(
@@ -1351,14 +1298,38 @@ function scheduleRefreshPipelineOutputContext(
   if (refreshDebounceTimer !== undefined) {
     clearTimeout(refreshDebounceTimer);
   }
+  // Debounce generously: a `git pull`/`stash` churns calkit.yaml and dvc.yaml,
+  // and each refresh can run `calkit status`; coalescing avoids stacking those
+  // (which holds DVC locks and stalls Git operations — see issue #938).
   refreshDebounceTimer = setTimeout(() => {
     refreshDebounceTimer = undefined;
     void refreshPipelineOutputContext(context);
-  }, 300);
+  }, 1500);
+}
+
+// Whether automatic `calkit status` checks (which detect stale pipeline stages)
+// run on file-change/activation refreshes. When disabled, the cheap parts of
+// the refresh still run; the staleness check only runs when forced via the
+// Refresh button.
+function isAutoRefreshStatusEnabled(): boolean {
+  return vscode.workspace
+    .getConfiguration("calkit")
+    .get<boolean>("autoRefreshStatus", true);
+}
+
+// Mirror the auto-refresh setting into a context key so the sidebar menu item
+// can show a checkmark (toggled: calkit-vscode.autoRefreshStatus).
+function updateAutoRefreshContext(): void {
+  void vscode.commands.executeCommand(
+    "setContext",
+    "calkit-vscode.autoRefreshStatus",
+    isAutoRefreshStatusEnabled(),
+  );
 }
 
 async function refreshPipelineOutputContext(
   context: vscode.ExtensionContext,
+  force = false,
 ): Promise<void> {
   const workspaceRoot = getWorkspaceRoot();
   if (!workspaceRoot) {
@@ -1377,6 +1348,7 @@ async function refreshPipelineOutputContext(
   const calkitYamlExists = await fileExists(
     path.join(workspaceRoot, "calkit.yaml"),
   );
+  currentCalkitYamlExists = calkitYamlExists;
   void vscode.commands.executeCommand(
     "setContext",
     "calkit-vscode.hasProject",
@@ -1422,7 +1394,7 @@ async function refreshPipelineOutputContext(
     ]),
   ].map((p) => vscode.Uri.file(p));
   decorationProvider.refresh(changedUris);
-  await scanDetectedFiles(workspaceRoot);
+  await scanDetectedFiles(workspaceRoot, calkitYamlExists);
   sidebarProvider?.refresh(
     workspaceRoot,
     calkitYamlExists ? calkitConfig : undefined,
@@ -1436,15 +1408,32 @@ async function refreshPipelineOutputContext(
   updateSidebarBadge();
   // Run the staleness check after the fast decoration pass: "not produced
   // by the pipeline" badges are applied immediately, and stale-output
-  // decorations follow once calkit status finishes.
-  void refreshStaleOutputContext(workspaceRoot, outputMap, decorationProvider);
+  // decorations follow once calkit status finishes. The check is skipped on
+  // automatic refreshes when auto-refresh is disabled; the Refresh button
+  // forces it.
+  if (force || isAutoRefreshStatusEnabled()) {
+    void refreshStaleOutputContext(
+      workspaceRoot,
+      outputMap,
+      decorationProvider,
+    );
+  }
 }
+
+// Guards against overlapping `calkit status` runs: while one is in flight,
+// further automatic refreshes skip launching another (they'd otherwise stack
+// up and contend for DVC locks during rapid file changes).
+let staleRefreshInFlight = false;
 
 async function refreshStaleOutputContext(
   workspaceRoot: string,
   outputMap: Map<string, string>,
   provider: PipelineOutputDecorationProvider,
 ): Promise<void> {
+  if (staleRefreshInFlight) {
+    return;
+  }
+  staleRefreshInFlight = true;
   try {
     const { stdout } = await execFileAsync(
       "calkit",
@@ -1486,7 +1475,7 @@ async function refreshStaleOutputContext(
     if (staleChanged) {
       sidebarProvider?.refresh(
         workspaceRoot,
-        currentCalkitConfig,
+        currentCalkitYamlExists ? currentCalkitConfig : undefined,
         currentDvcYaml,
         staleStageNames,
         currentEnvDescriptions,
@@ -1498,6 +1487,8 @@ async function refreshStaleOutputContext(
     }
   } catch (error) {
     log(`Staleness check failed: ${String(error)}`);
+  } finally {
+    staleRefreshInFlight = false;
   }
 }
 
@@ -1742,6 +1733,31 @@ const KIND_BY_EXT: Record<string, string> = {
   ".tex": "latex",
 };
 
+// Repo-relative paths of files Git does not ignore (tracked plus untracked but
+// not gitignored). Used to keep gitignored files — e.g. scripts inside a
+// virtualenv — out of the stage source suggestions. Returns undefined when the
+// listing fails (not a Git repo, git unavailable) so callers fall back to
+// showing everything.
+async function getGitVisibleFiles(
+  workspaceRoot: string,
+): Promise<Set<string> | undefined> {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+      { cwd: workspaceRoot, maxBuffer: 64 * 1024 * 1024, timeout: 30_000 },
+    );
+    return new Set(
+      stdout
+        .split("\0")
+        .filter((p) => p.length > 0)
+        .map((p) => p.replace(/\\/g, "/")),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
 async function showStageEditor(
   context: vscode.ExtensionContext,
   workspaceRoot: string,
@@ -1752,13 +1768,19 @@ async function showStageEditor(
   artifactKind?: "figure" | "dataset",
 ): Promise<void> {
   const nonce = getNonce();
-  const [sourceUris, allUris] = await Promise.all([
+  const [sourceUris, allUris, gitVisibleFiles] = await Promise.all([
     vscode.workspace.findFiles(SOURCE_GLOB, SOURCE_EXCLUDE),
     vscode.workspace.findFiles("**/*", ALL_FILES_EXCLUDE),
+    getGitVisibleFiles(workspaceRoot),
   ]);
+  // Don't suggest gitignored source files (e.g. scripts inside a venv). When
+  // the Git listing is unavailable, keep everything.
   const workspaceFiles = sourceUris
     .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
+    .filter((rel) => !gitVisibleFiles || gitVisibleFiles.has(rel))
     .sort();
+  // Outputs are left unfiltered: a stage output may legitimately be a
+  // DVC-tracked (and therefore gitignored) file.
   const allProjectFiles = allUris
     .map((u) => path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/"))
     .sort();
@@ -4028,6 +4050,8 @@ async function showEnvCreatorWebview(
       origPipPackages: string[];
       pythonVersion: string;
       condaPath: string;
+      juliaVersion: string;
+      juliaPath: string;
       image: string;
       base: string;
       dockerfilePath: string;
@@ -4148,6 +4172,18 @@ async function showEnvCreatorWebview(
             args.push("--image", msg.image);
           }
           args.push("--no-check", "--no-commit");
+        } else if (msg.kind === "julia") {
+          args.push("new", "julia-env", "-n", msg.name);
+          if (msg.juliaPath) {
+            args.push("--path", msg.juliaPath);
+          }
+          if (msg.juliaVersion) {
+            args.push("--julia", msg.juliaVersion);
+          }
+          args.push("--no-commit");
+          for (const pkg of msg.packages) {
+            args.push(pkg);
+          }
         } else if (msg.kind === "slurm") {
           args.push(
             "new",
@@ -4337,6 +4373,14 @@ ${
       <div id="julia-packages-list"></div>
       <button class="add-btn" id="add-julia-package">+ Add package</button>
     </div>
+  </div>
+  <div class="field">
+    <label>Julia version <span style="font-weight:normal;text-transform:none">(optional)</span></label>
+    <input id="julia-version" type="text" placeholder="auto-detected, e.g. 1.10" />
+  </div>
+  <div class="field">
+    <label>Project path <span style="font-weight:normal;text-transform:none">(optional)</span></label>
+    <input id="julia-path" type="text" placeholder="Project.toml" />
   </div>`
 }
 </div>`;
@@ -4651,6 +4695,8 @@ ${slurmSection}
       origPipPackages: ${pipPackagesJson},
       pythonVersion: document.getElementById('python-version') ? document.getElementById('python-version').value.trim() : '',
       condaPath: document.getElementById('conda-path') ? document.getElementById('conda-path').value.trim() : '',
+      juliaVersion: document.getElementById('julia-version') ? document.getElementById('julia-version').value.trim() : '',
+      juliaPath: document.getElementById('julia-path') ? document.getElementById('julia-path').value.trim() : '',
       image: document.getElementById('docker-image') ? document.getElementById('docker-image').value.trim() : '',
       base: document.getElementById('docker-base') ? document.getElementById('docker-base').value.trim() : '',
       dockerfilePath: document.getElementById('dockerfile-path') ? document.getElementById('dockerfile-path').value.trim() : '',

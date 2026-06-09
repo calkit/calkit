@@ -2,7 +2,7 @@
   "name": "calkit-vscode",
   "displayName": "Calkit",
   "description": "An extension for working with Calkit projects.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "calkit",
   "license": "MIT",
   "repository": {
@@ -205,6 +205,16 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "calkit-vscode.enableAutoRefresh",
+        "title": "Auto-refresh status",
+        "category": "Calkit"
+      },
+      {
+        "command": "calkit-vscode.disableAutoRefresh",
+        "title": "✓ Auto-refresh status",
+        "category": "Calkit"
+      },
+      {
         "command": "calkit-vscode.openCalkitYaml",
         "title": "Open calkit.yaml",
         "category": "Calkit",
@@ -264,6 +274,16 @@
           "command": "calkit-vscode.refreshSidebar",
           "when": "view == calkit-sidebar",
           "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.enableAutoRefresh",
+          "when": "view == calkit-sidebar && !calkit-vscode.autoRefreshStatus",
+          "group": "1_options"
+        },
+        {
+          "command": "calkit-vscode.disableAutoRefresh",
+          "when": "view == calkit-sidebar && calkit-vscode.autoRefreshStatus",
+          "group": "1_options"
         }
       ],
       "view/item/context": [
@@ -455,6 +475,14 @@
       ],
       "commandPalette": [
         {
+          "command": "calkit-vscode.enableAutoRefresh",
+          "when": "!calkit-vscode.autoRefreshStatus"
+        },
+        {
+          "command": "calkit-vscode.disableAutoRefresh",
+          "when": "calkit-vscode.autoRefreshStatus"
+        },
+        {
           "command": "calkit-vscode.selectCalkitEnvironment"
         },
         {
@@ -544,6 +572,11 @@
           "type": "number",
           "default": 8888,
           "description": "Default port used when launching a Calkit-backed Jupyter server."
+        },
+        "calkit.autoRefreshStatus": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically run 'calkit status' to refresh pipeline staleness when project files change. Disable this if frequent status checks interfere with Git operations like stashing or pulling; you can still refresh manually from the Calkit sidebar."
         }
       }
     }

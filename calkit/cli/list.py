@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Annotated, Literal
 
 import typer
@@ -10,6 +11,32 @@ import calkit
 from calkit.cli import AliasGroup, raise_error, warn
 
 list_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
+
+
+def _echo_object(obj: dict) -> None:
+    """Print a single object in the human-readable YAML-ish listing format."""
+    # Copy so popping 'path' doesn't mutate the caller's dict.
+    obj = dict(obj)
+    path = obj.pop("path", None)
+    typer.echo(f"- path: {path}")
+    for k, v in obj.items():
+        if isinstance(v, dict):
+            typer.echo(f"    {k}:")
+            for k1, v1 in v.items():
+                typer.echo(f"      {k1}: {v1}")
+        elif isinstance(v, list):
+            typer.echo(f"    {k}:")
+            for item in v:
+                if isinstance(item, dict):
+                    for n, (k1, v1) in enumerate(item.items()):
+                        if n == 0:
+                            typer.echo(f"      - {k1}: {v1}")
+                        else:
+                            typer.echo(f"        {k1}: {v1}")
+                else:
+                    typer.echo(f"        - {item}")
+        else:
+            typer.echo(f"  {k}: {v}")
 
 
 def _list_objects(
@@ -21,33 +48,44 @@ def _list_objects(
         "publications",
     ],
 ):
-    """List objects.
+    """List objects."""
+    ck_info = calkit.load_calkit_info()
+    for obj in ck_info.get(kind, []) or []:
+        _echo_object(obj)
 
-    TODO: This should probably just use some library to dump YAML to string.
+
+def _list_artifacts(
+    kind: Literal["figures", "datasets"],
+    json_output: bool,
+    declared_only: bool,
+):
+    """List figures or datasets, optionally including auto-detected ones.
+
+    By default, artifacts declared in ``calkit.yaml`` are merged with any
+    auto-detected from the project's files; ``--declared-only`` returns just the
+    declared ones. Each entry carries a ``detected`` flag so callers can tell
+    declared and auto-detected artifacts apart.
     """
     ck_info = calkit.load_calkit_info()
-    objects = ck_info.get(kind, [])
-    for obj in objects:
-        path = obj.pop("path")
-        typer.echo(f"- path: {path}")
-        for k, v in obj.items():
-            if isinstance(v, dict):
-                typer.echo(f"    {k}:")
-                for k1, v1 in v.items():
-                    typer.echo(f"      {k1}: {v1}")
-            elif isinstance(v, list):
-                typer.echo(f"    {k}:")
-                for item in v:
-                    if isinstance(item, dict):
-                        for n, (k1, v1) in enumerate(item.items()):
-                            if n == 0:
-                                typer.echo(f"      - {k1}: {v1}")
-                            else:
-                                typer.echo(f"        {k1}: {v1}")
-                    else:
-                        typer.echo(f"        - {item}")
-            else:
-                typer.echo(f"  {k}: {v}")
+    declared = ck_info.get(kind, []) or []
+    declared_paths = {o.get("path") for o in declared if isinstance(o, dict)}
+    detected: list[dict] = []
+    if not declared_only:
+        found = calkit.detect.detect_project_artifacts(ck_info=ck_info)
+        for path in found.get(kind, []):
+            if path not in declared_paths:
+                detected.append({"path": path})
+    if json_output:
+        result = [
+            {**o, "detected": False} for o in declared if isinstance(o, dict)
+        ]
+        result += [{**o, "detected": True} for o in detected]
+        typer.echo(json.dumps(result))
+        return
+    for obj in declared:
+        _echo_object(obj)
+    for obj in detected:
+        _echo_object({**obj, "detected": True})
 
 
 @list_app.command(name="notebooks|nb")
@@ -57,15 +95,43 @@ def list_notebooks():
 
 
 @list_app.command(name="figures|figs")
-def list_figures():
+def list_figures(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+    declared_only: Annotated[
+        bool,
+        typer.Option(
+            "--declared-only",
+            help=(
+                "Only list figures declared in calkit.yaml; "
+                "skip auto-detection."
+            ),
+        ),
+    ] = False,
+):
     """List figures in the project."""
-    _list_objects("figures")
+    _list_artifacts("figures", json_output, declared_only)
 
 
 @list_app.command(name="datasets")
-def list_datasets():
+def list_datasets(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+    declared_only: Annotated[
+        bool,
+        typer.Option(
+            "--declared-only",
+            help=(
+                "Only list datasets declared in calkit.yaml; "
+                "skip auto-detection."
+            ),
+        ),
+    ] = False,
+):
     """List datasets in the project."""
-    _list_objects("datasets")
+    _list_artifacts("datasets", json_output, declared_only)
 
 
 @list_app.command(name="publications|pubs")

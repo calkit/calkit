@@ -1746,8 +1746,15 @@ List figures in the project.
 Usage:
 
 ```text
-calkit list|ls figures|figs
+calkit list|ls figures|figs [OPTIONS]
 ```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                     |
+| ----------------- | ------- | -------- | ------- | --------------------------------------------------------------- |
+| `--json`          | boolean | no       | False   | Output result as JSON.                                          |
+| `--declared-only` | boolean | no       | False   | Only list figures declared in calkit.yaml; skip auto-detection. |
 
 <a id="subcommand-list-ls-datasets"></a>
 
@@ -1758,8 +1765,15 @@ List datasets in the project.
 Usage:
 
 ```text
-calkit list|ls datasets
+calkit list|ls datasets [OPTIONS]
 ```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                      |
+| ----------------- | ------- | -------- | ------- | ---------------------------------------------------------------- |
+| `--json`          | boolean | no       | False   | Output result as JSON.                                           |
+| `--declared-only` | boolean | no       | False   | Only list datasets declared in calkit.yaml; skip auto-detection. |
 
 <a id="subcommand-list-ls-publications-pubs"></a>
 

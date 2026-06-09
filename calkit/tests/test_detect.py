@@ -1075,3 +1075,77 @@ def test_create_files_in_subdirectory(tmp_dir):
 
     assert os.path.exists(output_path)
     assert os.path.exists(".calkit/envs/test-env")
+
+
+def test_is_figure_path():
+    """Figures must live in a figure-named directory."""
+    from calkit.detect import is_figure_path
+
+    # Detected: image-like extension under a figure directory, at any depth.
+    assert is_figure_path("figures/result.png")
+    assert is_figure_path("paper/figs/plot.pdf")
+    assert is_figure_path("Plots/Fig1.SVG")
+    # Plotly JSON under a figure-only directory counts as a figure.
+    assert is_figure_path("figures/interactive.json")
+    # Not detected: right extension, wrong (or no) directory.
+    assert not is_figure_path("result.png")
+    assert not is_figure_path("results/result.png")
+    assert not is_figure_path("output/plot.pdf")
+    assert not is_figure_path("img/logo.png")
+    # JSON under a data directory is not a figure.
+    assert not is_figure_path("data/records.json")
+    # Non-figure extension under a figure directory.
+    assert not is_figure_path("figures/notes.txt")
+
+
+def test_is_dataset_path():
+    """Datasets must live in a data-named directory."""
+    from calkit.detect import is_dataset_path
+
+    assert is_dataset_path("data/raw.csv")
+    assert is_dataset_path("datasets/measurements.parquet")
+    assert is_dataset_path("project/Data/records.json")
+    # Wrong directory.
+    assert not is_dataset_path("results/raw.csv")
+    assert not is_dataset_path("raw.csv")
+    # A .json under a figure-only dir is a figure, not a dataset.
+    assert not is_dataset_path("figures/plot.json")
+    # Non-dataset extension under a data directory.
+    assert not is_dataset_path("data/readme.md")
+
+
+def test_detect_figures():
+    """detect_figures filters hidden and reserved paths."""
+    from calkit.detect import detect_figures
+
+    candidates = [
+        "figures/a.png",
+        "figs/b.pdf",
+        "result.png",
+        ".cache/figures/c.png",
+        "figures/reserved.png",
+    ]
+    out = detect_figures(candidates, reserved_paths=["figures/reserved.png"])
+    assert out == ["figs/b.pdf", "figures/a.png"]
+    # Files inside a reserved directory are excluded too.
+    out = detect_figures(
+        ["figures/sub/x.png", "figures/y.png"], reserved_paths=["figures/sub"]
+    )
+    assert out == ["figures/y.png"]
+
+
+def test_detect_datasets():
+    """detect_datasets excludes figures and collapses folders."""
+    from calkit.detect import detect_datasets
+
+    candidates = [
+        "data/a.csv",
+        "data/sub/b.csv",
+        "data/sub/c.csv",
+        "figures/plot.json",
+        ".venv/data/d.csv",
+    ]
+    out = detect_datasets(candidates, figure_paths=["figures/plot.json"])
+    # data/sub holds two files, so it collapses to the folder; data/a.csv has
+    # only one file in its folder, so it stays a file.
+    assert out == ["data/a.csv", "data/sub"]

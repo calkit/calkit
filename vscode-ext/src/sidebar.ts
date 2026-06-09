@@ -100,6 +100,11 @@ export class CalkitSidebarProvider
   }
 
   getAttentionCount(): number {
+    // Not a Calkit project (no calkit.yaml): the tree shows the welcome view,
+    // so auto-detected files shouldn't drive a "needs attention" badge.
+    if (this.calkitConfig === undefined) {
+      return 0;
+    }
     let count = 0;
     // Stale pipeline stages
     count += this.staleStageNames.size;

@@ -1803,3 +1803,245 @@ def create_r_description_file(
         os.makedirs(output_dir, exist_ok=True)
     with open(output_path, "w") as f:
         f.write(create_r_description_content(dependencies))
+
+
+# --- Figure/dataset auto-detection ------------------------------------------
+# A file is only treated as an auto-detected figure or dataset when it lives in
+# a directory whose name signals its kind. These sets are intentionally narrow
+# (and kept in sync with Calkit Cloud) so we don't flag arbitrary images or
+# data files scattered around a repository.
+FIGURE_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".pdf",
+    ".eps",
+    ".tiff",
+    ".tif",
+}
+FIGURE_DIRS = {"figures", "figure", "figs", "fig", "plots", "plot", "images"}
+DATASET_EXTENSIONS = {
+    ".csv",
+    ".h5",
+    ".hdf5",
+    ".parquet",
+    ".nc",
+    ".zarr",
+    ".feather",
+    ".arrow",
+    ".avro",
+    ".json",
+    ".jsonl",
+    ".ndjson",
+}
+DATA_DIRS = {"data", "datasets", "dataset"}
+
+
+def _ancestor_dir_names(rel_path: str) -> set[str]:
+    """Lower-cased names of the ancestor directories of a "/"-separated path."""
+    return {p.lower() for p in rel_path.split("/")[:-1]}
+
+
+def _path_ext(rel_path: str) -> str:
+    name = rel_path.rsplit("/", 1)[-1]
+    return ("." + name.rsplit(".", 1)[-1].lower()) if "." in name else ""
+
+
+def is_figure_path(rel_path: str) -> bool:
+    """Whether a repo-relative path looks like an auto-detectable figure."""
+    ancestors = _ancestor_dir_names(rel_path)
+    ext = _path_ext(rel_path)
+    if ext in FIGURE_EXTENSIONS and ancestors & FIGURE_DIRS:
+        return True
+    # A Plotly figure is stored as JSON; treat .json under a figure-only
+    # directory (one that isn't also a data directory) as a figure.
+    if ext == ".json" and ancestors & (FIGURE_DIRS - DATA_DIRS):
+        return True
+    return False
+
+
+def is_dataset_path(rel_path: str) -> bool:
+    """Whether a repo-relative path looks like an auto-detectable dataset."""
+    return (
+        _path_ext(rel_path) in DATASET_EXTENSIONS
+        and bool(_ancestor_dir_names(rel_path) & DATA_DIRS)
+        and not is_figure_path(rel_path)
+    )
+
+
+def _is_hidden_path(rel_path: str) -> bool:
+    return any(part.startswith(".") for part in rel_path.split("/"))
+
+
+def _is_under_any_dir(rel_path: str, dirs: list[str]) -> bool:
+    """Whether ``rel_path`` equals or lives inside any of ``dirs``."""
+    return any(rel_path == d or rel_path.startswith(d + "/") for d in dirs)
+
+
+def _collapse_dataset_folders(paths: list[str]) -> list[str]:
+    """Collapse data files into their containing folder.
+
+    A folder holding two or more data files is reported as a single dataset
+    rather than file-by-file. Folders nested inside another collapsed folder
+    are dropped so only the outermost dataset folder remains.
+    """
+    by_dir: dict[str, list[str]] = {}
+    for p in paths:
+        directory = p.rsplit("/", 1)[0] if "/" in p else ""
+        by_dir.setdefault(directory, []).append(p)
+    collapsed: set[str] = set()
+    for directory, group in by_dir.items():
+        if directory and len(group) >= 2:
+            collapsed.add(directory)
+        else:
+            collapsed.update(group)
+    result = sorted(collapsed)
+    return [
+        p
+        for p in result
+        if not any(o != p and p.startswith(o + "/") for o in result)
+    ]
+
+
+def detect_figures(
+    candidate_paths: list[str],
+    reserved_paths: list[str] | tuple[str, ...] = (),
+) -> list[str]:
+    """Auto-detected figure paths among ``candidate_paths``.
+
+    Paths under a dot-directory or under one of ``reserved_paths`` (declared
+    artifacts and pipeline outputs) are skipped.
+    """
+    reserved = list(reserved_paths)
+    return sorted(
+        {
+            p
+            for p in candidate_paths
+            if not _is_hidden_path(p)
+            and not _is_under_any_dir(p, reserved)
+            and is_figure_path(p)
+        }
+    )
+
+
+def detect_datasets(
+    candidate_paths: list[str],
+    reserved_paths: list[str] | tuple[str, ...] = (),
+    figure_paths: list[str] | tuple[str, ...] = (),
+) -> list[str]:
+    """Auto-detected dataset paths among ``candidate_paths``.
+
+    Anything already detected as a figure (``figure_paths``) is excluded, and a
+    folder full of data files collapses to a single dataset entry.
+    """
+    reserved = list(reserved_paths)
+    figset = set(figure_paths)
+    files = {
+        p
+        for p in candidate_paths
+        if not _is_hidden_path(p)
+        and not _is_under_any_dir(p, reserved)
+        and p not in figset
+        and is_dataset_path(p)
+    }
+    return _collapse_dataset_folders(sorted(files))
+
+
+def list_repo_files(wdir: str | None = None) -> list[str]:
+    """Repo-relative paths of files Git does not ignore.
+
+    Combines tracked and untracked files while honoring ``.gitignore``, so
+    detection skips virtualenvs, ``node_modules``, and other ignored content.
+    Paths are returned relative to ``wdir`` (or the current directory), using
+    POSIX separators; files outside ``wdir`` are omitted.
+    """
+    import calkit.git
+
+    try:
+        repo = calkit.git.get_repo(wdir)
+    except Exception:
+        return []
+    files = calkit.git.ls_files(
+        repo, "--cached", "--others", "--exclude-standard"
+    )
+    repo_root = repo.working_dir
+    base = os.path.abspath(wdir if wdir is not None else ".")
+    rel_files = []
+    for f in files:
+        rel = os.path.relpath(os.path.join(repo_root, f), base)
+        if rel.startswith(".."):
+            continue
+        rel_files.append(Path(rel).as_posix())
+    return rel_files
+
+
+def list_dvc_tracked_files(wdir: str | None = None) -> list[str]:
+    """Repo-relative paths of files tracked by DVC.
+
+    DVC-tracked artifacts (added via ``dvc add`` or produced as pipeline
+    outputs) are Git-ignored, so they don't appear in :func:`list_repo_files`;
+    include them so figures and datasets stored with DVC are still detected.
+    Returns an empty list when DVC isn't available or the project isn't a DVC
+    repo.
+    """
+    from calkit.dvc.core import list_paths
+
+    try:
+        return [
+            p.replace("\\", "/")
+            for p in list_paths(wdir=wdir, recursive=True)
+            if p
+        ]
+    except Exception:
+        return []
+
+
+def _reserved_artifact_paths(
+    wdir: str | None = None, ck_info: dict | None = None
+) -> list[str]:
+    """Paths of artifacts declared in ``calkit.yaml``.
+
+    These are excluded from auto-detection so a declared figure/dataset isn't
+    reported twice and individual files inside a declared artifact folder aren't
+    listed separately. Pipeline/DVC stage outputs are intentionally *not*
+    reserved: a figure or dataset produced by the pipeline should still be
+    detected (and shown with its producing stage as provenance).
+    """
+    import calkit
+
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    paths: list[str] = []
+    for kind in ("figures", "datasets"):
+        for obj in ck_info.get(kind, []) or []:
+            if isinstance(obj, dict) and isinstance(obj.get("path"), str):
+                paths.append(obj["path"])
+    return [p.replace("\\", "/") for p in paths]
+
+
+def detect_project_artifacts(
+    wdir: str | None = None, ck_info: dict | None = None
+) -> dict[str, list[str]]:
+    """Auto-detect figure and dataset paths in the project at ``wdir``.
+
+    Candidates are the files Git does not ignore plus any files tracked by DVC
+    (which are Git-ignored); declared artifacts are reserved so they aren't
+    detected again.
+    """
+    import calkit
+
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    reserved = _reserved_artifact_paths(wdir=wdir, ck_info=ck_info)
+    candidates = list(
+        dict.fromkeys(
+            [*list_repo_files(wdir=wdir), *list_dvc_tracked_files(wdir=wdir)]
+        )
+    )
+    figures = detect_figures(candidates, reserved_paths=reserved)
+    datasets = detect_datasets(
+        candidates, reserved_paths=reserved, figure_paths=figures
+    )
+    return {"figures": figures, "datasets": datasets}

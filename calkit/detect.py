@@ -1805,7 +1805,7 @@ def create_r_description_file(
         f.write(create_r_description_content(dependencies))
 
 
-# --- Figure/dataset auto-detection ------------------------------------------
+# Figure/dataset auto-detection
 # A file is only treated as an auto-detected figure or dataset when it lives in
 # a directory whose name signals its kind. These sets are intentionally narrow
 # (and kept in sync with Calkit Cloud) so we don't flag arbitrary images or

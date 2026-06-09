@@ -103,8 +103,10 @@ def list_figures(
         bool,
         typer.Option(
             "--declared-only",
-            help="Only list figures declared in calkit.yaml; "
-            "skip auto-detection.",
+            help=(
+                "Only list figures declared in calkit.yaml; "
+                "skip auto-detection."
+            ),
         ),
     ] = False,
 ):
@@ -121,8 +123,10 @@ def list_datasets(
         bool,
         typer.Option(
             "--declared-only",
-            help="Only list datasets declared in calkit.yaml; "
-            "skip auto-detection.",
+            help=(
+                "Only list datasets declared in calkit.yaml; "
+                "skip auto-detection."
+            ),
         ),
     ] = False,
 ):

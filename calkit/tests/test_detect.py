@@ -209,6 +209,48 @@ pdf("figure.pdf")
     assert "plot.png" in result["outputs"]
     assert "clean_data.csv" in result["outputs"]
     assert "figure.pdf" in result["outputs"]
+    # An orchestrator script that sources other scripts via here::here()
+    # should recursively attribute their I/O to the stage
+    os.makedirs("code", exist_ok=True)
+    master_content = """
+here::i_am("code/master.R")
+log_file <- here::here("output", "run.log")
+sink(log_file, split = TRUE)
+source(here::here("code", "clean.R"))
+source(here::here("code", "model.R"))
+sink()
+"""
+    clean_content = """
+raw <- read_excel("data/raw.xlsx", sheet = "Master")
+saveRDS(raw, file = "data/clean.rds")
+"""
+    model_content = """
+df <- readRDS("data/clean.rds")
+write.csv(df, file = "output/tables/summary.csv")
+ggsave("output/figures/plot.pdf", p)
+sink("output/tables/model.tex")
+"""
+    with open("code/master.R", "w") as f:
+        f.write(master_content)
+    with open("code/clean.R", "w") as f:
+        f.write(clean_content)
+    with open("code/model.R", "w") as f:
+        f.write(model_content)
+    master = detect_r_script_io("code/master.R")
+    # Sourced scripts are detected as inputs even when wrapped in here::here()
+    assert "code/clean.R" in master["inputs"]
+    assert "code/model.R" in master["inputs"]
+    # I/O from sourced scripts is attributed to the orchestrator
+    assert "data/raw.xlsx" in master["inputs"]
+    # Named file=/filename= write arguments are detected
+    assert "data/clean.rds" in master["outputs"]
+    assert "output/tables/summary.csv" in master["outputs"]
+    # sink(), here::here()-assigned variables, and ggsave() literals
+    assert "output/run.log" in master["outputs"]
+    assert "output/tables/model.tex" in master["outputs"]
+    assert "output/figures/plot.pdf" in master["outputs"]
+    # An intermediate produced and consumed within the stage is not an input
+    assert "data/clean.rds" not in master["inputs"]
 
 
 def test_detect_shell_script_io(tmp_dir):

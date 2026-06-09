@@ -74,6 +74,7 @@ def detect_r_script_io(
         content,
         script_dir=script_dir,
         wdir=effective_wdir,
+        project_root=effective_wdir,
     )
 
 
@@ -995,7 +996,11 @@ def _resolve_python_import(
 
 
 def _detect_r_code_io(
-    code: str, script_dir: str = ".", wdir: str = "."
+    code: str,
+    script_dir: str = ".",
+    wdir: str = ".",
+    project_root: str = ".",
+    _seen: set[str] | None = None,
 ) -> dict[str, list[str]]:
     """Detect I/O from R code string (used for scripts and notebook cells).
 
@@ -1007,6 +1012,12 @@ def _detect_r_code_io(
         Directory containing the script (for resolving source() includes).
     wdir : str
         Working directory from which the script is executed (for data file paths).
+    project_root : str
+        Directory that ``here::here()`` resolves against, i.e. the project
+        root where the pipeline runs.
+    _seen : set[str] | None
+        Absolute paths of scripts already analyzed, used to guard against
+        cycles when recursing into ``source()``d scripts.
 
     Returns
     -------
@@ -1015,78 +1026,154 @@ def _detect_r_code_io(
     """
     inputs = []
     outputs = []
+    if _seen is None:
+        _seen = set()
     code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
     r_vars = _extract_r_string_assignments(code)
     fig_dir = r_vars.get("fig_dir")
-    # Detect source() calls for R script includes
-    source_pattern = r'source\s*\(\s*["\']([^"\']+\.R)["\']'
-    source_matches = re.findall(source_pattern, code, flags=re.IGNORECASE)
-    for match in source_matches:
-        if not os.path.isabs(match):
-            full_path = os.path.join(script_dir, match)
-            if os.path.exists(full_path):
-                inputs.append(Path(os.path.relpath(full_path)).as_posix())
-            elif _is_valid_project_path(match):
-                inputs.append(match)
-    # Read patterns that capture variables, file.path() expressions, or literals
-    read_patterns = [
-        r'read\.(?:csv|table|delim|tsv)\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
-        r'readRDS\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
-        r'load\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
-        r'read_csv\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
-        r'read_excel\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
-        r'fread\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
+    # A path argument may be a here::here()/file.path() call, a quoted literal,
+    # or a variable name that resolves to one of those
+    path_expr = (
+        r'(here::here\([^)]*\)|file\.path\([^)]*\)|"[^"]+"|\'[^\']+\'|'
+        r"[A-Za-z_][A-Za-z0-9_]*)"
+    )
+    # Detect source() calls for R script includes, add them as inputs, and
+    # recurse into them so their I/O is attributed to this stage
+    for raw in re.findall(r"source\s*\(\s*" + path_expr, code):
+        resolved = _resolve_r_path_expr(raw, r_vars)
+        if not resolved or not resolved.lower().endswith(".r"):
+            continue
+        if os.path.isabs(resolved):
+            continue
+        # here::here() paths are relative to the project root; everything else
+        # is resolved relative to the sourcing script's directory
+        if raw.strip().startswith("here::here"):
+            fs_path = os.path.join(project_root, resolved)
+        else:
+            fs_path = os.path.join(script_dir, resolved)
+        if os.path.exists(fs_path):
+            inputs.append(Path(os.path.relpath(fs_path)).as_posix())
+        elif _is_valid_project_path(resolved):
+            inputs.append(resolved)
+        # Recurse into the sourced script if we can read it
+        abs_path = os.path.abspath(fs_path)
+        if os.path.exists(fs_path) and abs_path not in _seen:
+            _seen.add(abs_path)
+            try:
+                with open(fs_path, "r", encoding="utf-8") as f:
+                    sub_code = f.read()
+            except (OSError, UnicodeDecodeError):
+                sub_code = None
+            if sub_code is not None:
+                sub_dir = (
+                    os.path.dirname(Path(os.path.relpath(fs_path)).as_posix())
+                    or "."
+                )
+                sub_io = _detect_r_code_io(
+                    sub_code,
+                    script_dir=sub_dir,
+                    wdir=wdir,
+                    project_root=project_root,
+                    _seen=_seen,
+                )
+                inputs.extend(sub_io["inputs"])
+                outputs.extend(sub_io["outputs"])
+    # Read patterns that capture variables, here::here()/file.path()
+    # expressions, or literals
+    read_funcs = [
+        r"read\.(?:csv|table|delim|tsv)",
+        r"readRDS",
+        r"readLines",
+        r"load",
+        r"read_csv",
+        r"read_tsv",
+        r"read_delim",
+        r"read_excel",
+        r"fread",
     ]
-    # Process read patterns with variable resolution
-    for pattern in read_patterns:
-        matches = re.findall(pattern, code)
-        for match in matches:
+    for func in read_funcs:
+        for match in re.findall(func + r"\s*\(\s*" + path_expr, code):
             resolved = _resolve_r_path_expr(match, r_vars)
             if resolved:
                 inputs.append(resolved)
-    # Write patterns for simple cases (literal strings in 2nd argument)
-    simple_write_patterns = [
-        r'write\.(?:csv|table)\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
-        r'saveRDS\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
-        r'save\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'write_csv\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
-        r'write_excel\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
-        r'pdf\s*\(\s*["\']([^"\']+)["\']',
-        r'png\s*\(\s*["\']([^"\']+)["\']',
-        r'pdf\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'png\s*\([^)]*filename\s*=\s*["\']([^"\']+)["\']',
-        r'svg\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'svg\s*\([^)]*filename\s*=\s*["\']([^"\']+)["\']',
-        r'jpeg\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'jpeg\s*\([^)]*filename\s*=\s*["\']([^"\']+)["\']',
-        r'tiff\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'tiff\s*\([^)]*filename\s*=\s*["\']([^"\']+)["\']',
-        r'bmp\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'bmp\s*\([^)]*filename\s*=\s*["\']([^"\']+)["\']',
-        r'CairoPNG\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'CairoPDF\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'svglite\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
+    # Write functions where the path is the second positional argument
+    second_arg_write_funcs = [
+        r"write\.(?:csv|table)",
+        r"saveRDS",
+        r"write_csv",
+        r"write_tsv",
+        r"write_delim",
+        r"write_excel\w*",
+        r"writeLines",
+        r"fwrite",
     ]
-    for pattern in simple_write_patterns:
-        outputs.extend(re.findall(pattern, code))
-    # ggsave patterns that handle file.path(), variables, or literals
-    ggsave_patterns = [
-        r'ggsave\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
-        r'ggsave\s*\([^)]*filename\s*=\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
-    ]
-    for pattern in ggsave_patterns:
-        matches = re.findall(pattern, code)
-        for match in matches:
+    for func in second_arg_write_funcs:
+        pattern = func + r"\s*\(\s*[^,]+,\s*" + path_expr
+        for match in re.findall(pattern, code):
             resolved = _resolve_r_path_expr(match, r_vars)
             if resolved:
                 outputs.append(resolved)
+    # Write functions where the path is the (only) first positional argument
+    first_arg_write_funcs = [
+        r"ggsave",
+        r"sink",
+        r"pdf",
+        r"png",
+        r"svg",
+        r"svglite",
+        r"jpeg",
+        r"tiff",
+        r"bmp",
+        r"cairo_pdf",
+        r"CairoPNG",
+        r"CairoPDF",
+    ]
+    for func in first_arg_write_funcs:
+        pattern = func + r"\s*\(\s*" + path_expr
+        for match in re.findall(pattern, code):
+            resolved = _resolve_r_path_expr(match, r_vars)
+            if resolved:
+                outputs.append(resolved)
+    # Write functions whose path is passed as a named argument, regardless of
+    # position (e.g. saveRDS(x, file = ...), pdf(file = ...), save(file = ...))
+    named_arg_write_funcs = [
+        r"write\.(?:csv|table)",
+        r"saveRDS",
+        r"save",
+        r"write_csv",
+        r"write_tsv",
+        r"write_delim",
+        r"write_excel\w*",
+        r"writeLines",
+        r"fwrite",
+        r"ggsave",
+        r"sink",
+        r"pdf",
+        r"png",
+        r"svg",
+        r"svglite",
+        r"jpeg",
+        r"tiff",
+        r"bmp",
+        r"cairo_pdf",
+        r"CairoPNG",
+        r"CairoPDF",
+    ]
+    for func in named_arg_write_funcs:
+        pattern = (
+            func + r"\s*\([^)]*\b(?:file|filename|path|con)\s*=\s*" + path_expr
+        )
+        for match in re.findall(pattern, code):
+            resolved = _resolve_r_path_expr(match, r_vars)
+            if resolved:
+                outputs.append(resolved)
+    # save_fig() writes into fig_dir when the path isn't already qualified
     save_fig_patterns = [
-        r"save_fig\s*\(\s*[^,]+,\s*(file\.path\([^\)]*\)|\"[^\"]+\"|'[^']+'|[A-Za-z_][A-Za-z0-9_]*)",
-        r"save_fig\s*\([^\)]*filename\s*=\s*(file\.path\([^\)]*\)|\"[^\"]+\"|'[^']+'|[A-Za-z_][A-Za-z0-9_]*)",
+        r"save_fig\s*\(\s*[^,]+,\s*" + path_expr,
+        r"save_fig\s*\([^)]*filename\s*=\s*" + path_expr,
     ]
     for pattern in save_fig_patterns:
-        matches = re.findall(pattern, code)
-        for match in matches:
+        for match in re.findall(pattern, code):
             resolved = _resolve_r_path_expr(match, r_vars)
             if resolved:
                 if fig_dir and not os.path.isabs(resolved):
@@ -1101,13 +1188,27 @@ def _detect_r_code_io(
     # Resolve paths relative to working directory
     inputs = _resolve_paths_to_wdir(inputs, script_dir, wdir)
     outputs = _resolve_paths_to_wdir(outputs, script_dir, wdir)
+    # Normalize to POSIX separators for persistence/display, since paths built
+    # from here::here()/file.path() use the host OS separator
+    inputs = [Path(p).as_posix() for p in inputs]
+    outputs = [Path(p).as_posix() for p in outputs]
     inputs = list(dict.fromkeys(inputs))
     outputs = list(dict.fromkeys(outputs))
+    # A file produced within this stage is not an external input, even if it is
+    # also read back (e.g. an intermediate written by one sourced script and
+    # consumed by another)
+    output_set = set(outputs)
+    inputs = [p for p in inputs if p not in output_set]
     return {"inputs": inputs, "outputs": outputs}
 
 
 def _extract_r_string_assignments(code: str) -> dict[str, str]:
-    """Extract simple string assignments in R code."""
+    """Extract simple string assignments in R code.
+
+    Captures both string-literal assignments (``x <- "path"``) and
+    ``here::here()``/``file.path()`` assignments whose arguments are literals
+    or previously assigned variables (``x <- here::here("a", "b")``).
+    """
     assignments = {}
     pattern = re.compile(
         r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:<-|=)\s*[\"']([^\"']+)[\"']",
@@ -1115,6 +1216,16 @@ def _extract_r_string_assignments(code: str) -> dict[str, str]:
     )
     for name, value in pattern.findall(code):
         assignments[name] = value
+    # Resolve here::here()/file.path() assignments using the literals above
+    call_pattern = re.compile(
+        r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:<-|=)\s*"
+        r"(here::here\([^)]*\)|file\.path\([^)]*\))",
+        flags=re.MULTILINE,
+    )
+    for name, expr in call_pattern.findall(code):
+        resolved = _resolve_r_path_expr(expr, assignments)
+        if resolved:
+            assignments[name] = resolved
     return assignments
 
 
@@ -1146,7 +1257,11 @@ def _resolve_julia_path_expr(
 
 
 def _resolve_r_path_expr(expr: str, variables: dict[str, str]) -> str | None:
-    """Resolve simple R path expressions like "x", var, or file.path(...)."""
+    """Resolve simple R path expressions.
+
+    Handles quoted literals, variables, and ``file.path()``/``here::here()``
+    calls whose arguments are literals or known variables.
+    """
     expr = expr.strip()
     if not expr:
         return None
@@ -1154,22 +1269,23 @@ def _resolve_r_path_expr(expr: str, variables: dict[str, str]) -> str | None:
         return expr[1:-1]
     if expr in variables:
         return variables[expr]
-    if expr.startswith("file.path"):
-        match = re.match(r"file\.path\((.*)\)", expr)
-        if not match:
-            return None
-        args = [a.strip() for a in match.group(1).split(",") if a.strip()]
-        if not args:
-            return None
-        parts = []
-        for arg in args:
-            if arg[0] in ['"', "'"] and arg[-1] == arg[0]:
-                parts.append(arg[1:-1])
-            elif arg in variables:
-                parts.append(variables[arg])
-            else:
+    for prefix in ("file.path", "here::here"):
+        if expr.startswith(prefix):
+            match = re.match(re.escape(prefix) + r"\((.*)\)", expr)
+            if not match:
                 return None
-        return os.path.join(*parts)
+            args = [a.strip() for a in match.group(1).split(",") if a.strip()]
+            if not args:
+                return None
+            parts = []
+            for arg in args:
+                if arg[0] in ['"', "'"] and arg[-1] == arg[0]:
+                    parts.append(arg[1:-1])
+                elif arg in variables:
+                    parts.append(variables[arg])
+                else:
+                    return None
+            return os.path.join(*parts)
     return None
 
 

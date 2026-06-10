@@ -134,6 +134,18 @@
         "icon": "$(play)"
       },
       {
+        "command": "calkit-vscode.openStagePdf",
+        "title": "Open Rendered PDF",
+        "category": "Calkit",
+        "icon": "$(file-pdf)"
+      },
+      {
+        "command": "calkit-vscode.goToFigureSource",
+        "title": "Go to Figure Source",
+        "category": "Calkit",
+        "icon": "$(go-to-file)"
+      },
+      {
         "command": "calkit-vscode.runPipeline",
         "title": "Run Pipeline",
         "category": "Calkit",
@@ -415,6 +427,11 @@
           "command": "calkit-vscode.runStageForFile",
           "when": "calkit.activeFileHasStage && !calkit.isSettingKernel",
           "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.openStagePdf",
+          "when": "resourceExtname == .qmd && calkit.activeFileHasStage && !calkit.isSettingKernel",
+          "group": "navigation"
         }
       ],
       "editor/context": [
@@ -429,6 +446,11 @@
         {
           "command": "calkit-vscode.defineProvenance",
           "group": "calkit@3"
+        },
+        {
+          "command": "calkit-vscode.goToFigureSource",
+          "when": "resourceExtname == .qmd",
+          "group": "calkit@4"
         }
       ],
       "notebook/toolbar": [
@@ -559,6 +581,14 @@
         {
           "command": "calkit-vscode.openPlotlyAsSource",
           "when": "calkit.plotlyPreviewActive"
+        },
+        {
+          "command": "calkit-vscode.openStagePdf",
+          "when": "resourceExtname == .qmd && calkit.activeFileHasStage"
+        },
+        {
+          "command": "calkit-vscode.goToFigureSource",
+          "when": "resourceExtname == .qmd"
         },
         {
           "command": "calkit-vscode.refreshSidebar"

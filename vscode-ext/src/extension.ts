@@ -26,6 +26,10 @@ import {
 } from "./notebooks";
 import type { CalkitInfo, DvcYaml, EnvDescription } from "./types";
 import { CalkitSidebarProvider } from "./sidebar";
+import {
+  extractMarkdownImageRefs,
+  resolveImageRefToRepoRelative,
+} from "./figures";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
 const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
@@ -60,6 +64,8 @@ const COMMAND_PREVIEW_PLOTLY = "calkit-vscode.previewPlotlyFigure";
 const COMMAND_PREVIEW_PLOTLY_TO_SIDE =
   "calkit-vscode.previewPlotlyFigureToSide";
 const COMMAND_OPEN_PLOTLY_SOURCE = "calkit-vscode.openPlotlyAsSource";
+const COMMAND_OPEN_STAGE_PDF = "calkit-vscode.openStagePdf";
+const COMMAND_GO_TO_FIGURE_SOURCE = "calkit-vscode.goToFigureSource";
 const FIGURE_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -224,33 +230,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!workspaceRoot) {
           return;
         }
-        const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
-        const filePath =
-          (typeof stage?.notebook_path === "string"
-            ? stage.notebook_path
-            : undefined) ??
-          (typeof stage?.script_path === "string"
-            ? stage.script_path
-            : undefined) ??
-          (typeof stage?.target_path === "string"
-            ? stage.target_path
-            : undefined);
-        if (!filePath) {
-          void vscode.window.showErrorMessage(
-            `No source file found for stage '${stageName}'.`,
-          );
-          return;
-        }
-        const fileUri = vscode.Uri.file(path.join(workspaceRoot, filePath));
-        if (filePath.endsWith(".ipynb")) {
-          await vscode.commands.executeCommand(
-            "vscode.openWith",
-            fileUri,
-            "jupyter-notebook",
-          );
-        } else {
-          await vscode.window.showTextDocument(fileUri);
-        }
+        await openStageSourceFile(workspaceRoot, stageName);
       },
     ),
   );
@@ -400,6 +380,116 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         runStageInTerminal(workspaceRoot, stageName);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_OPEN_STAGE_PDF,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        if (!fileUri) {
+          return;
+        }
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const stageName = await findStageForFile(workspaceRoot, fileUri);
+        if (!stageName) {
+          void vscode.window.showErrorMessage(
+            `No pipeline stage found for '${path.basename(fileUri.fsPath)}'.`,
+          );
+          return;
+        }
+        const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
+        const pdfRelPath = (Array.isArray(stage?.outputs) ? stage.outputs : [])
+          .map((out) => (typeof out === "string" ? out : out.path))
+          .find(
+            (outPath) =>
+              typeof outPath === "string" &&
+              outPath.toLowerCase().endsWith(".pdf"),
+          );
+        if (!pdfRelPath) {
+          void vscode.window.showErrorMessage(
+            `Stage '${stageName}' has no PDF output to open.`,
+          );
+          return;
+        }
+        const pdfUri = vscode.Uri.file(path.join(workspaceRoot, pdfRelPath));
+        try {
+          await vscode.workspace.fs.stat(pdfUri);
+        } catch {
+          void vscode.window.showInformationMessage(
+            `${pdfRelPath} hasn't been rendered yet. Run the stage to render the PDF first.`,
+          );
+          return;
+        }
+        await openPdfInLatexWorkshop(context, pdfUri);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_GO_TO_FIGURE_SOURCE,
+      async (figureArg?: string | vscode.Uri) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        let figureUri: vscode.Uri | undefined;
+        if (typeof figureArg === "string") {
+          figureUri = vscode.Uri.file(path.join(workspaceRoot, figureArg));
+        } else if (figureArg instanceof vscode.Uri) {
+          figureUri = figureArg;
+        } else {
+          // Invoked from the editor context menu: resolve the image reference on
+          // the cursor's line.
+          const editor = vscode.window.activeTextEditor;
+          if (editor) {
+            const lineText = editor.document.lineAt(
+              editor.selection.active.line,
+            ).text;
+            const match = /!\[[^\]]*\]\(\s*<?([^)\s>]+)>?/.exec(lineText);
+            const relPath = match
+              ? resolveImageRefToRepoRelative(
+                  editor.document.uri.fsPath,
+                  match[1],
+                  workspaceRoot,
+                )
+              : undefined;
+            if (relPath) {
+              figureUri = vscode.Uri.file(path.join(workspaceRoot, relPath));
+            }
+          }
+        }
+        if (!figureUri) {
+          void vscode.window.showErrorMessage(
+            "No figure reference found to go to source for.",
+          );
+          return;
+        }
+        const stageName = await findStageProducingOutput(
+          workspaceRoot,
+          figureUri,
+        );
+        if (!stageName) {
+          void vscode.window.showErrorMessage(
+            `No pipeline stage produces '${path.basename(figureUri.fsPath)}'.`,
+          );
+          return;
+        }
+        const stageItem = sidebarProvider?.findStageItem(stageName);
+        if (stageItem && sidebarTreeView) {
+          await sidebarTreeView.reveal(stageItem, {
+            select: true,
+            focus: false,
+            expand: true,
+          });
+        }
+        await openStageSourceFile(workspaceRoot, stageName);
       },
     ),
   );
@@ -856,32 +946,44 @@ export function activate(context: vscode.ExtensionContext): void {
   void refreshPipelineOutputContext(context);
   void refreshActiveFileStageContext(vscode.window.activeTextEditor?.document);
 
+  // Surfaces "Source: <stage>" CodeLenses on figure references in .qmd docs.
+  const figureCodeLensProvider = new FigureSourceCodeLensProvider();
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider(
+      { scheme: "file", pattern: "**/*.qmd" },
+      figureCodeLensProvider,
+    ),
+  );
+
+  // Set up PDF auto-refresh watchers for PDF-producing stages now and whenever
+  // the pipeline config changes (the latter picks up newly added stages).
+  const workspaceRootForPdfWatchers = getWorkspaceRoot();
+  if (workspaceRootForPdfWatchers) {
+    void setupStagePdfRefreshWatchers(context, workspaceRootForPdfWatchers);
+  }
+
   // Watch for changes to dvc.yaml/calkit.yaml to keep pipeline output context fresh.
+  const refreshPipelineDerived = (): void => {
+    scheduleRefreshPipelineOutputContext(context);
+    figureCodeLensProvider.refresh();
+    const root = getWorkspaceRoot();
+    if (root) {
+      void setupStagePdfRefreshWatchers(context, root);
+    }
+  };
   const dvcYamlWatcher =
     vscode.workspace.createFileSystemWatcher("**/dvc.yaml");
   context.subscriptions.push(dvcYamlWatcher);
-  dvcYamlWatcher.onDidChange(() => {
-    scheduleRefreshPipelineOutputContext(context);
-  });
-  dvcYamlWatcher.onDidCreate(() => {
-    scheduleRefreshPipelineOutputContext(context);
-  });
-  dvcYamlWatcher.onDidDelete(() => {
-    scheduleRefreshPipelineOutputContext(context);
-  });
+  dvcYamlWatcher.onDidChange(refreshPipelineDerived);
+  dvcYamlWatcher.onDidCreate(refreshPipelineDerived);
+  dvcYamlWatcher.onDidDelete(refreshPipelineDerived);
 
   const calkitYamlWatcher =
     vscode.workspace.createFileSystemWatcher("**/calkit.yaml");
   context.subscriptions.push(calkitYamlWatcher);
-  calkitYamlWatcher.onDidChange(() => {
-    scheduleRefreshPipelineOutputContext(context);
-  });
-  calkitYamlWatcher.onDidCreate(() => {
-    scheduleRefreshPipelineOutputContext(context);
-  });
-  calkitYamlWatcher.onDidDelete(() => {
-    scheduleRefreshPipelineOutputContext(context);
-  });
+  calkitYamlWatcher.onDidChange(refreshPipelineDerived);
+  calkitYamlWatcher.onDidCreate(refreshPipelineDerived);
+  calkitYamlWatcher.onDidDelete(refreshPipelineDerived);
 
   // Proposed API: shows Calkit in the top-level kernel source list.
   // This must never break activation when proposed APIs are unavailable.
@@ -3159,6 +3261,157 @@ function runStageInTerminal(workspaceRoot: string, stageName: string): void {
   terminal.sendText(`calkit run ${shQuote(stageName)}`);
 }
 
+function isLatexWorkshopInstalled(): boolean {
+  return (
+    vscode.extensions.getExtension("James-Yu.latex-workshop") !== undefined
+  );
+}
+
+// PDFs that already have an auto-refresh watcher this session (keyed by fsPath),
+// so we don't stack watchers on the same file.
+const pdfRefreshWatchers = new Set<string>();
+
+// Watch a PDF and ask LaTeX Workshop to reload it whenever it changes on disk.
+// LaTeX Workshop only watches PDFs produced by its own LaTeX builds, so a PDF
+// rendered by a Calkit stage (Quarto, LaTeX, etc.) never refreshes on its own;
+// latex-workshop.refresh-viewer reloads all open viewers from disk.
+function ensurePdfRefreshWatcher(
+  context: vscode.ExtensionContext,
+  pdfFsPath: string,
+): void {
+  if (pdfRefreshWatchers.has(pdfFsPath)) {
+    return;
+  }
+  pdfRefreshWatchers.add(pdfFsPath);
+  const watcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(
+      vscode.Uri.file(path.dirname(pdfFsPath)),
+      path.basename(pdfFsPath),
+    ),
+  );
+  let debounce: ReturnType<typeof setTimeout> | undefined;
+  const refresh = (): void => {
+    if (debounce) {
+      clearTimeout(debounce);
+    }
+    // Coalesce the burst of events a render produces and let the writer finish.
+    debounce = setTimeout(() => {
+      void vscode.commands.executeCommand("latex-workshop.refresh-viewer");
+    }, 200);
+  };
+  watcher.onDidChange(refresh);
+  watcher.onDidCreate(refresh);
+  context.subscriptions.push(watcher);
+}
+
+// Set up auto-refresh watchers for every PDF declared as a pipeline stage
+// output, so re-rendering any PDF-producing stage reloads its LaTeX Workshop
+// viewer regardless of how the PDF was opened.
+async function setupStagePdfRefreshWatchers(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+): Promise<void> {
+  if (!isLatexWorkshopInstalled()) {
+    return;
+  }
+  const outputToStage = await buildOutputToStageMap(workspaceRoot);
+  for (const outPath of outputToStage.keys()) {
+    if (outPath.toLowerCase().endsWith(".pdf")) {
+      ensurePdfRefreshWatcher(context, path.join(workspaceRoot, outPath));
+    }
+  }
+}
+
+// Open a PDF in LaTeX Workshop's viewer (and ensure it auto-reloads on change).
+async function openPdfInLatexWorkshop(
+  context: vscode.ExtensionContext,
+  pdfUri: vscode.Uri,
+): Promise<void> {
+  if (!isLatexWorkshopInstalled()) {
+    void vscode.window.showErrorMessage(
+      "Opening the rendered PDF requires the LaTeX Workshop extension " +
+        "(James-Yu.latex-workshop).",
+    );
+    return;
+  }
+  try {
+    await vscode.commands.executeCommand(
+      "vscode.openWith",
+      pdfUri,
+      "latex-workshop-pdf-hook",
+      vscode.ViewColumn.Active,
+    );
+  } catch (error) {
+    void vscode.window.showErrorMessage(
+      `Could not open the PDF in LaTeX Workshop: ${String(error)}`,
+    );
+    return;
+  }
+  ensurePdfRefreshWatcher(context, pdfUri.fsPath);
+}
+
+// Open a stage's source file (notebook/script/target), opening .ipynb in the
+// notebook editor. Shared by the sidebar "Open stage file" action and figure
+// go-to-source navigation.
+async function openStageSourceFile(
+  workspaceRoot: string,
+  stageName: string,
+): Promise<void> {
+  const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
+  const filePath =
+    (typeof stage?.notebook_path === "string"
+      ? stage.notebook_path
+      : undefined) ??
+    (typeof stage?.script_path === "string" ? stage.script_path : undefined) ??
+    (typeof stage?.target_path === "string" ? stage.target_path : undefined);
+  if (!filePath) {
+    void vscode.window.showErrorMessage(
+      `No source file found for stage '${stageName}'.`,
+    );
+    return;
+  }
+  const fileUri = vscode.Uri.file(path.join(workspaceRoot, filePath));
+  if (filePath.endsWith(".ipynb")) {
+    await vscode.commands.executeCommand(
+      "vscode.openWith",
+      fileUri,
+      "jupyter-notebook",
+    );
+  } else {
+    await vscode.window.showTextDocument(fileUri);
+  }
+}
+
+// Map of repo-relative output path -> name of the stage that produces it,
+// across both calkit pipeline stages and dvc.yaml stages. Calkit stages win on
+// conflict, matching findStageProducingOutput's lookup order.
+async function buildOutputToStageMap(
+  workspaceRoot: string,
+): Promise<Map<string, string>> {
+  const [dvcYaml, calkitConfig] = await Promise.all([
+    readDvcYaml(workspaceRoot),
+    readCalkitConfig(workspaceRoot),
+  ]);
+  const map = new Map<string, string>();
+  for (const [stageName, stage] of Object.entries(
+    calkitConfig?.pipeline?.stages ?? {},
+  )) {
+    for (const outPath of pipelineStageOutputPaths(stage)) {
+      if (!map.has(outPath)) {
+        map.set(outPath, stageName);
+      }
+    }
+  }
+  for (const [stageName, stage] of Object.entries(dvcYaml?.stages ?? {})) {
+    for (const outPath of dvcStageOutputPaths(stage)) {
+      if (!map.has(outPath)) {
+        map.set(outPath, stageName);
+      }
+    }
+  }
+  return map;
+}
+
 async function findStageForFile(
   workspaceRoot: string,
   fileUri: vscode.Uri,
@@ -3769,6 +4022,55 @@ class PlotlyPreviewProvider
         );
       }),
     );
+  }
+}
+
+// Shows a "Source: <stage>" CodeLens above each figure reference in a Quarto/
+// Markdown document whose target is produced by a pipeline stage, linking to
+// the producing stage's source via COMMAND_GO_TO_FIGURE_SOURCE.
+class FigureSourceCodeLensProvider implements vscode.CodeLensProvider {
+  private readonly _onDidChangeCodeLenses = new vscode.EventEmitter<void>();
+  readonly onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
+
+  refresh(): void {
+    this._onDidChangeCodeLenses.fire();
+  }
+
+  async provideCodeLenses(
+    document: vscode.TextDocument,
+  ): Promise<vscode.CodeLens[]> {
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
+      return [];
+    }
+    const refs = extractMarkdownImageRefs(document.getText());
+    if (refs.length === 0) {
+      return [];
+    }
+    const outputToStage = await buildOutputToStageMap(workspaceRoot);
+    const lenses: vscode.CodeLens[] = [];
+    for (const ref of refs) {
+      const relPath = resolveImageRefToRepoRelative(
+        document.uri.fsPath,
+        ref.target,
+        workspaceRoot,
+      );
+      if (!relPath) {
+        continue;
+      }
+      const stageName = outputToStage.get(relPath);
+      if (!stageName) {
+        continue;
+      }
+      lenses.push(
+        new vscode.CodeLens(new vscode.Range(ref.line, 0, ref.line, 0), {
+          title: `$(go-to-file) Source: ${stageName}`,
+          command: COMMAND_GO_TO_FIGURE_SOURCE,
+          arguments: [relPath],
+        }),
+      );
+    }
+    return lenses;
   }
 }
 

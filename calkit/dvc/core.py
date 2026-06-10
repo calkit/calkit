@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any, Literal
 
@@ -247,6 +248,26 @@ def register_ck_scheme() -> None:
     }
 
 
+class _LockErrorDetector(logging.Handler):
+    """Record whether DVC logged a ``LockError`` while running a command.
+
+    DVC catches its exceptions in ``dvc.cli.main`` and logs them with
+    ``logger.exception("")`` (an empty message, with the exception on
+    ``record.exc_info``) before returning a non-zero code, so we inspect
+    ``exc_info`` rather than the formatted message.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.hit = False
+
+    def emit(self, record: logging.LogRecord) -> None:
+        from dvc.lock import LockError
+
+        if record.exc_info and isinstance(record.exc_info[1], LockError):
+            self.hit = True
+
+
 def run_dvc_cli(argv: list[str] | None = None) -> int:
     """Run DVC CLI with ``ck://`` scheme pre-registered."""
     from dvc.cli import main as dvc_main
@@ -322,14 +343,42 @@ def get_running_pipeline_processes(wdir: str | None = None) -> list[dict]:
     return result
 
 
-def run_dvc_command(argv: list[str], cwd: str | None = None) -> int:
+def run_dvc_command(
+    argv: list[str],
+    cwd: str | None = None,
+    lock_retries: int = 0,
+    lock_retry_delay: float = 2.0,
+) -> int:
     """Run a DVC command, optionally in a specific working directory.
 
     Uses DVC's --cd flag to handle directory changes.
+
+    If ``lock_retries`` is greater than zero, the command is retried that many
+    times when it fails because another DVC process is holding the repo lock
+    (e.g. a git hook or a background status poller in a project with
+    subprojects). The lock is only ever held briefly by those, so a short
+    backoff lets the command succeed without the user having to re-run it.
     """
     if cwd:
         argv = ["--cd", cwd] + argv
-    return run_dvc_cli(argv)
+    attempt = 0
+    while True:
+        detector = _LockErrorDetector()
+        dvc_logger = logging.getLogger("dvc")
+        dvc_logger.addHandler(detector)
+        try:
+            result = run_dvc_cli(argv)
+        finally:
+            dvc_logger.removeHandler(detector)
+        if result == 0 or not detector.hit or attempt >= lock_retries:
+            return result
+        attempt += 1
+        delay = lock_retry_delay * attempt
+        warn(
+            "Another DVC process is holding the lock; "
+            f"retrying in {delay:.0f}s ({attempt}/{lock_retries})"
+        )
+        time.sleep(delay)
 
 
 def make_remote_name(use_ck: bool = USE_CK_REMOTE_BY_DEFAULT) -> str:

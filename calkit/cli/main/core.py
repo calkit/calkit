@@ -1172,7 +1172,7 @@ def pull(
         and "-R" not in dvc_args
     ):
         dvc_args.append("--recursive")
-    result = calkit.dvc.run_dvc_command(["pull"] + dvc_args)
+    result = calkit.dvc.run_dvc_command(["pull"] + dvc_args, lock_retries=5)
     if result != 0:
         raise_error("DVC pull failed")
     calkit.dvc.zip.sync_all(direction="to-workspace")
@@ -1187,7 +1187,7 @@ def pull(
                 continue
             typer.echo(f"DVC pulling subproject: {sp_path}")
             sp_result = calkit.dvc.run_dvc_command(
-                ["pull"] + dvc_args, cwd=sp_path
+                ["pull"] + dvc_args, cwd=sp_path, lock_retries=5
             )
             if sp_result != 0:
                 raise_error(f"DVC pull failed for subproject: {sp_path}")
@@ -1224,7 +1224,9 @@ def push(
                     calkit.dvc.set_remote_auth(remote_name=name)
         if remotes:
             typer.echo("Pushing to DVC remote")
-            result = calkit.dvc.run_dvc_command(["push"] + dvc_args)
+            result = calkit.dvc.run_dvc_command(
+                ["push"] + dvc_args, lock_retries=5
+            )
             if result != 0:
                 raise_error("DVC push failed")
         else:

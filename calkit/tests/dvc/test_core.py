@@ -346,3 +346,50 @@ def test_status_as_posix():
         }
     ]
     assert out["stage3"] == [{"changed command": "python src/new-script.py"}]
+
+
+def test_run_dvc_command_lock_retries(monkeypatch):
+    import logging
+
+    from dvc.lock import LockError
+
+    sleeps = []
+    monkeypatch.setattr(calkit.dvc.core.time, "sleep", sleeps.append)
+    # Simulate DVC failing with a lock error a couple times, the way
+    # dvc.cli.main does (log the exception, then return 255), before succeeding.
+    attempts = {"n": 0}
+
+    def fake_cli(argv):
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            try:
+                raise LockError("Unable to acquire lock")
+            except LockError:
+                logging.getLogger("dvc").exception("")
+            return 255
+        return 0
+
+    monkeypatch.setattr(calkit.dvc.core, "run_dvc_cli", fake_cli)
+    # With enough retries, the command eventually succeeds.
+    rc = calkit.dvc.run_dvc_command(["pull"], lock_retries=5)
+    assert rc == 0
+    assert attempts["n"] == 3
+    assert sleeps == [2.0, 4.0]
+    # Without retries, the first lock failure is returned as-is.
+    attempts["n"] = 0
+    sleeps.clear()
+    rc = calkit.dvc.run_dvc_command(["pull"])
+    assert rc == 255
+    assert attempts["n"] == 1
+    assert sleeps == []
+
+    # A non-lock failure is not retried even when retries are allowed.
+    def fake_cli_other_error(argv):
+        attempts["n"] += 1
+        return 1
+
+    attempts["n"] = 0
+    monkeypatch.setattr(calkit.dvc.core, "run_dvc_cli", fake_cli_other_error)
+    rc = calkit.dvc.run_dvc_command(["pull"], lock_retries=5)
+    assert rc == 1
+    assert attempts["n"] == 1

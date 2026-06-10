@@ -15,15 +15,17 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import time
 import uuid
+from typing import Any
 
 import typer
 from sqlitedict import SqliteDict
 from typing_extensions import Annotated
 
 import calkit
-from calkit.cli import AliasGroup, raise_error
+from calkit.cli import AliasGroup, raise_error, warn
 
 scheduler_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
@@ -177,15 +179,20 @@ def _mock_submit(job_id: str, job_command: str, log_path: str) -> int:
     env = dict(os.environ)
     env.setdefault("PBS_O_WORKDIR", os.getcwd())
     with open(log_path, "w") as log_file:
-        popen_kwargs = dict(
+        # Annotated so the mixed value types don't defeat Popen's overloads.
+        popen_kwargs: dict[str, Any] = dict(
             stdout=log_file,
             stderr=subprocess.STDOUT,
             env=env,
         )
-        if os.name == "posix":
-            popen_kwargs["start_new_session"] = True
-        elif hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+        # Detach the job into its own session/process group so it outlives
+        # this command and can be signaled as a group when canceled. Guard on
+        # `sys.platform` (not `os.name`) so the unused branch reads as
+        # platform-specific dead code rather than an unreachable bug.
+        if sys.platform == "win32":
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
         proc = subprocess.Popen(
             ["bash", "-c", wrapped],
             **popen_kwargs,
@@ -213,31 +220,133 @@ def _mock_cancel(job_id: str) -> tuple[bool, str]:
     return True, ""
 
 
-def _is_active(kind: str, job_id: str) -> bool:
+def _mock_exit_code(job_id: str) -> int | None:
+    # The job writes its exit code to the status sentinel before exiting; a
+    # canceled job writes "canceled" instead, which isn't an integer.
+    try:
+        with open(_mock_status_path(job_id)) as f:
+            content = f.read().strip()
+    except OSError:
+        return None
+    try:
+        return int(content)
+    except ValueError:
+        return None
+
+
+def _parse_slurm_exit_code(value: str) -> int | None:
+    # SLURM reports exit status as "<code>:<signal>"; a job killed by a signal
+    # (e.g. out-of-memory, walltime) has a non-zero signal even if code is 0.
+    code_part, _, signal_part = value.strip().partition(":")
+    try:
+        code = int(code_part)
+    except ValueError:
+        return None
+    try:
+        sig = int(signal_part) if signal_part else 0
+    except ValueError:
+        sig = 0
+    return code if sig == 0 else 128 + sig
+
+
+def _slurm_exit_code(job_id: str) -> int | None:
+    # Prefer scontrol, which reports a finished job while it lingers in the
+    # controller's memory and is available even without accounting; fall back
+    # to sacct for jobs that have already aged out of scontrol.
+    p = subprocess.run(
+        ["scontrol", "show", "job", job_id],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if p.returncode == 0 and p.stdout.strip():
+        state = None
+        exit_code = None
+        for token in p.stdout.split():
+            if token.startswith("JobState="):
+                state = token.split("=", 1)[1]
+            elif token.startswith("ExitCode="):
+                exit_code = _parse_slurm_exit_code(token.split("=", 1)[1])
+        if state is not None:
+            if state == "COMPLETED":
+                return exit_code or 0
+            return exit_code or 1
+    p = subprocess.run(
+        ["sacct", "-j", job_id, "-n", "-P", "-o", "State,ExitCode"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if p.returncode == 0 and p.stdout.strip():
+        # The first line is the job itself (later lines are its steps).
+        state, _, code = p.stdout.strip().splitlines()[0].partition("|")
+        exit_code = _parse_slurm_exit_code(code)
+        if state.strip() == "COMPLETED":
+            return exit_code or 0
+        return exit_code or 1
+    return None
+
+
+def _poll_job(kind: str, job_id: str) -> tuple[bool, int | None]:
+    """Return ``(active, exit_code)`` for a scheduler job.
+
+    ``active`` is whether the job is still queued or running. ``exit_code`` is
+    the job's exit status once it has finished---0 for success, non-zero for
+    failure---or ``None`` while the job is still active or when the scheduler
+    no longer has a record from which to read it. A ``None`` exit code on a
+    finished job is an unknown outcome the caller must decide how to treat.
+    """
     if _mock_enabled():
-        return _mock_active(job_id)
+        if _mock_active(job_id):
+            return True, None
+        return False, _mock_exit_code(job_id)
     if kind == "slurm":
         p = subprocess.run(
-            ["squeue", "--job", job_id], capture_output=True, text=True
+            ["squeue", "--job", job_id],
+            capture_output=True,
+            text=True,
+            check=False,
         )
-        if p.returncode != 0:
-            return False
-        return len(p.stdout.strip().split("\n")) > 1
+        if p.returncode == 0 and len(p.stdout.strip().split("\n")) > 1:
+            return True, None
+        return False, _slurm_exit_code(job_id)
     # Use `qstat -f` and parse job_state: on Torque/OpenPBS, plain `qstat
     # <id>` returns exit 0 even for completed (C) jobs, so checking the
     # return code alone would cause `calkit sched batch` to hang forever
-    # after a PBS job finishes.  States C and F mean the job is done.
+    # after a PBS job finishes.  States C and F mean the job is done, and a
+    # finished job's record carries its `Exit_status`.
     p = subprocess.run(
         ["qstat", "-f", job_id], capture_output=True, text=True, check=False
     )
     if p.returncode != 0:
-        return False
+        # A non-zero exit is ambiguous: either the job is gone (completed and
+        # purged from history) or `qstat` itself failed transiently---a busy
+        # PBS server periodically refuses connections or times out. Treating a
+        # transient failure as completion would stop the wait while the job is
+        # still running and writing its log, so only conclude the job is done
+        # when qstat positively reports it is unknown; otherwise keep waiting.
+        # A purged job (unknown to qstat) is done but with an unknowable exit
+        # status; any other error is transient, so report the job as active.
+        stderr = (p.stderr or "").lower()
+        return ("unknown job" not in stderr), None
+    state = None
+    exit_code = None
     for line in p.stdout.splitlines():
         stripped = line.strip()
         if stripped.startswith("job_state"):
             state = stripped.split("=", 1)[-1].strip()
-            return state not in ("C", "F")
-    return False
+        elif stripped.lower().startswith("exit_status"):
+            try:
+                exit_code = int(stripped.split("=", 1)[-1].strip())
+            except ValueError:
+                exit_code = None
+    if state in ("C", "F"):
+        return False, exit_code
+    return True, None
+
+
+def _is_active(kind: str, job_id: str) -> bool:
+    return _poll_job(kind, job_id)[0]
 
 
 def _cancel(kind: str, job_id: str) -> tuple[bool, str]:
@@ -250,14 +359,19 @@ def _cancel(kind: str, job_id: str) -> tuple[bool, str]:
     return p.returncode == 0, p.stderr
 
 
-def _wait_until_done(kind: str, job_id: str, name: str) -> None:
-    """Poll until the job finishes, canceling it on Ctrl+C.
+def _wait_until_done(kind: str, job_id: str, name: str) -> int | None:
+    """Poll until the job finishes, returning its exit code.
 
+    The exit code is the scheduler-reported status of the finished job (0 for
+    success, non-zero for failure), or ``None`` when it can't be determined.
     The job is submitted and tracked, so interrupting the local wait cancels
     the scheduler job before exiting rather than leaving it orphaned.
     """
     try:
-        while _is_active(kind, job_id):
+        while True:
+            active, exit_code = _poll_job(kind, job_id)
+            if not active:
+                return exit_code
             time.sleep(1)
     except KeyboardInterrupt:
         typer.echo(f"Interrupted; canceling job '{name}' ({job_id})")
@@ -265,6 +379,68 @@ def _wait_until_done(kind: str, job_id: str, name: str) -> None:
         if not ok:
             typer.echo(f"Failed to cancel job '{name}' ({job_id}): {stderr}")
         raise typer.Exit(130)
+
+
+def _wait_for_output_file(log_path: str, timeout: float = 120.0) -> None:
+    """Wait for a finished job's output log to be fully written.
+
+    A scheduler reports a job as done as soon as it leaves the queue, but the
+    job's ``-o`` log---which is the batch stage's declared DVC output---may not
+    be in place yet: PBS stages it back from the exec host's spool after the
+    job exits, and a job can still be flushing its final lines. Returning
+    before the file lands (or while it is still growing) makes the subsequent
+    ``dvc repro`` see a missing or mid-write output and wrongly report the job
+    as failed. Poll until the file exists and its size holds steady, or until
+    ``timeout`` elapses (then return and let DVC surface the real state).
+    """
+    deadline = time.monotonic() + timeout
+    last_size = -1
+    # Require the size to repeat across polls so we don't snapshot mid-write;
+    # a missing file reports -1, which never counts as stable.
+    stable_polls = 0
+    while time.monotonic() < deadline:
+        try:
+            size = os.path.getsize(log_path)
+        except OSError:
+            size = -1
+        if size >= 0 and size == last_size:
+            stable_polls += 1
+            if stable_polls >= 2:
+                return
+        else:
+            stable_polls = 0
+        last_size = size
+        time.sleep(1)
+
+
+def _finalize_job(
+    name: str, job_id: str, exit_code: int | None, log_path: str
+) -> None:
+    """Fail the command if the finished job did not succeed.
+
+    Waiting for the job to leave the queue only tells us it stopped, not
+    whether it worked, so a non-zero scheduler exit code is surfaced as an
+    error---raising a non-zero exit that propagates up through ``dvc repro``
+    so the stage is marked failed rather than silently recorded as done. An
+    unknown exit code (the scheduler purged the record before we could read
+    it) can't be judged, so we warn and let the stage's declared outputs be
+    the arbiter.
+    """
+    # Wait for the job's `-o` log---this stage's declared DVC output---to be
+    # staged back before we read from or point at it.
+    if not _mock_enabled():
+        _wait_for_output_file(log_path)
+    if exit_code is None:
+        warn(
+            f"Could not determine exit status for job '{name}' (ID {job_id}); "
+            f"assuming success. Check the log at {log_path}"
+        )
+        return
+    if exit_code != 0:
+        raise_error(
+            f"Job '{name}' (ID {job_id}) failed with exit code {exit_code}. "
+            f"See the log at {log_path}"
+        )
 
 
 @scheduler_app.command(name="batch")
@@ -543,7 +719,8 @@ def run_batch(
                     break
             if should_wait:
                 typer.echo("Waiting for job to finish")
-                _wait_until_done(prev_kind, job_id, name)
+                exit_code = _wait_until_done(prev_kind, job_id, name)
+                _finalize_job(name, job_id, exit_code, log_path)
                 raise typer.Exit(0)
         elif not os.environ.get("CALKIT_FORCE"):
             # The job has left the queue. If nothing it depends on changed and
@@ -632,7 +809,8 @@ def run_batch(
         )
         raise typer.Exit(130)
     typer.echo("Waiting for job to finish")
-    _wait_until_done(kind, job_id, name)
+    exit_code = _wait_until_done(kind, job_id, name)
+    _finalize_job(name, job_id, exit_code, log_path)
 
 
 def _detect_interpreter(target: str) -> list[str]:

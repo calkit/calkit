@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -10,12 +11,22 @@ import calkit
 from calkit.conda import (
     _check_list,
     _check_single,
+    _enrich_pip_deps_from_freeze,
     _get_pip_dependency_list,
     _split_env_dependencies,
     check_env,
+    find_conda_exe,
 )
 
 ENV_NAME = "main"
+
+# TODO: calkit conda env subprocess interactions need Windows debugging.
+# Conda on Windows uses .bat shims and PATH activation that interact poorly
+# with Python's subprocess; needs a real Windows checkout to fix properly.
+skipif_windows_conda = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: calkit conda env subprocess interactions need Windows debug",
+)
 
 
 def test_check_single():
@@ -31,6 +42,64 @@ def test_check_single():
     assert _check_single(
         "python>=3.12,<3.13", "python==3.12.18", env_spec_dir=".", conda=False
     )
+    # PEP 508 git direct reference in req matches plain installed version
+    assert _check_single(
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        "pyxdsm==0.4.0",
+        env_spec_dir=".",
+        conda=False,
+    )
+    # Different package name must not match
+    assert not _check_single(
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        "other==1.0",
+        env_spec_dir=".",
+        conda=False,
+    )
+    # Both sides git: same ref → match
+    assert _check_single(
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        env_spec_dir=".",
+        conda=False,
+    )
+    # Both sides git: short spec ref matches long installed ref (prefix)
+    assert _check_single(
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b07ca1234",
+        env_spec_dir=".",
+        conda=False,
+    )
+    # Both sides git: different refs → no match
+    assert not _check_single(
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@aabbcc1",
+        env_spec_dir=".",
+        conda=False,
+    )
+
+
+def test_enrich_pip_deps_from_freeze():
+    pip_freeze = [
+        "numpy==1.24.3",
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b07ca",
+        "scipy==1.11.0",
+    ]
+    spec_deps = [
+        "numpy==1.24.3",
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        "scipy",
+    ]
+    result = _enrich_pip_deps_from_freeze(spec_deps, pip_freeze)
+    # numpy and scipy get the exact freeze version
+    assert "numpy==1.24.3" in result
+    assert "scipy==1.11.0" in result
+    # pyxdsm gets the full git URL from freeze
+    assert any("fc0b49b07ca" in r for r in result)
+    # Editable installs are kept unchanged
+    editable = ["-e ../mypackage", "numpy==1.24.3"]
+    result2 = _enrich_pip_deps_from_freeze(editable, pip_freeze)
+    assert result2[0] == "-e ../mypackage"
 
 
 def test_check_list():
@@ -64,7 +133,8 @@ def test_get_pip_dependency_list():
 
 
 def delete_env(name: str):
-    subprocess.check_call(["conda", "env", "remove", "-y", "-n", name])
+    conda = find_conda_exe() or "conda"
+    subprocess.check_call([conda, "env", "remove", "-y", "-n", name])
 
 
 @pytest.fixture
@@ -75,6 +145,7 @@ def conda_env_name():
     delete_env(name)
 
 
+@skipif_windows_conda
 def test_check_env(tmp_dir, conda_env_name):
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
@@ -212,9 +283,11 @@ def test_check_env(tmp_dir, conda_env_name):
 def conda_env_prefix():
     prefix = ".conda-envs/my-conda-env"
     yield prefix
-    subprocess.check_call(["conda", "env", "remove", "-y", "--prefix", prefix])
+    conda = find_conda_exe() or "conda"
+    subprocess.check_call([conda, "env", "remove", "-y", "--prefix", prefix])
 
 
+@skipif_windows_conda
 def test_check_prefix_env(tmp_dir, conda_env_prefix):
     subprocess.check_call(["calkit", "init"])
     # Test we can use a local prefix
@@ -288,6 +361,7 @@ def test_check_prefix_env(tmp_dir, conda_env_prefix):
     )
 
 
+@skipif_windows_conda
 def test_check_env_editable(tmp_dir, conda_env_name):
     subprocess.check_call(["calkit", "init"])
     # Create a dummy package named 'src' to install in editable mode

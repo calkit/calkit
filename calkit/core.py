@@ -19,15 +19,7 @@ import uuid
 import warnings
 from os import PathLike
 
-# See https://github.com/calkit/calkit/issues/346
-with warnings.catch_warnings():
-    warnings.filterwarnings("ignore", category=UserWarning)
-    import checksumdir
-import psutil
-import requests
-
 import calkit
-from calkit.models import ProjectStatus
 
 try:
     from datetime import UTC
@@ -37,13 +29,12 @@ except ImportError:
     UTC = _timezone.utc
 
 from datetime import datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from calkit.models import ProjectInfo, ProjectStatus
 
 import ruamel.yaml
-from git import Repo
-from git.exc import InvalidGitRepositoryError
-
-from calkit.models import ProjectInfo
 
 logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
@@ -59,6 +50,7 @@ AUTO_IGNORE_SUFFIXES = [
     ".env",
     ".pyc",
     ".synctex.gz",
+    ".auxlock",
     ".ipynb_checkpoints",
 ]
 AUTO_IGNORE_PATHS = [os.path.join(".dvc", "config.local")]
@@ -124,8 +116,8 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
         path = os.path.dirname(ck_fpath)
         # Make sure this path is a Git repo
         try:
-            Repo(path)
-        except InvalidGitRepositoryError:
+            calkit.git.get_repo(path)
+        except calkit.git.InvalidGitRepositoryError:
             continue
         final_res.append(path)
     return final_res
@@ -180,11 +172,25 @@ def load_calkit_info(
     return info
 
 
+def save_calkit_info(
+    info: dict,
+    wdir: str | PathLike | None = None,
+) -> None:
+    """Save Calkit project information to ``calkit.yaml``."""
+    fpath = "calkit.yaml"
+    if wdir is not None:
+        fpath = os.path.join(wdir, fpath)
+    with open(fpath, "w") as f:
+        ryaml.dump(info, f)
+
+
 def load_calkit_info_object(
     wdir: str | None = None,
     process_includes: bool | str | list[str] = False,
 ) -> ProjectInfo:
     """Load Calkit project information as a ``ProjectInfo`` object."""
+    from calkit.models import ProjectInfo
+
     return ProjectInfo.model_validate(
         load_calkit_info(wdir=wdir, process_includes=process_includes)
     )
@@ -196,6 +202,24 @@ def utcnow(remove_tz=True) -> datetime:
     if remove_tz:
         dt = dt.replace(tzinfo=None)
     return dt
+
+
+LOCAL_DIR = ".calkit/local"
+
+
+def ensure_local_dir(wdir: str | None = None) -> str:
+    """Ensure the gitignored ``.calkit/local`` directory exists; return it.
+
+    Everything under ``.calkit/local`` is private to the machine and kept out
+    of version control via a ``*`` .gitignore.
+    """
+    base = os.path.join(wdir, LOCAL_DIR) if wdir else LOCAL_DIR
+    os.makedirs(base, exist_ok=True)
+    gitignore = os.path.join(base, ".gitignore")
+    if not os.path.isfile(gitignore):
+        with open(gitignore, "w") as f:
+            f.write("*\n")
+    return base
 
 
 NOTEBOOK_STAGE_OUT_FORMATS = ["pickle", "parquet", "json", "yaml", "csv"]
@@ -329,6 +353,14 @@ def check_dep_exists(
         return True
     if system_info is not None and system_info.get(f"{name}_version"):
         return True
+    # Conda and mamba are frequently installed but not on the PATH (most
+    # commonly on Windows), so search their typical install locations
+    # rather than relying on the bare name being directly executable.
+    if name in ("conda", "mamba"):
+        from calkit.conda import find_conda_exe, find_mamba_exe
+
+        exe = find_conda_exe() if name == "conda" else find_mamba_exe()
+        return exe is not None
     cmd = [name]
     # Executables with non-conventional CLIs
     if name == "matlab":
@@ -345,39 +377,168 @@ def check_dep_exists(
         return False
 
 
+def _normalize_dep(dep) -> dict:
+    """Normalize a calkit.yaml dependency entry into a ``{name, kind, ...}`` dict.
+
+    Accepts the three forms supported by ``check_system_deps`` so callers
+    that need access to extra fields (``check_command``, ``setup_command``,
+    etc.) don't have to re-parse:
+
+    - plain string (treated as an app name, version specifiers stripped)
+    - ``{name: {kind: ..., ...attrs}}`` single-key form
+    - ``{name, kind, ...attrs}`` flat form
+
+    For ``kind: setup`` only, ``name`` is optional and synthesized from a
+    short hash of ``check_command`` -- a single anonymous setup dep is
+    common and forcing users to invent a name adds friction.
+    """
+    if isinstance(dep, str):
+        # Split on the first version operator so a string like
+        # ``calkit>=0.38`` produces both a clean name and a version spec
+        # the caller can validate.
+        m = re.match(r"^([A-Za-z0-9_.\-]+)(.*)$", dep.strip())
+        if m is None:
+            raise ValueError(f"Malformed dependency: {dep}")
+        out: dict = {"name": m.group(1), "kind": "app"}
+        spec = m.group(2).strip()
+        if spec:
+            out["version_spec"] = spec
+        return out
+    if not isinstance(dep, dict):
+        raise ValueError(f"Malformed dependency: {dep}")
+    keys = list(dep.keys())
+    # Flat form with explicit kind: only requires ``name`` for kinds where
+    # name is the identity (app, env-var). Setup deps may omit it.
+    if "kind" in keys:
+        out = dict(dep)
+        if "name" not in out:
+            if out["kind"] != "setup":
+                raise ValueError(f"Dependency missing required 'name': {dep}")
+            check_command = out.get("check_command", "")
+            short = hashlib.sha1(check_command.encode("utf-8")).hexdigest()[:8]
+            out["name"] = f"setup-{short}"
+        return out
+    if "name" in keys:
+        out = dict(dep)
+        out.setdefault("kind", "app")
+        return out
+    if len(keys) != 1:
+        raise ValueError(f"Malformed dependency: {dep}")
+    # Single-key form: {name: {kind: ..., ...}}
+    name = keys[0]
+    attrs = dep[name] or {}
+    if not isinstance(attrs, dict):
+        raise ValueError(f"Malformed dependency: {dep}")
+    out = dict(attrs)
+    out["name"] = name
+    out.setdefault("kind", "app")
+    return out
+
+
 def check_system_deps(
     ck_info: dict | None = None,
     wdir: str | None = None,
     system_info: dict | None = None,
+    interactive: bool | None = None,
+    use_cache: bool = True,
 ) -> None:
     """Check that the dependencies declared in a project's ``calkit.yaml`` file
     exist.
+
+    ``setup`` dependencies are verified via
+    :func:`calkit.dependencies.check_setup_dep`, which runs the dep's
+    ``check_command`` and -- on an interactive TTY -- optionally runs the
+    declared ``setup_command`` after asking the user. Non-interactive
+    failures abort with the fix-it command printed for the user to run.
     """
     if ck_info is None:
         ck_info = load_calkit_info(wdir=wdir)
-    deps = ck_info.get("dependencies", [])
+    deps = list(ck_info.get("dependencies", []))
     if "git" not in deps:
         deps.append("git")
-    for dep in deps:
-        if isinstance(dep, dict):
-            keys = list(dep.keys())
-            # For backwards compatibility, we allow the name to be a single key
-            # or we allow a `name` key to be present
-            if len(keys) != 1 and "name" not in keys:
-                raise ValueError(f"Malformed dependency: {dep}")
-            if len(keys) == 1:
-                dep_name = keys[0]
-                dep_kind = dep[dep_name].get("kind", "app")
-            elif "name" in keys:
-                dep_name = dep["name"]
-                dep_kind = dep.get("kind", "app")
-            else:
-                raise ValueError(f"Malformed dependency: {dep}")
+    # Resolve TTY interactivity once so a single per-call answer drives
+    # every prompt (env-var, app installer, setup step).
+    if interactive is None:
+        from calkit.dependencies import _is_interactive
+
+        interactive = _is_interactive()
+    # Process in dependency order: env-vars first (some installers and
+    # setup commands read from them), then apps (env managers like pixi
+    # / uv need to exist before setup steps that run inside an env), then
+    # setup steps last. The setup-step ``check_command`` typically wraps
+    # ``calkit xenv``, which validates its own environment, so we don't
+    # need a separate env-check phase here.
+    buckets: dict[str, list[dict]] = {"env-var": [], "app": [], "setup": []}
+    for raw_dep in deps:
+        dep = _normalize_dep(raw_dep)
+        kind = dep["kind"]
+        if kind not in buckets:
+            # Unknown / legacy kinds (e.g., ``calkit-config``) fall through
+            # to ``check_dep_exists`` in original order so we don't change
+            # behavior for them silently.
+            buckets.setdefault("_other", []).append(dep)
         else:
-            dep_name = re.split("[=<>]", dep)[0]
-            dep_kind = "app"
+            buckets[kind].append(dep)
+    for dep in buckets["env-var"]:
+        dep_name = dep["name"]
+        if dep_name in os.environ:
+            continue
+        # On a TTY, prompt the user and persist to .env so the very next
+        # ``calkit run`` works without a separate setup step. Non-TTY
+        # (CI) falls through to the legacy "not found" abort.
+        if interactive:
+            from calkit.dependencies import prompt_and_store_env_var
+
+            print(f"Missing env var '{dep_name}'")
+            value = prompt_and_store_env_var(
+                dep_name, default=dep.get("default")
+            )
+            if value is not None:
+                continue
+        raise ValueError(f"env-var '{dep_name}' not found")
+    for dep in buckets["app"]:
+        dep_name = dep["name"]
+        # The ``calkit`` app is always satisfied by the running process,
+        # but a declared ``version_spec`` (e.g. ``calkit>=0.38``) is
+        # checked against the installed version so projects can pin a
+        # minimum CLI without writing a custom setup step.
+        if dep_name == "calkit":
+            spec = dep.get("version_spec")
+            if spec:
+                from calkit.dependencies import check_calkit_version
+
+                check_calkit_version(spec)
+            continue
+        if check_dep_exists(dep_name, "app", system_info=system_info):
+            continue
+        # Offer the registered native installer when we have one.
+        from calkit import install as _install
+
+        if _install.get_installer(dep_name) is not None:
+            print(f"App '{dep_name}' is not installed.")
+            if _install.prompt_and_install(
+                dep_name, interactive=interactive
+            ) and check_dep_exists(dep_name, "app", system_info=system_info):
+                continue
+        raise ValueError(f"app '{dep_name}' not found")
+    for dep in buckets.get("_other", []):
+        dep_name = dep["name"]
+        dep_kind = dep["kind"]
         if not check_dep_exists(dep_name, dep_kind, system_info=system_info):
             raise ValueError(f"{dep_kind} '{dep_name}' not found")
+    for dep in buckets["setup"]:
+        from calkit.dependencies import check_setup_dep
+
+        ok = check_setup_dep(
+            dep,
+            interactive=interactive,
+            use_cache=use_cache,
+            wdir=wdir,
+        )
+        if not ok:
+            raise ValueError(
+                f"setup dependency '{dep['name']}' is not satisfied"
+            )
 
 
 def get_env_var_dep_names(ck_info: dict | None = None) -> list[str]:
@@ -386,21 +547,13 @@ def get_env_var_dep_names(ck_info: dict | None = None) -> list[str]:
         ck_info = load_calkit_info()
     env_vars = []
     for dep in ck_info.get("dependencies", []):
-        if isinstance(dep, dict):
-            keys = list(dep.keys())
-            # For backwards compatibility, we allow the name to be a single key
-            # or we allow a `name` key to be present
-            if len(keys) != 1 and "name" not in keys:
-                raise ValueError(f"Malformed dependency: {dep}")
-            if len(keys) == 1:
-                dep_kind = dep[keys[0]].get("kind", "app")
-                if dep_kind == "env-var":
-                    env_vars.append(keys[0])
-            elif dep.get("kind") == "env-var":
-                if "name" in keys:
-                    env_vars.append(dep["name"])
-                else:
-                    raise ValueError(f"Malformed dependency: {dep}")
+        # Delegate shape-parsing to ``_normalize_dep`` so this stays in
+        # lockstep with ``check_system_deps`` -- string deps, single-key
+        # dicts, flat dicts, and nameless setup deps all flow through
+        # one path.
+        normalized = _normalize_dep(dep)
+        if normalized["kind"] == "env-var":
+            env_vars.append(normalized["name"])
     return env_vars
 
 
@@ -461,6 +614,8 @@ def read_file(path: str, as_bytes: bool | None = None) -> str | bytes:
                 return content_bytes.decode()
         # If the response has a URL, we can fetch from that directly
         elif (url := resp.get("url")) is not None:
+            import requests
+
             resp2 = requests.get(url)
             resp2.raise_for_status()
             if as_bytes:
@@ -497,9 +652,9 @@ def to_kebab_case(str) -> str:
     return re.sub(r"[-_/,\.\ ]", "-", str.lower())
 
 
-def get_project_status_history(
-    wdir: str | None = None, as_pydantic=True
-) -> list[ProjectStatus] | list[dict]:
+def get_project_status_history(wdir: str | None = None, as_pydantic=True):
+    from calkit.models import ProjectStatus
+
     statuses = []
     fpath = os.path.join(".calkit", "status.csv")
     if wdir is not None:
@@ -543,8 +698,8 @@ def detect_project_name(
     owner = ck_info.get("owner")
     if name is None or owner is None:
         try:
-            url = Repo(path=wdir).remote().url
-        except (ValueError, InvalidGitRepositoryError):
+            url = calkit.git.get_repo(wdir).remote().url
+        except (ValueError, calkit.git.InvalidGitRepositoryError):
             if name is not None and not prepend_owner:
                 return name
             if not prepend_owner:
@@ -566,7 +721,7 @@ def detect_project_name(
 def detect_project_github_url(wdir: str | None = None) -> str | None:
     """Detect the GitHub URL for the current project."""
     try:
-        url = Repo(path=wdir).remote().url
+        url = calkit.git.get_repo(wdir).remote().url
     except ValueError:
         warnings.warn("No Git remote set with name 'origin'")
         return None
@@ -593,6 +748,8 @@ def get_dep_version(dep_name: str) -> str | None:
 
 def get_system_info() -> dict:
     """Get information about the system on which we're currently running."""
+    import psutil
+
     os_name = platform.system()
     system_info = {
         "os": os_name,
@@ -620,10 +777,7 @@ def get_system_info() -> dict:
     system_info["node_id"] = node_id
     # See if we can detect Calkit Git rev
     try:
-        repo = Repo(
-            path=os.path.dirname(calkit.__file__),
-            search_parent_directories=True,
-        )
+        repo = calkit.git.get_repo(os.path.dirname(calkit.__file__))
         system_info["calkit_git_rev"] = repo.head.commit.hexsha
     except Exception:
         pass
@@ -657,6 +811,10 @@ def get_system_info() -> dict:
 
 def get_md5(path: str, exclude_files: list[str] | None = None) -> str:
     if os.path.isdir(path):
+        # See https://github.com/calkit/calkit/issues/346
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            import checksumdir
         return checksumdir.dirhash(path, excluded_files=exclude_files)
     hasher = hashlib.md5()
     with open(path, "rb") as f:
@@ -669,6 +827,8 @@ def get_md5(path: str, exclude_files: list[str] | None = None) -> str:
 def set_env_vars(ck_info: dict, cli: bool = True) -> None:
     """Set environmental variables according to the values read from
     ``calkit.yaml``.
+
+    TODO: This should also handle ``dotenv``.
     """
     env_vars = ck_info.get("env_vars", {})
     if not isinstance(env_vars, dict):

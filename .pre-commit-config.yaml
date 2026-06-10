@@ -4,6 +4,7 @@ repos:
     hooks:
       - id: check-case-conflict
       - id: check-merge-conflict
+        exclude: ^docs/overleaf\.md$
       - id: end-of-file-fixer
       - id: trailing-whitespace
       - id: check-yaml

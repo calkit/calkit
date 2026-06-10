@@ -2,13 +2,24 @@
 
 import os
 import subprocess
+import tempfile
 import uuid
+from pathlib import Path
 
 import git
+from typer.testing import CliRunner
 
 import calkit
-from calkit.cli.overleaf import _extract_title_from_tex
+from calkit.cli.overleaf import _extract_title_from_tex, overleaf_app
 from calkit.git import ls_files
+
+runner = CliRunner()
+
+
+def test_overleaf_status_alias_st_resolves():
+    result = runner.invoke(overleaf_app, ["st"])
+    assert result.exit_code == 1
+    assert "No Overleaf sync info found" in result.output
 
 
 def _make_temp_overleaf_project(project_id: str) -> git.Repo:
@@ -29,13 +40,20 @@ def _make_temp_overleaf_project(project_id: str) -> git.Repo:
 
 
 def test_overleaf(tmp_dir):
+    def get_overleaf_tree(repo: git.Repo) -> set[str]:
+        """List files tracked at the Overleaf repo's HEAD (post-push)."""
+        out = repo.git.ls_tree("-r", "--name-only", "HEAD")
+        return set(out.split("\n")) - {""}
+
     # First, create a temporary repo to represent the Overleaf project
     pid = str(uuid.uuid4())
     ol_repo = _make_temp_overleaf_project(pid)
     ol_repo.git.config(["receive.denyCurrentBranch", "ignore"])
     subprocess.run(["calkit", "init"], check=True)
     repo = git.Repo()
-    tmp_remote = f"/tmp/overleaf-sync-remotes/{pid}"
+    tmp_remote = (
+        Path(tempfile.gettempdir()) / "overleaf-sync-remotes" / pid
+    ).as_posix()
     os.makedirs(tmp_remote, exist_ok=True)
     remote_repo = git.Repo.init(path=tmp_remote, bare=True)
     remote_repo.git.config(["receive.denyCurrentBranch", "ignore"])
@@ -90,6 +108,22 @@ def test_overleaf(tmp_dir):
         f.write("\nHere's another line from Overleaf")
     ol_repo.git.commit(["main.tex", "-m", "Update on Overleaf"])
     subprocess.run(["calkit", "overleaf", "sync"], check=True)
+    # Test that --no-commit pulls changes from Overleaf but does not create a
+    # commit in the main repo, leaving the pulled changes staged instead
+    with open(os.path.join(ol_repo.working_dir, "main.tex"), "a") as f:
+        f.write("\nA line that should be pulled but not committed")
+    ol_repo.git.commit(["main.tex", "-m", "Update on Overleaf"])
+    head_before = repo.head.commit.hexsha
+    subprocess.run(["calkit", "overleaf", "sync", "--no-commit"], check=True)
+    # No new commit should have been created
+    assert repo.head.commit.hexsha == head_before
+    # The change should be present locally and staged
+    with open("ol-project/main.tex") as f:
+        assert "A line that should be pulled but not committed" in f.read()
+    assert repo.git.diff(["--staged", "ol-project/main.tex"])
+    assert not repo.git.diff(["ol-project/main.tex"])
+    # Commit the staged changes so the working tree is clean for the next step
+    repo.git.commit(["-m", "Commit pulled Overleaf changes"])
     # Test that if we add a file on Overleaf, it syncs back to the main repo
     with open(os.path.join(ol_repo.working_dir, "ol-new.txt"), "w") as f:
         f.write("Created on Overleaf")
@@ -115,8 +149,8 @@ def test_overleaf(tmp_dir):
     assert "diff --git a/figs/fig1.txt b/figs/fig1.txt" in ol_repo_git_show
     assert "Fig1 created in main repo" in ol_repo_git_show
     assert "new file mode 100644" in ol_repo_git_show
-    # Test that a file ignored in the main repo still makes it to Overleaf
-    # if it's in the synced subdirectory
+    # Test that a file ignored in the main repo (and not otherwise stored) is
+    # treated as ignored and does not make it to Overleaf
     with open(os.path.join(repo.working_dir, ".gitignore"), "a") as f:
         f.write("\nol-project/figs/ignored-in-main.txt\n*.pdf\n*.aux\n*.log")
     repo.git.add(".gitignore")
@@ -132,7 +166,7 @@ def test_overleaf(tmp_dir):
     subprocess.run(["calkit", "overleaf", "sync"], check=True)
     ol_repo_git_show = ol_repo.git.show()
     print("Git show in OL repo:\n", ol_repo_git_show)
-    assert "figs/ignored-in-main.txt" in ol_repo_git_show
+    assert "figs/ignored-in-main.txt" not in get_overleaf_tree(ol_repo)
     # Test that LaTeX aux build files and main PDFs don't make it to Overleaf
     for fname in ["main.pdf", "main.log", "main.aux"]:
         with open(
@@ -145,6 +179,19 @@ def test_overleaf(tmp_dir):
     assert "main.pdf" not in ol_repo_git_show
     assert "main.log" not in ol_repo_git_show
     assert "main.aux" not in ol_repo_git_show
+    # Test that an untracked LaTeX build artifact (e.g., a .auxlock file) in
+    # the synced folder is auto-ignored rather than committed during a sync,
+    # and is not pushed to Overleaf
+    auxlock_rel = "ol-project/out/main.auxlock"
+    os.makedirs(os.path.join(repo.working_dir, "ol-project", "out"))
+    with open(os.path.join(repo.working_dir, auxlock_rel), "w") as f:
+        f.write("\\def \\tikzexternallocked {0}")
+    subprocess.run(["calkit", "overleaf", "sync"], check=True)
+    assert auxlock_rel not in ls_files(repo)
+    with open(os.path.join(repo.working_dir, ".gitignore")) as f:
+        assert auxlock_rel in f.read()
+    assert not repo.git.status("--porcelain", "ol-project/out")
+    assert "main.auxlock" not in ol_repo.git.show()
     # Test that if we add a file locally, sync to Overleaf, then delete from
     # local, it is deleted on Overleaf as well
     with open(
@@ -219,6 +266,87 @@ def test_overleaf(tmp_dir):
     # The file should not have been deleted from Overleaf
     assert "deleted file mode" not in ol_repo_git_show
     assert "--- a/figs/fig3.txt" not in ol_repo_git_show
+
+
+def test_overleaf_sync_paths_storage(tmp_dir):
+    # Regression test for issue #922: only "stored" files (tracked by Git or
+    # cached by DVC) are synced with Overleaf. DVC pipeline outputs with no
+    # storage (storage: null) are treated as ignored -- never pushed, pulled,
+    # or deleted from Overleaf -- whether or not they exist on disk.
+    main_dir = os.path.join(str(tmp_dir), "main")
+    ol_dir = os.path.join(str(tmp_dir), "ol")
+    os.makedirs(os.path.join(main_dir, "pub", "aux"))
+    os.makedirs(ol_dir)
+    main_repo = git.Repo.init(main_dir)
+    ol_repo = git.Repo.init(ol_dir)
+    # Stored (git-tracked) authored files
+    with open(os.path.join(main_dir, "pub", "main.tex"), "w") as f:
+        f.write("Hello")
+    with open(os.path.join(main_dir, "pub", "references.bib"), "w") as f:
+        f.write("@article{a}")
+    # A storage: null pipeline output that exists on disk (a LaTeX aux PDF):
+    # must not be pushed to Overleaf
+    with open(
+        os.path.join(main_dir, "pub", "aux", "main-figure0.pdf"), "w"
+    ) as f:
+        f.write("build artifact")
+    # Declare the pipeline outputs as uncached (storage: null) in dvc.yaml.
+    # shared-pkg.tex is such an output that does not exist on disk locally but
+    # does exist on Overleaf -- it must not be deleted from Overleaf.
+    dvc_yaml = {
+        "stages": {
+            "build": {
+                "cmd": "echo build",
+                "outs": [
+                    {"pub/aux": {"cache": False}},
+                    {"pub/shared-pkg.tex": {"cache": False}},
+                ],
+            }
+        }
+    }
+    with open(os.path.join(main_dir, "dvc.yaml"), "w") as f:
+        calkit.ryaml.dump(dvc_yaml, f)
+    main_repo.git.add("pub/main.tex", "pub/references.bib", "dvc.yaml")
+    main_repo.git.commit(["-m", "Init project"])
+    # Overleaf has the stored files plus an Overleaf-only storage: null output
+    # (shared-pkg.tex) and a genuinely-removed file (deleted.tex)
+    for name, content in [
+        ("main.tex", "Hello"),
+        ("references.bib", "@article{a, note={edited on Overleaf}}"),
+        ("shared-pkg.tex", "\\usepackage{amsmath}"),
+        ("deleted.tex", "removed from the project"),
+    ]:
+        with open(os.path.join(ol_dir, name), "w") as f:
+            f.write(content)
+    ol_repo.git.add(".")
+    ol_repo.git.commit(["-m", "Overleaf state"])
+    paths = calkit.overleaf.OverleafSyncPaths(
+        main_repo=main_repo,
+        overleaf_repo=ol_repo,
+        path_in_project="pub",
+        sync_info_for_path={},
+        last_sync_commit=ol_repo.head.commit.hexsha,
+    )
+    # Only git-tracked authored files are "stored"
+    assert paths.stored_files == {"main.tex", "references.bib"}
+    # Both pipeline outputs are recognized regardless of on-disk presence
+    assert "shared-pkg.tex" in paths.pipeline_output_paths
+    assert "aux" in paths.pipeline_output_paths
+    # The storage: null aux PDF on disk is not pushed to Overleaf
+    assert set(paths.files_to_copy_to_overleaf) == {
+        "main.tex",
+        "references.bib",
+    }
+    # The Overleaf-only storage: null output is not pulled into the project
+    assert "shared-pkg.tex" not in paths.files_to_copy_from_overleaf
+    assert set(paths.files_to_copy_from_overleaf) == {
+        "main.tex",
+        "references.bib",
+        "deleted.tex",
+    }
+    # storage: null outputs (whether on disk or only on Overleaf) and stored
+    # files are preserved; only the genuinely-removed file is stale
+    assert paths.stale_files_in_overleaf == ["deleted.tex"]
 
 
 def test_extract_title_from_tex(tmp_dir):

@@ -7,9 +7,7 @@ import os
 from copy import deepcopy
 from typing import Annotated, Any
 
-import git
 import typer
-from git import InvalidGitRepositoryError
 
 import calkit
 from calkit.cli import raise_error
@@ -106,6 +104,9 @@ def execute_and_record(
     import contextlib
     import io
     import shlex
+
+    import git
+    from git import InvalidGitRepositoryError
 
     from calkit.detect import (
         detect_io,
@@ -296,7 +297,7 @@ def execute_and_record(
         language = "latex"
         pdf_path = first_arg.removesuffix(".tex") + ".pdf"
         try:
-            repo = git.Repo(".")
+            repo = calkit.git.get_repo()
             if repo.git.ls_files(pdf_path):
                 stage["pdf_storage"] = "git"
             else:
@@ -483,7 +484,7 @@ def execute_and_record(
             )
     # Initialize git repo and get DVC paths for storage determination
     try:
-        repo = git.Repo(".")
+        repo = calkit.git.get_repo()
     except InvalidGitRepositoryError:
         repo = None
     dvc_paths = []

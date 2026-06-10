@@ -45,6 +45,19 @@ def test_get_remotes(tmp_dir):
     }
 
 
+def test_ensure_dvc_lock_not_ignored(tmp_dir):
+    subprocess.check_call(["git", "init"])
+    repo = git.Repo()
+    # No-op (and no .gitignore created) when dvc.lock isn't ignored
+    assert not calkit.dvc.ensure_dvc_lock_not_ignored()
+    # Once dvc.lock is ignored, the helper un-ignores it
+    with open(".gitignore", "w") as f:
+        f.write("dvc.lock\n")
+    assert repo.ignored("dvc.lock")
+    assert calkit.dvc.ensure_dvc_lock_not_ignored()
+    assert not repo.ignored("dvc.lock")
+
+
 def test_hash_directory():
     this_dir = os.path.dirname(__file__)
     fpath = os.path.join(this_dir, "..", "..", "..", "test", "dvc-md5-dir")
@@ -53,6 +66,25 @@ def test_hash_directory():
     assert res["size"] == 1226
     assert res["hash"] == "md5"
     assert res["md5"] == "ca2ffab71e00d528b974e583d789ec97.dir"
+
+
+def test_frozen_stage_reproduce_warning_is_suppressed(caplog):
+    # Import side effect: loading calkit.dvc installs the filter on the
+    # dvc.repo.reproduce logger.
+    import logging
+
+    import calkit.dvc  # noqa: F401
+
+    logger = logging.getLogger("dvc.repo.reproduce")
+    with caplog.at_level(logging.WARNING, logger="dvc.repo.reproduce"):
+        logger.warning(
+            "%s is frozen. Its dependencies are not going to be reproduced.",
+            "stage: 'foo@1'",
+        )
+        logger.warning("some other warning that must pass through")
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any("is frozen" in m for m in messages)
+    assert any("must pass through" in m for m in messages)
 
 
 def test_register_ck_scheme_updates_schema_and_registry():
@@ -93,6 +125,44 @@ def test_list_files_paths(tmp_dir):
     assert "file1.txt" in calkit.dvc.list_paths()
 
 
+def test_detect_calkit_remote_type():
+    http_name = calkit.dvc.make_remote_name(use_ck=False)
+    ck_name = calkit.dvc.make_remote_name(use_ck=True)
+    # Default-named HTTP remote
+    assert (
+        calkit.dvc.detect_calkit_remote_type(http_name, "https://example.com")
+        == "http"
+    )
+    # Default-named ck remote
+    assert (
+        calkit.dvc.detect_calkit_remote_type(ck_name, "ck://owner/proj")
+        == "ck"
+    )
+    # External-project remote with ":" suffix
+    assert (
+        calkit.dvc.detect_calkit_remote_type(
+            f"{http_name}:owner/proj", "https://example.com/o/p/dvc"
+        )
+        == "http"
+    )
+    assert (
+        calkit.dvc.detect_calkit_remote_type(
+            f"{ck_name}:owner/proj", "ck://owner/proj"
+        )
+        == "ck"
+    )
+    # Unrelated remote name
+    assert (
+        calkit.dvc.detect_calkit_remote_type("something", "https://sup.com")
+        is None
+    )
+    # Matching name but unknown URL scheme
+    assert (
+        calkit.dvc.detect_calkit_remote_type(http_name, "ssh://git@host/repo")
+        is None
+    )
+
+
 def test_configure_remote_ck_uses_ck_scheme_and_skips_http_auth(monkeypatch):
     monkeypatch.setattr(calkit, "detect_project_name", lambda wdir=None: "o/p")
 
@@ -100,7 +170,7 @@ def test_configure_remote_ck_uses_ck_scheme_and_skips_http_auth(monkeypatch):
         def remote(self):
             return "origin"
 
-    monkeypatch.setattr(git, "Repo", lambda wdir=None: DummyRepo())
+    monkeypatch.setattr(git, "Repo", lambda wdir=None, **kwargs: DummyRepo())
     calls = []
     events = []
 
@@ -116,7 +186,7 @@ def test_configure_remote_ck_uses_ck_scheme_and_skips_http_auth(monkeypatch):
         lambda remote_name=None, wdir=None: events.append("clear"),
     )
     out = calkit.dvc.configure_remote(use_ck=True)
-    assert out == calkit.config.get_app_name()
+    assert out == calkit.dvc.make_remote_name(use_ck=True)
     assert events and events[0] == "clear"
     assert calls == [
         (
@@ -125,7 +195,7 @@ def test_configure_remote_ck_uses_ck_scheme_and_skips_http_auth(monkeypatch):
                 "add",
                 "-d",
                 "-f",
-                calkit.config.get_app_name(),
+                calkit.dvc.make_remote_name(use_ck=True),
                 "ck://o/p",
             ],
             None,
@@ -133,10 +203,59 @@ def test_configure_remote_ck_uses_ck_scheme_and_skips_http_auth(monkeypatch):
     ]
 
 
+def test_add_external_remote(monkeypatch):
+    calls = []
+    auth_calls = []
+    monkeypatch.setattr(
+        calkit.dvc.core,
+        "run_dvc_command",
+        lambda argv, cwd=None: calls.append((argv, cwd)) or 0,
+    )
+    monkeypatch.setattr(
+        calkit.dvc.core,
+        "set_remote_auth",
+        lambda name: auth_calls.append(name),
+    )
+    # HTTP case: builds URL from cloud base, sets custom auth
+    monkeypatch.setattr(
+        calkit.cloud, "get_base_url", lambda: "https://example.com"
+    )
+    out = calkit.dvc.add_external_remote("o", "p", use_ck=False)
+    http_name = f"{calkit.dvc.make_remote_name(use_ck=False)}:o/p"
+    assert out == {
+        "name": http_name,
+        "url": "https://example.com/projects/o/p/dvc",
+    }
+    assert calls == [
+        (
+            [
+                "remote",
+                "add",
+                "-f",
+                http_name,
+                "https://example.com/projects/o/p/dvc",
+            ],
+            None,
+        ),
+        (["remote", "modify", http_name, "auth", "custom"], None),
+    ]
+    assert auth_calls == [http_name]
+    # ck case: builds ck:// URL, skips HTTP auth modify and set_remote_auth
+    calls.clear()
+    auth_calls.clear()
+    out = calkit.dvc.add_external_remote("o", "p", use_ck=True)
+    ck_name = f"{calkit.dvc.make_remote_name(use_ck=True)}:o/p"
+    assert out == {"name": ck_name, "url": "ck://o/p"}
+    assert calls == [
+        (["remote", "add", "-f", ck_name, "ck://o/p"], None),
+    ]
+    assert auth_calls == []
+
+
 def test_set_remote_auth_ck_remote_clears_local_http_auth(
     monkeypatch, tmp_path
 ):
-    remote_name = calkit.config.get_app_name()
+    remote_name = calkit.dvc.make_remote_name()
     monkeypatch.setattr(
         calkit.dvc.core,
         "get_remotes",
@@ -158,3 +277,72 @@ def test_set_remote_auth_ck_remote_clears_local_http_auth(
     assert "custom_auth_header" not in section
     assert "password" not in section
     assert section["url"] == "https://example.com"  # type: ignore
+
+
+def test_data_status_as_posix():
+    # Use os.path.join so on Windows the inputs contain real backslash
+    # separators (exercising the \ -> / conversion), and on POSIX they're
+    # already forward-slashes (testing structure preservation + regressions).
+    data_status = {
+        "git": {
+            "is_dirty": True,
+            "untracked": [os.path.join("sub", "file.txt")],
+        },
+        "uncommitted": {
+            "added": [os.path.join("data", "a.csv")],
+            "modified": [os.path.join("data", "b.csv")],
+            "renamed": [
+                {
+                    "old": os.path.join("data", "old.csv"),
+                    "new": os.path.join("data", "new.csv"),
+                }
+            ],
+        },
+        "not_in_remote": [
+            os.path.join("figs", "a.png"),
+            os.path.join("figs", "b.png"),
+        ],
+        "scalar": "ignored",
+    }
+    out = calkit.dvc.data_status_as_posix(data_status)
+    # Git entry passes through untouched (no normalization applied), including
+    # whatever separator the OS uses.
+    assert out["git"] == {
+        "is_dirty": True,
+        "untracked": [os.path.join("sub", "file.txt")],
+    }
+    # All other paths come out in posix form regardless of platform.
+    assert out["not_in_remote"] == ["figs/a.png", "figs/b.png"]
+    assert out["uncommitted"]["added"] == ["data/a.csv"]
+    assert out["uncommitted"]["modified"] == ["data/b.csv"]
+    # Renamed entries are dicts — must not crash and must convert old/new.
+    assert out["uncommitted"]["renamed"] == [
+        {"old": "data/old.csv", "new": "data/new.csv"}
+    ]
+    # Unknown scalar values pass through.
+    assert out["scalar"] == "ignored"
+
+
+def test_status_as_posix():
+    # Stages with: bare-string entries, normal path/status dicts (using
+    # os.path.join so Windows runs see real backslashes), and scalar category
+    # values like "changed command" (which must not crash).
+    status = {
+        "stage1": ["always changed"],
+        "stage2": [
+            {
+                "changed outs": {os.path.join("data", "out.csv"): "modified"},
+                "changed deps": {os.path.join("src", "foo.py"): "modified"},
+            }
+        ],
+        "stage3": [{"changed command": "python src/new-script.py"}],
+    }
+    out = calkit.dvc.status_as_posix(status)
+    assert out["stage1"] == ["always changed"]
+    assert out["stage2"] == [
+        {
+            "changed outs": {"data/out.csv": "modified"},
+            "changed deps": {"src/foo.py": "modified"},
+        }
+    ]
+    assert out["stage3"] == [{"changed command": "python src/new-script.py"}]

@@ -108,6 +108,25 @@ def test_check_system_deps(tmp_dir):
         calkit.check_system_deps()
 
 
+def test_check_dep_exists_conda_off_path(monkeypatch):
+    # Conda is frequently installed but not on the PATH (especially on
+    # Windows). check_dep_exists should locate it via find_conda_exe rather
+    # than relying on ``conda --version`` being directly runnable.
+    import calkit.conda
+
+    # Simulate conda being absent from the PATH but present in a typical
+    # install location that find_conda_exe discovers.
+    monkeypatch.setattr(
+        calkit.conda, "find_conda_exe", lambda: "/opt/miniconda3/bin/conda"
+    )
+    monkeypatch.setattr(calkit.conda, "find_mamba_exe", lambda: None)
+    assert calkit.check_dep_exists("conda", "app")
+    assert not calkit.check_dep_exists("mamba", "app")
+    # When neither is findable, it should report missing.
+    monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: None)
+    assert not calkit.check_dep_exists("conda", "app")
+
+
 def test_get_md5(tmp_dir):
     with open("file1.txt", "w") as f:
         f.write("Hello world")

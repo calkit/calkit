@@ -7,6 +7,20 @@ from os import PathLike
 from pathlib import Path
 
 import git
+from git.exc import InvalidGitRepositoryError
+
+__all__ = ["InvalidGitRepositoryError", "get_repo"]
+
+
+def get_repo(path: str | None = None) -> git.Repo:
+    """Return a git.Repo for ``path`` (or cwd), searching parent dirs.
+
+    Prefer this over bare ``git.Repo()`` so that commands run from inside
+    a subproject folder (plain subdirectory of a parent git repo) correctly
+    discover the enclosing repo instead of raising InvalidGitRepositoryError
+    or, worse, initializing a new nested repo.
+    """
+    return git.Repo(path, search_parent_directories=True)
 
 
 def get_staged_files(
@@ -16,7 +30,7 @@ def get_staged_files(
     repo.
     """
     if repo is None:
-        repo = git.Repo(path)
+        repo = get_repo(path)
     cmd = ["--staged", "--name-only"]
     if path is not None:
         cmd.append(path)
@@ -30,7 +44,7 @@ def get_changed_files(
 ) -> list[str]:
     """Get a list of files that have been changed but not staged."""
     if repo is None:
-        repo = git.Repo(path)
+        repo = get_repo(path)
     return [
         item.a_path
         for item in repo.index.diff(None)
@@ -43,7 +57,7 @@ def get_untracked_files(
 ) -> list[str]:
     """Get a list of untracked files."""
     if repo is None:
-        repo = git.Repo(path)
+        repo = get_repo(path)
     return repo.untracked_files
 
 
@@ -51,7 +65,7 @@ def get_staged_files_with_status(
     path: str | None = None, repo: git.Repo | None = None
 ) -> list[dict]:
     if repo is None:
-        repo = git.Repo(path)
+        repo = get_repo(path)
     cmd = ["--staged", "--name-status"]
     if path is not None:
         cmd.append(path)
@@ -143,7 +157,7 @@ def ensure_path_is_ignored(
     if os.path.isfile(gitignore_path):
         with open(gitignore_path) as f:
             gitignore_txt = f.read()
-        lines = gitignore_txt.splitlines()
+        lines = [line for line in gitignore_txt.splitlines() if line]
         if target_path in lines:
             # The direct rule exists; also remove any stale negation that
             # follows it, otherwise the negation wins and the path stays
@@ -155,7 +169,7 @@ def ensure_path_is_ignored(
             for n in stale:
                 lines.remove(n)
             with open(gitignore_path, "w") as f:
-                f.write(os.linesep.join(lines))
+                f.write("\n".join(lines))
             return True
         # Remove any stale negations for this path so the ignore rule takes
         # effect cleanly without accumulating contradictory entries.
@@ -166,7 +180,7 @@ def ensure_path_is_ignored(
                 lines.remove(n)
             lines.append(target_path)
             with open(gitignore_path, "w") as f:
-                f.write(os.linesep.join(lines))
+                f.write("\n".join(lines))
             return True
     with open(gitignore_path, "a") as f:
         if (
@@ -315,7 +329,7 @@ def ensure_path_is_not_ignored(
                 lines.remove(no_ignore_line)
             lines.append(no_ignore_line)
     with open(gitignore_path, "w") as f:
-        f.write(os.linesep.join(lines))
+        f.write("\n".join(lines))
     # If the path is still ignored after updating this gitignore file (e.g.,
     # because a subdirectory .gitignore also contains a matching rule), fix
     # that file as well. Depth-limit guards against pathological gitignore

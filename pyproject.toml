@@ -30,7 +30,7 @@ dependencies = [
   "bibtexparser",
   "checksumdir",
   "docx2pdf",
-  "dvc==3.66.1",
+  "dvc==3.67.1",
   "fastapi",
   "gitpython",
   "keyring",
@@ -43,7 +43,7 @@ dependencies = [
   "python-dotenv>=1",
   "pywin32; platform_system == 'Windows'",
   "requests",
-  "typer==0.24.1",
+  "typer==0.25.1",
   "uvicorn",
   "tqdm>=4.67.1",
   "psutil>=7.0.0",
@@ -52,8 +52,8 @@ dependencies = [
   "sqlitedict>=2.1.0",
   "json2latex>=0.0.3",
   "toml>=0.10.2",
-  "texsoup>=0.3.1",
-  "fsspec>=2026.2.0",
+  "texsoup>=0.3.3",
+  "fsspec>=2026.4.0",
 ]
 description = "Reproducibility simplified."
 dynamic = ["version"]
@@ -103,9 +103,13 @@ ck = "calkit.fs:CalkitFileSystem"
 [project.scripts]
 calkit = "calkit.cli:run"
 calk9 = "calkit.cli:run"
+ck = "calkit.cli:run"
 
 [tool.hatch.build.targets.wheel]
 packages = ["calkit"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"agent-plugin/skills" = "calkit/agent_skills"
 
 [tool.hatch.build.targets.sdist]
 artifacts = ["calkit/labextension"]
@@ -153,6 +157,11 @@ ignore = ["W002"]
 source = "vcs"
 tag-pattern = "^v(?P<version>.+)$"
 
+[tool.hatch.version.raw-options]
+git_describe_command = [
+    "git", "describe", "--dirty", "--tags", "--long", "--match", "v[0-9]*",
+]
+
 [tool.mypy]
 files = ["calkit"]
 disallow_untyped_defs = true
@@ -162,6 +171,11 @@ check_untyped_defs = true
 warn_return_any = true
 warn_unused_ignores = true
 show_error_codes = true
+
+# Third-party modules that ship no type stubs.
+[[tool.mypy.overrides]]
+module = ["sqlitedict", "networkx"]
+ignore_missing_imports = true
 
 [tool.ruff]
 target-version = "py310"

@@ -7,10 +7,9 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import dvc.repo
-import git
 from configobj import ConfigObj
 from dvc.utils.objects import cached_property
 from dvc_objects.fs.base import ObjectFileSystem
@@ -23,6 +22,26 @@ from calkit.config import get_app_name
 
 logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
+
+USE_CK_REMOTE_BY_DEFAULT = True
+
+
+class _FrozenStageWarningFilter(logging.Filter):
+    """Drop DVC's "stage is frozen" warnings.
+
+    DVC emits these for every frozen stage on every ``status``/``repro`` call
+    ("... not going to be shown in the status output." and "... not going to
+    be reproduced."). Frozen stages are pinned by design, so the warnings are
+    noise — the substring shared by both variants is matched here.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "is frozen. Its dependencies are" not in record.getMessage()
+
+
+_frozen_stage_warning_filter = _FrozenStageWarningFilter()
+for _name in ("dvc.repo.reproduce", "dvc.repo.status"):
+    logging.getLogger(_name).addFilter(_frozen_stage_warning_filter)
 
 
 class CalkitDVCFileSystem(ObjectFileSystem):
@@ -242,6 +261,67 @@ def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
     return dvc.repo.Repo(wdir)
 
 
+def ensure_dvc_lock_not_ignored(wdir: str | None = None) -> bool:
+    """Ensure ``dvc.lock`` is not Git-ignored.
+
+    DVC raises ``FileIsGitIgnored`` when ``dvc.lock`` is excluded by Git, which
+    breaks ``dvc status`` and pipeline runs. This un-ignores it (editing the
+    relevant ``.gitignore`` as needed) so those operations keep working.
+
+    Returns True if a ``.gitignore`` was modified.
+    """
+    import calkit.git
+
+    lock_path = os.path.join(wdir, "dvc.lock") if wdir else "dvc.lock"
+    try:
+        repo = calkit.git.get_repo(wdir)
+    except Exception:
+        return False
+    return bool(calkit.git.ensure_path_is_not_ignored(repo, path=lock_path))
+
+
+def get_running_pipeline_processes(wdir: str | None = None) -> list[dict]:
+    """Return live processes holding DVC's read/write lock.
+
+    While ``dvc repro`` runs a stage, DVC records the owning process in its
+    ``rwlock`` file (under ``.dvc/tmp/rwlock``); this is the same lock that
+    makes ``dvc status`` fail with a ``LockError`` mid-run. Each returned item
+    is ``{"pid": int, "cmd": str}``, with stale entries (PIDs that are no
+    longer running) filtered out. An empty list means no pipeline run is
+    currently in progress.
+    """
+    import psutil  # Always available as a DVC dependency
+
+    rwlock_path = os.path.join(wdir or ".", ".dvc", "tmp", "rwlock")
+    if not os.path.isfile(rwlock_path):
+        return []
+    try:
+        with open(rwlock_path) as f:
+            lock = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+    # The rwlock format is
+    # {"write": {path: {pid, cmd}}, "read": {path: [{pid, cmd}]}}
+    by_pid: dict[int, str] = {}
+    for info in lock.get("write", {}).values():
+        if isinstance(info, dict) and "pid" in info:
+            by_pid[info["pid"]] = info.get("cmd", "")
+    for infos in lock.get("read", {}).values():
+        for info in infos or []:
+            if isinstance(info, dict) and "pid" in info:
+                by_pid[info["pid"]] = info.get("cmd", "")
+    result = []
+    for pid, cmd in by_pid.items():
+        try:
+            alive = psutil.pid_exists(pid)
+        except Exception:
+            # If we can't tell, assume the process is still alive
+            alive = True
+        if alive:
+            result.append({"pid": pid, "cmd": cmd})
+    return result
+
+
 def run_dvc_command(argv: list[str], cwd: str | None = None) -> int:
     """Run a DVC command, optionally in a specific working directory.
 
@@ -252,17 +332,46 @@ def run_dvc_command(argv: list[str], cwd: str | None = None) -> int:
     return run_dvc_cli(argv)
 
 
-def configure_remote(wdir: str | None = None, use_ck: bool = False) -> str:
-    """Configure a DVC remote for the current project.
+def make_remote_name(use_ck: bool = USE_CK_REMOTE_BY_DEFAULT) -> str:
+    """Generate a DVC remote name based on the app name or a default."""
+    return get_app_name() if not use_ck else "calkit"
 
-    TODO: Use the ck:// scheme by default once it's deemed stable.
+
+def detect_calkit_remote_type(
+    name: str, url: str
+) -> Literal["ck", "http"] | None:
+    """Detect whether a DVC remote is a Calkit remote, and its scheme.
+
+    Returns ``"ck"`` or ``"http"`` for recognized Calkit remotes (including
+    external project remotes named like ``"<base>:<owner>/<project>"``), or
+    ``None`` if the remote isn't a Calkit remote we recognize.
     """
+    candidates = {
+        make_remote_name(use_ck=False),
+        make_remote_name(use_ck=True),
+    }
+    name_matches = any(
+        name == c or name.startswith(f"{c}:") for c in candidates
+    )
+    if not name_matches:
+        return None
+    if url.startswith("ck://"):
+        return "ck"
+    if url.startswith("http"):
+        return "http"
+    return None
+
+
+def configure_remote(
+    wdir: str | None = None, use_ck: bool = USE_CK_REMOTE_BY_DEFAULT
+) -> str:
+    """Configure a DVC remote for the current project."""
     try:
         project_name = calkit.detect_project_name(wdir=wdir)
     except ValueError as e:
         raise ValueError(f"Can't detect project name: {e}")
     # If Git origin is not set, set that
-    repo = git.Repo(wdir)
+    repo = calkit.git.get_repo(wdir)
     try:
         repo.remote()
     except ValueError:
@@ -276,13 +385,13 @@ def configure_remote(wdir: str | None = None, use_ck: bool = False) -> str:
         if not url.endswith(".git"):
             url += ".git"
         repo.git.remote(["add", "origin", url])
+    remote_name = make_remote_name(use_ck=use_ck)
     if use_ck:
-        clear_remote_local_http_auth(wdir=wdir)
+        clear_remote_local_http_auth(remote_name=remote_name, wdir=wdir)
         remote_url = f"ck://{project_name}"
     else:
         base_url = calkit.cloud.get_base_url()
         remote_url = f"{base_url}/projects/{project_name}/dvc"
-    remote_name = get_app_name()
     result = run_dvc_command(
         ["remote", "add", "-d", "-f", remote_name, remote_url],
         cwd=wdir,
@@ -309,7 +418,7 @@ def clear_remote_local_http_auth(
     This clears values written to ``.dvc/config.local`` by HTTP auth setup.
     """
     if remote_name is None:
-        remote_name = get_app_name()
+        remote_name = make_remote_name()
     config_local = Path(wdir or ".") / ".dvc" / "config.local"
     if not config_local.is_file():
         return
@@ -342,7 +451,7 @@ def set_remote_auth(
     HTTP auth configuration.
     """
     if remote_name is None:
-        remote_name = get_app_name()
+        remote_name = make_remote_name()
     # Check if this is a ck:// remote (doesn't need HTTP auth)
     remotes = get_remotes(wdir=wdir)
     remote_url = remotes.get(remote_name, "")
@@ -388,13 +497,23 @@ def set_remote_auth(
         )
 
 
-def add_external_remote(owner_name: str, project_name: str) -> dict:
-    base_url = calkit.cloud.get_base_url()
-    remote_url = f"{base_url}/projects/{owner_name}/{project_name}/dvc"
-    remote_name = f"{get_app_name()}:{owner_name}/{project_name}"
+def add_external_remote(
+    owner_name: str,
+    project_name: str,
+    use_ck: bool = USE_CK_REMOTE_BY_DEFAULT,
+) -> dict:
+    if use_ck:
+        remote_url = f"ck://{owner_name}/{project_name}"
+    else:
+        base_url = calkit.cloud.get_base_url()
+        remote_url = f"{base_url}/projects/{owner_name}/{project_name}/dvc"
+    remote_name = (
+        f"{make_remote_name(use_ck=use_ck)}:{owner_name}/{project_name}"
+    )
     run_dvc_command(["remote", "add", "-f", remote_name, remote_url])
-    run_dvc_command(["remote", "modify", remote_name, "auth", "custom"])
-    set_remote_auth(remote_name)
+    if not use_ck:
+        run_dvc_command(["remote", "modify", remote_name, "auth", "custom"])
+        set_remote_auth(remote_name)
     return {"name": remote_name, "url": remote_url}
 
 
@@ -532,3 +651,55 @@ def hash_path(path: str) -> dict:
         return hash_file(path)
     else:
         raise ValueError(f"Path does not exist: {path}")
+
+
+def _path_item_as_posix(item):
+    # Renamed entries are dicts like {"old": ..., "new": ...}.
+    if isinstance(item, dict):
+        return {k: Path(v).as_posix() for k, v in item.items()}
+    return Path(item).as_posix()
+
+
+def data_status_as_posix(data_status: dict) -> dict:
+    """Convert all paths in DVC data status to posix format.
+
+    We skip the ``git`` entry since Git already formats as posix.
+    """
+    data_status_fmt = {}
+    for cat, obj in data_status.items():
+        if cat == "git":
+            data_status_fmt[cat] = obj
+        elif isinstance(obj, list):
+            data_status_fmt[cat] = [_path_item_as_posix(p) for p in obj]
+        elif isinstance(obj, dict):
+            obj_fmt = {}
+            for cat2, obj_i in obj.items():
+                obj_fmt[cat2] = [_path_item_as_posix(p) for p in obj_i]
+            data_status_fmt[cat] = obj_fmt
+        else:
+            data_status_fmt[cat] = obj
+    return data_status_fmt
+
+
+def status_as_posix(status: dict) -> dict:
+    """Convert all paths in repo status to posix format."""
+    status_fmt = {}
+    for stage_name, st_list in status.items():
+        st_list_fmt = []
+        for st_dict in st_list:
+            if isinstance(st_dict, str):
+                st_list_fmt.append(st_dict)
+                continue
+            st_dict_fmt = {}
+            for st_cat, path_st_dict in st_dict.items():
+                if not isinstance(path_st_dict, dict):
+                    # e.g. {"changed command": "python src/new-script.py"}
+                    st_dict_fmt[st_cat] = path_st_dict
+                    continue
+                path_st_dict_fmt = {}
+                for p, st in path_st_dict.items():
+                    path_st_dict_fmt[Path(p).as_posix()] = st
+                st_dict_fmt[st_cat] = path_st_dict_fmt
+            st_list_fmt.append(st_dict_fmt)
+        status_fmt[stage_name] = st_list_fmt
+    return status_fmt

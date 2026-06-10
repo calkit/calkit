@@ -78,6 +78,98 @@ by calling `calkit run`, and if anything has changed,
 commit and push those changes to the cloud with
 `calkit save -am "Run pipeline"`.
 
+### A clean working tree is required
+
+Syncing requires the synced folder to have no uncommitted changes.
+If there are any (staged or unstaged), Calkit raises an error like:
+
+```
+Uncommitted changes found in {wdir}.
+Commit or stash them before syncing with Overleaf,
+or use --auto-commit/-a to automatically commit them.
+```
+
+This is because incoming Overleaf edits are applied to the synced path with
+`git am`, which operates on commits and refuses to run against a dirty working
+tree.
+Requiring a clean tree also keeps the sync recoverable: the commit you were on
+before the sync is a clean checkpoint, so Calkit can cleanly reset back to it
+(e.g., for [`--no-commit`](#syncing-without-committing-no-commit)) or abort a
+failed patch without entangling or losing your in-progress edits.
+
+To let Calkit commit your local changes for you before syncing instead of
+erroring, pass `--auto-commit`/`-a`:
+
+```sh
+calkit overleaf sync --auto-commit
+```
+
+### What gets synced
+
+Calkit only syncs **stored** files, i.e., files that are tracked by Git or
+stored with DVC.
+These are synced bidirectionally, except for files under `push_paths`
+(see [importing](#importing-an-overleaf-project)), which are pushed to
+Overleaf one-way only.
+
+Everything else is treated as ignored and is never pushed to, pulled from,
+or deleted from Overleaf.
+In particular, this includes:
+
+- Files ignored by Git (e.g., via `.gitignore`) that are not stored by DVC.
+- Pipeline outputs with `storage: null`, such as LaTeX build artifacts
+  (`.aux`, aux PDFs, etc.).
+  These can be tracked by the pipeline but not stored, so Calkit leaves them
+  alone on both sides.
+
+A file is only deleted from Overleaf when a previously-synced stored file
+is genuinely removed from the project (deleted from Git and DVC).
+A file that merely disappears from disk because it hasn't been pulled, or
+that became an ignored/`storage: null` output, is left in place on Overleaf.
+
+### Syncing without committing (`--no-commit`)
+
+By default, `calkit overleaf sync` creates a commit in your project repo
+recording the synced changes.
+If you'd rather review the incoming Overleaf changes before committing them
+yourself, use:
+
+```sh
+calkit overleaf sync --no-commit
+```
+
+With `--no-commit`:
+
+- Changes from Overleaf are still pulled into your working tree, but they are
+  left **staged** (in the Git index) instead of committed, so you can inspect,
+  amend, or commit them however you like.
+- No "Sync ... with Overleaf project" commit is created in the project repo.
+- Overleaf itself is **always** committed and pushed; `--no-commit` only
+  affects the project repo.
+
+**Why it leaves changes staged rather than simply not touching Git:**
+Calkit pulls Overleaf edits by turning them into a patch and applying it with
+`git am`, which inherently creates commits (a mailbox patch can't be applied
+without committing).
+So pulling always advances the project repo's `HEAD`.
+To honor `--no-commit`, Calkit then runs `git reset --soft` back to the commit
+the repo was at before the sync.
+A soft reset rewinds `HEAD` but keeps every change in the index, so the pulled
+Overleaf edits end up staged and ready for you to commit, exactly as if you'd
+made them yourself.
+
+<!-- prettier-ignore -->
+!!! note "`--no-commit` discards Overleaf commit authorship"
+    A normal sync preserves the original author, date, and message of each
+    Overleaf-side commit (Calkit applies them with `git am`, which keeps that
+    metadata).
+    Because `--no-commit` rewinds those commits and leaves only their net
+    changes staged, committing them yourself collapses everything into a
+    single commit authored by **you**--the per-commit Overleaf authorship
+    and history are not retained.
+    Omit `--no-commit` (the default) if preserving Overleaf editors'
+    authorship matters to you.
+
 ## Example
 
 You can view an example project that uses Overleaf integration on

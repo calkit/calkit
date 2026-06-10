@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import warnings
 from pathlib import Path
 from typing import cast
@@ -137,6 +138,75 @@ def _editable_package_name_from_dir(dir_path: str) -> str:
     raise ValueError(f"Could not determine package name from {dir_path}")
 
 
+def _run_pip_freeze(env_prefix: str) -> list[str]:
+    """Run pip freeze inside a conda env and return the list of packages.
+
+    Uses the env's pip executable directly (avoids ``conda run``, which can
+    touch the env directory and invalidate the stored mtime check).
+    This captures git URLs and exact refs that ``conda env export`` drops.
+    """
+    if sys.platform == "win32":
+        pip_exe = os.path.join(env_prefix, "Scripts", "pip.exe")
+    else:
+        pip_exe = os.path.join(env_prefix, "bin", "pip")
+    if not os.path.isfile(pip_exe):
+        return []
+    output = subprocess.check_output([pip_exe, "freeze"]).decode()
+    return [
+        line.strip()
+        for line in output.splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+
+
+_GIT_RE = re.compile(r"\s*@\s*git\+", re.IGNORECASE)
+
+
+def _pkg_name_from_dep(dep: str) -> str:
+    """Extract the normalized package name from a pip/conda dep string."""
+    name = _GIT_RE.split(dep)[0]
+    name = re.split(r"[@=<>]", name)[0]
+    return name.strip().lower()
+
+
+def _enrich_pip_deps_from_freeze(
+    pip_deps: list[str],
+    pip_freeze: list[str],
+) -> list[str]:
+    """Replace pip dep entries with pip freeze versions when available.
+
+    Preserves git URLs and exact refs that conda env export drops.
+    Editable installs in pip_deps are kept unchanged.
+    """
+    freeze_by_name = {
+        _pkg_name_from_dep(line): line
+        for line in pip_freeze
+        if not line.startswith("-e ") and "@ file://" not in line
+    }
+    result = []
+    for dep in pip_deps:
+        if dep.startswith("-e ") or dep.startswith("--editable "):
+            result.append(dep)
+            continue
+        name = _pkg_name_from_dep(dep)
+        result.append(freeze_by_name.get(name, dep))
+    return result
+
+
+def _normalize_git_dep_url(dep: str) -> str:
+    """Extract and normalize the git URL+ref from a dep string for comparison.
+
+    Returns the lowercased URL with .git suffix removed.
+    """
+    parts = _GIT_RE.split(dep, maxsplit=1)
+    if len(parts) < 2:
+        return ""
+    url = parts[1].strip().lower()
+    if url.endswith(".git"):
+        url = url[:-4]
+    return url.rstrip("/")
+
+
 def _check_single(
     req: str, actual: str, env_spec_dir: str, conda: bool = False
 ) -> bool:
@@ -156,11 +226,28 @@ def _check_single(
         req = os.path.join(env_spec_dir, req)
         req = _editable_package_name_from_dir(req)
         editable = True
-    # If this is a Git version, we can't check it
-    # TODO: Clone Git repos to check?
-    if "@git" in req:
-        warnings.warn(f"Cannot check Git version for {req}")
-        req = req.split("@git")[0]
+    # Handle git-based requirements — both legacy "pkg@git+url" and PEP 508
+    # "pkg @ git+url" forms.
+    req_is_git = bool(_GIT_RE.search(req))
+    actual_is_git = bool(_GIT_RE.search(actual))
+    if req_is_git and actual_is_git:
+        # Both sides have git URLs: compare normalized URL+ref directly.
+        # A short SHA in the spec matches a full SHA in the installed dep when
+        # the full SHA starts with the short one.
+        req_url = _normalize_git_dep_url(req)
+        actual_url = _normalize_git_dep_url(actual)
+        if req_url and actual_url:
+            req_base, _, req_ref = req_url.rpartition("@")
+            actual_base, _, actual_ref = actual_url.rpartition("@")
+            if req_base != actual_base:
+                return False
+            return actual_ref.startswith(req_ref) or req_ref.startswith(
+                actual_ref
+            )
+        # Fallback: compare names only
+        return _pkg_name_from_dep(req) == _pkg_name_from_dep(actual)
+    if req_is_git:
+        req = _GIT_RE.split(req)[0].strip()
     req_name = re.split("[=<>]", req)[0].strip()
     req_spec = req.removeprefix(req_name).strip().replace(" ", "")
     if "[" in req_name:
@@ -176,9 +263,16 @@ def _check_single(
             numbers_and_dots = re.match(r"^[0-9.]+$", req_spec[2:])
             if numbers_and_dots and len(req_spec.split(".")) < 3:
                 req_spec += ".*"
-    actual_name, actual_vers = re.split("[=<>]+", actual, maxsplit=1)
-    if actual_name != req_name:
+    if actual_is_git:
+        # Spec has no git URL but installed dep does; name match is sufficient
+        actual = _GIT_RE.split(actual)[0].strip()
+    actual_parts = re.split("[=<>]+", actual, maxsplit=1)
+    actual_name = actual_parts[0]
+    actual_vers = actual_parts[1] if len(actual_parts) > 1 else ""
+    if actual_name.strip().lower() != req_name.lower():
         return False
+    if req_is_git or actual_is_git:
+        return True
     actual_spec = actual.removeprefix(actual_name)
     if conda and actual_spec.startswith("="):
         actual_spec = "=" + actual_spec
@@ -328,6 +422,7 @@ def check_env(
                     os.remove(lock_to_use_for_creation)
                 lock_to_use_for_creation = None
     res = EnvCheckResult()
+    early_pip_freeze: list[str] = []
     if verbose:
         log_func("Getting conda info")
     conda_exe = find_conda_exe()
@@ -360,8 +455,10 @@ def check_env(
     prefix_orig = prefix
     if prefix is not None:
         prefix = os.path.abspath(prefix)
+        env_prefix_path = prefix
         env_check_fpath = os.path.join(prefix, "env-export.yml")
     else:
+        env_prefix_path = os.path.join(envs_dir, env_name)
         env_check_fpath = os.path.join(
             os.path.expanduser("~"),
             ".calkit",
@@ -371,6 +468,8 @@ def check_env(
     env_check_dir = os.path.dirname(env_check_fpath)
     os.makedirs(env_check_dir, exist_ok=True)
     env_spec_dir = os.path.dirname(os.path.abspath(env_fpath))
+    spec_pip_deps = _get_pip_dependency_list(env_spec["dependencies"])
+    spec_has_git_pip = any(_GIT_RE.search(d) for d in spec_pip_deps)
     # Create env export command, which will be used later
     export_cmd = [
         conda_exe,  # Mamba output is slightly different
@@ -464,8 +563,26 @@ def check_env(
             env_check["mtime"] = os.path.getmtime(
                 os.path.normpath(env_check["prefix"])
             )
-            with open(env_check_fpath, "w") as f:
-                ryaml.dump(env_check, f)
+        # If the spec has git pip deps, enrich the in-memory env_check pip
+        # section so that git refs are compared correctly during the dep check
+        # rather than falling back to name-only matching.
+        if spec_has_git_pip:
+            log_func("Running pip freeze to enrich git dep comparison")
+            try:
+                early_pip_freeze = _run_pip_freeze(env_prefix_path)
+            except Exception as e:
+                log_func(
+                    f"pip freeze failed; git dep URLs may be missing: {e}"
+                )
+            if early_pip_freeze:
+                check_pip = _get_pip_dependency_list(env_check["dependencies"])
+                enriched_check_pip = _enrich_pip_deps_from_freeze(
+                    check_pip, early_pip_freeze
+                )
+                for dep_entry in env_check["dependencies"]:
+                    if isinstance(dep_entry, dict) and "pip" in dep_entry:
+                        dep_entry["pip"] = enriched_check_pip
+                        break
         # Determine if the env matches
         env_needs_rebuild = False
         existing_conda_deps, existing_pip_deps = _split_env_dependencies(
@@ -552,12 +669,41 @@ def check_env(
                 )
     # If the env was rebuilt, export the env check
     res.env_needs_export = env_needs_export
+    # Determine whether we need pip freeze output for enriching the stored
+    # env check and lock file with exact git URLs/refs.
+    needs_pip_freeze = (
+        env_needs_export
+        or not res.env_exists
+        or res.env_needs_rebuild
+        or spec_has_git_pip
+    )
+    pip_freeze: list[str] = []
+    if needs_pip_freeze:
+        # Reuse the early freeze captured before dep check when possible so
+        # we don't run pip twice; fall back to a fresh run after a rebuild.
+        if early_pip_freeze and not res.env_needs_rebuild:
+            pip_freeze = early_pip_freeze
+        else:
+            log_func("Running pip freeze to capture git deps")
+            try:
+                pip_freeze = _run_pip_freeze(env_prefix_path)
+            except Exception as e:
+                log_func(
+                    f"pip freeze failed; git dep URLs may be missing: {e}"
+                )
     if env_needs_export:
         log_func(f"Exporting existing env to {env_check_fpath}")
         env_check = json.loads(subprocess.check_output(export_cmd).decode())
         env_check["mtime"] = os.path.getmtime(
             os.path.normpath(env_check["prefix"])
         )
+        if pip_freeze:
+            check_pip = _get_pip_dependency_list(env_check["dependencies"])
+            enriched = _enrich_pip_deps_from_freeze(check_pip, pip_freeze)
+            for dep_entry in env_check["dependencies"]:
+                if isinstance(dep_entry, dict) and "pip" in dep_entry:
+                    dep_entry["pip"] = enriched
+                    break
         with open(env_check_fpath, "w") as f:
             ryaml.dump(env_check, f)
     if lock_fpath is None:
@@ -602,8 +748,13 @@ def check_env(
                 editable_pip_deps[pkg_name] = dir_path
         export_pip_deps = _get_pip_dependency_list(env_export["dependencies"])
         if export_pip_deps:
+            # Enrich with pip freeze to preserve git URLs, then fix editable paths
+            if pip_freeze:
+                export_pip_deps = _enrich_pip_deps_from_freeze(
+                    export_pip_deps, pip_freeze
+                )
             for i, dep in enumerate(export_pip_deps):
-                dep_name = re.split("[=<>]+", dep, maxsplit=1)[0]
+                dep_name = _pkg_name_from_dep(dep)
                 if dep_name in editable_pip_deps:
                     path_rel_to_project_root = editable_pip_deps[dep_name]
                     lock_dir = os.path.dirname(lock_fpath)
@@ -613,9 +764,30 @@ def check_env(
                     export_pip_deps[i] = (
                         "-e " + Path(path_rel_to_lock).as_posix()
                     )
+            # Write the modified list back (enrichment returns a new list)
+            for dep_entry in env_export["dependencies"]:
+                if isinstance(dep_entry, dict) and "pip" in dep_entry:
+                    dep_entry["pip"] = export_pip_deps
+                    break
         out_dir = os.path.dirname(lock_fpath)
         if out_dir:
             os.makedirs(out_dir, exist_ok=True)
         with open(lock_fpath, "w") as f:
             ryaml.dump(env_export, f)
+    elif pip_freeze and spec_has_git_pip and os.path.isfile(lock_fpath):
+        # The env matched the spec so no full re-export was done, but the
+        # existing lock file may pre-date pip freeze enrichment. Update its
+        # pip section in place — no conda env export needed.
+        with open(lock_fpath) as f:
+            lock_data = ryaml.load(f) or {}
+        lock_pip = _get_pip_dependency_list(lock_data.get("dependencies", []))
+        enriched = _enrich_pip_deps_from_freeze(lock_pip, pip_freeze)
+        if enriched != lock_pip:
+            log_func("Enriching existing lock file pip section with git URLs")
+            for dep_entry in lock_data.get("dependencies", []):
+                if isinstance(dep_entry, dict) and "pip" in dep_entry:
+                    dep_entry["pip"] = enriched
+                    break
+            with open(lock_fpath, "w") as f:
+                ryaml.dump(lock_data, f)
     return res

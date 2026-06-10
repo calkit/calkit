@@ -16,7 +16,9 @@ and our code of conduct can be found
 
 ## Vision
 
-We envision a future where nearly every research article is delivered as part
+We envision a future where reliable and impactful knowledge is created
+10x faster than it is today.
+In this future nearly every research article is delivered as part
 of a [single-button](https://petebachant.me/single-button/)
 reproducible
 [compendium](https://book.the-turing-way.org/reproducible-research/compendia/)
@@ -46,6 +48,10 @@ by enabling faster:
    making it easier to find something similar to a desired workflow to start
    from and adapt to new questions.
 
+Most importantly,
+full automation speeds up iteration cycle time,
+and more iterations means greater likelihood of success.
+
 ### The status quo
 
 The figure below from the PLOS Open Science Indicators dataset
@@ -63,10 +69,15 @@ Code sharing rates from
 
 ## Strategy
 
-We believe one major hurdle preventing researchers from working reproducibly is
-the expectation that they become software engineering experts,
-choose and integrate multiple tools,
-and assemble a custom workflow.
+Telling researchers they need to work reproducibly is like telling them
+they need to eat their vegetables.
+In other words, reproducibility needs to be a side effect of a process
+that is more productive and more enjoyable than the status quo.
+
+The current "gold standard"
+requires researchers to become de facto software engineers,
+choosing and integrating multiple tools,
+designing bespoke project layouts and workflows.
 We want to provide a vertically-integrated, purpose-built,
 and user-friendly project format and toolset that reduces the required
 expertise and decision fatigue.
@@ -75,7 +86,7 @@ solution—they certainly are—but we are focused on improving
 tooling and infrastructure.
 
 - **Path of least resistance:**
-  Make it faster to work in a clean,
+  Make it faster to work in a clean, automated,
   reproducible way than it is to work in an ad-hoc, disorganized way.
 - **Intuitive tooling:**
   Simplify the "hard parts" of modern scientific computing:
@@ -88,6 +99,9 @@ tooling and infrastructure.
 - **Builder's pride:**
   Enable researchers to take pride in what they create so
   they will be more likely to share their projects openly.
+- **Continuous delivery:** Continuous delivery (CD) practices have greatly
+  enhanced the quality and speed at which software products are created.
+  These same principles can be applied to research.
 
 ## Objective and key results (OKRs)
 

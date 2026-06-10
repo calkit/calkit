@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -92,6 +93,10 @@ def test_check_env_vars(tmp_dir):
 @pytest.mark.skipif(
     shutil.which("julia") is None, reason="Julia not installed"
 )
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
+)
 def test_check_julia_env_caches_second_run(tmp_dir):
     """Second run of ``calkit check julia-env`` should skip Pkg.instantiate."""
     with open("Project.toml", "w") as f:
@@ -124,6 +129,10 @@ def test_check_julia_env_caches_second_run(tmp_dir):
     assert "skipping Pkg.instantiate" not in result3.stdout
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
 def test_check_docker_env(tmp_dir):
     # First create a Dockerfile with a known base image
     with open("Dockerfile", "w") as f:
@@ -158,3 +167,35 @@ def test_check_docker_env(tmp_dir):
             ]
         )
     assert not os.path.exists("Dockerfile-lock.json")
+
+
+def test_check_envs_preloads_env_vars(tmp_dir, monkeypatch):
+    # Verify that `calkit check envs` loads .env and calkit.yaml env_vars
+    # before checking environments, so env-var-gated checks see them.
+    # The environment uses $CALKIT_VAR as its path so the check fails if
+    # the env var isn't preloaded before check_environment is called.
+    subprocess.check_call(["calkit", "init"])
+    with open(".env", "w") as f:
+        f.write("DOT_ENV_VAR=from_dotenv\n")
+    ck_info = calkit.load_calkit_info()
+    # CALKIT_VAR holds the requirements file path; it is set via env_vars so
+    # check envs must preload it before the venv check can resolve $CALKIT_VAR
+    ck_info["env_vars"] = {"CALKIT_VAR": "requirements.txt"}
+    ck_info["environments"] = {
+        "test-env": {
+            "kind": "uv-venv",
+            "path": "$CALKIT_VAR",
+            "prefix": ".venv",
+            "python": "3.13",
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("requirements.txt", "w") as f:
+        f.write("requests\n")
+    # Ensure vars are NOT already in the environment so only preloading sets them
+    monkeypatch.delenv("DOT_ENV_VAR", raising=False)
+    monkeypatch.delenv("CALKIT_VAR", raising=False)
+    # Should succeed: check envs preloads CALKIT_VAR → path resolves to
+    # requirements.txt; without preloading $CALKIT_VAR would not resolve
+    subprocess.check_call(["calkit", "check", "envs"])

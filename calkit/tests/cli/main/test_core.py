@@ -1,5 +1,6 @@
 """Tests for ``cli.main.core``."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -17,9 +18,28 @@ from git.exc import InvalidGitRepositoryError
 
 import calkit
 import calkit.cli.main
+from calkit.cli.core import complete_stage_names
 from calkit.cli.main.core import (
+    _get_running_pipeline_status,
+    _prune_run_logs,
     _stage_run_info_from_log_content,
+    _stage_target_from_cmd,
     _to_shell_cmd,
+)
+from calkit.cli.main.core import (
+    app as calkit_app,
+)
+
+skipif_windows_docker = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "TODO: Docker Linux images are unavailable on windows-latest GHA "
+        "runners"
+    ),
+)
+skipif_windows_mock_scheduler = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: mock scheduler is not yet Windows-compatible",
 )
 
 
@@ -34,6 +54,22 @@ def _repo_test_file(name: str) -> Path:
     )
 
 
+def test_init(tmp_dir):
+    # With no calkit.yaml present, init creates an empty one
+    assert not os.path.isfile("calkit.yaml")
+    subprocess.check_call(["calkit", "init"])
+    assert os.path.isfile("calkit.yaml")
+    assert calkit.load_calkit_info() == {}
+    # init must not clobber a pre-existing calkit.yaml
+    os.makedirs("sub")
+    ck_info = {"name": "test-project"}
+    with open(os.path.join("sub", "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "init"], cwd="sub")
+    assert calkit.load_calkit_info(wdir="sub") == ck_info
+
+
+@skipif_windows_docker
 def test_run_in_env(tmp_dir):
     # If running on Windows we need to set stdin for the subprocesses to
     # ensure sys.stdin.isatty() is False, otherwise we will run docker with
@@ -265,6 +301,10 @@ def test_run_in_venv(tmp_dir):
     assert out == "2.0.0"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
+)
 def test_run_in_julia_env(tmp_dir):
     subprocess.check_call("calkit init", shell=True)
     subprocess.check_call(
@@ -506,6 +546,125 @@ def test_add(tmp_dir):
     subprocess.check_call(["calkit", "add", "data2", "-M"])
     assert repo.head.commit.message.strip() == "Add data2"
     subprocess.check_call(["calkit", "add", "--to", "dvc", "large.bin"])
+    # Test dry run: verify nothing is staged and output describes what would happen
+    subprocess.check_call(["git", "reset"])
+    with open("dry_small.txt", "w") as f:
+        f.write("small")
+    with open("dry_large.bin", "wb") as f:
+        f.write(os.urandom(binary_size))
+    with open("dry_data.parquet", "w") as f:
+        f.write("fake parquet")
+    staged_before = set(calkit.git.get_staged_files())
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "add",
+            "--dry-run",
+            "dry_small.txt",
+            "dry_large.bin",
+            "dry_data.parquet",
+        ],
+        text=True,
+    )
+    assert "dry_small.txt" in out and "Git" in out
+    assert "dry_large.bin" in out and "DVC" in out
+    assert "dry_data.parquet" in out and "DVC" in out
+    # Nothing should have been staged
+    assert set(calkit.git.get_staged_files()) == staged_before
+    assert "dry_small.txt" not in calkit.dvc.list_paths()
+    # Test --dry-run with --to
+    out = subprocess.check_output(
+        ["calkit", "add", "--dry-run", "--to", "git", "dry_small.txt"],
+        text=True,
+    )
+    assert "dry_small.txt" in out and "git" in out
+    assert set(calkit.git.get_staged_files()) == staged_before
+
+
+def test_add_pipeline_output_storage(tmp_dir):
+    """Test that ``add`` respects pipeline output storage settings.
+
+    Bug: files with DVC extensions (e.g. .png) were routed to DVC even when
+    ``storage: git`` was set for that output in calkit.yaml.
+    """
+    subprocess.check_call(["calkit", "init"])
+    # Create a .png file – would normally be routed to DVC by extension.
+    # The content is intentionally fake; only the extension matters here.
+    with open("figure.png", "w") as f:
+        f.write("fake png content")
+    # Write a calkit.yaml pipeline that declares this output with storage: git
+    pipeline = {
+        "pipeline": {
+            "stages": {
+                "analyze": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "echo done",
+                    "outputs": [{"path": "figure.png", "storage": "git"}],
+                }
+            }
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(pipeline, f)
+    # Adding the file should use Git, not DVC, because of pipeline storage
+    out = subprocess.check_output(["calkit", "add", "figure.png"], text=True)
+    assert "Git" in out or "git" in out
+    assert "figure.png" in calkit.git.get_staged_files()
+    assert "figure.png" not in calkit.dvc.list_paths()
+    # Also verify dry-run output reflects pipeline output storage
+    out = subprocess.check_output(
+        ["calkit", "add", "--dry-run", "figure.png"], text=True
+    )
+    assert "Git" in out or "git" in out
+    # DVC pipeline output: storage: dvc means the file is tracked via
+    # dvc.lock (committed to Git), NOT via dvc add / .dvc files.
+    # Unstage figure.png to reset for the DVC storage case
+    subprocess.call(["git", "restore", "--staged", "figure.png"])
+    pipeline["pipeline"]["stages"]["analyze"]["outputs"] = [
+        {"path": "figure.png", "storage": "dvc"}
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(pipeline, f)
+    # Simulate dvc.lock being updated by a pipeline run
+    with open("dvc.lock", "w") as f:
+        f.write("schema: '2.0'\nstages:\n  analyze:\n    cmd: echo done\n")
+    subprocess.call(["git", "add", "dvc.lock"])
+    subprocess.call(["git", "commit", "-m", "init dvc.lock"])
+    # Modify dvc.lock so it is dirty and can be staged
+    with open("dvc.lock", "a") as f:
+        f.write("# updated\n")
+    out = subprocess.check_output(["calkit", "add", "figure.png"], text=True)
+    # Should mention dvc.lock, not attempt dvc add on the file
+    assert "dvc.lock" in out
+    assert not os.path.exists("figure.png.dvc")
+    assert "dvc.lock" in calkit.git.get_staged_files()
+
+
+def test_save_to_git_with_all(tmp_dir):
+    """Test that ``save --to git -a`` respects the ``--to`` flag.
+
+    Bug: when ``-a`` / ``--all`` was used together with ``--to git``, the
+    ``--to`` value was not forwarded to the internal ``add()`` call, causing
+    files to be auto-routed to DVC based on extension instead.
+
+    No pipeline storage override is set so the test relies solely on ``--to``
+    to route figure.png to Git; without the fix the extension-based heuristic
+    would send it to DVC.
+    """
+    subprocess.check_call(["calkit", "init"])
+    # No pipeline entry — figure.png has no explicit storage override, so
+    # only the --to flag can direct it to Git (extension would pick DVC).
+    with open("figure.png", "w") as f:
+        f.write("fake png content")
+    # save --to git -a should add figure.png to Git, not DVC
+    subprocess.check_call(
+        ["calkit", "save", "--to", "git", "-am", "Add figure", "--no-push"]
+    )
+    repo = git.Repo()
+    # figure.png should be tracked in Git, not DVC
+    assert repo.git.ls_files("figure.png")
+    assert "figure.png" not in calkit.dvc.list_paths()
 
 
 def test_large_folder_many_small_files(tmp_dir, tmp_path):
@@ -609,7 +768,7 @@ def test_status(tmp_dir):
 def test_save(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     repo = git.Repo()
-    assert repo.head.commit.message.strip() == "Initialize DVC"
+    assert repo.head.commit.message.strip() == "Initialize Calkit"
     with open("test.txt", "w") as f:
         f.write("sup")
     subprocess.check_call(["calkit", "save", "-aM", "--no-push"])
@@ -697,6 +856,9 @@ def test_run(tmp_dir):
     repo.git.checkout("HEAD^")
     out = subprocess.check_output(["calkit", "run"], text=True)
     # Test that we can run a Julia script
+    if sys.platform == "win32":
+        # TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)
+        pytest.skip("Julia portion of test_run not yet supported on Windows")
     with open("julia_script.jl", "w") as f:
         f.write('println("Hello from julia_script.jl")')
     subprocess.check_call(
@@ -844,6 +1006,201 @@ def test_stage_run_info_from_log_content():
             "status": "failed",
         },
     }
+    # Stage names containing colons (e.g. inline subproject targets) must keep
+    # their colons, not have them stripped out.
+    colon_log = (
+        "2025-07-11 18:25:43,557 - INFO - Running stage "
+        "'sub1/dvc.yaml:stage-a':\n"
+        "2025-07-11 18:25:44,000 - INFO - Running stage 'next':\n"
+    )
+    colon_info = _stage_run_info_from_log_content(colon_log)
+    assert "sub1/dvc.yaml:stage-a" in colon_info
+    assert colon_info["sub1/dvc.yaml:stage-a"]["status"] == "completed"
+    assert "next" in colon_info
+
+
+def _write_fake_rwlock(pid: int) -> None:
+    """Write a DVC rwlock file owned by ``pid`` to simulate a run."""
+    tmp = os.path.join(".dvc", "tmp")
+    os.makedirs(tmp, exist_ok=True)
+    with open(os.path.join(tmp, "rwlock"), "w") as f:
+        json.dump({"write": {"out.txt": {"pid": pid, "cmd": "calkit run"}}}, f)
+
+
+def _write_fake_run_log() -> None:
+    """Write a run log with one finished and one in-progress stage."""
+    logs_dir = os.path.join(calkit.ensure_local_dir(), "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    now = calkit.utcnow(remove_tz=True)
+    ts = now.strftime("%Y-%m-%d %H:%M:%S,") + f"{now.microsecond // 1000:03d}"
+    lines = [
+        f"{ts} - INFO - Running stage 'preprocess':",
+        f"{ts} - INFO - > echo hi",
+        f"{ts} - INFO - Running stage 'train':",
+        f"{ts} - INFO - > echo train",
+    ]
+    with open(os.path.join(logs_dir, "20250101-000000-abc.log"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def test_get_running_pipeline_status(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # No rwlock present means no run is in progress
+    assert _get_running_pipeline_status() is None
+    # A stale rwlock (dead PID) should not register as a running pipeline
+    _write_fake_rwlock(pid=2**31 - 1)
+    assert calkit.dvc.get_running_pipeline_processes() == []
+    assert _get_running_pipeline_status() is None
+    # A live PID holding the lock means a run is in progress; the log shows
+    # which stage is currently running and which have finished
+    _write_fake_rwlock(pid=os.getpid())
+    _write_fake_run_log()
+    procs = calkit.dvc.get_running_pipeline_processes()
+    assert len(procs) == 1
+    assert procs[0]["pid"] == os.getpid()
+    status = _get_running_pipeline_status()
+    assert status is not None
+    assert status["running"] is True
+    assert status["running_stages"] == ["train"]
+    assert status["stages"]["preprocess"]["status"] == "completed"
+
+
+def test_stage_target_from_cmd():
+    assert (
+        _stage_target_from_cmd(
+            "/p/__main__.py dvc repro --single-item sweep@3"
+        )
+        == "sweep@3"
+    )
+    assert _stage_target_from_cmd("dvc repro stage-a") == "stage-a"
+    assert _stage_target_from_cmd("dvc repro --single-item -f my-stage") == (
+        "my-stage"
+    )
+    # No explicit target (full-pipeline repro) or non-repro commands
+    assert _stage_target_from_cmd("dvc repro") is None
+    assert _stage_target_from_cmd("/p/calkit run") is None
+
+
+def test_running_status_names_concurrent_sweep_items(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # Mimic the concurrent-scheduler prepass: several `dvc repro --single-item
+    # <item>` processes hold the lock before any run log exists. Use real
+    # sleeper processes so their PIDs register as alive.
+    # A stale log from a previous run reports every item as finished. The
+    # current sweep runs only items 1 and 3; the stale log must be ignored so
+    # finished items don't show as running (and vice versa).
+    _write_fake_run_log()
+    logs_dir = os.path.join(calkit.ensure_local_dir(), "logs")
+    now = calkit.utcnow(remove_tz=True)
+    ts = now.strftime("%Y-%m-%d %H:%M:%S,") + f"{now.microsecond // 1000:03d}"
+    with open(os.path.join(logs_dir, "20240101-000000-old.log"), "w") as f:
+        for item in ["sweep@1", "sweep@2", "sweep@3"]:
+            f.write(f"{ts} - INFO - Stage '{item}' didn't change, skipping\n")
+    running_now = ["sweep@1", "sweep@3"]
+    sleepers = [
+        subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        for _ in running_now
+    ]
+    try:
+        tmp = os.path.join(".dvc", "tmp")
+        os.makedirs(tmp, exist_ok=True)
+        write = {
+            f"out-{item}.txt": {
+                "pid": proc.pid,
+                "cmd": f"calkit/__main__.py dvc repro --single-item {item}",
+            }
+            for proc, item in zip(sleepers, running_now)
+        }
+        with open(os.path.join(tmp, "rwlock"), "w") as f:
+            json.dump({"write": write}, f)
+        status = _get_running_pipeline_status()
+        assert status is not None
+        assert status["running"] is True
+        # Only the items actually running now, and no stale log stages
+        assert set(status["running_stages"]) == set(running_now)
+        assert status["stages"] == {}
+    finally:
+        for p in sleepers:
+            p.terminate()
+            p.wait()
+
+
+def test_status_reports_running_pipeline(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    _write_fake_rwlock(pid=os.getpid())
+    _write_fake_run_log()
+    out = subprocess.check_output(
+        ["calkit", "status", "-c", "pipeline"], text=True
+    )
+    assert "Run in progress" in out
+    assert str(os.getpid()) in out
+    assert "preprocess" in out
+    assert "train" in out
+    # The same information is available as JSON for programmatic/agent use
+    out = subprocess.check_output(
+        ["calkit", "status", "-c", "pipeline", "--json"], text=True
+    )
+    data = json.loads(out)
+    assert data["pipeline"]["running"] is True
+    assert "train" in data["pipeline"]["running_stages"]
+
+
+def test_run_writes_private_logs(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    dvc_yaml = {
+        "stages": {
+            "s1": {
+                "cmd": "python -c \"open('out.txt', 'w').write('x')\"",
+                "outs": ["out.txt"],
+            }
+        }
+    }
+    with open("dvc.yaml", "w") as f:
+        yaml.dump(dvc_yaml, f)
+    # Without --log, the log is retained privately under .calkit/local/logs
+    # (gitignored) and not saved to the tracked .calkit/logs directory
+    subprocess.check_call(["calkit", "run"])
+    local_logs = os.path.join(".calkit", "local", "logs")
+    private = [f for f in os.listdir(local_logs) if f.endswith(".log")]
+    assert len(private) == 1
+    assert os.path.isfile(os.path.join(".calkit", "local", ".gitignore"))
+    tracked_dir = os.path.join(".calkit", "logs")
+    assert not os.path.isdir(tracked_dir) or not [
+        f for f in os.listdir(tracked_dir) if f.endswith(".log")
+    ]
+    # With --log, the log is also saved to the tracked directory plus run info
+    subprocess.check_call(["calkit", "run", "--log", "--force"])
+    tracked = [f for f in os.listdir(tracked_dir) if f.endswith(".log")]
+    assert len(tracked) == 1
+    assert os.path.isdir(os.path.join(".calkit", "runs"))
+
+
+def test_prune_run_logs(tmp_dir):
+    logs_dir = "logs"
+    os.makedirs(logs_dir)
+    # Logs are named by start timestamp, so name order is time order
+    names = [f"2026-05-23T10-00-{i:02d}-abc.log" for i in range(12)]
+    for n in names:
+        with open(os.path.join(logs_dir, n), "w") as f:
+            f.write("x")
+    # A non-log file should be left untouched
+    with open(os.path.join(logs_dir, "keep.txt"), "w") as f:
+        f.write("x")
+    _prune_run_logs(logs_dir, keep=10)
+    remaining = sorted(f for f in os.listdir(logs_dir) if f.endswith(".log"))
+    assert remaining == names[-10:]
+    assert os.path.isfile(os.path.join(logs_dir, "keep.txt"))
+    # Pruning is a no-op when at or below the cap, and when the dir is missing
+    _prune_run_logs(logs_dir, keep=10)
+    assert len([f for f in os.listdir(logs_dir) if f.endswith(".log")]) == 10
+    _prune_run_logs("does-not-exist", keep=10)
+    # The active log is never deleted, even if its name sorts oldest (e.g.
+    # clock skew or an unusual name).
+    old_active = "1999-01-01T00-00-00-active.log"
+    with open(os.path.join(logs_dir, old_active), "w") as f:
+        f.write("x")
+    _prune_run_logs(logs_dir, keep=10, protect=old_active)
+    assert os.path.isfile(os.path.join(logs_dir, old_active))
 
 
 def test_map_paths(tmp_dir):
@@ -881,3 +1238,461 @@ def test_map_paths(tmp_dir):
         ["calkit", "map-paths", "--file-to-dir", "test.txt->paper/data"]
     )
     assert os.path.isfile("paper/data/test.txt")
+
+
+def test_complete_stage_names(tmp_dir):
+    subprocess.check_call(["git", "init"])
+    # Parent project with one pipeline stage
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "parent-stage": {
+                    "kind": "shell-command",
+                    "command": "echo hi",
+                    "environment": "env",
+                }
+            }
+        },
+        "subprojects": [
+            {"path": "inline-sp"},
+            {"path": "isolated-sp"},
+        ],
+    }
+    os.makedirs("inline-sp")
+    os.makedirs("isolated-sp/.dvc", exist_ok=True)
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # Write calkit.yaml for inline subproject
+    with open("inline-sp/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "stage-a": {
+                            "kind": "shell-command",
+                            "command": "echo a",
+                            "environment": "env",
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    # Write calkit.yaml for isolated subproject
+    with open("isolated-sp/calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        "stage-b": {
+                            "kind": "shell-command",
+                            "command": "echo b",
+                            "environment": "env",
+                        }
+                    }
+                }
+            },
+            f,
+        )
+    names = [item.value for item in complete_stage_names(None, None, "")]
+    # Parent stage
+    assert "parent-stage" in names
+    # Subproject shorthand
+    assert "inline-sp" in names
+    assert "isolated-sp" in names
+    # Subproject stage targets
+    assert "inline-sp:stage-a" in names
+    assert "isolated-sp:stage-b" in names
+    # Prefix filtering
+    filtered = [
+        item.value for item in complete_stage_names(None, None, "inline")
+    ]
+    assert "inline-sp" in filtered
+    assert "inline-sp:stage-a" in filtered
+    assert "parent-stage" not in filtered
+    assert "isolated-sp" not in filtered
+
+
+def test_use_version_execs_uvx(monkeypatch):
+    # ``calkit --use-version 0.38 run -f`` re-invokes itself under uvx
+    # with the requested calkit-python version pinned and the original
+    # subcommand/args forwarded.
+    captured: dict = {}
+
+    def fake_execvp(file, argv):
+        captured["argv"] = argv
+        raise SystemExit(0)
+
+    monkeypatch.setattr("os.execvp", fake_execvp)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/uvx")
+    monkeypatch.setattr(
+        sys, "argv", ["calkit", "--use-version", "0.38", "run", "-f"]
+    )
+    from typer.testing import CliRunner
+
+    runner = CliRunner()
+    result = runner.invoke(calkit_app, ["--use-version", "0.38", "run", "-f"])
+    # SystemExit is raised inside fake_execvp; Typer surfaces it as exit 0.
+    assert result.exit_code == 0
+    argv = captured["argv"]
+    assert argv[:4] == ["uvx", "--from", "calkit-python@0.38", "calkit"]
+    # ``--use-version`` is stripped so the child doesn't loop.
+    assert "--use-version" not in argv
+    assert argv[-2:] == ["run", "-f"]
+
+
+def test_use_version_intercepts_before_typer(monkeypatch):
+    # ``calkit --use-version 0.1.1 -- --help`` and ``-- --version`` must
+    # re-exec via uvx; if Typer were allowed to parse first, Click's
+    # eager ``--help``/``--version`` (or ``no_args_is_help``) would
+    # print the *current* CLI's output before the callback ran.
+    captured: dict = {}
+
+    def fake_execvp(file, argv):
+        captured["argv"] = argv
+        raise SystemExit(0)
+
+    monkeypatch.setattr("os.execvp", fake_execvp)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/uvx")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["calkit", "--use-version", "0.1.1", "--", "--help"],
+    )
+    from calkit.cli import run as cli_run
+
+    with pytest.raises(SystemExit):
+        cli_run()
+    assert captured["argv"][:4] == [
+        "uvx",
+        "--from",
+        "calkit-python@0.1.1",
+        "calkit",
+    ]
+    # The leading ``--`` separator was only needed to escape the parent
+    # parser; the forwarded argv must NOT carry it through, or the older
+    # child CLI will interpret ``--help`` as a positional subcommand.
+    assert "--" not in captured["argv"]
+    assert captured["argv"][-1] == "--help"
+    # ``--use-version=<v>`` form is also honored.
+    captured.clear()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["calkit", "--use-version=0.3", "--", "--version"],
+    )
+    with pytest.raises(SystemExit):
+        cli_run()
+    assert captured["argv"][:4] == [
+        "uvx",
+        "--from",
+        "calkit-python@0.3",
+        "calkit",
+    ]
+    assert "--" not in captured["argv"]
+    assert captured["argv"][-1] == "--version"
+
+
+def test_use_version_only_scanned_in_group_options(monkeypatch):
+    # ``--use-version`` buried after a subcommand (or after ``--``) is
+    # a forwarded argument for that subcommand's child process, NOT a
+    # request to re-exec under uvx. The pre-Typer intercept must only
+    # look at the group's own options region.
+    called: dict = {"exec": False}
+
+    def fake_execvp(file, argv):
+        called["exec"] = True
+        raise SystemExit(0)
+
+    monkeypatch.setattr("os.execvp", fake_execvp)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/uvx")
+    from calkit.cli import _maybe_exec_with_version
+
+    # Subcommand precedes ``--use-version``: must NOT re-exec.
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["calkit", "xenv", "--", "some-tool", "--use-version", "1.0"],
+    )
+    _maybe_exec_with_version()
+    assert called["exec"] is False
+    # And a bare ``--`` before ``--use-version`` is forwarded territory.
+    monkeypatch.setattr(sys, "argv", ["calkit", "--", "--use-version", "1.0"])
+    _maybe_exec_with_version()
+    assert called["exec"] is False
+
+
+def test_use_version_without_uvx(monkeypatch):
+    # If uvx isn't on PATH, --use-version fails fast with a clear error
+    # instead of falling through to running the local calkit.
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    from typer.testing import CliRunner
+
+    runner = CliRunner()
+    result = runner.invoke(calkit_app, ["--use-version", "0.38", "run"])
+    assert result.exit_code != 0
+    # ``raise_error`` writes to stderr but typer's runner merges output.
+    assert "uvx" in (result.output + (result.stderr or ""))
+
+
+@skipif_windows_mock_scheduler
+def test_run_concurrent_scheduler_stage_with_mock(tmp_dir):
+    # Exercise the full concurrent-scheduler path on a plain host: an
+    # iterate_over stage on a SLURM env, run via the mock scheduler so jobs
+    # execute locally. Covers concurrent fan-out, granular per-item caching,
+    # resume-after-failure, and the queue command.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        # Fail for x==3 only while the FAIL sentinel exists. FAIL is not a
+        # declared dependency, so removing it leaves the other items cached.
+        f.write('if [ "$1" = "3" ] && [ -f FAIL ]; then exit 1; fi\n')
+        f.write('echo "$1" > "out-$1.txt"\n')
+    ck_info = {
+        "environments": {
+            "slurm": {"kind": "slurm"},
+        },
+        "pipeline": {
+            "stages": {
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{x}"],
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2, 3]}],
+                    "outputs": ["out-{x}.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # First run: x=3 fails, so the run aborts, but x=1 and x=2 succeed and
+    # are cached.
+    open("FAIL", "w").close()
+    result = subprocess.run(["calkit", "run"], env=env)
+    assert result.returncode != 0
+    assert os.path.exists("out-1.txt")
+    assert os.path.exists("out-2.txt")
+    assert not os.path.exists("out-3.txt")
+    # Mock job data is isolated under the always-ignored .calkit/local.
+    assert os.path.isdir(".calkit/local/mock-scheduler")
+    assert not subprocess.check_output(
+        ["git", "status", "--porcelain"], text=True
+    ).count("mock-scheduler")
+    # Resume: dropping the (non-dependency) sentinel reruns only the failed
+    # item; the cached items are skipped by DVC.
+    os.remove("FAIL")
+    out = subprocess.check_output(["calkit", "run"], env=env, text=True)
+    assert os.path.exists("out-3.txt")
+    assert "Running stage 'sweep@3'" in out
+    assert "Running stage 'sweep@1'" not in out
+    # The queue command reports the locally tracked mock jobs.
+    queue = subprocess.check_output(
+        ["calkit", "scheduler", "queue"], env=env, text=True
+    )
+    assert "sweep@3" in queue
+
+
+@skipif_windows_mock_scheduler
+def test_run_with_mock_scheduler_flag(tmp_dir):
+    # The --mock-scheduler/-K flag runs scheduler stages locally without
+    # needing CALKIT_MOCK_SCHEDULER in the environment, and records
+    # "mocked": true in the scheduler env lock so a mocked run and a real run
+    # produce different lock content.
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        f.write("echo hello > out.txt\n")
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm"}},
+        "pipeline": {
+            "stages": {
+                "do-thing": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "outputs": ["out.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # Ensure the env var is absent so the flag is what enables the mock
+    env = {k: v for k, v in os.environ.items() if k != "CALKIT_MOCK_SCHEDULER"}
+    subprocess.check_call(["calkit", "run", "-K"], env=env)
+    assert os.path.exists("out.txt")
+    with open(".calkit/env-locks/slurm/info.json") as f:
+        lock = json.load(f)
+    assert lock["mocked"] is True
+
+
+@skipif_windows_mock_scheduler
+def test_run_concurrent_scheduler_table_iteration_with_mock(tmp_dir):
+    # Table-like iteration (arg_name as a list) compiles to a dict-valued DVC
+    # matrix that DVC names by index (sweep@_arg00, ...) while the scheduler
+    # job names use the comma-joined values (sweep@1,a). Verify the concurrent
+    # path handles both naming schemes and multi-arg output templating.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        f.write('echo "$1 $2" > "out-$1-$2.txt"\n')
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm"}},
+        "pipeline": {
+            "stages": {
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{var1}", "{var2}"],
+                    "iterate_over": [
+                        {
+                            "arg_name": ["var1", "var2"],
+                            "values": [[1, "a"], [2, "b"], [3, "c"]],
+                        }
+                    ],
+                    "outputs": ["out-{var1}-{var2}.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(["calkit", "run"], env=env, text=True)
+    # Every (var1, var2) combination ran and wrote a correctly templated file.
+    assert "Submitting 3 'sweep' jobs" in out
+    for var1, var2 in [(1, "a"), (2, "b"), (3, "c")]:
+        path = f"out-{var1}-{var2}.txt"
+        assert os.path.exists(path)
+        with open(path) as f:
+            assert f.read().strip() == f"{var1} {var2}"
+    # Scheduler job names use the comma-joined values, not the DVC index.
+    queue = subprocess.check_output(
+        ["calkit", "scheduler", "queue"], env=env, text=True
+    )
+    assert "sweep@1,a" in queue
+    assert "sweep@3,c" in queue
+
+
+@skipif_windows_mock_scheduler
+def test_run_concurrent_scheduler_force_runs_each_item_once(tmp_dir):
+    # --force must not run a sweep twice (once in the concurrent prepass and
+    # again in the main repro). Under --force the prepass is skipped, so each
+    # item runs exactly once per `calkit run`, serially via the main repro.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        # Append a line each execution so we can count how many times each
+        # item actually ran.
+        f.write('echo x >> "runs-$1.txt"\n')
+        f.write('echo "$1" > "out-$1.txt"\n')
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm"}},
+        "pipeline": {
+            "stages": {
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{x}"],
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2]}],
+                    "outputs": ["out-{x}.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"], env=env)
+    subprocess.check_call(["calkit", "run", "--force"], env=env)
+    # One run + one forced run = two executions per item (not three).
+    for x in (1, 2):
+        with open(f"runs-{x}.txt") as f:
+            assert len(f.read().splitlines()) == 2
+
+
+@skipif_windows_mock_scheduler
+def test_run_concurrent_scheduler_resume_after_disconnect(tmp_dir):
+    # If the master process is killed while jobs run, a job that already
+    # finished on the scheduler must not be resubmitted on the next run: the
+    # jobs database plus persisted outputs let Calkit recognize completed work.
+    # We simulate the disconnect by deleting dvc.lock (so DVC re-runs the
+    # stage) while the outputs and job records remain on disk.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        f.write('echo x >> "runs-$1.txt"\n')
+        f.write('echo "$1" > "out-$1.txt"\n')
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm"}},
+        "pipeline": {
+            "stages": {
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{x}"],
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2]}],
+                    "outputs": ["out-{x}.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"], env=env)
+    for x in (1, 2):
+        with open(f"runs-{x}.txt") as f:
+            assert len(f.read().splitlines()) == 1
+    # Simulate a disconnect where dvc.lock never got updated.
+    os.remove("dvc.lock")
+    out = subprocess.check_output(["calkit", "run"], env=env, text=True)
+    assert "already completed" in out
+    # The completed jobs are not resubmitted, so the run counts stay at one.
+    for x in (1, 2):
+        with open(f"runs-{x}.txt") as f:
+            assert len(f.read().splitlines()) == 1
+
+
+@skipif_windows_mock_scheduler
+def test_run_downstream_does_not_submit_unrelated_sweep(tmp_dir):
+    # A narrowed run (e.g. --downstream) leaves positional targets empty, so
+    # the concurrent prepass must be skipped entirely---otherwise it would
+    # submit every iterate_over scheduler stage, launching cluster jobs the
+    # user never asked for. Here 'sweep' is unrelated to the requested 'other'
+    # stage and must not run.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("other.sh", "w") as f:
+        f.write("echo done > other.txt\n")
+    with open("run.sh", "w") as f:
+        f.write('echo "$1" > "out-$1.txt"\n')
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm"}},
+        "pipeline": {
+            "stages": {
+                "other": {
+                    "kind": "shell-script",
+                    "script_path": "other.sh",
+                    "environment": "slurm",
+                    "outputs": ["other.txt"],
+                },
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{x}"],
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2]}],
+                    "outputs": ["out-{x}.txt"],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run", "--downstream", "other"], env=env)
+    # The requested stage ran; the unrelated sweep did not.
+    assert os.path.exists("other.txt")
+    assert not os.path.exists("out-1.txt")
+    assert not os.path.exists("out-2.txt")

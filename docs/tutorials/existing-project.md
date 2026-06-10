@@ -536,16 +536,12 @@ these figures.
 This will allow users to trace back from the figure to the code that
 produced it.
 
-Lastly, let's add our publications to `calkit.yaml`,
-which will make them viewable on the project publications page on
+Lastly, let's add our publications and presentations to `calkit.yaml`,
+which will make them viewable on their respective pages on
 calkit.io:
 
 ```yaml
 publications:
-  - path: pubs/2025-aps-dfd-slides/slides.pdf
-    kind: presentation
-    title: This is the title of the talk
-    stage: build-aps-slides
   - path: pubs/2025-article-1/paper.pdf
     kind: journal-article
     title: This is the title of the paper
@@ -554,6 +550,11 @@ publications:
     kind: phd-thesis
     title: This is the title of the thesis
     stage: build-thesis
+
+presentations:
+  - path: pubs/2025-aps-dfd-slides/slides.pdf
+    title: This is the title of the talk
+    stage: build-aps-slides
 ```
 
 We can then commit and push the changes to `calkit.yaml` with:

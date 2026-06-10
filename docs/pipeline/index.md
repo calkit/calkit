@@ -115,16 +115,6 @@ For more details, see `calkit.models.pipeline`.
 
 - `command`
 
-### `sbatch`
-
-- `script_path`
-- `args`
-- `sbatch_options`
-
-This stage type runs a script with `sbatch`, which is a common way to run
-jobs on a high performance computing (HPC) cluster that uses the SLURM
-job scheduler.
-
 ## Iteration
 
 ### Over a list of values
@@ -296,7 +286,8 @@ Common stage parameters:
 | `always_run`   | bool                                | no       | False   |
 | `iterate_over` | list[StageIteration] \| None        | no       | null    |
 | `description`  | str \| None                         | no       | null    |
-| `slurm`        | StageSlurmOptions \| None           | no       | null    |
+| `frozen`       | bool                                | no       | False   |
+| `scheduler`    | StageSchedulerOptions \| None       | no       | null    |
 
 ### `command`
 
@@ -407,6 +398,30 @@ Model class: `PythonScriptStage`
 | ----------------------- | --------- | -------- | ------- |
 | `script_path`           | str       | yes      |         |
 | `args`                  | list[str] | no       |         |
+
+### `quarto`
+
+Model class: `QuartoStage`
+
+A stage that renders a Quarto document.
+
+Calkit controls only what belongs on the CLI: which environment to
+render in, the target document, and (optionally) the output format and
+extra `quarto render` arguments. The output format(s) and any other
+rendering behavior are left to the document/`_quarto.yml` metadata, so
+there is no redundancy between the pipeline definition and the doc.
+
+Outputs are declared explicitly via `outputs` rather than parsed out
+of the Quarto document, since a document can emit multiple formats to
+arbitrary paths. As with other stages, plain string outputs are
+DVC-cached by default; use a `PathOutput` to store an output with Git
+instead.
+
+| Kind-specific parameter | Type        | Required | Default |
+| ----------------------- | ----------- | -------- | ------- |
+| `target_path`           | str         | yes      |         |
+| `to`                    | str \| None | no       | null    |
+| `args`                  | list[str]   | no       |         |
 
 ### `r-script`
 

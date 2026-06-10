@@ -107,6 +107,26 @@ put = partial(_request, "put")
 delete = partial(_request, "delete")
 
 
+def extract_doi(record: dict) -> str | None:
+    """Extract the DOI identifier from an InvenioRDM record or response.
+
+    Depending on the endpoint and whether the DOI has been minted yet, the
+    identifier can live in different places, so check all known locations and
+    return ``None`` if it isn't present yet.
+    """
+    pids = record.get("pids")
+    if isinstance(pids, dict):
+        doi = pids.get("doi")
+        if isinstance(doi, dict) and doi.get("identifier"):
+            return doi["identifier"]
+    if record.get("doi"):
+        return record["doi"]
+    metadata = record.get("metadata")
+    if isinstance(metadata, dict) and metadata.get("doi"):
+        return metadata["doi"]
+    return None
+
+
 def get_download_urls(
     record_id: int | str,
     service: ServiceName = DEFAULT_SERVICE,

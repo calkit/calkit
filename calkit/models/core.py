@@ -71,6 +71,8 @@ class Environment(BaseModel):
         "docker",
         "julia",
         "matlab",
+        "nix",
+        "pbs",
         "poetry",
         "npm",
         "yarn",
@@ -95,7 +97,9 @@ class CondaEnvironment(Environment):
 
 class VenvEnvironment(Environment):
     kind: Literal["venv"] = "venv"
-    prefix: str
+    # If unset, the prefix is resolved on the fly (defaults to .venv next to
+    # the spec file, nesting under .calkit/envs/{name}/.venv on conflict)
+    prefix: str | None = None
 
 
 class UvEnvironment(Environment):
@@ -104,12 +108,24 @@ class UvEnvironment(Environment):
 
 class UvVenvEnvironment(Environment):
     kind: Literal["uv-venv"] = "uv-venv"
-    prefix: str
+    # If unset, the prefix is resolved on the fly (defaults to .venv next to
+    # the spec file, nesting under .calkit/envs/{name}/.venv on conflict)
+    prefix: str | None = None
 
 
 class PixiEnvironment(Environment):
     kind: Literal["pixi"] = "pixi"
     name: str | None = None
+
+
+class NixEnvironment(Environment):
+    kind: Literal["nix"] = "nix"
+    # Path to the project's flake.nix (required). The flake.lock alongside
+    # it is the reproducibility-anchoring lock file we track as a DVC dep.
+    path: str
+    # Optional name of the dev shell to enter (passed as #<shell> to
+    # ``nix develop``). Defaults to the flake's default dev shell.
+    shell: str | None = None
 
 
 class DockerEnvironment(Environment):
@@ -139,6 +155,13 @@ class MatlabEnvironment(Environment):
 
 class SlurmEnvironment(Environment):
     kind: Literal["slurm"] = "slurm"
+    host: str = "localhost"
+    default_options: list[str] | None = None
+    default_setup: list[str] | None = None
+
+
+class PBSEnvironment(Environment):
+    kind: Literal["pbs"] = "pbs"
     host: str = "localhost"
     default_options: list[str] | None = None
     default_setup: list[str] | None = None
@@ -267,10 +290,36 @@ class ProjectStatus(BaseModel):
 
 
 class Dependency(BaseModel):
-    """A system-level dependency, e.g., and app or environmental variable."""
+    """A system-level dependency.
 
-    kind: Literal["app", "env-var"]
+    Three kinds are supported:
+
+    - ``app``: an executable that must be on ``PATH``.
+    - ``env-var``: an environmental variable that must be defined.
+    - ``setup``: a per-machine precondition that isn't a file -- e.g.,
+      the user must have authenticated a CLI like ``gh auth login``.
+      A ``setup`` dep declares ``check_command`` (a shell command whose
+      exit code determines whether the dep is satisfied) and
+      ``setup_command`` (run on a TTY when the user agrees, or printed
+      as a fix-it command otherwise). To run either inside a project
+      environment, prefix it with ``calkit xenv -n <env> --`` explicitly
+      rather than relying on an implicit wrap. A future ``cache_ttl``
+      field can extend this to skip re-probing for slow checks.
+    """
+
+    kind: Literal["app", "env-var", "setup"] = "app"
     name: str
+    # ``setup``-kind fields; ignored for other kinds.
+    check_command: str | None = None
+    setup_command: str | None = None
+    # ``cache_ttl`` is a duration string ('30m', '1h', '7d', '1w') or an
+    # integer number of seconds. Setup deps cache successful checks by
+    # default for ``DEFAULT_SETUP_CACHE_TTL``; set ``cache_ttl: 0`` to
+    # disable caching and re-probe every run.
+    cache_ttl: str | int | None = None
+    description: str | None = None
+    # Allow a per-env-var default value to be set (used by ``check env-vars``).
+    default: str | None = None
 
 
 class ProjectInfo(BaseModel):
@@ -310,15 +359,20 @@ class ProjectInfo(BaseModel):
     references: list[ReferenceCollection] = []
     environments: dict[
         str,
-        Environment
-        | DockerEnvironment
+        # The specific subclasses must precede the catch-all Environment so a
+        # dict that validates against both (e.g. a prefix-less uv-venv, whose
+        # only fields are kind and path) resolves to the specific subclass
+        DockerEnvironment
         | JuliaEnvironment
         | MatlabEnvironment
         | SlurmEnvironment
+        | PBSEnvironment
         | VenvEnvironment
         | UvEnvironment
         | UvVenvEnvironment
-        | SSHEnvironment,
+        | NixEnvironment
+        | SSHEnvironment
+        | Environment,
     ] = {}
     software: list[Software] = []
     notebooks: list[Notebook] = []

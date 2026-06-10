@@ -235,6 +235,46 @@ def test_check_cache_can_bypass_ttl(tmp_dir):
     )
 
 
+def test_get_default_venv_prefix():
+    get_default_venv_prefix = calkit.environments.get_default_venv_prefix
+    # With no existing environments, default to .venv next to the spec file
+    assert get_default_venv_prefix({}, "requirements.txt", "main") == ".venv"
+    assert (
+        get_default_venv_prefix({}, "sub/requirements.txt", "myenv")
+        == "sub/.venv"
+    )
+    # A uv environment in the same directory occupies .venv, so nest the new
+    # virtualenv under .calkit/envs/{name}
+    envs = {"main": {"kind": "uv", "path": "pyproject.toml"}}
+    assert (
+        get_default_venv_prefix(envs, "requirements.txt", "myenv")
+        == ".calkit/envs/myenv/.venv"
+    )
+    # A uv environment in another directory does not collide
+    envs = {"sub": {"kind": "uv", "path": "sub/pyproject.toml"}}
+    assert get_default_venv_prefix(envs, "requirements.txt", "main") == ".venv"
+    # An explicit prefix on an existing environment is respected
+    envs = {"a": {"kind": "venv", "prefix": ".venv"}}
+    assert (
+        get_default_venv_prefix(envs, "requirements.txt", "myenv")
+        == ".calkit/envs/myenv/.venv"
+    )
+    # An environment does not collide with itself, so a prefix-less venv that
+    # is already in the dict still resolves to .venv
+    envs = {"main": {"kind": "uv-venv", "path": "requirements.txt"}}
+    assert get_default_venv_prefix(envs, "requirements.txt", "main") == ".venv"
+    # Two prefix-less venvs in the same directory both nest under their own
+    # name, which is collision-free
+    envs = {
+        "a": {"kind": "venv", "path": "requirements.txt"},
+        "b": {"kind": "venv", "path": "requirements.txt"},
+    }
+    assert (
+        get_default_venv_prefix(envs, "requirements.txt", "b")
+        == ".calkit/envs/b/.venv"
+    )
+
+
 def test_env_from_name_or_path(tmp_dir):
     # Test with typical venvs
     with open("requirements.txt", "w") as f:
@@ -245,7 +285,8 @@ def test_env_from_name_or_path(tmp_dir):
     assert res.name == "main"
     assert res.env["path"] == "requirements.txt"
     assert not res.exists
-    assert res.env["prefix"] == ".venv"
+    # The prefix is left unset and resolved on the fly
+    assert "prefix" not in res.env
     res = calkit.environments.env_from_name_or_path(
         name_or_path="requirements.txt"
     )
@@ -261,7 +302,7 @@ def test_env_from_name_or_path(tmp_dir):
         name=None, path="envs/myenv/requirements.txt"
     )
     assert res.name == "myenv"
-    assert res.env["prefix"] == "envs/myenv/.venv"
+    assert "prefix" not in res.env
     # Test with a conda env
     with open("environment.yml", "w") as f:
         calkit.ryaml.dump({"name": "myenv", "dependencies": ["pandas"]}, f)
@@ -908,3 +949,201 @@ def test_env_from_notebook_path(tmp_dir):
     assert res.env["path"] == "pyproject.toml"
     assert res.env["kind"] == "uv"
     assert res.exists
+
+
+def test_scheduler_env_lock_files(tmp_dir, monkeypatch):
+    """Cover scheduler env lock-file behavior (slurm and pbs).
+
+    Scenarios:
+    - ``get_env_lock_fpath`` returns the expected path,
+    - ``write_scheduler_env_lock`` writes a deterministic JSON file,
+    - re-running with unchanged content leaves the file untouched,
+    - changing ``default_options`` produces different content (so DVC will
+      treat dependent stages as stale),
+    - a mocked scheduler records ``"mocked": true`` so mocked and real runs
+      produce different lock content,
+    - non-scheduler envs return ``None``.
+    """
+    slurm_env = {
+        "kind": "slurm",
+        "host": "localhost",
+        "default_options": ["--time=01:00:00"],
+        "default_setup": ["module purge"],
+    }
+    pbs_env = {
+        "kind": "pbs",
+        "host": "hpc.example.org",
+        "default_options": ["-l", "walltime=01:00:00"],
+    }
+    slurm_lock = calkit.environments.get_env_lock_fpath(
+        env=slurm_env, env_name="cluster", as_posix=True
+    )
+    assert slurm_lock == ".calkit/env-locks/cluster/info.json"
+    pbs_lock_path = calkit.environments.get_env_lock_fpath(
+        env=pbs_env, env_name="hpc", as_posix=True
+    )
+    assert pbs_lock_path == ".calkit/env-locks/hpc/info.json"
+    written = calkit.environments.write_scheduler_env_lock(
+        env_name="cluster", env=slurm_env
+    )
+    assert written == slurm_lock
+    assert os.path.isfile(slurm_lock)
+    with open(slurm_lock) as f:
+        loaded = json.load(f)
+    assert loaded == slurm_env
+    mtime_before = os.path.getmtime(slurm_lock)
+    calkit.environments.write_scheduler_env_lock(
+        env_name="cluster", env=slurm_env
+    )
+    assert os.path.getmtime(slurm_lock) == mtime_before
+    updated = dict(slurm_env)
+    updated["default_options"] = ["--time=02:00:00"]
+    calkit.environments.write_scheduler_env_lock(
+        env_name="cluster", env=updated
+    )
+    with open(slurm_lock) as f:
+        loaded = json.load(f)
+    assert loaded["default_options"] == ["--time=02:00:00"]
+    # When the scheduler is mocked, the lock records "mocked": true
+    monkeypatch.setenv("CALKIT_MOCK_SCHEDULER", "1")
+    calkit.environments.write_scheduler_env_lock(
+        env_name="cluster", env=slurm_env
+    )
+    with open(slurm_lock) as f:
+        loaded = json.load(f)
+    assert loaded["mocked"] is True
+    assert {k: v for k, v in loaded.items() if k != "mocked"} == slurm_env
+    # Without the mock, the key is absent again (so content differs)
+    monkeypatch.delenv("CALKIT_MOCK_SCHEDULER")
+    calkit.environments.write_scheduler_env_lock(
+        env_name="cluster", env=slurm_env
+    )
+    with open(slurm_lock) as f:
+        loaded = json.load(f)
+    assert "mocked" not in loaded
+    other = {"kind": "uv", "path": "pyproject.toml"}
+    assert (
+        calkit.environments.write_scheduler_env_lock(
+            env_name="main", env=other
+        )
+        is None
+    )
+
+
+def test_nix_env(tmp_dir):
+    # Flake at the repo root: flake.lock should live next to flake.nix.
+    root_env = {"kind": "nix", "path": "flake.nix"}
+    assert (
+        calkit.environments.get_env_lock_fpath(
+            env=root_env, env_name="main", as_posix=True
+        )
+        == "flake.lock"
+    )
+    # Flake in a subdirectory: lock follows the flake into the same dir.
+    nested_env = {"kind": "nix", "path": "envs/myenv/flake.nix"}
+    assert (
+        calkit.environments.get_env_lock_fpath(
+            env=nested_env, env_name="myenv", as_posix=True
+        )
+        == "envs/myenv/flake.lock"
+    )
+    # A path that doesn't end with flake.nix is a config error.
+    with pytest.raises(ValueError):
+        calkit.environments.get_env_lock_fpath(
+            env={"kind": "nix", "path": "envs/myenv/shell.nix"},
+            env_name="myenv",
+        )
+    # Detect from a flake.nix file. The detector keys off the filename,
+    # so a placeholder body is enough.
+    os.makedirs("envs/foo", exist_ok=True)
+    with open("envs/foo/flake.nix", "w") as f:
+        f.write("{}\n")
+    res = calkit.environments.env_from_name_and_or_path(
+        name=None, path="envs/foo/flake.nix"
+    )
+    assert res.env["kind"] == "nix"
+    assert res.env["path"] == "envs/foo/flake.nix"
+    assert not res.exists
+    # The generated flake.nix template lists each requested package and
+    # pins nixpkgs via the input URL we asked for.
+    content = calkit.environments.create_nix_flake_content(
+        packages=["python3", "uv"],
+        description="dev shell",
+        nixpkgs_url="github:NixOS/nixpkgs/nixos-24.05",
+    )
+    assert "python3" in content
+    assert "uv" in content
+    assert "nixos-24.05" in content
+    assert "devShells" in content
+
+
+def test_pixi_env_lock_fpath(tmp_dir):
+    # Manifest at the repo root: pixi.lock lives next to pixi.toml.
+    root_env = {"kind": "pixi", "path": "pixi.toml"}
+    assert (
+        calkit.environments.get_env_lock_fpath(
+            env=root_env, env_name="main", as_posix=True
+        )
+        == "pixi.lock"
+    )
+    # Manifest in a subdirectory: lock follows the manifest.
+    nested_env = {"kind": "pixi", "path": ".calkit/envs/my-env/pixi.toml"}
+    assert (
+        calkit.environments.get_env_lock_fpath(
+            env=nested_env, env_name="my-env", as_posix=True
+        )
+        == ".calkit/envs/my-env/pixi.lock"
+    )
+    # path may be omitted/None without raising.
+    assert (
+        calkit.environments.get_env_lock_fpath(
+            env={"kind": "pixi"}, env_name="main", as_posix=True
+        )
+        == "pixi.lock"
+    )
+    assert (
+        calkit.environments.get_env_lock_fpath(
+            env={"kind": "pixi", "path": None},
+            env_name="main",
+            as_posix=True,
+        )
+        == "pixi.lock"
+    )
+
+
+def test_add_packages_to_nix_flake(tmp_dir):
+    # Round-trip: generate a flake, add some packages, verify they appear
+    # in the packages list, that duplicates aren't re-inserted, and that
+    # we error cleanly when the anchor is missing.
+    initial = calkit.environments.create_nix_flake_content(
+        packages=["python3"],
+    )
+    with open("flake.nix", "w") as f:
+        f.write(initial)
+    added = calkit.environments.add_packages_to_nix_flake(
+        "flake.nix", ["R", "uv"]
+    )
+    assert added == ["R", "uv"]
+    with open("flake.nix") as f:
+        updated = f.read()
+    # All three packages now live in the packages list, in declaration
+    # order (existing first, then new).
+    pkgs_section = updated.split("packages = with pkgs;", 1)[1]
+    pkgs_section = pkgs_section.split("];", 1)[0]
+    assert pkgs_section.index("python3") < pkgs_section.index("R")
+    assert pkgs_section.index("R") < pkgs_section.index("uv")
+    # Adding a package that's already there is a no-op, not a duplicate.
+    again = calkit.environments.add_packages_to_nix_flake(
+        "flake.nix", ["R", "polars"]
+    )
+    assert again == ["polars"]
+    with open("flake.nix") as f:
+        after = f.read()
+    assert after.count("\n            R\n") == 1
+    # Unknown structure: raise rather than silently mangle the file.
+    with open("hand-rolled.nix", "w") as f:
+        f.write("{ outputs = { self }: { devShells = {}; }; }\n")
+    with pytest.raises(ValueError):
+        calkit.environments.add_packages_to_nix_flake(
+            "hand-rolled.nix", ["python3"]
+        )

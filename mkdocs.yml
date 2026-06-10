@@ -38,6 +38,7 @@ nav:
   - Installation: installation.md
   - Quickstart: quickstart.md
   - Cloud integration: cloud-integration.md
+  - Use with AI tools: ai-tools.md
   - Version control: version-control.md
   - The calkit.yaml file: calkit-yaml.md
   - Dependencies, configuration, and secrets: dependencies.md
@@ -46,9 +47,9 @@ nav:
       - pipeline/index.md
       - pipeline/running-and-logging.md
       - pipeline/manual-steps.md
-      - pipeline/slurm.md
   - Notebooks: notebooks.md
   - JupyterLab: jupyterlab.md
+  - High performance computing (HPC): hpc.md
   - Datasets: datasets.md
   - References: references.md
   - Calculations: calculations.md
@@ -56,6 +57,7 @@ nav:
   - Releasing/archiving projects and artifacts: releases.md
   - Local server (GUI interaction): local-server.md
   - Overleaf integration: overleaf.md
+  - Subprojects: subprojects.md
   - Examples: examples.md
   - Tutorials:
       - tutorials/index.md
@@ -72,6 +74,7 @@ nav:
       - tutorials/matlab.md
       - tutorials/github-actions.md
       - tutorials/vscode-slurm-notebook.md
+      - tutorials/ai-agents.md
   - CLI reference: cli-reference.md
   - Help and support: help.md
   - Reproducibility: reproducibility.md
@@ -91,7 +94,7 @@ markdown_extensions:
       custom_fences:
         - name: mermaid
           class: mermaid
-          format: !!python/name:mermaid2.fence_mermaid_custom
+          format: !!python/name:mermaid2.fence_mermaid_custom ""
 plugins:
   - search
   - mermaid2

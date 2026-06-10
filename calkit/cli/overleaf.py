@@ -8,14 +8,13 @@ import os
 import shutil
 from pathlib import Path
 
-import git
 import typer
 from typing_extensions import Annotated
 
 import calkit
-from calkit.cli import raise_error, warn
+from calkit.cli import AliasGroup, raise_error, warn
 
-overleaf_app = typer.Typer(no_args_is_help=True)
+overleaf_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
 
 def _extract_title_from_tex(tex_file_path: str) -> str | None:
@@ -170,6 +169,8 @@ def import_publication(
     ] = False,
 ):
     """Import a publication from an Overleaf project."""
+    import git
+
     from calkit.cli.main import ignore as git_ignore
     from calkit.cli.new import new_latex_stage
 
@@ -195,7 +196,7 @@ def import_publication(
     ck_info = calkit.load_calkit_info(process_includes="environments")
     pubs = ck_info.get("publications", [])
     # TODO: Don't allow the same Overleaf project ID in multiple publications
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     # Clone the Overleaf project into .calkit/overleaf if it doesn't exist
     # otherwise pull
     overleaf_dir = os.path.join(".calkit", "overleaf")
@@ -368,8 +369,11 @@ def sync(
         typer.Option(
             "--no-commit",
             help=(
-                "Do not commit the changes to the project repo. "
-                "Changes will always be committed to Overleaf."
+                "Do not create a commit in the project repo for this sync. "
+                "Changes pulled from Overleaf are still applied, but are "
+                "left staged so you can review or commit them yourself. "
+                "Changes are always committed and pushed to Overleaf "
+                "regardless."
             ),
         ),
     ] = False,
@@ -377,6 +381,7 @@ def sync(
         bool,
         typer.Option(
             "--auto-commit",
+            "-a",
             help=(
                 "Automatically commit changes to the project repo if a synced "
                 "folder has changes."
@@ -423,6 +428,8 @@ def sync(
     ] = False,
 ):
     """Sync folders with Overleaf."""
+    import git
+
     # TODO: We should probably ensure the pipeline isn't stale
     # Read all synced folders, fixing legacy schema if applicable
     overleaf_info = calkit.overleaf.get_sync_info(fix_legacy=True)
@@ -436,7 +443,7 @@ def sync(
                 raise_error(f"Path '{path}' is not synced with Overleaf")
     # First check our config for an Overleaf token
     overleaf_token = _get_overleaf_token()
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     conflict_fpath = calkit.overleaf.get_conflict_fpath()
     in_am_session = "in the middle of an am session" in repo.git.status()
     # Check if we're in the middle of resolving a merge conflict
@@ -487,8 +494,9 @@ def sync(
                 )
             else:
                 raise_error(
-                    f"Uncommitted changes found in {wdir}; "
-                    "please commit or stash them before syncing with Overleaf"
+                    f"Uncommitted changes found in {wdir}. "
+                    "Commit or stash them before syncing with Overleaf, "
+                    "or use --auto-commit/-a to automatically commit them."
                 )
         # Ensure we've cloned the Overleaf project
         overleaf_project_dir = os.path.join(
@@ -502,7 +510,7 @@ def sync(
                 overleaf_remote_url, to_path=overleaf_project_dir
             )
         else:
-            overleaf_repo = git.Repo(overleaf_project_dir)
+            overleaf_repo = calkit.git.get_repo(overleaf_project_dir)
         # Pull the latest version in the Overleaf project
         typer.echo("Pulling the latest version from Overleaf")
         # Ensure that our current Overleaf remote URL is correct
@@ -582,7 +590,7 @@ def compare_folders_recursively(
     return res
 
 
-@overleaf_app.command(name="status")
+@overleaf_app.command(name="status|st")
 def get_status(
     paths: Annotated[
         list[str] | None,
@@ -595,6 +603,8 @@ def get_status(
     ] = None,
 ):
     """Check the status of folders synced with Overleaf in a project."""
+    import git
+
     # Read all synced folders, fixing legacy schema if applicable
     overleaf_info = calkit.overleaf.get_sync_info(fix_legacy=False)
     if not overleaf_info:
@@ -633,7 +643,7 @@ def get_status(
                 overleaf_remote_url, to_path=overleaf_project_dir
             )
         else:
-            overleaf_repo = git.Repo(overleaf_project_dir)
+            overleaf_repo = calkit.git.get_repo(overleaf_project_dir)
         # Pull the latest version in the Overleaf project
         typer.echo("Pulling the latest version from Overleaf")
         # Ensure that our current Overleaf remote URL is correct
@@ -660,7 +670,7 @@ def get_status(
             )
         # Determine which paths to use for computing diff
         path_info = calkit.overleaf.OverleafSyncPaths(
-            main_repo=git.Repo(),
+            main_repo=calkit.git.get_repo(),
             overleaf_repo=overleaf_repo,
             path_in_project=path_in_project,
             sync_info_for_path=sync_data,

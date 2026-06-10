@@ -3,8 +3,6 @@
 import os
 from typing import Callable
 
-import git
-from git.exc import InvalidGitRepositoryError
 from pydantic import BaseModel, computed_field
 
 import calkit
@@ -176,11 +174,13 @@ def check_reproducibility(
     wdir: str = ".", log_func: Callable | None = None
 ) -> ReproCheck:
     """Check the reproducibility of a project."""
+    from git.exc import InvalidGitRepositoryError
+
     res = dict()
     if log_func is None:
         log_func = print
     try:
-        git.Repo(wdir)
+        calkit.git.get_repo(wdir)
         res["is_git_repo"] = True
     except InvalidGitRepositoryError:
         res["is_git_repo"] = False

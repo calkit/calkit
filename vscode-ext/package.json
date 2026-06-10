@@ -2,7 +2,7 @@
   "name": "calkit-vscode",
   "displayName": "Calkit",
   "description": "An extension for working with Calkit projects.",
-  "version": "0.0.3",
+  "version": "0.1.1",
   "publisher": "calkit",
   "license": "MIT",
   "repository": {
@@ -36,6 +36,43 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "calkit",
+          "title": "Calkit",
+          "icon": "images/calkit-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "calkit": [
+        {
+          "id": "calkit-sidebar",
+          "name": "Calkit",
+          "icon": "images/calkit-icon.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "calkit-sidebar",
+        "contents": "This folder is not yet a Calkit project.\n[Initialize Calkit Project](command:calkit-vscode.initProject)\nThis creates a calkit.yaml file and initializes Git and DVC.",
+        "when": "!calkit-vscode.hasProject"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "calkit.plotlyPreview",
+        "displayName": "Plotly Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.json"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
     "commands": [
       {
         "command": "calkit-vscode.selectCalkitEnvironment",
@@ -45,7 +82,20 @@
       {
         "command": "calkit-vscode.createCalkitEnvironment",
         "title": "Create Environment",
-        "category": "Calkit"
+        "category": "Calkit",
+        "icon": "$(add)"
+      },
+      {
+        "command": "calkit-vscode.editEnvironment",
+        "title": "Edit Environment",
+        "category": "Calkit",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "calkit-vscode.openStageFile",
+        "title": "Open File",
+        "category": "Calkit",
+        "icon": "$(go-to-file)"
       },
       {
         "command": "calkit-vscode.startCalkitSlurmJob",
@@ -64,9 +114,323 @@
         "title": "Restart Notebook Server",
         "category": "Calkit",
         "icon": "$(debug-restart)"
+      },
+      {
+        "command": "calkit-vscode.showProvenance",
+        "title": "Show Source",
+        "category": "Calkit",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "calkit-vscode.runStage",
+        "title": "Run Stage",
+        "category": "Calkit",
+        "icon": "$(play)"
+      },
+      {
+        "command": "calkit-vscode.runStageForFile",
+        "title": "Run Stage",
+        "category": "Calkit",
+        "icon": "$(play)"
+      },
+      {
+        "command": "calkit-vscode.runPipeline",
+        "title": "Run Pipeline",
+        "category": "Calkit",
+        "icon": "$(play)"
+      },
+      {
+        "command": "calkit-vscode.showPipelineDag",
+        "title": "Show Pipeline DAG",
+        "category": "Calkit",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "calkit-vscode.newStage",
+        "title": "New Stage",
+        "category": "Calkit",
+        "icon": "$(add)"
+      },
+      {
+        "command": "calkit-vscode.editStage",
+        "title": "Edit Stage",
+        "category": "Calkit",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "calkit-vscode.defineProvenance",
+        "title": "Define Source",
+        "category": "Calkit"
+      },
+      {
+        "command": "calkit-vscode.defineArtifactStage",
+        "title": "Define Pipeline Stage",
+        "category": "Calkit",
+        "icon": "$(add)"
+      },
+      {
+        "command": "calkit-vscode.defineArtifactImport",
+        "title": "Define Import",
+        "category": "Calkit",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "calkit-vscode.runArtifactStage",
+        "title": "Run Stage",
+        "category": "Calkit",
+        "icon": "$(play)"
+      },
+      {
+        "command": "calkit-vscode.runNotebookStage",
+        "title": "Run Pipeline Stage",
+        "category": "Calkit",
+        "icon": "$(play)"
+      },
+      {
+        "command": "calkit-vscode.editNotebookStage",
+        "title": "Edit Pipeline Stage",
+        "category": "Calkit",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "calkit-vscode.defineNotebookStage",
+        "title": "Define Pipeline Stage",
+        "category": "Calkit",
+        "icon": "$(add)"
+      },
+      {
+        "command": "calkit-vscode.refreshSidebar",
+        "title": "Refresh",
+        "category": "Calkit",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "calkit-vscode.enableAutoRefresh",
+        "title": "Auto-refresh status",
+        "category": "Calkit"
+      },
+      {
+        "command": "calkit-vscode.disableAutoRefresh",
+        "title": "✓ Auto-refresh status",
+        "category": "Calkit"
+      },
+      {
+        "command": "calkit-vscode.openCalkitYaml",
+        "title": "Open calkit.yaml",
+        "category": "Calkit",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "calkit-vscode.openFiguresCarousel",
+        "title": "Browse Figures",
+        "category": "Calkit",
+        "icon": "$(layout-panel)"
+      },
+      {
+        "command": "calkit-vscode.openFileHistory",
+        "title": "View File History",
+        "category": "Calkit",
+        "icon": "$(history)"
+      },
+      {
+        "command": "calkit-vscode.initProject",
+        "title": "Initialize Calkit Project",
+        "category": "Calkit",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "calkit-vscode.openNotebookHtml",
+        "title": "Open Executed HTML",
+        "category": "Calkit",
+        "icon": "$(file-pdf)"
+      },
+      {
+        "command": "calkit-vscode.previewPlotlyFigure",
+        "title": "Open Plotly Preview",
+        "category": "Calkit",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "calkit-vscode.previewPlotlyFigureToSide",
+        "title": "Open Plotly Preview to the Side",
+        "category": "Calkit",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "calkit-vscode.openPlotlyAsSource",
+        "title": "Reopen as Text",
+        "category": "Calkit",
+        "icon": "$(go-to-file)"
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "calkit-vscode.openCalkitYaml",
+          "when": "view == calkit-sidebar && calkit-vscode.hasProject",
+          "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.refreshSidebar",
+          "when": "view == calkit-sidebar",
+          "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.enableAutoRefresh",
+          "when": "view == calkit-sidebar && !calkit-vscode.autoRefreshStatus",
+          "group": "1_options"
+        },
+        {
+          "command": "calkit-vscode.disableAutoRefresh",
+          "when": "view == calkit-sidebar && calkit-vscode.autoRefreshStatus",
+          "group": "1_options"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "calkit-vscode.createCalkitEnvironment",
+          "when": "view == calkit-sidebar && viewItem == section-envs",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.editEnvironment",
+          "when": "view == calkit-sidebar && viewItem == env",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.newStage",
+          "when": "view == calkit-sidebar && viewItem == section-pipeline",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.showPipelineDag",
+          "when": "view == calkit-sidebar && viewItem == section-pipeline",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.runPipeline",
+          "when": "view == calkit-sidebar && viewItem == section-pipeline",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.openStageFile",
+          "when": "view == calkit-sidebar && viewItem == stage",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.editStage",
+          "when": "view == calkit-sidebar && viewItem == stage",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.runStage",
+          "when": "view == calkit-sidebar && viewItem == stage",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.editEnvironment",
+          "when": "view == calkit-sidebar && viewItem == stage-env-prop",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.defineArtifactStage",
+          "when": "view == calkit-sidebar && (viewItem == figure-no-provenance || viewItem == dataset-no-provenance)",
+          "group": "inline@1"
+        },
+        {
+          "command": "calkit-vscode.defineArtifactImport",
+          "when": "view == calkit-sidebar && (viewItem == figure-no-provenance || viewItem == dataset-no-provenance)",
+          "group": "inline@2"
+        },
+        {
+          "command": "calkit-vscode.editStage",
+          "when": "view == calkit-sidebar && viewItem == notebook-stage-prop",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.runArtifactStage",
+          "when": "view == calkit-sidebar && (viewItem == figure-stale || viewItem == dataset-stale)",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.openFiguresCarousel",
+          "when": "view == calkit-sidebar && viewItem == section-figures",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.openFiguresCarousel",
+          "when": "view == calkit-sidebar && (viewItem == figure || viewItem == figure-no-provenance || viewItem == figure-stale)",
+          "group": "inline@0"
+        },
+        {
+          "command": "calkit-vscode.openFileHistory",
+          "when": "view == calkit-sidebar && (viewItem == figure || viewItem == figure-no-provenance || viewItem == figure-stale || viewItem == dataset || viewItem == dataset-no-provenance || viewItem == dataset-stale || viewItem == notebook || viewItem == notebook-no-env)",
+          "group": "inline@99"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "calkit-vscode.showProvenance",
+          "when": "!explorerResourceIsFolder",
+          "group": "calkit@1"
+        },
+        {
+          "command": "calkit-vscode.runStageForFile",
+          "when": "!explorerResourceIsFolder",
+          "group": "calkit@2"
+        },
+        {
+          "command": "calkit-vscode.defineProvenance",
+          "when": "!explorerResourceIsFolder",
+          "group": "calkit@3"
+        },
+        {
+          "command": "calkit-vscode.openFileHistory",
+          "when": "!explorerResourceIsFolder",
+          "group": "calkit@4"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "calkit-vscode.previewPlotlyFigure",
+          "when": "calkit.activeFileIsPlotly",
+          "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.previewPlotlyFigureToSide",
+          "when": "calkit.activeFileIsPlotly",
+          "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.openPlotlyAsSource",
+          "when": "calkit.plotlyPreviewActive",
+          "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.showProvenance",
+          "when": "calkit.activeFileIsPipelineOutput || (calkit.plotlyPreviewActive && calkit.plotlyPreviewIsPipelineOutput)",
+          "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.runStageForFile",
+          "when": "calkit.activeFileHasStage && !calkit.isSettingKernel",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "calkit-vscode.showProvenance",
+          "group": "calkit@1"
+        },
+        {
+          "command": "calkit-vscode.runStageForFile",
+          "group": "calkit@2"
+        },
+        {
+          "command": "calkit-vscode.defineProvenance",
+          "group": "calkit@3"
+        }
+      ],
       "notebook/toolbar": [
         {
           "command": "calkit-vscode.selectCalkitEnvironment",
@@ -87,14 +451,48 @@
           "command": "calkit-vscode.restartCalkitJob",
           "when": "notebookType == 'jupyter-notebook' && (calkit.hasRunningSlurmSession || calkit.hasRunningDockerSession) && !calkit.isSettingKernel",
           "group": "navigation@102"
+        },
+        {
+          "command": "calkit-vscode.runNotebookStage",
+          "when": "notebookType == 'jupyter-notebook' && calkit.notebookHasStage && !calkit.isSettingKernel",
+          "group": "navigation@103"
+        },
+        {
+          "command": "calkit-vscode.editNotebookStage",
+          "when": "notebookType == 'jupyter-notebook' && calkit.notebookHasStage && !calkit.isSettingKernel",
+          "group": "navigation@104"
+        },
+        {
+          "command": "calkit-vscode.defineNotebookStage",
+          "when": "notebookType == 'jupyter-notebook' && !calkit.notebookHasStage && !calkit.isSettingKernel",
+          "group": "navigation@103"
+        },
+        {
+          "command": "calkit-vscode.openNotebookHtml",
+          "when": "notebookType == 'jupyter-notebook' && !calkit.isSettingKernel",
+          "group": "navigation@105"
         }
       ],
       "commandPalette": [
+        {
+          "command": "calkit-vscode.enableAutoRefresh",
+          "when": "!calkit-vscode.autoRefreshStatus"
+        },
+        {
+          "command": "calkit-vscode.disableAutoRefresh",
+          "when": "calkit-vscode.autoRefreshStatus"
+        },
         {
           "command": "calkit-vscode.selectCalkitEnvironment"
         },
         {
           "command": "calkit-vscode.createCalkitEnvironment"
+        },
+        {
+          "command": "calkit-vscode.editEnvironment"
+        },
+        {
+          "command": "calkit-vscode.openStageFile"
         },
         {
           "command": "calkit-vscode.startCalkitSlurmJob"
@@ -104,6 +502,66 @@
         },
         {
           "command": "calkit-vscode.restartCalkitJob"
+        },
+        {
+          "command": "calkit-vscode.showProvenance"
+        },
+        {
+          "command": "calkit-vscode.runStage"
+        },
+        {
+          "command": "calkit-vscode.runStageForFile"
+        },
+        {
+          "command": "calkit-vscode.runPipeline"
+        },
+        {
+          "command": "calkit-vscode.showPipelineDag"
+        },
+        {
+          "command": "calkit-vscode.newStage"
+        },
+        {
+          "command": "calkit-vscode.editStage"
+        },
+        {
+          "command": "calkit-vscode.defineProvenance"
+        },
+        {
+          "command": "calkit-vscode.defineArtifactStage"
+        },
+        {
+          "command": "calkit-vscode.defineArtifactImport"
+        },
+        {
+          "command": "calkit-vscode.runArtifactStage"
+        },
+        {
+          "command": "calkit-vscode.runNotebookStage"
+        },
+        {
+          "command": "calkit-vscode.editNotebookStage"
+        },
+        {
+          "command": "calkit-vscode.defineNotebookStage"
+        },
+        {
+          "command": "calkit-vscode.openNotebookHtml"
+        },
+        {
+          "command": "calkit-vscode.previewPlotlyFigure",
+          "when": "calkit.activeFileIsPlotly"
+        },
+        {
+          "command": "calkit-vscode.previewPlotlyFigureToSide",
+          "when": "calkit.activeFileIsPlotly"
+        },
+        {
+          "command": "calkit-vscode.openPlotlyAsSource",
+          "when": "calkit.plotlyPreviewActive"
+        },
+        {
+          "command": "calkit-vscode.refreshSidebar"
         }
       ]
     },
@@ -114,6 +572,11 @@
           "type": "number",
           "default": 8888,
           "description": "Default port used when launching a Calkit-backed Jupyter server."
+        },
+        "calkit.autoRefreshStatus": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically run 'calkit status' to refresh pipeline staleness when project files change. Disable this if frequent status checks interfere with Git operations like stashing or pulling; you can still refresh manually from the Calkit sidebar."
         }
       }
     }

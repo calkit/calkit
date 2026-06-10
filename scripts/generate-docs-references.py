@@ -19,6 +19,7 @@ from calkit.models.core import (
     Environment,
     JuliaEnvironment,
     MatlabEnvironment,
+    NixEnvironment,
     PixiEnvironment,
     REnvironment,
     SlurmEnvironment,
@@ -66,7 +67,11 @@ def make_table(rows: list[tuple[Any, ...]], header: list[str]) -> str:
 
 
 def _command_text(cmd: click.Command) -> str:
-    return (cmd.help or cmd.short_help or "").strip()
+    # CLI helps written in RST style use ``double backticks`` for inline
+    # code; convert to markdown single backticks so prettier doesn't
+    # rewrite the generated file and fail the pre-commit hook.
+    text = (cmd.help or cmd.short_help or "").strip()
+    return text.replace("``", "`")
 
 
 def _command_desc(cmd: click.Command) -> str:
@@ -295,6 +300,15 @@ def generate_cli_markdown() -> str:
     lines: list[str] = []
     lines.append("# CLI reference")
     lines.append("")
+    lines.append("<!-- prettier-ignore -->")
+    lines.append("!!! note")
+    lines.append(
+        "    `ck` is an abbreviated alias for the `calkit` executable."
+    )
+    lines.append(
+        '    All `calkit` commands can be run as `ck` instead, e.g., `ck save -am "..."`.'
+    )
+    lines.append("")
     if top_summary:
         lines.append(top_summary)
         lines.append("")
@@ -495,6 +509,7 @@ def generate_environment_kinds_markdown() -> str:
         DockerEnvironment,
         JuliaEnvironment,
         MatlabEnvironment,
+        NixEnvironment,
         SlurmEnvironment,
         REnvironment,
         SSHEnvironment,
@@ -567,6 +582,12 @@ def generate_environment_kinds_markdown() -> str:
         "matlab": [
             ("kind", "Literal['matlab']", "required"),
             ("products", "list[str]", "optional"),
+            ("description", "str", "optional"),
+        ],
+        "nix": [
+            ("kind", "Literal['nix']", "required"),
+            ("path", "str (must end with 'flake.nix')", "required"),
+            ("shell", "str (name of devShell to enter)", "optional"),
             ("description", "str", "optional"),
         ],
         "slurm": [
@@ -642,7 +663,7 @@ def generate_stage_kinds_markdown() -> str:
                 _annotation_to_text(field.annotation),
                 "yes" if _is_required(field) else "no",
                 _default_to_text(field.default),
-            )
+            )  # type: ignore
         )
     lines.append(
         make_table(
@@ -678,7 +699,7 @@ def generate_stage_kinds_markdown() -> str:
                     _annotation_to_text(field.annotation),
                     "yes" if _is_required(field) else "no",
                     _default_to_text(field.default),
-                )
+                )  # type: ignore
             )
         if extra_rows:
             lines.append(

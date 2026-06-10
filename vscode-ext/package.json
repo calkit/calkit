@@ -152,6 +152,12 @@
         "icon": "$(play)"
       },
       {
+        "command": "calkit-vscode.save",
+        "title": "Save",
+        "category": "Calkit",
+        "icon": "$(save)"
+      },
+      {
         "command": "calkit-vscode.showPipelineDag",
         "title": "Show Pipeline DAG",
         "category": "Calkit",
@@ -277,6 +283,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "calkit-vscode.save",
+          "when": "view == calkit-sidebar && calkit-vscode.hasProject",
+          "group": "navigation@0"
+        },
         {
           "command": "calkit-vscode.openCalkitYaml",
           "when": "view == calkit-sidebar && calkit-vscode.hasProject",
@@ -589,6 +600,10 @@
         {
           "command": "calkit-vscode.goToFigureSource",
           "when": "resourceExtname == .qmd"
+        },
+        {
+          "command": "calkit-vscode.save",
+          "when": "calkit-vscode.hasProject"
         },
         {
           "command": "calkit-vscode.refreshSidebar"

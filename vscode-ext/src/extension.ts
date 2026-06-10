@@ -66,6 +66,7 @@ const COMMAND_PREVIEW_PLOTLY_TO_SIDE =
 const COMMAND_OPEN_PLOTLY_SOURCE = "calkit-vscode.openPlotlyAsSource";
 const COMMAND_OPEN_STAGE_PDF = "calkit-vscode.openStagePdf";
 const COMMAND_GO_TO_FIGURE_SOURCE = "calkit-vscode.goToFigureSource";
+const COMMAND_SAVE = "calkit-vscode.save";
 const FIGURE_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -503,6 +504,35 @@ export function activate(context: vscode.ExtensionContext): void {
       const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
       terminal.show();
       terminal.sendText("calkit run");
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_SAVE, async () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      const message = await vscode.window.showInputBox({
+        title: "Calkit: Save",
+        prompt: "Commit message for saving your work",
+        placeHolder: "e.g. Update analysis figures",
+        ignoreFocusOut: true,
+      });
+      // Cancelled (Escape) returns undefined; an empty message is not allowed.
+      if (message === undefined) {
+        return;
+      }
+      const trimmed = message.trim();
+      if (!trimmed) {
+        void vscode.window.showErrorMessage(
+          "A commit message is required to save.",
+        );
+        return;
+      }
+      const terminal = getOrCreateTerminal("calkit: save", workspaceRoot);
+      terminal.show();
+      terminal.sendText(`calkit save -a -m ${shQuote(trimmed)}`);
     }),
   );
 

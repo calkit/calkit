@@ -15,7 +15,8 @@ from functools import partial
 from typing import Literal
 
 import requests
-from requests.exceptions import HTTPError
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import HTTPError, Timeout
 
 from . import config
 
@@ -104,8 +105,7 @@ def run_device_flow() -> str:
                     ) from e
                 if "Device code not found" in txt:
                     raise DeviceLoginError(
-                        "Device code not found; "
-                        "Run 'calkit cloud login' again"
+                        "Device code not found; Run 'calkit cloud login' again"
                     ) from e
                 raise DeviceLoginError(
                     f"Error while polling for device authorization: {e}"
@@ -304,6 +304,9 @@ def _request(
     max_retries = 10
     base_delay_seconds = 0.25
     max_delay_seconds = 30
+    # Bound how long a single attempt can hang so stalled connections become
+    # retryable timeouts rather than blocking forever. Callers can override.
+    kwargs.setdefault("timeout", (10, 120))
     func = getattr(requests, kind)
     if base_url is None:
         base_url = get_base_url()
@@ -333,15 +336,29 @@ def _request(
                 run_device_flow()
                 continue
             raise
-        resp = func(
-            base_url + path,
-            params=params,
-            json=json,
-            data=data,
-            headers=req_headers,
-            **kwargs,
-        )
-        if resp.status_code == 502 and retry_num < max_retries:
+        try:
+            resp = func(
+                base_url + path,
+                params=params,
+                json=json,
+                data=data,
+                headers=req_headers,
+                **kwargs,
+            )
+        except (Timeout, RequestsConnectionError):
+            # Transient network failure (read/connect timeout, connection
+            # reset/refused). Retry with the same backoff as transient 5xx
+            # responses; re-raise once retries are exhausted.
+            if retry_num >= max_retries:
+                raise
+            wait = min(base_delay_seconds * (2**retry_num), max_delay_seconds)
+            time.sleep(wait)
+            continue
+        # Retry transient server-side errors (bad gateway, overloaded,
+        # unavailable, gateway timeout) with exponential backoff. These are
+        # typically infrastructure hiccups that resolve on a retry.
+        is_transient_5xx = resp.status_code in (500, 502, 503, 504)
+        if is_transient_5xx and retry_num < max_retries:
             wait = min(base_delay_seconds * (2**retry_num), max_delay_seconds)
             time.sleep(wait)
             continue

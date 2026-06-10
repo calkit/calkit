@@ -87,6 +87,28 @@ def test_frozen_stage_reproduce_warning_is_suppressed(caplog):
     assert any("must pass through" in m for m in messages)
 
 
+def test_stale_rwlock_warning_is_suppressed(caplog):
+    # Import side effect: loading calkit.dvc installs the filter on the
+    # dvc.rwlock logger.
+    import logging
+
+    import calkit.dvc  # noqa: F401
+
+    logger = logging.getLogger("dvc.rwlock")
+    with caplog.at_level(logging.WARNING, logger="dvc.rwlock"):
+        logger.warning(
+            "Process '%s' with (Pid %s), in RWLock-file '%s' had been "
+            "killed. Auto removed it from the lock file.",
+            "calkit status --json -c pipeline",
+            22108,
+            "runs/amip",
+        )
+        logger.warning("some other warning that must pass through")
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any("Auto removed it from the lock file" in m for m in messages)
+    assert any("must pass through" in m for m in messages)
+
+
 def test_register_ck_scheme_updates_schema_and_registry():
     register_ck_scheme()
 
@@ -346,3 +368,50 @@ def test_status_as_posix():
         }
     ]
     assert out["stage3"] == [{"changed command": "python src/new-script.py"}]
+
+
+def test_run_dvc_command_lock_retries(monkeypatch):
+    import logging
+
+    from dvc.lock import LockError
+
+    sleeps = []
+    monkeypatch.setattr(calkit.dvc.core.time, "sleep", sleeps.append)
+    # Simulate DVC failing with a lock error a couple times, the way
+    # dvc.cli.main does (log the exception, then return 255), before succeeding.
+    attempts = {"n": 0}
+
+    def fake_cli(argv):
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            try:
+                raise LockError("Unable to acquire lock")
+            except LockError:
+                logging.getLogger("dvc").exception("")
+            return 255
+        return 0
+
+    monkeypatch.setattr(calkit.dvc.core, "run_dvc_cli", fake_cli)
+    # With enough retries, the command eventually succeeds.
+    rc = calkit.dvc.run_dvc_command(["pull"], lock_retries=5)
+    assert rc == 0
+    assert attempts["n"] == 3
+    assert sleeps == [2.0, 4.0]
+    # Without retries, the first lock failure is returned as-is.
+    attempts["n"] = 0
+    sleeps.clear()
+    rc = calkit.dvc.run_dvc_command(["pull"])
+    assert rc == 255
+    assert attempts["n"] == 1
+    assert sleeps == []
+
+    # A non-lock failure is not retried even when retries are allowed.
+    def fake_cli_other_error(argv):
+        attempts["n"] += 1
+        return 1
+
+    attempts["n"] = 0
+    monkeypatch.setattr(calkit.dvc.core, "run_dvc_cli", fake_cli_other_error)
+    rc = calkit.dvc.run_dvc_command(["pull"], lock_retries=5)
+    assert rc == 1
+    assert attempts["n"] == 1

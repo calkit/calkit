@@ -1616,7 +1616,8 @@ def test_run_concurrent_scheduler_force_runs_each_item_once(tmp_dir):
 def test_run_concurrent_scheduler_resume_after_disconnect(tmp_dir):
     # If the master process is killed while jobs run, a job that already
     # finished on the scheduler must not be resubmitted on the next run: the
-    # jobs database plus persisted outputs let Calkit recognize completed work.
+    # jobs database lets Calkit recognize the prior submission left the queue
+    # and reuse its recorded exit status instead of rerunning the work.
     # We simulate the disconnect by deleting dvc.lock (so DVC re-runs the
     # stage) while the outputs and job records remain on disk.
     env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
@@ -1648,7 +1649,7 @@ def test_run_concurrent_scheduler_resume_after_disconnect(tmp_dir):
     # Simulate a disconnect where dvc.lock never got updated.
     os.remove("dvc.lock")
     out = subprocess.check_output(["calkit", "run"], env=env, text=True)
-    assert "already completed" in out
+    assert "already left the queue" in out
     # The completed jobs are not resubmitted, so the run counts stay at one.
     for x in (1, 2):
         with open(f"runs-{x}.txt") as f:

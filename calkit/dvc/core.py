@@ -40,9 +40,25 @@ class _FrozenStageWarningFilter(logging.Filter):
         return "is frozen. Its dependencies are" not in record.getMessage()
 
 
+class _StaleRWLockWarningFilter(logging.Filter):
+    """Drop DVC's "auto removed it from the lock file" warnings.
+
+    DVC records a read/write entry in its ``rwlock`` files while a command
+    runs. Background pollers like ``calkit status --json -c pipeline`` (run by
+    the VS Code extension) acquire read locks, and when such a process is
+    killed mid-run its entries are left behind. The next DVC command notices
+    the owning PID is gone and cleans them up, logging a WARNING per stale
+    entry. That auto-recovery is expected and not actionable, so it's filtered.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "Auto removed it from the lock file" not in record.getMessage()
+
+
 _frozen_stage_warning_filter = _FrozenStageWarningFilter()
 for _name in ("dvc.repo.reproduce", "dvc.repo.status"):
     logging.getLogger(_name).addFilter(_frozen_stage_warning_filter)
+logging.getLogger("dvc.rwlock").addFilter(_StaleRWLockWarningFilter())
 
 
 class CalkitDVCFileSystem(ObjectFileSystem):

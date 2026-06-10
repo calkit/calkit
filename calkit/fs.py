@@ -326,7 +326,6 @@ class CalkitFileSystem(AbstractFileSystem):
                 )
         # Total payload size for progress reporting.
         payload_size = len(data) if data is not None else (file_size or 0)
-
         # Retries are intentionally narrow: only transient transport errors.
         max_retries = 2
         retry_backoff = 1.0
@@ -483,11 +482,13 @@ class CalkitFileSystem(AbstractFileSystem):
             complete_body = ET.tostring(
                 complete_root, encoding="utf-8", xml_declaration=True
             )
-            complete_resp = self._session.post(
-                complete_url,
-                headers={"Content-Type": "application/xml"},
-                data=complete_body,
-                timeout=120,
+            complete_resp = _request_with_retry(
+                lambda: self._session.post(
+                    complete_url,
+                    headers={"Content-Type": "application/xml"},
+                    data=complete_body,
+                    timeout=120,
+                )
             )
             complete_resp.raise_for_status()
             return complete_resp

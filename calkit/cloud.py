@@ -341,7 +341,11 @@ def _request(
             headers=req_headers,
             **kwargs,
         )
-        if resp.status_code == 502 and retry_num < max_retries:
+        # Retry transient server-side errors (bad gateway, overloaded,
+        # unavailable, gateway timeout) with exponential backoff. These are
+        # typically infrastructure hiccups that resolve on a retry.
+        is_transient_5xx = resp.status_code in (500, 502, 503, 504)
+        if is_transient_5xx and retry_num < max_retries:
             wait = min(base_delay_seconds * (2**retry_num), max_delay_seconds)
             time.sleep(wait)
             continue

@@ -314,6 +314,56 @@ def test_request_permission_403_does_not_trigger_refresh(monkeypatch):
     assert refresh_calls["n"] == 0
 
 
+def test_request_retries_on_transient_5xx(monkeypatch):
+    """Transient 5xx responses are retried with backoff; a persistent 5xx
+    eventually exhausts retries and surfaces as an HTTPError."""
+    from requests.exceptions import HTTPError
+
+    base_url = cloud.get_base_url()
+    fresh = _make_jwt(time.time() + 3600)
+    monkeypatch.setitem(cloud._tokens, base_url, fresh)
+    # Avoid real sleeping during backoff.
+    monkeypatch.setattr(cloud.time, "sleep", lambda *_a, **_kw: None)
+
+    class Resp:
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise HTTPError(f"{self.status_code}")
+
+        def json(self):
+            return {"ok": True} if self.status_code < 400 else {}
+
+    # Case 1: each transient 5xx status is retried once, then succeeds.
+    for transient_status in (500, 502, 503, 504):
+        statuses = [transient_status, 200]
+        calls = {"n": 0}
+
+        def _fake_get(url, **kwargs):
+            status = statuses[calls["n"]]
+            calls["n"] += 1
+            return Resp(status)
+
+        monkeypatch.setattr(cloud.requests, "get", _fake_get)
+        result = cloud._request("get", "/test", base_url=base_url)
+        assert result == {"ok": True}
+        assert calls["n"] == 2
+    # Case 2: a persistent 500 exhausts all retries and raises HTTPError.
+    persistent = {"n": 0}
+
+    def _fake_get_500(url, **kwargs):
+        persistent["n"] += 1
+        return Resp(500)
+
+    monkeypatch.setattr(cloud.requests, "get", _fake_get_500)
+    with pytest.raises(HTTPError):
+        cloud._request("get", "/test", base_url=base_url)
+    # Initial attempt plus max_retries follow-ups.
+    assert persistent["n"] == 11
+
+
 def test_concurrent_refresh_fires_only_once(monkeypatch):
     """Many threads calling get_token() on an expiring JWT should trigger
     exactly one refresh request, not one per thread."""

@@ -240,6 +240,42 @@ def test_execute_operation_retries_transient_timeout_across_upload_paths():
         assert calls == [5, 5, 3]
 
 
+def test_execute_operation_retries_transient_5xx():
+    """Retries a transient 5xx response from the storage backend."""
+    import io
+
+    with patch("calkit.fs.time.sleep", return_value=None):
+        # A 503 from the backend is retried; the follow-up 200 is returned.
+        statuses = [503, 200]
+        seen = []
+
+        def _side_effect(**kwargs):
+            resp = MagicMock()
+            resp.status_code = statuses[len(seen)]
+            seen.append(resp.status_code)
+            return resp
+
+        session = MagicMock()
+        session.request.side_effect = _side_effect
+        fs = ckfs.CalkitFileSystem.__new__(ckfs.CalkitFileSystem)
+        fs._session = session
+        op = {
+            "access": {
+                "kind": "presigned-url",
+                "url": "https://storage.example.com/upload",
+                "http_method": "PUT",
+            }
+        }
+        resp = fs._execute_operation(
+            op,
+            "put",
+            file_obj=io.BytesIO(b"hello"),
+            file_size=5,
+        )
+        assert seen == [503, 200]
+        assert resp.status_code == 200
+
+
 def _calkit_cloud_available(
     env: Literal["local", "staging", "production"] = "local",
 ) -> bool:

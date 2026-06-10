@@ -364,6 +364,52 @@ def test_request_retries_on_transient_5xx(monkeypatch):
     assert persistent["n"] == 11
 
 
+def test_request_retries_on_network_error(monkeypatch):
+    """Transient network errors (read/connect timeout, connection reset) are
+    retried; a persistent one eventually propagates."""
+    from requests.exceptions import ConnectionError as ReqConnErr
+    from requests.exceptions import Timeout
+
+    base_url = cloud.get_base_url()
+    fresh = _make_jwt(time.time() + 3600)
+    monkeypatch.setitem(cloud._tokens, base_url, fresh)
+    monkeypatch.setattr(cloud.time, "sleep", lambda *_a, **_kw: None)
+
+    class Resp200:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"ok": True}
+
+    # Case 1: two transient network errors, then success.
+    errors = [Timeout("read timeout"), ReqConnErr("connection reset")]
+    calls = {"n": 0}
+
+    def _fake_get(url, **kwargs):
+        calls["n"] += 1
+        if calls["n"] <= len(errors):
+            raise errors[calls["n"] - 1]
+        return Resp200()
+
+    monkeypatch.setattr(cloud.requests, "get", _fake_get)
+    assert cloud._request("get", "/test", base_url=base_url) == {"ok": True}
+    assert calls["n"] == 3
+    # Case 2: a persistent network error exhausts retries and propagates.
+    persistent = {"n": 0}
+
+    def _always_timeout(url, **kwargs):
+        persistent["n"] += 1
+        raise Timeout("read timeout")
+
+    monkeypatch.setattr(cloud.requests, "get", _always_timeout)
+    with pytest.raises(Timeout):
+        cloud._request("get", "/test", base_url=base_url)
+    assert persistent["n"] == 11
+
+
 def test_concurrent_refresh_fires_only_once(monkeypatch):
     """Many threads calling get_token() on an expiring JWT should trigger
     exactly one refresh request, not one per thread."""

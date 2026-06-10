@@ -326,21 +326,32 @@ class CalkitFileSystem(AbstractFileSystem):
                 )
         # Total payload size for progress reporting.
         payload_size = len(data) if data is not None else (file_size or 0)
-        # Retries are intentionally narrow: only transient transport errors.
+        # Retries are intentionally narrow: transient transport errors and
+        # transient 5xx responses from the storage backend (e.g. GCS/S3
+        # returning 503 under load). Non-5xx statuses (308 resume acks, 404,
+        # etc.) are returned to the caller untouched.
         max_retries = 2
         retry_backoff = 1.0
+        transient_statuses = (500, 502, 503, 504)
 
         def _request_with_retry(func):
             delay = retry_backoff
             for attempt in range(max_retries + 1):
                 try:
-                    return func()
+                    resp = func()
                 except (Timeout, RequestsConnectionError):
                     if attempt >= max_retries:
                         raise
-                    if delay > 0:
-                        time.sleep(delay)
-                        delay *= 2
+                else:
+                    status = getattr(resp, "status_code", None)
+                    if (
+                        status not in transient_statuses
+                        or attempt >= max_retries
+                    ):
+                        return resp
+                if delay > 0:
+                    time.sleep(delay)
+                    delay *= 2
 
         def _prepare_stream(request_headers: dict) -> Any:
             """Return the request body, setting Content-Length if streaming."""

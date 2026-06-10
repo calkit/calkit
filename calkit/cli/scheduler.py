@@ -240,12 +240,12 @@ def _parse_slurm_exit_code(value: str) -> int | None:
     code_part, _, signal_part = value.strip().partition(":")
     try:
         code = int(code_part)
-    except ValueError:
-        return None
-    try:
+        # An empty signal part means "no signal"; a non-empty one that won't
+        # parse is malformed, so report the whole value as unknown rather than
+        # silently treating it as a clean exit.
         sig = int(signal_part) if signal_part else 0
     except ValueError:
-        sig = 0
+        return None
     return code if sig == 0 else 128 + sig
 
 
@@ -307,9 +307,21 @@ def _poll_job(kind: str, job_id: str) -> tuple[bool, int | None]:
             text=True,
             check=False,
         )
-        if p.returncode == 0 and len(p.stdout.strip().split("\n")) > 1:
-            return True, None
-        return False, _slurm_exit_code(job_id)
+        if p.returncode == 0:
+            # squeue prints a header row plus one row per matching job, so more
+            # than the header means the job is still queued or running.
+            if len(p.stdout.strip().split("\n")) > 1:
+                return True, None
+            return False, _slurm_exit_code(job_id)
+        # A non-zero exit is ambiguous like PBS: an invalid/unknown job id
+        # means the job is gone, but a transient controller failure should not
+        # end the wait early (nor let `_slurm_exit_code` call a still-running
+        # job failed), so only conclude the job is done when squeue positively
+        # reports the id is invalid; otherwise keep waiting.
+        stderr = (p.stderr or "").lower()
+        if "invalid job id" in stderr:
+            return False, _slurm_exit_code(job_id)
+        return True, None
     # Use `qstat -f` and parse job_state: on Torque/OpenPBS, plain `qstat
     # <id>` returns exit 0 even for completed (C) jobs, so checking the
     # return code alone would cause `calkit sched batch` to hang forever
@@ -672,7 +684,11 @@ def run_batch(
         # The recorded job may have been submitted under a different
         # scheduler kind; use its own kind for activity/cancel checks.
         prev_kind = job_info.get("kind", kind)
-        running_or_queued = _is_active(prev_kind, job_id)
+        # Capture the exit code alongside liveness: if the job already left the
+        # queue (e.g. while we were disconnected) the scheduler may still have
+        # its status in history, and reading it now avoids losing it to a later
+        # purge.
+        running_or_queued, prev_exit_code = _poll_job(prev_kind, job_id)
         should_wait = True
 
         def _cancel_with_reason(reason: str) -> None:
@@ -723,11 +739,15 @@ def run_batch(
                 _finalize_job(name, job_id, exit_code, log_path)
                 raise typer.Exit(0)
         elif not os.environ.get("CALKIT_FORCE"):
-            # The job has left the queue. If nothing it depends on changed and
-            # its outputs are present, it already finished successfully (e.g.
-            # while the master process was disconnected), so treat it as done
-            # rather than resubmitting and discarding that work. Under --force
-            # (CALKIT_FORCE) we skip this check and resubmit.
+            # The job has left the queue (e.g. it finished while the master
+            # process was disconnected). If nothing it depends on changed and
+            # the prior submission succeeded---or its status was purged, in
+            # which case we assume success since there is no record left to
+            # judge by and the stage's declared outputs are the final
+            # arbiter---harvest it rather than resubmitting and discarding the
+            # work. A known failure instead falls through to resubmit, so
+            # `calkit run` retries it (e.g. after the user fixed the cause).
+            # Under --force (CALKIT_FORCE) we skip this and always resubmit.
             job_dep_md5s = job_info.get("dep_md5s", {})
             deps_unchanged = set(job_deps) == set(deps) and all(
                 current_dep_md5s.get(dep) == job_dep_md5s.get(dep)
@@ -738,13 +758,15 @@ def run_batch(
                 and job_args == args
                 and job_setup == setup_cmds
             )
-            outputs_present = bool(outs) and all(
-                os.path.exists(out) for out in outs
-            )
-            if deps_unchanged and command_unchanged and outputs_present:
+            if (
+                deps_unchanged
+                and command_unchanged
+                and prev_exit_code in (0, None)
+            ):
                 typer.echo(
-                    f"Job '{name}' already completed; skipping resubmission"
+                    f"Job '{name}' already left the queue; using its result"
                 )
+                _finalize_job(name, job_id, prev_exit_code, log_path)
                 raise typer.Exit(0)
     # Job is not running or queued, so we can submit. First, delete any
     # non-persistent outputs.

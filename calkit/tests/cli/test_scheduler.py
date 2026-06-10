@@ -256,6 +256,48 @@ def test_poll_job_pbs(monkeypatch):
     assert _is_active("pbs", "1.pbs")
 
 
+def test_poll_job_slurm(monkeypatch):
+    import subprocess
+
+    import calkit.cli.scheduler as sched
+
+    queue: dict = {}
+
+    def _fake_run(cmd, *args, **kwargs):
+        if cmd[0] == "squeue":
+            return subprocess.CompletedProcess(
+                cmd,
+                queue["returncode"],
+                stdout=queue.get("stdout", ""),
+                stderr=queue.get("stderr", ""),
+            )
+        # Any exit-code lookup (scontrol/sacct) reports a clean completion.
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="JobState=COMPLETED ExitCode=0:0", stderr=""
+        )
+
+    monkeypatch.setattr(sched.subprocess, "run", _fake_run)
+    # A header row plus a job row means the job is still active.
+    queue.update(returncode=0, stdout="JOBID ST\n1 R\n", stderr="")
+    assert _poll_job("slurm", "1") == (True, None)
+    # Just the header means the job has left the queue; its exit code is read.
+    queue.update(returncode=0, stdout="JOBID ST\n")
+    assert _poll_job("slurm", "1") == (False, 0)
+    # A non-zero squeue reporting an invalid job id means it is gone.
+    queue.update(
+        returncode=1,
+        stdout="",
+        stderr="slurm_load_jobs error: Invalid job id specified\n",
+    )
+    assert _poll_job("slurm", "1") == (False, 0)
+    # Any other squeue failure is transient: keep waiting rather than ending
+    # the wait early while the job may still be running.
+    queue.update(
+        returncode=1, stdout="", stderr="slurm_load_jobs error: timeout\n"
+    )
+    assert _poll_job("slurm", "1") == (True, None)
+
+
 def test_wait_for_output_file(tmp_dir, monkeypatch):
     import calkit.cli.scheduler as sched
 

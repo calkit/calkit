@@ -67,6 +67,8 @@ const COMMAND_OPEN_PLOTLY_SOURCE = "calkit-vscode.openPlotlyAsSource";
 const COMMAND_OPEN_STAGE_PDF = "calkit-vscode.openStagePdf";
 const COMMAND_GO_TO_FIGURE_SOURCE = "calkit-vscode.goToFigureSource";
 const COMMAND_SAVE = "calkit-vscode.save";
+const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
+const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
 const FIGURE_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -536,6 +538,49 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  // Reveal a pipeline stage in the sidebar's Pipeline section, expanded. Invoked
+  // by clicking a stage property under a figure/notebook, or its context menu.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_VIEW_STAGE,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const stageName = item?.nodeId;
+        if (!stageName) {
+          return;
+        }
+        const stageItem = sidebarProvider?.findStageItem(stageName);
+        if (stageItem && sidebarTreeView) {
+          await sidebarTreeView.reveal(stageItem, {
+            select: true,
+            focus: true,
+            expand: true,
+          });
+        }
+      },
+    ),
+  );
+
+  // Reveal an environment in the sidebar's Environments section, expanded.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_VIEW_ENVIRONMENT,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const envName = item?.nodeId;
+        if (!envName) {
+          return;
+        }
+        const envItem = sidebarProvider?.findEnvItem(envName);
+        if (envItem && sidebarTreeView) {
+          await sidebarTreeView.reveal(envItem, {
+            select: true,
+            focus: true,
+            expand: true,
+          });
+        }
+      },
+    ),
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_SHOW_DAG, () => {
       const workspaceRoot = getWorkspaceRoot();
@@ -937,6 +982,11 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.window.onDidChangeActiveNotebookEditor(() => {
       void refreshNotebookToolbarContext(context);
+      // Auto-select the configured environment once the notebook is actually the
+      // active editor. onDidOpenNotebookDocument can fire before the editor is
+      // active, and switching between already-open notebooks only fires this
+      // event, so without this a notebook's environment is never auto-selected.
+      void autoSelectEnvironmentForActiveNotebook(context);
     }),
   );
 

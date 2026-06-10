@@ -158,6 +158,18 @@
         "icon": "$(save)"
       },
       {
+        "command": "calkit-vscode.viewStage",
+        "title": "View Stage",
+        "category": "Calkit",
+        "icon": "$(layers)"
+      },
+      {
+        "command": "calkit-vscode.viewEnvironment",
+        "title": "View Environment",
+        "category": "Calkit",
+        "icon": "$(package)"
+      },
+      {
         "command": "calkit-vscode.showPipelineDag",
         "title": "Show Pipeline DAG",
         "category": "Calkit",
@@ -371,6 +383,16 @@
           "group": "inline"
         },
         {
+          "command": "calkit-vscode.viewStage",
+          "when": "view == calkit-sidebar && (viewItem == notebook-stage-prop || viewItem == artifact-stage-prop)",
+          "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.viewEnvironment",
+          "when": "view == calkit-sidebar && viewItem == stage-env-prop",
+          "group": "navigation"
+        },
+        {
           "command": "calkit-vscode.runArtifactStage",
           "when": "view == calkit-sidebar && (viewItem == figure-stale || viewItem == dataset-stale)",
           "group": "inline"
@@ -431,7 +453,7 @@
         },
         {
           "command": "calkit-vscode.showProvenance",
-          "when": "calkit.activeFileIsPipelineOutput || (calkit.plotlyPreviewActive && calkit.plotlyPreviewIsPipelineOutput)",
+          "when": "calkit.activeFileIsPipelineOutput || (calkit.plotlyPreviewActive && calkit.plotlyPreviewIsPipelineOutput) || resourceExtname == .pdf",
           "group": "navigation"
         },
         {
@@ -604,6 +626,14 @@
         {
           "command": "calkit-vscode.save",
           "when": "calkit-vscode.hasProject"
+        },
+        {
+          "command": "calkit-vscode.viewStage",
+          "when": "false"
+        },
+        {
+          "command": "calkit-vscode.viewEnvironment",
+          "when": "false"
         },
         {
           "command": "calkit-vscode.refreshSidebar"

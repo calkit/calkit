@@ -63,6 +63,7 @@ export class CalkitSidebarProvider
     "datasets",
   );
   private stageItemCache = new Map<string, SidebarItem>();
+  private envItemCache = new Map<string, SidebarItem>();
 
   refresh(
     workspaceRoot: string | undefined,
@@ -96,6 +97,7 @@ export class CalkitSidebarProvider
     this.detectedFigures = detectedFigures ?? [];
     this.detectedDatasets = detectedDatasets ?? [];
     this.stageItemCache.clear();
+    this.envItemCache.clear();
     this._onDidChangeTreeData.fire();
   }
 
@@ -157,6 +159,13 @@ export class CalkitSidebarProvider
       this.getStageItems();
     }
     return this.stageItemCache.get(stageName);
+  }
+
+  findEnvItem(envName: string): SidebarItem | undefined {
+    if (this.envItemCache.size === 0) {
+      this.getEnvItems();
+    }
+    return this.envItemCache.get(envName);
   }
 
   getParent(element: SidebarItem): SidebarItem | undefined {
@@ -247,6 +256,10 @@ export class CalkitSidebarProvider
       return [empty];
     }
     return Object.entries(envs).map(([name, env]) => {
+      const cached = this.envItemCache.get(name);
+      if (cached) {
+        return cached;
+      }
       const item = new SidebarItem(
         name,
         vscode.TreeItemCollapsibleState.Collapsed,
@@ -256,8 +269,30 @@ export class CalkitSidebarProvider
       item.description = typeof env.kind === "string" ? env.kind : undefined;
       item.iconPath = new vscode.ThemeIcon("package");
       item.contextValue = "env";
+      this.envItemCache.set(name, item);
       return item;
     });
+  }
+
+  // An "Environment" property node (shown under stages, notebooks, and
+  // artifacts). Clicking it jumps to the environment in the Environments
+  // section, expanded.
+  private makeEnvPropItem(envName: string): SidebarItem {
+    const item = new SidebarItem(
+      "Environment",
+      vscode.TreeItemCollapsibleState.None,
+      "stage-env-prop",
+      envName,
+    );
+    item.description = envName;
+    item.iconPath = new vscode.ThemeIcon("package");
+    item.contextValue = "stage-env-prop";
+    item.command = {
+      command: "calkit-vscode.viewEnvironment",
+      title: "View Environment",
+      arguments: [item],
+    };
+    return item;
   }
 
   private getEnvProps(envName: string): SidebarItem[] {
@@ -416,16 +451,7 @@ export class CalkitSidebarProvider
     const items: SidebarItem[] = [];
     const envName = entry.environment ?? stage?.environment;
     if (envName) {
-      const envItem = new SidebarItem(
-        "Environment",
-        vscode.TreeItemCollapsibleState.None,
-        "stage-env-prop",
-        envName,
-      );
-      envItem.description = envName;
-      envItem.iconPath = new vscode.ThemeIcon("package");
-      envItem.contextValue = "stage-env-prop";
-      items.push(envItem);
+      items.push(this.makeEnvPropItem(envName));
     }
     if (stageName && stage) {
       const stageItem = new SidebarItem(
@@ -437,6 +463,11 @@ export class CalkitSidebarProvider
       stageItem.description = stageName;
       stageItem.iconPath = new vscode.ThemeIcon("layers");
       stageItem.contextValue = "notebook-stage-prop";
+      stageItem.command = {
+        command: "calkit-vscode.viewStage",
+        title: "View Stage",
+        arguments: [stageItem],
+      };
       items.push(stageItem);
       for (const input of Array.isArray(stage.inputs)
         ? (stage.inputs as string[])
@@ -659,10 +690,8 @@ export class CalkitSidebarProvider
       this.buildOutputToStageMap(),
     );
     const items: SidebarItem[] = [];
-    const stages = this.calkitConfig?.pipeline?.stages ?? {};
     if (typeof entry.stage === "string") {
       const stageName = entry.stage;
-      const stage = stages[stageName];
       const stageItem = new SidebarItem(
         "Stage",
         vscode.TreeItemCollapsibleState.None,
@@ -672,19 +701,12 @@ export class CalkitSidebarProvider
       stageItem.description = stageName;
       stageItem.iconPath = new vscode.ThemeIcon("layers");
       stageItem.contextValue = "artifact-stage-prop";
+      stageItem.command = {
+        command: "calkit-vscode.viewStage",
+        title: "View Stage",
+        arguments: [stageItem],
+      };
       items.push(stageItem);
-      if (stage && typeof stage.environment === "string") {
-        const envItem = new SidebarItem(
-          "Environment",
-          vscode.TreeItemCollapsibleState.None,
-          "stage-env-prop",
-          stage.environment,
-        );
-        envItem.description = stage.environment;
-        envItem.iconPath = new vscode.ThemeIcon("package");
-        envItem.contextValue = "stage-env-prop";
-        items.push(envItem);
-      }
     } else if (entry.imported_from) {
       const src =
         typeof entry.imported_from === "object" &&
@@ -826,16 +848,7 @@ export class CalkitSidebarProvider
         );
       }
       if (typeof calkitStage.environment === "string") {
-        const envItem = new SidebarItem(
-          "Environment",
-          vscode.TreeItemCollapsibleState.None,
-          "stage-env-prop",
-          calkitStage.environment,
-        );
-        envItem.description = calkitStage.environment;
-        envItem.iconPath = new vscode.ThemeIcon("package");
-        envItem.contextValue = "stage-env-prop";
-        items.push(envItem);
+        items.push(this.makeEnvPropItem(calkitStage.environment));
       }
       for (const input of Array.isArray(calkitStage.inputs)
         ? (calkitStage.inputs as string[])

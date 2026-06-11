@@ -170,6 +170,30 @@
         "icon": "$(package)"
       },
       {
+        "command": "calkit-vscode.hideSection",
+        "title": "Hide Section",
+        "category": "Calkit",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "calkit-vscode.manageSections",
+        "title": "Manage Sections",
+        "category": "Calkit",
+        "icon": "$(list-selection)"
+      },
+      {
+        "command": "calkit-vscode.addQuestion",
+        "title": "Add Question",
+        "category": "Calkit",
+        "icon": "$(add)"
+      },
+      {
+        "command": "calkit-vscode.deleteQuestion",
+        "title": "Remove Question",
+        "category": "Calkit",
+        "icon": "$(trash)"
+      },
+      {
         "command": "calkit-vscode.showPipelineDag",
         "title": "Show Pipeline DAG",
         "category": "Calkit",
@@ -301,6 +325,11 @@
           "group": "navigation@0"
         },
         {
+          "command": "calkit-vscode.manageSections",
+          "when": "view == calkit-sidebar && calkit-vscode.hasProject",
+          "group": "1_options"
+        },
+        {
           "command": "calkit-vscode.openCalkitYaml",
           "when": "view == calkit-sidebar && calkit-vscode.hasProject",
           "group": "navigation"
@@ -322,6 +351,21 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "calkit-vscode.hideSection",
+          "when": "view == calkit-sidebar && viewItem =~ /^section-/",
+          "group": "9_section@1"
+        },
+        {
+          "command": "calkit-vscode.addQuestion",
+          "when": "view == calkit-sidebar && viewItem == section-questions",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.deleteQuestion",
+          "when": "view == calkit-sidebar && viewItem == question",
+          "group": "inline"
+        },
         {
           "command": "calkit-vscode.createCalkitEnvironment",
           "when": "view == calkit-sidebar && viewItem == section-envs",
@@ -636,6 +680,22 @@
           "when": "false"
         },
         {
+          "command": "calkit-vscode.hideSection",
+          "when": "false"
+        },
+        {
+          "command": "calkit-vscode.deleteQuestion",
+          "when": "false"
+        },
+        {
+          "command": "calkit-vscode.manageSections",
+          "when": "calkit-vscode.hasProject"
+        },
+        {
+          "command": "calkit-vscode.addQuestion",
+          "when": "calkit-vscode.hasProject"
+        },
+        {
           "command": "calkit-vscode.refreshSidebar"
         }
       ]
@@ -652,6 +712,26 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically run 'calkit status' to refresh pipeline staleness when project files change. Disable this if frequent status checks interfere with Git operations like stashing or pulling; you can still refresh manually from the Calkit sidebar."
+        },
+        "calkit.sidebar.hiddenSections": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "questions",
+              "envs",
+              "pipeline",
+              "notebooks",
+              "figures",
+              "datasets",
+              "publications",
+              "presentations",
+              "results"
+            ]
+          },
+          "default": [],
+          "scope": "resource",
+          "description": "Calkit sidebar sections to hide. Manage these via the sidebar's 'Manage sections' action or by right-clicking a section header."
         }
       }
     }

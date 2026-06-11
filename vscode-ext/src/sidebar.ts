@@ -2,21 +2,46 @@ import * as vscode from "vscode";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import type {
+  ArtifactEntry,
   CalkitInfo,
-  DatasetEntry,
   DvcYaml,
   EnvDescription,
-  FigureEntry,
   NotebookEntry,
   PipelineStage,
 } from "./types";
 import { getExecutedNotebookHtmlPath } from "./notebooks";
+
+// Singular node kinds and the matching calkit.yaml collection keys for the
+// artifact-style sections (figures, datasets, results, publications,
+// presentations), which share the same item machinery.
+type ArtifactKind =
+  | "figure"
+  | "dataset"
+  | "result"
+  | "publication"
+  | "presentation";
+type ArtifactCollection =
+  | "figures"
+  | "datasets"
+  | "results"
+  | "publications"
+  | "presentations";
 
 function outputEntryPath(
   output: string | { path: string; [key: string]: unknown },
 ): string {
   return typeof output === "string" ? output : output.path;
 }
+
+// Base codicon for each artifact kind (used when the artifact has provenance and
+// isn't stale; imported artifacts use a cloud icon instead).
+const ARTIFACT_ICONS: Record<ArtifactKind, string> = {
+  figure: "file-media",
+  dataset: "database",
+  result: "graph",
+  publication: "book",
+  presentation: "device-desktop",
+};
 
 export class SidebarItem extends vscode.TreeItem {
   constructor(
@@ -46,9 +71,16 @@ export class CalkitSidebarProvider
   private detectedNotebooks: string[] = [];
   private detectedFigures: string[] = [];
   private detectedDatasets: string[] = [];
+  private detectedResults: string[] = [];
+  private detectedPresentations: string[] = [];
+  private hiddenSections = new Set<string>();
   private lastFingerprint: string | undefined;
 
   // Cached section items so reveal() can use getParent()
+  private readonly questionsSectionItem = this.makeSection(
+    "Questions",
+    "questions",
+  );
   private readonly envsSectionItem = this.makeSection("Environments", "envs");
   private readonly pipelineSectionItem = this.makeSection(
     "Pipeline",
@@ -63,6 +95,15 @@ export class CalkitSidebarProvider
     "Datasets",
     "datasets",
   );
+  private readonly publicationsSectionItem = this.makeSection(
+    "Publications",
+    "publications",
+  );
+  private readonly presentationsSectionItem = this.makeSection(
+    "Presentations",
+    "presentations",
+  );
+  private readonly resultsSectionItem = this.makeSection("Results", "results");
   private stageItemCache = new Map<string, SidebarItem>();
   private envItemCache = new Map<string, SidebarItem>();
 
@@ -76,6 +117,9 @@ export class CalkitSidebarProvider
     detectedFigures?: string[],
     detectedDatasets?: string[],
     runningStageNames?: Set<string>,
+    detectedResults?: string[],
+    detectedPresentations?: string[],
+    hiddenSections?: Set<string>,
   ): void {
     const nextFingerprint = JSON.stringify([
       calkitConfig,
@@ -86,6 +130,9 @@ export class CalkitSidebarProvider
       detectedFigures,
       detectedDatasets,
       [...(runningStageNames ?? [])].sort(),
+      detectedResults,
+      detectedPresentations,
+      [...(hiddenSections ?? [])].sort(),
     ]);
     if (nextFingerprint === this.lastFingerprint) {
       return;
@@ -100,6 +147,9 @@ export class CalkitSidebarProvider
     this.detectedNotebooks = detectedNotebooks ?? [];
     this.detectedFigures = detectedFigures ?? [];
     this.detectedDatasets = detectedDatasets ?? [];
+    this.detectedResults = detectedResults ?? [];
+    this.detectedPresentations = detectedPresentations ?? [];
+    this.hiddenSections = hiddenSections ?? new Set();
     this.stageItemCache.clear();
     this.envItemCache.clear();
     this._onDidChangeTreeData.fire();
@@ -202,15 +252,26 @@ export class CalkitSidebarProvider
       if (this.calkitConfig === undefined) {
         return [];
       }
+      // Full ordered list; users hide sections they don't want via the
+      // calkit.sidebar.hiddenSections setting (the section id is the suffix
+      // after "section-").
       return [
+        this.questionsSectionItem,
         this.envsSectionItem,
         this.pipelineSectionItem,
         this.notebooksSectionItem,
         this.figuresSectionItem,
         this.datasetsSectionItem,
-      ];
+        this.publicationsSectionItem,
+        this.presentationsSectionItem,
+        this.resultsSectionItem,
+      ].filter(
+        (s) => !this.hiddenSections.has(s.nodeKind.replace(/^section-/, "")),
+      );
     }
     switch (element.nodeKind) {
+      case "section-questions":
+        return this.getQuestionItems();
       case "section-envs":
         return this.getEnvItems();
       case "section-pipeline":
@@ -221,6 +282,12 @@ export class CalkitSidebarProvider
         return this.getArtifactItems("figures");
       case "section-datasets":
         return this.getArtifactItems("datasets");
+      case "section-publications":
+        return this.getArtifactItems("publications");
+      case "section-presentations":
+        return this.getArtifactItems("presentations");
+      case "section-results":
+        return this.getArtifactItems("results");
       case "env":
         return this.getEnvProps(element.nodeId ?? "");
       case "stage":
@@ -229,13 +296,42 @@ export class CalkitSidebarProvider
         return this.getNotebookProps(element.nodeId ?? "");
       case "figure":
       case "dataset":
+      case "result":
+      case "publication":
+      case "presentation":
         return this.getArtifactProps(
           element.nodeId ?? "",
-          element.nodeKind as "figure" | "dataset",
+          element.nodeKind as ArtifactKind,
         );
       default:
         return [];
     }
+  }
+
+  private getQuestionItems(): SidebarItem[] {
+    const questions = this.calkitConfig?.questions ?? [];
+    if (questions.length === 0) {
+      return [
+        new SidebarItem(
+          "No questions defined",
+          vscode.TreeItemCollapsibleState.None,
+          "empty",
+        ),
+      ];
+    }
+    return questions.map((text, i) => {
+      // nodeId carries the 1-based index used by `calkit rm question <index>`.
+      const item = new SidebarItem(
+        text,
+        vscode.TreeItemCollapsibleState.None,
+        "question",
+        String(i + 1),
+      );
+      item.iconPath = new vscode.ThemeIcon("question");
+      item.tooltip = text;
+      item.contextValue = "question";
+      return item;
+    });
   }
 
   private makeSection(label: string, id: string): SidebarItem {
@@ -560,15 +656,27 @@ export class CalkitSidebarProvider
     return map;
   }
 
+  private detectedForCollection(kind: ArtifactCollection): string[] {
+    switch (kind) {
+      case "figures":
+        return this.detectedFigures;
+      case "datasets":
+        return this.detectedDatasets;
+      case "results":
+        return this.detectedResults;
+      case "presentations":
+        return this.detectedPresentations;
+      case "publications":
+        return []; // publications are declared-only
+    }
+  }
+
   private resolveArtifactEntry(
     artifactPath: string,
-    kind: "figure" | "dataset",
+    kind: ArtifactKind,
     outputToStage: Map<string, string>,
-  ): FigureEntry | DatasetEntry {
-    const list =
-      kind === "figure"
-        ? this.calkitConfig?.figures ?? []
-        : this.calkitConfig?.datasets ?? [];
+  ): ArtifactEntry {
+    const list = (this.calkitConfig?.[`${kind}s`] ?? []) as ArtifactEntry[];
     const fromList = list.find((e) => e.path === artifactPath);
     if (fromList?.stage || fromList?.imported_from) {
       return fromList;
@@ -582,16 +690,13 @@ export class CalkitSidebarProvider
 
   // Registered artifact paths for a kind plus any newly detected ones. Detected
   // paths are already filtered at the detection source (submodules, files
-  // inside registered figure/dataset/output folders, and folder collapsing), so
-  // here we only need to drop exact duplicates of the registered entries.
-  mergedArtifactPaths(kind: "figures" | "datasets"): string[] {
-    const list: (FigureEntry | DatasetEntry)[] =
-      this.calkitConfig?.[kind] ?? [];
+  // inside registered artifact/output folders, and folder collapsing), so here
+  // we only need to drop exact duplicates of the registered entries.
+  mergedArtifactPaths(kind: ArtifactCollection): string[] {
+    const list = (this.calkitConfig?.[kind] ?? []) as ArtifactEntry[];
     const knownPaths = new Set(list.map((e) => e.path));
-    const detected =
-      kind === "figures" ? this.detectedFigures : this.detectedDatasets;
     const allPaths = [...knownPaths];
-    for (const p of detected) {
+    for (const p of this.detectedForCollection(kind)) {
       if (!knownPaths.has(p)) {
         allPaths.push(p);
       }
@@ -599,13 +704,13 @@ export class CalkitSidebarProvider
     return allPaths;
   }
 
-  private getArtifactItems(kind: "figures" | "datasets"): SidebarItem[] {
-    const nodeKind = kind === "figures" ? "figure" : "dataset";
+  private getArtifactItems(kind: ArtifactCollection): SidebarItem[] {
+    const nodeKind = kind.slice(0, -1) as ArtifactKind;
     const allPaths = this.mergedArtifactPaths(kind);
     if (allPaths.length === 0) {
       return [
         new SidebarItem(
-          kind === "figures" ? "No figures found" : "No datasets found",
+          `No ${kind} found`,
           vscode.TreeItemCollapsibleState.None,
           "empty",
         ),
@@ -621,8 +726,8 @@ export class CalkitSidebarProvider
   }
 
   private makeArtifactItem(
-    entry: FigureEntry | DatasetEntry,
-    nodeKind: "figure" | "dataset",
+    entry: ArtifactEntry,
+    nodeKind: ArtifactKind,
   ): SidebarItem {
     const label = path.basename(entry.path);
     const hasProvenance = !!entry.stage || !!entry.imported_from;
@@ -650,13 +755,7 @@ export class CalkitSidebarProvider
     } else {
       const isImported = !!entry.imported_from;
       item.iconPath = new vscode.ThemeIcon(
-        nodeKind === "figure"
-          ? isImported
-            ? "cloud-download"
-            : "file-media"
-          : isImported
-          ? "cloud-download"
-          : "database",
+        isImported ? "cloud-download" : ARTIFACT_ICONS[nodeKind],
         new vscode.ThemeColor("testing.iconPassed"),
       );
       item.tooltip = entry.stage
@@ -664,7 +763,7 @@ export class CalkitSidebarProvider
         : `${entry.path} — imported`;
       item.contextValue = nodeKind;
     }
-    // Clicking a figure always opens the carousel; clicking a dataset opens the file
+    // Clicking a figure opens the carousel; everything else opens the file.
     if (this.workspaceRoot) {
       if (nodeKind === "figure") {
         item.command = {
@@ -686,7 +785,7 @@ export class CalkitSidebarProvider
 
   private getArtifactProps(
     artifactPath: string,
-    nodeKind: "figure" | "dataset",
+    nodeKind: ArtifactKind,
   ): SidebarItem[] {
     const entry = this.resolveArtifactEntry(
       artifactPath,

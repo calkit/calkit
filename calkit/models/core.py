@@ -41,11 +41,18 @@ class Figure(_CalkitObject):
     pass
 
 
+class Result(_CalkitObject):
+    pass
+
+
+class Presentation(_CalkitObject):
+    pass
+
+
 class Publication(_CalkitObject):
     kind: Literal[
         "journal-article",
         "conference-paper",
-        "presentation",
         "proposal",
         "poster",
         "report",
@@ -84,7 +91,9 @@ class Environment(BaseModel):
         "uv-venv",
         "renv",
     ]
-    path: str | None = None
+    path: str | None = (
+        None  # TODO: Remove? Envs that need paths have type errors if forced
+    )
     description: str | None = None
     stage: str | None = None
     default: bool | None = None
@@ -289,6 +298,32 @@ class ProjectStatus(BaseModel):
     message: str | None = None
 
 
+class FigureEvidence(BaseModel):
+    """Evidence to back up the answer to a question."""
+
+    kind: Literal["figure"] = "figure"
+    path: str
+    explanation: str | None = None
+
+
+class ResultsEvidence(BaseModel):
+    """Evidence in the form of a result."""
+
+    kind: Literal["result"] = "result"
+    path: str
+    key: str | None = None
+    explanation: str | None = None
+
+
+class Question(BaseModel):
+    """A question the project hopes to answer."""
+
+    question: str
+    hypothesis: str | None = None
+    answer: str | None = None
+    evidence: list[FigureEvidence | ResultsEvidence] | None = None
+
+
 class Dependency(BaseModel):
     """A system-level dependency.
 
@@ -348,14 +383,16 @@ class ProjectInfo(BaseModel):
     name: str | None = None
     git_repo_url: str | None = None
     derived_from: DerivedFromProject | None = None
-    questions: list[str] = []
+    questions: list[str | Question] = []
     dependencies: list[str | dict[str, str] | Dependency] = []
     parameters: ParametersType | None = None
     metrics: dict[str, Metric] | None = None
     pipeline: Pipeline | None = None
     datasets: list[Dataset] = []
     figures: list[Figure] = []
+    results: list[Result] = []
     publications: list[Publication] = []
+    presentations: list[Presentation] = []
     references: list[ReferenceCollection] = []
     environments: dict[
         str,

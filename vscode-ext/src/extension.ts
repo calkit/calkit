@@ -69,6 +69,24 @@ const COMMAND_GO_TO_FIGURE_SOURCE = "calkit-vscode.goToFigureSource";
 const COMMAND_SAVE = "calkit-vscode.save";
 const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
 const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
+const COMMAND_HIDE_SECTION = "calkit-vscode.hideSection";
+const COMMAND_MANAGE_SECTIONS = "calkit-vscode.manageSections";
+const COMMAND_ADD_QUESTION = "calkit-vscode.addQuestion";
+const COMMAND_DELETE_QUESTION = "calkit-vscode.deleteQuestion";
+
+// All sidebar sections in display order, for the "Manage sections" picker. The
+// id is the suffix after "section-" used in calkit.sidebar.hiddenSections.
+const SIDEBAR_SECTIONS: { id: string; label: string }[] = [
+  { id: "questions", label: "Questions" },
+  { id: "envs", label: "Environments" },
+  { id: "pipeline", label: "Pipeline" },
+  { id: "notebooks", label: "Notebooks" },
+  { id: "figures", label: "Figures" },
+  { id: "datasets", label: "Datasets" },
+  { id: "publications", label: "Publications" },
+  { id: "presentations", label: "Presentations" },
+  { id: "results", label: "Results" },
+];
 const FIGURE_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -131,6 +149,8 @@ let currentEnvDescriptions: Record<string, EnvDescription> | undefined;
 let currentDetectedNotebooks: string[] = [];
 let currentDetectedFigures: string[] = [];
 let currentDetectedDatasets: string[] = [];
+let currentDetectedResults: string[] = [];
+let currentDetectedPresentations: string[] = [];
 let sidebarProvider: CalkitSidebarProvider | undefined;
 let sidebarTreeView:
   | vscode.TreeView<import("./sidebar").SidebarItem>
@@ -584,6 +604,123 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
+  // Hide a sidebar section (right-click a section header). Persists in the
+  // per-project calkit.sidebar.hiddenSections workspace setting.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_HIDE_SECTION,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const sectionId = item?.nodeKind?.replace(/^section-/, "");
+        if (!sectionId) {
+          return;
+        }
+        const hidden = getHiddenSections();
+        hidden.add(sectionId);
+        await vscode.workspace
+          .getConfiguration("calkit")
+          .update(
+            "sidebar.hiddenSections",
+            [...hidden],
+            vscode.ConfigurationTarget.Workspace,
+          );
+      },
+    ),
+  );
+
+  // Choose which sidebar sections are visible.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_MANAGE_SECTIONS, async () => {
+      const hidden = getHiddenSections();
+      const picks = await vscode.window.showQuickPick(
+        SIDEBAR_SECTIONS.map((s) => ({
+          label: s.label,
+          id: s.id,
+          picked: !hidden.has(s.id),
+        })),
+        {
+          canPickMany: true,
+          title: "Calkit: visible sidebar sections",
+          placeHolder: "Checked sections are shown",
+        },
+      );
+      if (picks === undefined) {
+        return; // cancelled
+      }
+      const visible = new Set(picks.map((p) => p.id));
+      const nextHidden = SIDEBAR_SECTIONS.filter((s) => !visible.has(s.id)).map(
+        (s) => s.id,
+      );
+      await vscode.workspace
+        .getConfiguration("calkit")
+        .update(
+          "sidebar.hiddenSections",
+          nextHidden,
+          vscode.ConfigurationTarget.Workspace,
+        );
+    }),
+  );
+
+  // Add a project question (writes to calkit.yaml via the CLI).
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_ADD_QUESTION, async () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      const question = await vscode.window.showInputBox({
+        title: "Calkit: Add Question",
+        prompt: "A question this project aims to answer",
+        placeHolder: "e.g. Does wind farm control increase AEP?",
+        ignoreFocusOut: true,
+      });
+      if (question === undefined || !question.trim()) {
+        return;
+      }
+      try {
+        await execFileAsync("calkit", ["new", "question", question.trim()], {
+          cwd: workspaceRoot,
+        });
+      } catch (error) {
+        const err = error as { stderr?: string; message?: string };
+        void vscode.window.showErrorMessage(
+          `Could not add question: ${(err.stderr || err.message || "").trim()}`,
+        );
+        return;
+      }
+      void refreshPipelineOutputContext(context);
+    }),
+  );
+
+  // Remove a project question by its 1-based index (its nodeId).
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_DELETE_QUESTION,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const workspaceRoot = getWorkspaceRoot();
+        const index = item?.nodeId;
+        if (!workspaceRoot || !index) {
+          return;
+        }
+        try {
+          await execFileAsync("calkit", ["rm", "question", index], {
+            cwd: workspaceRoot,
+          });
+        } catch (error) {
+          const err = error as { stderr?: string; message?: string };
+          void vscode.window.showErrorMessage(
+            `Could not remove question: ${(
+              err.stderr ||
+              err.message ||
+              ""
+            ).trim()}`,
+          );
+          return;
+        }
+        void refreshPipelineOutputContext(context);
+      },
+    ),
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_SHOW_DAG, () => {
       const workspaceRoot = getWorkspaceRoot();
@@ -1021,6 +1158,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if (e.affectsConfiguration("calkit.autoRefreshStatus")) {
         updateAutoRefreshContext();
       }
+      if (e.affectsConfiguration("calkit.sidebar.hiddenSections")) {
+        renderSidebarFromState();
+      }
     }),
   );
 
@@ -1456,7 +1596,7 @@ async function getSubmodulePaths(workspaceRoot: string): Promise<string[]> {
 // already come from calkit.yaml.
 async function listDetectedArtifacts(
   workspaceRoot: string,
-  kind: "figures" | "datasets",
+  kind: "figures" | "datasets" | "results" | "presentations",
 ): Promise<string[]> {
   try {
     const { stdout } = await execFileAsync("calkit", ["list", kind, "--json"], {
@@ -1488,18 +1628,28 @@ async function scanDetectedFiles(
     currentDetectedNotebooks = [];
     currentDetectedFigures = [];
     currentDetectedDatasets = [];
+    currentDetectedResults = [];
+    currentDetectedPresentations = [];
     return;
   }
-  const [notebookUris, submodulePaths, detectedFigures, detectedDatasets] =
-    await Promise.all([
-      vscode.workspace.findFiles(
-        `**/*${NOTEBOOK_EXTENSION}`,
-        DETECTED_FILES_EXCLUDE,
-      ),
-      getSubmodulePaths(workspaceRoot),
-      listDetectedArtifacts(workspaceRoot, "figures"),
-      listDetectedArtifacts(workspaceRoot, "datasets"),
-    ]);
+  const [
+    notebookUris,
+    submodulePaths,
+    detectedFigures,
+    detectedDatasets,
+    detectedResults,
+    detectedPresentations,
+  ] = await Promise.all([
+    vscode.workspace.findFiles(
+      `**/*${NOTEBOOK_EXTENSION}`,
+      DETECTED_FILES_EXCLUDE,
+    ),
+    getSubmodulePaths(workspaceRoot),
+    listDetectedArtifacts(workspaceRoot, "figures"),
+    listDetectedArtifacts(workspaceRoot, "datasets"),
+    listDetectedArtifacts(workspaceRoot, "results"),
+    listDetectedArtifacts(workspaceRoot, "presentations"),
+  ]);
   const toRel = (u: vscode.Uri): string =>
     path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/");
   currentDetectedNotebooks = notebookUris
@@ -1508,6 +1658,8 @@ async function scanDetectedFiles(
     .sort();
   currentDetectedFigures = detectedFigures;
   currentDetectedDatasets = detectedDatasets;
+  currentDetectedResults = detectedResults;
+  currentDetectedPresentations = detectedPresentations;
 }
 
 function scheduleRefreshPipelineOutputContext(
@@ -1624,8 +1776,18 @@ async function refreshPipelineOutputContext(
   }
 }
 
+// Section ids the user has chosen to hide (calkit.sidebar.hiddenSections,
+// stored per-project in .vscode/settings.json).
+function getHiddenSections(): Set<string> {
+  return new Set(
+    vscode.workspace
+      .getConfiguration("calkit")
+      .get<string[]>("sidebar.hiddenSections", []),
+  );
+}
+
 // Re-render the sidebar from the current cached pipeline state (config, stale
-// stages, running stages, detected files).
+// stages, running stages, detected files, hidden sections).
 function renderSidebarFromState(): void {
   const workspaceRoot = getWorkspaceRoot();
   if (!workspaceRoot) {
@@ -1641,6 +1803,9 @@ function renderSidebarFromState(): void {
     currentDetectedFigures,
     currentDetectedDatasets,
     runningStageNames,
+    currentDetectedResults,
+    currentDetectedPresentations,
+    getHiddenSections(),
   );
   updateSidebarBadge();
 }

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import time
 from enum import Enum
+from typing import Literal
 
 import typer
 from typing_extensions import Annotated
@@ -589,6 +590,102 @@ def new_figure(
             repo.git.add("dvc.yaml")
         if repo.git.diff("--staged"):
             repo.git.commit(["-m", f"Add figure {path}"])
+
+
+def _new_simple_artifact(
+    kind: Literal["results", "presentations"],
+    path: str,
+    title: str,
+    description: str | None,
+    stage_name: str | None,
+    no_commit: bool,
+    overwrite: bool,
+) -> None:
+    """Declare a simple artifact (path/title/description/stage) in calkit.yaml."""
+    singular = kind.rstrip("s")
+    ck_info = calkit.load_calkit_info()
+    objects = ck_info.get(kind, [])
+    paths = [o.get("path") for o in objects]
+    if not overwrite and path in paths:
+        raise_error(f"{singular.capitalize()} at path {path} already exists")
+    if overwrite and path in paths:
+        objects = [o for o in objects if o.get("path") != path]
+    obj = dict(path=path, title=title)
+    if description is not None:
+        obj["description"] = description
+    if stage_name is not None:
+        obj["stage"] = stage_name
+    objects.append(obj)
+    ck_info[kind] = objects
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    if not no_commit:
+        repo = calkit.git.get_repo()
+        repo.git.add("calkit.yaml")
+        if repo.git.diff("--staged"):
+            repo.git.commit(["-m", f"Add {singular} {path}"])
+
+
+@new_app.command(name="result")
+def new_result(
+    path: str,
+    title: Annotated[str, typer.Option("--title")],
+    description: Annotated[str | None, typer.Option("--description")] = None,
+    stage_name: Annotated[
+        str | None,
+        typer.Option(
+            "--stage",
+            help="Name of the pipeline stage that generates this result.",
+        ),
+    ] = None,
+    no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite existing result if one exists.",
+        ),
+    ] = False,
+):
+    """Declare a new result."""
+    _new_simple_artifact(
+        "results", path, title, description, stage_name, no_commit, overwrite
+    )
+
+
+@new_app.command(name="presentation|pres")
+def new_presentation(
+    path: str,
+    title: Annotated[str, typer.Option("--title")],
+    description: Annotated[str | None, typer.Option("--description")] = None,
+    stage_name: Annotated[
+        str | None,
+        typer.Option(
+            "--stage",
+            help="Name of the pipeline stage that generates this presentation.",
+        ),
+    ] = None,
+    no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Overwrite existing presentation if one exists.",
+        ),
+    ] = False,
+):
+    """Declare a new presentation."""
+    _new_simple_artifact(
+        "presentations",
+        path,
+        title,
+        description,
+        stage_name,
+        no_commit,
+        overwrite,
+    )
 
 
 @new_app.command("question")

@@ -134,6 +134,54 @@ def test_new_figure(tmp_dir):
     assert pipeline["stages"]["create-figure3"]["deps"] == ["myfigure2.png"]
 
 
+def test_new_result(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "result",
+            "results/metrics.json",
+            "--title",
+            "Key metrics",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert "results/metrics.json" in [r["path"] for r in ck_info["results"]]
+    # Won't overwrite without -f
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(
+            [
+                "calkit",
+                "new",
+                "result",
+                "results/metrics.json",
+                "--title",
+                "Key metrics",
+            ]
+        )
+
+
+def test_new_presentation(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "presentation",
+            "slides/talk.pdf",
+            "--title",
+            "Kickoff",
+            "--stage",
+            "build-slides",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    pres = ck_info["presentations"]
+    assert pres[0]["path"] == "slides/talk.pdf"
+    assert pres[0]["stage"] == "build-slides"
+
+
 def test_new_publication(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(

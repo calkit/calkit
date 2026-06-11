@@ -1837,6 +1837,31 @@ DATASET_EXTENSIONS = {
     ".ndjson",
 }
 DATA_DIRS = {"data", "datasets", "dataset"}
+RESULT_DIRS = {"results", "result"}
+RESULT_EXTENSIONS = {
+    ".json",
+    ".csv",
+    ".tsv",
+    ".yaml",
+    ".yml",
+    ".parquet",
+    ".h5",
+    ".hdf5",
+    ".txt",
+    ".html",
+}
+PRESENTATION_DIRS = {"presentations", "presentation", "slides", "talks"}
+PRESENTATION_EXTENSIONS = {".pdf", ".pptx", ".key"}
+# Files that look like a presentation regardless of which directory they live in.
+PRESENTATION_NAMES = {
+    "slides.pdf",
+    "slides.pptx",
+    "slides.key",
+    "presentation.pdf",
+    "presentation.pptx",
+    "presentation.key",
+    "talk.pdf",
+}
 
 
 def _ancestor_dir_names(rel_path: str) -> set[str]:
@@ -1868,6 +1893,37 @@ def is_dataset_path(rel_path: str) -> bool:
         _path_ext(rel_path) in DATASET_EXTENSIONS
         and bool(_ancestor_dir_names(rel_path) & DATA_DIRS)
         and not is_figure_path(rel_path)
+    )
+
+
+def is_result_path(rel_path: str) -> bool:
+    """Whether a repo-relative path looks like an auto-detectable result.
+
+    A result is a data-like file (JSON, CSV, etc.) under a ``results``-style
+    directory. Anything already detected as a figure or dataset is excluded.
+    """
+    return (
+        _path_ext(rel_path) in RESULT_EXTENSIONS
+        and bool(_ancestor_dir_names(rel_path) & RESULT_DIRS)
+        and not is_figure_path(rel_path)
+        and not is_dataset_path(rel_path)
+    )
+
+
+def is_presentation_path(rel_path: str) -> bool:
+    """Whether a repo-relative path looks like an auto-detectable presentation.
+
+    Either a slide-deck file (PDF/PPTX/KEY) under a ``slides``/``presentations``
+    directory, or a file with a presentation-like name (e.g. ``slides.pdf``,
+    ``presentation.pdf``) anywhere. Figures are excluded.
+    """
+    if is_figure_path(rel_path):
+        return False
+    name = rel_path.rsplit("/", 1)[-1].lower()
+    if name in PRESENTATION_NAMES:
+        return True
+    return _path_ext(rel_path) in PRESENTATION_EXTENSIONS and bool(
+        _ancestor_dir_names(rel_path) & PRESENTATION_DIRS
     )
 
 
@@ -1949,6 +2005,44 @@ def detect_datasets(
     return _collapse_dataset_folders(sorted(files))
 
 
+def detect_results(
+    candidate_paths: list[str],
+    reserved_paths: list[str] | tuple[str, ...] = (),
+) -> list[str]:
+    """Auto-detected result paths among ``candidate_paths``.
+
+    Paths under a dot-directory or under one of ``reserved_paths`` (declared
+    artifacts) are skipped.
+    """
+    reserved = list(reserved_paths)
+    return sorted(
+        {
+            p
+            for p in candidate_paths
+            if not _is_hidden_path(p)
+            and not _is_under_any_dir(p, reserved)
+            and is_result_path(p)
+        }
+    )
+
+
+def detect_presentations(
+    candidate_paths: list[str],
+    reserved_paths: list[str] | tuple[str, ...] = (),
+) -> list[str]:
+    """Auto-detected presentation paths among ``candidate_paths``."""
+    reserved = list(reserved_paths)
+    return sorted(
+        {
+            p
+            for p in candidate_paths
+            if not _is_hidden_path(p)
+            and not _is_under_any_dir(p, reserved)
+            and is_presentation_path(p)
+        }
+    )
+
+
 def list_repo_files(wdir: str | None = None) -> list[str]:
     """Repo-relative paths of files Git does not ignore.
 
@@ -2014,7 +2108,7 @@ def _reserved_artifact_paths(
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
     paths: list[str] = []
-    for kind in ("figures", "datasets"):
+    for kind in ("figures", "datasets", "results", "presentations"):
         for obj in ck_info.get(kind, []) or []:
             if isinstance(obj, dict) and isinstance(obj.get("path"), str):
                 paths.append(obj["path"])
@@ -2044,4 +2138,11 @@ def detect_project_artifacts(
     datasets = detect_datasets(
         candidates, reserved_paths=reserved, figure_paths=figures
     )
-    return {"figures": figures, "datasets": datasets}
+    results = detect_results(candidates, reserved_paths=reserved)
+    presentations = detect_presentations(candidates, reserved_paths=reserved)
+    return {
+        "figures": figures,
+        "datasets": datasets,
+        "results": results,
+        "presentations": presentations,
+    }

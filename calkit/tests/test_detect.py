@@ -1149,3 +1149,70 @@ def test_detect_datasets():
     # data/sub holds two files, so it collapses to the folder; data/a.csv has
     # only one file in its folder, so it stays a file.
     assert out == ["data/a.csv", "data/sub"]
+
+
+def test_is_result_path():
+    """Results are data-like files under a results-named directory."""
+    from calkit.detect import is_result_path
+
+    assert is_result_path("results/metrics.json")
+    assert is_result_path("results/summary.csv")
+    assert is_result_path("project/result/table.html")
+    # Wrong directory.
+    assert not is_result_path("metrics.json")
+    assert not is_result_path("data/raw.csv")
+    # A figure under results is not a result.
+    assert not is_result_path("results/plot.png")
+
+
+def test_is_presentation_path():
+    """Presentations are slide decks by directory or by name."""
+    from calkit.detect import is_presentation_path
+
+    assert is_presentation_path("slides/deck.pdf")
+    assert is_presentation_path("presentations/kickoff.pptx")
+    # Presentation-like name anywhere.
+    assert is_presentation_path("slides.pdf")
+    assert is_presentation_path("docs/presentation.pdf")
+    # A PDF that isn't a slide deck and isn't in a presentation dir.
+    assert not is_presentation_path("paper/manuscript.pdf")
+    # A figure PDF is not a presentation.
+    assert not is_presentation_path("figures/plot.pdf")
+
+
+def test_detect_results_and_presentations():
+    """detect_results/detect_presentations filter hidden and reserved paths."""
+    from calkit.detect import detect_presentations, detect_results
+
+    results = detect_results(
+        [
+            "results/a.json",
+            "results/b.csv",
+            "data/c.csv",
+            ".cache/results/d.json",
+        ],
+        reserved_paths=["results/b.csv"],
+    )
+    assert results == ["results/a.json"]
+    presentations = detect_presentations(
+        ["slides/x.pdf", "presentation.pdf", "figures/p.pdf"]
+    )
+    assert presentations == ["presentation.pdf", "slides/x.pdf"]
+
+
+def test_detect_project_artifacts_includes_results_and_presentations(tmp_dir):
+    """detect_project_artifacts reports the new kinds for a real repo."""
+    import subprocess
+
+    import calkit.detect
+
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("results")
+    os.makedirs("slides")
+    with open("results/metrics.json", "w") as f:
+        f.write("{}")
+    with open("slides/deck.pdf", "w") as f:
+        f.write("%PDF-1.4")
+    out = calkit.detect.detect_project_artifacts(ck_info={})
+    assert "results/metrics.json" in out["results"]
+    assert "slides/deck.pdf" in out["presentations"]

@@ -37,6 +37,7 @@
 | [`xr`](#top-command-xr)                          | Execute a command and if successful, record in the pipeline.                                                 |
 | [`config`](#command-group-config)                | Configure Calkit.                                                                                            |
 | [`new\|create`](#command-group-new-create)       | Create a new Calkit object.                                                                                  |
+| [`delete\|rm`](#command-group-delete-rm)         | Delete a Calkit object.                                                                                      |
 | [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with Jupyter notebooks.                                                                                 |
 | [`list\|ls`](#command-group-list-ls)             | List Calkit objects.                                                                                         |
 | [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
@@ -814,6 +815,8 @@ Create a new Calkit object.
 | ------------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | [`project`](#subcommand-new-create-project)                               | Create a new project.                                                 |
 | [`figure\|fig`](#subcommand-new-create-figure-fig)                        | Create a new figure.                                                  |
+| [`result`](#subcommand-new-create-result)                                 | Declare a new result.                                                 |
+| [`presentation\|pres`](#subcommand-new-create-presentation-pres)          | Declare a new presentation.                                           |
 | [`question`](#subcommand-new-create-question)                             | Add a new question.                                                   |
 | [`notebook\|nb`](#subcommand-new-create-notebook-nb)                      | Add a new notebook.                                                   |
 | [`docker-env`](#subcommand-new-create-docker-env)                         | Create a new Docker environment.                                      |
@@ -902,6 +905,62 @@ Options:
 | `--deps-from-stage-outs` | text    | no       |         | Stage name from which to add outputs as dependencies.          |
 | `--no-commit`            | boolean | no       | False   |                                                                |
 | `--overwrite`, `-f`      | boolean | no       | False   | Overwrite existing figure if one exists.                       |
+
+<a id="subcommand-new-create-result"></a>
+
+#### `calkit new|create result`
+
+Declare a new result.
+
+Usage:
+
+```text
+calkit new|create result [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `path`   | text | yes      |         |             |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                            |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------ |
+| `--title`           | text    | yes      |         |                                                        |
+| `--description`     | text    | no       |         |                                                        |
+| `--stage`           | text    | no       |         | Name of the pipeline stage that generates this result. |
+| `--no-commit`       | boolean | no       | False   |                                                        |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite existing result if one exists.               |
+
+<a id="subcommand-new-create-presentation-pres"></a>
+
+#### `calkit new|create presentation|pres`
+
+Declare a new presentation.
+
+Usage:
+
+```text
+calkit new|create presentation|pres [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `path`   | text | yes      |         |             |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                                  |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------------ |
+| `--title`           | text    | yes      |         |                                                              |
+| `--description`     | text    | no       |         |                                                              |
+| `--stage`           | text    | no       |         | Name of the pipeline stage that generates this presentation. |
+| `--no-commit`       | boolean | no       | False   |                                                              |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite existing presentation if one exists.               |
 
 <a id="subcommand-new-create-question"></a>
 
@@ -1590,6 +1649,34 @@ Options:
 | `--license`               | text    | no       |         | License ID (from https://spdx.org/licenses). Multiple can be specified. Will try to infer from LICENSE file, if present.   |
 | `--verbose`, `-v`         | boolean | no       | False   | Print verbose output.                                                                                                      |
 
+<a id="command-group-delete-rm"></a>
+
+### `calkit delete|rm`
+
+Delete a Calkit object.
+
+| Command                                      | Description                             |
+| -------------------------------------------- | --------------------------------------- |
+| [`question`](#subcommand-delete-rm-question) | Remove a question by its 1-based index. |
+
+<a id="subcommand-delete-rm-question"></a>
+
+#### `calkit delete|rm question`
+
+Remove a question by its 1-based index.
+
+Usage:
+
+```text
+calkit delete|rm question INDEX
+```
+
+Arguments:
+
+| Argument | Type    | Required | Default | Description                                                            |
+| -------- | ------- | -------- | ------- | ---------------------------------------------------------------------- |
+| `index`  | integer | yes      |         | 1-based index of the question to remove (see `calkit list questions`). |
+
 <a id="command-group-notebooks-nb"></a>
 
 ### `calkit notebooks|nb`
@@ -1710,20 +1797,23 @@ Options:
 
 List Calkit objects.
 
-| Command                                                       | Description                                   |
-| ------------------------------------------------------------- | --------------------------------------------- |
-| [`notebooks\|nb`](#subcommand-list-ls-notebooks-nb)           | List notebooks in the project.                |
-| [`figures\|figs`](#subcommand-list-ls-figures-figs)           | List figures in the project.                  |
-| [`datasets`](#subcommand-list-ls-datasets)                    | List datasets in the project.                 |
-| [`publications\|pubs`](#subcommand-list-ls-publications-pubs) | List publications in the project.             |
-| [`references\|refs`](#subcommand-list-ls-references-refs)     | List reference collections in the project.    |
-| [`environments\|envs`](#subcommand-list-ls-environments-envs) | List environments in the project.             |
-| [`templates`](#subcommand-list-ls-templates)                  | List all available Calkit templates.          |
-| [`installers`](#subcommand-list-ls-installers)                | List apps with a registered native installer. |
-| [`procedures`](#subcommand-list-ls-procedures)                | List procedures in the current project.       |
-| [`releases`](#subcommand-list-ls-releases)                    | List releases.                                |
-| [`stages`](#subcommand-list-ls-stages)                        | List pipeline stages.                         |
-| [`remotes`](#subcommand-list-ls-remotes)                      | List Git and DVC remotes.                     |
+| Command                                                         | Description                                   |
+| --------------------------------------------------------------- | --------------------------------------------- |
+| [`notebooks\|nb`](#subcommand-list-ls-notebooks-nb)             | List notebooks in the project.                |
+| [`figures\|figs`](#subcommand-list-ls-figures-figs)             | List figures in the project.                  |
+| [`datasets`](#subcommand-list-ls-datasets)                      | List datasets in the project.                 |
+| [`results`](#subcommand-list-ls-results)                        | List results in the project.                  |
+| [`presentations\|pres`](#subcommand-list-ls-presentations-pres) | List presentations in the project.            |
+| [`questions`](#subcommand-list-ls-questions)                    | List the project's questions (1-indexed).     |
+| [`publications\|pubs`](#subcommand-list-ls-publications-pubs)   | List publications in the project.             |
+| [`references\|refs`](#subcommand-list-ls-references-refs)       | List reference collections in the project.    |
+| [`environments\|envs`](#subcommand-list-ls-environments-envs)   | List environments in the project.             |
+| [`templates`](#subcommand-list-ls-templates)                    | List all available Calkit templates.          |
+| [`installers`](#subcommand-list-ls-installers)                  | List apps with a registered native installer. |
+| [`procedures`](#subcommand-list-ls-procedures)                  | List procedures in the current project.       |
+| [`releases`](#subcommand-list-ls-releases)                      | List releases.                                |
+| [`stages`](#subcommand-list-ls-stages)                          | List pipeline stages.                         |
+| [`remotes`](#subcommand-list-ls-remotes)                        | List Git and DVC remotes.                     |
 
 <a id="subcommand-list-ls-notebooks-nb"></a>
 
@@ -1774,6 +1864,62 @@ Options:
 | ----------------- | ------- | -------- | ------- | ---------------------------------------------------------------- |
 | `--json`          | boolean | no       | False   | Output result as JSON.                                           |
 | `--declared-only` | boolean | no       | False   | Only list datasets declared in calkit.yaml; skip auto-detection. |
+
+<a id="subcommand-list-ls-results"></a>
+
+#### `calkit list|ls results`
+
+List results in the project.
+
+Usage:
+
+```text
+calkit list|ls results [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                     |
+| ----------------- | ------- | -------- | ------- | --------------------------------------------------------------- |
+| `--json`          | boolean | no       | False   | Output result as JSON.                                          |
+| `--declared-only` | boolean | no       | False   | Only list results declared in calkit.yaml; skip auto-detection. |
+
+<a id="subcommand-list-ls-presentations-pres"></a>
+
+#### `calkit list|ls presentations|pres`
+
+List presentations in the project.
+
+Usage:
+
+```text
+calkit list|ls presentations|pres [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                           |
+| ----------------- | ------- | -------- | ------- | --------------------------------------------------------------------- |
+| `--json`          | boolean | no       | False   | Output result as JSON.                                                |
+| `--declared-only` | boolean | no       | False   | Only list presentations declared in calkit.yaml; skip auto-detection. |
+
+<a id="subcommand-list-ls-questions"></a>
+
+#### `calkit list|ls questions`
+
+List the project's questions (1-indexed).
+
+Usage:
+
+```text
+calkit list|ls questions [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-publications-pubs"></a>
 

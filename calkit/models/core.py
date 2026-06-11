@@ -91,9 +91,10 @@ class Environment(BaseModel):
         "uv-venv",
         "renv",
     ]
-    path: str | None = (
-        None  # TODO: Remove? Envs that need paths have type errors if forced
-    )
+    # Note: ``path`` is declared on the specific subclasses that need it (most
+    # of them, required; optional for Docker) rather than here, so subclasses
+    # without a spec file (e.g. Matlab/Slurm/PBS) don't carry an unused field
+    # and a required ``path`` doesn't conflict with the base's optional one.
     description: str | None = None
     stage: str | None = None
     default: bool | None = None
@@ -101,11 +102,13 @@ class Environment(BaseModel):
 
 class CondaEnvironment(Environment):
     kind: Literal["conda"] = "conda"
+    path: str
     prefix: str | None = None
 
 
 class VenvEnvironment(Environment):
     kind: Literal["venv"] = "venv"
+    path: str
     # If unset, the prefix is resolved on the fly (defaults to .venv next to
     # the spec file, nesting under .calkit/envs/{name}/.venv on conflict)
     prefix: str | None = None
@@ -113,10 +116,12 @@ class VenvEnvironment(Environment):
 
 class UvEnvironment(Environment):
     kind: Literal["uv"] = "uv"
+    path: str
 
 
 class UvVenvEnvironment(Environment):
     kind: Literal["uv-venv"] = "uv-venv"
+    path: str
     # If unset, the prefix is resolved on the fly (defaults to .venv next to
     # the spec file, nesting under .calkit/envs/{name}/.venv on conflict)
     prefix: str | None = None
@@ -124,6 +129,7 @@ class UvVenvEnvironment(Environment):
 
 class PixiEnvironment(Environment):
     kind: Literal["pixi"] = "pixi"
+    path: str
     name: str | None = None
 
 
@@ -139,6 +145,9 @@ class NixEnvironment(Environment):
 
 class DockerEnvironment(Environment):
     kind: Literal["docker"] = "docker"
+    # Docker environments can be defined purely by an image, so the path (to a
+    # Dockerfile) is optional.
+    path: str | None = None
     image: str
     layers: list[str] | None = None
     shell: Literal["bash", "sh"] = "sh"
@@ -148,11 +157,13 @@ class DockerEnvironment(Environment):
 
 class REnvironment(Environment):
     kind: Literal["renv"] = "renv"
+    path: str
     prefix: str
 
 
 class JuliaEnvironment(Environment):
     kind: Literal["julia"] = "julia"
+    path: str
     julia: str
 
 
@@ -398,10 +409,15 @@ class ProjectInfo(BaseModel):
         str,
         # The specific subclasses must precede the catch-all Environment so a
         # dict that validates against both (e.g. a prefix-less uv-venv, whose
-        # only fields are kind and path) resolves to the specific subclass
-        DockerEnvironment
+        # only fields are kind and path) resolves to the specific subclass.
+        # All path-bearing subclasses must be listed; otherwise such an env
+        # falls back to the catch-all Environment (which has no ``path``).
+        CondaEnvironment
+        | DockerEnvironment
         | JuliaEnvironment
         | MatlabEnvironment
+        | PixiEnvironment
+        | REnvironment
         | SlurmEnvironment
         | PBSEnvironment
         | VenvEnvironment

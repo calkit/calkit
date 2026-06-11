@@ -48,6 +48,7 @@ from calkit.cli.check import (
 )
 from calkit.cli.cloud import cloud_app
 from calkit.cli.config import config_app
+from calkit.cli.delete import delete_app
 from calkit.cli.describe import describe_app
 from calkit.cli.dev import dev_app
 from calkit.cli.import_ import import_app
@@ -69,6 +70,7 @@ app = typer.Typer(
 )
 app.add_typer(config_app, name="config", help="Configure Calkit.")
 app.add_typer(new_app, name="new|create", help="Create a new Calkit object.")
+app.add_typer(delete_app, name="delete|rm", help="Delete a Calkit object.")
 app.add_typer(
     notebooks_app, name="notebooks|nb", help="Work with Jupyter notebooks."
 )

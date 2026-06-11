@@ -26,6 +26,10 @@ import {
 } from "./notebooks";
 import type { CalkitInfo, DvcYaml, EnvDescription } from "./types";
 import { CalkitSidebarProvider } from "./sidebar";
+import {
+  extractMarkdownImageRefs,
+  resolveImageRefToRepoRelative,
+} from "./figures";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
 const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
@@ -60,6 +64,29 @@ const COMMAND_PREVIEW_PLOTLY = "calkit-vscode.previewPlotlyFigure";
 const COMMAND_PREVIEW_PLOTLY_TO_SIDE =
   "calkit-vscode.previewPlotlyFigureToSide";
 const COMMAND_OPEN_PLOTLY_SOURCE = "calkit-vscode.openPlotlyAsSource";
+const COMMAND_OPEN_STAGE_PDF = "calkit-vscode.openStagePdf";
+const COMMAND_GO_TO_FIGURE_SOURCE = "calkit-vscode.goToFigureSource";
+const COMMAND_SAVE = "calkit-vscode.save";
+const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
+const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
+const COMMAND_HIDE_SECTION = "calkit-vscode.hideSection";
+const COMMAND_MANAGE_SECTIONS = "calkit-vscode.manageSections";
+const COMMAND_ADD_QUESTION = "calkit-vscode.addQuestion";
+const COMMAND_DELETE_QUESTION = "calkit-vscode.deleteQuestion";
+
+// All sidebar sections in display order, for the "Manage sections" picker. The
+// id is the suffix after "section-" used in calkit.sidebar.hiddenSections.
+const SIDEBAR_SECTIONS: { id: string; label: string }[] = [
+  { id: "questions", label: "Questions" },
+  { id: "envs", label: "Environments" },
+  { id: "pipeline", label: "Pipeline" },
+  { id: "notebooks", label: "Notebooks" },
+  { id: "figures", label: "Figures" },
+  { id: "datasets", label: "Datasets" },
+  { id: "publications", label: "Publications" },
+  { id: "presentations", label: "Presentations" },
+  { id: "results", label: "Results" },
+];
 const FIGURE_EXTENSIONS = new Set([
   ".png",
   ".jpg",
@@ -88,7 +115,7 @@ const DATASET_EXTENSIONS = new Set([
 const NOTEBOOK_EXTENSION = ".ipynb";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
 const execFileAsync = promisify(execFile);
-const DEFAULT_MIN_CALKIT_VERSION = "0.41.12";
+const DEFAULT_MIN_CALKIT_VERSION = "0.41.14";
 const DEFAULT_NOTEBOOK_SLURM_TIME = "120";
 const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
 const MISSING_IJULIA_ERROR_TEXT =
@@ -107,6 +134,9 @@ let hasCheckedCalkitCli = false;
 const pipelineOutputUris = new Set<string>();
 const staleOutputUris = new Set<string>();
 const staleStageNames = new Set<string>();
+// Stages currently being executed by an in-progress `calkit run` (reported by
+// `calkit status --json` as pipeline.running_stages); shown with a spinner.
+const runningStageNames = new Set<string>();
 const importedFigureUris = new Set<string>();
 const pipelineNotebookUris = new Set<string>();
 let currentCalkitConfig: CalkitInfo | undefined;
@@ -119,6 +149,8 @@ let currentEnvDescriptions: Record<string, EnvDescription> | undefined;
 let currentDetectedNotebooks: string[] = [];
 let currentDetectedFigures: string[] = [];
 let currentDetectedDatasets: string[] = [];
+let currentDetectedResults: string[] = [];
+let currentDetectedPresentations: string[] = [];
 let sidebarProvider: CalkitSidebarProvider | undefined;
 let sidebarTreeView:
   | vscode.TreeView<import("./sidebar").SidebarItem>
@@ -224,33 +256,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!workspaceRoot) {
           return;
         }
-        const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
-        const filePath =
-          (typeof stage?.notebook_path === "string"
-            ? stage.notebook_path
-            : undefined) ??
-          (typeof stage?.script_path === "string"
-            ? stage.script_path
-            : undefined) ??
-          (typeof stage?.target_path === "string"
-            ? stage.target_path
-            : undefined);
-        if (!filePath) {
-          void vscode.window.showErrorMessage(
-            `No source file found for stage '${stageName}'.`,
-          );
-          return;
-        }
-        const fileUri = vscode.Uri.file(path.join(workspaceRoot, filePath));
-        if (filePath.endsWith(".ipynb")) {
-          await vscode.commands.executeCommand(
-            "vscode.openWith",
-            fileUri,
-            "jupyter-notebook",
-          );
-        } else {
-          await vscode.window.showTextDocument(fileUri);
-        }
+        await openStageSourceFile(workspaceRoot, stageName);
       },
     ),
   );
@@ -405,6 +411,116 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_OPEN_STAGE_PDF,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        if (!fileUri) {
+          return;
+        }
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        const stageName = await findStageForFile(workspaceRoot, fileUri);
+        if (!stageName) {
+          void vscode.window.showErrorMessage(
+            `No pipeline stage found for '${path.basename(fileUri.fsPath)}'.`,
+          );
+          return;
+        }
+        const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
+        const pdfRelPath = (Array.isArray(stage?.outputs) ? stage.outputs : [])
+          .map((out) => (typeof out === "string" ? out : out.path))
+          .find(
+            (outPath) =>
+              typeof outPath === "string" &&
+              outPath.toLowerCase().endsWith(".pdf"),
+          );
+        if (!pdfRelPath) {
+          void vscode.window.showErrorMessage(
+            `Stage '${stageName}' has no PDF output to open.`,
+          );
+          return;
+        }
+        const pdfUri = vscode.Uri.file(path.join(workspaceRoot, pdfRelPath));
+        try {
+          await vscode.workspace.fs.stat(pdfUri);
+        } catch {
+          void vscode.window.showInformationMessage(
+            `${pdfRelPath} hasn't been rendered yet. Run the stage to render the PDF first.`,
+          );
+          return;
+        }
+        await openPdfInLatexWorkshop(context, pdfUri);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_GO_TO_FIGURE_SOURCE,
+      async (figureArg?: string | vscode.Uri) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot) {
+          return;
+        }
+        let figureUri: vscode.Uri | undefined;
+        if (typeof figureArg === "string") {
+          figureUri = vscode.Uri.file(path.join(workspaceRoot, figureArg));
+        } else if (figureArg instanceof vscode.Uri) {
+          figureUri = figureArg;
+        } else {
+          // Invoked from the editor context menu: resolve the image reference on
+          // the cursor's line.
+          const editor = vscode.window.activeTextEditor;
+          if (editor) {
+            const lineText = editor.document.lineAt(
+              editor.selection.active.line,
+            ).text;
+            const match = /!\[[^\]]*\]\(\s*<?([^)\s>]+)>?/.exec(lineText);
+            const relPath = match
+              ? resolveImageRefToRepoRelative(
+                  editor.document.uri.fsPath,
+                  match[1],
+                  workspaceRoot,
+                )
+              : undefined;
+            if (relPath) {
+              figureUri = vscode.Uri.file(path.join(workspaceRoot, relPath));
+            }
+          }
+        }
+        if (!figureUri) {
+          void vscode.window.showErrorMessage(
+            "No figure reference found to go to source for.",
+          );
+          return;
+        }
+        const stageName = await findStageProducingOutput(
+          workspaceRoot,
+          figureUri,
+        );
+        if (!stageName) {
+          void vscode.window.showErrorMessage(
+            `No pipeline stage produces '${path.basename(figureUri.fsPath)}'.`,
+          );
+          return;
+        }
+        const stageItem = sidebarProvider?.findStageItem(stageName);
+        if (stageItem && sidebarTreeView) {
+          await sidebarTreeView.reveal(stageItem, {
+            select: true,
+            focus: false,
+            expand: true,
+          });
+        }
+        await openStageSourceFile(workspaceRoot, stageName);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND_RUN_PIPELINE, () => {
       const workspaceRoot = getWorkspaceRoot();
       if (!workspaceRoot) {
@@ -414,6 +530,195 @@ export function activate(context: vscode.ExtensionContext): void {
       terminal.show();
       terminal.sendText("calkit run");
     }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_SAVE, async () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      const message = await vscode.window.showInputBox({
+        title: "Calkit: Save",
+        prompt: "Commit message for saving your work",
+        placeHolder: "e.g. Update analysis figures",
+        ignoreFocusOut: true,
+      });
+      // Cancelled (Escape) returns undefined; an empty message is not allowed.
+      if (message === undefined) {
+        return;
+      }
+      const trimmed = message.trim();
+      if (!trimmed) {
+        void vscode.window.showErrorMessage(
+          "A commit message is required to save.",
+        );
+        return;
+      }
+      const terminal = getOrCreateTerminal("calkit: save", workspaceRoot);
+      terminal.show();
+      terminal.sendText(`calkit save -a -m ${shQuote(trimmed)}`);
+    }),
+  );
+
+  // Reveal a pipeline stage in the sidebar's Pipeline section, expanded. Invoked
+  // by clicking a stage property under a figure/notebook, or its context menu.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_VIEW_STAGE,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const stageName = item?.nodeId;
+        if (!stageName) {
+          return;
+        }
+        const stageItem = sidebarProvider?.findStageItem(stageName);
+        if (stageItem && sidebarTreeView) {
+          await sidebarTreeView.reveal(stageItem, {
+            select: true,
+            focus: true,
+            expand: true,
+          });
+        }
+      },
+    ),
+  );
+
+  // Reveal an environment in the sidebar's Environments section, expanded.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_VIEW_ENVIRONMENT,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const envName = item?.nodeId;
+        if (!envName) {
+          return;
+        }
+        const envItem = sidebarProvider?.findEnvItem(envName);
+        if (envItem && sidebarTreeView) {
+          await sidebarTreeView.reveal(envItem, {
+            select: true,
+            focus: true,
+            expand: true,
+          });
+        }
+      },
+    ),
+  );
+
+  // Hide a sidebar section (right-click a section header). Persists in the
+  // per-project calkit.sidebar.hiddenSections workspace setting.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_HIDE_SECTION,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const sectionId = item?.nodeKind?.replace(/^section-/, "");
+        if (!sectionId) {
+          return;
+        }
+        const hidden = getHiddenSections();
+        hidden.add(sectionId);
+        await vscode.workspace
+          .getConfiguration("calkit")
+          .update(
+            "sidebar.hiddenSections",
+            [...hidden],
+            vscode.ConfigurationTarget.Workspace,
+          );
+      },
+    ),
+  );
+
+  // Choose which sidebar sections are visible.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_MANAGE_SECTIONS, async () => {
+      const hidden = getHiddenSections();
+      const picks = await vscode.window.showQuickPick(
+        SIDEBAR_SECTIONS.map((s) => ({
+          label: s.label,
+          id: s.id,
+          picked: !hidden.has(s.id),
+        })),
+        {
+          canPickMany: true,
+          title: "Calkit: visible sidebar sections",
+          placeHolder: "Checked sections are shown",
+        },
+      );
+      if (picks === undefined) {
+        return; // cancelled
+      }
+      const visible = new Set(picks.map((p) => p.id));
+      const nextHidden = SIDEBAR_SECTIONS.filter((s) => !visible.has(s.id)).map(
+        (s) => s.id,
+      );
+      await vscode.workspace
+        .getConfiguration("calkit")
+        .update(
+          "sidebar.hiddenSections",
+          nextHidden,
+          vscode.ConfigurationTarget.Workspace,
+        );
+    }),
+  );
+
+  // Add a project question (writes to calkit.yaml via the CLI).
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_ADD_QUESTION, async () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        return;
+      }
+      const question = await vscode.window.showInputBox({
+        title: "Calkit: Add Question",
+        prompt: "A question this project aims to answer",
+        placeHolder: "e.g. Does wind farm control increase AEP?",
+        ignoreFocusOut: true,
+      });
+      if (question === undefined || !question.trim()) {
+        return;
+      }
+      try {
+        await execFileAsync("calkit", ["new", "question", question.trim()], {
+          cwd: workspaceRoot,
+        });
+      } catch (error) {
+        const err = error as { stderr?: string; message?: string };
+        void vscode.window.showErrorMessage(
+          `Could not add question: ${(err.stderr || err.message || "").trim()}`,
+        );
+        return;
+      }
+      void refreshPipelineOutputContext(context);
+    }),
+  );
+
+  // Remove a project question by its 1-based index (its nodeId).
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_DELETE_QUESTION,
+      async (item?: import("./sidebar").SidebarItem) => {
+        const workspaceRoot = getWorkspaceRoot();
+        const index = item?.nodeId;
+        if (!workspaceRoot || !index) {
+          return;
+        }
+        try {
+          await execFileAsync("calkit", ["rm", "question", index], {
+            cwd: workspaceRoot,
+          });
+        } catch (error) {
+          const err = error as { stderr?: string; message?: string };
+          void vscode.window.showErrorMessage(
+            `Could not remove question: ${(
+              err.stderr ||
+              err.message ||
+              ""
+            ).trim()}`,
+          );
+          return;
+        }
+        void refreshPipelineOutputContext(context);
+      },
+    ),
   );
 
   context.subscriptions.push(
@@ -817,6 +1122,11 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.window.onDidChangeActiveNotebookEditor(() => {
       void refreshNotebookToolbarContext(context);
+      // Auto-select the configured environment once the notebook is actually the
+      // active editor. onDidOpenNotebookDocument can fire before the editor is
+      // active, and switching between already-open notebooks only fires this
+      // event, so without this a notebook's environment is never auto-selected.
+      void autoSelectEnvironmentForActiveNotebook(context);
     }),
   );
 
@@ -848,6 +1158,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if (e.affectsConfiguration("calkit.autoRefreshStatus")) {
         updateAutoRefreshContext();
       }
+      if (e.affectsConfiguration("calkit.sidebar.hiddenSections")) {
+        renderSidebarFromState();
+      }
     }),
   );
 
@@ -856,32 +1169,77 @@ export function activate(context: vscode.ExtensionContext): void {
   void refreshPipelineOutputContext(context);
   void refreshActiveFileStageContext(vscode.window.activeTextEditor?.document);
 
+  // Surfaces "Source: <stage>" CodeLenses on figure references in .qmd docs.
+  const figureCodeLensProvider = new FigureSourceCodeLensProvider();
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider(
+      { scheme: "file", pattern: "**/*.qmd" },
+      figureCodeLensProvider,
+    ),
+  );
+
+  // Set up PDF auto-refresh watchers for PDF-producing stages now and whenever
+  // the pipeline config changes (the latter picks up newly added stages).
+  const workspaceRootForPdfWatchers = getWorkspaceRoot();
+  if (workspaceRootForPdfWatchers) {
+    void setupStagePdfRefreshWatchers(context, workspaceRootForPdfWatchers);
+  }
+
   // Watch for changes to dvc.yaml/calkit.yaml to keep pipeline output context fresh.
+  const refreshPipelineDerived = (): void => {
+    scheduleRefreshPipelineOutputContext(context);
+    figureCodeLensProvider.refresh();
+    const root = getWorkspaceRoot();
+    if (root) {
+      void setupStagePdfRefreshWatchers(context, root);
+    }
+  };
   const dvcYamlWatcher =
     vscode.workspace.createFileSystemWatcher("**/dvc.yaml");
   context.subscriptions.push(dvcYamlWatcher);
-  dvcYamlWatcher.onDidChange(() => {
-    scheduleRefreshPipelineOutputContext(context);
-  });
-  dvcYamlWatcher.onDidCreate(() => {
-    scheduleRefreshPipelineOutputContext(context);
-  });
-  dvcYamlWatcher.onDidDelete(() => {
-    scheduleRefreshPipelineOutputContext(context);
-  });
+  dvcYamlWatcher.onDidChange(refreshPipelineDerived);
+  dvcYamlWatcher.onDidCreate(refreshPipelineDerived);
+  dvcYamlWatcher.onDidDelete(refreshPipelineDerived);
 
   const calkitYamlWatcher =
     vscode.workspace.createFileSystemWatcher("**/calkit.yaml");
   context.subscriptions.push(calkitYamlWatcher);
-  calkitYamlWatcher.onDidChange(() => {
-    scheduleRefreshPipelineOutputContext(context);
-  });
-  calkitYamlWatcher.onDidCreate(() => {
-    scheduleRefreshPipelineOutputContext(context);
-  });
-  calkitYamlWatcher.onDidDelete(() => {
-    scheduleRefreshPipelineOutputContext(context);
-  });
+  calkitYamlWatcher.onDidChange(refreshPipelineDerived);
+  calkitYamlWatcher.onDidCreate(refreshPipelineDerived);
+  calkitYamlWatcher.onDidDelete(refreshPipelineDerived);
+
+  // Watch DVC's rwlock to detect when a `calkit run` starts/finishes (it holds
+  // this lock while running) and drive the running-stage spinners. We only poll
+  // `calkit status` while the lock indicates activity, where it takes the cheap,
+  // lock-free path — avoiding contention with the run itself.
+  const rwlockWorkspaceRoot = getWorkspaceRoot();
+  if (rwlockWorkspaceRoot) {
+    const rwlockWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(
+        vscode.Uri.file(path.join(rwlockWorkspaceRoot, ".dvc", "tmp")),
+        "rwlock",
+      ),
+    );
+    let rwlockDebounce: ReturnType<typeof setTimeout> | undefined;
+    const onRwlockEvent = (): void => {
+      if (Date.now() < suppressRwlockUntil) {
+        return;
+      }
+      // Coalesce bursts of lock activity (e.g. dvc push/pull touching rwlock)
+      // into a single status check.
+      if (rwlockDebounce !== undefined) {
+        clearTimeout(rwlockDebounce);
+      }
+      rwlockDebounce = setTimeout(() => {
+        rwlockDebounce = undefined;
+        ensureRunStatusPolling(context);
+      }, 1000);
+    };
+    rwlockWatcher.onDidCreate(onRwlockEvent);
+    rwlockWatcher.onDidChange(onRwlockEvent);
+    rwlockWatcher.onDidDelete(onRwlockEvent);
+    context.subscriptions.push(rwlockWatcher);
+  }
 
   // Proposed API: shows Calkit in the top-level kernel source list.
   // This must never break activation when proposed APIs are unavailable.
@@ -1148,15 +1506,22 @@ class PipelineOutputDecorationProvider
   implements vscode.FileDecorationProvider
 {
   private readonly _onDidChangeFileDecorations = new vscode.EventEmitter<
-    vscode.Uri[]
+    vscode.Uri[] | undefined
   >();
   readonly onDidChangeFileDecorations = this._onDidChangeFileDecorations.event;
 
-  refresh(uris: vscode.Uri[]): void {
+  // Passing undefined invalidates all decorations (used when the project's
+  // Calkit status flips, since the affected files aren't otherwise tracked).
+  refresh(uris?: vscode.Uri[]): void {
     this._onDidChangeFileDecorations.fire(uris);
   }
 
   provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
+    // Only Calkit projects have a pipeline, so outside one nothing is "not
+    // produced by the pipeline".
+    if (!currentCalkitYamlExists) {
+      return undefined;
+    }
     const ext = path.extname(uri.fsPath).toLowerCase();
     if (pipelineOutputUris.has(uri.fsPath)) {
       if (staleOutputUris.has(uri.fsPath)) {
@@ -1238,7 +1603,7 @@ async function getSubmodulePaths(workspaceRoot: string): Promise<string[]> {
 // already come from calkit.yaml.
 async function listDetectedArtifacts(
   workspaceRoot: string,
-  kind: "figures" | "datasets",
+  kind: "figures" | "datasets" | "results" | "presentations",
 ): Promise<string[]> {
   try {
     const { stdout } = await execFileAsync("calkit", ["list", kind, "--json"], {
@@ -1270,18 +1635,28 @@ async function scanDetectedFiles(
     currentDetectedNotebooks = [];
     currentDetectedFigures = [];
     currentDetectedDatasets = [];
+    currentDetectedResults = [];
+    currentDetectedPresentations = [];
     return;
   }
-  const [notebookUris, submodulePaths, detectedFigures, detectedDatasets] =
-    await Promise.all([
-      vscode.workspace.findFiles(
-        `**/*${NOTEBOOK_EXTENSION}`,
-        DETECTED_FILES_EXCLUDE,
-      ),
-      getSubmodulePaths(workspaceRoot),
-      listDetectedArtifacts(workspaceRoot, "figures"),
-      listDetectedArtifacts(workspaceRoot, "datasets"),
-    ]);
+  const [
+    notebookUris,
+    submodulePaths,
+    detectedFigures,
+    detectedDatasets,
+    detectedResults,
+    detectedPresentations,
+  ] = await Promise.all([
+    vscode.workspace.findFiles(
+      `**/*${NOTEBOOK_EXTENSION}`,
+      DETECTED_FILES_EXCLUDE,
+    ),
+    getSubmodulePaths(workspaceRoot),
+    listDetectedArtifacts(workspaceRoot, "figures"),
+    listDetectedArtifacts(workspaceRoot, "datasets"),
+    listDetectedArtifacts(workspaceRoot, "results"),
+    listDetectedArtifacts(workspaceRoot, "presentations"),
+  ]);
   const toRel = (u: vscode.Uri): string =>
     path.relative(workspaceRoot, u.fsPath).replace(/\\/g, "/");
   currentDetectedNotebooks = notebookUris
@@ -1290,6 +1665,8 @@ async function scanDetectedFiles(
     .sort();
   currentDetectedFigures = detectedFigures;
   currentDetectedDatasets = detectedDatasets;
+  currentDetectedResults = detectedResults;
+  currentDetectedPresentations = detectedPresentations;
 }
 
 function scheduleRefreshPipelineOutputContext(
@@ -1348,6 +1725,7 @@ async function refreshPipelineOutputContext(
   const calkitYamlExists = await fileExists(
     path.join(workspaceRoot, "calkit.yaml"),
   );
+  const calkitStatusChanged = calkitYamlExists !== currentCalkitYamlExists;
   currentCalkitYamlExists = calkitYamlExists;
   void vscode.commands.executeCommand(
     "setContext",
@@ -1393,103 +1771,183 @@ async function refreshPipelineOutputContext(
       ...pipelineNotebookUris,
     ]),
   ].map((p) => vscode.Uri.file(p));
-  decorationProvider.refresh(changedUris);
+  // When the project gains/loses calkit.yaml, invalidate all decorations so the
+  // "not produced by the pipeline" badges appear or clear across the tree; the
+  // affected figure/notebook files aren't in changedUris otherwise.
+  decorationProvider.refresh(calkitStatusChanged ? undefined : changedUris);
   await scanDetectedFiles(workspaceRoot, calkitYamlExists);
-  sidebarProvider?.refresh(
-    workspaceRoot,
-    calkitYamlExists ? calkitConfig : undefined,
-    dvcYaml,
-    staleStageNames,
-    envDescriptions,
-    currentDetectedNotebooks,
-    currentDetectedFigures,
-    currentDetectedDatasets,
-  );
-  updateSidebarBadge();
+  renderSidebarFromState();
   // Run the staleness check after the fast decoration pass: "not produced
   // by the pipeline" badges are applied immediately, and stale-output
   // decorations follow once calkit status finishes. The check is skipped on
   // automatic refreshes when auto-refresh is disabled; the Refresh button
   // forces it.
   if (force || isAutoRefreshStatusEnabled()) {
-    void refreshStaleOutputContext(
-      workspaceRoot,
-      outputMap,
-      decorationProvider,
-    );
+    ensureRunStatusPolling(context);
   }
 }
 
-// Guards against overlapping `calkit status` runs: while one is in flight,
-// further automatic refreshes skip launching another (they'd otherwise stack
-// up and contend for DVC locks during rapid file changes).
-let staleRefreshInFlight = false;
+// Section ids the user has chosen to hide (calkit.sidebar.hiddenSections,
+// stored per-project in .vscode/settings.json).
+function getHiddenSections(): Set<string> {
+  return new Set(
+    vscode.workspace
+      .getConfiguration("calkit")
+      .get<string[]>("sidebar.hiddenSections", []),
+  );
+}
 
-async function refreshStaleOutputContext(
-  workspaceRoot: string,
-  outputMap: Map<string, string>,
-  provider: PipelineOutputDecorationProvider,
-): Promise<void> {
-  if (staleRefreshInFlight) {
+// Re-render the sidebar from the current cached pipeline state (config, stale
+// stages, running stages, detected files, hidden sections).
+function renderSidebarFromState(): void {
+  const workspaceRoot = getWorkspaceRoot();
+  if (!workspaceRoot) {
     return;
   }
-  staleRefreshInFlight = true;
+  sidebarProvider?.refresh(
+    workspaceRoot,
+    currentCalkitYamlExists ? currentCalkitConfig : undefined,
+    currentDvcYaml,
+    staleStageNames,
+    currentEnvDescriptions,
+    currentDetectedNotebooks,
+    currentDetectedFigures,
+    currentDetectedDatasets,
+    runningStageNames,
+    currentDetectedResults,
+    currentDetectedPresentations,
+    getHiddenSections(),
+  );
+  updateSidebarBadge();
+}
+
+// Apply a fresh set of stale stage names: update stage badges, per-output file
+// decorations, and the sidebar (only re-rendering on an actual change).
+function applyStaleStages(
+  workspaceRoot: string,
+  freshStaleStageNames: Set<string>,
+): void {
+  const outputMap = buildPipelineOutputMapFromYaml(
+    workspaceRoot,
+    currentDvcYaml,
+  );
+  const nextStale = new Set<string>();
+  for (const [absPath, stageName] of outputMap) {
+    if (freshStaleStageNames.has(stageName)) {
+      nextStale.add(absPath);
+    }
+  }
+  const prevStale = new Set(staleOutputUris);
+  staleOutputUris.clear();
+  for (const p of nextStale) {
+    staleOutputUris.add(p);
+  }
+  const prevStageNames = new Set(staleStageNames);
+  staleStageNames.clear();
+  for (const n of freshStaleStageNames) {
+    staleStageNames.add(n);
+  }
+  const changedUris = [...new Set([...prevStale, ...staleOutputUris])].map(
+    (p) => vscode.Uri.file(p),
+  );
+  if (changedUris.length > 0 && decorationProvider) {
+    decorationProvider.refresh(changedUris);
+  }
+  const staleChanged =
+    prevStageNames.size !== staleStageNames.size ||
+    [...staleStageNames].some((n) => !prevStageNames.has(n));
+  if (staleChanged) {
+    renderSidebarFromState();
+  }
+}
+
+// Apply a fresh set of running stage names (re-rendering only on change).
+function applyRunningStages(freshRunning: Set<string>): void {
+  const changed =
+    freshRunning.size !== runningStageNames.size ||
+    [...freshRunning].some((n) => !runningStageNames.has(n));
+  if (!changed) {
+    return;
+  }
+  runningStageNames.clear();
+  for (const n of freshRunning) {
+    runningStageNames.add(n);
+  }
+  renderSidebarFromState();
+}
+
+// True while a poll loop is active, so refreshes/lock events don't start a
+// second loop. The loop runs only while a pipeline run is in progress (when
+// `calkit status` takes the cheap, lock-free path), plus one final check that
+// recomputes staleness once the run finishes.
+let runStatusPolling = false;
+let runStatusPollTimer: ReturnType<typeof setTimeout> | undefined;
+// Ignore rwlock file-watcher events for a short window around our own status
+// call: the not-running status path itself takes the DVC lock (touching
+// rwlock), which would otherwise re-trigger the watcher into an endless poll.
+let suppressRwlockUntil = 0;
+const RUN_STATUS_POLL_INTERVAL_MS = 2500;
+
+async function pollPipelineRunStatus(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const workspaceRoot = getWorkspaceRoot();
+  if (!workspaceRoot) {
+    runStatusPolling = false;
+    return;
+  }
+  let running = false;
   try {
+    suppressRwlockUntil = Date.now() + 5000;
     const { stdout } = await execFileAsync(
       "calkit",
       ["status", "--json", "-c", "pipeline"],
       { cwd: workspaceRoot, timeout: 60_000 },
     );
+    suppressRwlockUntil = Date.now() + 5000;
     const status = JSON.parse(stdout) as {
-      pipeline?: { stale_stage_names?: string[] };
+      pipeline?: {
+        running?: boolean;
+        running_stages?: string[];
+        stale_stage_names?: string[];
+      };
     };
-    const freshStaleStageNames = new Set(
-      status?.pipeline?.stale_stage_names ?? [],
-    );
-    const nextStale = new Set<string>();
-    for (const [absPath, stageName] of outputMap) {
-      if (freshStaleStageNames.has(stageName)) {
-        nextStale.add(absPath);
-      }
-    }
-    const prevStale = new Set(staleOutputUris);
-    staleOutputUris.clear();
-    for (const p of nextStale) {
-      staleOutputUris.add(p);
-    }
-    const prevStageNames = new Set(staleStageNames);
-    staleStageNames.clear();
-    for (const n of freshStaleStageNames) {
-      staleStageNames.add(n);
-    }
-    const changedUris = [...new Set([...prevStale, ...staleOutputUris])].map(
-      (p) => vscode.Uri.file(p),
-    );
-    if (changedUris.length > 0) {
-      provider.refresh(changedUris);
-    }
-    // Only re-render the sidebar if the set of stale stages actually changed
-    const staleChanged =
-      prevStageNames.size !== staleStageNames.size ||
-      [...staleStageNames].some((n) => !prevStageNames.has(n));
-    if (staleChanged) {
-      sidebarProvider?.refresh(
+    const pipeline = status?.pipeline ?? {};
+    running = pipeline.running === true;
+    if (running) {
+      // While a run holds the lock, calkit can't compute staleness, so only
+      // update the spinners and keep the previous stale badges.
+      applyRunningStages(new Set(pipeline.running_stages ?? []));
+    } else {
+      applyRunningStages(new Set());
+      applyStaleStages(
         workspaceRoot,
-        currentCalkitYamlExists ? currentCalkitConfig : undefined,
-        currentDvcYaml,
-        staleStageNames,
-        currentEnvDescriptions,
-        currentDetectedNotebooks,
-        currentDetectedFigures,
-        currentDetectedDatasets,
+        new Set(pipeline.stale_stage_names ?? []),
       );
-      updateSidebarBadge();
     }
   } catch (error) {
-    log(`Staleness check failed: ${String(error)}`);
-  } finally {
-    staleRefreshInFlight = false;
+    log(`Pipeline status check failed: ${String(error)}`);
   }
+  if (running) {
+    runStatusPollTimer = setTimeout(
+      () => void pollPipelineRunStatus(context),
+      RUN_STATUS_POLL_INTERVAL_MS,
+    );
+  } else {
+    runStatusPolling = false;
+    runStatusPollTimer = undefined;
+  }
+}
+
+// Run a status check (and, while a run is in progress, a poll loop that drives
+// the running spinners until it finishes). When idle, the single check doubles
+// as the staleness refresh. No-op if a loop is already active.
+function ensureRunStatusPolling(context: vscode.ExtensionContext): void {
+  if (runStatusPolling) {
+    return;
+  }
+  runStatusPolling = true;
+  void pollPipelineRunStatus(context);
 }
 
 function getNonce(): string {
@@ -3159,6 +3617,157 @@ function runStageInTerminal(workspaceRoot: string, stageName: string): void {
   terminal.sendText(`calkit run ${shQuote(stageName)}`);
 }
 
+function isLatexWorkshopInstalled(): boolean {
+  return (
+    vscode.extensions.getExtension("James-Yu.latex-workshop") !== undefined
+  );
+}
+
+// PDFs that already have an auto-refresh watcher this session (keyed by fsPath),
+// so we don't stack watchers on the same file.
+const pdfRefreshWatchers = new Set<string>();
+
+// Watch a PDF and ask LaTeX Workshop to reload it whenever it changes on disk.
+// LaTeX Workshop only watches PDFs produced by its own LaTeX builds, so a PDF
+// rendered by a Calkit stage (Quarto, LaTeX, etc.) never refreshes on its own;
+// latex-workshop.refresh-viewer reloads all open viewers from disk.
+function ensurePdfRefreshWatcher(
+  context: vscode.ExtensionContext,
+  pdfFsPath: string,
+): void {
+  if (pdfRefreshWatchers.has(pdfFsPath)) {
+    return;
+  }
+  pdfRefreshWatchers.add(pdfFsPath);
+  const watcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(
+      vscode.Uri.file(path.dirname(pdfFsPath)),
+      path.basename(pdfFsPath),
+    ),
+  );
+  let debounce: ReturnType<typeof setTimeout> | undefined;
+  const refresh = (): void => {
+    if (debounce) {
+      clearTimeout(debounce);
+    }
+    // Coalesce the burst of events a render produces and let the writer finish.
+    debounce = setTimeout(() => {
+      void vscode.commands.executeCommand("latex-workshop.refresh-viewer");
+    }, 200);
+  };
+  watcher.onDidChange(refresh);
+  watcher.onDidCreate(refresh);
+  context.subscriptions.push(watcher);
+}
+
+// Set up auto-refresh watchers for every PDF declared as a pipeline stage
+// output, so re-rendering any PDF-producing stage reloads its LaTeX Workshop
+// viewer regardless of how the PDF was opened.
+async function setupStagePdfRefreshWatchers(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+): Promise<void> {
+  if (!isLatexWorkshopInstalled()) {
+    return;
+  }
+  const outputToStage = await buildOutputToStageMap(workspaceRoot);
+  for (const outPath of outputToStage.keys()) {
+    if (outPath.toLowerCase().endsWith(".pdf")) {
+      ensurePdfRefreshWatcher(context, path.join(workspaceRoot, outPath));
+    }
+  }
+}
+
+// Open a PDF in LaTeX Workshop's viewer (and ensure it auto-reloads on change).
+async function openPdfInLatexWorkshop(
+  context: vscode.ExtensionContext,
+  pdfUri: vscode.Uri,
+): Promise<void> {
+  if (!isLatexWorkshopInstalled()) {
+    void vscode.window.showErrorMessage(
+      "Opening the rendered PDF requires the LaTeX Workshop extension " +
+        "(James-Yu.latex-workshop).",
+    );
+    return;
+  }
+  try {
+    await vscode.commands.executeCommand(
+      "vscode.openWith",
+      pdfUri,
+      "latex-workshop-pdf-hook",
+      vscode.ViewColumn.Active,
+    );
+  } catch (error) {
+    void vscode.window.showErrorMessage(
+      `Could not open the PDF in LaTeX Workshop: ${String(error)}`,
+    );
+    return;
+  }
+  ensurePdfRefreshWatcher(context, pdfUri.fsPath);
+}
+
+// Open a stage's source file (notebook/script/target), opening .ipynb in the
+// notebook editor. Shared by the sidebar "Open stage file" action and figure
+// go-to-source navigation.
+async function openStageSourceFile(
+  workspaceRoot: string,
+  stageName: string,
+): Promise<void> {
+  const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
+  const filePath =
+    (typeof stage?.notebook_path === "string"
+      ? stage.notebook_path
+      : undefined) ??
+    (typeof stage?.script_path === "string" ? stage.script_path : undefined) ??
+    (typeof stage?.target_path === "string" ? stage.target_path : undefined);
+  if (!filePath) {
+    void vscode.window.showErrorMessage(
+      `No source file found for stage '${stageName}'.`,
+    );
+    return;
+  }
+  const fileUri = vscode.Uri.file(path.join(workspaceRoot, filePath));
+  if (filePath.endsWith(".ipynb")) {
+    await vscode.commands.executeCommand(
+      "vscode.openWith",
+      fileUri,
+      "jupyter-notebook",
+    );
+  } else {
+    await vscode.window.showTextDocument(fileUri);
+  }
+}
+
+// Map of repo-relative output path -> name of the stage that produces it,
+// across both calkit pipeline stages and dvc.yaml stages. Calkit stages win on
+// conflict, matching findStageProducingOutput's lookup order.
+async function buildOutputToStageMap(
+  workspaceRoot: string,
+): Promise<Map<string, string>> {
+  const [dvcYaml, calkitConfig] = await Promise.all([
+    readDvcYaml(workspaceRoot),
+    readCalkitConfig(workspaceRoot),
+  ]);
+  const map = new Map<string, string>();
+  for (const [stageName, stage] of Object.entries(
+    calkitConfig?.pipeline?.stages ?? {},
+  )) {
+    for (const outPath of pipelineStageOutputPaths(stage)) {
+      if (!map.has(outPath)) {
+        map.set(outPath, stageName);
+      }
+    }
+  }
+  for (const [stageName, stage] of Object.entries(dvcYaml?.stages ?? {})) {
+    for (const outPath of dvcStageOutputPaths(stage)) {
+      if (!map.has(outPath)) {
+        map.set(outPath, stageName);
+      }
+    }
+  }
+  return map;
+}
+
 async function findStageForFile(
   workspaceRoot: string,
   fileUri: vscode.Uri,
@@ -3769,6 +4378,55 @@ class PlotlyPreviewProvider
         );
       }),
     );
+  }
+}
+
+// Shows a "Source: <stage>" CodeLens above each figure reference in a Quarto/
+// Markdown document whose target is produced by a pipeline stage, linking to
+// the producing stage's source via COMMAND_GO_TO_FIGURE_SOURCE.
+class FigureSourceCodeLensProvider implements vscode.CodeLensProvider {
+  private readonly _onDidChangeCodeLenses = new vscode.EventEmitter<void>();
+  readonly onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
+
+  refresh(): void {
+    this._onDidChangeCodeLenses.fire();
+  }
+
+  async provideCodeLenses(
+    document: vscode.TextDocument,
+  ): Promise<vscode.CodeLens[]> {
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
+      return [];
+    }
+    const refs = extractMarkdownImageRefs(document.getText());
+    if (refs.length === 0) {
+      return [];
+    }
+    const outputToStage = await buildOutputToStageMap(workspaceRoot);
+    const lenses: vscode.CodeLens[] = [];
+    for (const ref of refs) {
+      const relPath = resolveImageRefToRepoRelative(
+        document.uri.fsPath,
+        ref.target,
+        workspaceRoot,
+      );
+      if (!relPath) {
+        continue;
+      }
+      const stageName = outputToStage.get(relPath);
+      if (!stageName) {
+        continue;
+      }
+      lenses.push(
+        new vscode.CodeLens(new vscode.Range(ref.line, 0, ref.line, 0), {
+          title: `$(go-to-file) Source: ${stageName}`,
+          command: COMMAND_GO_TO_FIGURE_SOURCE,
+          arguments: [relPath],
+        }),
+      );
+    }
+    return lenses;
   }
 }
 

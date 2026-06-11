@@ -41,11 +41,18 @@ class Figure(_CalkitObject):
     pass
 
 
+class Result(_CalkitObject):
+    pass
+
+
+class Presentation(_CalkitObject):
+    pass
+
+
 class Publication(_CalkitObject):
     kind: Literal[
         "journal-article",
         "conference-paper",
-        "presentation",
         "proposal",
         "poster",
         "report",
@@ -84,7 +91,10 @@ class Environment(BaseModel):
         "uv-venv",
         "renv",
     ]
-    path: str | None = None
+    # Note: ``path`` is declared on the specific subclasses that need it (most
+    # of them, required; optional for Docker) rather than here, so subclasses
+    # without a spec file (e.g. Matlab/Slurm/PBS) don't carry an unused field
+    # and a required ``path`` doesn't conflict with the base's optional one.
     description: str | None = None
     stage: str | None = None
     default: bool | None = None
@@ -92,11 +102,13 @@ class Environment(BaseModel):
 
 class CondaEnvironment(Environment):
     kind: Literal["conda"] = "conda"
+    path: str
     prefix: str | None = None
 
 
 class VenvEnvironment(Environment):
     kind: Literal["venv"] = "venv"
+    path: str
     # If unset, the prefix is resolved on the fly (defaults to .venv next to
     # the spec file, nesting under .calkit/envs/{name}/.venv on conflict)
     prefix: str | None = None
@@ -104,10 +116,12 @@ class VenvEnvironment(Environment):
 
 class UvEnvironment(Environment):
     kind: Literal["uv"] = "uv"
+    path: str
 
 
 class UvVenvEnvironment(Environment):
     kind: Literal["uv-venv"] = "uv-venv"
+    path: str
     # If unset, the prefix is resolved on the fly (defaults to .venv next to
     # the spec file, nesting under .calkit/envs/{name}/.venv on conflict)
     prefix: str | None = None
@@ -115,6 +129,7 @@ class UvVenvEnvironment(Environment):
 
 class PixiEnvironment(Environment):
     kind: Literal["pixi"] = "pixi"
+    path: str
     name: str | None = None
 
 
@@ -130,6 +145,9 @@ class NixEnvironment(Environment):
 
 class DockerEnvironment(Environment):
     kind: Literal["docker"] = "docker"
+    # Docker environments can be defined purely by an image, so the path (to a
+    # Dockerfile) is optional.
+    path: str | None = None
     image: str
     layers: list[str] | None = None
     shell: Literal["bash", "sh"] = "sh"
@@ -139,11 +157,13 @@ class DockerEnvironment(Environment):
 
 class REnvironment(Environment):
     kind: Literal["renv"] = "renv"
+    path: str
     prefix: str
 
 
 class JuliaEnvironment(Environment):
     kind: Literal["julia"] = "julia"
+    path: str
     julia: str
 
 
@@ -289,6 +309,32 @@ class ProjectStatus(BaseModel):
     message: str | None = None
 
 
+class FigureEvidence(BaseModel):
+    """Evidence to back up the answer to a question."""
+
+    kind: Literal["figure"] = "figure"
+    path: str
+    explanation: str | None = None
+
+
+class ResultsEvidence(BaseModel):
+    """Evidence in the form of a result."""
+
+    kind: Literal["result"] = "result"
+    path: str
+    key: str | None = None
+    explanation: str | None = None
+
+
+class Question(BaseModel):
+    """A question the project hopes to answer."""
+
+    question: str
+    hypothesis: str | None = None
+    answer: str | None = None
+    evidence: list[FigureEvidence | ResultsEvidence] | None = None
+
+
 class Dependency(BaseModel):
     """A system-level dependency.
 
@@ -348,23 +394,30 @@ class ProjectInfo(BaseModel):
     name: str | None = None
     git_repo_url: str | None = None
     derived_from: DerivedFromProject | None = None
-    questions: list[str] = []
+    questions: list[str | Question] = []
     dependencies: list[str | dict[str, str] | Dependency] = []
     parameters: ParametersType | None = None
     metrics: dict[str, Metric] | None = None
     pipeline: Pipeline | None = None
     datasets: list[Dataset] = []
     figures: list[Figure] = []
+    results: list[Result] = []
     publications: list[Publication] = []
+    presentations: list[Presentation] = []
     references: list[ReferenceCollection] = []
     environments: dict[
         str,
         # The specific subclasses must precede the catch-all Environment so a
         # dict that validates against both (e.g. a prefix-less uv-venv, whose
-        # only fields are kind and path) resolves to the specific subclass
-        DockerEnvironment
+        # only fields are kind and path) resolves to the specific subclass.
+        # All path-bearing subclasses must be listed; otherwise such an env
+        # falls back to the catch-all Environment (which has no ``path``).
+        CondaEnvironment
+        | DockerEnvironment
         | JuliaEnvironment
         | MatlabEnvironment
+        | PixiEnvironment
+        | REnvironment
         | SlurmEnvironment
         | PBSEnvironment
         | VenvEnvironment

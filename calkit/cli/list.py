@@ -55,7 +55,7 @@ def _list_objects(
 
 
 def _list_artifacts(
-    kind: Literal["figures", "datasets"],
+    kind: Literal["figures", "datasets", "results", "presentations"],
     json_output: bool,
     declared_only: bool,
 ):
@@ -132,6 +132,61 @@ def list_datasets(
 ):
     """List datasets in the project."""
     _list_artifacts("datasets", json_output, declared_only)
+
+
+@list_app.command(name="results")
+def list_results(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+    declared_only: Annotated[
+        bool,
+        typer.Option(
+            "--declared-only",
+            help=(
+                "Only list results declared in calkit.yaml; "
+                "skip auto-detection."
+            ),
+        ),
+    ] = False,
+):
+    """List results in the project."""
+    _list_artifacts("results", json_output, declared_only)
+
+
+@list_app.command(name="presentations|pres")
+def list_presentations(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+    declared_only: Annotated[
+        bool,
+        typer.Option(
+            "--declared-only",
+            help=(
+                "Only list presentations declared in calkit.yaml; "
+                "skip auto-detection."
+            ),
+        ),
+    ] = False,
+):
+    """List presentations in the project."""
+    _list_artifacts("presentations", json_output, declared_only)
+
+
+@list_app.command(name="questions")
+def list_questions(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+):
+    """List the project's questions (1-indexed)."""
+    questions = calkit.load_calkit_info().get("questions", []) or []
+    if json_output:
+        typer.echo(json.dumps(questions))
+        return
+    for n, question in enumerate(questions, start=1):
+        typer.echo(f"{n}. {question}")
 
 
 @list_app.command(name="publications|pubs")

@@ -2,21 +2,46 @@ import * as vscode from "vscode";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import type {
+  ArtifactEntry,
   CalkitInfo,
-  DatasetEntry,
   DvcYaml,
   EnvDescription,
-  FigureEntry,
   NotebookEntry,
   PipelineStage,
 } from "./types";
 import { getExecutedNotebookHtmlPath } from "./notebooks";
+
+// Singular node kinds and the matching calkit.yaml collection keys for the
+// artifact-style sections (figures, datasets, results, publications,
+// presentations), which share the same item machinery.
+type ArtifactKind =
+  | "figure"
+  | "dataset"
+  | "result"
+  | "publication"
+  | "presentation";
+type ArtifactCollection =
+  | "figures"
+  | "datasets"
+  | "results"
+  | "publications"
+  | "presentations";
 
 function outputEntryPath(
   output: string | { path: string; [key: string]: unknown },
 ): string {
   return typeof output === "string" ? output : output.path;
 }
+
+// Base codicon for each artifact kind (used when the artifact has provenance and
+// isn't stale; imported artifacts use a cloud icon instead).
+const ARTIFACT_ICONS: Record<ArtifactKind, string> = {
+  figure: "file-media",
+  dataset: "database",
+  result: "graph",
+  publication: "book",
+  presentation: "device-desktop",
+};
 
 export class SidebarItem extends vscode.TreeItem {
   constructor(
@@ -41,13 +66,21 @@ export class CalkitSidebarProvider
   private calkitConfig: CalkitInfo | undefined;
   private dvcYaml: DvcYaml | undefined;
   private staleStageNames = new Set<string>();
+  private runningStageNames = new Set<string>();
   private envDescriptions: Record<string, EnvDescription> | undefined;
   private detectedNotebooks: string[] = [];
   private detectedFigures: string[] = [];
   private detectedDatasets: string[] = [];
+  private detectedResults: string[] = [];
+  private detectedPresentations: string[] = [];
+  private hiddenSections = new Set<string>();
   private lastFingerprint: string | undefined;
 
   // Cached section items so reveal() can use getParent()
+  private readonly questionsSectionItem = this.makeSection(
+    "Questions",
+    "questions",
+  );
   private readonly envsSectionItem = this.makeSection("Environments", "envs");
   private readonly pipelineSectionItem = this.makeSection(
     "Pipeline",
@@ -62,7 +95,17 @@ export class CalkitSidebarProvider
     "Datasets",
     "datasets",
   );
+  private readonly publicationsSectionItem = this.makeSection(
+    "Publications",
+    "publications",
+  );
+  private readonly presentationsSectionItem = this.makeSection(
+    "Presentations",
+    "presentations",
+  );
+  private readonly resultsSectionItem = this.makeSection("Results", "results");
   private stageItemCache = new Map<string, SidebarItem>();
+  private envItemCache = new Map<string, SidebarItem>();
 
   refresh(
     workspaceRoot: string | undefined,
@@ -73,6 +116,10 @@ export class CalkitSidebarProvider
     detectedNotebooks?: string[],
     detectedFigures?: string[],
     detectedDatasets?: string[],
+    runningStageNames?: Set<string>,
+    detectedResults?: string[],
+    detectedPresentations?: string[],
+    hiddenSections?: Set<string>,
   ): void {
     const nextFingerprint = JSON.stringify([
       calkitConfig,
@@ -82,6 +129,10 @@ export class CalkitSidebarProvider
       detectedNotebooks,
       detectedFigures,
       detectedDatasets,
+      [...(runningStageNames ?? [])].sort(),
+      detectedResults,
+      detectedPresentations,
+      [...(hiddenSections ?? [])].sort(),
     ]);
     if (nextFingerprint === this.lastFingerprint) {
       return;
@@ -91,23 +142,42 @@ export class CalkitSidebarProvider
     this.calkitConfig = calkitConfig;
     this.dvcYaml = dvcYaml;
     this.staleStageNames = staleStageNames;
+    this.runningStageNames = runningStageNames ?? new Set();
     this.envDescriptions = envDescriptions;
     this.detectedNotebooks = detectedNotebooks ?? [];
     this.detectedFigures = detectedFigures ?? [];
     this.detectedDatasets = detectedDatasets ?? [];
+    this.detectedResults = detectedResults ?? [];
+    this.detectedPresentations = detectedPresentations ?? [];
+    this.hiddenSections = hiddenSections ?? new Set();
     this.stageItemCache.clear();
+    this.envItemCache.clear();
     this._onDidChangeTreeData.fire();
   }
 
   getAttentionCount(): number {
+    let total = 0;
+    for (const n of this.computeSectionAttention().values()) {
+      total += n;
+    }
+    return total;
+  }
+
+  // Number of items "needing attention" per section id (stale pipeline stages,
+  // notebooks without an environment, figures/datasets without provenance).
+  // Used both for the view badge and to flag the offending section headers so
+  // they're identifiable while collapsed.
+  private computeSectionAttention(): Map<string, number> {
+    const counts = new Map<string, number>();
     // Not a Calkit project (no calkit.yaml): the tree shows the welcome view,
     // so auto-detected files shouldn't drive a "needs attention" badge.
     if (this.calkitConfig === undefined) {
-      return 0;
+      return counts;
     }
-    let count = 0;
     // Stale pipeline stages
-    count += this.staleStageNames.size;
+    if (this.staleStageNames.size > 0) {
+      counts.set("pipeline", this.staleStageNames.size);
+    }
     // Notebooks with no environment
     const stages = this.calkitConfig?.pipeline?.stages ?? {};
     const listed = this.calkitConfig?.notebooks ?? [];
@@ -123,33 +193,37 @@ export class CalkitSidebarProvider
         allNbPaths.push(p);
       }
     }
+    let notebooksNeedingEnv = 0;
     for (const nbPath of allNbPaths) {
       const { entry, stage: nbStage } = this.resolveNotebookEntry(nbPath);
       const envName = entry.environment ?? nbStage?.environment;
       if (!envName) {
-        count++;
+        notebooksNeedingEnv++;
       }
     }
-    // Figures with no provenance or stale stage
+    if (notebooksNeedingEnv > 0) {
+      counts.set("notebooks", notebooksNeedingEnv);
+    }
+    // Figures/datasets with no provenance
     const outputToStage = this.buildOutputToStageMap();
-    for (const figPath of this.mergedArtifactPaths("figures")) {
-      const entry = this.resolveArtifactEntry(figPath, "figure", outputToStage);
-      if (!entry.stage && !entry.imported_from) {
-        count++;
+    for (const kind of ["figures", "datasets"] as const) {
+      const nodeKind = kind.slice(0, -1) as ArtifactKind;
+      let n = 0;
+      for (const artifactPath of this.mergedArtifactPaths(kind)) {
+        const entry = this.resolveArtifactEntry(
+          artifactPath,
+          nodeKind,
+          outputToStage,
+        );
+        if (!entry.stage && !entry.imported_from) {
+          n++;
+        }
+      }
+      if (n > 0) {
+        counts.set(kind, n);
       }
     }
-    // Datasets with no provenance
-    for (const dataPath of this.mergedArtifactPaths("datasets")) {
-      const entry = this.resolveArtifactEntry(
-        dataPath,
-        "dataset",
-        outputToStage,
-      );
-      if (!entry.stage && !entry.imported_from) {
-        count++;
-      }
-    }
-    return count;
+    return counts;
   }
 
   findStageItem(stageName: string): SidebarItem | undefined {
@@ -157,6 +231,13 @@ export class CalkitSidebarProvider
       this.getStageItems();
     }
     return this.stageItemCache.get(stageName);
+  }
+
+  findEnvItem(envName: string): SidebarItem | undefined {
+    if (this.envItemCache.size === 0) {
+      this.getEnvItems();
+    }
+    return this.envItemCache.get(envName);
   }
 
   getParent(element: SidebarItem): SidebarItem | undefined {
@@ -189,15 +270,29 @@ export class CalkitSidebarProvider
       if (this.calkitConfig === undefined) {
         return [];
       }
+      // Full ordered list; users hide sections they don't want via the
+      // calkit.sidebar.hiddenSections setting (the section id is the suffix
+      // after "section-").
+      const attention = this.computeSectionAttention();
       return [
+        this.questionsSectionItem,
         this.envsSectionItem,
         this.pipelineSectionItem,
         this.notebooksSectionItem,
         this.figuresSectionItem,
         this.datasetsSectionItem,
-      ];
+        this.publicationsSectionItem,
+        this.presentationsSectionItem,
+        this.resultsSectionItem,
+      ]
+        .filter(
+          (s) => !this.hiddenSections.has(s.nodeKind.replace(/^section-/, "")),
+        )
+        .map((s) => this.decorateSectionAttention(s, attention));
     }
     switch (element.nodeKind) {
+      case "section-questions":
+        return this.getQuestionItems();
       case "section-envs":
         return this.getEnvItems();
       case "section-pipeline":
@@ -208,6 +303,12 @@ export class CalkitSidebarProvider
         return this.getArtifactItems("figures");
       case "section-datasets":
         return this.getArtifactItems("datasets");
+      case "section-publications":
+        return this.getArtifactItems("publications");
+      case "section-presentations":
+        return this.getArtifactItems("presentations");
+      case "section-results":
+        return this.getArtifactItems("results");
       case "env":
         return this.getEnvProps(element.nodeId ?? "");
       case "stage":
@@ -216,13 +317,42 @@ export class CalkitSidebarProvider
         return this.getNotebookProps(element.nodeId ?? "");
       case "figure":
       case "dataset":
+      case "result":
+      case "publication":
+      case "presentation":
         return this.getArtifactProps(
           element.nodeId ?? "",
-          element.nodeKind as "figure" | "dataset",
+          element.nodeKind as ArtifactKind,
         );
       default:
         return [];
     }
+  }
+
+  private getQuestionItems(): SidebarItem[] {
+    const questions = this.calkitConfig?.questions ?? [];
+    if (questions.length === 0) {
+      return [
+        new SidebarItem(
+          "No questions defined",
+          vscode.TreeItemCollapsibleState.None,
+          "empty",
+        ),
+      ];
+    }
+    return questions.map((text, i) => {
+      // nodeId carries the 1-based index used by `calkit rm question <index>`.
+      const item = new SidebarItem(
+        text,
+        vscode.TreeItemCollapsibleState.None,
+        "question",
+        String(i + 1),
+      );
+      item.iconPath = new vscode.ThemeIcon("question");
+      item.tooltip = text;
+      item.contextValue = "question";
+      return item;
+    });
   }
 
   private makeSection(label: string, id: string): SidebarItem {
@@ -233,6 +363,30 @@ export class CalkitSidebarProvider
     );
     item.contextValue = `section-${id}`;
     return item;
+  }
+
+  // Flag a section header that contains items needing attention with a warning
+  // icon and count, so the offending section is identifiable while collapsed
+  // (mirroring the view's overall "needs attention" badge).
+  private decorateSectionAttention(
+    section: SidebarItem,
+    attention: Map<string, number>,
+  ): SidebarItem {
+    const id = section.nodeKind.replace(/^section-/, "");
+    const count = attention.get(id) ?? 0;
+    if (count > 0) {
+      section.iconPath = new vscode.ThemeIcon(
+        "warning",
+        new vscode.ThemeColor("list.warningForeground"),
+      );
+      section.description = String(count);
+      section.tooltip = `${count} item${count === 1 ? "" : "s"} need attention`;
+    } else {
+      section.iconPath = undefined;
+      section.description = undefined;
+      section.tooltip = undefined;
+    }
+    return section;
   }
 
   private getEnvItems(): SidebarItem[] {
@@ -247,6 +401,10 @@ export class CalkitSidebarProvider
       return [empty];
     }
     return Object.entries(envs).map(([name, env]) => {
+      const cached = this.envItemCache.get(name);
+      if (cached) {
+        return cached;
+      }
       const item = new SidebarItem(
         name,
         vscode.TreeItemCollapsibleState.Collapsed,
@@ -256,8 +414,30 @@ export class CalkitSidebarProvider
       item.description = typeof env.kind === "string" ? env.kind : undefined;
       item.iconPath = new vscode.ThemeIcon("package");
       item.contextValue = "env";
+      this.envItemCache.set(name, item);
       return item;
     });
+  }
+
+  // An "Environment" property node (shown under stages, notebooks, and
+  // artifacts). Clicking it jumps to the environment in the Environments
+  // section, expanded.
+  private makeEnvPropItem(envName: string): SidebarItem {
+    const item = new SidebarItem(
+      "Environment",
+      vscode.TreeItemCollapsibleState.None,
+      "stage-env-prop",
+      envName,
+    );
+    item.description = envName;
+    item.iconPath = new vscode.ThemeIcon("package");
+    item.contextValue = "stage-env-prop";
+    item.command = {
+      command: "calkit-vscode.viewEnvironment",
+      title: "View Environment",
+      arguments: [item],
+    };
+    return item;
   }
 
   private getEnvProps(envName: string): SidebarItem[] {
@@ -416,16 +596,7 @@ export class CalkitSidebarProvider
     const items: SidebarItem[] = [];
     const envName = entry.environment ?? stage?.environment;
     if (envName) {
-      const envItem = new SidebarItem(
-        "Environment",
-        vscode.TreeItemCollapsibleState.None,
-        "stage-env-prop",
-        envName,
-      );
-      envItem.description = envName;
-      envItem.iconPath = new vscode.ThemeIcon("package");
-      envItem.contextValue = "stage-env-prop";
-      items.push(envItem);
+      items.push(this.makeEnvPropItem(envName));
     }
     if (stageName && stage) {
       const stageItem = new SidebarItem(
@@ -437,6 +608,11 @@ export class CalkitSidebarProvider
       stageItem.description = stageName;
       stageItem.iconPath = new vscode.ThemeIcon("layers");
       stageItem.contextValue = "notebook-stage-prop";
+      stageItem.command = {
+        command: "calkit-vscode.viewStage",
+        title: "View Stage",
+        arguments: [stageItem],
+      };
       items.push(stageItem);
       for (const input of Array.isArray(stage.inputs)
         ? (stage.inputs as string[])
@@ -525,15 +701,27 @@ export class CalkitSidebarProvider
     return map;
   }
 
+  private detectedForCollection(kind: ArtifactCollection): string[] {
+    switch (kind) {
+      case "figures":
+        return this.detectedFigures;
+      case "datasets":
+        return this.detectedDatasets;
+      case "results":
+        return this.detectedResults;
+      case "presentations":
+        return this.detectedPresentations;
+      case "publications":
+        return []; // publications are declared-only
+    }
+  }
+
   private resolveArtifactEntry(
     artifactPath: string,
-    kind: "figure" | "dataset",
+    kind: ArtifactKind,
     outputToStage: Map<string, string>,
-  ): FigureEntry | DatasetEntry {
-    const list =
-      kind === "figure"
-        ? this.calkitConfig?.figures ?? []
-        : this.calkitConfig?.datasets ?? [];
+  ): ArtifactEntry {
+    const list = (this.calkitConfig?.[`${kind}s`] ?? []) as ArtifactEntry[];
     const fromList = list.find((e) => e.path === artifactPath);
     if (fromList?.stage || fromList?.imported_from) {
       return fromList;
@@ -547,16 +735,13 @@ export class CalkitSidebarProvider
 
   // Registered artifact paths for a kind plus any newly detected ones. Detected
   // paths are already filtered at the detection source (submodules, files
-  // inside registered figure/dataset/output folders, and folder collapsing), so
-  // here we only need to drop exact duplicates of the registered entries.
-  mergedArtifactPaths(kind: "figures" | "datasets"): string[] {
-    const list: (FigureEntry | DatasetEntry)[] =
-      this.calkitConfig?.[kind] ?? [];
+  // inside registered artifact/output folders, and folder collapsing), so here
+  // we only need to drop exact duplicates of the registered entries.
+  mergedArtifactPaths(kind: ArtifactCollection): string[] {
+    const list = (this.calkitConfig?.[kind] ?? []) as ArtifactEntry[];
     const knownPaths = new Set(list.map((e) => e.path));
-    const detected =
-      kind === "figures" ? this.detectedFigures : this.detectedDatasets;
     const allPaths = [...knownPaths];
-    for (const p of detected) {
+    for (const p of this.detectedForCollection(kind)) {
       if (!knownPaths.has(p)) {
         allPaths.push(p);
       }
@@ -564,13 +749,13 @@ export class CalkitSidebarProvider
     return allPaths;
   }
 
-  private getArtifactItems(kind: "figures" | "datasets"): SidebarItem[] {
-    const nodeKind = kind === "figures" ? "figure" : "dataset";
+  private getArtifactItems(kind: ArtifactCollection): SidebarItem[] {
+    const nodeKind = kind.slice(0, -1) as ArtifactKind;
     const allPaths = this.mergedArtifactPaths(kind);
     if (allPaths.length === 0) {
       return [
         new SidebarItem(
-          kind === "figures" ? "No figures found" : "No datasets found",
+          `No ${kind} found`,
           vscode.TreeItemCollapsibleState.None,
           "empty",
         ),
@@ -586,8 +771,8 @@ export class CalkitSidebarProvider
   }
 
   private makeArtifactItem(
-    entry: FigureEntry | DatasetEntry,
-    nodeKind: "figure" | "dataset",
+    entry: ArtifactEntry,
+    nodeKind: ArtifactKind,
   ): SidebarItem {
     const label = path.basename(entry.path);
     const hasProvenance = !!entry.stage || !!entry.imported_from;
@@ -615,13 +800,7 @@ export class CalkitSidebarProvider
     } else {
       const isImported = !!entry.imported_from;
       item.iconPath = new vscode.ThemeIcon(
-        nodeKind === "figure"
-          ? isImported
-            ? "cloud-download"
-            : "file-media"
-          : isImported
-          ? "cloud-download"
-          : "database",
+        isImported ? "cloud-download" : ARTIFACT_ICONS[nodeKind],
         new vscode.ThemeColor("testing.iconPassed"),
       );
       item.tooltip = entry.stage
@@ -629,7 +808,7 @@ export class CalkitSidebarProvider
         : `${entry.path} — imported`;
       item.contextValue = nodeKind;
     }
-    // Clicking a figure always opens the carousel; clicking a dataset opens the file
+    // Clicking a figure opens the carousel; everything else opens the file.
     if (this.workspaceRoot) {
       if (nodeKind === "figure") {
         item.command = {
@@ -651,7 +830,7 @@ export class CalkitSidebarProvider
 
   private getArtifactProps(
     artifactPath: string,
-    nodeKind: "figure" | "dataset",
+    nodeKind: ArtifactKind,
   ): SidebarItem[] {
     const entry = this.resolveArtifactEntry(
       artifactPath,
@@ -659,10 +838,8 @@ export class CalkitSidebarProvider
       this.buildOutputToStageMap(),
     );
     const items: SidebarItem[] = [];
-    const stages = this.calkitConfig?.pipeline?.stages ?? {};
     if (typeof entry.stage === "string") {
       const stageName = entry.stage;
-      const stage = stages[stageName];
       const stageItem = new SidebarItem(
         "Stage",
         vscode.TreeItemCollapsibleState.None,
@@ -672,19 +849,12 @@ export class CalkitSidebarProvider
       stageItem.description = stageName;
       stageItem.iconPath = new vscode.ThemeIcon("layers");
       stageItem.contextValue = "artifact-stage-prop";
+      stageItem.command = {
+        command: "calkit-vscode.viewStage",
+        title: "View Stage",
+        arguments: [stageItem],
+      };
       items.push(stageItem);
-      if (stage && typeof stage.environment === "string") {
-        const envItem = new SidebarItem(
-          "Environment",
-          vscode.TreeItemCollapsibleState.None,
-          "stage-env-prop",
-          stage.environment,
-        );
-        envItem.description = stage.environment;
-        envItem.iconPath = new vscode.ThemeIcon("package");
-        envItem.contextValue = "stage-env-prop";
-        items.push(envItem);
-      }
     } else if (entry.imported_from) {
       const src =
         typeof entry.imported_from === "object" &&
@@ -741,6 +911,7 @@ export class CalkitSidebarProvider
       if (cached) {
         return cached;
       }
+      const isRunning = this.runningStageNames.has(stageName);
       const isStale = this.staleStageNames.has(stageName);
       const item = new SidebarItem(
         stageName,
@@ -748,8 +919,10 @@ export class CalkitSidebarProvider
         "stage",
         stageName,
       );
-      item.description = isStale ? "stale" : undefined;
-      item.iconPath = isStale
+      item.description = isRunning ? "running" : isStale ? "stale" : undefined;
+      item.iconPath = isRunning
+        ? new vscode.ThemeIcon("loading~spin")
+        : isStale
         ? new vscode.ThemeIcon(
             "warning",
             new vscode.ThemeColor("list.warningForeground"),
@@ -759,7 +932,9 @@ export class CalkitSidebarProvider
             new vscode.ThemeColor("testing.iconPassed"),
           );
       item.contextValue = "stage";
-      item.tooltip = isStale
+      item.tooltip = isRunning
+        ? `${stageName} — running`
+        : isStale
         ? `${stageName} — stage is stale`
         : `${stageName} — up to date`;
       this.stageItemCache.set(stageName, item);
@@ -826,16 +1001,7 @@ export class CalkitSidebarProvider
         );
       }
       if (typeof calkitStage.environment === "string") {
-        const envItem = new SidebarItem(
-          "Environment",
-          vscode.TreeItemCollapsibleState.None,
-          "stage-env-prop",
-          calkitStage.environment,
-        );
-        envItem.description = calkitStage.environment;
-        envItem.iconPath = new vscode.ThemeIcon("package");
-        envItem.contextValue = "stage-env-prop";
-        items.push(envItem);
+        items.push(this.makeEnvPropItem(calkitStage.environment));
       }
       for (const input of Array.isArray(calkitStage.inputs)
         ? (calkitStage.inputs as string[])

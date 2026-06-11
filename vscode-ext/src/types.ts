@@ -39,12 +39,26 @@ export interface DatasetEntry {
   [key: string]: unknown;
 }
 
+// Figures, datasets, results, presentations, and publications all share the
+// same basic shape in calkit.yaml (a path with optional title/stage/provenance).
+export interface ArtifactEntry {
+  path: string;
+  title?: string;
+  stage?: string;
+  imported_from?: unknown;
+  [key: string]: unknown;
+}
+
 export interface CalkitInfo {
   name?: string;
   environments?: Record<string, CalkitEnvironment>;
   notebooks?: NotebookEntry[];
+  questions?: string[];
   figures?: FigureEntry[];
   datasets?: DatasetEntry[];
+  results?: ArtifactEntry[];
+  publications?: ArtifactEntry[];
+  presentations?: ArtifactEntry[];
   pipeline?: {
     stages?: Record<string, PipelineStage>;
   };

@@ -1,5 +1,7 @@
 """Tests for ``cli.list``."""
 
+import json
+import os
 import subprocess
 
 import calkit
@@ -51,6 +53,50 @@ def test_list_stages(tmp_dir):
     )
     assert "stage1" not in out
     assert "stage2" in out
+
+
+def test_list_results(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("results")
+    with open("results/metrics.json", "w") as f:
+        f.write("{}")
+    out = subprocess.check_output(
+        ["calkit", "list", "results", "--json"], text=True
+    )
+    entries = json.loads(out)
+    paths = [e["path"] for e in entries]
+    assert "results/metrics.json" in paths
+    assert all(
+        e["detected"] for e in entries if e["path"] == "results/metrics.json"
+    )
+    # --declared-only skips auto-detection
+    out = subprocess.check_output(
+        ["calkit", "list", "results", "--json", "--declared-only"], text=True
+    )
+    assert json.loads(out) == []
+
+
+def test_list_presentations(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("slides")
+    with open("slides/deck.pdf", "w") as f:
+        f.write("%PDF-1.4")
+    out = subprocess.check_output(
+        ["calkit", "list", "presentations", "--json"], text=True
+    )
+    paths = [e["path"] for e in json.loads(out)]
+    assert "slides/deck.pdf" in paths
+
+
+def test_list_questions(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(["calkit", "new", "question", "Does it work?"])
+    out = subprocess.check_output(
+        ["calkit", "list", "questions", "--json"], text=True
+    )
+    assert json.loads(out) == ["Does it work?"]
+    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    assert "1. Does it work?" in out
 
 
 def test_list_remotes(tmp_dir):

@@ -212,11 +212,14 @@ def test_get_status_reports_dvc_op_in_progress_during_pull(tmp_dir):
         proc.wait(timeout=30)
     assert status.errors
     joined = " ".join(status.errors)
-    # It names the in-progress process by PID rather than crashing or guessing.
+    # It reports that a DVC process is in progress rather than crashing.
     assert "in progress" in joined
-    assert str(proc.pid) in joined
     # The raw, alarming failure message must not be used for a mere lock hold.
     assert "Failed to get pipeline status from DVC" not in joined
+    # On POSIX we can additionally identify the holder by PID. On Windows the
+    # lock file/owner can't be read while held, so the message is generic.
+    if sys.platform != "win32":
+        assert str(proc.pid) in joined
 
 
 def test_concurrent_calkit_runs_do_not_fail_on_lock(tmp_dir):

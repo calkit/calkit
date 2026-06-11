@@ -154,6 +154,10 @@ def test_wait_until_done_cancels_on_interrupt(tmp_dir, monkeypatch):
     assert exc.value.exit_code == 130
     # The interrupt should have canceled the job rather than leaving it running
     assert not _is_active("slurm", job_id)
+    # The record must also be removed so the next run resubmits the job rather
+    # than finding it gone from the queue with no exit status and wrongly
+    # treating the canceled job as a success.
+    assert "sweep@x" not in _load_jobs()
 
 
 def test_build_pbs_submit():

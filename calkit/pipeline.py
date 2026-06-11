@@ -729,14 +729,25 @@ def get_status(
             raw_status = dvc_repo.status()
             raw_status = calkit.dvc.status_as_posix(raw_status)
         except LockError:
-            # Another DVC process (most likely a pipeline run in progress) is
-            # holding the repo lock. Report that plainly rather than as a hard
-            # failure so a background poller (e.g. the VS Code extension) does
-            # not surface an alarming error.
-            result["errors"].append(
-                "Pipeline status unavailable because another DVC process is "
-                "holding the lock (a pipeline run may be in progress)."
-            )
+            # Another DVC process is holding the repo lock---most often a
+            # long-running `dvc pull`/`push` or a concurrent `calkit run`. We
+            # genuinely cannot compute status until it releases, so state what
+            # is running plainly rather than surfacing an alarming error (e.g.
+            # to the VS Code extension's status poller). The holder PID is
+            # reliable here because we just failed to acquire the lock.
+            holder = calkit.dvc.get_dvc_lock_holder(wdir=wdir)
+            if holder is not None and holder.get("cmd"):
+                result["errors"].append(
+                    f"A DVC process is in progress (PID {holder['pid']}: "
+                    f"{holder['cmd']}). Status will be available once it "
+                    "finishes."
+                )
+            else:
+                result["errors"].append(
+                    "Another DVC process is holding the lock (a run or pull "
+                    "may be in progress). Status will be available once it "
+                    "finishes."
+                )
             return PipelineStatus.model_validate(result)
         except Exception as e:
             result["errors"].append(

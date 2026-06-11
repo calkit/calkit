@@ -379,6 +379,48 @@ def get_running_pipeline_processes(wdir: str | None = None) -> list[dict]:
     return result
 
 
+def get_dvc_lock_holder(wdir: str | None = None) -> dict | None:
+    """Return the process holding DVC's repo-level lock, or ``None``.
+
+    A long-running ``dvc pull``/``push`` (or another ``calkit run``) holds the
+    repo-level lock (``.dvc/tmp/lock``), into which ``zc.lockfile`` writes the
+    holder's PID. This lets callers report *what* is running---e.g. "a pull is
+    in progress"---when a status check can't acquire the lock.
+
+    Only meaningful right after a ``LockError``: the lock file persists with a
+    stale PID after release, so the recorded PID is the genuine holder only when
+    the lock is actually held (i.e. we just failed to acquire it). Returns
+    ``{"pid": int, "cmd": str}`` or ``None`` if it can't be determined (no lock
+    file, an unparseable/hardlink-lock file, or the process is gone).
+    """
+    import psutil  # Always available as a DVC dependency
+
+    lock_path = os.path.join(wdir or ".", ".dvc", "tmp", "lock")
+    try:
+        with open(lock_path) as f:
+            content = f.read()
+    except OSError:
+        return None
+    try:
+        # zc.lockfile writes " <pid>\n"; hardlink locks use another format.
+        pid = int(content.split()[0])
+    except (ValueError, IndexError):
+        return None
+    try:
+        proc = psutil.Process(pid)
+        cmdline = proc.cmdline()
+        # Drop the interpreter's full path so the command reads cleanly, e.g.
+        # "calkit pull" rather than "/.../python /.../calkit pull".
+        cmd = " ".join(
+            ([os.path.basename(cmdline[0])] + cmdline[1:])
+            if cmdline
+            else [proc.name()]
+        )
+    except Exception:
+        return None
+    return {"pid": pid, "cmd": cmd}
+
+
 def run_dvc_command(
     argv: list[str],
     cwd: str | None = None,

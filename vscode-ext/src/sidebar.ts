@@ -156,14 +156,28 @@ export class CalkitSidebarProvider
   }
 
   getAttentionCount(): number {
+    let total = 0;
+    for (const n of this.computeSectionAttention().values()) {
+      total += n;
+    }
+    return total;
+  }
+
+  // Number of items "needing attention" per section id (stale pipeline stages,
+  // notebooks without an environment, figures/datasets without provenance).
+  // Used both for the view badge and to flag the offending section headers so
+  // they're identifiable while collapsed.
+  private computeSectionAttention(): Map<string, number> {
+    const counts = new Map<string, number>();
     // Not a Calkit project (no calkit.yaml): the tree shows the welcome view,
     // so auto-detected files shouldn't drive a "needs attention" badge.
     if (this.calkitConfig === undefined) {
-      return 0;
+      return counts;
     }
-    let count = 0;
     // Stale pipeline stages
-    count += this.staleStageNames.size;
+    if (this.staleStageNames.size > 0) {
+      counts.set("pipeline", this.staleStageNames.size);
+    }
     // Notebooks with no environment
     const stages = this.calkitConfig?.pipeline?.stages ?? {};
     const listed = this.calkitConfig?.notebooks ?? [];
@@ -179,33 +193,37 @@ export class CalkitSidebarProvider
         allNbPaths.push(p);
       }
     }
+    let notebooksNeedingEnv = 0;
     for (const nbPath of allNbPaths) {
       const { entry, stage: nbStage } = this.resolveNotebookEntry(nbPath);
       const envName = entry.environment ?? nbStage?.environment;
       if (!envName) {
-        count++;
+        notebooksNeedingEnv++;
       }
     }
-    // Figures with no provenance or stale stage
+    if (notebooksNeedingEnv > 0) {
+      counts.set("notebooks", notebooksNeedingEnv);
+    }
+    // Figures/datasets with no provenance
     const outputToStage = this.buildOutputToStageMap();
-    for (const figPath of this.mergedArtifactPaths("figures")) {
-      const entry = this.resolveArtifactEntry(figPath, "figure", outputToStage);
-      if (!entry.stage && !entry.imported_from) {
-        count++;
+    for (const kind of ["figures", "datasets"] as const) {
+      const nodeKind = kind.slice(0, -1) as ArtifactKind;
+      let n = 0;
+      for (const artifactPath of this.mergedArtifactPaths(kind)) {
+        const entry = this.resolveArtifactEntry(
+          artifactPath,
+          nodeKind,
+          outputToStage,
+        );
+        if (!entry.stage && !entry.imported_from) {
+          n++;
+        }
+      }
+      if (n > 0) {
+        counts.set(kind, n);
       }
     }
-    // Datasets with no provenance
-    for (const dataPath of this.mergedArtifactPaths("datasets")) {
-      const entry = this.resolveArtifactEntry(
-        dataPath,
-        "dataset",
-        outputToStage,
-      );
-      if (!entry.stage && !entry.imported_from) {
-        count++;
-      }
-    }
-    return count;
+    return counts;
   }
 
   findStageItem(stageName: string): SidebarItem | undefined {
@@ -255,6 +273,7 @@ export class CalkitSidebarProvider
       // Full ordered list; users hide sections they don't want via the
       // calkit.sidebar.hiddenSections setting (the section id is the suffix
       // after "section-").
+      const attention = this.computeSectionAttention();
       return [
         this.questionsSectionItem,
         this.envsSectionItem,
@@ -265,9 +284,11 @@ export class CalkitSidebarProvider
         this.publicationsSectionItem,
         this.presentationsSectionItem,
         this.resultsSectionItem,
-      ].filter(
-        (s) => !this.hiddenSections.has(s.nodeKind.replace(/^section-/, "")),
-      );
+      ]
+        .filter(
+          (s) => !this.hiddenSections.has(s.nodeKind.replace(/^section-/, "")),
+        )
+        .map((s) => this.decorateSectionAttention(s, attention));
     }
     switch (element.nodeKind) {
       case "section-questions":
@@ -342,6 +363,30 @@ export class CalkitSidebarProvider
     );
     item.contextValue = `section-${id}`;
     return item;
+  }
+
+  // Flag a section header that contains items needing attention with a warning
+  // icon and count, so the offending section is identifiable while collapsed
+  // (mirroring the view's overall "needs attention" badge).
+  private decorateSectionAttention(
+    section: SidebarItem,
+    attention: Map<string, number>,
+  ): SidebarItem {
+    const id = section.nodeKind.replace(/^section-/, "");
+    const count = attention.get(id) ?? 0;
+    if (count > 0) {
+      section.iconPath = new vscode.ThemeIcon(
+        "warning",
+        new vscode.ThemeColor("list.warningForeground"),
+      );
+      section.description = String(count);
+      section.tooltip = `${count} item${count === 1 ? "" : "s"} need attention`;
+    } else {
+      section.iconPath = undefined;
+      section.description = undefined;
+      section.tooltip = undefined;
+    }
+    return section;
   }
 
   private getEnvItems(): SidebarItem[] {

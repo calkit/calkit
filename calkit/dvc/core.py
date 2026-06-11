@@ -343,12 +343,11 @@ def get_running_pipeline_processes(wdir: str | None = None) -> list[dict]:
     While ``dvc repro`` runs a stage, DVC records the owning process in its
     ``rwlock`` file (under ``.dvc/tmp/rwlock``); this is the same lock that
     makes ``dvc status`` fail with a ``LockError`` mid-run. Each returned item
-    is ``{"pid": int, "cmd": str}``, with stale entries (PIDs that are no
-    longer running) filtered out. An empty list means no pipeline run is
-    currently in progress.
+    is ``{"pid": int, "cmd": str}``. Entries are dropped unless the recorded
+    PID is still running *the recorded command* (see
+    :func:`_rwlock_holder_is_live`), so neither dead PIDs nor reused ones are
+    reported. An empty list means no pipeline run is currently in progress.
     """
-    import psutil  # Always available as a DVC dependency
-
     rwlock_path = os.path.join(wdir or ".", ".dvc", "tmp", "rwlock")
     if not os.path.isfile(rwlock_path):
         return []
@@ -369,14 +368,43 @@ def get_running_pipeline_processes(wdir: str | None = None) -> list[dict]:
                 by_pid[info["pid"]] = info.get("cmd", "")
     result = []
     for pid, cmd in by_pid.items():
-        try:
-            alive = psutil.pid_exists(pid)
-        except Exception:
-            # If we can't tell, assume the process is still alive
-            alive = True
-        if alive:
+        if _rwlock_holder_is_live(pid, cmd):
             result.append({"pid": pid, "cmd": cmd})
     return result
+
+
+def _rwlock_holder_is_live(pid: int, recorded_cmd: str) -> bool:
+    """Whether ``pid`` is still the process that recorded an rwlock entry.
+
+    DVC marks an rwlock entry stale only when its PID no longer exists, but the
+    OS reuses PIDs: a finished or killed run can leave an entry whose PID later
+    belongs to an unrelated process. Checking liveness alone then misreports a
+    pipeline as still running---the reported "Run in progress (PID ...)" with an
+    ever-growing elapsed time from a stale run log, which only clears once the
+    reused PID happens to exit (hence "works on the second retry").
+
+    DVC records the holder's ``" ".join(sys.argv)`` as the entry's command, so
+    confirm the live process still carries those arguments. The interpreter
+    path and launch form (``-m calkit`` vs the ``calkit`` script) differ
+    between what DVC recorded and what ``psutil`` reports, so compare the
+    arguments after ``argv[0]`` (the meaningful subcommand and its args), which
+    match for the genuine holder and differ for a reused PID.
+    """
+    import psutil  # Always available as a DVC dependency
+
+    try:
+        cmdline = psutil.Process(pid).cmdline()
+    except Exception:
+        # No such process, or we can't introspect it: treat as not running.
+        return False
+    tail = recorded_cmd.split()[1:]
+    if not tail:
+        # Nothing distinctive to match on; trust that the PID is alive.
+        return bool(cmdline)
+    return any(
+        cmdline[i : i + len(tail)] == tail
+        for i in range(len(cmdline) - len(tail) + 1)
+    )
 
 
 def get_dvc_lock_holder(wdir: str | None = None) -> dict | None:

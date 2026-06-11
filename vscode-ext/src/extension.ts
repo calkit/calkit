@@ -116,6 +116,9 @@ let hasCheckedCalkitCli = false;
 const pipelineOutputUris = new Set<string>();
 const staleOutputUris = new Set<string>();
 const staleStageNames = new Set<string>();
+// Stages currently being executed by an in-progress `calkit run` (reported by
+// `calkit status --json` as pipeline.running_stages); shown with a spinner.
+const runningStageNames = new Set<string>();
 const importedFigureUris = new Set<string>();
 const pipelineNotebookUris = new Set<string>();
 let currentCalkitConfig: CalkitInfo | undefined;
@@ -1065,6 +1068,39 @@ export function activate(context: vscode.ExtensionContext): void {
   calkitYamlWatcher.onDidCreate(refreshPipelineDerived);
   calkitYamlWatcher.onDidDelete(refreshPipelineDerived);
 
+  // Watch DVC's rwlock to detect when a `calkit run` starts/finishes (it holds
+  // this lock while running) and drive the running-stage spinners. We only poll
+  // `calkit status` while the lock indicates activity, where it takes the cheap,
+  // lock-free path — avoiding contention with the run itself.
+  const rwlockWorkspaceRoot = getWorkspaceRoot();
+  if (rwlockWorkspaceRoot) {
+    const rwlockWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(
+        vscode.Uri.file(path.join(rwlockWorkspaceRoot, ".dvc", "tmp")),
+        "rwlock",
+      ),
+    );
+    let rwlockDebounce: ReturnType<typeof setTimeout> | undefined;
+    const onRwlockEvent = (): void => {
+      if (Date.now() < suppressRwlockUntil) {
+        return;
+      }
+      // Coalesce bursts of lock activity (e.g. dvc push/pull touching rwlock)
+      // into a single status check.
+      if (rwlockDebounce !== undefined) {
+        clearTimeout(rwlockDebounce);
+      }
+      rwlockDebounce = setTimeout(() => {
+        rwlockDebounce = undefined;
+        ensureRunStatusPolling(context);
+      }, 1000);
+    };
+    rwlockWatcher.onDidCreate(onRwlockEvent);
+    rwlockWatcher.onDidChange(onRwlockEvent);
+    rwlockWatcher.onDidDelete(onRwlockEvent);
+    context.subscriptions.push(rwlockWatcher);
+  }
+
   // Proposed API: shows Calkit in the top-level kernel source list.
   // This must never break activation when proposed APIs are unavailable.
   registerKernelSourceIfAvailable(context);
@@ -1577,101 +1613,165 @@ async function refreshPipelineOutputContext(
   ].map((p) => vscode.Uri.file(p));
   decorationProvider.refresh(changedUris);
   await scanDetectedFiles(workspaceRoot, calkitYamlExists);
-  sidebarProvider?.refresh(
-    workspaceRoot,
-    calkitYamlExists ? calkitConfig : undefined,
-    dvcYaml,
-    staleStageNames,
-    envDescriptions,
-    currentDetectedNotebooks,
-    currentDetectedFigures,
-    currentDetectedDatasets,
-  );
-  updateSidebarBadge();
+  renderSidebarFromState();
   // Run the staleness check after the fast decoration pass: "not produced
   // by the pipeline" badges are applied immediately, and stale-output
   // decorations follow once calkit status finishes. The check is skipped on
   // automatic refreshes when auto-refresh is disabled; the Refresh button
   // forces it.
   if (force || isAutoRefreshStatusEnabled()) {
-    void refreshStaleOutputContext(
-      workspaceRoot,
-      outputMap,
-      decorationProvider,
-    );
+    ensureRunStatusPolling(context);
   }
 }
 
-// Guards against overlapping `calkit status` runs: while one is in flight,
-// further automatic refreshes skip launching another (they'd otherwise stack
-// up and contend for DVC locks during rapid file changes).
-let staleRefreshInFlight = false;
-
-async function refreshStaleOutputContext(
-  workspaceRoot: string,
-  outputMap: Map<string, string>,
-  provider: PipelineOutputDecorationProvider,
-): Promise<void> {
-  if (staleRefreshInFlight) {
+// Re-render the sidebar from the current cached pipeline state (config, stale
+// stages, running stages, detected files).
+function renderSidebarFromState(): void {
+  const workspaceRoot = getWorkspaceRoot();
+  if (!workspaceRoot) {
     return;
   }
-  staleRefreshInFlight = true;
+  sidebarProvider?.refresh(
+    workspaceRoot,
+    currentCalkitYamlExists ? currentCalkitConfig : undefined,
+    currentDvcYaml,
+    staleStageNames,
+    currentEnvDescriptions,
+    currentDetectedNotebooks,
+    currentDetectedFigures,
+    currentDetectedDatasets,
+    runningStageNames,
+  );
+  updateSidebarBadge();
+}
+
+// Apply a fresh set of stale stage names: update stage badges, per-output file
+// decorations, and the sidebar (only re-rendering on an actual change).
+function applyStaleStages(
+  workspaceRoot: string,
+  freshStaleStageNames: Set<string>,
+): void {
+  const outputMap = buildPipelineOutputMapFromYaml(
+    workspaceRoot,
+    currentDvcYaml,
+  );
+  const nextStale = new Set<string>();
+  for (const [absPath, stageName] of outputMap) {
+    if (freshStaleStageNames.has(stageName)) {
+      nextStale.add(absPath);
+    }
+  }
+  const prevStale = new Set(staleOutputUris);
+  staleOutputUris.clear();
+  for (const p of nextStale) {
+    staleOutputUris.add(p);
+  }
+  const prevStageNames = new Set(staleStageNames);
+  staleStageNames.clear();
+  for (const n of freshStaleStageNames) {
+    staleStageNames.add(n);
+  }
+  const changedUris = [...new Set([...prevStale, ...staleOutputUris])].map(
+    (p) => vscode.Uri.file(p),
+  );
+  if (changedUris.length > 0 && decorationProvider) {
+    decorationProvider.refresh(changedUris);
+  }
+  const staleChanged =
+    prevStageNames.size !== staleStageNames.size ||
+    [...staleStageNames].some((n) => !prevStageNames.has(n));
+  if (staleChanged) {
+    renderSidebarFromState();
+  }
+}
+
+// Apply a fresh set of running stage names (re-rendering only on change).
+function applyRunningStages(freshRunning: Set<string>): void {
+  const changed =
+    freshRunning.size !== runningStageNames.size ||
+    [...freshRunning].some((n) => !runningStageNames.has(n));
+  if (!changed) {
+    return;
+  }
+  runningStageNames.clear();
+  for (const n of freshRunning) {
+    runningStageNames.add(n);
+  }
+  renderSidebarFromState();
+}
+
+// True while a poll loop is active, so refreshes/lock events don't start a
+// second loop. The loop runs only while a pipeline run is in progress (when
+// `calkit status` takes the cheap, lock-free path), plus one final check that
+// recomputes staleness once the run finishes.
+let runStatusPolling = false;
+let runStatusPollTimer: ReturnType<typeof setTimeout> | undefined;
+// Ignore rwlock file-watcher events for a short window around our own status
+// call: the not-running status path itself takes the DVC lock (touching
+// rwlock), which would otherwise re-trigger the watcher into an endless poll.
+let suppressRwlockUntil = 0;
+const RUN_STATUS_POLL_INTERVAL_MS = 2500;
+
+async function pollPipelineRunStatus(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const workspaceRoot = getWorkspaceRoot();
+  if (!workspaceRoot) {
+    runStatusPolling = false;
+    return;
+  }
+  let running = false;
   try {
+    suppressRwlockUntil = Date.now() + 5000;
     const { stdout } = await execFileAsync(
       "calkit",
       ["status", "--json", "-c", "pipeline"],
       { cwd: workspaceRoot, timeout: 60_000 },
     );
+    suppressRwlockUntil = Date.now() + 5000;
     const status = JSON.parse(stdout) as {
-      pipeline?: { stale_stage_names?: string[] };
+      pipeline?: {
+        running?: boolean;
+        running_stages?: string[];
+        stale_stage_names?: string[];
+      };
     };
-    const freshStaleStageNames = new Set(
-      status?.pipeline?.stale_stage_names ?? [],
-    );
-    const nextStale = new Set<string>();
-    for (const [absPath, stageName] of outputMap) {
-      if (freshStaleStageNames.has(stageName)) {
-        nextStale.add(absPath);
-      }
-    }
-    const prevStale = new Set(staleOutputUris);
-    staleOutputUris.clear();
-    for (const p of nextStale) {
-      staleOutputUris.add(p);
-    }
-    const prevStageNames = new Set(staleStageNames);
-    staleStageNames.clear();
-    for (const n of freshStaleStageNames) {
-      staleStageNames.add(n);
-    }
-    const changedUris = [...new Set([...prevStale, ...staleOutputUris])].map(
-      (p) => vscode.Uri.file(p),
-    );
-    if (changedUris.length > 0) {
-      provider.refresh(changedUris);
-    }
-    // Only re-render the sidebar if the set of stale stages actually changed
-    const staleChanged =
-      prevStageNames.size !== staleStageNames.size ||
-      [...staleStageNames].some((n) => !prevStageNames.has(n));
-    if (staleChanged) {
-      sidebarProvider?.refresh(
+    const pipeline = status?.pipeline ?? {};
+    running = pipeline.running === true;
+    if (running) {
+      // While a run holds the lock, calkit can't compute staleness, so only
+      // update the spinners and keep the previous stale badges.
+      applyRunningStages(new Set(pipeline.running_stages ?? []));
+    } else {
+      applyRunningStages(new Set());
+      applyStaleStages(
         workspaceRoot,
-        currentCalkitYamlExists ? currentCalkitConfig : undefined,
-        currentDvcYaml,
-        staleStageNames,
-        currentEnvDescriptions,
-        currentDetectedNotebooks,
-        currentDetectedFigures,
-        currentDetectedDatasets,
+        new Set(pipeline.stale_stage_names ?? []),
       );
-      updateSidebarBadge();
     }
   } catch (error) {
-    log(`Staleness check failed: ${String(error)}`);
-  } finally {
-    staleRefreshInFlight = false;
+    log(`Pipeline status check failed: ${String(error)}`);
   }
+  if (running) {
+    runStatusPollTimer = setTimeout(
+      () => void pollPipelineRunStatus(context),
+      RUN_STATUS_POLL_INTERVAL_MS,
+    );
+  } else {
+    runStatusPolling = false;
+    runStatusPollTimer = undefined;
+  }
+}
+
+// Run a status check (and, while a run is in progress, a poll loop that drives
+// the running spinners until it finishes). When idle, the single check doubles
+// as the staleness refresh. No-op if a loop is already active.
+function ensureRunStatusPolling(context: vscode.ExtensionContext): void {
+  if (runStatusPolling) {
+    return;
+  }
+  runStatusPolling = true;
+  void pollPipelineRunStatus(context);
 }
 
 function getNonce(): string {

@@ -41,6 +41,7 @@ export class CalkitSidebarProvider
   private calkitConfig: CalkitInfo | undefined;
   private dvcYaml: DvcYaml | undefined;
   private staleStageNames = new Set<string>();
+  private runningStageNames = new Set<string>();
   private envDescriptions: Record<string, EnvDescription> | undefined;
   private detectedNotebooks: string[] = [];
   private detectedFigures: string[] = [];
@@ -74,6 +75,7 @@ export class CalkitSidebarProvider
     detectedNotebooks?: string[],
     detectedFigures?: string[],
     detectedDatasets?: string[],
+    runningStageNames?: Set<string>,
   ): void {
     const nextFingerprint = JSON.stringify([
       calkitConfig,
@@ -83,6 +85,7 @@ export class CalkitSidebarProvider
       detectedNotebooks,
       detectedFigures,
       detectedDatasets,
+      [...(runningStageNames ?? [])].sort(),
     ]);
     if (nextFingerprint === this.lastFingerprint) {
       return;
@@ -92,6 +95,7 @@ export class CalkitSidebarProvider
     this.calkitConfig = calkitConfig;
     this.dvcYaml = dvcYaml;
     this.staleStageNames = staleStageNames;
+    this.runningStageNames = runningStageNames ?? new Set();
     this.envDescriptions = envDescriptions;
     this.detectedNotebooks = detectedNotebooks ?? [];
     this.detectedFigures = detectedFigures ?? [];
@@ -763,6 +767,7 @@ export class CalkitSidebarProvider
       if (cached) {
         return cached;
       }
+      const isRunning = this.runningStageNames.has(stageName);
       const isStale = this.staleStageNames.has(stageName);
       const item = new SidebarItem(
         stageName,
@@ -770,8 +775,10 @@ export class CalkitSidebarProvider
         "stage",
         stageName,
       );
-      item.description = isStale ? "stale" : undefined;
-      item.iconPath = isStale
+      item.description = isRunning ? "running" : isStale ? "stale" : undefined;
+      item.iconPath = isRunning
+        ? new vscode.ThemeIcon("loading~spin")
+        : isStale
         ? new vscode.ThemeIcon(
             "warning",
             new vscode.ThemeColor("list.warningForeground"),
@@ -781,7 +788,9 @@ export class CalkitSidebarProvider
             new vscode.ThemeColor("testing.iconPassed"),
           );
       item.contextValue = "stage";
-      item.tooltip = isStale
+      item.tooltip = isRunning
+        ? `${stageName} — running`
+        : isStale
         ? `${stageName} — stage is stale`
         : `${stageName} — up to date`;
       this.stageItemCache.set(stageName, item);

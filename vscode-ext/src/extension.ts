@@ -1506,15 +1506,22 @@ class PipelineOutputDecorationProvider
   implements vscode.FileDecorationProvider
 {
   private readonly _onDidChangeFileDecorations = new vscode.EventEmitter<
-    vscode.Uri[]
+    vscode.Uri[] | undefined
   >();
   readonly onDidChangeFileDecorations = this._onDidChangeFileDecorations.event;
 
-  refresh(uris: vscode.Uri[]): void {
+  // Passing undefined invalidates all decorations (used when the project's
+  // Calkit status flips, since the affected files aren't otherwise tracked).
+  refresh(uris?: vscode.Uri[]): void {
     this._onDidChangeFileDecorations.fire(uris);
   }
 
   provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
+    // Only Calkit projects have a pipeline, so outside one nothing is "not
+    // produced by the pipeline".
+    if (!currentCalkitYamlExists) {
+      return undefined;
+    }
     const ext = path.extname(uri.fsPath).toLowerCase();
     if (pipelineOutputUris.has(uri.fsPath)) {
       if (staleOutputUris.has(uri.fsPath)) {
@@ -1718,6 +1725,7 @@ async function refreshPipelineOutputContext(
   const calkitYamlExists = await fileExists(
     path.join(workspaceRoot, "calkit.yaml"),
   );
+  const calkitStatusChanged = calkitYamlExists !== currentCalkitYamlExists;
   currentCalkitYamlExists = calkitYamlExists;
   void vscode.commands.executeCommand(
     "setContext",
@@ -1763,7 +1771,10 @@ async function refreshPipelineOutputContext(
       ...pipelineNotebookUris,
     ]),
   ].map((p) => vscode.Uri.file(p));
-  decorationProvider.refresh(changedUris);
+  // When the project gains/loses calkit.yaml, invalidate all decorations so the
+  // "not produced by the pipeline" badges appear or clear across the tree; the
+  // affected figure/notebook files aren't in changedUris otherwise.
+  decorationProvider.refresh(calkitStatusChanged ? undefined : changedUris);
   await scanDetectedFiles(workspaceRoot, calkitYamlExists);
   renderSidebarFromState();
   // Run the staleness check after the fast decoration pass: "not produced

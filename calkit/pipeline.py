@@ -716,6 +716,8 @@ def get_status(
                     f"{e.__class__.__name__}: {e}"
                 )
                 return PipelineStatus.model_validate(result)
+        from dvc.lock import LockError
+
         try:
             dvc_repo = calkit.dvc.get_dvc_repo()
             # calkit.dvc.core installs a filter on dvc.repo.status that drops
@@ -726,6 +728,16 @@ def get_status(
             # the full-project status view.
             raw_status = dvc_repo.status()
             raw_status = calkit.dvc.status_as_posix(raw_status)
+        except LockError:
+            # Another DVC process (most likely a pipeline run in progress) is
+            # holding the repo lock. Report that plainly rather than as a hard
+            # failure so a background poller (e.g. the VS Code extension) does
+            # not surface an alarming error.
+            result["errors"].append(
+                "Pipeline status unavailable because another DVC process is "
+                "holding the lock (a pipeline run may be in progress)."
+            )
+            return PipelineStatus.model_validate(result)
         except Exception as e:
             result["errors"].append(
                 "Failed to get pipeline status from DVC: "

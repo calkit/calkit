@@ -1063,6 +1063,53 @@ export class CalkitSidebarProvider
       }
     }
 
+    // Stages that run in a scheduler (SLURM/PBS) environment write a log file;
+    // surface it (once it exists) so it can be opened from the tree.
+    const logPath = this.schedulerLogPathForStage(stageName);
+    if (
+      logPath &&
+      this.workspaceRoot &&
+      fs.existsSync(path.join(this.workspaceRoot, logPath))
+    ) {
+      prop("Log", logPath, "output", logPath);
+    }
+
     return items;
+  }
+
+  // Repo-relative path of the scheduler log for a stage, or undefined if the
+  // stage doesn't run in a scheduler environment. Prefers the log declared as a
+  // DVC output (covers iteration-expanded stages and log_path overrides under
+  // the default dir); otherwise falls back to the default path the CLI uses.
+  private schedulerLogPathForStage(stageName: string): string | undefined {
+    const outs = this.dvcYaml?.stages?.[stageName]?.outs ?? [];
+    for (const out of outs) {
+      const p =
+        typeof out === "string" ? out : String(Object.keys(out)[0] ?? "");
+      if (p.startsWith(".calkit/scheduler/logs/")) {
+        return p;
+      }
+    }
+    const stage = this.calkitConfig?.pipeline?.stages?.[stageName];
+    if (stage && this.usesSchedulerEnv(stage)) {
+      const override = stage.scheduler?.log_path;
+      return typeof override === "string" && override
+        ? override
+        : `.calkit/scheduler/logs/${stageName}.out`;
+    }
+    return undefined;
+  }
+
+  // Whether a stage runs under a SLURM/PBS scheduler. Environments combine as
+  // "outer:inner", with the scheduler being the outer (or only) environment, so
+  // the kind of the part before any colon is what matters.
+  private usesSchedulerEnv(stage: PipelineStage): boolean {
+    const envRef = stage.environment;
+    if (typeof envRef !== "string") {
+      return false;
+    }
+    const outerName = envRef.split(":")[0];
+    const kind = this.calkitConfig?.environments?.[outerName]?.kind;
+    return kind === "slurm" || kind === "pbs";
   }
 }

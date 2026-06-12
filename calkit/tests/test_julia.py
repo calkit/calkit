@@ -1,14 +1,25 @@
 """Tests for ``calkit.julia``"""
 
+import os
 from unittest import mock
 
 import pytest
 
 from calkit.julia import (
+    _is_julia_command,
     check_version_in_command,
     ensure_startup_file_disabled_in_command,
     get_julia_exe,
+    load_path,
 )
+
+
+def test_load_path_uses_platform_separator():
+    # Julia splits JULIA_LOAD_PATH on the platform path separator, so the
+    # value must use ';' on Windows and ':' elsewhere (== os.pathsep).
+    assert load_path() == f"@{os.pathsep}@stdlib"
+    assert "@" in load_path()
+    assert "@stdlib" in load_path()
 
 
 def test_get_julia_exe(monkeypatch, tmp_path):
@@ -42,6 +53,28 @@ def test_get_julia_exe(monkeypatch, tmp_path):
     # caller surfaces a clear not-found error
     monkeypatch.setattr("calkit.julia.shutil.which", lambda name: None)
     assert get_julia_exe() == "julia"
+
+
+def test_is_julia_command_case_insensitive():
+    # Windows resolves the execution-alias shim to an uppercase extension
+    # (e.g. ``julia.EXE``); the check must still recognize it.
+    assert _is_julia_command("C:/x/julia.EXE")
+    assert _is_julia_command("C:/x/Julia.Exe")
+    assert _is_julia_command("C:/x/julialauncher.EXE")
+    assert _is_julia_command("/usr/bin/julia")
+    assert _is_julia_command("julialauncher")
+    assert not _is_julia_command("python")
+    assert not _is_julia_command("C:/x/python.exe")
+
+
+def test_disable_startup_file_accepts_uppercase_exe():
+    # Regression: julia.EXE (Windows execution alias) was rejected as not a
+    # Julia command, failing the env check and masking real pipeline status.
+    cmd = ensure_startup_file_disabled_in_command(
+        ["C:/x/julia.EXE", "--version"]
+    )
+    assert cmd[0] == "C:/x/julia.EXE"
+    assert "--startup-file=no" in cmd
 
 
 def test_check_version_in_command():

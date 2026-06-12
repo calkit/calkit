@@ -80,6 +80,11 @@
         "category": "Calkit"
       },
       {
+        "command": "calkit-vscode.editNotebookEnvironment",
+        "title": "Edit Notebook Environment",
+        "category": "Calkit"
+      },
+      {
         "command": "calkit-vscode.createCalkitEnvironment",
         "title": "Create Environment",
         "category": "Calkit",
@@ -556,6 +561,11 @@
         {
           "command": "calkit-vscode.selectCalkitEnvironment",
           "when": "notebookType == 'jupyter-notebook' && !calkit.isSettingKernel",
+          "group": "navigation@98"
+        },
+        {
+          "command": "calkit-vscode.editNotebookEnvironment",
+          "when": "notebookType == 'jupyter-notebook' && calkit.notebookHasEnvironment && !calkit.isSettingKernel",
           "group": "navigation@99"
         },
         {
@@ -605,6 +615,9 @@
         },
         {
           "command": "calkit-vscode.selectCalkitEnvironment"
+        },
+        {
+          "command": "calkit-vscode.editNotebookEnvironment"
         },
         {
           "command": "calkit-vscode.createCalkitEnvironment"

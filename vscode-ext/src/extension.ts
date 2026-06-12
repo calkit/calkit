@@ -35,6 +35,7 @@ import {
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
 const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
 const COMMAND_EDIT_ENV = "calkit-vscode.editEnvironment";
+const COMMAND_EDIT_NOTEBOOK_ENV = "calkit-vscode.editNotebookEnvironment";
 const COMMAND_OPEN_STAGE_FILE = "calkit-vscode.openStageFile";
 const COMMAND_START_SLURM = "calkit-vscode.startCalkitSlurmJob";
 const COMMAND_STOP_SLURM = "calkit-vscode.stopCalkitSlurmJob";
@@ -231,20 +232,44 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!workspaceRoot) {
           return;
         }
-        const env = currentCalkitConfig?.environments?.[envName];
-        const desc = currentEnvDescriptions?.[envName];
-        const specPath =
-          desc?.spec_path ??
-          (typeof env?.path === "string" ? env.path : undefined);
-        await showEnvCreatorWebview(
-          context,
-          workspaceRoot,
-          envName,
-          env,
-          specPath,
-        );
+        await openEnvironmentEditor(context, workspaceRoot, envName);
       },
     ),
+  );
+
+  // Edit the active notebook's configured environment (the inner environment,
+  // which carries the package spec) straight from the notebook toolbar.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND_EDIT_NOTEBOOK_ENV, async () => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        void vscode.window.showErrorMessage(
+          "Open a workspace folder to edit Calkit environments.",
+        );
+        return;
+      }
+      const notebookRelativePath = getActiveNotebookRelativePath(workspaceRoot);
+      if (!notebookRelativePath) {
+        void vscode.window.showErrorMessage("No active notebook.");
+        return;
+      }
+      const candidate = await getConfiguredCandidateForNotebookPath(
+        workspaceRoot,
+        notebookRelativePath,
+      );
+      if (!candidate) {
+        void vscode.window.showInformationMessage(
+          "No environment is configured for this notebook yet. " +
+            "Use 'Select Notebook Environment' first.",
+        );
+        return;
+      }
+      await openEnvironmentEditor(
+        context,
+        workspaceRoot,
+        candidate.innerEnvironment,
+      );
+    }),
   );
 
   context.subscriptions.push(
@@ -5925,6 +5950,21 @@ function hasRunningServerSession(
   return true;
 }
 
+// Open the environment editor webview for a named environment, resolving its
+// spec file the same way for the sidebar "Edit Environment" action and the
+// notebook toolbar "Edit Notebook Environment" action.
+async function openEnvironmentEditor(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+  envName: string,
+): Promise<void> {
+  const env = currentCalkitConfig?.environments?.[envName];
+  const desc = currentEnvDescriptions?.[envName];
+  const specPath =
+    desc?.spec_path ?? (typeof env?.path === "string" ? env.path : undefined);
+  await showEnvCreatorWebview(context, workspaceRoot, envName, env, specPath);
+}
+
 async function getConfiguredCandidateForNotebookPath(
   workspaceRoot: string,
   notebookRelativePath: string,
@@ -7740,11 +7780,25 @@ async function refreshNotebookToolbarContext(
   const workspaceRoot = getWorkspaceRoot();
   const notebookUri = vscode.window.activeNotebookEditor?.notebook.uri;
   let notebookHasStage = false;
+  let notebookHasEnvironment = false;
   if (workspaceRoot && notebookUri) {
     const stageName = await findStageForFile(workspaceRoot, notebookUri);
     notebookHasStage = stageName !== undefined;
+    const notebookRelativePath = getActiveNotebookRelativePath(workspaceRoot);
+    if (notebookRelativePath) {
+      const candidate = await getConfiguredCandidateForNotebookPath(
+        workspaceRoot,
+        notebookRelativePath,
+      );
+      notebookHasEnvironment = candidate !== undefined;
+    }
   }
 
+  await vscode.commands.executeCommand(
+    "setContext",
+    "calkit.notebookHasEnvironment",
+    notebookHasEnvironment,
+  );
   await vscode.commands.executeCommand(
     "setContext",
     "calkit.hasResumableSlurmSession",

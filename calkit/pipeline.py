@@ -734,8 +734,10 @@ def get_status(
             # genuinely cannot compute status until it releases, so state what
             # is running plainly rather than surfacing an alarming error (e.g.
             # to the VS Code extension's status poller). The holder PID is
-            # reliable here because we just failed to acquire the lock.
-            holder = calkit.dvc.get_dvc_lock_holder(wdir=wdir)
+            # reliable here because we just failed to acquire the lock. We've
+            # already chdir'd into wdir above, so read the lock from the cwd
+            # rather than re-joining the (possibly relative) wdir.
+            holder = calkit.dvc.get_dvc_lock_holder()
             if holder is not None and holder.get("cmd"):
                 result["errors"].append(
                     f"A DVC process is in progress (PID {holder['pid']}: "

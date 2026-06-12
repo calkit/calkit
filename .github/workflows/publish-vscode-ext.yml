@@ -26,20 +26,21 @@ jobs:
           cache-dependency-path: vscode-ext/package-lock.json
       - name: Install dependencies
         run: npm ci
-      - name: Read extension version
+      - name: Derive version from release tag
         id: version
-        run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
-      - name: Validate release tag matches package version
         env:
           TAG_NAME: ${{ github.event.release.tag_name }}
-          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          expected_tag="vscode-ext/v${PACKAGE_VERSION}"
-          if [ "$TAG_NAME" != "$expected_tag" ]; then
-            echo "Tag $TAG_NAME does not match package version $PACKAGE_VERSION"
-            echo "Expected tag: $expected_tag"
+          # Tags look like vscode-ext/vX.Y.Z; the package version is the X.Y.Z part.
+          version="${TAG_NAME#vscode-ext/v}"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+].+)?$'; then
+            echo "Tag $TAG_NAME does not contain a valid version"
             exit 1
           fi
+          # Write it into package.json (and the lockfile) so the packaged
+          # extension version always mirrors the release tag.
+          npm version "$version" --no-git-tag-version --allow-same-version
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Run extension tests
         run: npm test
       - name: Package extension

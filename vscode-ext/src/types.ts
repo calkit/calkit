@@ -20,6 +20,9 @@ export interface PipelineStage {
     log_path?: string;
     [key: string]: unknown;
   };
+  // When present, the stage is run once per iteration; its declared outputs are
+  // templated with calkit's `{arg_name}` placeholders.
+  iterate_over?: unknown;
   [key: string]: unknown;
 }
 
@@ -53,11 +56,30 @@ export interface ArtifactEntry {
   [key: string]: unknown;
 }
 
+// A question can be a plain string or, in the richer schema, an object with a
+// hypothesis, answer, and supporting evidence (figures or results). See the
+// Python `Question` model in calkit/models/core.py.
+export interface QuestionEvidence {
+  kind?: string;
+  path?: string;
+  key?: string;
+  explanation?: string;
+  [key: string]: unknown;
+}
+
+export interface QuestionEntry {
+  question: string;
+  hypothesis?: string;
+  answer?: string;
+  evidence?: QuestionEvidence[];
+  [key: string]: unknown;
+}
+
 export interface CalkitInfo {
   name?: string;
   environments?: Record<string, CalkitEnvironment>;
   notebooks?: NotebookEntry[];
-  questions?: string[];
+  questions?: (string | QuestionEntry)[];
   figures?: FigureEntry[];
   datasets?: DatasetEntry[];
   results?: ArtifactEntry[];
@@ -82,6 +104,9 @@ export interface DvcStage {
   outs?: (string | Record<string, unknown>)[];
   params?: unknown[];
   desc?: string;
+  // Present on iterate_over stages: a map of arg name to its list of values.
+  // The deps/outs are templated with `${item.<arg>}` against this.
+  matrix?: Record<string, unknown[]>;
   [key: string]: unknown;
 }
 

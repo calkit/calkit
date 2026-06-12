@@ -8,8 +8,10 @@ import type {
   EnvDescription,
   NotebookEntry,
   PipelineStage,
+  QuestionEntry,
 } from "./types";
 import { getExecutedNotebookHtmlPath } from "./notebooks";
+import { dvcStageOutputPaths } from "./pipeline/core";
 
 // Singular node kinds and the matching calkit.yaml collection keys for the
 // artifact-style sections (figures, datasets, results, publications,
@@ -31,6 +33,12 @@ function outputEntryPath(
   output: string | { path: string; [key: string]: unknown },
 ): string {
   return typeof output === "string" ? output : output.path;
+}
+
+// The displayed text of a question, which may be a plain string or a structured
+// entry carrying a hypothesis/answer/evidence alongside the question itself.
+function questionText(question: string | QuestionEntry): string {
+  return typeof question === "string" ? question : question.question;
 }
 
 // Base codicon for each artifact kind (used when the artifact has provenance and
@@ -357,6 +365,8 @@ export class CalkitSidebarProvider
         return this.getArtifactItems("presentations");
       case "section-results":
         return this.getArtifactItems("results");
+      case "question":
+        return this.getQuestionProps(element.nodeId ?? "");
       case "env":
         return this.getEnvProps(element.nodeId ?? "");
       case "stage":
@@ -382,15 +392,31 @@ export class CalkitSidebarProvider
     // Keep the original 1-based index (used by `calkit rm question <index>`)
     // before filtering removes entries.
     const filtered = questions
-      .map((text, i) => ({ text, index: i + 1 }))
-      .filter(({ text }) => this.matchesFilter(text));
+      .map((question, i) => ({ question, index: i + 1 }))
+      .filter(({ question }) =>
+        this.matchesFilter(
+          questionText(question),
+          typeof question === "string" ? undefined : question.hypothesis,
+          typeof question === "string" ? undefined : question.answer,
+        ),
+      );
     if (filtered.length === 0) {
       return this.emptyOrNone("No questions defined");
     }
-    return filtered.map(({ text, index }) => {
+    return filtered.map(({ question, index }) => {
+      const text = questionText(question);
+      // Plain-string questions stay leaf nodes; a structured entry expands to
+      // show whichever of hypothesis/answer/evidence it carries.
+      const hasDetails =
+        typeof question !== "string" &&
+        (!!question.hypothesis ||
+          !!question.answer ||
+          (question.evidence?.length ?? 0) > 0);
       const item = new SidebarItem(
         text,
-        vscode.TreeItemCollapsibleState.None,
+        hasDetails
+          ? vscode.TreeItemCollapsibleState.Collapsed
+          : vscode.TreeItemCollapsibleState.None,
         "question",
         String(index),
       );
@@ -399,6 +425,58 @@ export class CalkitSidebarProvider
       item.contextValue = "question";
       return item;
     });
+  }
+
+  private getQuestionProps(indexId: string): SidebarItem[] {
+    const question = this.calkitConfig?.questions?.[Number(indexId) - 1];
+    if (question === undefined || typeof question === "string") {
+      return [];
+    }
+    const items: SidebarItem[] = [];
+    // Hypothesis and answer are single-line text props, mirroring the
+    // label/description prop rows used by stages and artifacts.
+    const detail = (label: string, value: string, icon: string) => {
+      const item = new SidebarItem(
+        label,
+        vscode.TreeItemCollapsibleState.None,
+        "question-prop",
+      );
+      item.description = value;
+      item.tooltip = value;
+      item.iconPath = new vscode.ThemeIcon(icon);
+      items.push(item);
+    };
+    if (question.hypothesis) {
+      detail("Hypothesis", question.hypothesis, "lightbulb");
+    }
+    if (question.answer) {
+      detail("Answer", question.answer, "check");
+    }
+    for (const ev of question.evidence ?? []) {
+      // Evidence references a figure or result file with an optional
+      // explanation; clicking opens the file when it has a path.
+      const label = ev.explanation || ev.path || ev.kind || "Evidence";
+      const evItem = new SidebarItem(
+        label,
+        vscode.TreeItemCollapsibleState.None,
+        "question-evidence",
+        ev.path,
+      );
+      evItem.description = ev.path;
+      evItem.tooltip = ev.explanation ?? ev.path;
+      evItem.iconPath = new vscode.ThemeIcon(
+        ev.kind === "result" ? "graph" : "file-media",
+      );
+      if (this.workspaceRoot && ev.path) {
+        evItem.command = {
+          command: "vscode.open",
+          title: "Open",
+          arguments: [vscode.Uri.file(path.join(this.workspaceRoot, ev.path))],
+        };
+      }
+      items.push(evItem);
+    }
+    return items;
   }
 
   private makeSection(label: string, id: string): SidebarItem {
@@ -730,12 +808,10 @@ export class CalkitSidebarProvider
     for (const [stageName, stage] of Object.entries(
       this.dvcYaml?.stages ?? {},
     )) {
-      for (const out of stage.outs ?? []) {
-        const p =
-          typeof out === "string" ? out : String(Object.keys(out)[0] ?? "");
-        if (p) {
-          map.set(p, stageName);
-        }
+      // dvcStageOutputPaths expands iterate_over (matrix) templates, so the
+      // concrete per-iteration files resolve back to their producing stage.
+      for (const p of dvcStageOutputPaths(stage)) {
+        map.set(p, stageName);
       }
     }
     return map;
@@ -1043,7 +1119,15 @@ export class CalkitSidebarProvider
         : []) {
         prop("Input", input, "arrow-left", input);
       }
-      const explicitOutputs = Array.isArray(calkitStage.outputs)
+      // An iterate_over stage declares templated outputs (e.g.
+      // runs/{problem}.json) that never exist as written; show the concrete
+      // per-iteration files from the generated dvc.yaml matrix instead, so each
+      // "Output" row opens a real file. Scheduler logs get their own row below.
+      const explicitOutputs = calkitStage.iterate_over
+        ? dvcStageOutputPaths(this.dvcYaml?.stages?.[stageName] ?? {}).filter(
+            (p) => !p.startsWith(".calkit/scheduler/logs/"),
+          )
+        : Array.isArray(calkitStage.outputs)
         ? (calkitStage.outputs as (string | { path: string })[]).map(
             outputEntryPath,
           )

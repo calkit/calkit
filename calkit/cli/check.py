@@ -180,7 +180,8 @@ def _check_julia_env(
         try:
             subprocess.check_call(
                 cmd,
-                env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"},
+                env=os.environ.copy()
+                | {"JULIA_LOAD_PATH": calkit.julia.load_path()},
             )
         except subprocess.CalledProcessError:
             calkit.environments.save_cache(
@@ -206,7 +207,9 @@ def _check_julia_env(
     cmd = calkit.julia.ensure_startup_file_disabled_in_command(cmd)
     try:
         subprocess.check_call(
-            cmd, env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"}
+            cmd,
+            env=os.environ.copy()
+            | {"JULIA_LOAD_PATH": calkit.julia.load_path()},
         )
     except subprocess.CalledProcessError:
         calkit.environments.save_cache(

@@ -317,7 +317,7 @@ def check_env_kernel(
             f'"--project={env_dir_abs}",'
             '"--startup-file=no",'
             f'displayname="{display_name}",'
-            'env=Dict("JULIA_LOAD_PATH" => "@:@stdlib")'
+            f'env=Dict("JULIA_LOAD_PATH" => "{calkit.julia.load_path()}")'
             ");"
             "println(kp);"
         )

@@ -182,7 +182,7 @@ function buildCarouselHtml(
       <button class="nav-btn" id="btn-next">&#8594;</button>
       <span id="counter"></span>
       <span id="path-label"></span>
-      <button class="nav-btn icon-btn hidden" id="btn-source" title="View producing stage"><svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" aria-hidden="true"><path d="M14 1H8L7 2H2.5l-.5.5v3l.5.5H7v7h2v2h5l1-1V2l-1-1zM8 5H3V3h3.79l.85-.85L7.5 2H8v3zm6 8H9v-1l-1-1V6h6v7zm0-8H9V2h5v3z"/></svg></button>
+      <button class="nav-btn icon-btn hidden" id="btn-source" title="View producing stage"><svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M2 3.5C2 3.22386 2.22386 3 2.5 3H13.5C13.7761 3 14 3.22386 14 3.5C14 3.77614 13.7761 4 13.5 4H6V6H13.5C13.7761 6 14 6.22386 14 6.5C14 6.77614 13.7761 7 13.5 7H6V9H13.5C13.7761 9 14 9.22386 14 9.5C14 9.77614 13.7761 10 13.5 10H6V12H13.5C13.7761 12 14 12.2239 14 12.5C14 12.7761 13.7761 13 13.5 13H5.5C5.22386 13 5 12.7761 5 12.5V4H2.5C2.22386 4 2 3.77614 2 3.5Z"/></svg></button>
     </div>
     <div id="viewer">
       <div id="fig-content"></div>

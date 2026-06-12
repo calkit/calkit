@@ -144,7 +144,10 @@ const staleStageNames = new Set<string>();
 // Stages currently being executed by an in-progress `calkit run` (reported by
 // `calkit status --json` as pipeline.running_stages); shown with a spinner.
 const runningStageNames = new Set<string>();
-const importedFigureUris = new Set<string>();
+// Imported artifacts (figures or publications with a non-empty imported_from)
+// are legitimately not produced by the pipeline, so they're exempt from the
+// "!" badge below.
+const importedArtifactUris = new Set<string>();
 const pipelineNotebookUris = new Set<string>();
 let currentCalkitConfig: CalkitInfo | undefined;
 // Whether a calkit.yaml exists in the workspace. The sidebar is gated on this:
@@ -1642,7 +1645,7 @@ class PipelineOutputDecorationProvider
       return undefined;
     }
     if (
-      (FIGURE_EXTENSIONS.has(ext) && !importedFigureUris.has(uri.fsPath)) ||
+      (FIGURE_EXTENSIONS.has(ext) && !importedArtifactUris.has(uri.fsPath)) ||
       (ext === NOTEBOOK_EXTENSION &&
         !pipelineNotebookUris.has(uri.fsPath) &&
         !uri.fsPath.includes(
@@ -1861,18 +1864,21 @@ async function refreshPipelineOutputContext(
   const outputMap = buildPipelineOutputMapFromYaml(workspaceRoot, dvcYaml);
   const prevPaths = new Set([
     ...pipelineOutputUris,
-    ...importedFigureUris,
+    ...importedArtifactUris,
     ...pipelineNotebookUris,
   ]);
   pipelineOutputUris.clear();
-  importedFigureUris.clear();
+  importedArtifactUris.clear();
   pipelineNotebookUris.clear();
   for (const absPath of outputMap.keys()) {
     pipelineOutputUris.add(absPath);
   }
-  for (const fig of calkitConfig?.figures ?? []) {
-    if (fig.imported_from) {
-      importedFigureUris.add(path.join(workspaceRoot, fig.path));
+  for (const artifact of [
+    ...(calkitConfig?.figures ?? []),
+    ...(calkitConfig?.publications ?? []),
+  ]) {
+    if (artifact.imported_from) {
+      importedArtifactUris.add(path.join(workspaceRoot, artifact.path));
     }
   }
   for (const stage of Object.values(calkitConfig?.pipeline?.stages ?? {})) {
@@ -1893,7 +1899,7 @@ async function refreshPipelineOutputContext(
     ...new Set([
       ...prevPaths,
       ...pipelineOutputUris,
-      ...importedFigureUris,
+      ...importedArtifactUris,
       ...pipelineNotebookUris,
     ]),
   ].map((p) => vscode.Uri.file(p));

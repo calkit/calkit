@@ -585,11 +585,12 @@ def get_status(
         # staleness, leaving stale_stages empty. Don't let that masquerade as an
         # up-to-date pipeline---say plainly that the status is unknown.
         elif pipeline_status and pipeline_status.failed_environment_checks:
-            warn(
-                "Pipeline status unavailable: environment checks failed for: "
-                + ", ".join(pipeline_status.failed_environment_checks)
-                + ". Resolve the environment issue(s) above to see "
-                "pipeline status."
+            # The failing environments were already named in the warning emitted
+            # right after computing pipeline_status, so keep this explanatory
+            # only rather than repeating the list.
+            typer.echo(
+                "Pipeline status unavailable until the failed environment "
+                "checks above are resolved."
             )
             return
         elif pipeline_status and pipeline_status.is_stale:

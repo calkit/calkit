@@ -1881,7 +1881,6 @@ function applyRunningStages(freshRunning: Set<string>): void {
 // `calkit status` takes the cheap, lock-free path), plus one final check that
 // recomputes staleness once the run finishes.
 let runStatusPolling = false;
-let runStatusPollTimer: ReturnType<typeof setTimeout> | undefined;
 // Ignore rwlock file-watcher events for a short window around our own status
 // call: the not-running status path itself takes the DVC lock (touching
 // rwlock), which would otherwise re-trigger the watcher into an endless poll.
@@ -1929,13 +1928,12 @@ async function pollPipelineRunStatus(
     log(`Pipeline status check failed: ${String(error)}`);
   }
   if (running) {
-    runStatusPollTimer = setTimeout(
+    setTimeout(
       () => void pollPipelineRunStatus(context),
       RUN_STATUS_POLL_INTERVAL_MS,
     );
   } else {
     runStatusPolling = false;
-    runStatusPollTimer = undefined;
   }
 }
 

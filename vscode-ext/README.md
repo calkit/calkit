@@ -1,11 +1,15 @@
 # Calkit VS Code Extension
 
-Use Calkit environments directly from VS Code Jupyter notebooks.
+Conveniently create and manage Calkit projects in VS Code.
 
 This extension lets you:
 
+- Manage your project's environments (with uv, Pixi, renv, Docker, Julia,
+  SLURM, and more).
+- Manage and run your project's pipeline.
+- View your project's figures in a gallery and carousel, including interactive
+  Plotly figures.
 - Select notebook kernels backed by Calkit environments.
-- Create new Calkit environments from VS Code (Conda, uv, Julia, and SLURM).
 - Use nested environments like `slurm:main` for notebook jobs that, e.g., need to reserve GPUs on a cluster.
 - Start, stop, and restart notebook server sessions for SLURM and Docker-backed workflows.
 - Reopen notebooks and resume SLURM-backed sessions using toolbar actions.

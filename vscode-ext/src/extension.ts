@@ -2047,13 +2047,25 @@ async function pollPipelineRunStatus(
     running = pipeline.running === true;
     if (running) {
       // While a run holds the lock, calkit can't compute staleness, so only
-      // update the spinners and keep the previous stale badges.
-      applyRunningStages(new Set(pipeline.running_stages ?? []));
+      // update the spinners and keep the previous stale badges. An iterate_over
+      // sweep reports its expanded DVC items (e.g. "benchmark@zdt1"); the
+      // sidebar keys stages by the base name, so collapse "stage@item" back to
+      // "stage" to drive the parent stage's spinner.
+      applyRunningStages(
+        new Set(
+          (pipeline.running_stages ?? []).map((name) => name.split("@")[0]),
+        ),
+      );
     } else {
       applyRunningStages(new Set());
+      // Stale iterate_over items are likewise reported per expansion
+      // ("benchmark@zdt1"); collapse to the base stage so the sidebar badge
+      // and stale-output decorations match.
       applyStaleStages(
         workspaceRoot,
-        new Set(pipeline.stale_stage_names ?? []),
+        new Set(
+          (pipeline.stale_stage_names ?? []).map((name) => name.split("@")[0]),
+        ),
       );
     }
   } catch (error) {

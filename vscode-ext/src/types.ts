@@ -53,11 +53,30 @@ export interface ArtifactEntry {
   [key: string]: unknown;
 }
 
+// A question can be a plain string or, in the richer schema, an object with a
+// hypothesis, answer, and supporting evidence (figures or results). See the
+// Python `Question` model in calkit/models/core.py.
+export interface QuestionEvidence {
+  kind?: string;
+  path?: string;
+  key?: string;
+  explanation?: string;
+  [key: string]: unknown;
+}
+
+export interface QuestionEntry {
+  question: string;
+  hypothesis?: string;
+  answer?: string;
+  evidence?: QuestionEvidence[];
+  [key: string]: unknown;
+}
+
 export interface CalkitInfo {
   name?: string;
   environments?: Record<string, CalkitEnvironment>;
   notebooks?: NotebookEntry[];
-  questions?: string[];
+  questions?: (string | QuestionEntry)[];
   figures?: FigureEntry[];
   datasets?: DatasetEntry[];
   results?: ArtifactEntry[];

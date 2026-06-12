@@ -77,6 +77,23 @@ def _record_job(name: str, info: dict) -> None:
         jobs[name] = info
 
 
+def _delete_job(name: str) -> None:
+    """Remove a job record from the database.
+
+    Used when a job is canceled (e.g. the user hits Ctrl+C while waiting for
+    it). Without this the record would linger, and the next ``calkit run``
+    would find the job gone from the queue with no exit status and wrongly
+    treat it as successful instead of resubmitting it.
+    """
+    if not os.path.isfile(JOBS_DB_PATH):
+        return
+    with SqliteDict(
+        JOBS_DB_PATH, autocommit=True, timeout=JOBS_DB_TIMEOUT
+    ) as jobs:
+        if name in jobs:
+            del jobs[name]
+
+
 def _mock_enabled() -> bool:
     """Whether scheduler commands should run jobs locally.
 
@@ -390,6 +407,9 @@ def _wait_until_done(kind: str, job_id: str, name: str) -> int | None:
         ok, stderr = _cancel(kind, job_id)
         if not ok:
             typer.echo(f"Failed to cancel job '{name}' ({job_id}): {stderr}")
+        # Drop the record so the next run resubmits this job instead of
+        # mistaking the canceled job (which has no exit status) for a success.
+        _delete_job(name)
         raise typer.Exit(130)
 
 

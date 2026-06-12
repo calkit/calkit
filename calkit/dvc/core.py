@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
 import os
-import time
 from pathlib import Path
 from typing import Any, Literal
 
@@ -59,6 +59,46 @@ _frozen_stage_warning_filter = _FrozenStageWarningFilter()
 for _name in ("dvc.repo.reproduce", "dvc.repo.status"):
     logging.getLogger(_name).addFilter(_frozen_stage_warning_filter)
 logging.getLogger("dvc.rwlock").addFilter(_StaleRWLockWarningFilter())
+
+
+# Default seconds to wait for DVC's repo-level lock during a pipeline run.
+#
+# DVC's own default is only 3 seconds (``dvc.lock.DEFAULT_TIMEOUT``), after
+# which it raises "Unable to acquire lock". That is far too short whenever
+# more than one DVC process briefly touches the same repo: a background
+# ``calkit status`` poller (e.g. the VS Code extension), a stage whose command
+# is itself ``calkit run``, or DVC's own per-stage *re-lock* (DVC releases the
+# repo lock while a stage command runs---see ``dvc.stage.run.unlocked_repo``---
+# and re-acquires it the instant the command finishes, which collides with any
+# poller that grabbed it meanwhile). The lock is only ever held for short,
+# bounded operations, so waiting generously lets these resolve instead of
+# failing the run. It stays bounded (rather than waiting forever, as DVC's
+# ``--wait-for-lock`` does) so a genuinely stale lock---e.g. a ``hardlink_lock``
+# left behind by a crashed process on an NFS share, common on HPC clusters---is
+# still surfaced as an error the user can act on.
+DEFAULT_RUN_LOCK_TIMEOUT = 120.0
+
+
+@contextlib.contextmanager
+def dvc_lock_timeout(seconds: float):
+    """Temporarily raise DVC's repo-lock acquisition timeout.
+
+    Patches ``dvc.lock.DEFAULT_TIMEOUT`` for the duration. Both lock backends
+    (``Lock`` via ``zc.lockfile`` and ``HardlinkLock`` via ``flufl.lock``) read
+    that module global at acquisition time---including DVC's internal per-stage
+    re-lock---so this covers every repo-lock acquisition made while the context
+    is active without having to thread a flag through DVC. Never lowers the
+    timeout, so a more generous outer context is preserved.
+    """
+    import dvc.lock
+
+    previous = dvc.lock.DEFAULT_TIMEOUT
+    if seconds > previous:
+        dvc.lock.DEFAULT_TIMEOUT = seconds
+    try:
+        yield
+    finally:
+        dvc.lock.DEFAULT_TIMEOUT = previous
 
 
 class CalkitDVCFileSystem(ObjectFileSystem):
@@ -264,26 +304,6 @@ def register_ck_scheme() -> None:
     }
 
 
-class _LockErrorDetector(logging.Handler):
-    """Record whether DVC logged a ``LockError`` while running a command.
-
-    DVC catches its exceptions in ``dvc.cli.main`` and logs them with
-    ``logger.exception("")`` (an empty message, with the exception on
-    ``record.exc_info``) before returning a non-zero code, so we inspect
-    ``exc_info`` rather than the formatted message.
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.hit = False
-
-    def emit(self, record: logging.LogRecord) -> None:
-        from dvc.lock import LockError
-
-        if record.exc_info and isinstance(record.exc_info[1], LockError):
-            self.hit = True
-
-
 def run_dvc_cli(argv: list[str] | None = None) -> int:
     """Run DVC CLI with ``ck://`` scheme pre-registered."""
     from dvc.cli import main as dvc_main
@@ -323,12 +343,11 @@ def get_running_pipeline_processes(wdir: str | None = None) -> list[dict]:
     While ``dvc repro`` runs a stage, DVC records the owning process in its
     ``rwlock`` file (under ``.dvc/tmp/rwlock``); this is the same lock that
     makes ``dvc status`` fail with a ``LockError`` mid-run. Each returned item
-    is ``{"pid": int, "cmd": str}``, with stale entries (PIDs that are no
-    longer running) filtered out. An empty list means no pipeline run is
-    currently in progress.
+    is ``{"pid": int, "cmd": str}``. Entries are dropped unless the recorded
+    PID is still running *the recorded command* (see
+    :func:`_rwlock_holder_is_live`), so neither dead PIDs nor reused ones are
+    reported. An empty list means no pipeline run is currently in progress.
     """
-    import psutil  # Always available as a DVC dependency
-
     rwlock_path = os.path.join(wdir or ".", ".dvc", "tmp", "rwlock")
     if not os.path.isfile(rwlock_path):
         return []
@@ -349,52 +368,109 @@ def get_running_pipeline_processes(wdir: str | None = None) -> list[dict]:
                 by_pid[info["pid"]] = info.get("cmd", "")
     result = []
     for pid, cmd in by_pid.items():
-        try:
-            alive = psutil.pid_exists(pid)
-        except Exception:
-            # If we can't tell, assume the process is still alive
-            alive = True
-        if alive:
+        if _rwlock_holder_is_live(pid, cmd):
             result.append({"pid": pid, "cmd": cmd})
     return result
+
+
+def _rwlock_holder_is_live(pid: int, recorded_cmd: str) -> bool:
+    """Whether ``pid`` is still the process that recorded an rwlock entry.
+
+    DVC marks an rwlock entry stale only when its PID no longer exists, but the
+    OS reuses PIDs: a finished or killed run can leave an entry whose PID later
+    belongs to an unrelated process. Checking liveness alone then misreports a
+    pipeline as still running---the reported "Run in progress (PID ...)" with an
+    ever-growing elapsed time from a stale run log, which only clears once the
+    reused PID happens to exit (hence "works on the second retry").
+
+    DVC records the holder's ``" ".join(sys.argv)`` as the entry's command, so
+    confirm the live process still carries those arguments. The interpreter
+    path and launch form (``-m calkit`` vs the ``calkit`` script) differ
+    between what DVC recorded and what ``psutil`` reports, so compare the
+    arguments after ``argv[0]`` (the meaningful subcommand and its args), which
+    match for the genuine holder and differ for a reused PID.
+    """
+    import psutil  # Always available as a DVC dependency
+
+    try:
+        cmdline = psutil.Process(pid).cmdline()
+    except Exception:
+        # No such process, or we can't introspect it: treat as not running.
+        return False
+    tail = recorded_cmd.split()[1:]
+    if not tail:
+        # Nothing distinctive to match on; trust that the PID is alive.
+        return bool(cmdline)
+    return any(
+        cmdline[i : i + len(tail)] == tail
+        for i in range(len(cmdline) - len(tail) + 1)
+    )
+
+
+def get_dvc_lock_holder(wdir: str | None = None) -> dict | None:
+    """Return the process holding DVC's repo-level lock, or ``None``.
+
+    A long-running ``dvc pull``/``push`` (or another ``calkit run``) holds the
+    repo-level lock (``.dvc/tmp/lock``), into which ``zc.lockfile`` writes the
+    holder's PID. This lets callers report *what* is running---e.g. "a pull is
+    in progress"---when a status check can't acquire the lock.
+
+    Only meaningful right after a ``LockError``: the lock file persists with a
+    stale PID after release, so the recorded PID is the genuine holder only when
+    the lock is actually held (i.e. we just failed to acquire it). Returns
+    ``{"pid": int, "cmd": str}`` or ``None`` if it can't be determined (no lock
+    file, an unparseable/hardlink-lock file, or the process is gone).
+    """
+    import psutil  # Always available as a DVC dependency
+
+    lock_path = os.path.join(wdir or ".", ".dvc", "tmp", "lock")
+    try:
+        with open(lock_path) as f:
+            content = f.read()
+    except OSError:
+        return None
+    try:
+        # zc.lockfile writes " <pid>\n"; hardlink locks use another format.
+        pid = int(content.split()[0])
+    except (ValueError, IndexError):
+        return None
+    try:
+        proc = psutil.Process(pid)
+        cmdline = proc.cmdline()
+        # Drop the interpreter's full path so the command reads cleanly, e.g.
+        # "calkit pull" rather than "/.../python /.../calkit pull".
+        cmd = " ".join(
+            ([os.path.basename(cmdline[0])] + cmdline[1:])
+            if cmdline
+            else [proc.name()]
+        )
+    except Exception:
+        return None
+    return {"pid": pid, "cmd": cmd}
 
 
 def run_dvc_command(
     argv: list[str],
     cwd: str | None = None,
-    lock_retries: int = 0,
-    lock_retry_delay: float = 2.0,
+    lock_timeout: float | None = None,
 ) -> int:
     """Run a DVC command, optionally in a specific working directory.
 
     Uses DVC's --cd flag to handle directory changes.
 
-    If ``lock_retries`` is greater than zero, the command is retried that many
-    times when it fails because another DVC process is holding the repo lock
-    (e.g. a git hook or a background status poller in a project with
-    subprojects). The lock is only ever held briefly by those, so a short
-    backoff lets the command succeed without the user having to re-run it.
+    If ``lock_timeout`` is given, DVC waits that many seconds for the repo lock
+    instead of failing after its 3s default. ``pull``/``push`` use this because
+    a background ``calkit status`` poller (e.g. the VS Code extension) or a
+    concurrent run can briefly hold the lock---the original symptom in issue
+    #942, where ``calkit pull`` failed and succeeded on a second try. See
+    :func:`dvc_lock_timeout`.
     """
     if cwd:
         argv = ["--cd", cwd] + argv
-    attempt = 0
-    while True:
-        detector = _LockErrorDetector()
-        dvc_logger = logging.getLogger("dvc")
-        dvc_logger.addHandler(detector)
-        try:
-            result = run_dvc_cli(argv)
-        finally:
-            dvc_logger.removeHandler(detector)
-        if result == 0 or not detector.hit or attempt >= lock_retries:
-            return result
-        attempt += 1
-        delay = lock_retry_delay * attempt
-        warn(
-            "Another DVC process is holding the lock; "
-            f"retrying in {delay:.0f}s ({attempt}/{lock_retries})"
-        )
-        time.sleep(delay)
+    if lock_timeout is not None:
+        with dvc_lock_timeout(lock_timeout):
+            return run_dvc_cli(argv)
+    return run_dvc_cli(argv)
 
 
 def make_remote_name(use_ck: bool = USE_CK_REMOTE_BY_DEFAULT) -> str:

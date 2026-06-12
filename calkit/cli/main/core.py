@@ -1174,7 +1174,10 @@ def pull(
         and "-R" not in dvc_args
     ):
         dvc_args.append("--recursive")
-    result = calkit.dvc.run_dvc_command(["pull"] + dvc_args, lock_retries=5)
+    result = calkit.dvc.run_dvc_command(
+        ["pull"] + dvc_args,
+        lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
+    )
     if result != 0:
         raise_error("DVC pull failed")
     calkit.dvc.zip.sync_all(direction="to-workspace")
@@ -1189,7 +1192,9 @@ def pull(
                 continue
             typer.echo(f"DVC pulling subproject: {sp_path}")
             sp_result = calkit.dvc.run_dvc_command(
-                ["pull"] + dvc_args, cwd=sp_path, lock_retries=5
+                ["pull"] + dvc_args,
+                cwd=sp_path,
+                lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
             )
             if sp_result != 0:
                 raise_error(f"DVC pull failed for subproject: {sp_path}")
@@ -1227,7 +1232,8 @@ def push(
         if remotes:
             typer.echo("Pushing to DVC remote")
             result = calkit.dvc.run_dvc_command(
-                ["push"] + dvc_args, lock_retries=5
+                ["push"] + dvc_args,
+                lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
             )
             if result != 0:
                 raise_error("DVC push failed")
@@ -2037,7 +2043,10 @@ def run(
             original_dir = os.getcwd()
             try:
                 os.chdir(sp_path)
-                sp_res = dvc_cli_main(["repro"] + sp_args)
+                with calkit.dvc.dvc_lock_timeout(
+                    calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT
+                ):
+                    sp_res = dvc_cli_main(["repro"] + sp_args)
             finally:
                 os.chdir(original_dir)
             if sp_res != 0:
@@ -2106,7 +2115,15 @@ def run(
     if force:
         os.environ["CALKIT_FORCE"] = "1"
     try:
-        res = dvc_cli_main(["repro"] + args)
+        # Wait generously for the repo lock instead of failing after DVC's 3s
+        # default. Brief contention is common and benign: a background
+        # `calkit status` poller (e.g. the VS Code extension), a stage whose
+        # command is itself `calkit run`, or DVC's own per-stage re-lock (DVC
+        # releases the repo lock while a stage command runs and re-acquires it
+        # the instant it finishes) can all hold it momentarily. Without this,
+        # such a collision aborts the whole run with "Unable to acquire lock".
+        with calkit.dvc.dvc_lock_timeout(calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT):
+            res = dvc_cli_main(["repro"] + args)
     finally:
         os.environ.pop("CALKIT_FORCE", None)
     failed = failed or res != 0

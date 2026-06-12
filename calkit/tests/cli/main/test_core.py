@@ -1021,10 +1021,32 @@ def test_stage_run_info_from_log_content():
 
 def _write_fake_rwlock(pid: int) -> None:
     """Write a DVC rwlock file owned by ``pid`` to simulate a run."""
+    _write_rwlock({"out.txt": {"pid": pid, "cmd": "calkit run"}})
+
+
+def _write_rwlock(entries: dict) -> None:
+    """Write a DVC rwlock 'write' section from ``{path: {pid, cmd}}``."""
     tmp = os.path.join(".dvc", "tmp")
     os.makedirs(tmp, exist_ok=True)
     with open(os.path.join(tmp, "rwlock"), "w") as f:
-        json.dump({"write": {"out.txt": {"pid": pid, "cmd": "calkit run"}}}, f)
+        json.dump({"write": entries}, f)
+
+
+def _spawn_lock_holder(*signature: str):
+    """Spawn a long-lived process whose argv embeds ``signature``.
+
+    Returns ``(proc, cmd)`` where ``cmd`` mirrors what DVC records for an
+    rwlock entry (``" ".join(sys.argv)``) and matches the live process, so it
+    is recognized as a genuine holder. ``signature`` lets a test embed e.g.
+    ``"dvc", "repro", "--single-item", "sweep@1"`` so both stage-target parsing
+    and holder verification see a realistic command. Args must be space-free so
+    the recorded command tokenizes the same way DVC's does.
+    """
+    with open("holder.py", "w") as f:
+        f.write("import time\ntime.sleep(120)\n")
+    argv = [sys.executable, "holder.py", *signature]
+    proc = subprocess.Popen(argv)
+    return proc, " ".join(argv)
 
 
 def _write_fake_run_log() -> None:
@@ -1051,18 +1073,53 @@ def test_get_running_pipeline_status(tmp_dir):
     _write_fake_rwlock(pid=2**31 - 1)
     assert calkit.dvc.get_running_pipeline_processes() == []
     assert _get_running_pipeline_status() is None
-    # A live PID holding the lock means a run is in progress; the log shows
-    # which stage is currently running and which have finished
-    _write_fake_rwlock(pid=os.getpid())
-    _write_fake_run_log()
-    procs = calkit.dvc.get_running_pipeline_processes()
-    assert len(procs) == 1
-    assert procs[0]["pid"] == os.getpid()
-    status = _get_running_pipeline_status()
-    assert status is not None
-    assert status["running"] is True
-    assert status["running_stages"] == ["train"]
-    assert status["stages"]["preprocess"]["status"] == "completed"
+    # A live process whose command matches the recorded entry means a run is in
+    # progress; the log shows which stage is running and which have finished.
+    proc, cmd = _spawn_lock_holder()
+    try:
+        _write_rwlock({"out.txt": {"pid": proc.pid, "cmd": cmd}})
+        _write_fake_run_log()
+        procs = calkit.dvc.get_running_pipeline_processes()
+        assert len(procs) == 1
+        assert procs[0]["pid"] == proc.pid
+        status = _get_running_pipeline_status()
+        assert status is not None
+        assert status["running"] is True
+        assert status["running_stages"] == ["train"]
+        assert status["stages"]["preprocess"]["status"] == "completed"
+    finally:
+        proc.terminate()
+        proc.wait()
+
+
+def test_reused_pid_is_not_reported_as_running(tmp_dir):
+    """A live PID that isn't the recorded run must not show as in progress.
+
+    After a run finishes or is killed, its rwlock entry can linger and the OS
+    can reuse its PID for an unrelated process. Liveness alone then reports a
+    phantom "Run in progress (PID ...)" whose elapsed time keeps growing from a
+    stale run log (issue #942). The entry's recorded command must match the live
+    process, so a reused PID running something else is ignored.
+    """
+    subprocess.check_call(["calkit", "init"])
+    # A live process whose command does NOT match the recorded run command,
+    # simulating a reused PID.
+    proc, _ = _spawn_lock_holder("unrelated", "process")
+    try:
+        _write_rwlock(
+            {
+                "out.txt": {
+                    "pid": proc.pid,
+                    "cmd": "calkit run -s postpro-ParetoFigFunc",
+                }
+            }
+        )
+        _write_fake_run_log()
+        assert calkit.dvc.get_running_pipeline_processes() == []
+        assert _get_running_pipeline_status() is None
+    finally:
+        proc.terminate()
+        proc.wait()
 
 
 def test_stage_target_from_cmd():
@@ -1097,22 +1154,18 @@ def test_running_status_names_concurrent_sweep_items(tmp_dir):
         for item in ["sweep@1", "sweep@2", "sweep@3"]:
             f.write(f"{ts} - INFO - Stage '{item}' didn't change, skipping\n")
     running_now = ["sweep@1", "sweep@3"]
-    sleepers = [
-        subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
-        for _ in running_now
-    ]
+    # Real processes whose command lines match the recorded rwlock entries, as
+    # the concurrent prepass's `dvc repro --single-item <item>` workers would.
+    holders = []
     try:
-        tmp = os.path.join(".dvc", "tmp")
-        os.makedirs(tmp, exist_ok=True)
-        write = {
-            f"out-{item}.txt": {
-                "pid": proc.pid,
-                "cmd": f"calkit/__main__.py dvc repro --single-item {item}",
-            }
-            for proc, item in zip(sleepers, running_now)
-        }
-        with open(os.path.join(tmp, "rwlock"), "w") as f:
-            json.dump({"write": write}, f)
+        write = {}
+        for item in running_now:
+            proc, cmd = _spawn_lock_holder(
+                "dvc", "repro", "--single-item", item
+            )
+            holders.append(proc)
+            write[f"out-{item}.txt"] = {"pid": proc.pid, "cmd": cmd}
+        _write_rwlock(write)
         status = _get_running_pipeline_status()
         assert status is not None
         assert status["running"] is True
@@ -1120,29 +1173,34 @@ def test_running_status_names_concurrent_sweep_items(tmp_dir):
         assert set(status["running_stages"]) == set(running_now)
         assert status["stages"] == {}
     finally:
-        for p in sleepers:
+        for p in holders:
             p.terminate()
             p.wait()
 
 
 def test_status_reports_running_pipeline(tmp_dir):
     subprocess.check_call(["calkit", "init"])
-    _write_fake_rwlock(pid=os.getpid())
-    _write_fake_run_log()
-    out = subprocess.check_output(
-        ["calkit", "status", "-c", "pipeline"], text=True
-    )
-    assert "Run in progress" in out
-    assert str(os.getpid()) in out
-    assert "preprocess" in out
-    assert "train" in out
-    # The same information is available as JSON for programmatic/agent use
-    out = subprocess.check_output(
-        ["calkit", "status", "-c", "pipeline", "--json"], text=True
-    )
-    data = json.loads(out)
-    assert data["pipeline"]["running"] is True
-    assert "train" in data["pipeline"]["running_stages"]
+    proc, cmd = _spawn_lock_holder()
+    try:
+        _write_rwlock({"out.txt": {"pid": proc.pid, "cmd": cmd}})
+        _write_fake_run_log()
+        out = subprocess.check_output(
+            ["calkit", "status", "-c", "pipeline"], text=True
+        )
+        assert "Run in progress" in out
+        assert str(proc.pid) in out
+        assert "preprocess" in out
+        assert "train" in out
+        # The same information is available as JSON for programmatic/agent use
+        out = subprocess.check_output(
+            ["calkit", "status", "-c", "pipeline", "--json"], text=True
+        )
+        data = json.loads(out)
+        assert data["pipeline"]["running"] is True
+        assert "train" in data["pipeline"]["running_stages"]
+    finally:
+        proc.terminate()
+        proc.wait()
 
 
 def test_run_writes_private_logs(tmp_dir):

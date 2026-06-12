@@ -16,6 +16,10 @@ export interface PipelineStage {
     setup?: string[];
     [key: string]: unknown;
   };
+  scheduler?: {
+    log_path?: string;
+    [key: string]: unknown;
+  };
   [key: string]: unknown;
 }
 

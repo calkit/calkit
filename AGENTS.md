@@ -43,3 +43,6 @@ The only exception here is if splitting up a function makes it easier to
 write meaningful unit tests.
 If a function is only used inside one other function, nest it inside the
 caller at the top.
+
+No spaces on either side of en or em dashes used for ranges or pauses in prose,
+respectively.

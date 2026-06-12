@@ -2,7 +2,7 @@
   "name": "calkit-vscode",
   "displayName": "Calkit",
   "description": "An extension for working with Calkit projects.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "calkit",
   "license": "MIT",
   "repository": {
@@ -77,6 +77,11 @@
       {
         "command": "calkit-vscode.selectCalkitEnvironment",
         "title": "Select Notebook Environment",
+        "category": "Calkit"
+      },
+      {
+        "command": "calkit-vscode.editNotebookEnvironment",
+        "title": "Edit Notebook Environment",
         "category": "Calkit"
       },
       {
@@ -259,6 +264,18 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "calkit-vscode.searchSidebar",
+        "title": "Filter",
+        "category": "Calkit",
+        "icon": "$(search)"
+      },
+      {
+        "command": "calkit-vscode.clearSidebarSearch",
+        "title": "Clear Filter",
+        "category": "Calkit",
+        "icon": "$(search-stop)"
+      },
+      {
         "command": "calkit-vscode.enableAutoRefresh",
         "title": "Auto-refresh status",
         "category": "Calkit"
@@ -338,6 +355,16 @@
           "command": "calkit-vscode.refreshSidebar",
           "when": "view == calkit-sidebar",
           "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.searchSidebar",
+          "when": "view == calkit-sidebar && calkit-vscode.hasProject",
+          "group": "navigation@1"
+        },
+        {
+          "command": "calkit-vscode.clearSidebarSearch",
+          "when": "view == calkit-sidebar && calkit-vscode.hasProject && calkit-vscode.sidebarFiltered",
+          "group": "navigation@1"
         },
         {
           "command": "calkit-vscode.enableAutoRefresh",
@@ -497,7 +524,7 @@
         },
         {
           "command": "calkit-vscode.showProvenance",
-          "when": "calkit.activeFileIsPipelineOutput || (calkit.plotlyPreviewActive && calkit.plotlyPreviewIsPipelineOutput) || resourceExtname == .pdf",
+          "when": "calkit.activeFileIsPipelineOutput || calkit.activeFileIsFigureOutput || (calkit.plotlyPreviewActive && calkit.plotlyPreviewIsPipelineOutput) || resourceExtname == .pdf",
           "group": "navigation"
         },
         {
@@ -526,7 +553,7 @@
         },
         {
           "command": "calkit-vscode.goToFigureSource",
-          "when": "resourceExtname == .qmd",
+          "when": "resourceExtname == .qmd || resourceExtname == .tex",
           "group": "calkit@4"
         }
       ],
@@ -534,6 +561,11 @@
         {
           "command": "calkit-vscode.selectCalkitEnvironment",
           "when": "notebookType == 'jupyter-notebook' && !calkit.isSettingKernel",
+          "group": "navigation@98"
+        },
+        {
+          "command": "calkit-vscode.editNotebookEnvironment",
+          "when": "notebookType == 'jupyter-notebook' && calkit.notebookHasEnvironment && !calkit.isSettingKernel",
           "group": "navigation@99"
         },
         {
@@ -583,6 +615,9 @@
         },
         {
           "command": "calkit-vscode.selectCalkitEnvironment"
+        },
+        {
+          "command": "calkit-vscode.editNotebookEnvironment"
         },
         {
           "command": "calkit-vscode.createCalkitEnvironment"
@@ -665,7 +700,7 @@
         },
         {
           "command": "calkit-vscode.goToFigureSource",
-          "when": "resourceExtname == .qmd"
+          "when": "resourceExtname == .qmd || resourceExtname == .tex"
         },
         {
           "command": "calkit-vscode.save",
@@ -697,6 +732,14 @@
         },
         {
           "command": "calkit-vscode.refreshSidebar"
+        },
+        {
+          "command": "calkit-vscode.searchSidebar",
+          "when": "calkit-vscode.hasProject"
+        },
+        {
+          "command": "calkit-vscode.clearSidebarSearch",
+          "when": "calkit-vscode.hasProject"
         }
       ]
     },

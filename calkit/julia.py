@@ -27,9 +27,25 @@ def get_julia_exe() -> str:
     return "julia"
 
 
+def load_path() -> str:
+    """Return the ``JULIA_LOAD_PATH`` scoping resolution to the active project
+    and stdlib.
+
+    Julia splits ``JULIA_LOAD_PATH`` on the platform path separator---``;`` on
+    Windows and ``:`` elsewhere---so a hardcoded ``:`` leaves ``@stdlib`` off
+    the load path on Windows and even stdlib packages (e.g. ``Pkg``) fail to
+    resolve. ``os.pathsep`` matches Julia's rule on every platform.
+    """
+    return os.pathsep.join(["@", "@stdlib"])
+
+
 def _is_julia_command(arg: str) -> bool:
-    """Whether ``arg`` is a Julia executable (julia or the juliaup launcher)."""
-    base = os.path.basename(arg)
+    """Whether ``arg`` is a Julia executable (julia or the juliaup launcher).
+
+    The comparison is case-insensitive so Windows paths like ``julia.EXE``
+    (e.g. the ``WindowsApps`` execution-alias shim) are recognized.
+    """
+    base = os.path.basename(arg).lower()
     if base.endswith(".exe"):
         base = base[: -len(".exe")]
     return base in ("julia", "julialauncher")

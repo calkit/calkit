@@ -581,6 +581,17 @@ def get_status(
         if pipeline_status and not pipeline_status.has_pipeline:
             typer.echo("This project has no pipeline.")
             return
+        # A failed environment check makes get_status bail out before computing
+        # staleness, leaving stale_stages empty. Don't let that masquerade as an
+        # up-to-date pipeline---say plainly that the status is unknown.
+        elif pipeline_status and pipeline_status.failed_environment_checks:
+            warn(
+                "Pipeline status unavailable: environment checks failed for: "
+                + ", ".join(pipeline_status.failed_environment_checks)
+                + ". Resolve the environment issue(s) above to see "
+                "pipeline status."
+            )
+            return
         elif pipeline_status and pipeline_status.is_stale:
             typer.echo("Stale stages:")
             for stage_name in pipeline_status.stale_stage_names:
@@ -2586,7 +2597,8 @@ def run_in_env(
             subprocess.check_call(
                 julia_cmd,
                 cwd=wdir,
-                env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"},
+                env=os.environ.copy()
+                | {"JULIA_LOAD_PATH": calkit.julia.load_path()},
             )
         except subprocess.CalledProcessError:
             raise_error("Failed to run in julia environment")

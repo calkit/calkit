@@ -4,7 +4,7 @@ import * as path from "node:path";
 import {
   extractMarkdownImageRefs,
   resolveImageRefToRepoRelative,
-} from "../figures";
+} from "../figures/core";
 
 test("extractMarkdownImageRefs finds image targets with their line numbers", () => {
   const text = [

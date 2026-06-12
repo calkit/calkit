@@ -1,5 +1,9 @@
 import * as path from "node:path";
 
+// Pure helpers (no vscode imports) for parsing figure references, so they can be
+// unit-tested under plain `node --test` (where the `vscode` module is absent).
+// The vscode-dependent figure UI lives in view.ts.
+
 // Extract Markdown/Quarto image references (`![alt](target)`) from document
 // text, returning the 0-based line and the raw link target for each. The target
 // stops at whitespace so an optional "title" or `<url>` wrapper is ignored.

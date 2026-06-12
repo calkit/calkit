@@ -2,7 +2,7 @@
   "name": "calkit-vscode",
   "displayName": "Calkit",
   "description": "An extension for working with Calkit projects.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "calkit",
   "license": "MIT",
   "repository": {
@@ -259,6 +259,18 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "calkit-vscode.searchSidebar",
+        "title": "Filter",
+        "category": "Calkit",
+        "icon": "$(search)"
+      },
+      {
+        "command": "calkit-vscode.clearSidebarSearch",
+        "title": "Clear Filter",
+        "category": "Calkit",
+        "icon": "$(search-stop)"
+      },
+      {
         "command": "calkit-vscode.enableAutoRefresh",
         "title": "Auto-refresh status",
         "category": "Calkit"
@@ -338,6 +350,16 @@
           "command": "calkit-vscode.refreshSidebar",
           "when": "view == calkit-sidebar",
           "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.searchSidebar",
+          "when": "view == calkit-sidebar && calkit-vscode.hasProject",
+          "group": "navigation@1"
+        },
+        {
+          "command": "calkit-vscode.clearSidebarSearch",
+          "when": "view == calkit-sidebar && calkit-vscode.hasProject && calkit-vscode.sidebarFiltered",
+          "group": "navigation@1"
         },
         {
           "command": "calkit-vscode.enableAutoRefresh",
@@ -497,7 +519,7 @@
         },
         {
           "command": "calkit-vscode.showProvenance",
-          "when": "calkit.activeFileIsPipelineOutput || (calkit.plotlyPreviewActive && calkit.plotlyPreviewIsPipelineOutput) || resourceExtname == .pdf",
+          "when": "calkit.activeFileIsPipelineOutput || calkit.activeFileIsFigureOutput || (calkit.plotlyPreviewActive && calkit.plotlyPreviewIsPipelineOutput) || resourceExtname == .pdf",
           "group": "navigation"
         },
         {
@@ -697,6 +719,14 @@
         },
         {
           "command": "calkit-vscode.refreshSidebar"
+        },
+        {
+          "command": "calkit-vscode.searchSidebar",
+          "when": "calkit-vscode.hasProject"
+        },
+        {
+          "command": "calkit-vscode.clearSidebarSearch",
+          "when": "calkit-vscode.hasProject"
         }
       ]
     },

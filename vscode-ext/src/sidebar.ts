@@ -74,6 +74,9 @@ export class CalkitSidebarProvider
   private detectedResults: string[] = [];
   private detectedPresentations: string[] = [];
   private hiddenSections = new Set<string>();
+  // Lowercased filter text; when non-empty, only items matching it (and the
+  // sections containing them) are shown. Set via setFilter, not refresh.
+  private filterText = "";
   private lastFingerprint: string | undefined;
 
   // Cached section items so reveal() can use getParent()
@@ -153,6 +156,41 @@ export class CalkitSidebarProvider
     this.stageItemCache.clear();
     this.envItemCache.clear();
     this._onDidChangeTreeData.fire();
+  }
+
+  // Apply (or clear, with "") a case-insensitive text filter across all
+  // sections' items, then re-render. Kept separate from refresh() so it isn't
+  // gated by the data fingerprint.
+  setFilter(text: string): void {
+    const next = text.trim().toLowerCase();
+    if (next === this.filterText) {
+      return;
+    }
+    this.filterText = next;
+    this._onDidChangeTreeData.fire();
+  }
+
+  getFilter(): string {
+    return this.filterText;
+  }
+
+  // True when no filter is active, or any of the given texts contains it.
+  private matchesFilter(...texts: (string | undefined)[]): boolean {
+    if (!this.filterText) {
+      return true;
+    }
+    return texts.some((t) => t?.toLowerCase().includes(this.filterText));
+  }
+
+  // An empty section yields no rows while filtering (so it is hidden) and the
+  // given "none" placeholder otherwise.
+  private emptyOrNone(message: string): SidebarItem[] {
+    if (this.filterText) {
+      return [];
+    }
+    return [
+      new SidebarItem(message, vscode.TreeItemCollapsibleState.None, "empty"),
+    ];
   }
 
   getAttentionCount(): number {
@@ -274,21 +312,31 @@ export class CalkitSidebarProvider
       // calkit.sidebar.hiddenSections setting (the section id is the suffix
       // after "section-").
       const attention = this.computeSectionAttention();
-      return [
-        this.questionsSectionItem,
-        this.envsSectionItem,
-        this.pipelineSectionItem,
-        this.notebooksSectionItem,
-        this.figuresSectionItem,
-        this.datasetsSectionItem,
-        this.publicationsSectionItem,
-        this.presentationsSectionItem,
-        this.resultsSectionItem,
-      ]
-        .filter(
-          (s) => !this.hiddenSections.has(s.nodeKind.replace(/^section-/, "")),
-        )
-        .map((s) => this.decorateSectionAttention(s, attention));
+      return (
+        [
+          this.questionsSectionItem,
+          this.envsSectionItem,
+          this.pipelineSectionItem,
+          this.notebooksSectionItem,
+          this.figuresSectionItem,
+          this.datasetsSectionItem,
+          this.publicationsSectionItem,
+          this.presentationsSectionItem,
+          this.resultsSectionItem,
+        ]
+          .filter(
+            (s) =>
+              !this.hiddenSections.has(s.nodeKind.replace(/^section-/, "")),
+          )
+          // While filtering, drop sections whose items don't match (their child
+          // producers return no rows for a non-matching section).
+          .filter(
+            (s) =>
+              !this.filterText ||
+              this.getChildren(s).some((c) => c.nodeKind !== "empty"),
+          )
+          .map((s) => this.decorateSectionAttention(s, attention))
+      );
     }
     switch (element.nodeKind) {
       case "section-questions":
@@ -331,22 +379,20 @@ export class CalkitSidebarProvider
 
   private getQuestionItems(): SidebarItem[] {
     const questions = this.calkitConfig?.questions ?? [];
-    if (questions.length === 0) {
-      return [
-        new SidebarItem(
-          "No questions defined",
-          vscode.TreeItemCollapsibleState.None,
-          "empty",
-        ),
-      ];
+    // Keep the original 1-based index (used by `calkit rm question <index>`)
+    // before filtering removes entries.
+    const filtered = questions
+      .map((text, i) => ({ text, index: i + 1 }))
+      .filter(({ text }) => this.matchesFilter(text));
+    if (filtered.length === 0) {
+      return this.emptyOrNone("No questions defined");
     }
-    return questions.map((text, i) => {
-      // nodeId carries the 1-based index used by `calkit rm question <index>`.
+    return filtered.map(({ text, index }) => {
       const item = new SidebarItem(
         text,
         vscode.TreeItemCollapsibleState.None,
         "question",
-        String(i + 1),
+        String(index),
       );
       item.iconPath = new vscode.ThemeIcon("question");
       item.tooltip = text;
@@ -391,16 +437,13 @@ export class CalkitSidebarProvider
 
   private getEnvItems(): SidebarItem[] {
     const envs = this.calkitConfig?.environments ?? {};
-    if (Object.keys(envs).length === 0) {
-      const empty = new SidebarItem(
-        "No environments defined",
-        vscode.TreeItemCollapsibleState.None,
-        "empty",
-      );
-      empty.description = "";
-      return [empty];
+    const entries = Object.entries(envs).filter(([name, env]) =>
+      this.matchesFilter(name, typeof env.kind === "string" ? env.kind : ""),
+    );
+    if (entries.length === 0) {
+      return this.emptyOrNone("No environments defined");
     }
-    return Object.entries(envs).map(([name, env]) => {
+    return entries.map(([name, env]) => {
       const cached = this.envItemCache.get(name);
       if (cached) {
         return cached;
@@ -543,16 +586,13 @@ export class CalkitSidebarProvider
         allPaths.push(p);
       }
     }
-    if (allPaths.length === 0) {
-      return [
-        new SidebarItem(
-          "No notebooks found",
-          vscode.TreeItemCollapsibleState.None,
-          "empty",
-        ),
-      ];
+    const filtered = allPaths.filter((nbPath) =>
+      this.matchesFilter(nbPath, path.basename(nbPath)),
+    );
+    if (filtered.length === 0) {
+      return this.emptyOrNone("No notebooks found");
     }
-    return allPaths.map((nbPath) => {
+    return filtered.map((nbPath) => {
       const { entry, stage, stageName } = this.resolveNotebookEntry(nbPath);
       const envName = entry.environment ?? stage?.environment;
       const hasStage = !!stageName;
@@ -751,15 +791,11 @@ export class CalkitSidebarProvider
 
   private getArtifactItems(kind: ArtifactCollection): SidebarItem[] {
     const nodeKind = kind.slice(0, -1) as ArtifactKind;
-    const allPaths = this.mergedArtifactPaths(kind);
+    const allPaths = this.mergedArtifactPaths(kind).filter((p) =>
+      this.matchesFilter(p, path.basename(p)),
+    );
     if (allPaths.length === 0) {
-      return [
-        new SidebarItem(
-          `No ${kind} found`,
-          vscode.TreeItemCollapsibleState.None,
-          "empty",
-        ),
-      ];
+      return this.emptyOrNone(`No ${kind} found`);
     }
     const outputToStage = this.buildOutputToStageMap();
     return allPaths.map((artifactPath) =>
@@ -808,20 +844,25 @@ export class CalkitSidebarProvider
         : `${entry.path} — imported`;
       item.contextValue = nodeKind;
     }
-    // Clicking a figure opens the carousel; everything else opens the file.
+    // Clicking opens the file in the regular viewer (the inline carousel icon
+    // opens the special figures viewer). Plotly figures (.json) open in the
+    // Plotly preview editor rather than as raw JSON.
     if (this.workspaceRoot) {
-      if (nodeKind === "figure") {
+      const absUri = vscode.Uri.file(path.join(this.workspaceRoot, entry.path));
+      if (
+        nodeKind === "figure" &&
+        path.extname(entry.path).toLowerCase() === ".json"
+      ) {
         item.command = {
-          command: "calkit-vscode.openFiguresCarousel",
-          title: "Browse Figures",
-          arguments: [item],
+          command: "vscode.openWith",
+          title: "Open",
+          arguments: [absUri, "calkit.plotlyPreview"],
         };
       } else {
-        const absPath = path.join(this.workspaceRoot, entry.path);
         item.command = {
           command: "vscode.open",
           title: "Open",
-          arguments: [vscode.Uri.file(absPath)],
+          arguments: [absUri],
         };
       }
     }
@@ -894,19 +935,13 @@ export class CalkitSidebarProvider
   private getStageItems(): SidebarItem[] {
     const calkitStages = this.calkitConfig?.pipeline?.stages ?? {};
     const dvcStages = this.dvcYaml?.stages ?? {};
-    const allNames = new Set([
-      ...Object.keys(calkitStages),
-      ...Object.keys(dvcStages),
-    ]);
-    if (allNames.size === 0) {
-      const empty = new SidebarItem(
-        "No pipeline stages defined",
-        vscode.TreeItemCollapsibleState.None,
-        "empty",
-      );
-      return [empty];
+    const allNames = [
+      ...new Set([...Object.keys(calkitStages), ...Object.keys(dvcStages)]),
+    ].filter((name) => this.matchesFilter(name));
+    if (allNames.length === 0) {
+      return this.emptyOrNone("No pipeline stages defined");
     }
-    const items = [...allNames].map((stageName) => {
+    const items = allNames.map((stageName) => {
       const cached = this.stageItemCache.get(stageName);
       if (cached) {
         return cached;

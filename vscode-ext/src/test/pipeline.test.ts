@@ -19,6 +19,12 @@ test("expandDvcMatrix produces the cartesian product, flattening nested values",
   ]);
   // An empty matrix yields a single empty combination.
   assert.deepEqual(expandDvcMatrix({}), [{}]);
+  // A malformed (non-array) matrix value is skipped rather than throwing or
+  // iterating a scalar's characters.
+  assert.deepEqual(
+    expandDvcMatrix({ bad: 5 as unknown as unknown[], problem: ["a"] }),
+    [{ problem: "a" }],
+  );
 });
 
 test("dvcStageOutputPaths expands matrix-templated outs into concrete files", () => {

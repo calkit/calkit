@@ -16,9 +16,16 @@ export function expandDvcMatrix(
 ): Record<string, string>[] {
   let combos: Record<string, unknown>[] = [{}];
   for (const [key, values] of Object.entries(matrix)) {
+    // calkit always writes matrix values as arrays, but a hand-edited dvc.yaml
+    // could hold a scalar (which would iterate characters) or a non-iterable
+    // (which would throw); skip anything that isn't an array so a malformed
+    // file can't break the sidebar render.
+    if (!Array.isArray(values)) {
+      continue;
+    }
     const next: Record<string, unknown>[] = [];
     for (const combo of combos) {
-      for (const value of values ?? []) {
+      for (const value of values) {
         next.push({ ...combo, [key]: value });
       }
     }

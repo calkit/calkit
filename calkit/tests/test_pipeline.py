@@ -556,15 +556,18 @@ def test_to_dvc_skips_no_op_writes(tmp_dir):
         original = f.read()
     with open("dvc.yaml", "w") as f:
         f.write("# hand-written comment\n" + original)
-    reformatted = open("dvc.yaml").read()
+    with open("dvc.yaml") as f:
+        reformatted = f.read()
     os.utime("dvc.yaml", (pinned, pinned))
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
-    assert open("dvc.yaml").read() == reformatted
+    with open("dvc.yaml") as f:
+        assert f.read() == reformatted
     assert os.path.getmtime("dvc.yaml") == pinned
     # A real change, though, is written.
     ck_info["pipeline"]["stages"]["s1"]["command"] = "echo b > a.txt"
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
-    assert open("dvc.yaml").read() != reformatted
+    with open("dvc.yaml") as f:
+        assert f.read() != reformatted
 
 
 def test_sbatch_stage_to_dvc(tmp_dir):

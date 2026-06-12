@@ -553,7 +553,7 @@
         },
         {
           "command": "calkit-vscode.goToFigureSource",
-          "when": "resourceExtname == .qmd",
+          "when": "resourceExtname == .qmd || resourceExtname == .tex",
           "group": "calkit@4"
         }
       ],
@@ -700,7 +700,7 @@
         },
         {
           "command": "calkit-vscode.goToFigureSource",
-          "when": "resourceExtname == .qmd"
+          "when": "resourceExtname == .qmd || resourceExtname == .tex"
         },
         {
           "command": "calkit-vscode.save",

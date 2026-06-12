@@ -1,7 +1,9 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
 import {
+  extractLatexImageRefs,
   extractMarkdownImageRefs,
+  resolveFigureRefStage,
   resolveImageRefToRepoRelative,
 } from "./core";
 import type { FigureEntry } from "../types";
@@ -433,7 +435,14 @@ export class FigureSourceCodeLensProvider implements vscode.CodeLensProvider {
     if (!workspaceRoot) {
       return [];
     }
-    const refs = extractMarkdownImageRefs(document.getText());
+    // LaTeX docs use \includegraphics; Markdown/Quarto use ![](...).
+    const isLatex =
+      document.languageId === "latex" ||
+      document.uri.fsPath.toLowerCase().endsWith(".tex");
+    const text = document.getText();
+    const refs = isLatex
+      ? extractLatexImageRefs(text)
+      : extractMarkdownImageRefs(text);
     if (refs.length === 0) {
       return [];
     }
@@ -448,7 +457,7 @@ export class FigureSourceCodeLensProvider implements vscode.CodeLensProvider {
       if (!relPath) {
         continue;
       }
-      const stageName = outputToStage.get(relPath);
+      const stageName = resolveFigureRefStage(relPath, outputToStage);
       if (!stageName) {
         continue;
       }

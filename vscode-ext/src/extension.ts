@@ -26,7 +26,10 @@ import {
 } from "./notebooks";
 import type { CalkitInfo, DvcYaml, EnvDescription } from "./types";
 import { CalkitSidebarProvider } from "./sidebar";
-import { resolveImageRefToRepoRelative } from "./figures/core";
+import {
+  resolveFigureRefStage,
+  resolveImageRefToRepoRelative,
+} from "./figures/core";
 import {
   FigureSourceCodeLensProvider,
   openFiguresCarousel,
@@ -486,45 +489,45 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!workspaceRoot) {
           return;
         }
-        let figureUri: vscode.Uri | undefined;
+        // The CodeLens passes the figure path as a string. The editor context
+        // menu and command palette pass the document Uri (or nothing), so in
+        // those cases resolve the image reference on the cursor's line instead
+        // (Markdown ![](...) or LaTeX \includegraphics{...}); the resulting
+        // path may be extension-less for LaTeX.
+        let relPath: string | undefined;
         if (typeof figureArg === "string") {
-          figureUri = vscode.Uri.file(path.join(workspaceRoot, figureArg));
-        } else if (figureArg instanceof vscode.Uri) {
-          figureUri = figureArg;
+          relPath = figureArg;
         } else {
-          // Invoked from the editor context menu: resolve the image reference on
-          // the cursor's line.
           const editor = vscode.window.activeTextEditor;
           if (editor) {
             const lineText = editor.document.lineAt(
               editor.selection.active.line,
             ).text;
-            const match = /!\[[^\]]*\]\(\s*<?([^)\s>]+)>?/.exec(lineText);
-            const relPath = match
+            const target =
+              /!\[[^\]]*\]\(\s*<?([^)\s>]+)>?/.exec(lineText)?.[1] ??
+              /\\includegraphics\*?\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/
+                .exec(lineText)?.[1]
+                ?.trim();
+            relPath = target
               ? resolveImageRefToRepoRelative(
                   editor.document.uri.fsPath,
-                  match[1],
+                  target,
                   workspaceRoot,
                 )
               : undefined;
-            if (relPath) {
-              figureUri = vscode.Uri.file(path.join(workspaceRoot, relPath));
-            }
           }
         }
-        if (!figureUri) {
+        if (!relPath) {
           void vscode.window.showErrorMessage(
             "No figure reference found to go to source for.",
           );
           return;
         }
-        const stageName = await findStageProducingOutput(
-          workspaceRoot,
-          figureUri,
-        );
+        const outputToStage = await buildOutputToStageMap(workspaceRoot);
+        const stageName = resolveFigureRefStage(relPath, outputToStage);
         if (!stageName) {
           void vscode.window.showErrorMessage(
-            `No pipeline stage produces '${path.basename(figureUri.fsPath)}'.`,
+            `No pipeline stage produces '${path.basename(relPath)}'.`,
           );
           return;
         }
@@ -1267,7 +1270,8 @@ export function activate(context: vscode.ExtensionContext): void {
   void refreshActiveFileStageContext(vscode.window.activeTextEditor?.document);
   void refreshActiveFileFigureOutputContext();
 
-  // Surfaces "Source: <stage>" CodeLenses on figure references in .qmd docs.
+  // Surfaces "Source: <stage>" CodeLenses on figure references in Quarto
+  // (![](...)) and LaTeX (\includegraphics{...}) documents.
   const figureCodeLensProvider = new FigureSourceCodeLensProvider({
     getWorkspaceRoot,
     buildOutputToStageMap,
@@ -1275,7 +1279,10 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   context.subscriptions.push(
     vscode.languages.registerCodeLensProvider(
-      { scheme: "file", pattern: "**/*.qmd" },
+      [
+        { scheme: "file", pattern: "**/*.qmd" },
+        { scheme: "file", pattern: "**/*.tex" },
+      ],
       figureCodeLensProvider,
     ),
   );

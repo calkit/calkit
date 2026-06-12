@@ -24,6 +24,24 @@ export function extractMarkdownImageRefs(
   return refs;
 }
 
+// Extract LaTeX `\includegraphics[opts]{target}` references from document text,
+// returning the 0-based line and the raw target for each. The optional `[...]`
+// options block and a trailing `*` are skipped.
+export function extractLatexImageRefs(
+  text: string,
+): { line: number; target: string }[] {
+  const refs: { line: number; target: string }[] = [];
+  const re = /\\includegraphics\*?\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}/g;
+  text.split(/\r?\n/).forEach((lineText, lineIndex) => {
+    re.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(lineText)) !== null) {
+      refs.push({ line: lineIndex, target: match[1].trim() });
+    }
+  });
+  return refs;
+}
+
 // Resolve an image link target (relative to the referencing document) to a
 // repo-relative POSIX path, or undefined for remote URLs, data URIs, or paths
 // that escape the workspace.
@@ -41,4 +59,35 @@ export function resolveImageRefToRepoRelative(
     return undefined;
   }
   return relPath;
+}
+
+// Find the pipeline stage that produces the figure referenced at `relPath`.
+// Matches the output paths directly; if `relPath` has no extension (common for
+// LaTeX `\includegraphics`, which lets LaTeX pick the file), it also tries the
+// usual graphics extensions so e.g. `figures/plot` finds `figures/plot.pdf`.
+export function resolveFigureRefStage(
+  relPath: string,
+  outputToStage: Map<string, string>,
+): string | undefined {
+  const direct = outputToStage.get(relPath);
+  if (direct) {
+    return direct;
+  }
+  if (path.extname(relPath) === "") {
+    for (const ext of [
+      ".pdf",
+      ".png",
+      ".jpg",
+      ".jpeg",
+      ".eps",
+      ".svg",
+      ".gif",
+    ]) {
+      const stage = outputToStage.get(relPath + ext);
+      if (stage) {
+        return stage;
+      }
+    }
+  }
+  return undefined;
 }

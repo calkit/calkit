@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as path from "node:path";
 import {
+  extractLatexImageRefs,
   extractMarkdownImageRefs,
+  resolveFigureRefStage,
   resolveImageRefToRepoRelative,
 } from "../figures/core";
 
@@ -29,6 +31,44 @@ test("extractMarkdownImageRefs finds image targets with their line numbers", () 
   );
   // Angle-bracket wrapped targets are unwrapped.
   assert.equal(extractMarkdownImageRefs("![](<a b.png>)")[0].target, "a b.png");
+});
+
+test("extractLatexImageRefs finds includegraphics targets with their line numbers", () => {
+  const text = [
+    "\\begin{figure}",
+    "\\includegraphics[width=0.8\\textwidth]{figures/wind-rose}",
+    "\\includegraphics{../figures/farm-layout.pdf}",
+    "no graphics here",
+    "\\includegraphics*[scale=1]{a} text \\includegraphics{b.png}",
+  ].join("\n");
+  const refs = extractLatexImageRefs(text);
+  assert.deepEqual(refs, [
+    { line: 1, target: "figures/wind-rose" },
+    { line: 2, target: "../figures/farm-layout.pdf" },
+    { line: 4, target: "a" },
+    { line: 4, target: "b.png" },
+  ]);
+});
+
+test("resolveFigureRefStage matches outputs, trying graphics extensions when none", () => {
+  const map = new Map<string, string>([
+    ["figures/wind-rose.pdf", "plot-wind-rose"],
+    ["figures/farm-layout.png", "plot-layout"],
+    ["data/results.csv", "collect"],
+  ]);
+  // Exact path with extension matches directly.
+  assert.equal(
+    resolveFigureRefStage("figures/farm-layout.png", map),
+    "plot-layout",
+  );
+  // Extension-less LaTeX target resolves via a graphics extension.
+  assert.equal(
+    resolveFigureRefStage("figures/wind-rose", map),
+    "plot-wind-rose",
+  );
+  // Non-outputs and non-graphics matches return undefined.
+  assert.equal(resolveFigureRefStage("figures/missing", map), undefined);
+  assert.equal(resolveFigureRefStage("data/results", map), undefined);
 });
 
 test("resolveImageRefToRepoRelative resolves relative to the document dir", () => {

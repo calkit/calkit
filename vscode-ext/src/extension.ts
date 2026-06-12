@@ -25,6 +25,7 @@ import {
   getExecutedNotebookHtmlPath,
 } from "./notebooks";
 import type { CalkitInfo, DvcYaml, EnvDescription } from "./types";
+import { dvcStageOutputPaths } from "./pipeline/core";
 import { CalkitSidebarProvider } from "./sidebar";
 import {
   resolveFigureRefStage,
@@ -1586,16 +1587,6 @@ async function readDvcYaml(
     log(`Failed to read dvc.yaml: ${String(error)}`);
     return undefined;
   }
-}
-
-function dvcStageOutputPaths(stage: import("./types").DvcStage): string[] {
-  const outs = stage.outs ?? [];
-  return outs.flatMap((out) => {
-    if (typeof out === "string") {
-      return [out];
-    }
-    return Object.keys(out);
-  });
 }
 
 function buildPipelineOutputMapFromYaml(

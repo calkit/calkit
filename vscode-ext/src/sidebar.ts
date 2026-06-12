@@ -11,6 +11,7 @@ import type {
   QuestionEntry,
 } from "./types";
 import { getExecutedNotebookHtmlPath } from "./notebooks";
+import { dvcStageOutputPaths } from "./pipeline/core";
 
 // Singular node kinds and the matching calkit.yaml collection keys for the
 // artifact-style sections (figures, datasets, results, publications,
@@ -807,12 +808,10 @@ export class CalkitSidebarProvider
     for (const [stageName, stage] of Object.entries(
       this.dvcYaml?.stages ?? {},
     )) {
-      for (const out of stage.outs ?? []) {
-        const p =
-          typeof out === "string" ? out : String(Object.keys(out)[0] ?? "");
-        if (p) {
-          map.set(p, stageName);
-        }
+      // dvcStageOutputPaths expands iterate_over (matrix) templates, so the
+      // concrete per-iteration files resolve back to their producing stage.
+      for (const p of dvcStageOutputPaths(stage)) {
+        map.set(p, stageName);
       }
     }
     return map;
@@ -1120,7 +1119,15 @@ export class CalkitSidebarProvider
         : []) {
         prop("Input", input, "arrow-left", input);
       }
-      const explicitOutputs = Array.isArray(calkitStage.outputs)
+      // An iterate_over stage declares templated outputs (e.g.
+      // runs/{problem}.json) that never exist as written; show the concrete
+      // per-iteration files from the generated dvc.yaml matrix instead, so each
+      // "Output" row opens a real file. Scheduler logs get their own row below.
+      const explicitOutputs = calkitStage.iterate_over
+        ? dvcStageOutputPaths(this.dvcYaml?.stages?.[stageName] ?? {}).filter(
+            (p) => !p.startsWith(".calkit/scheduler/logs/"),
+          )
+        : Array.isArray(calkitStage.outputs)
         ? (calkitStage.outputs as (string | { path: string })[]).map(
             outputEntryPath,
           )

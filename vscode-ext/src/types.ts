@@ -20,6 +20,9 @@ export interface PipelineStage {
     log_path?: string;
     [key: string]: unknown;
   };
+  // When present, the stage is run once per iteration; its declared outputs are
+  // templated with calkit's `{arg_name}` placeholders.
+  iterate_over?: unknown;
   [key: string]: unknown;
 }
 
@@ -101,6 +104,9 @@ export interface DvcStage {
   outs?: (string | Record<string, unknown>)[];
   params?: unknown[];
   desc?: string;
+  // Present on iterate_over stages: a map of arg name to its list of values.
+  // The deps/outs are templated with `${item.<arg>}` against this.
+  matrix?: Record<string, unknown[]>;
   [key: string]: unknown;
 }
 

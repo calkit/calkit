@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import glob
 import os
+import platform
+import re
 import subprocess
 
 import typer
@@ -233,12 +235,57 @@ def config_github_ssh():
     subprocess.run(keygen_cmd)
     # Start the SSH agent in the background
     typer.echo("Checking that the SSH agent is running")
-    ssh_agent_cmd = subprocess.run(
-        ["ssh-agent", "-s"], capture_output=True, text=True
-    ).stdout
-    p = subprocess.run(ssh_agent_cmd, shell=True)
-    if p.returncode != 0:
-        raise_error("Failed to start ssh-agent")
+    # Note that under git bash / MSYS (MSYSTEM is set) we get a POSIX
+    # ssh-agent on PATH, so we use the POSIX path even on Windows there.
+    native_windows = platform.system() == "Windows" and not os.environ.get(
+        "MSYSTEM"
+    )
+    if native_windows:
+        # On native Windows, OpenSSH's ssh-agent runs as a Windows service
+        # rather than exporting environment variables to the current shell.
+        # The service ships disabled by default, so ensure it's enabled
+        # before starting it (enabling requires administrator privileges).
+        p = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                (
+                    "if ((Get-Service ssh-agent).StartType -eq 'Disabled') "
+                    "{ Set-Service ssh-agent -StartupType Manual }; "
+                    "Start-Service ssh-agent"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if p.returncode != 0:
+            err = (p.stderr.strip() or p.stdout.strip()).lower()
+            if "access" in err and "denied" in err:
+                raise_error(
+                    "Failed to start ssh-agent service: access denied.\n"
+                    "The ssh-agent service is disabled and enabling it "
+                    "requires administrator privileges. Please run the "
+                    "following in an elevated (Run as administrator) "
+                    "PowerShell, then try again:\n\n"
+                    "    Set-Service ssh-agent -StartupType Manual; "
+                    "Start-Service ssh-agent"
+                )
+            raise_error(
+                "Failed to start ssh-agent service: "
+                f"{p.stderr.strip() or p.stdout.strip()}"
+            )
+    else:
+        # On POSIX systems, ssh-agent -s prints shell commands that export
+        # SSH_AUTH_SOCK and SSH_AGENT_PID; parse them into our environment so
+        # the subsequent ssh-add call can find the agent
+        p = subprocess.run(["ssh-agent", "-s"], capture_output=True, text=True)
+        if p.returncode != 0:
+            raise_error("Failed to start ssh-agent")
+        for match in re.finditer(
+            r"(SSH_AUTH_SOCK|SSH_AGENT_PID)=([^;\n]+);", p.stdout
+        ):
+            os.environ[match.group(1)] = match.group(2)
     # Add the SSH key to the ssh-agent
     typer.echo(f"Adding SSH key to ssh-agent: {key_path}")
     cmd = ["ssh-add", key_path]

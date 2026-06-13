@@ -144,7 +144,9 @@ def load_calkit_info(
     if wdir is not None:
         fpath = os.path.join(wdir, fpath)
     if os.path.isfile(fpath):
-        with open(fpath) as f:
+        # Always read as UTF-8; on Windows the default open() encoding is
+        # cp1252, which mangles non-ASCII content (e.g., Greek letters).
+        with open(fpath, encoding="utf-8") as f:
             info = ryaml.load(f)
     if info is None:
         info = {}
@@ -166,7 +168,7 @@ def load_calkit_info(
                         if wdir is not None:
                             include_fpath = os.path.join(wdir, include_fpath)
                         if os.path.isfile(include_fpath):
-                            with open(include_fpath) as f:
+                            with open(include_fpath, encoding="utf-8") as f:
                                 include_data = ryaml.load(f)
                             info[kind][obj_name] |= include_data
     return info

@@ -242,11 +242,9 @@ def declare_notebook(
             }
         )
     # Write calkit.yaml
-    fpath = os.path.join(wdir, "calkit.yaml")
     ck_info["pipeline"] = pipeline_dict
     ck_info["notebooks"] = notebooks
-    with open(fpath, "w") as f:
-        calkit.ryaml.dump(ck_info, f)
+    calkit.save_calkit_info(ck_info, wdir=wdir)
     if must_be_rerun:
         raise RuntimeError(
             f"Notebook stage '{stage_name}' was modified while the pipeline "

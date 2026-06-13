@@ -2108,7 +2108,7 @@ def new_julia_env(
         except subprocess.CalledProcessError:
             raise_error(f"Failed to install Julia version {julia_version}")
         cmd = ["julia", f"+{julia_version}", f"--project={env_dir}", "-e"]
-        install_cmd = f'using Pkg; Pkg.activate("{env_dir}");'
+        install_cmd = f'using Pkg; Pkg.activate("{calkit.julia.escape_string(env_dir)}");'
         for package in packages or []:
             install_cmd += f' Pkg.add("{package}");'
         cmd.append(install_cmd)

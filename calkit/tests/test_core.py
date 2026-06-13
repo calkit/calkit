@@ -43,6 +43,21 @@ def test_detect_project_name(tmp_dir):
     assert calkit.detect_project_name() == "someone-else/some-project"
 
 
+def test_save_calkit_info_preserves_unicode(tmp_dir):
+    # Regression: on Windows, opening calkit.yaml without encoding="utf-8"
+    # writes as cp1252, which either errors or corrupts non-ASCII content
+    # (e.g., the Greek letter "ν") into mojibake ("Î½"). ruamel dumps raw
+    # unicode (allow_unicode=True), so the encoding of the file handle matters.
+    info = {"name": "p", "owner": "o", "title": "viscosity ν"}
+    calkit.save_calkit_info(info)
+    # The value must survive the round-trip intact.
+    assert calkit.load_calkit_info()["title"] == "viscosity ν"
+    # Raw bytes must be the UTF-8 encoding of "ν", not cp1252 mojibake.
+    raw = open("calkit.yaml", "rb").read()
+    assert "ν".encode("utf-8") in raw
+    assert "Î½".encode("utf-8") not in raw
+
+
 def test_load_calkit_info(tmp_dir, monkeypatch):
     subpath = "some/project"
     os.makedirs(subpath)

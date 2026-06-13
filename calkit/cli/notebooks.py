@@ -310,14 +310,18 @@ def check_env_kernel(
                     "still failed."
                 )
         # Don't include version in display_name; IJulia appends it automatically
+        # Escape interpolated values for the Julia string literals---notably the
+        # Windows project path, whose backslashes are otherwise read as invalid
+        # unicode escapes.
+        esc = calkit.julia.escape_string
         julia_cmd = (
             "import IJulia;"
             "kp=IJulia.installkernel("
-            f'"{kernel_name}",'
-            f'"--project={env_dir_abs}",'
+            f'"{esc(kernel_name)}",'
+            f'"--project={esc(env_dir_abs)}",'
             '"--startup-file=no",'
-            f'displayname="{display_name}",'
-            f'env=Dict("JULIA_LOAD_PATH" => "{calkit.julia.load_path()}")'
+            f'displayname="{esc(display_name)}",'
+            f'env=Dict("JULIA_LOAD_PATH" => "{esc(calkit.julia.load_path())}")'
             ");"
             "println(kp);"
         )
@@ -474,8 +478,7 @@ def execute_notebook(
         # Create this environment and write it to file
         envs[res.name] = res.env
         ck_info["environments"] = envs
-        with open("calkit.yaml", "w") as f:
-            calkit.ryaml.dump(ck_info, f)
+        calkit.save_calkit_info(ck_info)
     # Detect language from environment
     if language is None:
         detected_language = language_from_notebook(path)
@@ -501,16 +504,20 @@ def execute_notebook(
         raise ValueError(
             "Language must be one of 'python', 'matlab', 'julia', or 'r'"
         )
-    # Try to set kernelspec metadata so execution uses the expected kernel
+    # Try to set kernelspec metadata so execution uses the expected kernel.
+    # Always read/write as UTF-8: notebooks routinely contain non-ASCII (e.g.,
+    # Greek letters such as "ν" in code), and on Windows the default open()
+    # encoding is cp1252, which mangles UTF-8 content into mojibake ("ν" ->
+    # "Î½") and breaks execution.
     try:
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             nb_json = json.load(f)
         metadata = nb_json.setdefault("metadata", {})
         kernelspec = metadata.setdefault("kernelspec", {})
         kernelspec["name"] = kernel_name
         kernelspec["display_name"] = display_name
-        kernelspec.setdefault("language", language.lower())
-        with open(path, "w") as f:
+        kernelspec["language"] = language.lower()
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(nb_json, f, indent=1)
     except Exception as e:
         if verbose:

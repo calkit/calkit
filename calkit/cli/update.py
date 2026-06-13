@@ -746,7 +746,7 @@ def update_julia_env(
     env_dir = os.path.dirname(spec_path) or "."
     julia_version = env.get("julia")
     julia_bin = ["julia", f"+{julia_version}"] if julia_version else ["julia"]
-    cmds = [f'Pkg.activate("{env_dir}")']
+    cmds = [f'Pkg.activate("{calkit.julia.escape_string(env_dir)}")']
     if add:
         pkg_list = "[" + ", ".join(f'"{p}"' for p in add) + "]"
         cmds.append(f"Pkg.add({pkg_list})")

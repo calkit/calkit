@@ -39,6 +39,17 @@ def load_path() -> str:
     return os.pathsep.join(["@", "@stdlib"])
 
 
+def escape_string(value: str) -> str:
+    """Escape ``value`` for embedding in a Julia double-quoted string literal.
+
+    Julia treats ``\\``, ``"`` and ``$`` specially inside double quotes. In
+    particular a Windows path like ``C:\\Users\\...`` is otherwise read as an
+    invalid ``\\U`` unicode escape, so any value interpolated into Julia source
+    (e.g., a ``--project`` path passed via ``julia -e``) must be escaped.
+    """
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$")
+
+
 def _is_julia_command(arg: str) -> bool:
     """Whether ``arg`` is a Julia executable (julia or the juliaup launcher).
 

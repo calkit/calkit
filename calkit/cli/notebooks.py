@@ -310,14 +310,18 @@ def check_env_kernel(
                     "still failed."
                 )
         # Don't include version in display_name; IJulia appends it automatically
+        # Escape interpolated values for the Julia string literals---notably the
+        # Windows project path, whose backslashes are otherwise read as invalid
+        # unicode escapes.
+        esc = calkit.julia.escape_string
         julia_cmd = (
             "import IJulia;"
             "kp=IJulia.installkernel("
-            f'"{kernel_name}",'
-            f'"--project={env_dir_abs}",'
+            f'"{esc(kernel_name)}",'
+            f'"--project={esc(env_dir_abs)}",'
             '"--startup-file=no",'
-            f'displayname="{display_name}",'
-            f'env=Dict("JULIA_LOAD_PATH" => "{calkit.julia.load_path()}")'
+            f'displayname="{esc(display_name)}",'
+            f'env=Dict("JULIA_LOAD_PATH" => "{esc(calkit.julia.load_path())}")'
             ");"
             "println(kp);"
         )
@@ -357,6 +361,30 @@ def check_env_kernel(
         }
         typer.echo(json.dumps(result))
     return kernel_name, display_name
+
+
+def set_notebook_kernelspec(
+    path: str,
+    kernel_name: str,
+    display_name: str,
+    language: str,
+) -> None:
+    """Set a notebook's kernelspec metadata so execution uses the right kernel.
+
+    Always reads and writes as UTF-8. Notebooks routinely contain non-ASCII
+    (e.g. Greek letters such as ``ν`` in code), and on Windows the default
+    ``open()`` encoding is cp1252, which mangles UTF-8 content into mojibake
+    (e.g. ``ν`` -> ``Î½``) and breaks execution.
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        nb_json = json.load(f)
+    metadata = nb_json.setdefault("metadata", {})
+    kernelspec = metadata.setdefault("kernelspec", {})
+    kernelspec["name"] = kernel_name
+    kernelspec["display_name"] = display_name
+    kernelspec.setdefault("language", language)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(nb_json, f, indent=1)
 
 
 @notebooks_app.command("exec", help="Alias for 'execute'.")
@@ -474,7 +502,7 @@ def execute_notebook(
         # Create this environment and write it to file
         envs[res.name] = res.env
         ck_info["environments"] = envs
-        with open("calkit.yaml", "w") as f:
+        with open("calkit.yaml", "w", encoding="utf-8") as f:
             calkit.ryaml.dump(ck_info, f)
     # Detect language from environment
     if language is None:
@@ -503,15 +531,12 @@ def execute_notebook(
         )
     # Try to set kernelspec metadata so execution uses the expected kernel
     try:
-        with open(path, "r") as f:
-            nb_json = json.load(f)
-        metadata = nb_json.setdefault("metadata", {})
-        kernelspec = metadata.setdefault("kernelspec", {})
-        kernelspec["name"] = kernel_name
-        kernelspec["display_name"] = display_name
-        kernelspec.setdefault("language", language.lower())
-        with open(path, "w") as f:
-            json.dump(nb_json, f, indent=1)
+        set_notebook_kernelspec(
+            path=path,
+            kernel_name=kernel_name,
+            display_name=display_name,
+            language=language.lower(),
+        )
     except Exception as e:
         if verbose:
             warn(f"Warning: failed to set kernelspec metadata: {e}")

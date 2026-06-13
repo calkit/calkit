@@ -9,9 +9,22 @@ from calkit.julia import (
     _is_julia_command,
     check_version_in_command,
     ensure_startup_file_disabled_in_command,
+    escape_string,
     get_julia_exe,
     load_path,
 )
+
+
+def test_escape_string_windows_path():
+    # A Windows path embedded in a Julia string literal must have its
+    # backslashes escaped, otherwise "C:\\Users" is read as an invalid \\U
+    # unicode escape (ParseError).
+    assert escape_string("C:\\Users\\peteb") == "C:\\\\Users\\\\peteb"
+    # Double quotes and dollar signs are the other special characters.
+    assert escape_string('a"b') == 'a\\"b'
+    assert escape_string("a$b") == "a\\$b"
+    # Plain values (e.g. the load path) are unchanged.
+    assert escape_string("@;@stdlib") == "@;@stdlib"
 
 
 def test_load_path_uses_platform_separator():

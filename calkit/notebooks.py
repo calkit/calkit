@@ -245,7 +245,7 @@ def declare_notebook(
     fpath = os.path.join(wdir, "calkit.yaml")
     ck_info["pipeline"] = pipeline_dict
     ck_info["notebooks"] = notebooks
-    with open(fpath, "w") as f:
+    with open(fpath, "w", encoding="utf-8") as f:
         calkit.ryaml.dump(ck_info, f)
     if must_be_rerun:
         raise RuntimeError(

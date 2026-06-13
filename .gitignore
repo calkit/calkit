@@ -12,6 +12,8 @@ tsconfig.tsbuildinfo
 lib
 node_modules
 .yarn
+*.eslintcache
+*.stylelintcache
 calkit/labextension
 coverage
 junit.xml

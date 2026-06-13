@@ -56,6 +56,9 @@ jobs:
           uv run pytest -n 4 --durations=10
   ui:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jupyterlab-ext
     steps:
       - uses: actions/checkout@v4
       - name: Setup uv
@@ -84,7 +87,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-test-results
-          path: ui-tests/test-results/
+          path: jupyterlab-ext/ui-tests/test-results/
           retention-days: 7
   vscode-ext:
     runs-on: ubuntu-latest

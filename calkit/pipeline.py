@@ -1011,6 +1011,35 @@ def get_output_storage_map(
     return result
 
 
+def _dump_yaml_if_changed(data, fpath: str, verbose: bool = False) -> bool:
+    """Write ``data`` to ``fpath`` as YAML only if it changes the file.
+
+    ``calkit status`` recompiles the pipeline to DVC on every call, and the VS
+    Code extension polls status continuously. Blindly rewriting an identical
+    file causes two problems: (1) bumping ``dvc.yaml``'s mtime wakes the
+    extension's file watcher, which triggers yet another status poll---an
+    endless loop that keeps re-taking DVC's lock; and (2) the serializer formats
+    slightly differently across platforms and ruamel versions, so the file
+    churns in Git for no real change. Comparison is on the parsed structure, so
+    trivial reformatting is not treated as a change. DVC keys stage staleness on
+    ``dvc.lock`` (not on ``dvc.yaml``'s mtime), so skipping a no-op write is
+    safe. Returns whether the file was written.
+    """
+    if os.path.isfile(fpath):
+        try:
+            with open(fpath) as f:
+                if (calkit.ryaml.load(f) or {}) == data:
+                    return False
+        except Exception:
+            # Unreadable or invalid existing YAML: fall through and overwrite.
+            pass
+    if verbose:
+        typer.echo(f"Writing to {os.path.basename(fpath)}")
+    with open(fpath, "w") as f:
+        calkit.ryaml.dump(data, f)
+    return True
+
+
 def to_dvc(
     ck_info: dict | None = None,
     wdir: str | None = None,
@@ -1099,8 +1128,7 @@ def to_dvc(
                 with open(dvc_yaml_fpath) as f:
                     existing = calkit.ryaml.load(f) or {}
             existing.setdefault("stages", {}).update(wrapper_stages)
-            with open(dvc_yaml_fpath, "w") as f:
-                calkit.ryaml.dump(existing, f)
+            _dump_yaml_if_changed(existing, dvc_yaml_fpath)
         return wrapper_stages
     # Detect stages with the old ``slurm:`` field before model validation
     # because model_validate pops it in place.
@@ -1194,8 +1222,7 @@ def to_dvc(
         for sname in slurm_field_stages:
             stage_data = ck_yaml_data["pipeline"]["stages"][sname]
             stage_data["scheduler"] = stage_data.pop("slurm")
-        with open(ck_yaml_path, "w") as _f:
-            calkit.ryaml.dump(ck_yaml_data, _f)
+        _dump_yaml_if_changed(ck_yaml_data, ck_yaml_path)
     # Validate and initialize scheduler options (SLURM/PBS) for stages
     # whose outer environment is a job scheduler. Env defaults are applied
     # at job-submission time, not here.
@@ -1372,10 +1399,7 @@ def to_dvc(
                 dvc_stages[stage_name] = stage
         dvc_yaml["stages"] = dvc_stages
         dvc_yaml_fpath = os.path.join(wdir, "dvc.yaml") if wdir else "dvc.yaml"
-        with open(dvc_yaml_fpath, "w") as f:
-            if verbose:
-                typer.echo("Writing to dvc.yaml")
-            calkit.ryaml.dump(dvc_yaml, f)
+        _dump_yaml_if_changed(dvc_yaml, dvc_yaml_fpath, verbose=verbose)
         # DVC errors out (FileIsGitIgnored) if dvc.lock is Git-ignored, so make
         # sure it isn't---this keeps both status and pipeline runs working
         calkit.dvc.ensure_dvc_lock_not_ignored(wdir)

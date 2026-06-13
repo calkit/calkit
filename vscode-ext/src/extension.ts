@@ -25,6 +25,7 @@ import {
   getExecutedNotebookHtmlPath,
 } from "./notebooks";
 import type { CalkitInfo, DvcYaml, EnvDescription } from "./types";
+import { dvcStageOutputPaths } from "./pipeline/core";
 import { CalkitSidebarProvider } from "./sidebar";
 import {
   resolveFigureRefStage,
@@ -122,7 +123,7 @@ const DATASET_EXTENSIONS = new Set([
 const NOTEBOOK_EXTENSION = ".ipynb";
 const STATE_KEY_NOTEBOOK_PROFILES = "calkit.notebook.launchProfiles";
 const execFileAsync = promisify(execFile);
-const DEFAULT_MIN_CALKIT_VERSION = "0.41.14";
+const DEFAULT_MIN_CALKIT_VERSION = "0.41.15";
 const DEFAULT_NOTEBOOK_SLURM_TIME = "120";
 const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
 const MISSING_IJULIA_ERROR_TEXT =
@@ -144,7 +145,10 @@ const staleStageNames = new Set<string>();
 // Stages currently being executed by an in-progress `calkit run` (reported by
 // `calkit status --json` as pipeline.running_stages); shown with a spinner.
 const runningStageNames = new Set<string>();
-const importedFigureUris = new Set<string>();
+// Imported artifacts (figures or publications with a non-empty imported_from)
+// are legitimately not produced by the pipeline, so they're exempt from the
+// "!" badge below.
+const importedArtifactUris = new Set<string>();
 const pipelineNotebookUris = new Set<string>();
 let currentCalkitConfig: CalkitInfo | undefined;
 // Whether a calkit.yaml exists in the workspace. The sidebar is gated on this:
@@ -1585,16 +1589,6 @@ async function readDvcYaml(
   }
 }
 
-function dvcStageOutputPaths(stage: import("./types").DvcStage): string[] {
-  const outs = stage.outs ?? [];
-  return outs.flatMap((out) => {
-    if (typeof out === "string") {
-      return [out];
-    }
-    return Object.keys(out);
-  });
-}
-
 function buildPipelineOutputMapFromYaml(
   workspaceRoot: string,
   dvcYaml: DvcYaml | undefined,
@@ -1642,7 +1636,7 @@ class PipelineOutputDecorationProvider
       return undefined;
     }
     if (
-      (FIGURE_EXTENSIONS.has(ext) && !importedFigureUris.has(uri.fsPath)) ||
+      (FIGURE_EXTENSIONS.has(ext) && !importedArtifactUris.has(uri.fsPath)) ||
       (ext === NOTEBOOK_EXTENSION &&
         !pipelineNotebookUris.has(uri.fsPath) &&
         !uri.fsPath.includes(
@@ -1861,18 +1855,21 @@ async function refreshPipelineOutputContext(
   const outputMap = buildPipelineOutputMapFromYaml(workspaceRoot, dvcYaml);
   const prevPaths = new Set([
     ...pipelineOutputUris,
-    ...importedFigureUris,
+    ...importedArtifactUris,
     ...pipelineNotebookUris,
   ]);
   pipelineOutputUris.clear();
-  importedFigureUris.clear();
+  importedArtifactUris.clear();
   pipelineNotebookUris.clear();
   for (const absPath of outputMap.keys()) {
     pipelineOutputUris.add(absPath);
   }
-  for (const fig of calkitConfig?.figures ?? []) {
-    if (fig.imported_from) {
-      importedFigureUris.add(path.join(workspaceRoot, fig.path));
+  for (const artifact of [
+    ...(calkitConfig?.figures ?? []),
+    ...(calkitConfig?.publications ?? []),
+  ]) {
+    if (artifact.imported_from) {
+      importedArtifactUris.add(path.join(workspaceRoot, artifact.path));
     }
   }
   for (const stage of Object.values(calkitConfig?.pipeline?.stages ?? {})) {
@@ -1893,7 +1890,7 @@ async function refreshPipelineOutputContext(
     ...new Set([
       ...prevPaths,
       ...pipelineOutputUris,
-      ...importedFigureUris,
+      ...importedArtifactUris,
       ...pipelineNotebookUris,
     ]),
   ].map((p) => vscode.Uri.file(p));
@@ -2041,13 +2038,25 @@ async function pollPipelineRunStatus(
     running = pipeline.running === true;
     if (running) {
       // While a run holds the lock, calkit can't compute staleness, so only
-      // update the spinners and keep the previous stale badges.
-      applyRunningStages(new Set(pipeline.running_stages ?? []));
+      // update the spinners and keep the previous stale badges. An iterate_over
+      // sweep reports its expanded DVC items (e.g. "benchmark@zdt1"); the
+      // sidebar keys stages by the base name, so collapse "stage@item" back to
+      // "stage" to drive the parent stage's spinner.
+      applyRunningStages(
+        new Set(
+          (pipeline.running_stages ?? []).map((name) => name.split("@")[0]),
+        ),
+      );
     } else {
       applyRunningStages(new Set());
+      // Stale iterate_over items are likewise reported per expansion
+      // ("benchmark@zdt1"); collapse to the base stage so the sidebar badge
+      // and stale-output decorations match.
       applyStaleStages(
         workspaceRoot,
-        new Set(pipeline.stale_stage_names ?? []),
+        new Set(
+          (pipeline.stale_stage_names ?? []).map((name) => name.split("@")[0]),
+        ),
       );
     }
   } catch (error) {

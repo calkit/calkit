@@ -521,6 +521,55 @@ def test_to_dvc_unignores_dvc_lock(tmp_dir):
     assert not repo.ignored("dvc.lock")
 
 
+def test_to_dvc_skips_no_op_writes(tmp_dir):
+    # Compiling to DVC happens on every `calkit status` (which the VS Code
+    # extension polls continuously). Rewriting an unchanged dvc.yaml churns Git
+    # across platforms (trivial reformatting) and wakes the extension's dvc.yaml
+    # watcher into another status poll, an endless loop that keeps re-taking
+    # DVC's lock. The write must be skipped unless the parsed content changes.
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "s1": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "echo a > a.txt",
+                    "outputs": ["a.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # First compile creates dvc.yaml.
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert os.path.isfile("dvc.yaml")
+    # Pin an old mtime; a no-op recompile of identical content must leave it.
+    pinned = 1000000000.0
+    os.utime("dvc.yaml", (pinned, pinned))
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    assert os.path.getmtime("dvc.yaml") == pinned
+    # A semantically-equal but reformatted/commented file is also left as-is, so
+    # trivial cross-platform reformatting doesn't churn the file in Git.
+    with open("dvc.yaml") as f:
+        original = f.read()
+    with open("dvc.yaml", "w") as f:
+        f.write("# hand-written comment\n" + original)
+    with open("dvc.yaml") as f:
+        reformatted = f.read()
+    os.utime("dvc.yaml", (pinned, pinned))
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    with open("dvc.yaml") as f:
+        assert f.read() == reformatted
+    assert os.path.getmtime("dvc.yaml") == pinned
+    # A real change, though, is written.
+    ck_info["pipeline"]["stages"]["s1"]["command"] = "echo b > a.txt"
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    with open("dvc.yaml") as f:
+        assert f.read() != reformatted
+
+
 def test_sbatch_stage_to_dvc(tmp_dir):
     """Cover the SLURM stage compilation paths.
 

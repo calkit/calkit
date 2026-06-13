@@ -68,4 +68,6 @@ test-jlab: ## Run JupyterLab extension unit tests with Jest.
 test-jlab-ui: ## Run the JupyterLab UI integration tests.
 	@echo "🚀 Running JupyterLab UI tests with Playwright"
 	@cd jupyterlab-ext && uv run jlpm run build:prod
+	@uv run --directory=jupyterlab-ext/ui-tests jlpm install
+	@uv run --directory=jupyterlab-ext/ui-tests jlpm playwright install
 	@uv run --directory=jupyterlab-ext/ui-tests jlpm playwright test -u --reporter=list

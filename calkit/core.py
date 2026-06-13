@@ -180,7 +180,9 @@ def save_calkit_info(
     fpath = "calkit.yaml"
     if wdir is not None:
         fpath = os.path.join(wdir, fpath)
-    with open(fpath, "w") as f:
+    # Always write as UTF-8; on Windows the default open() encoding is cp1252,
+    # which mangles non-ASCII content (e.g., Greek letters) into mojibake.
+    with open(fpath, "w", encoding="utf-8") as f:
         ryaml.dump(info, f)
 
 

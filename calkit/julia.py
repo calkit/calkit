@@ -45,7 +45,7 @@ def escape_string(value: str) -> str:
     Julia treats ``\\``, ``"`` and ``$`` specially inside double quotes. In
     particular a Windows path like ``C:\\Users\\...`` is otherwise read as an
     invalid ``\\U`` unicode escape, so any value interpolated into Julia source
-    (e.g. a ``--project`` path passed via ``julia -e``) must be escaped.
+    (e.g., a ``--project`` path passed via ``julia -e``) must be escaped.
     """
     return value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$")
 

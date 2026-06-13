@@ -363,30 +363,6 @@ def check_env_kernel(
     return kernel_name, display_name
 
 
-def set_notebook_kernelspec(
-    path: str,
-    kernel_name: str,
-    display_name: str,
-    language: str,
-) -> None:
-    """Set a notebook's kernelspec metadata so execution uses the right kernel.
-
-    Always reads and writes as UTF-8. Notebooks routinely contain non-ASCII
-    (e.g. Greek letters such as ``ν`` in code), and on Windows the default
-    ``open()`` encoding is cp1252, which mangles UTF-8 content into mojibake
-    (e.g. ``ν`` -> ``Î½``) and breaks execution.
-    """
-    with open(path, "r", encoding="utf-8") as f:
-        nb_json = json.load(f)
-    metadata = nb_json.setdefault("metadata", {})
-    kernelspec = metadata.setdefault("kernelspec", {})
-    kernelspec["name"] = kernel_name
-    kernelspec["display_name"] = display_name
-    kernelspec.setdefault("language", language)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(nb_json, f, indent=1)
-
-
 @notebooks_app.command("exec", help="Alias for 'execute'.")
 @notebooks_app.command("execute")
 def execute_notebook(
@@ -502,8 +478,7 @@ def execute_notebook(
         # Create this environment and write it to file
         envs[res.name] = res.env
         ck_info["environments"] = envs
-        with open("calkit.yaml", "w", encoding="utf-8") as f:
-            calkit.ryaml.dump(ck_info, f)
+        calkit.save_calkit_info(ck_info)
     # Detect language from environment
     if language is None:
         detected_language = language_from_notebook(path)
@@ -529,14 +504,21 @@ def execute_notebook(
         raise ValueError(
             "Language must be one of 'python', 'matlab', 'julia', or 'r'"
         )
-    # Try to set kernelspec metadata so execution uses the expected kernel
+    # Try to set kernelspec metadata so execution uses the expected kernel.
+    # Always read/write as UTF-8: notebooks routinely contain non-ASCII (e.g.,
+    # Greek letters such as "ν" in code), and on Windows the default open()
+    # encoding is cp1252, which mangles UTF-8 content into mojibake ("ν" ->
+    # "Î½") and breaks execution.
     try:
-        set_notebook_kernelspec(
-            path=path,
-            kernel_name=kernel_name,
-            display_name=display_name,
-            language=language.lower(),
-        )
+        with open(path, "r", encoding="utf-8") as f:
+            nb_json = json.load(f)
+        metadata = nb_json.setdefault("metadata", {})
+        kernelspec = metadata.setdefault("kernelspec", {})
+        kernelspec["name"] = kernel_name
+        kernelspec["display_name"] = display_name
+        kernelspec["language"] = language.lower()
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(nb_json, f, indent=1)
     except Exception as e:
         if verbose:
             warn(f"Warning: failed to set kernelspec metadata: {e}")

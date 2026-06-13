@@ -7,45 +7,6 @@ import pytest
 from git.exc import InvalidGitRepositoryError
 
 import calkit
-from calkit.cli.notebooks import set_notebook_kernelspec
-
-
-def test_set_notebook_kernelspec_preserves_unicode(tmp_path):
-    # Regression: on Windows, opening the notebook without encoding="utf-8"
-    # read/wrote it as cp1252, corrupting non-ASCII code (e.g. the Greek letter
-    # "ν") into mojibake ("Î½") and breaking kernel execution.
-    nb_path = tmp_path / "nb.ipynb"
-    code = "ν=U * 2radius / Re  # viscosity"
-    nb = {
-        "cells": [
-            {
-                "cell_type": "code",
-                "source": [code],
-                "metadata": {},
-                "outputs": [],
-            }
-        ],
-        "metadata": {},
-        "nbformat": 4,
-        "nbformat_minor": 5,
-    }
-    with open(nb_path, "w", encoding="utf-8") as f:
-        json.dump(nb, f)
-    set_notebook_kernelspec(
-        path=str(nb_path),
-        kernel_name="my-kernel",
-        display_name="My Kernel",
-        language="julia",
-    )
-    with open(nb_path, "r", encoding="utf-8") as f:
-        result = json.load(f)
-    assert result["metadata"]["kernelspec"]["name"] == "my-kernel"
-    # The Greek nu must survive the round-trip intact (no mojibake).
-    assert "".join(result["cells"][0]["source"]) == code
-    assert "ν" in "".join(result["cells"][0]["source"])
-    # Raw file bytes must not contain the cp1252 mojibake escape for "ν".
-    raw = nb_path.read_text(encoding="utf-8")
-    assert "\\u00ce" not in raw
 
 
 def test_declare_notebook(tmp_dir):

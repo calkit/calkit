@@ -23,5 +23,3 @@ repos:
     hooks:
       - id: prettier
         exclude: calkit
-        args:
-          - --config=package.json

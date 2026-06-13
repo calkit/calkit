@@ -39,7 +39,7 @@
     "clean": "jlpm clean:lib",
     "clean:lib": "rimraf lib tsconfig.tsbuildinfo",
     "clean:lintcache": "rimraf .eslintcache .stylelintcache",
-    "clean:labextension": "rimraf calkit/labextension calkit/_version.py",
+    "clean:labextension": "rimraf ../calkit/labextension ../calkit/_version.py",
     "clean:all": "jlpm clean:lib && jlpm clean:labextension && jlpm clean:lintcache",
     "eslint": "jlpm eslint:check --fix",
     "eslint:check": "eslint . --cache --ext .ts,.tsx",
@@ -128,7 +128,7 @@
       }
     },
     "extension": true,
-    "outputDir": "calkit/labextension",
+    "outputDir": "../calkit/labextension",
     "schemaDir": "schema"
   },
   "eslintIgnore": [
@@ -152,20 +152,6 @@
       "project": "tsconfig.json",
       "sourceType": "module"
     },
-    "overrides": [
-      {
-        "files": [
-          "vscode-ext/**/*.ts"
-        ],
-        "parserOptions": {
-          "project": "vscode-ext/tsconfig.json",
-          "sourceType": "module"
-        },
-        "rules": {
-          "@typescript-eslint/naming-convention": "off"
-        }
-      }
-    ],
     "plugins": [
       "@typescript-eslint"
     ],
@@ -199,12 +185,6 @@
       "eqeqeq": "error",
       "prefer-arrow-callback": "error"
     }
-  },
-  "prettier": {
-    "singleQuote": false,
-    "trailingComma": "all",
-    "arrowParens": "always",
-    "endOfLine": "auto"
   },
   "stylelint": {
     "extends": [

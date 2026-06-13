@@ -53,19 +53,19 @@ import-profile: ## Profile the import time of the CLI.
 
 .PHONY: jlab-dev
 jlab-dev: ## Develop the JupyterLab extension.
-	uv run jlpm run watch
+	cd jupyterlab-ext && uv run jlpm run watch
 
 .PHONY: jlab
 jlab: ## Build the JupyterLab extension.
-	uv run jlpm run build:prod
+	cd jupyterlab-ext && uv run jlpm run build:prod
 
 .PHONY: test-frontend
 test-frontend: ## Run frontend unit tests with Jest.
 	@echo "🚀 Running frontend unit tests"
-	@uv run jlpm test
+	@cd jupyterlab-ext && uv run jlpm test
 
 .PHONY: test-ui
 test-ui: ## Run the JupyterLab UI integration tests.
 	@echo "🚀 Running JupyterLab UI tests with Playwright"
-	@uv run npm run build
-	@uv run --directory=ui-tests jlpm playwright test -u --reporter=list
+	@cd jupyterlab-ext && uv run jlpm run build:prod
+	@uv run --directory=jupyterlab-ext/ui-tests jlpm playwright test -u --reporter=list

@@ -29,6 +29,7 @@ jobs:
           --user
       - name: Install JupyterLab extension dependencies and build
         run: |
+          cd jupyterlab-ext
           uv run jlpm install --immutable
           uv run jlpm run build:prod
       - name: Build a binary wheel and a source tarball

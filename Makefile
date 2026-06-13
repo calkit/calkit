@@ -59,13 +59,13 @@ jlab-dev: ## Develop the JupyterLab extension.
 jlab: ## Build the JupyterLab extension.
 	cd jupyterlab-ext && uv run jlpm run build:prod
 
-.PHONY: test-frontend
-test-frontend: ## Run frontend unit tests with Jest.
-	@echo "🚀 Running frontend unit tests"
+.PHONY: test-jlab
+test-jlab: ## Run JupyterLab extension unit tests with Jest.
+	@echo "🚀 Running JupyterLab extension unit tests"
 	@cd jupyterlab-ext && uv run jlpm test
 
-.PHONY: test-ui
-test-ui: ## Run the JupyterLab UI integration tests.
+.PHONY: test-jlab-ui
+test-jlab-ui: ## Run the JupyterLab UI integration tests.
 	@echo "🚀 Running JupyterLab UI tests with Playwright"
 	@cd jupyterlab-ext && uv run jlpm run build:prod
 	@uv run --directory=jupyterlab-ext/ui-tests jlpm playwright test -u --reporter=list

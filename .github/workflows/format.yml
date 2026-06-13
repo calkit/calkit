@@ -3,7 +3,7 @@ name: Check format
 on: pull_request
 
 jobs:
-  format:
+  all:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

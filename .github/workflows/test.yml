@@ -6,7 +6,7 @@ env:
   CALKIT_TEST_ZENODO_TOKEN: ${{ secrets.CALKIT_ZENODO_TOKEN }}
 
 jobs:
-  test:
+  main:
     strategy:
       fail-fast: false
       matrix:
@@ -54,7 +54,7 @@ jobs:
           Rscript --version
           uv --version
           uv run pytest -n 4 --durations=10
-  ui:
+  jupyterlab-ext:
     runs-on: ubuntu-latest
     defaults:
       run:

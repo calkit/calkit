@@ -1229,6 +1229,49 @@ def _extract_r_string_assignments(code: str) -> dict[str, str]:
     return assignments
 
 
+def _extract_r_string_vector_assignments(code: str) -> dict[str, list[str]]:
+    """Extract character-vector assignments in R code.
+
+    Captures assignments of the form ``x <- c("a", "b")`` so that a later
+    ``pacman::p_load(char = x)`` can be resolved back to its package list.
+    """
+    assignments = {}
+    pattern = re.compile(
+        r"([A-Za-z_][A-Za-z0-9_.]*)\s*(?:<-|=)\s*c\(([^)]*)\)",
+        flags=re.DOTALL,
+    )
+    for name, body in pattern.findall(code):
+        strings = re.findall(r'["\']([a-zA-Z0-9._]+)["\']', body)
+        if strings:
+            assignments[name] = strings
+    return assignments
+
+
+def _resolve_r_package_args(
+    call_args: str, vector_assignments: dict[str, list[str]]
+) -> set[str]:
+    """Resolve package names from a ``pacman::p_load()`` argument list.
+
+    Handles quoted literals, inline ``c(...)`` vectors, bare (non-standard
+    evaluation) names like ``p_load(dplyr, tidyr)``, and ``char = x`` where
+    ``x`` is a character vector assigned earlier in the script.
+    """
+    packages = set()
+    # Quoted strings are package names, whether passed directly or inside c()
+    packages.update(re.findall(r'["\']([a-zA-Z0-9._]+)["\']', call_args))
+    # char = <var> referencing a character-vector assignment
+    for var in re.findall(r"char\s*=\s*([A-Za-z_][A-Za-z0-9_.]*)", call_args):
+        packages.update(vector_assignments.get(var, []))
+    # Bare names passed positionally; drop keyword arguments (install=, update=,
+    # character.only=, etc.) and their values before collecting identifiers
+    stripped = re.sub(r"[A-Za-z_][A-Za-z0-9_.]*\s*=\s*[^,]+", "", call_args)
+    for token in re.findall(r"[A-Za-z_][A-Za-z0-9_.]*", stripped):
+        # c() is the vector constructor, not a package; TRUE/FALSE are values
+        if token not in {"c", "TRUE", "FALSE", "T", "F"}:
+            packages.add(token)
+    return packages
+
+
 def _extract_julia_string_assignments(code: str) -> dict[str, str]:
     """Extract simple string assignments in Julia code."""
     assignments = {}
@@ -1622,6 +1665,27 @@ def detect_r_dependencies(
     for pattern in patterns:
         matches = re.findall(pattern, code)
         dependencies.update(matches)
+    # requireNamespace()/loadNamespace() take the package as a string and are
+    # commonly used to guard optional installs (e.g. pacman/here bootstrapping)
+    dependencies.update(
+        re.findall(
+            r'(?:require|load)Namespace\s*\(\s*["\']([a-zA-Z0-9._]+)["\']',
+            code,
+        )
+    )
+    # Qualified calls like pkg::fn() or pkg:::fn() reference a package without
+    # ever attaching it, so the package itself is still a dependency
+    dependencies.update(re.findall(r"\b([a-zA-Z][a-zA-Z0-9._]*)\s*:::?", code))
+    # pacman::p_load() loads (and optionally installs) packages dynamically; its
+    # arguments may be bare names, quoted strings, or a character vector passed
+    # via char=, possibly referencing a variable assigned earlier in the script
+    vector_assignments = _extract_r_string_vector_assignments(code)
+    for call_args in re.findall(
+        r"p_load\s*\(((?:[^()]|\([^()]*\))*)\)", code, flags=re.DOTALL
+    ):
+        dependencies.update(
+            _resolve_r_package_args(call_args, vector_assignments)
+        )
     # Filter out base R packages
     base_packages = {
         "base",

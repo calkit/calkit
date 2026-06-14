@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -1454,7 +1455,9 @@ def create_julia_project_file_content(
         return content
 
 
-def create_r_description_content(dependencies: list[str]) -> str:
+def create_r_description_content(
+    dependencies: list[str], project_name: str | None = None
+) -> str:
     """Generate R DESCRIPTION file content listing dependencies.
 
     This creates a minimal DESCRIPTION file that renv can work with.
@@ -1463,13 +1466,26 @@ def create_r_description_content(dependencies: list[str]) -> str:
     ----------
     dependencies : list[str]
         List of R package names.
+    project_name : str | None
+        Name for the DESCRIPTION's ``Package`` field. It is sanitized into a
+        valid R package name (letters, numbers and dots, starting with a
+        letter). Falls back to the detected project name, then to
+        ``CalkitProject``.
 
     Returns
     -------
     str
         The DESCRIPTION file content.
     """
-    content = """Package: CalkitProject
+    if project_name is None:
+        project_name = calkit.detect_project_name(prepend_owner=False)
+    # Valid R package names may only contain letters, numbers and dots, and
+    # must start with a letter, so replace anything else (e.g. hyphens) with a
+    # dot and prefix a letter if needed
+    package_name = re.sub(r"[^A-Za-z0-9.]+", ".", project_name).strip(".")
+    if not package_name or not package_name[0].isalpha():
+        package_name = "Calkit." + package_name if package_name else "Calkit"
+    content = f"""Package: {package_name}
 Version: 0.0.1
 Title: Auto-generated R environment
 """

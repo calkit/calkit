@@ -330,3 +330,21 @@ or
 
 We welcome all kinds of contributions!
 See [CONTRIBUTING.md](CONTRIBUTING.md) to learn how to get involved.
+
+## Acknowledgements
+
+<!-- INCLUDE: docs/acknowledgements.md +1 -->
+
+Calkit is supported by the
+[Caltech Schmidt Academy of Software Engineering](https://sase.caltech.edu).
+
+<p align="center">
+  <a href="https://sase.caltech.edu" target="_blank">
+    <img width="40%" src="docs/img/caltech.png" alt="Caltech SASE">
+  </a>
+<a href="https://schmidtsciences.org/" target="_blank">
+    <img width="40%" src="docs/img/schmidt-sciences.png" alt="Schmidt Sciences">
+  </a>
+</p>
+
+<!-- END INCLUDE -->

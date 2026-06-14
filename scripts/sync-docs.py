@@ -38,11 +38,10 @@ def get_content_without_title(doc_path: Path) -> str:
 
 
 def convert_relative_links(content: str) -> str:
-    """Convert relative markdown links to absolute URLs for docs.calkit.org.
+    """Convert relative links and image URLs to absolute docs URLs.
 
-    Converts links like [text](relative-path.md) to
-    [text](https://docs.calkit.org/relative-path)
-    but only if they're not already absolute URLs or anchor links.
+    Converts markdown links, markdown images, and HTML img src values to
+    docs.calkit.org URLs when they are not already absolute.
 
     Parameters
     ----------
@@ -54,23 +53,63 @@ def convert_relative_links(content: str) -> str:
     str
         Content with converted links
     """
+
+    def to_docs_url(url: str, is_markdown_doc_link: bool = False) -> str:
+        if re.match(r"^(https?:|mailto:|#)", url):
+            return url
+        if url.startswith("/"):
+            return f"https://docs.calkit.org{url}"
+        if is_markdown_doc_link and url.endswith("/index.md"):
+            return f"https://docs.calkit.org/{url[:-9]}"
+        if is_markdown_doc_link and url.endswith(".md"):
+            return f"https://docs.calkit.org/{url[:-3]}"
+        return f"https://docs.calkit.org/{url}"
+
+    def to_readme_image_url(url: str) -> str:
+        if re.match(r"^(https?:|mailto:|#)", url):
+            return url
+        if url.startswith("/docs/img/"):
+            return url[1:]
+        if url.startswith("docs/img/"):
+            return url
+        if url.startswith("/img/"):
+            return f"docs/{url[1:]}"
+        if url.startswith("img/"):
+            return f"docs/{url}"
+        return url
+
     # Match markdown links [text](url) where url doesn't start with http,
     # https, #, or /
-    pattern = r"\[([^\]]+)\]\((?!https?:|#|/)([^\)]+)\)"
+    link_pattern = r"\[([^\]]+)\]\((?!https?:|mailto:|#|/)([^\)]+)\)"
 
     def replace_link(match: Match[str]) -> str:
         text = match.group(1)
-        rel_url = match.group(2)
-        # Remove trailing .md and /index.md for absolute URLs
-        if rel_url.endswith("/index.md"):
-            abs_url = f"https://docs.calkit.org/{rel_url[:-9]}"
-        elif rel_url.endswith(".md"):
-            abs_url = f"https://docs.calkit.org/{rel_url[:-3]}"
-        else:
-            abs_url = f"https://docs.calkit.org/{rel_url}"
+        rel_url = match.group(2).strip()
+        abs_url = to_docs_url(rel_url, is_markdown_doc_link=True)
         return f"[{text}]({abs_url})"
 
-    return re.sub(pattern, replace_link, content)
+    content = re.sub(link_pattern, replace_link, content)
+
+    # Match markdown images ![alt](url)
+    image_pattern = r"!\[([^\]]*)\]\(([^\)]+)\)"
+
+    def replace_image(match: Match[str]) -> str:
+        alt_text = match.group(1)
+        image_url = match.group(2).strip()
+        return f"![{alt_text}]({to_readme_image_url(image_url)})"
+
+    content = re.sub(image_pattern, replace_image, content)
+
+    # Match HTML image tags and convert src values.
+    html_image_pattern = r'(<img\b[^>]*\bsrc=["\'])([^"\']+)(["\'])'
+
+    def replace_html_image_src(match: Match[str]) -> str:
+        before = match.group(1)
+        src = match.group(2).strip()
+        after = match.group(3)
+        return f"{before}{to_readme_image_url(src)}{after}"
+
+    return re.sub(html_image_pattern, replace_html_image_src, content)
 
 
 def adjust_heading_levels(content: str, shift: int) -> str:

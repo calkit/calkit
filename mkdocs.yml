@@ -79,6 +79,7 @@ nav:
   - Help and support: help.md
   - Reproducibility: reproducibility.md
   - Governance: governance.md
+  - Acknowledgements: acknowledgements.md
 markdown_extensions:
   - admonition
   - attr_list

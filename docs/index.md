@@ -15,6 +15,8 @@ tailored for research,
 you can reap the rewards of reproducibility and automation
 without the cognitive overhead.
 
+![pipeline](/img/pipeline.png)
+
 ## Features
 
 - A simplified [version control](version-control.md)

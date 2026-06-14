@@ -34,6 +34,8 @@ tailored for research,
 you can reap the rewards of reproducibility and automation
 without the cognitive overhead.
 
+![pipeline](docs/img/pipeline.png)
+
 ## Features
 
 - A simplified [version control](https://docs.calkit.org/version-control)

@@ -34,6 +34,8 @@ tailored for research,
 you can reap the rewards of reproducibility and automation
 without the cognitive overhead.
 
+<!-- https://docs.google.com/drawings/d/1XMGnbgYYNFAVUBDyUaCyLfRB7efvJdrnrKmFlNmT19o/edit -->
+
 ![pipeline](docs/img/pipeline.png)
 
 ## Features

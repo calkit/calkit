@@ -863,6 +863,41 @@ data <- read.csv("data.csv")
     assert "tidyr" in deps
     # Base packages should not be included
     assert "base" not in deps
+    # Qualified calls (pkg::fn), requireNamespace/loadNamespace, and
+    # pacman::p_load with a character vector should all be detected
+    pacman_content = """
+if (!requireNamespace("here", quietly = TRUE)) install.packages("here")
+here::i_am("code/master.R")
+loadNamespace("withr")
+pkgs <- c(
+  "haven", "readxl",
+  "dplyr", "ggplot2"
+)
+pacman::p_load(char = pkgs, install = TRUE, character.only = TRUE)
+pacman::p_load(stringr, tidyr)
+pacman::p_load("forcats", c("janitor", "lubridate"))
+"""
+    deps = detect_r_dependencies(code=pacman_content)
+    # Qualified call and the requireNamespace/loadNamespace guards
+    assert "here" in deps
+    assert "pacman" in deps
+    assert "withr" in deps
+    # Vector resolved via char =
+    assert "haven" in deps
+    assert "readxl" in deps
+    assert "ggplot2" in deps
+    # Bare non-standard-evaluation names
+    assert "stringr" in deps
+    assert "tidyr" in deps
+    # Quoted names and inline c() vectors
+    assert "forcats" in deps
+    assert "janitor" in deps
+    assert "lubridate" in deps
+    # The vector constructor and keyword-argument values are not packages
+    assert "c" not in deps
+    assert "TRUE" not in deps
+    assert "install" not in deps
+    assert "character.only" not in deps
 
 
 def test_detect_r_dependencies_from_code():
@@ -1064,6 +1099,20 @@ def test_create_r_description_file(tmp_dir):
     assert "dplyr" in content
     assert "tidyr" in content
     assert "Imports:" in content
+    # The Package field reflects the project name (sanitized to a valid R
+    # package name), not a hard-coded placeholder
+    from calkit.environments import create_r_description_content
+
+    content = create_r_description_content(deps, project_name="AI-Games")
+    assert "Package: AI.Games" in content
+    assert "CalkitProject" not in content
+    # Names that don't start with a letter get a valid prefix
+    content = create_r_description_content(deps, project_name="2023-study")
+    package_line = [
+        ln for ln in content.splitlines() if ln.startswith("Package:")
+    ][0]
+    package_name = package_line.split(":", 1)[1].strip()
+    assert package_name[0].isalpha()
 
 
 def test_create_files_in_subdirectory(tmp_dir):

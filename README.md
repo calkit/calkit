@@ -19,35 +19,26 @@
 
 <!-- INCLUDE: docs/index.md -->
 
-Calkit helps you manage and automate research projects like a software
-engineer.
+It's six months since you submitted your paper,
+do you know exactly how your figures and results were generated?
 
-Define computational environments,
-steps that process your data, create figures,
-presentations, and publications, connect to external tools,
-then iterate quickly and painlessly until your research questions are
-answered, tracking changes to all files along the way.
-At the end, deliver your entire project as a self-contained, self-documenting,
-version-controlled, and
-[single button reproducible](https://doi.org/10.1190/1.1822162)
-"calculation kit" so you and others can easily verify
-and build upon the results.
+You will if they're part of a Calkit project.
 
-## Guiding principles
+Calkit helps you integrate code, data, figures, results, publications,
+and more into a cohesive, traceable, and portable _knowledge creation system_,
+so every output can be traced back to its source and reproduced with a
+single command.
 
-- Quality comes from iteration. Automation reduces the time and effort
-  needed to iterate, thereby increasing iteration and quality.
-- Automating a step can and should take roughly
-  the same amount of time as doing it once manually,
-  therefore it's almost always worth it.
-- Working in a "quick and dirty" way can easily become _not quick_ when
-  the dirtiness results in mistakes and/or discourages working in small steps.
+With industry standard tools combined into a unified and simplified experience
+tailored for research,
+you can reap the rewards of reproducibility and automation
+without the cognitive overhead.
 
 ## Features
 
 - A simplified [version control](https://docs.calkit.org/version-control)
   interface that unifies Git and DVC (Data Version Control),
-  so all materials can be kept in the same project repository.
+  so everything can be kept in the same project repository.
   This way, code doesn't need to be siloed away from other
   important artifacts like datasets, models, figures, or article PDFs,
   allowing you to work on all parts of a project without hopping around to
@@ -70,9 +61,10 @@ and build upon the results.
 - [Overleaf integration](https://docs.calkit.org/overleaf/), so
   analysis, visualization, and writing can all stay in sync
   (no more manual uploads!)
-- Support for running on high performance computing (HPC) systems that use
-  [SLURM schedulers](https://docs.calkit.org/pipeline/slurm).
-- Support for running with [GitHub Actions](https://docs.calkit.org/tutorials/github-actions).
+- Support for running on [high performance computing (HPC)](https://docs.calkit.org/hpc) systems
+  that use PBS or SLURM schedulers.
+- Support for automated running with
+  [GitHub Actions](https://docs.calkit.org/tutorials/github-actions).
 - Extensions for doing all of the above graphically in
   [JupyterLab](https://docs.calkit.org/jupyterlab) and
   [VS Code](https://marketplace.visualstudio.com/items?itemName=Calkit.calkit-vscode).

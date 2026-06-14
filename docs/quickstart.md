@@ -95,3 +95,13 @@ To back up or save the project, call:
 ```sh
 calkit save -am "Run pipeline"
 ```
+
+## With an AI coding agent
+
+Simply tell the [AI agent](ai-tools.md):
+
+> Turn this folder into a Calkit project
+
+or
+
+> Create me a new Calkit project for investigating...

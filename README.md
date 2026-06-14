@@ -314,6 +314,16 @@ To back up or save the project, call:
 calkit save -am "Run pipeline"
 ```
 
+### With an AI coding agent
+
+Simply tell the [AI agent](https://docs.calkit.org/ai-tools):
+
+> Turn this folder into a Calkit project
+
+or
+
+> Create me a new Calkit project for investigating...
+
 <!-- END INCLUDE -->
 
 ## Get involved

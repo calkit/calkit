@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 import types
 from pathlib import Path
-from typing import Any, get_args, get_origin
+from typing import Any, Union, get_args, get_origin
 
 import click
 import typer
@@ -498,6 +498,62 @@ def _class_doc_lines(cls: type[Any] | None) -> list[str]:
     return lines
 
 
+def _render_field_type(ann: Any) -> str:
+    """Render a Pydantic field annotation as it should appear in the docs.
+
+    Optionality is conveyed by the separate "Required" column, so ``X | None``
+    is rendered as ``X``.
+    """
+    origin = get_origin(ann)
+    if origin is Union or isinstance(ann, types.UnionType):
+        non_none = [a for a in get_args(ann) if a is not type(None)]
+        if len(non_none) == 1:
+            return _render_field_type(non_none[0])
+        return " | ".join(_render_field_type(a) for a in non_none)
+    if origin is not None and str(origin).endswith("Literal"):
+        return "Literal[" + "|".join(repr(v) for v in get_args(ann)) + "]"
+    if origin in (list, set, tuple):
+        inner = ", ".join(_render_field_type(a) for a in get_args(ann))
+        return f"{origin.__name__}[{inner}]"
+    if origin is dict:
+        key_t, val_t = get_args(ann)
+        return (
+            f"dict[{_render_field_type(key_t)}, {_render_field_type(val_t)}]"
+        )
+    if isinstance(ann, type):
+        return ann.__name__
+    return str(ann)
+
+
+# Fields declared on the Environment base; we list them after the
+# kind-specific ones so each table leads with the fields that matter most.
+_ENV_META_FIELDS = ("description",)
+
+
+def _env_rows_from_model(cls: type[Any]) -> list[tuple[str, str, str]]:
+    """Derive doc table rows directly from a Pydantic environment model."""
+    fields = cls.model_fields
+    kind_specific = [
+        name for name in fields if name not in ("kind",) + _ENV_META_FIELDS
+    ]
+    meta = [name for name in _ENV_META_FIELDS if name in fields]
+    ordered = (["kind"] if "kind" in fields else []) + kind_specific + meta
+    rows = []
+    for name in ordered:
+        field = fields[name]
+        # ``kind`` carries a default for convenience but is always required in
+        # a definition, so it's the one field we don't infer from the default.
+        required = name == "kind" or field.is_required()
+        rows.append(
+            (
+                name,
+                _render_field_type(field.annotation),
+                "required" if required else "optional",
+            )
+        )
+    return rows
+
+
 def generate_environment_kinds_markdown() -> str:
     env_classes = [
         Environment,
@@ -521,92 +577,8 @@ def generate_environment_kinds_markdown() -> str:
     }
 
     env_kinds: dict[str, list[tuple[str, str, str]]] = {
-        "conda": [
-            ("kind", "Literal['conda']", "required"),
-            ("path", "str", "required"),
-            ("prefix", "str", "optional"),
-            ("description", "str", "optional"),
-        ],
-        "uv": [
-            ("kind", "Literal['uv']", "required"),
-            ("path", "str", "required"),
-            ("description", "str", "optional"),
-        ],
-        "venv": [
-            ("kind", "Literal['venv']", "required"),
-            ("path", "str", "required"),
-            ("prefix", "str", "required"),
-            ("python", "str", "optional"),
-            ("description", "str", "optional"),
-        ],
-        "uv-venv": [
-            ("kind", "Literal['uv-venv']", "required"),
-            ("path", "str", "required"),
-            ("prefix", "str", "required"),
-            ("python", "str", "optional"),
-            ("description", "str", "optional"),
-        ],
-        "pixi": [
-            ("kind", "Literal['pixi']", "required"),
-            ("path", "str", "required"),
-            ("name", "str", "optional"),
-            ("description", "str", "optional"),
-        ],
-        "docker": [
-            ("kind", "Literal['docker']", "required"),
-            ("image", "str", "required"),
-            ("path", "str", "optional"),
-            ("platform", "str", "optional"),
-            ("command_mode", "Literal['shell'|'entrypoint']", "optional"),
-            ("shell", "str", "optional"),
-            ("deps", "list[str]", "optional"),
-            ("env_vars", "dict[str, str]", "optional"),
-            ("ports", "list[str]", "optional"),
-            ("gpus", "str", "optional"),
-            ("user", "str", "optional"),
-            ("wdir", "str", "optional"),
-            ("args", "list[str]", "optional"),
-            ("description", "str", "optional"),
-        ],
-        "renv": [
-            ("kind", "Literal['renv']", "required"),
-            ("path", "str", "required"),
-            ("description", "str", "optional"),
-        ],
-        "julia": [
-            ("kind", "Literal['julia']", "required"),
-            ("path", "str", "required"),
-            ("julia", "str", "required"),
-            ("description", "str", "optional"),
-        ],
-        "matlab": [
-            ("kind", "Literal['matlab']", "required"),
-            ("products", "list[str]", "optional"),
-            ("description", "str", "optional"),
-        ],
-        "nix": [
-            ("kind", "Literal['nix']", "required"),
-            ("path", "str (must end with 'flake.nix')", "required"),
-            ("shell", "str (name of devShell to enter)", "optional"),
-            ("description", "str", "optional"),
-        ],
-        "slurm": [
-            ("kind", "Literal['slurm']", "required"),
-            ("host", "str", "optional (default: localhost)"),
-            ("default_options", "list[str]", "optional"),
-            ("default_setup", "list[str]", "optional"),
-            ("description", "str", "optional"),
-        ],
-        "ssh": [
-            ("kind", "Literal['ssh']", "required"),
-            ("host", "str", "required"),
-            ("user", "str", "required"),
-            ("wdir", "str", "required"),
-            ("key", "str", "optional"),
-            ("send_paths", "list[str]", "optional"),
-            ("get_paths", "list[str]", "optional"),
-            ("description", "str", "optional"),
-        ],
+        kind: _env_rows_from_model(cls)
+        for kind, cls in env_classes_by_kind.items()
     }
     lines = [
         "### Environment kind reference",

@@ -96,8 +96,6 @@ class Environment(BaseModel):
     # without a spec file (e.g. Matlab/Slurm/PBS) don't carry an unused field
     # and a required ``path`` doesn't conflict with the base's optional one.
     description: str | None = None
-    stage: str | None = None
-    default: bool | None = None
 
 
 class CondaEnvironment(Environment):
@@ -112,6 +110,8 @@ class VenvEnvironment(Environment):
     # If unset, the prefix is resolved on the fly (defaults to .venv next to
     # the spec file, nesting under .calkit/envs/{name}/.venv on conflict)
     prefix: str | None = None
+    # Python version to use when creating the environment
+    python: str | None = None
 
 
 class UvEnvironment(Environment):
@@ -125,6 +125,8 @@ class UvVenvEnvironment(Environment):
     # If unset, the prefix is resolved on the fly (defaults to .venv next to
     # the spec file, nesting under .calkit/envs/{name}/.venv on conflict)
     prefix: str | None = None
+    # Python version to use when creating the environment
+    python: str | None = None
 
 
 class PixiEnvironment(Environment):
@@ -153,6 +155,24 @@ class DockerEnvironment(Environment):
     shell: Literal["bash", "sh"] = "sh"
     command_mode: Literal["shell", "entrypoint"] = "shell"
     platform: str | None = None
+    # Working directory inside the container; defaults to ``/work`` at run time
+    wdir: str | None = None
+    # User to run the container as; defaults to the host user at run time
+    user: str | None = None
+    # Files added to the container as dependencies
+    deps: list[str] | None = None
+    # Environment variables to set in the container
+    env_vars: dict[str, str] | None = None
+    # Ports to expose, e.g. ``"8080:80"``
+    ports: list[str] | None = None
+    # GPUs to make available, passed to ``docker run --gpus``
+    gpus: str | None = None
+    # Extra arguments passed to ``docker run``
+    args: list[str] | None = None
+    # Name of the Jupyter kernel inside the image, used when executing
+    # notebooks with ``calkit nb execute``; defaults to ``python3`` (or ``ir``
+    # for R images)
+    jupyter_kernel: str | None = None
 
 
 class REnvironment(Environment):
@@ -195,6 +215,7 @@ class SSHEnvironment(BaseModel):
     key: str | None = None
     send_paths: list[str] = ["./*"]
     get_paths: list[str] = ["*"]
+    description: str | None = None
 
 
 class Software(BaseModel):

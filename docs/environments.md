@@ -626,7 +626,7 @@ Model class: `VenvEnvironment`
 | ----------- | --------------- | -------- |
 | kind        | Literal['venv'] | yes      |
 | path        | str             | yes      |
-| prefix      | str             | yes      |
+| prefix      | str             | no       |
 | python      | str             | no       |
 | description | str             | no       |
 
@@ -638,7 +638,7 @@ Model class: `UvVenvEnvironment`
 | ----------- | ------------------ | -------- |
 | kind        | Literal['uv-venv'] | yes      |
 | path        | str                | yes      |
-| prefix      | str                | yes      |
+| prefix      | str                | no       |
 | python      | str                | no       |
 | description | str                | no       |
 
@@ -657,32 +657,24 @@ Model class: `PixiEnvironment`
 
 Model class: `DockerEnvironment`
 
-| Parameter    | Type                           | Required |
-| ------------ | ------------------------------ | -------- |
-| kind         | Literal['docker']              | yes      |
-| image        | str                            | yes      |
-| path         | str                            | no       |
-| platform     | str                            | no       |
-| command_mode | Literal['shell'\|'entrypoint'] | no       |
-| shell        | str                            | no       |
-| deps         | list[str]                      | no       |
-| env_vars     | dict[str, str]                 | no       |
-| ports        | list[str]                      | no       |
-| gpus         | str                            | no       |
-| user         | str                            | no       |
-| wdir         | str                            | no       |
-| args         | list[str]                      | no       |
-| description  | str                            | no       |
-
-#### `renv`
-
-Model class: `REnvironment`
-
-| Parameter   | Type            | Required |
-| ----------- | --------------- | -------- |
-| kind        | Literal['renv'] | yes      |
-| path        | str             | yes      |
-| description | str             | no       |
+| Parameter      | Type                           | Required |
+| -------------- | ------------------------------ | -------- |
+| kind           | Literal['docker']              | yes      |
+| path           | str                            | no       |
+| image          | str                            | yes      |
+| layers         | list[str]                      | no       |
+| shell          | Literal['bash'\|'sh']          | no       |
+| command_mode   | Literal['shell'\|'entrypoint'] | no       |
+| platform       | str                            | no       |
+| wdir           | str                            | no       |
+| user           | str                            | no       |
+| deps           | list[str]                      | no       |
+| env_vars       | dict[str, str]                 | no       |
+| ports          | list[str]                      | no       |
+| gpus           | str                            | no       |
+| args           | list[str]                      | no       |
+| jupyter_kernel | str                            | no       |
+| description    | str                            | no       |
 
 #### `julia`
 
@@ -702,6 +694,7 @@ Model class: `MatlabEnvironment`
 | Parameter   | Type              | Required |
 | ----------- | ----------------- | -------- |
 | kind        | Literal['matlab'] | yes      |
+| version     | str               | no       |
 | products    | list[str]         | no       |
 | description | str               | no       |
 
@@ -709,12 +702,12 @@ Model class: `MatlabEnvironment`
 
 Model class: `NixEnvironment`
 
-| Parameter   | Type                            | Required |
-| ----------- | ------------------------------- | -------- |
-| kind        | Literal['nix']                  | yes      |
-| path        | str (must end with 'flake.nix') | yes      |
-| shell       | str (name of devShell to enter) | no       |
-| description | str                             | no       |
+| Parameter   | Type           | Required |
+| ----------- | -------------- | -------- |
+| kind        | Literal['nix'] | yes      |
+| path        | str            | yes      |
+| shell       | str            | no       |
+| description | str            | no       |
 
 #### `slurm`
 
@@ -727,6 +720,17 @@ Model class: `SlurmEnvironment`
 | default_options | list[str]        | no       |
 | default_setup   | list[str]        | no       |
 | description     | str              | no       |
+
+#### `renv`
+
+Model class: `REnvironment`
+
+| Parameter   | Type            | Required |
+| ----------- | --------------- | -------- |
+| kind        | Literal['renv'] | yes      |
+| path        | str             | yes      |
+| prefix      | str             | yes      |
+| description | str             | no       |
 
 #### `ssh`
 

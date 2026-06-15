@@ -490,7 +490,17 @@ def execute_notebook(
         typer.echo(f"Using {language} as notebook language")
     # First, ensure the specified environment has a kernel we can use
     # We need to check the environment type and create the kernel if needed
-    if language.lower() in ["python", "julia", "r"]:
+    docker_env = env.get("kind") == "docker"
+    if docker_env:
+        # Docker environments run the kernel inside the container, so there is
+        # no host kernel to register. Use the container's own kernel (default
+        # 'python3', overridable with the env's 'jupyter_kernel' key) and
+        # execute with Papermill inside the container further below.
+        kernel_name = env.get("jupyter_kernel") or {"r": "ir"}.get(
+            language.lower(), "python3"
+        )
+        display_name = kernel_name
+    elif language.lower() in ["python", "julia", "r"]:
         kernel_name, display_name = check_env_kernel(
             env_name=env_name,
             no_check=no_check,
@@ -563,10 +573,70 @@ def execute_notebook(
         typer.echo(f"Using kernel: {kernel_name}")
         typer.echo(f"Running with cwd: {notebook_dir}")
         typer.echo(f"Output will be saved to: {fpath_out_exec}")
-    # If this is a Python, Julia, or R notebook, we can use Papermill
+    # If this is a Python, Julia, or R notebook, we can use Papermill.
     # If it's a MATLAB notebook, we need to use the MATLAB kernel inside the
-    # specified environment
-    if language.lower() in ["python", "julia", "r"]:
+    # specified environment.
+    # Exception: If the environment is a Docker environment, we run Papermill
+    # inside the container so the kernel (which lives in the image) and
+    # Papermill share a process namespace---this avoids registering a host
+    # kernel and cross-container networking entirely
+    if docker_env:
+        # run_in_env mounts the project at the working directory and applies
+        # the env's user/platform/args, so we only need to invoke Papermill
+        # ipykernel is in the image, but Papermill may not be, so install it
+        # on demand (warning the user) before executing. We install into a
+        # writable temp dir on PYTHONPATH rather than the image's site-packages:
+        # run_in_env maps the host user into the container, so writing to the
+        # system location is typically denied, but /tmp is world-writable
+        pm_target = "/tmp/calkit-papermill"
+        pythonpath = f"PYTHONPATH={pm_target}"
+        pm_cmd = [
+            pythonpath,
+            "python",
+            "-c",
+            "import papermill",
+            "2>/dev/null",
+            "||",
+            "(",
+            "echo",
+            "papermill not found in image; installing it with pip...",
+            "&&",
+            "python",
+            "-m",
+            "pip",
+            "install",
+            "-q",
+            "--target",
+            pm_target,
+            "papermill",
+            ")",
+            "&&",
+            pythonpath,
+            "python",
+            "-m",
+            "papermill",
+            path,
+            fpath_out_exec,
+            "-k",
+            kernel_name,
+            "--log-output",
+        ]
+        if notebook_dir:
+            pm_cmd += ["--cwd", notebook_dir]
+        if parsed_params:
+            # JSON is valid YAML, so pass parameters as base64-encoded JSON to
+            # avoid shell-quoting issues across the container boundary
+            params_b64 = base64.b64encode(
+                json.dumps(parsed_params).encode()
+            ).decode()
+            pm_cmd += ["-b", params_b64]
+        run_in_env(
+            pm_cmd,
+            env_name=env_name,
+            no_check=no_check,
+            verbose=verbose,
+        )
+    elif language.lower() in ["python", "julia", "r"]:
         papermill.execute_notebook(
             input_path=path,
             output_path=fpath_out_exec,

@@ -98,6 +98,18 @@ export interface EnvDescription {
   python?: string;
 }
 
+// Per-stage staleness detail from `calkit status --json` (the Python
+// `StaleStage` model). Used to show *what* is stale about a stage in the
+// sidebar, not just that it is.
+export interface StaleStageDetail {
+  stale_outputs?: string[];
+  modified_inputs?: string[];
+  modified_outputs?: string[];
+  modified_command?: boolean;
+  always_run?: boolean;
+  is_subproject?: boolean;
+}
+
 export interface DvcStage {
   cmd?: string;
   deps?: (string | Record<string, unknown>)[];

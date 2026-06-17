@@ -9,9 +9,14 @@ import type {
   NotebookEntry,
   PipelineStage,
   QuestionEntry,
+  StaleStageDetail,
 } from "./types";
 import { getExecutedNotebookHtmlPath } from "./notebooks";
-import { dvcStageOutputPaths } from "./pipeline/core";
+import {
+  classifyStaleStage,
+  dvcStageOutputPaths,
+  type StaleClassification,
+} from "./pipeline/core";
 
 // Singular node kinds and the matching calkit.yaml collection keys for the
 // artifact-style sections (figures, datasets, results, publications,
@@ -74,6 +79,10 @@ export class CalkitSidebarProvider
   private calkitConfig: CalkitInfo | undefined;
   private dvcYaml: DvcYaml | undefined;
   private staleStageNames = new Set<string>();
+  // What is stale about each stale stage (modified inputs/outputs, script,
+  // environment, command), keyed by base stage name. Drives the per-property
+  // stale markers shown when a stage node is expanded.
+  private staleStageDetails: Record<string, StaleStageDetail> = {};
   private runningStageNames = new Set<string>();
   private envDescriptions: Record<string, EnvDescription> | undefined;
   private detectedNotebooks: string[] = [];
@@ -131,6 +140,7 @@ export class CalkitSidebarProvider
     detectedResults?: string[],
     detectedPresentations?: string[],
     hiddenSections?: Set<string>,
+    staleStageDetails?: Record<string, StaleStageDetail>,
   ): void {
     const nextFingerprint = JSON.stringify([
       calkitConfig,
@@ -144,6 +154,7 @@ export class CalkitSidebarProvider
       detectedResults,
       detectedPresentations,
       [...(hiddenSections ?? [])].sort(),
+      staleStageDetails,
     ]);
     if (nextFingerprint === this.lastFingerprint) {
       return;
@@ -153,6 +164,7 @@ export class CalkitSidebarProvider
     this.calkitConfig = calkitConfig;
     this.dvcYaml = dvcYaml;
     this.staleStageNames = staleStageNames;
+    this.staleStageDetails = staleStageDetails ?? {};
     this.runningStageNames = runningStageNames ?? new Set();
     this.envDescriptions = envDescriptions;
     this.detectedNotebooks = detectedNotebooks ?? [];
@@ -543,15 +555,23 @@ export class CalkitSidebarProvider
   // An "Environment" property node (shown under stages, notebooks, and
   // artifacts). Clicking it jumps to the environment in the Environments
   // section, expanded.
-  private makeEnvPropItem(envName: string): SidebarItem {
+  private makeEnvPropItem(envName: string, stale = false): SidebarItem {
     const item = new SidebarItem(
-      "Environment",
+      stale ? "Environment (modified)" : "Environment",
       vscode.TreeItemCollapsibleState.None,
       "stage-env-prop",
       envName,
     );
     item.description = envName;
-    item.iconPath = new vscode.ThemeIcon("package");
+    item.iconPath = stale
+      ? new vscode.ThemeIcon(
+          "warning",
+          new vscode.ThemeColor("list.warningForeground"),
+        )
+      : new vscode.ThemeIcon("package");
+    item.tooltip = stale
+      ? `${envName} — environment changed; stage needs to be re-run`
+      : undefined;
     item.contextValue = "stage-env-prop";
     item.command = {
       command: "calkit-vscode.viewEnvironment",
@@ -1054,23 +1074,87 @@ export class CalkitSidebarProvider
     return items;
   }
 
+  // The environment's spec/lock files (e.g. pyproject.toml + uv.lock), used to
+  // detect when a stage is stale because its environment changed. An env ref
+  // may combine an outer and inner environment as "outer:inner", so collect the
+  // files for each part.
+  private envFilePaths(envName: string): string[] {
+    const paths: string[] = [];
+    for (const part of envName.split(":")) {
+      const desc = this.envDescriptions?.[part];
+      if (desc?.spec_path) {
+        paths.push(desc.spec_path);
+      }
+      if (desc?.lock_path) {
+        paths.push(desc.lock_path);
+      }
+      const env = this.calkitConfig?.environments?.[part];
+      if (env && typeof env.path === "string") {
+        paths.push(env.path);
+      }
+    }
+    return paths;
+  }
+
   private getStageProps(stageName: string): SidebarItem[] {
     const calkitStage = this.calkitConfig?.pipeline?.stages?.[stageName];
     const items: SidebarItem[] = [];
+    // When the stage is stale, attribute its changes to the specific
+    // script/notebook/source/environment/inputs/outputs so each affected row is
+    // flagged, rather than only marking the stage itself.
+    const detail = this.staleStageDetails[stageName];
+    const cls: StaleClassification | undefined =
+      detail && calkitStage
+        ? classifyStaleStage(detail, {
+            scriptPath:
+              typeof calkitStage.script_path === "string"
+                ? calkitStage.script_path
+                : undefined,
+            notebookPath:
+              typeof calkitStage.notebook_path === "string"
+                ? calkitStage.notebook_path
+                : undefined,
+            targetPath:
+              typeof calkitStage.target_path === "string"
+                ? calkitStage.target_path
+                : undefined,
+            configuredInputs: Array.isArray(calkitStage.inputs)
+              ? (calkitStage.inputs as string[])
+              : [],
+            envFilePaths:
+              typeof calkitStage.environment === "string"
+                ? this.envFilePaths(calkitStage.environment)
+                : [],
+          })
+        : undefined;
+    // An output is "modified" when its file changed on disk, or "stale" when an
+    // upstream change means it needs regenerating.
+    const outputStaleKind = (p: string): "modified" | "stale" | undefined =>
+      cls?.modifiedOutputs.has(p)
+        ? "modified"
+        : cls?.staleOutputs.has(p)
+        ? "stale"
+        : undefined;
 
     const prop = (
       label: string,
       val: string,
       icon: string,
       openPath?: string,
+      staleKind?: "modified" | "stale",
     ): void => {
       const item = new SidebarItem(
-        label,
+        staleKind ? `${label} (${staleKind})` : label,
         vscode.TreeItemCollapsibleState.None,
         "stage-prop",
       );
       item.description = val;
-      item.iconPath = new vscode.ThemeIcon(icon);
+      item.iconPath = staleKind
+        ? new vscode.ThemeIcon(
+            "warning",
+            new vscode.ThemeColor("list.warningForeground"),
+          )
+        : new vscode.ThemeIcon(icon);
       if (openPath && this.workspaceRoot) {
         const absPath = path.join(this.workspaceRoot, openPath);
         item.command = {
@@ -1080,6 +1164,13 @@ export class CalkitSidebarProvider
         };
         item.tooltip = `Open ${openPath}`;
       }
+      // The stale tooltip takes precedence over the plain "Open ..." one.
+      if (staleKind) {
+        item.tooltip =
+          staleKind === "modified"
+            ? `${val} — modified; stage needs to be re-run`
+            : `${val} — out of date; stage needs to be re-run`;
+      }
       items.push(item);
     };
 
@@ -1087,12 +1178,29 @@ export class CalkitSidebarProvider
       if (typeof calkitStage.kind === "string") {
         prop("Kind", calkitStage.kind, "symbol-enum");
       }
+      // The stage command itself changed (e.g. its args), independent of any
+      // individual input/output file.
+      if (cls?.commandModified) {
+        const cmdItem = new SidebarItem(
+          "Command (modified)",
+          vscode.TreeItemCollapsibleState.None,
+          "stage-prop",
+        );
+        cmdItem.description = "stage command changed";
+        cmdItem.iconPath = new vscode.ThemeIcon(
+          "warning",
+          new vscode.ThemeColor("list.warningForeground"),
+        );
+        cmdItem.tooltip = "The stage command changed; stage needs to be re-run";
+        items.push(cmdItem);
+      }
       if (typeof calkitStage.notebook_path === "string") {
         prop(
           "Notebook",
           calkitStage.notebook_path,
           "notebook",
           calkitStage.notebook_path,
+          cls?.notebookStale ? "modified" : undefined,
         );
       }
       if (typeof calkitStage.script_path === "string") {
@@ -1101,6 +1209,7 @@ export class CalkitSidebarProvider
           calkitStage.script_path,
           "file-code",
           calkitStage.script_path,
+          cls?.scriptStale ? "modified" : undefined,
         );
       }
       if (typeof calkitStage.target_path === "string") {
@@ -1109,15 +1218,30 @@ export class CalkitSidebarProvider
           calkitStage.target_path,
           "file-code",
           calkitStage.target_path,
+          cls?.sourceStale ? "modified" : undefined,
         );
       }
       if (typeof calkitStage.environment === "string") {
-        items.push(this.makeEnvPropItem(calkitStage.environment));
+        items.push(
+          this.makeEnvPropItem(calkitStage.environment, cls?.envStale),
+        );
       }
       for (const input of Array.isArray(calkitStage.inputs)
         ? (calkitStage.inputs as string[])
         : []) {
-        prop("Input", input, "arrow-left", input);
+        prop(
+          "Input",
+          input,
+          "arrow-left",
+          input,
+          cls?.modifiedInputs.has(input) ? "modified" : undefined,
+        );
+      }
+      // Modified deps that aren't one of the declared inputs/script/notebook/
+      // environment above (e.g. an auto-added module dependency). Surfacing
+      // them explains an otherwise-mysterious stale stage.
+      for (const extra of cls?.extraModifiedInputs ?? []) {
+        prop("Input", extra, "arrow-left", extra, "modified");
       }
       // An iterate_over stage declares templated outputs (e.g.
       // runs/{problem}.json) that never exist as written; show the concrete
@@ -1133,7 +1257,7 @@ export class CalkitSidebarProvider
           )
         : [];
       for (const output of explicitOutputs) {
-        prop("Output", output, "arrow-right", output);
+        prop("Output", output, "arrow-right", output, outputStaleKind(output));
       }
       // Implicit PDF output for latex stages
       if (
@@ -1142,7 +1266,13 @@ export class CalkitSidebarProvider
       ) {
         const pdfPath = calkitStage.target_path.replace(/\.tex$/, ".pdf");
         if (!explicitOutputs.includes(pdfPath)) {
-          prop("Output", pdfPath, "arrow-right", pdfPath);
+          prop(
+            "Output",
+            pdfPath,
+            "arrow-right",
+            pdfPath,
+            outputStaleKind(pdfPath),
+          );
         }
       }
     }

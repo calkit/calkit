@@ -24,7 +24,12 @@ import {
   getConfiguredCandidateForNotebookPath as resolveConfiguredCandidateForNotebookPath,
   getExecutedNotebookHtmlPath,
 } from "./notebooks";
-import type { CalkitInfo, DvcYaml, EnvDescription } from "./types";
+import type {
+  CalkitInfo,
+  DvcYaml,
+  EnvDescription,
+  StaleStageDetail,
+} from "./types";
 import { dvcStageOutputPaths } from "./pipeline/core";
 import { CalkitSidebarProvider } from "./sidebar";
 import {
@@ -142,6 +147,10 @@ let hasCheckedCalkitCli = false;
 const pipelineOutputUris = new Set<string>();
 const staleOutputUris = new Set<string>();
 const staleStageNames = new Set<string>();
+// What is stale about each stale stage (modified inputs/outputs, script,
+// environment, command), keyed by base stage name. Surfaced as per-property
+// markers under a stale stage in the sidebar.
+let staleStageDetails: Record<string, StaleStageDetail> = {};
 // Stages currently being executed by an in-progress `calkit run` (reported by
 // `calkit status --json` as pipeline.running_stages); shown with a spinner.
 const runningStageNames = new Set<string>();
@@ -1228,6 +1237,29 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  // Re-check pipeline status when a workspace file is saved, so a stage goes
+  // stale in the sidebar right after editing its script/input/notebook without
+  // a manual refresh (issue #959). The dvc.yaml/calkit.yaml watchers already
+  // cover config edits. The scheduled refresh is debounced and only runs
+  // `calkit status` when auto-refresh is enabled.
+  const onDocumentSaved = (uri: vscode.Uri): void => {
+    const root = getWorkspaceRoot();
+    if (!root || uri.scheme !== "file") {
+      return;
+    }
+    const rel = path.relative(root, uri.fsPath);
+    if (rel.startsWith("..") || path.isAbsolute(rel)) {
+      return; // saved file is outside the workspace
+    }
+    scheduleRefreshPipelineOutputContext(context);
+  };
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument((doc) => onDocumentSaved(doc.uri)),
+    vscode.workspace.onDidSaveNotebookDocument((doc) =>
+      onDocumentSaved(doc.uri),
+    ),
+  );
+
   // Image/figure files open in a custom editor, so the active-text-editor event
   // above doesn't fire for them. Re-evaluate the figure-output context on tab
   // changes (a tab becoming active) and tab-group changes (the active split
@@ -1940,6 +1972,7 @@ function renderSidebarFromState(): void {
     currentDetectedResults,
     currentDetectedPresentations,
     getHiddenSections(),
+    staleStageDetails,
   );
   updateSidebarBadge();
 }
@@ -1949,6 +1982,7 @@ function renderSidebarFromState(): void {
 function applyStaleStages(
   workspaceRoot: string,
   freshStaleStageNames: Set<string>,
+  freshStaleStageDetails: Record<string, StaleStageDetail> = {},
 ): void {
   const outputMap = buildPipelineOutputMapFromYaml(
     workspaceRoot,
@@ -1970,6 +2004,8 @@ function applyStaleStages(
   for (const n of freshStaleStageNames) {
     staleStageNames.add(n);
   }
+  const prevDetails = staleStageDetails;
+  staleStageDetails = freshStaleStageDetails;
   const changedUris = [...new Set([...prevStale, ...staleOutputUris])].map(
     (p) => vscode.Uri.file(p),
   );
@@ -1978,7 +2014,10 @@ function applyStaleStages(
   }
   const staleChanged =
     prevStageNames.size !== staleStageNames.size ||
-    [...staleStageNames].some((n) => !prevStageNames.has(n));
+    [...staleStageNames].some((n) => !prevStageNames.has(n)) ||
+    // The set of stale stages can be unchanged while *what* is stale about them
+    // changes (e.g. a different input edited), so compare the details too.
+    JSON.stringify(prevDetails) !== JSON.stringify(staleStageDetails);
   if (staleChanged) {
     renderSidebarFromState();
   }
@@ -2010,6 +2049,55 @@ let runStatusPolling = false;
 let suppressRwlockUntil = 0;
 const RUN_STATUS_POLL_INTERVAL_MS = 2500;
 
+function unionPaths(
+  a: string[] | undefined,
+  b: string[] | undefined,
+): string[] {
+  return [...new Set([...(a ?? []), ...(b ?? [])])];
+}
+
+// Merge the per-stage staleness detail from `calkit status --json` down to base
+// stage names. iterate_over stages report one entry per expansion
+// ("benchmark@zdt1"); the sidebar keys stages by the base name, so union each
+// expansion's modified paths/flags under "benchmark".
+function collapseStaleStageDetails(
+  raw: Record<string, StaleStageDetail>,
+): Record<string, StaleStageDetail> {
+  const merged: Record<string, StaleStageDetail> = {};
+  for (const [key, detail] of Object.entries(raw)) {
+    const base = key.split("@")[0];
+    const existing = merged[base];
+    if (!existing) {
+      merged[base] = {
+        stale_outputs: [...(detail.stale_outputs ?? [])],
+        modified_inputs: [...(detail.modified_inputs ?? [])],
+        modified_outputs: [...(detail.modified_outputs ?? [])],
+        modified_command: !!detail.modified_command,
+        always_run: !!detail.always_run,
+        is_subproject: !!detail.is_subproject,
+      };
+      continue;
+    }
+    existing.stale_outputs = unionPaths(
+      existing.stale_outputs,
+      detail.stale_outputs,
+    );
+    existing.modified_inputs = unionPaths(
+      existing.modified_inputs,
+      detail.modified_inputs,
+    );
+    existing.modified_outputs = unionPaths(
+      existing.modified_outputs,
+      detail.modified_outputs,
+    );
+    existing.modified_command =
+      existing.modified_command || !!detail.modified_command;
+    existing.always_run = existing.always_run || !!detail.always_run;
+    existing.is_subproject = existing.is_subproject || !!detail.is_subproject;
+  }
+  return merged;
+}
+
 async function pollPipelineRunStatus(
   context: vscode.ExtensionContext,
 ): Promise<void> {
@@ -2032,6 +2120,7 @@ async function pollPipelineRunStatus(
         running?: boolean;
         running_stages?: string[];
         stale_stage_names?: string[];
+        stale_stages?: Record<string, StaleStageDetail>;
       };
     };
     const pipeline = status?.pipeline ?? {};
@@ -2057,6 +2146,7 @@ async function pollPipelineRunStatus(
         new Set(
           (pipeline.stale_stage_names ?? []).map((name) => name.split("@")[0]),
         ),
+        collapseStaleStageDetails(pipeline.stale_stages ?? {}),
       );
     }
   } catch (error) {

@@ -304,6 +304,25 @@ def _slurm_exit_code(job_id: str) -> int | None:
     return None
 
 
+def _parse_pbs_state(stdout: str) -> tuple[str | None, int | None]:
+    # `qstat -f` output is a flat list of `key = value` lines; pull out the
+    # job's state and, for a finished job, its exit status. The status field is
+    # spelled `Exit_status` on PBS Pro and `exit_status` on some Torque builds,
+    # so match it case-insensitively.
+    state = None
+    exit_code = None
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("job_state"):
+            state = stripped.split("=", 1)[-1].strip()
+        elif stripped.lower().startswith("exit_status"):
+            try:
+                exit_code = int(stripped.split("=", 1)[-1].strip())
+            except ValueError:
+                exit_code = None
+    return state, exit_code
+
+
 def _poll_job(kind: str, job_id: str) -> tuple[bool, int | None]:
     """Return ``(active, exit_code)`` for a scheduler job.
 
@@ -339,39 +358,51 @@ def _poll_job(kind: str, job_id: str) -> tuple[bool, int | None]:
         if "invalid job id" in stderr:
             return False, _slurm_exit_code(job_id)
         return True, None
-    # Use `qstat -f` and parse job_state: on Torque/OpenPBS, plain `qstat
-    # <id>` returns exit 0 even for completed (C) jobs, so checking the
-    # return code alone would cause `calkit sched batch` to hang forever
-    # after a PBS job finishes.  States C and F mean the job is done, and a
-    # finished job's record carries its `Exit_status`.
+    # PBS reports a finished job differently across variants, so poll in two
+    # steps that mirror the SLURM path above. First consult the active-queue
+    # view with `qstat -f`: every live state (R, Q, H, E) shows here, and on
+    # Torque a completed job lingers here in state `C` carrying its
+    # `Exit_status`. `qstat -f` is used rather than plain `qstat <id>` because
+    # the latter exits 0 even for completed jobs, so the return code alone
+    # could not tell running from done.
     p = subprocess.run(
         ["qstat", "-f", job_id], capture_output=True, text=True, check=False
     )
-    if p.returncode != 0:
-        # A non-zero exit is ambiguous: either the job is gone (completed and
-        # purged from history) or `qstat` itself failed transiently---a busy
-        # PBS server periodically refuses connections or times out. Treating a
-        # transient failure as completion would stop the wait while the job is
-        # still running and writing its log, so only conclude the job is done
-        # when qstat positively reports it is unknown; otherwise keep waiting.
-        # A purged job (unknown to qstat) is done but with an unknowable exit
-        # status; any other error is transient, so report the job as active.
-        stderr = (p.stderr or "").lower()
-        return ("unknown job" not in stderr), None
-    state = None
-    exit_code = None
-    for line in p.stdout.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("job_state"):
-            state = stripped.split("=", 1)[-1].strip()
-        elif stripped.lower().startswith("exit_status"):
-            try:
-                exit_code = int(stripped.split("=", 1)[-1].strip())
-            except ValueError:
-                exit_code = None
-    if state in ("C", "F"):
-        return False, exit_code
-    return True, None
+    if p.returncode == 0:
+        state, exit_code = _parse_pbs_state(p.stdout)
+        if state in ("C", "F"):
+            return False, exit_code
+        if state is not None:
+            return True, None
+    # The job is no longer in the active queue---on PBS Pro a finished job is
+    # hidden from plain `qstat` and shows (as state `F` with its `Exit_status`)
+    # only under `qstat -x`---or qstat failed. Ask the history view for the
+    # finished record. Without this, a PBS Pro job that has finished is never
+    # seen as done and the wait hangs forever. `-x` means "include finished
+    # jobs" on PBS Pro; on Torque it switches qstat to XML output, which simply
+    # won't parse here, leaving the stderr check below to settle it (Torque
+    # already reported completion above via state `C`).
+    hist = subprocess.run(
+        ["qstat", "-x", "-f", job_id],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if hist.returncode == 0:
+        state, exit_code = _parse_pbs_state(hist.stdout)
+        if state in ("C", "F"):
+            return False, exit_code
+        if state is not None:
+            return True, None
+    # Neither view resolved a state. A non-zero exit is ambiguous: either the
+    # job is gone (finished and purged from history) or qstat failed
+    # transiently---a busy PBS server periodically refuses connections or times
+    # out. Treating a transient failure as completion would stop the wait while
+    # the job is still running and writing its log, so only conclude the job is
+    # done when qstat positively reports it is unknown; otherwise keep waiting.
+    # A purged job is done but with an unknowable exit status.
+    stderr = (p.stderr or "").lower()
+    return ("unknown job" not in stderr), None
 
 
 def _is_active(kind: str, job_id: str) -> bool:

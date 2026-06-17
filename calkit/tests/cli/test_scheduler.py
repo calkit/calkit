@@ -215,44 +215,75 @@ def test_poll_job_pbs(monkeypatch):
 
     import calkit.cli.scheduler as sched
 
-    outcomes: dict = {}
+    # PBS is polled in two steps: plain `qstat -f` for the active queue, then
+    # `qstat -x -f` for the finished-job history view. The fake dispatches on
+    # whether `-x` is present so each step can be simulated independently, the
+    # way a real PBS Pro server answers them.
+    active: dict = {}
+    history: dict = {}
 
-    def _fake_run(*args, **kwargs):
+    def _fake_run(cmd, *args, **kwargs):
+        outcomes = history if "-x" in cmd else active
         return subprocess.CompletedProcess(
-            args=args[0],
+            cmd,
             returncode=outcomes["returncode"],
             stdout=outcomes.get("stdout", ""),
             stderr=outcomes.get("stderr", ""),
         )
 
     monkeypatch.setattr(sched.subprocess, "run", _fake_run)
-    # A running job (state R) is active with no exit code yet.
-    outcomes.update(returncode=0, stdout="    job_state = R\n", stderr="")
+    # A running job (state R) is active with no exit code yet, and resolves
+    # from the active queue alone---the history view is never consulted.
+    active.update(returncode=0, stdout="    job_state = R\n", stderr="")
+    history.clear()
     assert _poll_job("pbs", "1.pbs") == (True, None)
-    # Terminal states C (Torque) and F (PBS Pro) mean the job is done; qstat
-    # still exits 0 while the record lingers in history and carries the exit
-    # status, which is reported back so the caller can fail a bad job.
-    outcomes.update(
+    # The reported bug: on PBS Pro a finished job leaves the active queue and
+    # is shown only under `qstat -x`, where it appears as state F with its
+    # Exit_status. Plain `qstat -f` errors with a message that is NOT "unknown
+    # job", which used to be read as "still active" and hang the wait forever.
+    active.update(
+        returncode=1,
+        stdout="",
+        stderr="qstat: 1.pbs Job has finished, use -x to obtain historical "
+        "job information\n",
+    )
+    history.update(
         returncode=0, stdout="    job_state = F\n    Exit_status = 0\n"
     )
     assert _poll_job("pbs", "1.pbs") == (False, 0)
-    outcomes.update(
-        returncode=0, stdout="    job_state = C\n    exit_status = 137\n"
+    # A non-zero exit code from the finished job is reported back so the caller
+    # can fail the stage.
+    history.update(
+        returncode=0, stdout="    job_state = F\n    Exit_status = 137\n"
     )
     assert _poll_job("pbs", "1.pbs") == (False, 137)
+    # On Torque a completed job lingers in the active queue as state C with its
+    # exit status, so it is done without ever needing the history view.
+    active.update(
+        returncode=0, stdout="    job_state = C\n    exit_status = 137\n"
+    )
+    history.update(returncode=1, stdout="", stderr="should not be reached\n")
+    assert _poll_job("pbs", "1.pbs") == (False, 137)
     # A finished job whose record lacks an exit status yields an unknown code.
-    outcomes.update(returncode=0, stdout="    job_state = F\n")
+    active.update(returncode=1, stdout="", stderr="qstat: Unknown Job Id\n")
+    history.update(returncode=0, stdout="    job_state = F\n")
     assert _poll_job("pbs", "1.pbs") == (False, None)
-    # Once purged, qstat exits non-zero and reports the job unknown: done, but
-    # with no way to recover the exit status.
-    outcomes.update(
+    # Once purged from history too, both views error with "unknown job": done,
+    # but with no way to recover the exit status.
+    active.update(
+        returncode=1, stdout="", stderr="qstat: Unknown Job Id 1.pbs\n"
+    )
+    history.update(
         returncode=1, stdout="", stderr="qstat: Unknown Job Id 1.pbs\n"
     )
     assert _poll_job("pbs", "1.pbs") == (False, None)
-    # A transient qstat failure (busy/unreachable server) is NOT completion:
-    # treating it as done would stop the wait while the job still runs, so the
-    # job is reported active and the caller keeps polling.
-    outcomes.update(
+    # A transient qstat failure (busy/unreachable server) on both views is NOT
+    # completion: treating it as done would stop the wait while the job still
+    # runs, so the job is reported active and the caller keeps polling.
+    active.update(
+        returncode=1, stdout="", stderr="qstat: cannot connect to server\n"
+    )
+    history.update(
         returncode=1, stdout="", stderr="qstat: cannot connect to server\n"
     )
     assert _poll_job("pbs", "1.pbs") == (True, None)

@@ -1083,6 +1083,16 @@ def test_new_internal_release(tmp_dir):
         release["stored_path"]
         == ".calkit/releases/v5/test-project-notes-v5.txt"
     )
+    # Listing releases must not warn about publication status for internal
+    # releases, which have no publisher or record ID
+    result = subprocess.run(
+        ["calkit", "list", "releases"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "v0" in result.stdout
+    assert "Cannot tell if release" not in result.stderr
 
 
 def test_new_release_publish_empty_pids(tmp_dir, monkeypatch, httpserver):

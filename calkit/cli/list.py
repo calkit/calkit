@@ -261,21 +261,23 @@ def list_releases():
     objs = calkit.load_calkit_info().get("releases", {})
     for name, obj in objs.items():
         typer.echo(name + ":")
-        # First figure out if the release is published
+        # Figure out if the release is published. Internal releases are never
+        # uploaded to an archival service, so skip the lookup for them.
         published = None
-        try:
-            published = calkit.invenio.get(
-                f"/records/{obj.get('record_id')}",
-                service=obj.get("publisher"),
-            )["is_published"]
-        except Exception:
+        if not obj.get("internal"):
             try:
                 published = calkit.invenio.get(
-                    f"/records/{obj.get('record_id')}/draft",
+                    f"/records/{obj.get('record_id')}",
                     service=obj.get("publisher"),
                 )["is_published"]
-            except Exception as e:
-                warn(f"Cannot tell if release {name} is published: {e}")
+            except Exception:
+                try:
+                    published = calkit.invenio.get(
+                        f"/records/{obj.get('record_id')}/draft",
+                        service=obj.get("publisher"),
+                    )["is_published"]
+                except Exception as e:
+                    warn(f"Cannot tell if release {name} is published: {e}")
         if published is not None:
             typer.echo(f"    published: {published}")
         for k, v in obj.items():

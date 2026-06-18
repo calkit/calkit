@@ -402,6 +402,59 @@ def ls_files() -> list[str]:
     ]
 
 
+def find_artifact(path: str, ck_info: dict) -> tuple[str | None, dict | None]:
+    """Find a project artifact by path.
+
+    Returns a ``(kind, artifact)`` tuple, where ``kind`` is the singular
+    release kind (e.g. ``"dataset"``) and ``artifact`` is its definition from
+    ``calkit.yaml``. Returns ``(None, None)`` if no artifact matches the path.
+    """
+    collections = {
+        "publications": "publication",
+        "datasets": "dataset",
+        "figures": "figure",
+        "presentations": "presentation",
+        "software": "software",
+    }
+    target = os.path.normpath(path)
+    for collection, kind in collections.items():
+        for artifact in ck_info.get(collection, []):
+            if not isinstance(artifact, dict):
+                continue
+            if os.path.normpath(artifact.get("path", "")) == target:
+                return kind, artifact
+    return None, None
+
+
+def get_storage_for_path(path: str, ck_info: dict | None = None) -> str | None:
+    """Determine how a path is stored: ``git``, ``dvc``, or ``dvc-zip``.
+
+    Returns ``None`` if it can't be determined, leaving the decision to
+    ``calkit add``'s auto-detection.
+    """
+    import calkit.pipeline
+
+    if path == ".":
+        return None
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info()
+    posix_path = Path(path).as_posix()
+    storage_map = calkit.pipeline.get_output_storage_map(ck_info=ck_info)
+    if posix_path in storage_map:
+        return storage_map[posix_path]
+    try:
+        if posix_path in calkit.dvc.list_paths():
+            return "dvc"
+    except Exception:
+        pass
+    try:
+        if calkit.git.get_repo().git.ls_files(path):
+            return "git"
+    except Exception:
+        pass
+    return None
+
+
 def make_dvc_md5s(
     zipfile: str | None = None, paths: list[str] | None = None
 ) -> dict:

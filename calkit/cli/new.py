@@ -3000,9 +3000,16 @@ def new_release(
             ),
         ),
     ],
-    release_type: Annotated[
-        str, typer.Option("--kind", help="What kind of release to create.")
-    ] = "project",
+    release_kind: Annotated[
+        str | None,
+        typer.Option(
+            "--kind",
+            help=(
+                "What kind of release to create. "
+                "Will attempt to infer from path if not provided."
+            ),
+        ),
+    ] = None,
     path: Annotated[
         str,
         typer.Argument(help="The path to release; '.' for a project release."),
@@ -3043,6 +3050,18 @@ def new_release(
             help="Do not push to Git remote.",
         ),
     ] = False,
+    internal_release: Annotated[
+        bool,
+        typer.Option(
+            "--internal",
+            help=(
+                "Create an internal release that is not published to an "
+                "archival service. Still creates a Git tag and release "
+                "record in calkit.yaml, but does not upload files or create "
+                "a GitHub release."
+            ),
+        ),
+    ] = False,
     no_github_release: Annotated[
         bool,
         typer.Option(
@@ -3053,7 +3072,11 @@ def new_release(
     to: Annotated[
         str,
         typer.Option(
-            "--to", help="Archival service to use (zenodo or caltechdata)."
+            "--to",
+            help=(
+                "Archival service to use for external releases (zenodo or "
+                "caltechdata); ignored for --internal releases."
+            ),
         ),
     ] = "zenodo",
     draft_only: Annotated[
@@ -3090,28 +3113,7 @@ def new_release(
     import calkit.pipeline
 
     to = to.lower()
-    if to not in calkit.releases.SERVICES:
-        raise_error(
-            f"Unknown archival service '{to}'; "
-            f"choose from: {list(calkit.releases.SERVICES.keys())}"
-        )
-    publisher_name = calkit.releases.SERVICES[to]["name"]
-    if release_type not in [
-        "project",
-        "publication",
-        "figure",
-        "dataset",
-        "software",
-    ]:
-        raise_error(f"Unknown release type '{release_type}'")
-    # TODO: Check path is consistent with release type
     dotenv.load_dotenv()
-    # Check that we have access to the service
-    typer.echo(f"Checking for {to} token")
-    try:
-        calkit.invenio.get_token(service=to)  # type: ignore
-    except Exception as e:
-        raise_error(str(e))
     ck_info = calkit.load_calkit_info()
     releases = ck_info.get("releases", {})
     # TODO: Enable resuming a release if upload failed part-way?
@@ -3120,10 +3122,66 @@ def new_release(
     repo = calkit.git.get_repo()
     if name in repo.tags:
         raise_error(f"Git tag with name '{name}' already exists")
-    # Check that the pipeline is up-to-date
+    # Detect the release kind from the path unless it was given with --kind. A
+    # "." path is always a project release; otherwise prefer a declared
+    # artifact in calkit.yaml, falling back to auto-detection from the path
+    # (e.g. a PDF under slides/ is a presentation).
+    if path == ".":
+        if release_kind is None:
+            release_kind = "project"
+        artifact = None
+    else:
+        detected_kind, artifact = calkit.releases.find_artifact(path, ck_info)
+        if detected_kind is None:
+            detected_kind = calkit.detect.detect_artifact_kind(
+                pathlib.Path(path).as_posix()
+            )
+        if release_kind is None:
+            if detected_kind is None:
+                raise_error(
+                    f"Could not determine release kind for path '{path}'; "
+                    "define it in calkit.yaml as a dataset, figure, "
+                    "publication, presentation, or software artifact, or "
+                    "pass --kind"
+                )
+            release_kind = detected_kind
+    if release_kind not in [
+        "project",
+        "publication",
+        "figure",
+        "dataset",
+        "presentation",
+        "software",
+    ]:
+        raise_error(f"Unknown release type '{release_kind}'")
+    # External (archival) releases require a valid service and access token;
+    # internal releases are stored locally and need neither.
+    if internal_release:
+        to = "none"
+    else:
+        if to not in calkit.releases.SERVICES:
+            raise_error(
+                f"Unknown archival service '{to}'; "
+                f"choose from: {list(calkit.releases.SERVICES.keys())}"
+            )
+        publisher_name = calkit.releases.SERVICES[to]["name"]
+        # Check that we have access to the service
+        typer.echo(f"Checking for {to} token")
+        try:
+            calkit.invenio.get_token(service=to)  # type: ignore
+        except Exception as e:
+            raise_error(str(e))
+    # Check that the pipeline is up-to-date, limiting the check to the stage
+    # that produces the released artifact when releasing a single path.
     typer.echo("Checking pipeline is up-to-date for release")
+    targets = None
+    if path != ".":
+        stage_name = calkit.pipeline.get_stage_for_output(path, ck_info)
+        if stage_name is not None:
+            targets = [stage_name]
     status = calkit.pipeline.get_status(
         ck_info=ck_info,
+        targets=targets,
         check_environments=True,
         clean_notebooks=True,
         compile_to_dvc=True,
@@ -3141,395 +3199,461 @@ def new_release(
             + ", ".join(status.stale_stage_names)
         )
     release_dir = f".calkit/releases/{name}"
-    release_files_dir = release_dir + "/files"
-    os.makedirs(release_files_dir, exist_ok=True)
-    # Ignore release files dir
-    typer.echo(f"Ignoring {release_files_dir}")
-    gitignore_path = release_dir + "/.gitignore"
-    with open(gitignore_path, "w") as f:
-        f.write("/files\n")
-    if not dry_run:
-        repo.git.add(gitignore_path)
     if release_date is None:
         release_date = str(calkit.utcnow().date())
     typer.echo(f"Using release date: {release_date}")
-    project_description = ck_info.get("description")
-    # Gather up the list of files to upload
-    if path == ".":
-        zip_path = release_files_dir + "/archive.zip"
-        all_paths = calkit.releases.ls_files()
-        typer.echo(f"Adding files to {zip_path}")
-        calkit.releases.zip_paths(zip_path, all_paths)
-        typer.echo("Checking extracted project release archive")
-        try:
-            calkit.releases.check_project_release_archive(
-                zip_path, verbose=verbose
-            )
-        except Exception as e:
-            raise_error(str(e))
-        title = ck_info.get("title")
-        if title is None:
-            warn("Project has no title")
-            title = typer.prompt("Enter a title for the project")
-            ck_info["title"] = title
-            if not dry_run:
-                with open("calkit.yaml", "w") as f:
-                    calkit.ryaml.dump(ck_info, f)
-    else:
-        # TODO: Handle directories, e.g., datasets
-        if not os.path.isfile(path):
-            raise_error("Single artifact releases must be a single file")
-        typer.echo(f"Copying {path} into {release_files_dir}")
-        shutil.copy2(path, release_files_dir)
-        # Check that this artifact actually exists
-        artifact_key = (
-            release_type + "s" if release_type != "software" else release_type
-        )
-        artifacts = ck_info.get(artifact_key, [])
-        title = None
-        artifact = None
-        for a in artifacts:
-            if a.get("path") == path:
-                artifact = a
-                title = artifact.get("title")
-                break
-        if artifact is None:
-            raise_error(f"{release_type} at {path} not defined in calkit.yaml")
-        if title is None:
-            raise_error(f"{release_type} at {path} has no title")
-    # Save a metadata file with each DVC file's MD5 checksum
-    dvc_md5s = calkit.releases.make_dvc_md5s(
-        zipfile="archive.zip" if path == "." else None,
-        paths=None if path == "." else [path],
-    )
-    dvc_md5s_path = release_dir + "/dvc-md5s.yaml"
-    typer.echo(f"Saving DVC MD5 info to {dvc_md5s_path}")
-    with open(dvc_md5s_path, "w") as f:
-        calkit.ryaml.dump(dvc_md5s, f)
-    if not dry_run:
-        repo.git.add(dvc_md5s_path)
-    # Create a README for the Zenodo release
-    readme_txt = f"# {title}\n"
     git_rev = repo.git.rev_parse(["--short", "HEAD"])
-    readme_txt += (
-        f"\nThis is a {release_type} release ({name}) generated with "
-        f"Calkit from Git rev {git_rev}.\n"
-    )
-    readme_path = release_files_dir + "/README.md"
-    with open(readme_path, "w") as f:
-        f.write(readme_txt)
-    # Check size of files dir
-    size = calkit.get_size(release_files_dir)
-    typer.echo(f"Release size: {(size / 1e6):.1f} MB")
-    if size >= 50e9:
-        raise_error(f"Release is too large (>50 GB) to upload to {to}")
-    # Upload to InvenioRDM instance
-    # Is there already a record for this release, which indicates we should
-    # create a new version?
-    try:
-        project_name = calkit.detect_project_name(prepend_owner=True)
-    except Exception:
-        raise_error("Could not detect project name")
-    invenio_description = ""
-    if project_description is not None:
-        invenio_description += project_description + "\n\n"
-    if release_description is not None:
-        invenio_description += release_description + "\n\n"
-    invenio_description += (
-        f"This is an archive of release '{name}' from the Calkit project "
-        f"'{project_name}'."
-    )
-    record_id = None
-    # Detect project license IDs if necessary
-    if not license_ids:
-        license_file = calkit.licenses.find_license_file()
-        if license_file is None:
-            typer.echo("No project license found.")
-            use_default_license = typer.confirm(
-                "Would you like to use the default (MIT/CC-BY-4.0)?",
-                default=True,
-            )
-            if not use_default_license:
-                raise_error("Please generate a license file and try again")
-            copyright_holder = typer.prompt(
-                "Please enter the copyright holder for the license "
-                "(e.g., your full name)"
-            )
-            license_txt = calkit.licenses.LICENSE_TEMPLATE_DUAL.format(
-                year=calkit.utcnow().year, copyright_holder=copyright_holder
-            )
-            with open("LICENSE", "w") as f:
-                f.write(license_txt)
-            repo.git.add("LICENSE")
-            license_ids = ["mit", "cc-by-4.0"]
-        else:
-            typer.echo(f"Detecting license(s) from {license_file}")
-            with open(license_file) as f:
-                license_txt = f.read()
-            license_ids = calkit.licenses.detect_license_ids(license_txt)
-            if license_ids:
-                typer.echo(f"Detected license(s): {', '.join(license_ids)}")
-            else:
-                warn(
-                    f"Could not detect any known license in {license_file}; "
-                    "specify one explicitly with --license"
-                )
-    if not license_ids:
-        raise_error("Project has no license(s) defined")
-    invenio_metadata = dict(
-        title=title,
-        description=invenio_description,
-        notes=f"Created from Calkit project {project_name} release {name}.",
-        publication_date=release_date,
-        version=name,
-        publisher=publisher_name,
-        rights=[{"id": lid for lid in license_ids}],
-    )
-    # Add related identifiers
-    github_url = calkit.detect_project_github_url()
-    related_identifiers = []
-    if github_url is not None:
-        related_identifiers.append(
-            {
-                "identifier": github_url,
-                "scheme": "url",
-                "relation_type": {"id": "issupplementto"},
-                "resource_type": {"id": "other"},
-            }
-        )
-    invenio_metadata["related_identifiers"] = related_identifiers
-    # TODO: Add calkit.io URL if applicable?
-    # Determine creators from authors. CITATION.cff is the single source of
-    # truth for authors, so read them from there; if none are defined yet,
-    # prompt for them and persist them to CITATION.cff.
-    authors = calkit.releases.read_authors_from_cff()
-    if authors:
-        typer.echo(f"Read {len(authors)} author(s) from CITATION.cff")
-    else:
-        warn("No authors defined for the project")
-        still_entering_authors = True
-        n = 0
-        while still_entering_authors:
-            n += 1
-            author = dict()
-            author["first_name"] = typer.prompt(
-                f"Enter the first name of author {n}"
-            )
-            author["last_name"] = typer.prompt(
-                f"Enter the last name of author {n}"
-            )
-            author["affiliation"] = typer.prompt(
-                f"Enter the affiliation of author {n}"
-            )
-            has_orcid = typer.confirm(
-                f"Does author {n} have an ORCID?", default=False
-            )
-            if has_orcid:
-                author["orcid"] = typer.prompt(
-                    f"Enter the ORCID of author {n}"
-                )
-            authors.append(author)
-            still_entering_authors = typer.confirm(
-                "Are there more authors to enter?", default=True
-            )
-        # Write authors out to CITATION.cff
-        if not dry_run:
-            typer.echo("Writing authors to CITATION.cff")
-            calkit.releases.set_cff_authors(authors, ck_info=ck_info)
-            repo.git.add("CITATION.cff")
-    invenio_creators = []
-    for author in authors:
-        orcid = author.get("orcid")
-        creator: dict = {
-            "person_or_org": {
-                "type": "personal",
-                "given_name": author["first_name"],
-                "family_name": author["last_name"],
-                "identifiers": [{"identifier": orcid}] if orcid else [],
-            },
-        }
-        # Affiliation is optional (e.g., authors read from CITATION.cff may
-        # not specify one)
-        affiliation = author.get("affiliation")
-        if affiliation:
-            creator["affiliations"] = [{"name": affiliation}]
-        invenio_creators.append(creator)
-    invenio_metadata["creators"] = invenio_creators  # type: ignore
-    # Set InvenioRDM resource_type based on release_type and artifact kind
-    if release_type == "publication":
-        pubtype = artifact.get("kind")  # type: ignore
-        if pubtype == "journal-article":
-            resource_type = "publication-article"
-        elif pubtype == "presentation":
-            resource_type = "presentation"
-        elif pubtype == "poster":
-            resource_type = "poster"
-        else:
-            resource_type = "publication-other"
-    elif release_type == "figure":
-        resource_type = "image-figure"
-    elif release_type in ["dataset", "software", "poster", "presentation"]:
-        resource_type = release_type
-    else:
-        # Default for "project" and other unknown types
-        resource_type = "other"
-    invenio_metadata["resource_type"] = {"id": resource_type}  # type: ignore
+    # Fields below are populated only for external (archival) releases;
+    # internal releases leave them empty.
     doi = None
     url = None
-    for existing_name, existing_release in releases.items():
-        if (
-            existing_release.get("kind") == release_type
-            and existing_release.get("path") == path
-            and existing_release.get("publisher") == to
-        ):
-            record_id = existing_release.get("record_id")
-            typer.echo(
-                f"Found existing {to} record ID {record_id} "
-                f"in release {existing_name} to create new version for"
-            )
-            break
-    if not dry_run:
-        typer.echo(f"Uploading to {to}")
-        if record_id is not None:
-            # Create a new version of the existing record
-            # TODO: This might fail if a new version is in progress, in which
-            # case we should discard that
-            invenio_dep = calkit.invenio.post(
-                f"/records/{record_id}/versions",
-                service=to,  # type: ignore
-            )
-            typer.echo("Created new version record")
-            record_id = invenio_dep["id"]
-            typer.echo(f"Created new version with record ID: {record_id}")
-            # Now update that draft with the metadata
-            typer.echo("Updating draft metadata")
-            calkit.invenio.put(
-                f"/records/{record_id}/draft",
-                json=dict(metadata=invenio_metadata),
-                service=to,  # type: ignore
-            )
-        else:
-            invenio_dep = calkit.invenio.post(
-                "/records",
-                json=dict(metadata=invenio_metadata),
-                service=to,  # type: ignore
-            )
-            if verbose:
-                typer.echo(f"Invenio records post response:\n{invenio_dep}")
-            record_id = invenio_dep["id"]
-        files = os.listdir(release_files_dir)
-        for filename in files:
-            typer.echo(f"Uploading {filename}")
-            fpath = os.path.join(release_files_dir, filename)
-            # First, initiate the file upload
-            calkit.invenio.post(
-                f"/records/{record_id}/draft/files",
-                json=[{"key": filename}],
-                service=to,  # type: ignore
-            )
-            # Then upload the file content
-            with open(fpath, "rb") as f:
-                file_data = f.read()
-                resp = calkit.invenio.put(
-                    f"/records/{record_id}/draft/files/{filename}/content",
-                    headers={"Content-Type": "application/octet-stream"},
-                    as_json=False,
-                    service=to,  # type: ignore
-                    data=file_data,
-                )
-                typer.echo(f"Status code: {resp.status_code}")
-            # Commit the file
-            calkit.invenio.post(
-                f"/records/{record_id}/draft/files/{filename}/commit",
-                service=to,  # type: ignore
-            )
-        # Reserve a DOI on the draft before publishing. The publish action's
-        # response only echoes back the DOI under "pids" if one was reserved
-        # on the draft first (otherwise "pids" comes back empty), so always
-        # reserve here to get a stable identifier.
-        typer.echo(f"Reserving DOI for {to} draft record ID {record_id}")
-        doi_resp = calkit.invenio.post(
-            f"/records/{record_id}/draft/pids/doi",
-            service=to,  # type: ignore
-        )
-        if verbose:
-            typer.echo(f"DOI reservation response:\n{doi_resp}")
-        doi = calkit.invenio.extract_doi(doi_resp)
-        if doi is None:
-            raise_error(
-                f"Failed to reserve DOI for {to} draft record {record_id}"
-            )
-        if draft_only:
-            url = f"https://doi.org/{doi}"
-            typer.echo(f"Created {to} draft with reserved DOI: {doi}")
-        else:
-            # Publish the record
-            typer.echo(f"Publishing {to} record ID {record_id}")
-            invenio_dep = calkit.invenio.post(
-                f"/records/{record_id}/draft/actions/publish",
-                service=to,  # type: ignore
-            )
-            if verbose:
-                typer.echo(f"Publish response:\n{invenio_dep}")
-            record_id = invenio_dep["id"]
-            # Prefer the DOI from the publish response, but fall back to the
-            # reserved DOI (and a fetch of the published record) since the
-            # publish action returns 202 and may not echo "pids" immediately.
-            # Polling failures are tolerated: we already have the reserved DOI,
-            # so a transient error while the record settles should not abort
-            # the release.
-            published_doi = calkit.invenio.extract_doi(invenio_dep)
-            for _ in range(10):
-                if published_doi is not None:
-                    break
-                time.sleep(1)
-                try:
-                    record = calkit.invenio.get(
-                        f"/records/{record_id}",
-                        service=to,  # type: ignore
-                    )
-                except Exception as e:
-                    if verbose:
-                        typer.echo(f"Polling for published DOI failed: {e}")
-                    continue
-                published_doi = calkit.invenio.extract_doi(record)
-            if published_doi is not None:
-                doi = published_doi
-            else:
-                typer.echo(
-                    "Could not confirm minted DOI from published record; "
-                    f"falling back to reserved DOI {doi}"
-                )
-            url = f"https://doi.org/{doi}"
-            typer.echo(f"Published to {to} with DOI: {doi}")
-    else:
-        typer.echo(f"Would have posted {to} record: {invenio_metadata}")
-    # If this is a project release, add badge to project README
+    record_id = None
     doi_md = None
-    if release_type == "project" and doi is not None:
-        typer.echo("Adding DOI badge to README.md")
-        doi_base_url = calkit.releases.SERVICES[to]["url"]
-        doi_md = (
-            f"[![DOI]({doi_base_url}/badge/DOI/{doi}.svg)]"
-            f"(https://doi.org/{doi})"
-        )
-        if os.path.isfile("README.md"):
-            with open("README.md") as f:
-                readme_txt = f.read()
+    stored_path_posix = None
+    if internal_release:
+        # Internal releases are frozen local snapshots: store a
+        # self-describing copy of the artifact in the repo. They are not
+        # uploaded to an archival service, so they need no authors, license,
+        # or DOI---just a stored file, a record, and a Git tag. Files are
+        # stored as-is (renamed); folders and whole-project releases are
+        # zipped.
+        project_name = calkit.detect_project_name(prepend_owner=False)
+        if path == ".":
+            stored_filename = f"{project_name}-{name}.zip"
+            is_zip = True
+        elif os.path.isdir(path):
+            folder_name = os.path.basename(os.path.normpath(path))
+            stored_filename = f"{project_name}-{folder_name}-{name}.zip"
+            is_zip = True
+        elif os.path.isfile(path):
+            stem, ext = os.path.splitext(os.path.basename(path))
+            stored_filename = f"{project_name}-{stem}-{name}{ext}"
+            is_zip = False
         else:
-            readme_txt = ""
-        readme_txt = calkit.releases.add_doi_badge_to_readme(
-            readme_txt, badge=doi_md, title=title
-        )
+            raise_error(f"Release path '{path}' does not exist")
+        stored_path = os.path.join(release_dir, stored_filename)
+        stored_path_posix = pathlib.Path(stored_path).as_posix()
+        if dry_run:
+            action = "archive" if is_zip else "copy"
+            typer.echo(f"Would {action} {path} to {stored_path_posix}")
+        else:
+            os.makedirs(release_dir, exist_ok=True)
+            if is_zip:
+                paths = calkit.releases.ls_files() if path == "." else [path]
+                typer.echo(f"Archiving {path} to {stored_path_posix}")
+                calkit.releases.zip_paths(stored_path, paths)
+            else:
+                typer.echo(f"Copying {path} to {stored_path_posix}")
+                shutil.copy2(path, stored_path)
+            # Store the artifact with the same storage as its source (Git or
+            # DVC), falling back to ``calkit add``'s auto-detection.
+            from calkit.cli.main.core import add as add_to_repo
+
+            storage = calkit.releases.get_storage_for_path(
+                path, ck_info=ck_info
+            )
+            add_to_repo([stored_path], to=storage)
+    else:
+        release_files_dir = release_dir + "/files"
+        os.makedirs(release_files_dir, exist_ok=True)
+        # Ignore release files dir; external release artifacts are staged here for
+        # upload only and are not committed to the repo.
+        typer.echo(f"Ignoring {release_files_dir}")
+        gitignore_path = release_dir + "/.gitignore"
+        with open(gitignore_path, "w") as f:
+            f.write("/files\n")
         if not dry_run:
-            with open("README.md", "w") as f:
-                f.write(readme_txt)
-            # Stage only after the file is closed; otherwise the buffered
-            # contents may not be flushed to disk yet and Git would stage an
-            # empty file
-            repo.git.add("README.md")
+            repo.git.add(gitignore_path)
+        project_description = ck_info.get("description")
+        # Gather up the list of files to upload
+        if path == ".":
+            if release_kind is None:
+                release_kind = "project"
+            zip_path = release_files_dir + "/archive.zip"
+            all_paths = calkit.releases.ls_files()
+            typer.echo(f"Adding files to {zip_path}")
+            calkit.releases.zip_paths(zip_path, all_paths)
+            typer.echo("Checking extracted project release archive")
+            try:
+                calkit.releases.check_project_release_archive(
+                    zip_path, verbose=verbose
+                )
+            except Exception as e:
+                raise_error(str(e))
+            title = ck_info.get("title")
+            if title is None:
+                warn("Project has no title")
+                title = typer.prompt("Enter a title for the project")
+                ck_info["title"] = title
+                if not dry_run:
+                    with open("calkit.yaml", "w") as f:
+                        calkit.ryaml.dump(ck_info, f)
         else:
-            typer.echo(f"Would have updated README.md to:\n{readme_txt}")
+            # TODO: Handle directories, e.g., datasets
+            if not os.path.isfile(path):
+                raise_error("Single artifact releases must be a single file")
+            typer.echo(f"Copying {path} into {release_files_dir}")
+            shutil.copy2(path, release_files_dir)
+            # Check that this artifact actually exists
+            artifact_key = (
+                release_kind + "s"
+                if release_kind != "software"
+                else release_kind
+            )
+            artifacts = ck_info.get(artifact_key, [])
+            title = None
+            artifact = None
+            for a in artifacts:
+                if a.get("path") == path:
+                    artifact = a
+                    title = artifact.get("title")
+                    break
+            if artifact is None:
+                raise_error(
+                    f"{release_kind} at {path} not defined in calkit.yaml"
+                )
+            if title is None:
+                raise_error(f"{release_kind} at {path} has no title")
+        # Save a metadata file with each DVC file's MD5 checksum
+        dvc_md5s = calkit.releases.make_dvc_md5s(
+            zipfile="archive.zip" if path == "." else None,
+            paths=None if path == "." else [path],
+        )
+        dvc_md5s_path = release_dir + "/dvc-md5s.yaml"
+        typer.echo(f"Saving DVC MD5 info to {dvc_md5s_path}")
+        with open(dvc_md5s_path, "w") as f:
+            calkit.ryaml.dump(dvc_md5s, f)
+        if not dry_run:
+            repo.git.add(dvc_md5s_path)
+        # Create a README for the Zenodo release
+        readme_txt = f"# {title}\n"
+        git_rev = repo.git.rev_parse(["--short", "HEAD"])
+        readme_txt += (
+            f"\nThis is a {release_kind} release ({name}) generated with "
+            f"Calkit v{calkit.__version__} from Git rev {git_rev}.\n"
+        )
+        readme_path = release_files_dir + "/README.md"
+        with open(readme_path, "w") as f:
+            f.write(readme_txt)
+        # Check size of files dir
+        size = calkit.get_size(release_files_dir)
+        typer.echo(f"Release size: {(size / 1e6):.1f} MB")
+        if size >= 50e9:
+            raise_error(f"Release is too large (>50 GB) to upload to {to}")
+        # Upload to InvenioRDM instance
+        # Is there already a record for this release, which indicates we should
+        # create a new version?
+        try:
+            project_name = calkit.detect_project_name(prepend_owner=True)
+        except Exception:
+            raise_error("Could not detect project name")
+        invenio_description = ""
+        if project_description is not None:
+            invenio_description += project_description + "\n\n"
+        if release_description is not None:
+            invenio_description += release_description + "\n\n"
+        invenio_description += (
+            f"This is an archive of release '{name}' from the Calkit project "
+            f"'{project_name}'."
+        )
+        record_id = None
+        # Detect project license IDs if necessary
+        if not license_ids:
+            license_file = calkit.licenses.find_license_file()
+            if license_file is None:
+                typer.echo("No project license found.")
+                use_default_license = typer.confirm(
+                    "Would you like to use the default (MIT/CC-BY-4.0)?",
+                    default=True,
+                )
+                if not use_default_license:
+                    raise_error("Please generate a license file and try again")
+                copyright_holder = typer.prompt(
+                    "Please enter the copyright holder for the license "
+                    "(e.g., your full name)"
+                )
+                license_txt = calkit.licenses.LICENSE_TEMPLATE_DUAL.format(
+                    year=calkit.utcnow().year,
+                    copyright_holder=copyright_holder,
+                )
+                with open("LICENSE", "w") as f:
+                    f.write(license_txt)
+                repo.git.add("LICENSE")
+                license_ids = ["mit", "cc-by-4.0"]
+            else:
+                typer.echo(f"Detecting license(s) from {license_file}")
+                with open(license_file) as f:
+                    license_txt = f.read()
+                license_ids = calkit.licenses.detect_license_ids(license_txt)
+                if license_ids:
+                    typer.echo(
+                        f"Detected license(s): {', '.join(license_ids)}"
+                    )
+                else:
+                    warn(
+                        f"Could not detect any known license in {license_file}; "
+                        "specify one explicitly with --license"
+                    )
+        if not license_ids:
+            raise_error("Project has no license(s) defined")
+        invenio_metadata = dict(
+            title=title,
+            description=invenio_description,
+            notes=f"Created from Calkit project {project_name} release {name}.",
+            publication_date=release_date,
+            version=name,
+            publisher=publisher_name,
+            rights=[{"id": lid for lid in license_ids}],
+        )
+        # Add related identifiers
+        github_url = calkit.detect_project_github_url()
+        related_identifiers = []
+        if github_url is not None:
+            related_identifiers.append(
+                {
+                    "identifier": github_url,
+                    "scheme": "url",
+                    "relation_type": {"id": "issupplementto"},
+                    "resource_type": {"id": "other"},
+                }
+            )
+        invenio_metadata["related_identifiers"] = related_identifiers
+        # TODO: Add calkit.io URL if applicable?
+        # Determine creators from authors. CITATION.cff is the single source of
+        # truth for authors, so read them from there; if none are defined yet,
+        # prompt for them and persist them to CITATION.cff.
+        authors = calkit.releases.read_authors_from_cff()
+        if authors:
+            typer.echo(f"Read {len(authors)} author(s) from CITATION.cff")
+        else:
+            warn("No authors defined for the project")
+            still_entering_authors = True
+            n = 0
+            while still_entering_authors:
+                n += 1
+                author = dict()
+                author["first_name"] = typer.prompt(
+                    f"Enter the first name of author {n}"
+                )
+                author["last_name"] = typer.prompt(
+                    f"Enter the last name of author {n}"
+                )
+                author["affiliation"] = typer.prompt(
+                    f"Enter the affiliation of author {n}"
+                )
+                has_orcid = typer.confirm(
+                    f"Does author {n} have an ORCID?", default=False
+                )
+                if has_orcid:
+                    author["orcid"] = typer.prompt(
+                        f"Enter the ORCID of author {n}"
+                    )
+                authors.append(author)
+                still_entering_authors = typer.confirm(
+                    "Are there more authors to enter?", default=True
+                )
+            # Write authors out to CITATION.cff
+            if not dry_run:
+                typer.echo("Writing authors to CITATION.cff")
+                calkit.releases.set_cff_authors(authors, ck_info=ck_info)
+                repo.git.add("CITATION.cff")
+        invenio_creators = []
+        for author in authors:
+            orcid = author.get("orcid")
+            creator: dict = {
+                "person_or_org": {
+                    "type": "personal",
+                    "given_name": author["first_name"],
+                    "family_name": author["last_name"],
+                    "identifiers": [{"identifier": orcid}] if orcid else [],
+                },
+            }
+            # Affiliation is optional (e.g., authors read from CITATION.cff may
+            # not specify one)
+            affiliation = author.get("affiliation")
+            if affiliation:
+                creator["affiliations"] = [{"name": affiliation}]
+            invenio_creators.append(creator)
+        invenio_metadata["creators"] = invenio_creators  # type: ignore
+        # Set InvenioRDM resource_type based on release_type and artifact kind
+        if release_kind == "publication":
+            pubtype = artifact.get("kind")  # type: ignore
+            if pubtype == "journal-article":
+                resource_type = "publication-article"
+            elif pubtype == "presentation":
+                resource_type = "presentation"
+            elif pubtype == "poster":
+                resource_type = "poster"
+            else:
+                resource_type = "publication-other"
+        elif release_kind == "figure":
+            resource_type = "image-figure"
+        elif release_kind in ["dataset", "software", "poster", "presentation"]:
+            resource_type = release_kind
+        else:
+            # Default for "project" and other unknown types
+            resource_type = "other"
+        invenio_metadata["resource_type"] = {"id": resource_type}  # type: ignore
+        doi = None
+        url = None
+        for existing_name, existing_release in releases.items():
+            if (
+                existing_release.get("kind") == release_kind
+                and existing_release.get("path") == path
+                and existing_release.get("publisher") == to
+            ):
+                record_id = existing_release.get("record_id")
+                typer.echo(
+                    f"Found existing {to} record ID {record_id} "
+                    f"in release {existing_name} to create new version for"
+                )
+                break
+        if not dry_run:
+            typer.echo(f"Uploading to {to}")
+            if record_id is not None:
+                # Create a new version of the existing record
+                # TODO: This might fail if a new version is in progress, in which
+                # case we should discard that
+                invenio_dep = calkit.invenio.post(
+                    f"/records/{record_id}/versions",
+                    service=to,  # type: ignore
+                )
+                typer.echo("Created new version record")
+                record_id = invenio_dep["id"]
+                typer.echo(f"Created new version with record ID: {record_id}")
+                # Now update that draft with the metadata
+                typer.echo("Updating draft metadata")
+                calkit.invenio.put(
+                    f"/records/{record_id}/draft",
+                    json=dict(metadata=invenio_metadata),
+                    service=to,  # type: ignore
+                )
+            else:
+                invenio_dep = calkit.invenio.post(
+                    "/records",
+                    json=dict(metadata=invenio_metadata),
+                    service=to,  # type: ignore
+                )
+                if verbose:
+                    typer.echo(
+                        f"Invenio records post response:\n{invenio_dep}"
+                    )
+                record_id = invenio_dep["id"]
+            files = os.listdir(release_files_dir)
+            for filename in files:
+                typer.echo(f"Uploading {filename}")
+                fpath = os.path.join(release_files_dir, filename)
+                # First, initiate the file upload
+                calkit.invenio.post(
+                    f"/records/{record_id}/draft/files",
+                    json=[{"key": filename}],
+                    service=to,  # type: ignore
+                )
+                # Then upload the file content
+                with open(fpath, "rb") as f:
+                    file_data = f.read()
+                    resp = calkit.invenio.put(
+                        f"/records/{record_id}/draft/files/{filename}/content",
+                        headers={"Content-Type": "application/octet-stream"},
+                        as_json=False,
+                        service=to,  # type: ignore
+                        data=file_data,
+                    )
+                    typer.echo(f"Status code: {resp.status_code}")
+                # Commit the file
+                calkit.invenio.post(
+                    f"/records/{record_id}/draft/files/{filename}/commit",
+                    service=to,  # type: ignore
+                )
+            # Reserve a DOI on the draft before publishing. The publish action's
+            # response only echoes back the DOI under "pids" if one was reserved
+            # on the draft first (otherwise "pids" comes back empty), so always
+            # reserve here to get a stable identifier.
+            typer.echo(f"Reserving DOI for {to} draft record ID {record_id}")
+            doi_resp = calkit.invenio.post(
+                f"/records/{record_id}/draft/pids/doi",
+                service=to,  # type: ignore
+            )
+            if verbose:
+                typer.echo(f"DOI reservation response:\n{doi_resp}")
+            doi = calkit.invenio.extract_doi(doi_resp)
+            if doi is None:
+                raise_error(
+                    f"Failed to reserve DOI for {to} draft record {record_id}"
+                )
+            if draft_only:
+                url = f"https://doi.org/{doi}"
+                typer.echo(f"Created {to} draft with reserved DOI: {doi}")
+            else:
+                # Publish the record
+                typer.echo(f"Publishing {to} record ID {record_id}")
+                invenio_dep = calkit.invenio.post(
+                    f"/records/{record_id}/draft/actions/publish",
+                    service=to,  # type: ignore
+                )
+                if verbose:
+                    typer.echo(f"Publish response:\n{invenio_dep}")
+                record_id = invenio_dep["id"]
+                # Prefer the DOI from the publish response, but fall back to the
+                # reserved DOI (and a fetch of the published record) since the
+                # publish action returns 202 and may not echo "pids" immediately.
+                # Polling failures are tolerated: we already have the reserved DOI,
+                # so a transient error while the record settles should not abort
+                # the release.
+                published_doi = calkit.invenio.extract_doi(invenio_dep)
+                for _ in range(10):
+                    if published_doi is not None:
+                        break
+                    time.sleep(1)
+                    try:
+                        record = calkit.invenio.get(
+                            f"/records/{record_id}",
+                            service=to,  # type: ignore
+                        )
+                    except Exception as e:
+                        if verbose:
+                            typer.echo(
+                                f"Polling for published DOI failed: {e}"
+                            )
+                        continue
+                    published_doi = calkit.invenio.extract_doi(record)
+                if published_doi is not None:
+                    doi = published_doi
+                else:
+                    typer.echo(
+                        "Could not confirm minted DOI from published record; "
+                        f"falling back to reserved DOI {doi}"
+                    )
+                url = f"https://doi.org/{doi}"
+                typer.echo(f"Published to {to} with DOI: {doi}")
+        else:
+            typer.echo(f"Would have posted {to} record: {invenio_metadata}")
+        # If this is a project release, add badge to project README
+        doi_md = None
+        if release_kind == "project" and doi is not None:
+            typer.echo("Adding DOI badge to README.md")
+            doi_base_url = calkit.releases.SERVICES[to]["url"]
+            doi_md = (
+                f"[![DOI]({doi_base_url}/badge/DOI/{doi}.svg)]"
+                f"(https://doi.org/{doi})"
+            )
+            if os.path.isfile("README.md"):
+                with open("README.md") as f:
+                    readme_txt = f.read()
+            else:
+                readme_txt = ""
+            readme_txt = calkit.releases.add_doi_badge_to_readme(
+                readme_txt, badge=doi_md, title=title
+            )
+            if not dry_run:
+                with open("README.md", "w") as f:
+                    f.write(readme_txt)
+                # Stage only after the file is closed; otherwise the buffered
+                # contents may not be flushed to disk yet and Git would stage an
+                # empty file
+                repo.git.add("README.md")
+            else:
+                typer.echo(f"Would have updated README.md to:\n{readme_txt}")
     # Create Git tag
     git_tag_message = release_description
     if git_tag_message is None:
@@ -3542,21 +3666,26 @@ def new_release(
             f"{git_tag_message}"
         )
     # Save release in Calkit info
-    release = dict(
-        kind=release_type,
+    from calkit.models.core import Release
+
+    release = Release(
+        kind=release_kind,  # type: ignore
         path=path,
         git_rev=git_rev,
+        calkit_version=calkit.__version__,
         date=release_date,
-        publisher=to,
+        publisher=None if internal_release else to,
         record_id=record_id,
         doi=doi,
         url=url,
         description=release_description,
-    )
+        internal=internal_release,
+        stored_path=stored_path_posix,
+    ).model_dump()
     releases[name] = release
     ck_info["releases"] = releases
     # Create/update CITATION.cff file, preserving existing authors
-    if release_type == "project":
+    if release_kind == "project" and not internal_release:
         cff = calkit.releases.create_citation_cff(
             ck_info=ck_info,
             release_name=name,
@@ -3570,79 +3699,82 @@ def new_release(
             with open("CITATION.cff", "w") as f:
                 calkit.ryaml.dump(cff, f)
             repo.git.add("CITATION.cff")
-    # Add to references so it can be cited
-    typer.echo("Adding BibTeX entry to references")
-    reference_collections = ck_info.get("references", [])
-    if len(reference_collections) > 1:
-        warn("Multiple references collections; writing to first")
-    if not reference_collections:
-        references = dict(path="references.bib")
-        ck_info["references"] = [references]
-    else:
-        references = reference_collections[0]
-    ref_path = references.get("path", "references.bib")
-    try:
-        # Read the existing references as raw text so we can append the new
-        # entry without reformatting the user's existing entries
-        if os.path.isfile(ref_path):
-            with open(ref_path) as f:
-                existing_text = f.read()
+    if not internal_release:
+        # Add to references so it can be cited
+        typer.echo("Adding BibTeX entry to references")
+        reference_collections = ck_info.get("references", [])
+        if len(reference_collections) > 1:
+            warn("Multiple references collections; writing to first")
+        if not reference_collections:
+            references = dict(path="references.bib")
+            ck_info["references"] = [references]
         else:
-            existing_text = ""
-        bibtex_doi = doi
-        if bibtex_doi is None and dry_run:
-            mock_suffix = "".join(
-                ch if (ch.isalnum() or ch in ".-_") else "-"
-                for ch in name.lower()
+            references = reference_collections[0]
+        ref_path = references.get("path", "references.bib")
+        try:
+            # Read the existing references as raw text so we can append the new
+            # entry without reformatting the user's existing entries
+            if os.path.isfile(ref_path):
+                with open(ref_path) as f:
+                    existing_text = f.read()
+            else:
+                existing_text = ""
+            bibtex_doi = doi
+            if bibtex_doi is None and dry_run:
+                mock_suffix = "".join(
+                    ch if (ch.isalnum() or ch in ".-_") else "-"
+                    for ch in name.lower()
+                )
+                bibtex_doi = f"10.0000/calkit-dry-run.{mock_suffix}"
+            invenio_bibtex = calkit.releases.create_bibtex(
+                authors=authors,
+                release_date=release_date,
+                title=title,  # type: ignore
+                doi=bibtex_doi,
+                record_id=record_id,  # type: ignore
+                service=to,  # type: ignore
             )
-            bibtex_doi = f"10.0000/calkit-dry-run.{mock_suffix}"
-        invenio_bibtex = calkit.releases.create_bibtex(
-            authors=authors,
-            release_date=release_date,
-            title=title,  # type: ignore
-            doi=bibtex_doi,
-            record_id=record_id,  # type: ignore
-            service=to,  # type: ignore
-        )
-        new_entries = bibtexparser.loads(invenio_bibtex).entries
-        if not new_entries:
-            raise ValueError("Failed to parse generated BibTeX entry")
-        new_entry = new_entries[0]
-        # Search through existing entries for any with the same DOI, and
-        # replace them (by citation key) if there is a match. Tolerate parse
-        # errors here (e.g., non-standard or temporarily-invalid BibTeX) by
-        # skipping replacement detection and still appending the new entry.
-        new_doi = new_entry.get("doi")
-        replace_ids = []
-        if new_doi:
-            try:
-                existing_entries = bibtexparser.loads(existing_text).entries
-            except Exception as e:
-                warn(f"Could not parse existing references to dedupe: {e}")
-                existing_entries = []
-            replace_ids = [
-                entry["ID"]
-                for entry in existing_entries
-                if entry.get("doi") == new_doi
-            ]
-        if replace_ids:
-            typer.echo(
-                "Found matching DOI in existing references "
-                f"({len(replace_ids)} entr"
-                f"{'y' if len(replace_ids) == 1 else 'ies'}); "
-                "replacing"
+            new_entries = bibtexparser.loads(invenio_bibtex).entries
+            if not new_entries:
+                raise ValueError("Failed to parse generated BibTeX entry")
+            new_entry = new_entries[0]
+            # Search through existing entries for any with the same DOI, and
+            # replace them (by citation key) if there is a match. Tolerate parse
+            # errors here (e.g., non-standard or temporarily-invalid BibTeX) by
+            # skipping replacement detection and still appending the new entry.
+            new_doi = new_entry.get("doi")
+            replace_ids = []
+            if new_doi:
+                try:
+                    existing_entries = bibtexparser.loads(
+                        existing_text
+                    ).entries
+                except Exception as e:
+                    warn(f"Could not parse existing references to dedupe: {e}")
+                    existing_entries = []
+                replace_ids = [
+                    entry["ID"]
+                    for entry in existing_entries
+                    if entry.get("doi") == new_doi
+                ]
+            if replace_ids:
+                typer.echo(
+                    "Found matching DOI in existing references "
+                    f"({len(replace_ids)} entr"
+                    f"{'y' if len(replace_ids) == 1 else 'ies'}); "
+                    "replacing"
+                )
+            new_text = calkit.releases.add_bibtex_entry(
+                existing_text, invenio_bibtex, replace_ids=replace_ids
             )
-        new_text = calkit.releases.add_bibtex_entry(
-            existing_text, invenio_bibtex, replace_ids=replace_ids
-        )
-        if dry_run:
-            typer.echo(f"Would write updated references to {ref_path}")
-        else:
-            with open(ref_path, "w") as f:
-                f.write(new_text)
-            repo.git.add(ref_path)
-    except Exception as e:
-        warn(f"Failed to add to references: {e}")
+            if dry_run:
+                typer.echo(f"Would write updated references to {ref_path}")
+            else:
+                with open(ref_path, "w") as f:
+                    f.write(new_text)
+                repo.git.add(ref_path)
+        except Exception as e:
+            warn(f"Failed to add to references: {e}")
     # Write out Calkit metadata
     if not dry_run:
         typer.echo("Writing to calkit.yaml")
@@ -3653,12 +3785,12 @@ def new_release(
         typer.echo(f"Would have created release:\n{release}")
     # Commit with Git
     if not dry_run and calkit.git.get_staged_files() and not no_commit:
-        repo.git.commit(["-m", f"Create new {release_type} release {name}"])
+        repo.git.commit(["-m", f"Create new {release_kind} release {name}"])
     # Push with Git
     if not dry_run and not no_push and not no_commit and not draft_only:
         repo.git.push(["origin", repo.active_branch.name, "--tags"])
-        # Now create GitHub release
-        if not no_github_release:
+        # Now create GitHub release (external releases only)
+        if not internal_release and not no_github_release:
             typer.echo("Creating GitHub release")
             release_body = ""
             if doi_md is not None:
@@ -3674,5 +3806,5 @@ def new_release(
             )
             typer.echo(f"Created GitHub release at: {resp['url']}")
             # TODO: Upload assets for GitHub release if they're not too big?
-    typer.echo(f"New {release_type} release {name} successfully created")
+    typer.echo(f"New {release_kind} release {name} successfully created")
     return release

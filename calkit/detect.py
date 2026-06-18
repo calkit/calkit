@@ -1991,6 +1991,68 @@ def is_presentation_path(rel_path: str) -> bool:
     )
 
 
+PUBLICATION_DIRS = {
+    "publication",
+    "publications",
+    "paper",
+    "papers",
+    "manuscript",
+    "manuscripts",
+    "thesis",
+    "report",
+    "reports",
+    "pub",
+    "pubs",
+}
+PUBLICATION_EXTENSIONS = {".pdf", ".tex", ".docx"}
+# Files that look like a publication regardless of which directory they live in.
+PUBLICATION_NAMES = {
+    "paper.pdf",
+    "manuscript.pdf",
+    "thesis.pdf",
+    "report.pdf",
+    "paper.tex",
+    "main.tex",
+    "manuscript.tex",
+    "thesis.tex",
+}
+
+
+def is_publication_path(rel_path: str) -> bool:
+    """Whether a repo-relative path looks like an auto-detectable publication.
+
+    Either a document (PDF/TeX/DOCX) under a ``paper``/``publication``/
+    ``thesis``-style directory, or a file with a publication-like name (e.g.
+    ``manuscript.pdf``, ``main.tex``) anywhere. Figures and presentations are
+    excluded.
+    """
+    if is_figure_path(rel_path) or is_presentation_path(rel_path):
+        return False
+    name = rel_path.rsplit("/", 1)[-1].lower()
+    if name in PUBLICATION_NAMES:
+        return True
+    return _path_ext(rel_path) in PUBLICATION_EXTENSIONS and bool(
+        _ancestor_dir_names(rel_path) & PUBLICATION_DIRS
+    )
+
+
+def detect_artifact_kind(rel_path: str) -> str | None:
+    """Infer an artifact's release kind from its repo-relative path.
+
+    Returns one of ``"figure"``, ``"presentation"``, ``"publication"``, or
+    ``"dataset"``, or ``None`` if the path doesn't look like any of these.
+    """
+    if is_figure_path(rel_path):
+        return "figure"
+    if is_presentation_path(rel_path):
+        return "presentation"
+    if is_publication_path(rel_path):
+        return "publication"
+    if is_dataset_path(rel_path):
+        return "dataset"
+    return None
+
+
 def _is_hidden_path(rel_path: str) -> bool:
     return any(part.startswith(".") for part in rel_path.split("/"))
 

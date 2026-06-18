@@ -972,6 +972,22 @@ def get_status(
             os.chdir(prev_cwd)
 
 
+def get_stage_for_output(path: str, ck_info: dict) -> str | None:
+    """Return the name of the pipeline stage that produces ``path``, if any."""
+    target = Path(path).as_posix()
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    if not isinstance(stages, dict):
+        return None
+    for name, stage in stages.items():
+        if not isinstance(stage, dict):
+            continue
+        for out in stage.get("outputs", []):
+            out_path = out.get("path") if isinstance(out, dict) else out
+            if out_path and Path(out_path).as_posix() == target:
+                return name
+    return None
+
+
 def get_output_storage_map(
     ck_info: dict | None = None,
     wdir: str | None = None,

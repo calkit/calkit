@@ -1229,6 +1229,37 @@ def test_is_presentation_path():
     assert not is_presentation_path("figures/plot.pdf")
 
 
+def test_is_publication_path():
+    """Publications are documents by directory or by name."""
+    from calkit.detect import is_publication_path
+
+    assert is_publication_path("paper/manuscript.pdf")
+    assert is_publication_path("publications/report.docx")
+    assert is_publication_path("thesis/main.tex")
+    # Publication-like name anywhere.
+    assert is_publication_path("manuscript.pdf")
+    assert is_publication_path("docs/main.tex")
+    # A slide deck or figure is not a publication.
+    assert not is_publication_path("slides/deck.pdf")
+    assert not is_publication_path("figures/plot.pdf")
+    # A document outside a publication dir without a publication name.
+    assert not is_publication_path("notes/random.pdf")
+
+
+def test_detect_artifact_kind():
+    """Artifact kind is inferred from the path, with figures taking priority."""
+    from calkit.detect import detect_artifact_kind
+
+    assert detect_artifact_kind("figures/plot.png") == "figure"
+    assert detect_artifact_kind("slides/slides.pdf") == "presentation"
+    assert detect_artifact_kind("paper/manuscript.pdf") == "publication"
+    assert detect_artifact_kind("data/raw.csv") == "dataset"
+    # A figure PDF wins over presentation/publication detection.
+    assert detect_artifact_kind("figures/diagram.pdf") == "figure"
+    # Nothing recognizable.
+    assert detect_artifact_kind("notes.txt") is None
+
+
 def test_detect_results_and_presentations():
     """detect_results/detect_presentations filter hidden and reserved paths."""
     from calkit.detect import detect_presentations, detect_results

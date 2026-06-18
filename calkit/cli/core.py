@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 import typer
 from typer.core import TyperGroup
@@ -96,7 +96,7 @@ def run_cmd(cmd: list[str]):
         pty.spawn(cmd, lambda fd: os.read(fd, 1024))
 
 
-def raise_error(txt: str):
+def raise_error(txt: str) -> NoReturn:
     typer.echo(typer.style("Error: " + str(txt), fg="red"), err=True)
     raise typer.Exit(1)
 

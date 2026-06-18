@@ -1634,20 +1634,21 @@ Arguments:
 
 Options:
 
-| Option                    | Type    | Required | Default | Description                                                                                                                |
-| ------------------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`            | text    | yes      |         | A name for the release, typically kebab-case or a semantic version. Will be used for the Git tag and GitHub release title. |
-| `--kind`                  | text    | no       | project | What kind of release to create.                                                                                            |
-| `--description`, `--desc` | text    | no       |         | A description of the release. Will be auto-generated if not provided.                                                      |
-| `--date`                  | text    | no       |         | Release date. Will default to today.                                                                                       |
-| `--dry-run`               | boolean | no       | False   | Only print actions that would be taken but don't take them.                                                                |
-| `--no-commit`             | boolean | no       | False   | Do not commit changes to Git repo.                                                                                         |
-| `--no-push`               | boolean | no       | False   | Do not push to Git remote.                                                                                                 |
-| `--no-github`             | boolean | no       | False   | Do not create a GitHub release.                                                                                            |
-| `--to`                    | text    | no       | zenodo  | Archival service to use (zenodo or caltechdata).                                                                           |
-| `--draft`                 | boolean | no       | False   | Create draft record with reserved DOI but do not publish.                                                                  |
-| `--license`               | text    | no       |         | License ID (from https://spdx.org/licenses). Multiple can be specified. Will try to infer from LICENSE file, if present.   |
-| `--verbose`, `-v`         | boolean | no       | False   | Print verbose output.                                                                                                      |
+| Option                    | Type    | Required | Default | Description                                                                                                                                                                               |
+| ------------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`            | text    | yes      |         | A name for the release, typically kebab-case or a semantic version. Will be used for the Git tag and GitHub release title.                                                                |
+| `--kind`                  | text    | no       |         | What kind of release to create. Will attempt to infer from path if not provided.                                                                                                          |
+| `--description`, `--desc` | text    | no       |         | A description of the release. Will be auto-generated if not provided.                                                                                                                     |
+| `--date`                  | text    | no       |         | Release date. Will default to today.                                                                                                                                                      |
+| `--dry-run`               | boolean | no       | False   | Only print actions that would be taken but don't take them.                                                                                                                               |
+| `--no-commit`             | boolean | no       | False   | Do not commit changes to Git repo.                                                                                                                                                        |
+| `--no-push`               | boolean | no       | False   | Do not push to Git remote.                                                                                                                                                                |
+| `--internal`              | boolean | no       | False   | Create an internal release that is not published to an archival service. Still creates a Git tag and release record in calkit.yaml, but does not upload files or create a GitHub release. |
+| `--no-github`             | boolean | no       | False   | Do not create a GitHub release.                                                                                                                                                           |
+| `--to`                    | text    | no       | zenodo  | Archival service to use (zenodo or caltechdata).                                                                                                                                          |
+| `--draft`                 | boolean | no       | False   | Create draft record with reserved DOI but do not publish.                                                                                                                                 |
+| `--license`               | text    | no       |         | License ID (from https://spdx.org/licenses). Multiple can be specified. Will try to infer from LICENSE file, if present.                                                                  |
+| `--verbose`, `-v`         | boolean | no       | False   | Print verbose output.                                                                                                                                                                     |
 
 <a id="command-group-delete-rm"></a>
 

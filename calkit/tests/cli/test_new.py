@@ -917,6 +917,148 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     # )
 
 
+def test_new_internal_release(tmp_dir):
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "project",
+            ".",
+            "--title",
+            "Test project",
+            "--name",
+            "test-project",
+        ]
+    )
+    # Create a presentation (single file), a dataset (folder), and register
+    # them in calkit.yaml so their release kinds can be detected
+    os.makedirs("slides", exist_ok=True)
+    with open("slides/slides.pdf", "wb") as f:
+        f.write(b"%PDF-1.4 fake slides\n")
+    os.makedirs("data/raw", exist_ok=True)
+    with open("data/raw/values.csv", "w") as f:
+        f.write("a,b\n1,2\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["presentations"] = [
+        {"path": "slides/slides.pdf", "title": "Slides"}
+    ]
+    ck_info["datasets"] = [{"path": "data/raw", "title": "Raw data"}]
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(["git", "commit", "-m", "Add artifacts"])
+    # Internal release of a single file: stored as-is with a self-describing
+    # name, with the kind inferred from calkit.yaml
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "slides/slides.pdf",
+            "--internal",
+            "--to",
+            "none",
+            "--name",
+            "v0",
+            "--desc",
+            "First version sent to Mo for review.",
+            "--no-push",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert "v0" in ck_info["releases"]
+    release = ck_info["releases"]["v0"]
+    assert release["internal"] is True
+    assert release["kind"] == "presentation"
+    assert release["doi"] is None
+    assert release["description"] == "First version sent to Mo for review."
+    assert (
+        release["stored_path"]
+        == ".calkit/releases/v0/test-project-slides-v0.pdf"
+    )
+    assert os.path.isfile(release["stored_path"])
+    assert "v0" in [t.name for t in git.Repo().tags]
+    # Internal release of a folder: zipped with a self-describing name
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "data/raw",
+            "--internal",
+            "--name",
+            "v1",
+            "--no-push",
+        ]
+    )
+    release = calkit.load_calkit_info()["releases"]["v1"]
+    assert release["kind"] == "dataset"
+    assert (
+        release["stored_path"] == ".calkit/releases/v1/test-project-raw-v1.zip"
+    )
+    assert os.path.isfile(release["stored_path"])
+    # Internal release of the whole project: zipped archive
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            ".",
+            "--internal",
+            "--name",
+            "v2",
+            "--no-push",
+        ]
+    )
+    release = calkit.load_calkit_info()["releases"]["v2"]
+    assert release["kind"] == "project"
+    assert release["stored_path"] == ".calkit/releases/v2/test-project-v2.zip"
+    assert os.path.isfile(release["stored_path"])
+    # An undeclared file whose path matches a known pattern has its kind
+    # auto-detected (a PNG under figures/ is a figure)
+    os.makedirs("figures", exist_ok=True)
+    with open("figures/plot.png", "wb") as f:
+        f.write(b"\x89PNG\r\n fake\n")
+    subprocess.check_call(["git", "add", "figures/plot.png"])
+    subprocess.check_call(["git", "commit", "-m", "Add figure"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "figures/plot.png",
+            "--internal",
+            "--name",
+            "v3",
+            "--no-push",
+        ]
+    )
+    release = calkit.load_calkit_info()["releases"]["v3"]
+    assert release["kind"] == "figure"
+    assert (
+        release["stored_path"]
+        == ".calkit/releases/v3/test-project-plot-v3.png"
+    )
+    # A path that isn't a defined artifact should fail kind detection
+    with open("notes.txt", "w") as f:
+        f.write("hello\n")
+    result = subprocess.run(
+        [
+            "calkit",
+            "new",
+            "release",
+            "notes.txt",
+            "--internal",
+            "--name",
+            "v4",
+            "--no-push",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "Could not determine release kind" in result.stderr
+
+
 def test_new_release_publish_empty_pids(tmp_dir, monkeypatch, httpserver):
     """Regression test for issue #927.
 

@@ -285,29 +285,31 @@ class Procedure(BaseModel):
 
 
 class Release(BaseModel):
-    kind: Literal["project", "publication", "dataset", "model", "figure"]
-    url: str | None = None
+    kind: Literal[
+        "project",
+        "publication",
+        "dataset",
+        "figure",
+        "presentation",
+        "software",
+        "model",
+    ]
+    path: str | None = None
+    git_rev: str | None = None
+    date: str | None = None
+    publisher: str | None = None
+    record_id: int | str | None = None
     doi: str | None = None
-    has_suffix: bool = False
-
-
-class ProjectRelease(Release):
-    kind: Literal["project"]
-
-
-class PublicationRelease(Release):
-    kind: Literal["publication"]
-    path: str
-
-
-class DatasetRelease(Release):
-    kind: Literal["dataset"]
-    path: str
-
-
-class ModelRelease(Release):
-    kind: Literal["model"]
-    path: str
+    url: str | None = None
+    description: str | None = None
+    # Internal releases are frozen, locally-stored snapshots that are not
+    # published to an archival service, so they carry no publisher or DOI.
+    internal: bool = False
+    # Path (relative to the project root) to the renamed, self-describing copy
+    # of the artifact kept within the release directory, e.g.
+    # ".calkit/releases/v0/my-project-slides-v0.pdf". Only set for internal
+    # releases, which store the artifact in the repo rather than ignoring it.
+    stored_path: str | None = None
 
 
 class ShowcaseFigure(BaseModel):
@@ -451,8 +453,5 @@ class ProjectInfo(BaseModel):
     software: list[Software] = []
     notebooks: list[Notebook] = []
     procedures: dict[str, Procedure] = {}
-    releases: dict[
-        str,
-        ProjectRelease | PublicationRelease | DatasetRelease | ModelRelease,
-    ] = {}
+    releases: dict[str, Release] = {}
     showcase: list[ShowcaseFigure | ShowcaseText] | None = None

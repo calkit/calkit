@@ -1230,7 +1230,7 @@ def test_is_presentation_path():
 
 
 def test_is_publication_path():
-    """Publications are documents by directory or by name."""
+    # Publications are documents by directory or by name
     from calkit.detect import is_publication_path
 
     assert is_publication_path("paper/manuscript.pdf")
@@ -1247,7 +1247,7 @@ def test_is_publication_path():
 
 
 def test_detect_artifact_kind():
-    """Artifact kind is inferred from the path, with figures taking priority."""
+    # Artifact kind is inferred from the path, with figures taking priority
     from calkit.detect import detect_artifact_kind
 
     assert detect_artifact_kind("figures/plot.png") == "figure"

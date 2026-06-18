@@ -1060,6 +1060,29 @@ def test_new_internal_release(tmp_dir):
     )
     assert result.returncode != 0
     assert "Could not determine release kind" in result.stderr
+    # ...but passing --kind explicitly bypasses detection for such paths
+    subprocess.check_call(["git", "add", "notes.txt"])
+    subprocess.check_call(["git", "commit", "-m", "Add notes"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "notes.txt",
+            "--internal",
+            "--kind",
+            "dataset",
+            "--name",
+            "v5",
+            "--no-push",
+        ]
+    )
+    release = calkit.load_calkit_info()["releases"]["v5"]
+    assert release["kind"] == "dataset"
+    assert (
+        release["stored_path"]
+        == ".calkit/releases/v5/test-project-notes-v5.txt"
+    )
 
 
 def test_new_release_publish_empty_pids(tmp_dir, monkeypatch, httpserver):

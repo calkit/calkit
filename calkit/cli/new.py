@@ -3072,7 +3072,11 @@ def new_release(
     to: Annotated[
         str,
         typer.Option(
-            "--to", help="Archival service to use (zenodo or caltechdata)."
+            "--to",
+            help=(
+                "Archival service to use for external releases (zenodo or "
+                "caltechdata); ignored for --internal releases."
+            ),
         ),
     ] = "zenodo",
     draft_only: Annotated[
@@ -3118,28 +3122,28 @@ def new_release(
     repo = calkit.git.get_repo()
     if name in repo.tags:
         raise_error(f"Git tag with name '{name}' already exists")
-    # Detect the release kind from the path. A "." path is always a project
-    # release; otherwise the path must be defined as an artifact in calkit.yaml.
+    # Detect the release kind from the path unless it was given with --kind. A
+    # "." path is always a project release; otherwise prefer a declared
+    # artifact in calkit.yaml, falling back to auto-detection from the path
+    # (e.g. a PDF under slides/ is a presentation).
     if path == ".":
         if release_kind is None:
             release_kind = "project"
         artifact = None
     else:
-        # Prefer a declared artifact in calkit.yaml; otherwise fall back to
-        # auto-detecting the kind from the path (e.g. a PDF under slides/ is a
-        # presentation).
         detected_kind, artifact = calkit.releases.find_artifact(path, ck_info)
         if detected_kind is None:
             detected_kind = calkit.detect.detect_artifact_kind(
                 pathlib.Path(path).as_posix()
             )
-        if detected_kind is None:
-            raise_error(
-                f"Could not determine release kind for path '{path}'; "
-                "define it in calkit.yaml as a dataset, figure, publication, "
-                "presentation, or software artifact, or pass --kind"
-            )
         if release_kind is None:
+            if detected_kind is None:
+                raise_error(
+                    f"Could not determine release kind for path '{path}'; "
+                    "define it in calkit.yaml as a dataset, figure, "
+                    "publication, presentation, or software artifact, or "
+                    "pass --kind"
+                )
             release_kind = detected_kind
     if release_kind not in [
         "project",

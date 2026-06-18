@@ -296,6 +296,8 @@ class Release(BaseModel):
     ]
     path: str | None = None
     git_rev: str | None = None
+    # Version of Calkit that created the release, for reproducibility.
+    calkit_version: str | None = None
     date: str | None = None
     publisher: str | None = None
     record_id: int | str | None = None

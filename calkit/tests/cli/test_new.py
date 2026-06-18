@@ -859,6 +859,8 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     assert "v0.1.0" in ck_info["releases"]
     release = ck_info["releases"]["v0.1.0"]
     assert release["doi"] is not None
+    # Issue #874: the creating Calkit version is recorded on the release
+    assert release["calkit_version"] == calkit.__version__
     # Regression test for issue #931: the README must not be emptied, the
     # committed README must match the working tree (otherwise it shows up as a
     # spurious unstaged change), and the DOI badge must link to doi.org rather
@@ -970,6 +972,7 @@ def test_new_internal_release(tmp_dir):
     assert release["internal"] is True
     assert release["kind"] == "presentation"
     assert release["doi"] is None
+    assert release["calkit_version"] == calkit.__version__
     assert release["description"] == "First version sent to Mo for review."
     assert (
         release["stored_path"]

@@ -3326,7 +3326,7 @@ def new_release(
         git_rev = repo.git.rev_parse(["--short", "HEAD"])
         readme_txt += (
             f"\nThis is a {release_kind} release ({name}) generated with "
-            f"Calkit from Git rev {git_rev}.\n"
+            f"Calkit v{calkit.__version__} from Git rev {git_rev}.\n"
         )
         readme_path = release_files_dir + "/README.md"
         with open(readme_path, "w") as f:
@@ -3668,6 +3668,7 @@ def new_release(
         kind=release_kind,  # type: ignore
         path=path,
         git_rev=git_rev,
+        calkit_version=calkit.__version__,
         date=release_date,
         publisher=None if internal_release else to,
         record_id=record_id,

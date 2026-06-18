@@ -259,7 +259,7 @@ def update_release(
         git_rev = repo.git.rev_parse(["--short", "HEAD"])
         readme_txt += (
             f"\nThis is a {release_type} release ({name}) generated with "
-            f"Calkit from Git rev {git_rev}.\n"
+            f"Calkit v{calkit.__version__} from Git rev {git_rev}.\n"
         )
         readme_path = release_files_dir + "/README.md"
         with open(readme_path, "w") as f:
@@ -1015,8 +1015,7 @@ def update_environment(
         flake_path = env.get("path")
         if not flake_path or not os.path.isfile(flake_path):
             raise_error(
-                f"Nix flake not found at '{flake_path}' for env "
-                f"'{env_name}'"
+                f"Nix flake not found at '{flake_path}' for env '{env_name}'"
             )
         try:
             added = add_packages_to_nix_flake(flake_path, add_packages)

@@ -546,12 +546,26 @@ class MapPathsStage(Stage):
 class LatexStage(Stage):
     kind: Literal["latex"] = "latex"
     target_path: str
-    out_dir: str | None = None
+    output_dir: str | None = None
     latexmkrc_path: str | None = None
     pdf_storage: Literal["git", "dvc"] | None = "dvc"
     verbose: bool = False
     force: bool = False
     synctex: bool = True
+
+    @property
+    def pdf_path(self) -> str:
+        """Path to the compiled PDF.
+
+        When ``output_dir`` is set (e.g. via ``$out_dir`` in a latexmkrc
+        file), latexmk writes the PDF there using the target's base name
+        rather than next to the source ``.tex`` file.
+        """
+        if self.output_dir is not None:
+            out_base = Path(self.output_dir) / Path(self.target_path).stem
+        else:
+            out_base = Path(self.target_path)
+        return out_base.with_suffix(".pdf").as_posix()
 
     @property
     def dvc_cmd(self) -> str:
@@ -577,11 +591,7 @@ class LatexStage(Stage):
     @property
     def dvc_outs(self) -> list[str | dict]:
         outs = super().dvc_outs
-        if self.out_dir is not None:
-            out_base = Path(out_dir) / Path(self.target_path).stem
-        else:
-            out_base = Path(self.target_path)
-        out_path = out_base.with_suffix(".pdf").as_posix()
+        out_path = self.pdf_path
         # If the PDF output is already in outs use that
         # Otherwise, create a DVC output from pdf_storage and add it to outs
         out_paths = []

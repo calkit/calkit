@@ -96,6 +96,43 @@ def test_latexstage():
         outputs=["my-paper.pdf"],
     )
     assert s.dvc_outs == ["my-paper.pdf"]
+    # With no output_dir, the PDF sits next to the source
+    s = LatexStage(
+        name="something",
+        environment="tex",
+        target_path="paper/my-paper.tex",
+    )
+    assert s.pdf_path == "paper/my-paper.pdf"
+    assert "paper/my-paper.pdf" in s.dvc_outs
+    # With an output_dir (e.g. $out_dir in latexmkrc), latexmk writes the PDF
+    # into that directory using the target's base name
+    s = LatexStage(
+        name="something",
+        environment="tex",
+        target_path="paper/my-paper.tex",
+        output_dir="paper/build",
+    )
+    assert s.pdf_path == "paper/build/my-paper.pdf"
+    assert "paper/build/my-paper.pdf" in s.dvc_outs
+    # The source path's .pdf is not assumed when output_dir is set
+    assert "paper/my-paper.pdf" not in s.dvc_outs
+    # output_dir is respected for git-stored PDFs too
+    s = LatexStage(
+        name="something",
+        environment="tex",
+        target_path="paper/my-paper.tex",
+        output_dir="build",
+        pdf_storage="git",
+    )
+    assert s.dvc_outs == [{"build/my-paper.pdf": {"cache": False}}]
+    # An output_dir relative to the document root resolves cleanly
+    s = LatexStage(
+        name="something",
+        environment="tex",
+        target_path="my-paper.tex",
+        output_dir="build",
+    )
+    assert s.pdf_path == "build/my-paper.pdf"
 
 
 def test_quartostage():

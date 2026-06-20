@@ -2,6 +2,8 @@
 
 import itertools
 import os
+import re
+import warnings
 from collections.abc import Callable
 from pathlib import Path
 
@@ -12,6 +14,7 @@ import calkit
 from calkit.models.iteration import expand_project_parameters
 from calkit.models.pipeline import (
     InputsFromStageOutputs,
+    LatexStage,
     PathOutput,
     Pipeline,
 )
@@ -1056,6 +1059,158 @@ def _dump_yaml_if_changed(data, fpath: str, verbose: bool = False) -> bool:
     return True
 
 
+def _parse_latexmkrc_var(text: str, var: str) -> str | None:
+    """Extract a literal ``$<var> = '...'`` assignment from latexmkrc text.
+
+    Returns the assigned string for a simple literal assignment (single- or
+    double-quoted), or ``None`` if absent or computed. Anything non-literal
+    is intentionally left for the user rather than guessed at.
+    """
+    match = re.search(
+        r"^\s*\$" + re.escape(var) + r"""\s*=\s*['"]([^'"]*)['"]""",
+        text,
+        flags=re.MULTILINE,
+    )
+    if match is None:
+        return None
+    return match.group(1)
+
+
+def _warn_on_latexmkrc_out_dir_mismatch(
+    stage: LatexStage, wdir: str | None = None
+) -> None:
+    """Warn at compile time if latexmkrc ``$out_dir`` disagrees with the
+    stage's ``output_dir``.
+
+    The tracked PDF output path is derived from ``output_dir``, so a latexmkrc
+    that redirects the PDF without a matching ``output_dir`` would leave the
+    real PDF untracked. Because ``calkit latex build`` runs latexmk with
+    ``-cd``, the latexmkrc's ``$out_dir`` is relative to the LaTeX source
+    directory, whereas ``output_dir`` (like all Calkit path fields) is relative
+    to the stage's working directory; we resolve the former into that same
+    frame before comparing. We only read the file when a latexmkrc is
+    referenced (rare), so there is no cost on the common path.
+    """
+    if stage.latexmkrc_path is None:
+        return
+    # Stage path fields are relative to the stage's wdir, which in turn is
+    # relative to the (sub)project being compiled.
+    base = os.path.join(wdir or ".", stage.wdir) if stage.wdir else wdir or "."
+    try:
+        with open(os.path.join(base, stage.latexmkrc_path)) as f:
+            text = f.read()
+    except OSError:
+        return
+    rc_out_dir = _parse_latexmkrc_var(text, "out_dir")
+    if rc_out_dir is None:
+        # Absent or computed (non-literal): nothing reliable to compare.
+        return
+    source_dir = os.path.dirname(stage.target_path)
+    # Resolve the source-relative $out_dir into the stage's path frame (the
+    # same frame as output_dir). An empty or "." $out_dir means "next to the
+    # source", which is what output_dir=None also means.
+    rc_resolved = os.path.normpath(os.path.join(source_dir or ".", rc_out_dir))
+    next_to_source = os.path.normpath(source_dir or ".")
+    if stage.output_dir is None:
+        declared = next_to_source
+    else:
+        declared = os.path.normpath(stage.output_dir)
+    if rc_resolved == declared:
+        return
+    if rc_resolved == next_to_source:
+        fix = "remove output_dir (the PDF is written next to the source)"
+    else:
+        fix = f"set output_dir: {rc_resolved}"
+    warnings.warn(
+        f"LaTeX stage '{stage.name}': latexmkrc '{stage.latexmkrc_path}' "
+        f"sets $out_dir={rc_out_dir!r} (relative to the source, i.e. "
+        f"{rc_resolved!r} in the stage's path frame), but the stage's "
+        f"output_dir is {stage.output_dir!r}. The tracked PDF output path is "
+        "derived from output_dir, so these should agree or the compiled PDF "
+        f"may not be tracked. {fix}.",
+        stacklevel=2,
+    )
+
+
+def _ensure_latex_aux_gitignore(
+    stage: LatexStage, wdir: str | None = None
+) -> bool:
+    """Ensure a managed ``.gitignore`` block ignores LaTeX aux files.
+
+    The block lives in the LaTeX source directory's ``.gitignore`` rather than
+    inside the build/output directory, which may not exist at compile time and
+    can be wiped by a clean build (``latexmk -C``). The globs are unanchored,
+    so aux files are caught wherever latexmk writes them relative to the
+    source -- next to it, or in an ``aux``/output subdirectory via
+    ``$aux_dir``/``$out_dir``/``output_dir``. ``*.pdf`` is never ignored so the
+    compiled output stays tracked.
+
+    Returns True if ``.gitignore`` was modified.
+    """
+    aux_globs = [
+        "*.aux",
+        "*.bbl",
+        "*.bcf",
+        "*.blg",
+        "*.fdb_latexmk",
+        "*.fls",
+        "*.lof",
+        "*.lot",
+        "*.nav",
+        "*.out",
+        "*.run.xml",
+        "*.snm",
+        "*.synctex.gz",
+        "*.toc",
+        "*.vrb",
+    ]
+    # Stage path fields are relative to the stage's wdir, which in turn is
+    # relative to the (sub)project being compiled.
+    base = os.path.join(wdir or ".", stage.wdir) if stage.wdir else wdir or "."
+    source_dir = os.path.dirname(stage.target_path)
+    gitignore_path = os.path.join(base, source_dir, ".gitignore")
+    return _write_managed_gitignore_block(
+        gitignore_path, marker="calkit latex aux files", lines=aux_globs
+    )
+
+
+def _write_managed_gitignore_block(
+    gitignore_path: str, marker: str, lines: list[str]
+) -> bool:
+    """Create or update a marker-delimited block in a ``.gitignore`` file.
+
+    The block is replaced in place if it already exists (so it stays free of
+    duplicate/stale entries across recompiles) and appended otherwise.
+    Returns True if the file was modified.
+    """
+    begin = f"# >>> {marker} (managed by calkit) >>>"
+    end = f"# <<< {marker} <<<"
+    block = "\n".join([begin] + lines + [end])
+    existing = ""
+    if os.path.isfile(gitignore_path):
+        with open(gitignore_path) as f:
+            existing = f.read()
+    block_re = re.compile(
+        re.escape(begin) + r".*?" + re.escape(end), flags=re.DOTALL
+    )
+    if block_re.search(existing):
+        updated = block_re.sub(lambda _: block, existing)
+        if updated == existing:
+            return False
+        with open(gitignore_path, "w") as f:
+            f.write(updated)
+        return True
+    parent = os.path.dirname(gitignore_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    separator = (
+        "" if not existing else ("\n" if existing.endswith("\n") else "\n\n")
+    )
+    with open(gitignore_path, "a") as f:
+        f.write(separator + block + "\n")
+    return True
+
+
 def to_dvc(
     ck_info: dict | None = None,
     wdir: str | None = None,
@@ -1110,8 +1265,6 @@ def to_dvc(
             continue
         isolated_sp_paths.append(sp)
         if not sp_dvc_stages:
-            import warnings
-
             warnings.warn(
                 f"Subproject '{sp}' has no pipeline stages defined; "
                 "no wrapper stage will be created.",
@@ -1369,6 +1522,14 @@ def to_dvc(
                 elif isinstance(out, PathOutput) and out.storage == "dvc-zip":
                     calkit.git.ensure_path_is_ignored(repo, path=out.path)
                     calkit.dvc.zip.add(out.path, is_stage_output=True)
+        # For LaTeX stages, warn on a latexmkrc/output_dir mismatch and keep
+        # the generated aux files out of Git via a managed .gitignore block.
+        # Globs (not per-file git check-ignore) keep this cheap for large
+        # pipelines.
+        if write and isinstance(stage, LatexStage):
+            _warn_on_latexmkrc_out_dir_mismatch(stage, wdir=wdir)
+            if manage_gitignore:
+                _ensure_latex_aux_gitignore(stage, wdir=wdir)
     # Now process any inputs from stage outputs
     for stage_name, stage in pipeline.stages.items():
         for i in stage.inputs:

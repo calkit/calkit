@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import shlex
 from pathlib import Path
 from typing import Any, Literal
@@ -557,15 +558,24 @@ class LatexStage(Stage):
     def pdf_path(self) -> str:
         """Path to the compiled PDF.
 
-        When ``output_dir`` is set (e.g. via ``$out_dir`` in a latexmkrc
-        file), latexmk writes the PDF there using the target's base name
-        rather than next to the source ``.tex`` file.
+        Like ``target_path`` and every other Calkit path field, ``output_dir``
+        is relative to the stage's working directory (its ``wdir``, defaulting
+        to the project root), not the LaTeX source directory. The returned path
+        is in that same frame, so it drops straight into ``dvc_outs``. When
+        ``output_dir`` is set, the PDF is written to
+        ``<output_dir>/<target stem>.pdf``; otherwise it sits next to the
+        source ``.tex`` file. This mirrors where latexmk actually writes the
+        PDF when a latexmkrc sets ``$out_dir`` -- see
+        ``_warn_on_latexmkrc_out_dir_mismatch`` in ``calkit.pipeline``, which
+        translates the (source-relative) ``$out_dir`` into this frame and warns
+        when the two disagree.
         """
+        target = Path(self.target_path)
         if self.output_dir is not None:
-            out_base = Path(self.output_dir) / Path(self.target_path).stem
+            out_base = Path(self.output_dir) / target.stem
         else:
-            out_base = Path(self.target_path)
-        return out_base.with_suffix(".pdf").as_posix()
+            out_base = target
+        return Path(os.path.normpath(out_base)).with_suffix(".pdf").as_posix()
 
     @property
     def dvc_cmd(self) -> str:

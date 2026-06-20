@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import warnings
 
 import git
 import pytest
@@ -9,10 +10,13 @@ import pytest
 import calkit
 import calkit.pipeline
 from calkit.environments import get_env_lock_fpath
+from calkit.models.pipeline import LatexStage
 from calkit.pipeline import (
     StaleStage,
+    _ensure_latex_aux_gitignore,
     _expand_dep_excluding_subprojects,
     _status_target_matches,
+    _warn_on_latexmkrc_out_dir_mismatch,
     collapse_dvc_stages,
     stages_are_similar,
 )
@@ -1416,8 +1420,14 @@ def test_gitignore_not_unignored_latex_pdf_output(tmp_dir):
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     assert not os.path.exists(".gitignore")
     with open("paper/.gitignore") as f:
-        assert f.read().splitlines() == ["/main.pdf"]
+        lines = f.read().splitlines()
+    # The user's PDF ignore entry is preserved (not unignored on recompile)
+    assert "/main.pdf" in lines
     assert repo.ignored("paper/main.pdf")
+    # The managed aux-file block is added, but never ignores the PDF
+    assert "# >>> calkit latex aux files (managed by calkit) >>>" in lines
+    assert "*.aux" in lines
+    assert "*.pdf" not in lines
 
 
 def test_get_status(tmp_dir):
@@ -2280,3 +2290,107 @@ def test_reproduce_targets_concurrently():
         "work@e": 0,
     }
     assert state["peak"] == 2
+
+
+def test_warn_on_latexmkrc_out_dir_mismatch(tmp_dir):
+    os.makedirs("paper")
+    rc_path = "paper/.latexmkrc"
+    stage = LatexStage(
+        name="build-paper",
+        environment="tex",
+        target_path="paper/main.tex",
+        latexmkrc_path=rc_path,
+    )
+    # latexmkrc redirects the PDF but output_dir is unset. $out_dir is
+    # source-relative (latexmk -cd), so 'build' resolves to 'paper/build'
+    # from the project root; the warning suggests that project-root value.
+    with open(rc_path, "w") as f:
+        f.write("$out_dir = 'build';\n$aux_dir = 'aux';\n")
+    with pytest.warns(UserWarning, match=r"output_dir: paper/build"):
+        _warn_on_latexmkrc_out_dir_mismatch(stage)
+    # A bare source-relative value in output_dir is still flagged (it would be
+    # interpreted as project-root 'build', not 'paper/build')
+    stage.output_dir = "build"
+    with pytest.warns(UserWarning, match=r"output_dir: paper/build"):
+        _warn_on_latexmkrc_out_dir_mismatch(stage)
+    # When output_dir matches the resolved project-root path, no warning
+    stage.output_dir = "paper/build"
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _warn_on_latexmkrc_out_dir_mismatch(stage)
+    # $out_dir = '.' means "next to the source" == output_dir unset; a
+    # non-None output_dir is flagged with advice to remove it
+    stage.output_dir = "paper/build"
+    with open(rc_path, "w") as f:
+        f.write("$out_dir = '.';\n")
+    with pytest.warns(UserWarning, match=r"remove output_dir"):
+        _warn_on_latexmkrc_out_dir_mismatch(stage)
+    # $out_dir = '.' with output_dir unset -> no warning
+    stage.output_dir = None
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _warn_on_latexmkrc_out_dir_mismatch(stage)
+    # A computed (non-literal) $out_dir is left alone -> no warning
+    with open(rc_path, "w") as f:
+        f.write("$out_dir = $ENV{BUILD_DIR};\n")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _warn_on_latexmkrc_out_dir_mismatch(stage)
+    # No latexmkrc referenced -> no file read, no warning
+    stage.latexmkrc_path = None
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _warn_on_latexmkrc_out_dir_mismatch(stage)
+
+
+def test_ensure_latex_aux_gitignore(tmp_dir):
+    os.makedirs("paper")
+    stage = LatexStage(
+        name="build-paper",
+        environment="tex",
+        target_path="paper/main.tex",
+    )
+    # A pre-existing, unrelated .gitignore entry that must be preserved
+    gitignore_path = os.path.join("paper", ".gitignore")
+    with open(gitignore_path, "w") as f:
+        f.write("figs/*.png\n")
+    # The managed block is written to the document directory's .gitignore
+    changed = _ensure_latex_aux_gitignore(stage)
+    assert changed
+    with open(gitignore_path) as f:
+        contents = f.read()
+    assert "figs/*.png" in contents
+    assert "*.aux" in contents
+    assert "*.fdb_latexmk" in contents
+    assert "*.synctex.gz" in contents
+    # The compiled PDF must never be ignored
+    assert "*.pdf" not in contents
+    assert "managed by calkit" in contents
+    assert contents.count("# >>> calkit latex aux files") == 1
+    # Idempotent: re-running makes no change
+    assert _ensure_latex_aux_gitignore(stage) is False
+    # The globs are unanchored regardless of output_dir, so they catch aux
+    # files in an output/aux subdirectory too; output_dir does not change the
+    # written patterns (it is handled by pdf_path/the lint, not the gitignore)
+    stage.output_dir = "paper/build"
+    assert _ensure_latex_aux_gitignore(stage) is False
+    with open(gitignore_path) as f:
+        contents = f.read()
+    assert "*.aux" in contents
+    assert "*.pdf" not in contents
+    # The block is not duplicated and the unrelated entry survives
+    assert contents.count("# >>> calkit latex aux files") == 1
+    assert "figs/*.png" in contents
+    # When the stage has a wdir, paths are relative to it, so the .gitignore
+    # lands under <wdir>/<source dir>, not the project root
+    os.makedirs("sub/doc")
+    wdir_stage = LatexStage(
+        name="build-sub",
+        environment="tex",
+        wdir="sub",
+        target_path="doc/main.tex",
+    )
+    assert _ensure_latex_aux_gitignore(wdir_stage)
+    assert not os.path.exists(os.path.join("doc", ".gitignore"))
+    with open(os.path.join("sub", "doc", ".gitignore")) as f:
+        assert "*.aux" in f.read()

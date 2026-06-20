@@ -1108,7 +1108,8 @@ def _warn_on_latexmkrc_out_dir_mismatch(
     source_dir = os.path.dirname(stage.target_path)
     # Resolve the source-relative $out_dir into the stage's path frame (the
     # same frame as output_dir). An empty or "." $out_dir means "next to the
-    # source", which is what output_dir=None also means.
+    # source", which is what output_dir=None also means. Comparison uses native
+    # os.path; the resolved value is converted to POSIX only for display.
     rc_resolved = os.path.normpath(os.path.join(source_dir or ".", rc_out_dir))
     next_to_source = os.path.normpath(source_dir or ".")
     if stage.output_dir is None:
@@ -1117,17 +1118,18 @@ def _warn_on_latexmkrc_out_dir_mismatch(
         declared = os.path.normpath(stage.output_dir)
     if rc_resolved == declared:
         return
+    rc_posix = Path(rc_resolved).as_posix()
     if rc_resolved == next_to_source:
         fix = "remove output_dir (the PDF is written next to the source)"
     else:
-        fix = f"set output_dir: {rc_resolved}"
+        fix = f"set output_dir: {rc_posix}"
     warnings.warn(
         f"LaTeX stage '{stage.name}': latexmkrc '{stage.latexmkrc_path}' "
         f"sets $out_dir={rc_out_dir!r} (relative to the source, i.e. "
-        f"{rc_resolved!r} in the stage's path frame), but the stage's "
-        f"output_dir is {stage.output_dir!r}. The tracked PDF output path is "
-        "derived from output_dir, so these should agree or the compiled PDF "
-        f"may not be tracked. {fix}.",
+        f"{rc_posix!r} in the stage's path frame), but the stage's output_dir "
+        f"is {stage.output_dir!r}. The tracked PDF output path is derived from "
+        "output_dir, so these should agree or the compiled PDF may not be "
+        f"tracked. {fix}.",
         stacklevel=2,
     )
 

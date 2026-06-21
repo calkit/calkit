@@ -1704,14 +1704,72 @@ def test_run_concurrent_scheduler_resume_after_disconnect(tmp_dir):
     for x in (1, 2):
         with open(f"runs-{x}.txt") as f:
             assert len(f.read().splitlines()) == 1
-    # Simulate a disconnect where dvc.lock never got updated.
+    # Simulate a disconnect where dvc.lock never got updated, and where the
+    # scheduler has since purged the finished jobs from its history (here, the
+    # mock's status sentinels). The recorded exit codes still tell us the jobs
+    # succeeded, so they are harvested rather than re-polled or rerun.
     os.remove("dvc.lock")
+    shutil.rmtree(os.path.join(".calkit", "local", "mock-scheduler"))
     out = subprocess.check_output(["calkit", "run"], env=env, text=True)
     assert "already left the queue" in out
     # The completed jobs are not resubmitted, so the run counts stay at one.
     for x in (1, 2):
         with open(f"runs-{x}.txt") as f:
             assert len(f.read().splitlines()) == 1
+
+
+@skipif_windows_mock_scheduler
+def test_run_scheduler_reruns_when_exit_status_unknown(tmp_dir):
+    # Safety: if a finished job's exit status cannot be determined on a later
+    # run---the scheduler purged it from history and we never recorded a code
+    # (e.g. disconnected before the job finished)---Calkit must rerun rather
+    # than assume success. Otherwise a job that actually failed would be cached
+    # as done just because its declared outputs happen to exist on disk.
+    from sqlitedict import SqliteDict
+
+    from calkit.cli.scheduler import JOBS_DB_PATH
+
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        f.write('echo x >> "runs-$1.txt"\n')
+        f.write('echo "$1" > "out-$1.txt"\n')
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm"}},
+        "pipeline": {
+            "stages": {
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{x}"],
+                    "iterate_over": [{"arg_name": "x", "values": [1, 2]}],
+                    "outputs": ["out-{x}.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"], env=env)
+    for x in (1, 2):
+        with open(f"runs-{x}.txt") as f:
+            assert len(f.read().splitlines()) == 1
+    # Wipe the recorded exit codes and the scheduler's status sentinels so the
+    # jobs' outcome is unknowable on the next run, as after a long disconnect.
+    with SqliteDict(JOBS_DB_PATH, autocommit=True) as jobs:
+        for name in list(jobs):
+            info = jobs[name]
+            info.pop("exit_code", None)
+            jobs[name] = info
+    shutil.rmtree(os.path.join(".calkit", "local", "mock-scheduler"))
+    os.remove("dvc.lock")
+    out = subprocess.check_output(["calkit", "run"], env=env, text=True)
+    # The unknown-outcome jobs are rerun, not harvested as successful.
+    assert "already left the queue" not in out
+    for x in (1, 2):
+        with open(f"runs-{x}.txt") as f:
+            assert len(f.read().splitlines()) == 2
 
 
 @skipif_windows_mock_scheduler

@@ -20,6 +20,7 @@ from calkit.cli.scheduler import (
     _parse_slurm_exit_code,
     _poll_job,
     _record_job,
+    _record_job_result,
     _sanitize_pbs_job_name,
     _slurm_exit_code,
     _wait_for_output_file,
@@ -437,3 +438,20 @@ def test_finalize_job(tmp_dir, monkeypatch):
     assert exc.value.exit_code == 1
     # An unknown exit code only warns---the stage's declared outputs decide.
     _finalize_job("sweep@x", "id", None, "job.log")
+
+
+def test_record_job_result(tmp_dir):
+    # Updating before anything is recorded is a no-op (nothing to attach to).
+    _record_job_result("sweep@x", 0)
+    assert _load_jobs() == {}
+    # A definite exit code is attached to the existing record, along with a
+    # completion timestamp, without disturbing the other fields.
+    _record_job("sweep@x", {"job_id": "1", "deps": ["a.txt"]})
+    _record_job_result("sweep@x", 7)
+    info = _load_jobs()["sweep@x"]
+    assert info["exit_code"] == 7
+    assert info["deps"] == ["a.txt"]
+    assert info["finished_at"]
+    # A canceled-and-deleted job is not resurrected by a later result.
+    _record_job_result("gone", 0)
+    assert "gone" not in _load_jobs()

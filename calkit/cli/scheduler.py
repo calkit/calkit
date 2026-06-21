@@ -94,6 +94,31 @@ def _delete_job(name: str) -> None:
             del jobs[name]
 
 
+def _record_job_result(name: str, exit_code: int) -> None:
+    """Persist a finished job's observed exit code and completion time.
+
+    Recording the exit code the moment we observe a job finish means a later
+    ``calkit run`` (e.g. after the master process was disconnected) reads the
+    verdict we already saw instead of re-polling a scheduler record that may
+    have since been purged from history. Without it, a job whose status the
+    scheduler has forgotten looks like an unknown outcome, which we
+    deliberately treat as a failure to rerun rather than assume success. Only
+    an existing record is updated, so a job that was canceled and deleted is
+    not resurrected here.
+    """
+    if not os.path.isfile(JOBS_DB_PATH):
+        return
+    with SqliteDict(
+        JOBS_DB_PATH, autocommit=True, timeout=JOBS_DB_TIMEOUT
+    ) as jobs:
+        info = jobs.get(name)
+        if info is None:
+            return
+        info["exit_code"] = exit_code
+        info["finished_at"] = calkit.utcnow().isoformat()
+        jobs[name] = info
+
+
 def _mock_enabled() -> bool:
     """Whether scheduler commands should run jobs locally.
 
@@ -485,10 +510,17 @@ def _finalize_job(
     whether it worked, so a non-zero scheduler exit code is surfaced as an
     error---raising a non-zero exit that propagates up through ``dvc repro``
     so the stage is marked failed rather than silently recorded as done. An
-    unknown exit code (the scheduler purged the record before we could read
-    it) can't be judged, so we warn and let the stage's declared outputs be
-    the arbiter.
+    unknown exit code here (we waited and the job left the queue, but the
+    scheduler never gave us a status) can't be judged, so we warn and let the
+    stage's declared outputs be the arbiter; a definite code is persisted so a
+    later run reuses it instead of re-polling a possibly-purged record.
     """
+    # Persist the verdict the instant we have it, before the (potentially long)
+    # wait below: the exit code doesn't depend on the log file, and recording
+    # it first means a disconnect mid-wait can't lose the outcome we already
+    # observed.
+    if exit_code is not None:
+        _record_job_result(name, exit_code)
     # Wait for the job's `-o` log---this stage's declared DVC output---to be
     # staged back before we read from or point at it.
     if not _mock_enabled():
@@ -738,8 +770,16 @@ def run_batch(
         # Capture the exit code alongside liveness: if the job already left the
         # queue (e.g. while we were disconnected) the scheduler may still have
         # its status in history, and reading it now avoids losing it to a later
-        # purge.
-        running_or_queued, prev_exit_code = _poll_job(prev_kind, job_id)
+        # purge. An exit code we recorded when the job first finished is
+        # authoritative---we observed it directly---so prefer it over a re-poll,
+        # which can come back unknown once the scheduler forgets the job.
+        stored_exit_code = job_info.get("exit_code")
+        running_or_queued, polled_exit_code = _poll_job(prev_kind, job_id)
+        prev_exit_code = (
+            stored_exit_code
+            if stored_exit_code is not None
+            else polled_exit_code
+        )
         should_wait = True
 
         def _cancel_with_reason(reason: str) -> None:
@@ -791,14 +831,19 @@ def run_batch(
                 raise typer.Exit(0)
         elif not os.environ.get("CALKIT_FORCE"):
             # The job has left the queue (e.g. it finished while the master
-            # process was disconnected). If nothing it depends on changed and
-            # the prior submission succeeded---or its status was purged, in
-            # which case we assume success since there is no record left to
-            # judge by and the stage's declared outputs are the final
-            # arbiter---harvest it rather than resubmitting and discarding the
-            # work. A known failure instead falls through to resubmit, so
-            # `calkit run` retries it (e.g. after the user fixed the cause).
-            # Under --force (CALKIT_FORCE) we skip this and always resubmit.
+            # process was disconnected). Harvest it---rather than resubmitting
+            # and discarding the work---only when nothing it depends on changed
+            # and we have a confirmed successful exit code (recorded when we
+            # first observed the job finish, or read back now from the
+            # scheduler's history). Any other outcome falls through to resubmit
+            # so `calkit run` retries it: a known failure (e.g. so the user can
+            # rerun after fixing the cause) and---just as importantly---an
+            # unknown exit code. An unknown code means the scheduler purged the
+            # finished job before we could read its status; assuming success
+            # there would let a job that actually failed be cached as done,
+            # since its declared outputs exist on disk but may be partial or
+            # wrong. Rerunning is the safe choice. Under --force (CALKIT_FORCE)
+            # we skip this and always resubmit.
             job_dep_md5s = job_info.get("dep_md5s", {})
             deps_unchanged = set(job_deps) == set(deps) and all(
                 current_dep_md5s.get(dep) == job_dep_md5s.get(dep)
@@ -809,11 +854,7 @@ def run_batch(
                 and job_args == args
                 and job_setup == setup_cmds
             )
-            if (
-                deps_unchanged
-                and command_unchanged
-                and prev_exit_code in (0, None)
-            ):
+            if deps_unchanged and command_unchanged and prev_exit_code == 0:
                 typer.echo(
                     f"Job '{name}' already left the queue; using its result"
                 )
@@ -869,6 +910,7 @@ def run_batch(
             "args": args,
             "setup": setup_cmds,
             "dep_md5s": current_dep_md5s,
+            "submitted_at": calkit.utcnow().isoformat(),
         }
         if pid is not None:
             new_job["pid"] = pid

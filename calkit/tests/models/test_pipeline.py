@@ -133,6 +133,62 @@ def test_latexstage():
         output_dir="./build/",
     )
     assert s.pdf_path == "build/my-paper.pdf"
+    # Without a latexmkrc, output_dir/aux_dir drive latexmk via the build CLI
+    s = LatexStage(
+        name="something",
+        environment="tex",
+        target_path="paper/my-paper.tex",
+        output_dir="paper/build",
+        aux_dir="paper/aux",
+    )
+    assert "--output-dir paper/build" in s.dvc_cmd
+    assert "--aux-dir paper/aux" in s.dvc_cmd
+    # With a latexmkrc, it stays authoritative -- Calkit does not pass the dir
+    # flags (a CLI -outdir would override the rc's $out_dir)
+    s = LatexStage(
+        name="something",
+        environment="tex",
+        target_path="paper/my-paper.tex",
+        output_dir="paper/build",
+        aux_dir="paper/aux",
+        latexmkrc_path="paper/.latexmkrc",
+    )
+    assert "--output-dir" not in s.dvc_cmd
+    assert "--aux-dir" not in s.dvc_cmd
+    assert "-r paper/.latexmkrc" in s.dvc_cmd
+    # Extra latexmk_args are passed straight through to latexmk
+    s = LatexStage(
+        name="something",
+        environment="tex",
+        target_path="my-paper.tex",
+        latexmk_args=["-pdflua", "-shell-escape"],
+    )
+    assert "--latexmk-arg -pdflua" in s.dvc_cmd
+    assert "--latexmk-arg -shell-escape" in s.dvc_cmd
+    # A latexmk_args entry that sets a Calkit-managed directory is a conflict
+    with pytest.raises(ValidationError):
+        LatexStage(
+            name="something",
+            environment="tex",
+            target_path="my-paper.tex",
+            output_dir="build",
+            latexmk_args=["-outdir=other"],
+        )
+    # The same flag is allowed when the field is unset (escape hatch)
+    s = LatexStage(
+        name="something",
+        environment="tex",
+        target_path="my-paper.tex",
+        latexmk_args=["-outdir=other"],
+    )
+    assert "--latexmk-arg -outdir=other" in s.dvc_cmd
+    # Paths/args with spaces are shell-quoted in the compiled command
+    s = LatexStage(
+        name="something",
+        environment="tex",
+        target_path="my paper.tex",
+    )
+    assert "'my paper.tex'" in s.dvc_cmd
 
 
 def test_quartostage():

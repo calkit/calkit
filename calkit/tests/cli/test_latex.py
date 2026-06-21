@@ -131,3 +131,35 @@ def test_build(tmp_dir):
         )
     subprocess.check_call(["calkit", "latex", "build", "paper/main.tex"])
     assert os.path.isfile("paper/main.pdf")
+
+
+@skipif_windows_docker
+def test_build_output_and_aux_dirs(tmp_dir):
+    # --output-dir / --aux-dir are given relative to the current directory but
+    # latexmk runs with -cd, so the build command must translate them to the
+    # .tex file's frame. The PDF should land in <output-dir> and aux files in
+    # <aux-dir>, both resolved from the project root.
+    os.makedirs("paper", exist_ok=True)
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            r"""\documentclass{article}
+            \begin{document}
+            Hello, world!
+            \end{document}
+            """
+        )
+    subprocess.check_call(
+        [
+            "calkit",
+            "latex",
+            "build",
+            "--output-dir",
+            "paper/build",
+            "--aux-dir",
+            "paper/aux",
+            "paper/main.tex",
+        ]
+    )
+    assert os.path.isfile("paper/build/main.pdf")
+    assert not os.path.isfile("paper/main.pdf")
+    assert os.path.isfile("paper/aux/main.aux")

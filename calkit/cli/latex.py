@@ -7,6 +7,7 @@ import os
 import string
 import subprocess
 from copy import deepcopy
+from pathlib import Path
 
 import typer
 from typing_extensions import Annotated
@@ -135,6 +136,36 @@ def build(
             help="Path to a latexmkrc file to use for compilation.",
         ),
     ] = None,
+    output_dir: Annotated[
+        str | None,
+        typer.Option(
+            "--output-dir",
+            help=(
+                "Directory for the compiled PDF, relative to the current "
+                "directory. Passed to latexmk as -outdir."
+            ),
+        ),
+    ] = None,
+    aux_dir: Annotated[
+        str | None,
+        typer.Option(
+            "--aux-dir",
+            help=(
+                "Directory for auxiliary files, relative to the current "
+                "directory. Passed to latexmk as -auxdir."
+            ),
+        ),
+    ] = None,
+    latexmk_args: Annotated[
+        list[str],
+        typer.Option(
+            "--latexmk-arg",
+            help=(
+                "Extra argument to pass through to latexmk. Repeat the option "
+                "to pass more than one."
+            ),
+        ),
+    ] = [],
     no_synctex: Annotated[
         bool,
         typer.Option(
@@ -173,7 +204,20 @@ def build(
         latexmk_cmd.append("-silent")
     if force:
         latexmk_cmd.append("-f")
-    latexmk_cmd += ["-interaction=nonstopmode", tex_file]
+    # latexmk runs with -cd, so its -outdir/-auxdir are relative to the .tex
+    # file's directory; convert the (current-directory-relative) Calkit paths
+    # into that frame.
+    tex_dir = os.path.dirname(tex_file) or "."
+    if output_dir is not None:
+        rel = Path(os.path.relpath(output_dir, tex_dir)).as_posix()
+        latexmk_cmd.append(f"-outdir={rel}")
+    if aux_dir is not None:
+        rel = Path(os.path.relpath(aux_dir, tex_dir)).as_posix()
+        latexmk_cmd.append(f"-auxdir={rel}")
+    latexmk_cmd.append("-interaction=nonstopmode")
+    # User pass-through args come last so they can override Calkit's defaults.
+    latexmk_cmd += latexmk_args
+    latexmk_cmd.append(tex_file)
     if environment is not None:
         if no_check:
             check_cmd = ["--no-check"]

@@ -617,6 +617,37 @@ def test_new_latex_stage(tmp_dir):
         ["paper.tex", env_lock_fpath]
     )
     assert pipeline["stages"]["build-paper"]["outs"] == ["paper.pdf"]
+    # output_dir / aux_dir / extra latexmk args flow through to the command
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "latex-stage",
+            "--name",
+            "build-paper-out",
+            "--target",
+            "paper.tex",
+            "--environment",
+            "tex",
+            "--output-dir",
+            "build",
+            "--aux-dir",
+            "aux",
+            "--latexmk-arg",
+            "-shell-escape",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    stage = ck_info["pipeline"]["stages"]["build-paper-out"]
+    assert stage["output_dir"] == "build"
+    assert stage["aux_dir"] == "aux"
+    assert stage["latexmk_args"] == ["-shell-escape"]
+    subprocess.check_call(["calkit", "check", "pipeline", "--compile"])
+    pipeline = calkit.dvc.read_pipeline()
+    cmd = pipeline["stages"]["build-paper-out"]["cmd"]
+    assert "--output-dir build" in cmd
+    assert "--aux-dir aux" in cmd
+    assert "--latexmk-arg -shell-escape" in cmd
 
 
 def test_new_matlab_script_stage(tmp_dir):

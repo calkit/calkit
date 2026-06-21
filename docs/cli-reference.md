@@ -1570,6 +1570,10 @@ Options:
 | `--name`, `-n`                 | text    | yes      |         | Stage name, typically kebab-case.                                                                              |
 | `--environment`, `-e`          | text    | yes      |         | Environment to use to run the stage.                                                                           |
 | `--target`                     | text    | yes      |         | Target .tex file path.                                                                                         |
+| `--output-dir`                 | text    | no       |         | Directory for the compiled PDF (passed to latexmk as -outdir). Ignored when a latexmkrc is provided.           |
+| `--aux-dir`                    | text    | no       |         | Directory for auxiliary files (passed to latexmk as -auxdir). Ignored when a latexmkrc is provided.            |
+| `--latexmkrc`                  | text    | no       |         | Path to a latexmkrc file for compilation.                                                                      |
+| `--latexmk-arg`                | text    | no       |         | Extra argument passed through to latexmk. Repeat the option to pass more than one.                             |
 | `--input`, `-i`                | text    | no       |         | A path on which the stage depends.                                                                             |
 | `--output`, `-o`               | text    | no       |         | A path that is produced by the stage.                                                                          |
 | `--out-git`                    | text    | no       |         | An output that should be stored with Git instead of DVC.                                                       |
@@ -3073,14 +3077,17 @@ Arguments:
 
 Options:
 
-| Option               | Type    | Required | Default | Description                                                        |
-| -------------------- | ------- | -------- | ------- | ------------------------------------------------------------------ |
-| `--env`, `-e`        | text    | no       |         | Environment in which to run latexmk, if applicable.                |
-| `--no-check`         | boolean | no       | False   | Don't check the environment is valid before running latexmk.       |
-| `--latexmk-rc`, `-r` | text    | no       |         | Path to a latexmkrc file to use for compilation.                   |
-| `--no-synctex`       | boolean | no       | False   | Don't generate synctex file for source-to-pdf mapping.             |
-| `--force`, `-f`      | boolean | no       | False   | Force latexmk to recompile all files, even if they are up to date. |
-| `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                              |
+| Option               | Type    | Required | Default | Description                                                                                      |
+| -------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
+| `--env`, `-e`        | text    | no       |         | Environment in which to run latexmk, if applicable.                                              |
+| `--no-check`         | boolean | no       | False   | Don't check the environment is valid before running latexmk.                                     |
+| `--latexmk-rc`, `-r` | text    | no       |         | Path to a latexmkrc file to use for compilation.                                                 |
+| `--output-dir`       | text    | no       |         | Directory for the compiled PDF, relative to the current directory. Passed to latexmk as -outdir. |
+| `--aux-dir`          | text    | no       |         | Directory for auxiliary files, relative to the current directory. Passed to latexmk as -auxdir.  |
+| `--latexmk-arg`      | text    | no       |         | Extra argument to pass through to latexmk. Repeat the option to pass more than one.              |
+| `--no-synctex`       | boolean | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                           |
+| `--force`, `-f`      | boolean | no       | False   | Force latexmk to recompile all files, even if they are up to date.                               |
+| `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                                                            |
 
 <a id="command-group-overleaf-ol"></a>
 

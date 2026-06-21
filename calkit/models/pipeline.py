@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import shlex
 from pathlib import Path
 from typing import Any, Literal
@@ -546,11 +547,35 @@ class MapPathsStage(Stage):
 class LatexStage(Stage):
     kind: Literal["latex"] = "latex"
     target_path: str
+    output_dir: str | None = None
     latexmkrc_path: str | None = None
     pdf_storage: Literal["git", "dvc"] | None = "dvc"
     verbose: bool = False
     force: bool = False
     synctex: bool = True
+
+    @property
+    def pdf_path(self) -> str:
+        """Path to the compiled PDF.
+
+        Like ``target_path`` and every other Calkit path field, ``output_dir``
+        is relative to the stage's working directory (its ``wdir``, defaulting
+        to the project root), not the LaTeX source directory. The returned path
+        is in that same frame, so it drops straight into ``dvc_outs``. When
+        ``output_dir`` is set, the PDF is written to
+        ``<output_dir>/<target stem>.pdf``; otherwise it sits next to the
+        source ``.tex`` file. This mirrors where latexmk actually writes the
+        PDF when a latexmkrc sets ``$out_dir`` -- see
+        ``_warn_on_latexmkrc_out_dir_mismatch`` in ``calkit.pipeline``, which
+        translates the (source-relative) ``$out_dir`` into this frame and warns
+        when the two disagree.
+        """
+        target = Path(self.target_path)
+        if self.output_dir is not None:
+            out_base = Path(self.output_dir) / target.stem
+        else:
+            out_base = target
+        return Path(os.path.normpath(out_base)).with_suffix(".pdf").as_posix()
 
     @property
     def dvc_cmd(self) -> str:
@@ -576,9 +601,7 @@ class LatexStage(Stage):
     @property
     def dvc_outs(self) -> list[str | dict]:
         outs = super().dvc_outs
-        out_path = Path(
-            self.target_path.removesuffix(".tex") + ".pdf"
-        ).as_posix()
+        out_path = self.pdf_path
         # If the PDF output is already in outs use that
         # Otherwise, create a DVC output from pdf_storage and add it to outs
         out_paths = []

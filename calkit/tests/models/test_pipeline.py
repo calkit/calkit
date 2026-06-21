@@ -96,6 +96,43 @@ def test_latexstage():
         outputs=["my-paper.pdf"],
     )
     assert s.dvc_outs == ["my-paper.pdf"]
+    # With no output_dir, the PDF sits next to the source
+    s = LatexStage(
+        name="something",
+        environment="tex",
+        target_path="paper/my-paper.tex",
+    )
+    assert s.pdf_path == "paper/my-paper.pdf"
+    assert "paper/my-paper.pdf" in s.dvc_outs
+    # output_dir is relative to the project root (like every other Calkit path
+    # field), so the PDF lands in <output_dir>/<stem>.pdf
+    s = LatexStage(
+        name="something",
+        environment="tex",
+        target_path="paper/my-paper.tex",
+        output_dir="paper/build",
+    )
+    assert s.pdf_path == "paper/build/my-paper.pdf"
+    assert "paper/build/my-paper.pdf" in s.dvc_outs
+    # The source path's .pdf is not assumed when output_dir is set
+    assert "paper/my-paper.pdf" not in s.dvc_outs
+    # output_dir is respected for git-stored PDFs too
+    s = LatexStage(
+        name="something",
+        environment="tex",
+        target_path="paper/my-paper.tex",
+        output_dir="paper/build",
+        pdf_storage="git",
+    )
+    assert s.dvc_outs == [{"paper/build/my-paper.pdf": {"cache": False}}]
+    # A trailing-slash / redundant "." segment normalizes cleanly
+    s = LatexStage(
+        name="something",
+        environment="tex",
+        target_path="my-paper.tex",
+        output_dir="./build/",
+    )
+    assert s.pdf_path == "build/my-paper.pdf"
 
 
 def test_quartostage():
@@ -108,8 +145,7 @@ def test_quartostage():
     )
     sd = s.to_dvc()
     assert sd["cmd"] == (
-        "calkit xenv -n analysis --no-check -- "
-        "quarto render report/report.qmd"
+        "calkit xenv -n analysis --no-check -- quarto render report/report.qmd"
     )
     assert "report/report.qmd" in sd["deps"]
     assert "report/results.json" in sd["deps"]

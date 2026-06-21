@@ -358,6 +358,7 @@ Model class: `LatexStage`
 | Kind-specific parameter | Type                          | Required | Default |
 | ----------------------- | ----------------------------- | -------- | ------- |
 | `target_path`           | str                           | yes      |         |
+| `output_dir`            | str \| None                   | no       | null    |
 | `latexmkrc_path`        | str \| None                   | no       | null    |
 | `pdf_storage`           | Literal['git', 'dvc'] \| None | no       | 'dvc'   |
 | `verbose`               | bool                          | no       | False   |

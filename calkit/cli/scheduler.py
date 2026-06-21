@@ -515,12 +515,16 @@ def _finalize_job(
     stage's declared outputs be the arbiter; a definite code is persisted so a
     later run reuses it instead of re-polling a possibly-purged record.
     """
+    # Persist the verdict the instant we have it, before the (potentially long)
+    # wait below: the exit code doesn't depend on the log file, and recording
+    # it first means a disconnect mid-wait can't lose the outcome we already
+    # observed.
+    if exit_code is not None:
+        _record_job_result(name, exit_code)
     # Wait for the job's `-o` log---this stage's declared DVC output---to be
     # staged back before we read from or point at it.
     if not _mock_enabled():
         _wait_for_output_file(log_path)
-    if exit_code is not None:
-        _record_job_result(name, exit_code)
     if exit_code is None:
         warn(
             f"Could not determine exit status for job '{name}' (ID {job_id}); "

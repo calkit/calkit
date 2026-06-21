@@ -2891,7 +2891,7 @@ def new_latex_stage(
             "--latexmkrc", help="Path to a latexmkrc file for compilation."
         ),
     ] = None,
-    args: Annotated[
+    latexmk_args: Annotated[
         list[str],
         typer.Option(
             "--latexmk-arg",
@@ -2929,7 +2929,7 @@ def new_latex_stage(
             output_dir=output_dir,
             aux_dir=aux_dir,
             latexmkrc_path=latexmkrc_path,
-            args=args,
+            latexmk_args=latexmk_args,
             inputs=inputs,  # type: ignore
             outputs=ck_outs,
         )

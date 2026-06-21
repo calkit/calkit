@@ -555,16 +555,16 @@ class LatexStage(Stage):
     force: bool = False
     synctex: bool = True
     # Extra arguments passed straight through to latexmk, for control Calkit
-    # does not model. Mirrors the ``args`` field on script stages.
-    args: list[str] = []
+    # does not model.
+    latexmk_args: list[str] = []
 
     @model_validator(mode="after")
     def _check_args_dont_set_managed_dirs(self) -> "LatexStage":
-        """Reject latexmk dir flags in ``args`` that Calkit already manages.
+        """Reject latexmk dir flags in ``latexmk_args`` Calkit already manages.
 
         ``output_dir``/``aux_dir`` drive latexmk's ``-outdir``/``-auxdir``; a
-        duplicate in ``args`` would silently fight them, so make the conflict
-        an error rather than a surprise.
+        duplicate in ``latexmk_args`` would silently fight them, so make the
+        conflict an error rather than a surprise.
         """
         managed = {
             "-outdir": "output_dir",
@@ -572,12 +572,12 @@ class LatexStage(Stage):
             "-auxdir": "aux_dir",
             "-aux-directory": "aux_dir",
         }
-        for arg in self.args:
+        for arg in self.latexmk_args:
             field = managed.get(arg.split("=", 1)[0])
             if field is not None and getattr(self, field) is not None:
                 raise ValueError(
-                    f"latexmk option '{arg}' in args conflicts with the "
-                    f"'{field}' field; set one or the other, not both."
+                    f"latexmk option '{arg}' in latexmk_args conflicts with "
+                    f"the '{field}' field; set one or the other, not both."
                 )
         return self
 
@@ -606,27 +606,31 @@ class LatexStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        cmd = f"calkit latex build -e {self.environment} --no-check"
+        # Quote user-controlled paths/args so spaces or shell metacharacters in
+        # them don't corrupt the compiled DVC command.
+        cmd = (
+            f"calkit latex build -e {shlex.quote(self.environment)} --no-check"
+        )
         if self.latexmkrc_path is not None:
-            cmd += f" -r {self.latexmkrc_path}"
+            cmd += f" -r {shlex.quote(self.latexmkrc_path)}"
         else:
             # Only drive latexmk's output/aux directories when the user has not
             # supplied a latexmkrc; a CLI -outdir would override the rc's
             # $out_dir. With a latexmkrc, it stays authoritative (and the
             # output_dir drift lint in calkit.pipeline covers mismatches).
             if self.output_dir is not None:
-                cmd += f" --output-dir {self.output_dir}"
+                cmd += f" --output-dir {shlex.quote(self.output_dir)}"
             if self.aux_dir is not None:
-                cmd += f" --aux-dir {self.aux_dir}"
+                cmd += f" --aux-dir {shlex.quote(self.aux_dir)}"
         if self.verbose:
             cmd += " --verbose"
         if self.force:
             cmd += " -f"
         if not self.synctex:
             cmd += " --no-synctex"
-        for arg in self.args:
-            cmd += f" --latexmk-arg {arg}"
-        cmd += f" {self.target_path}"
+        for arg in self.latexmk_args:
+            cmd += f" --latexmk-arg {shlex.quote(arg)}"
+        cmd += f" {shlex.quote(self.target_path)}"
         return cmd
 
     @property

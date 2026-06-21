@@ -641,7 +641,7 @@ def test_new_latex_stage(tmp_dir):
     stage = ck_info["pipeline"]["stages"]["build-paper-out"]
     assert stage["output_dir"] == "build"
     assert stage["aux_dir"] == "aux"
-    assert stage["args"] == ["-shell-escape"]
+    assert stage["latexmk_args"] == ["-shell-escape"]
     subprocess.check_call(["calkit", "check", "pipeline", "--compile"])
     pipeline = calkit.dvc.read_pipeline()
     cmd = pipeline["stages"]["build-paper-out"]["cmd"]

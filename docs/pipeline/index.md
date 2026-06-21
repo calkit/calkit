@@ -365,7 +365,7 @@ Model class: `LatexStage`
 | `verbose`               | bool                          | no       | False   |
 | `force`                 | bool                          | no       | False   |
 | `synctex`               | bool                          | no       | True    |
-| `args`                  | list[str]                     | no       |         |
+| `latexmk_args`          | list[str]                     | no       |         |
 
 ### `map-paths`
 

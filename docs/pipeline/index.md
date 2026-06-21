@@ -359,11 +359,13 @@ Model class: `LatexStage`
 | ----------------------- | ----------------------------- | -------- | ------- |
 | `target_path`           | str                           | yes      |         |
 | `output_dir`            | str \| None                   | no       | null    |
+| `aux_dir`               | str \| None                   | no       | null    |
 | `latexmkrc_path`        | str \| None                   | no       | null    |
 | `pdf_storage`           | Literal['git', 'dvc'] \| None | no       | 'dvc'   |
 | `verbose`               | bool                          | no       | False   |
 | `force`                 | bool                          | no       | False   |
 | `synctex`               | bool                          | no       | True    |
+| `args`                  | list[str]                     | no       |         |
 
 ### `map-paths`
 

@@ -2865,6 +2865,42 @@ def new_latex_stage(
     target_path: Annotated[
         str, typer.Option("--target", help="Target .tex file path.")
     ],
+    output_dir: Annotated[
+        str | None,
+        typer.Option(
+            "--output-dir",
+            help=(
+                "Directory for the compiled PDF (passed to latexmk as "
+                "-outdir). Ignored when a latexmkrc is provided."
+            ),
+        ),
+    ] = None,
+    aux_dir: Annotated[
+        str | None,
+        typer.Option(
+            "--aux-dir",
+            help=(
+                "Directory for auxiliary files (passed to latexmk as "
+                "-auxdir). Ignored when a latexmkrc is provided."
+            ),
+        ),
+    ] = None,
+    latexmkrc_path: Annotated[
+        str | None,
+        typer.Option(
+            "--latexmkrc", help="Path to a latexmkrc file for compilation."
+        ),
+    ] = None,
+    args: Annotated[
+        list[str],
+        typer.Option(
+            "--latexmk-arg",
+            help=(
+                "Extra argument passed through to latexmk. Repeat the option "
+                "to pass more than one."
+            ),
+        ),
+    ] = [],
     inputs: StageArgs.inputs = [],
     outputs: StageArgs.outputs = [],
     outs_git: StageArgs.outs_git = [],
@@ -2890,6 +2926,10 @@ def new_latex_stage(
             kind="latex",
             environment=environment,
             target_path=target_path,
+            output_dir=output_dir,
+            aux_dir=aux_dir,
+            latexmkrc_path=latexmkrc_path,
+            args=args,
             inputs=inputs,  # type: ignore
             outputs=ck_outs,
         )

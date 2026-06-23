@@ -499,6 +499,23 @@ def _sync_one(
     # pipeline output that hasn't been produced yet on a fresh run)
     if workspace_hash is None and zip_hash is None:
         return None
+    # Workspace doesn't exist with no prior sync record while syncing to-zip —
+    # there's nothing to push into the zip (e.g., the zip was pulled but
+    # never unzipped into the workspace)
+    if (
+        workspace_hash is None
+        and last_sync_record is None
+        and direction == "to-zip"
+    ):
+        return None
+    # Zip doesn't exist with no prior sync record while syncing to-workspace —
+    # there's nothing to pull into the workspace
+    if (
+        zip_hash is None
+        and last_sync_record is None
+        and direction == "to-workspace"
+    ):
+        return None
     # Deletion + change on the other side is a conflict
     if workspace_deleted and zip_changed and direction == "both":
         raise RuntimeError(

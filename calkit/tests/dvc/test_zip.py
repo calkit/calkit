@@ -303,3 +303,28 @@ def test_sync_one(tmp_dir, monkeypatch):
     assert result is not None
     assert (src7 / "a.txt").read_text() == "hello"
     assert get_sync_record(str(src7.as_posix())) is not None
+    # Zip exists but workspace was never unzipped (no sync record) with
+    # direction=to-zip: nothing to push, skip without error
+    src8 = tmp_dir / "src8"
+    src8.mkdir()
+    (src8 / "a.txt").write_text("hello")
+    zip_out8 = str(tmp_dir / calkit.dvc.zip.ZIPS_DIR / "src8.zip")
+    zip_(str(src8), zip_out8)
+    shutil.rmtree(str(src8))
+    write_zip_path_map({str(src8.as_posix()): zip_out8})
+    result = sync_one(str(src8), zip_out8, direction="to-zip")
+    assert result is None
+    assert os.path.isfile(zip_out8)
+    assert not os.path.exists(str(src8))
+    # Workspace exists but zip was never created (no sync record) with
+    # direction=to-workspace: nothing to pull, skip without error
+    src9 = tmp_dir / "src9"
+    src9.mkdir()
+    (src9 / "a.txt").write_text("hello")
+    zip_out9 = str(tmp_dir / calkit.dvc.zip.ZIPS_DIR / "src9.zip")
+    write_zip_path_map({str(src9.as_posix()): zip_out9})
+    result = sync_one(str(src9), zip_out9, direction="to-workspace")
+    assert result is None
+    assert not os.path.exists(zip_out9)
+    assert get_sync_record(str(src9.as_posix())) is None
+    assert (src9 / "a.txt").read_text() == "hello"

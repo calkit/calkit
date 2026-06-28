@@ -3174,7 +3174,8 @@ def new_release(
         detected_kind, artifact = calkit.releases.find_artifact(path, ck_info)
         if detected_kind is None:
             detected_kind = calkit.detect.detect_artifact_kind(
-                pathlib.Path(path).as_posix()
+                pathlib.Path(path).as_posix(),
+                ignore=calkit.detect.load_detection_ignore(),
             )
         if release_kind is None:
             if detected_kind is None:

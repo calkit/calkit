@@ -1309,3 +1309,33 @@ def test_detect_project_artifacts_includes_results_and_presentations(tmp_dir):
     out = calkit.detect.detect_project_artifacts(ck_info={})
     assert "results/metrics.json" in out["results"]
     assert "slides/deck.pdf" in out["presentations"]
+
+
+def test_detection_ignore_json(tmp_dir):
+    """``.calkit/ignore.json`` excludes paths from selected artifact kinds."""
+    from calkit.detect import (
+        detect_artifact_kind,
+        detect_datasets,
+        detect_figures,
+        load_detection_ignore,
+    )
+
+    path = "paper/figs/report.pdf"
+    ignore = {path: {"not": ["figure"]}}
+    assert detect_artifact_kind(path) == "figure"
+    assert detect_artifact_kind(path, ignore=ignore) == "publication"
+    assert path not in detect_figures([path], ignore=ignore)
+    # Excluding one kind does not block other kinds for the same path.
+    assert "data/raw.csv" in detect_datasets(["data/raw.csv"], ignore=ignore)
+    assert "data/raw.csv" not in detect_datasets(
+        ["data/raw.csv"], ignore={"data/raw.csv": {"not": ["dataset"]}}
+    )
+    # No ignore file -> unchanged detection.
+    assert load_detection_ignore() == {}
+    assert detect_figures(["figures/a.png"]) == ["figures/a.png"]
+    # Malformed JSON -> clear error.
+    os.makedirs(".calkit")
+    with open(".calkit/ignore.json", "w") as f:
+        f.write("{not valid json")
+    with pytest.raises(ValueError, match="Invalid JSON"):
+        load_detection_ignore()

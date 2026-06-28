@@ -179,11 +179,16 @@ def init(
         typer.Option(
             "--force",
             "-f",
-            help="Force reinitializing DVC if already initialized.",
+            help=("Re-initialize even if the project is already initialized."),
         ),
     ] = False,
 ):
     """Initialize the current working directory."""
+    if os.path.isfile("calkit.yaml") and not force:
+        raise_error(
+            "This project is already initialized. "
+            "Use --force to re-initialize."
+        )
     subprocess.run(["git", "init"])
     result = calkit.dvc.run_dvc_command(
         ["init"] + (["--force"] if force else [])

@@ -60,12 +60,32 @@ def test_init(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     assert os.path.isfile("calkit.yaml")
     assert calkit.load_calkit_info() == {}
-    # init must not clobber a pre-existing calkit.yaml
+    # Already initialized: init without --force fails and does not clobber
+    result = subprocess.run(
+        ["calkit", "init"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "already initialized" in result.stderr.lower()
+    assert "use --force" in result.stderr.lower()
+    assert calkit.load_calkit_info() == {}
+    # Pre-existing calkit.yaml blocks init without --force
     os.makedirs("sub")
     ck_info = {"name": "test-project"}
     with open(os.path.join("sub", "calkit.yaml"), "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    subprocess.check_call(["calkit", "init"], cwd="sub")
+    result = subprocess.run(
+        ["calkit", "init"],
+        cwd="sub",
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "already initialized" in result.stderr.lower()
+    assert calkit.load_calkit_info(wdir="sub") == ck_info
+    # --force allows re-initialization without clobbering calkit.yaml
+    subprocess.check_call(["calkit", "init", "--force"], cwd="sub")
     assert calkit.load_calkit_info(wdir="sub") == ck_info
 
 

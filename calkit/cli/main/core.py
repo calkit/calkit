@@ -179,12 +179,22 @@ def init(
         typer.Option(
             "--force",
             "-f",
-            help=("Re-initialize even if the project is already initialized."),
+            help="Re-initialize even if the project is already initialized.",
         ),
     ] = False,
 ):
     """Initialize the current working directory."""
-    if os.path.isfile("calkit.yaml") and not force:
+    import git
+    from git.exc import InvalidGitRepositoryError
+
+    def _project_is_initialized() -> bool:
+        try:
+            git.Repo(".", search_parent_directories=False)
+        except InvalidGitRepositoryError:
+            return False
+        return os.path.isfile(".dvc/config") and os.path.isfile("calkit.yaml")
+
+    if _project_is_initialized() and not force:
         raise_error(
             "This project is already initialized. "
             "Use --force to re-initialize."
@@ -202,13 +212,15 @@ def init(
     # Commit the newly created .dvc directory
     repo = calkit.git.get_repo()
     repo.git.add(".dvc")
-    repo.git.commit("-m", "Initialize DVC")
+    if calkit.git.get_staged_files(repo=repo):
+        repo.git.commit("-m", "Initialize DVC")
     # Create an empty calkit.yaml if one doesn't already exist
     if not os.path.isfile("calkit.yaml"):
         with open("calkit.yaml", "w"):
             pass
         repo.git.add("calkit.yaml")
-        repo.git.commit("-m", "Initialize Calkit")
+        if calkit.git.get_staged_files(repo=repo):
+            repo.git.commit("-m", "Initialize Calkit")
     # TODO: Initialize `dvc.yaml`
     # TODO: Add a sane .gitignore file
     # TODO: Add a sane LICENSE file?

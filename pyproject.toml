@@ -54,6 +54,7 @@ dependencies = [
   "toml>=0.10.2",
   "texsoup>=0.3.3",
   "fsspec>=2026.4.0",
+  "websockets>=16.0",
 ]
 description = "Reproducibility simplified."
 dynamic = ["version"]

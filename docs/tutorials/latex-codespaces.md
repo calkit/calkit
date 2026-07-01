@@ -112,10 +112,31 @@ which will refresh on each build.
 
 ![The editor with buttons.](img/latex-codespaces/editor-split.png)
 
-Note that the play button will run the entire pipeline
-(like calling `calkit run` from a terminal,)
-not just the paper build stage,
-so we can add more stages later, e.g., for creating figures,
+Note that the play button will run build just the paper stage.
+It is also possible to have the play button run the entire pipeline
+(like calling `calkit run` from a terminal)
+by editing the `.devcontainer/devcontainer.conf`:
+```yaml
+{
+  "image": "ghcr.io/calkit/devcontainer:latest",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        ...
+        # Add these lines
+        "latex-workshop.latex.external.build.command": "calkit",
+        "latex-workshop.latex.external.build.args": [
+            "run"
+        ],
+        # Comment-out or remove these lines
+        # "latex-workshop.docker.image.latex": "texlive/texlive:latest-full",
+        # "latex-workshop.docker.enabled": true,
+      }
+    }
+  },
+}
+```
+This we, we can add more stages later, e.g., for creating figures,
 or even another LaTeX document,
 and everything will be kept up-to-date as needed.
 This is a major difference between this workflow and that of a typical

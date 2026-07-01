@@ -15,6 +15,11 @@ import websockets
 from pydantic import BaseModel
 
 
+def read_config():
+    """Read the operator config, which tells us what we're allowed to do."""
+    pass
+
+
 class Message(BaseModel):
     pass
 

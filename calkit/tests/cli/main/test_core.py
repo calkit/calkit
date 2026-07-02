@@ -1836,3 +1836,84 @@ def test_run_downstream_does_not_submit_unrelated_sweep(tmp_dir):
     assert os.path.exists("other.txt")
     assert not os.path.exists("out-1.txt")
     assert not os.path.exists("out-2.txt")
+
+
+def test_add_dvc_pointer_unignored(tmp_dir):
+    """Test that calkit add --to=dvc ensures the .dvc pointer is unignored."""
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("pubs/defense/ppt")
+    with open("pubs/defense/ppt/.gitignore", "w") as f:
+        f.write("*.pdf*\n")
+
+    pdf_path = "pubs/defense/ppt/McCabe.pdf"
+    with open(pdf_path, "w") as f:
+        f.write("dummy pdf content")
+
+    subprocess.check_call(["calkit", "add", "--to=dvc", pdf_path])
+
+    # Assert pointer exists
+    dvc_file = f"{pdf_path}.dvc"
+    assert os.path.exists(dvc_file)
+
+    # Assert pointer is NOT ignored (should return 1)
+    res = subprocess.run(["git", "check-ignore", "-q", dvc_file])
+    assert res.returncode == 1
+
+    # Assert data file IS still ignored
+    res_data = subprocess.run(["git", "check-ignore", "-q", pdf_path])
+    assert res_data.returncode == 0
+
+    # Assert it was staged
+    staged = calkit.git.get_staged_files()
+    assert dvc_file in staged
+
+
+def test_add_dvc_pointer_unignored_idempotent(tmp_dir):
+    """Test that the unignore logic does not duplicate lines."""
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("data")
+    with open("data/.gitignore", "w") as f:
+        f.write("*.pdf*\n")
+
+    pdf_path = "data/doc.pdf"
+    with open(pdf_path, "w") as f:
+        f.write("doc")
+
+    subprocess.check_call(["calkit", "add", "--to=dvc", pdf_path])
+
+    with open("data/.gitignore") as f:
+        content1 = f.read()
+
+    # Second add should not duplicate
+    subprocess.check_call(["calkit", "add", "--to=dvc", pdf_path])
+
+    with open("data/.gitignore") as f:
+        content2 = f.read()
+
+    assert content1 == content2
+    assert content1.count("!*.dvc") == 1
+
+
+def test_call_dvc_passthrough_hint(tmp_dir):
+    """Test that calkit dvc add prints a hint if .dvc is ignored."""
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("data")
+    with open("data/.gitignore", "w") as f:
+        f.write("*.pdf*\n")
+
+    pdf_path = "data/doc.pdf"
+    with open(pdf_path, "w") as f:
+        f.write("doc")
+
+    # Run the passthrough dvc add which will fail because it's ignored
+    res = subprocess.run(
+        ["calkit", "dvc", "add", pdf_path], capture_output=True, text=True
+    )
+    assert res.returncode != 0
+    assert (
+        "Hint: If DVC failed because a .dvc pointer file is git-ignored"
+        in res.stderr
+    )

@@ -786,6 +786,8 @@ def add(
         elif to == "git":
             subprocess.call(["git", "add"] + paths)
         elif to == "dvc":
+            for path in paths:
+                calkit.git.ensure_dvc_pointer_is_not_ignored(repo, path)
             calkit.dvc.run_dvc_command(["add"] + paths)
         elif to == "dvc-zip":
             for path in paths:
@@ -899,6 +901,7 @@ def add(
                         f"Adding {path} to DVC since it's already tracked "
                         "with DVC"
                     )
+                    calkit.git.ensure_dvc_pointer_is_not_ignored(repo, path)
                     calkit.dvc.run_dvc_command(["add", path])
             elif posix_path in pipeline_output_storage:
                 # Respect storage explicitly set in the pipeline definition
@@ -943,6 +946,7 @@ def add(
                     typer.echo(f"Would add {path} to DVC (per extension)")
                 else:
                     typer.echo(f"Adding {path} to DVC per its extension")
+                    calkit.git.ensure_dvc_pointer_is_not_ignored(repo, path)
                     calkit.dvc.run_dvc_command(["add", path])
             elif calkit.dvc.zip.is_zip_candidate(path):
                 if dry_run:
@@ -963,6 +967,7 @@ def add(
                     typer.echo(
                         f"Adding {path} to DVC since it's greater than 1 MB"
                     )
+                    calkit.git.ensure_dvc_pointer_is_not_ignored(repo, path)
                     calkit.dvc.run_dvc_command(["add", path])
             else:
                 if dry_run:
@@ -3218,6 +3223,14 @@ def call_dvc(
     and DVC is not installed.
     """
     result = calkit.dvc.run_dvc_command(sys.argv[2:])
+    if result != 0 and len(sys.argv) > 2 and sys.argv[2] == "add":
+        typer.secho(
+            "Hint: If DVC failed because a .dvc pointer file is git-ignored, "
+            "use `calkit add --to=dvc <path>` instead so Calkit can "
+            "automatically manage the gitignore exception.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
     sys.exit(result)
 
 

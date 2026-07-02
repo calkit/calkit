@@ -362,3 +362,50 @@ def test_extract_title_from_tex(tmp_dir):
         f.write(tex)
     title = _extract_title_from_tex("test.tex")
     assert title == "My Cool Paper"
+
+
+def test_overleaf_sync_trailing_slash_or_space(tmp_dir):
+    pid = str(uuid.uuid4())
+    ol_repo = _make_temp_overleaf_project(pid)
+    ol_repo.git.config(["receive.denyCurrentBranch", "ignore"])
+    subprocess.run(["calkit", "init"], check=True)
+    repo = git.Repo()
+    tmp_remote = (
+        Path(tempfile.gettempdir()) / "overleaf-sync-remotes" / pid
+    ).as_posix()
+    os.makedirs(tmp_remote, exist_ok=True)
+    remote_repo = git.Repo.init(path=tmp_remote, bare=True)
+    remote_repo.git.config(["receive.denyCurrentBranch", "ignore"])
+    repo.git.config(["push.autoSetupRemote", "true"])
+    repo.git.remote(["add", "origin", tmp_remote])
+    ol_url = calkit.overleaf.get_git_remote_url(pid, "no token")
+    assert os.environ["CALKIT_ENV"] == "test"
+    assert os.environ["CALKIT_TEST_OVERLEAF_TOKEN"] == "none"
+    config = calkit.config.read()
+    assert config.overleaf_token == "none"
+    subprocess.run(
+        [
+            "calkit",
+            "overleaf",
+            "import",
+            ol_url,
+            "pubs/applied-ocean-research",
+            "--title",
+            "Test Pub",
+        ],
+        check=True,
+    )
+    # Try syncing with a trailing slash
+    res = subprocess.run(
+        ["calkit", "overleaf", "sync", "pubs/applied-ocean-research/"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, f"Trailing slash sync failed: {res.stderr}"
+    # Try syncing with a trailing space
+    res2 = subprocess.run(
+        ["calkit", "overleaf", "sync", "pubs/applied-ocean-research "],
+        capture_output=True,
+        text=True,
+    )
+    assert res2.returncode == 0, f"Trailing space sync failed: {res2.stderr}"

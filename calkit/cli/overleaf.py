@@ -437,7 +437,12 @@ def sync(
         raise_error("No Overleaf sync info found")
     overleaf_sync_dirs = list(overleaf_info.keys())
     if paths is not None:
-        paths = [os.path.dirname(p) if os.path.isfile(p) else p for p in paths]
+        paths = [
+            (os.path.dirname(p) if os.path.isfile(p) else p)
+            .strip()
+            .rstrip("/\\")
+            for p in paths
+        ]
         for path in paths:
             if path not in overleaf_sync_dirs:
                 raise_error(f"Path '{path}' is not synced with Overleaf")
@@ -611,7 +616,12 @@ def get_status(
         raise_error("No Overleaf sync info found")
     overleaf_sync_dirs = list(overleaf_info.keys())
     if paths is not None:
-        paths = [os.path.dirname(p) if os.path.isfile(p) else p for p in paths]
+        paths = [
+            (os.path.dirname(p) if os.path.isfile(p) else p)
+            .strip()
+            .rstrip("/\\")
+            for p in paths
+        ]
         for path in paths:
             if path not in overleaf_sync_dirs:
                 raise_error(f"Path '{path}' is not synced with Overleaf")

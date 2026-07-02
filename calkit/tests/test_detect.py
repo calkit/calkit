@@ -821,7 +821,7 @@ data = pd.read_csv("data.csv")
     deps = detect_python_dependencies(script_path="script.py")
     assert "numpy" in deps
     assert "pandas" in deps
-    assert "sklearn" in deps
+    assert "scikit-learn" in deps
     assert "matplotlib" in deps
     # stdlib modules should not be included
     assert "os" not in deps
@@ -839,6 +839,19 @@ import json  # stdlib
     assert "requests" in deps
     assert "flask" in deps
     assert "json" not in deps
+
+
+def test_detect_python_dependencies_distribution_mapping():
+    """Test mapping of Python import names to distribution names."""
+    code = """
+import sklearn
+import cv2
+"""
+    deps = detect_python_dependencies(code=code)
+    assert "scikit-learn" in deps
+    assert "opencv-python" in deps
+    assert "sklearn" not in deps
+    assert "cv2" not in deps
 
 
 def test_detect_r_dependencies_from_script(tmp_dir):
@@ -1025,7 +1038,7 @@ def test_detect_dependencies_from_python_notebook(tmp_dir):
     deps = detect_dependencies_from_notebook("notebook.ipynb")
     assert "numpy" in deps
     assert "pandas" in deps
-    assert "sklearn" in deps
+    assert "scikit-learn" in deps
     assert "matplotlib" in deps
     assert "requests" in deps
 

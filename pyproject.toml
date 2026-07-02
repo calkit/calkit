@@ -30,7 +30,7 @@ dependencies = [
   "bibtexparser",
   "checksumdir",
   "docx2pdf",
-  "dvc==3.67.1",
+  "dvc[all]==3.67.1",
   "fastapi",
   "gitpython",
   "keyring",
@@ -117,7 +117,6 @@ exclude = [".github"]
 
 [tool.hatch.build.targets.wheel.shared-data]
 "calkit/labextension" = "share/jupyter/labextensions/calkit"
-"jupyterlab-ext/install.json" = "share/jupyter/labextensions/calkit/install.json"
 "jupyterlab-ext/jupyter-config/server-config" = "etc/jupyter/jupyter_server_config.d"
 
 [tool.hatch.build.hooks.jupyter-builder]

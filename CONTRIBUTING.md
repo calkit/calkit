@@ -98,7 +98,7 @@ This guide will help you get started.
 ## 🎉 Join the community
 
 - Participate in **[GitHub Discussions](https://github.com/calkit/discussions)**.
-- Join our [**Discord**](https://discord.gg/ubb7gAXc) for real-time collaboration.
+- Join our [**Discord**](https://discord.gg/m2MBC79HzD) for real-time collaboration.
 - Follow our updates on [**LinkedIn**](https://linkedin.com/company/calkit).
 
 We appreciate your help in making Calkit better! 🚀

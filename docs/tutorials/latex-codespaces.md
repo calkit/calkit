@@ -115,8 +115,7 @@ which will refresh on each build.
 Note that the play button will run build just the paper stage.
 It is also possible to have the play button run the entire pipeline
 (like calling `calkit run` from a terminal)
-by editing the `.devcontainer/devcontainer.conf`:
-```yaml
+by editing the `.devcontainer/devcontainer.json`:
 {
   "image": "ghcr.io/calkit/devcontainer:latest",
   "customizations": {

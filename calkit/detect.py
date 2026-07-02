@@ -1549,7 +1549,7 @@ def _is_stdlib_module(module_name: str) -> bool:
     return base_module in common_stdlib
 
 
-_IMPORT_TO_DISTRIBUTION = {
+_PYTHON_IMPORT_TO_DISTRIBUTION = {
     "sklearn": "scikit-learn",
     "skimage": "scikit-image",
     "cv2": "opencv-python",
@@ -1629,7 +1629,9 @@ def detect_python_dependencies(
                     # Get the top-level package name
                     top_level = module_name.split(".")[0]
                     dependencies.add(
-                        _IMPORT_TO_DISTRIBUTION.get(top_level, top_level)
+                        _PYTHON_IMPORT_TO_DISTRIBUTION.get(
+                            top_level, top_level
+                        )
                     )
         elif isinstance(node, ast.ImportFrom):
             if node.module and node.level == 0:
@@ -1637,7 +1639,9 @@ def detect_python_dependencies(
                 if not _is_stdlib_module(module_name):
                     top_level = module_name.split(".")[0]
                     dependencies.add(
-                        _IMPORT_TO_DISTRIBUTION.get(top_level, top_level)
+                        _PYTHON_IMPORT_TO_DISTRIBUTION.get(
+                            top_level, top_level
+                        )
                     )
     return sorted(list(dependencies))
 

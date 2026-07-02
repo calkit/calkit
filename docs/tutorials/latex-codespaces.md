@@ -135,7 +135,7 @@ by editing the `.devcontainer/devcontainer.json`:
   },
 }
 ```
-This we, we can add more stages later, e.g., for creating figures,
+This way, we can add more stages later, e.g., for creating figures,
 or even another LaTeX document,
 and everything will be kept up-to-date as needed.
 This is a major difference between this workflow and that of a typical

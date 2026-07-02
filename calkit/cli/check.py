@@ -294,12 +294,51 @@ def check_repro(
     wdir: Annotated[
         str, typer.Option("--wdir", help="Project working directory.")
     ] = ".",
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
 ) -> None:
     """Check the reproducibility of a project."""
     from calkit.check import check_reproducibility
 
     res = check_reproducibility(wdir=wdir, log_func=typer.echo)
+    if as_json:
+        calkit.echo(res.model_dump_json(indent=2))
+        return
+
     calkit.echo(res.to_pretty())
+    if res.untraceable_literals:
+        try:
+            from rich.console import Console
+            from rich.table import Table
+
+            console = Console()
+            table = Table(
+                title="Untraceable Literals",
+                title_justify="left",
+                show_header=True,
+                header_style="bold",
+            )
+            table.add_column("File", style="cyan")
+            table.add_column("Line", justify="right")
+            table.add_column("Col", justify="right")
+            table.add_column("Value", style="red")
+            table.add_column("Context")
+            table.add_column("Suggestion")
+
+            for finding in res.untraceable_literals:
+                table.add_row(
+                    finding["file"],
+                    str(finding["line"]),
+                    str(finding["column"]),
+                    finding["value"],
+                    finding["context"],
+                    finding["suggestion"],
+                )
+            calkit.echo("")
+            console.print(table)
+        except ImportError:
+            pass
 
 
 @check_app.command(
@@ -910,6 +949,7 @@ def check_docker_env(
             os.remove(lock_fpath)
 
     if fpath is not None and rebuild_or_pull:
+        dockerfile_dir: str | None
         dockerfile_dir, dockerfile_name = os.path.split(fpath)
         if not dockerfile_dir:
             dockerfile_dir = None

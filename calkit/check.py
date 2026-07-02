@@ -1,9 +1,9 @@
 """Checking things."""
 
 import os
-from typing import Callable
+from typing import Any, Callable
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, Field, computed_field
 
 import calkit
 
@@ -41,6 +41,7 @@ class ReproCheck(BaseModel):
     n_publications: int
     n_publications_no_import_or_stage: int
     n_dvc_remotes: int
+    untraceable_literals: list[dict] = Field(default_factory=list)
     # TODO: Check calkit remotes are authenticated
 
     @computed_field
@@ -165,6 +166,12 @@ class ReproCheck(BaseModel):
                 f"created by pipeline: {n_good}/{n} "
                 f"{_bool_to_check_x(n_bad == 0)}\n"
             )
+        if self.untraceable_literals:
+            txt += (
+                f"Untraceable literals: {len(self.untraceable_literals)} ❌\n"
+            )
+        else:
+            txt += "Untraceable literals: 0 ✅\n"
         if self.recommendation:
             txt += f"\nRecommendation: {self.recommendation}\n"
         return txt
@@ -176,7 +183,7 @@ def check_reproducibility(
     """Check the reproducibility of a project."""
     from git.exc import InvalidGitRepositoryError
 
-    res = dict()
+    res: dict[str, Any] = dict()
     if log_func is None:
         log_func = print
     try:
@@ -245,4 +252,104 @@ def check_reproducibility(
     # DVC remotes
     dvc_remotes = calkit.dvc.get_remotes(wdir=wdir)
     res["n_dvc_remotes"] = len(dvc_remotes)
+
+    # Check for untraceable literals in manuscript tex targets
+    import re
+
+    from calkit.check_literals import find_untraceable_literals
+
+    from_json_values: dict[str, str | None] = {}
+    generated_tex = set()
+    for stage_name, stage in stages.items():
+        cmd = stage.get("cmd", "")
+        if "calkit latex from-json" in cmd:
+            deps = stage.get("deps", [])
+            for dep in deps:
+                if dep.endswith(".json"):
+                    dep_path = os.path.join(wdir, dep)
+                    if os.path.isfile(dep_path):
+                        try:
+                            import json
+
+                            with open(dep_path) as f:
+                                data = json.load(f)
+                            for val in data.values():
+                                if isinstance(val, (int, float, str)):
+                                    from_json_values[str(val)] = None
+                        except Exception:
+                            pass
+            outs = stage.get("outs", [])
+            for out in outs:
+                out_path = out if isinstance(out, str) else list(out.keys())[0]
+                if out_path.endswith(".tex"):
+                    full_out = os.path.abspath(os.path.join(wdir, out_path))
+                    generated_tex.add(full_out)
+                    if os.path.isfile(full_out):
+                        try:
+                            with open(full_out) as f:
+                                for line in f:
+                                    m = re.match(
+                                        r"\\newcommand\{\\([a-zA-Z]+)\}\{(.+)\}",
+                                        line.strip(),
+                                    )
+                                    if m:
+                                        macro, val = m.groups()
+                                        from_json_values[val] = macro
+                        except Exception:
+                            pass
+
+    tex_targets = set()
+    for pub in ck_info.get("publications", []):
+        if pub.get("path", "").endswith(".tex"):
+            tex_targets.add(pub["path"])
+    for stage_name, stage in stages.items():
+        cmd = stage.get("cmd", "")
+        if "calkit latex build" in cmd:
+            deps = stage.get("deps", [])
+            for dep in deps:
+                if dep.endswith(".tex"):
+                    tex_targets.add(dep)
+
+    def get_tex_and_children(tex_path, visited=None):
+        if visited is None:
+            visited = set()
+        abs_path = os.path.abspath(os.path.join(wdir, tex_path))
+        if abs_path in visited or not os.path.isfile(abs_path):
+            return visited
+        visited.add(abs_path)
+        try:
+            with open(abs_path) as f:
+                content = f.read()
+            for m in re.finditer(r"\\(?:input|include)\{([^}]+)\}", content):
+                child = m.group(1)
+                if not child.endswith(".tex"):
+                    child += ".tex"
+                child_path = os.path.relpath(
+                    os.path.join(os.path.dirname(abs_path), child), wdir
+                )
+                get_tex_and_children(child_path, visited)
+        except Exception:
+            pass
+        return visited
+
+    all_tex_files = set()
+    for t in tex_targets:
+        all_tex_files.update(get_tex_and_children(t))
+
+    all_tex_files = {f for f in all_tex_files if f not in generated_tex}
+
+    untraceable_literals = []
+    for tex_file in sorted(all_tex_files):
+        try:
+            with open(tex_file) as f:
+                content = f.read()
+            rel_path = os.path.relpath(tex_file, wdir)
+            untraceable_literals.extend(
+                find_untraceable_literals(content, rel_path, from_json_values)
+            )
+        except Exception:
+            pass
+
+    res["untraceable_literals"] = untraceable_literals
+
     return ReproCheck.model_validate(res)

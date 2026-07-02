@@ -116,6 +116,7 @@ Note that the play button will run build just the paper stage.
 It is also possible to have the play button run the entire pipeline
 (like calling `calkit run` from a terminal)
 by editing the `.devcontainer/devcontainer.json`:
+
 ```json
 {
   "image": "ghcr.io/calkit/devcontainer:latest",
@@ -136,6 +137,7 @@ by editing the `.devcontainer/devcontainer.json`:
   },
 }
 ```
+
 This way, we can add more stages later, e.g., for creating figures,
 or even another LaTeX document,
 and everything will be kept up-to-date as needed.

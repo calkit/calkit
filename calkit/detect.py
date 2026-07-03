@@ -11,7 +11,10 @@ import re
 import shlex
 import sys
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    import pathspec
 
 NotebookLanguage = Literal["python", "julia", "r"]
 
@@ -1949,41 +1952,20 @@ PRESENTATION_NAMES = {
     "talk.pdf",
 }
 
-DETECTION_IGNORE_FPATH = os.path.join(".calkit", "ignore.json")
+DETECTION_IGNORE_FPATH = os.path.join(".calkit", "ignore")
 
 
-def load_detection_ignore(wdir: str | None = None) -> dict[str, dict]:
-    """Load ``.calkit/ignore.json`` artifact detection exclusions.
+def _load_ignore_spec(wdir: str | None = None) -> "pathspec.PathSpec | None":
+    """Load ``.calkit/ignore`` artifact detection exclusions."""
+    import pathspec
 
-    Returns an empty mapping when the file is absent. Raises ``ValueError`` when
-    the file exists but is not valid JSON.
-    """
     fpath = DETECTION_IGNORE_FPATH
     if wdir is not None:
         fpath = os.path.join(wdir, fpath)
     if not os.path.isfile(fpath):
-        return {}
-    try:
-        with open(fpath, encoding="utf-8") as f:
-            data = json.load(f)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in {fpath}: {e}") from e
-    if not isinstance(data, dict):
-        return {}
-    return data
-
-
-def _is_excluded_from_kind(
-    rel_path: str, kind: str, ignore: dict[str, dict]
-) -> bool:
-    """Whether ``rel_path`` must not be auto-detected as ``kind``."""
-    entry = ignore.get(rel_path)
-    if not isinstance(entry, dict):
-        return False
-    not_kinds = entry.get("not")
-    if not isinstance(not_kinds, list):
-        return False
-    return kind in not_kinds
+        return None
+    with open(fpath, encoding="utf-8") as f:
+        return pathspec.PathSpec.from_lines("gitwildmatch", f)
 
 
 def _ancestor_dir_names(rel_path: str) -> set[str]:
@@ -1997,10 +1979,10 @@ def _path_ext(rel_path: str) -> str:
 
 
 def is_figure_path(
-    rel_path: str, *, ignore: dict[str, dict] | None = None
+    rel_path: str, *, ignore: "pathspec.PathSpec | None" = None
 ) -> bool:
     """Whether a repo-relative path looks like an auto-detectable figure."""
-    if ignore and _is_excluded_from_kind(rel_path, "figure", ignore):
+    if ignore is not None and ignore.match_file(rel_path):
         return False
     ancestors = _ancestor_dir_names(rel_path)
     ext = _path_ext(rel_path)
@@ -2014,10 +1996,10 @@ def is_figure_path(
 
 
 def is_dataset_path(
-    rel_path: str, *, ignore: dict[str, dict] | None = None
+    rel_path: str, *, ignore: "pathspec.PathSpec | None" = None
 ) -> bool:
     """Whether a repo-relative path looks like an auto-detectable dataset."""
-    if ignore and _is_excluded_from_kind(rel_path, "dataset", ignore):
+    if ignore is not None and ignore.match_file(rel_path):
         return False
     return (
         _path_ext(rel_path) in DATASET_EXTENSIONS
@@ -2027,14 +2009,14 @@ def is_dataset_path(
 
 
 def is_result_path(
-    rel_path: str, *, ignore: dict[str, dict] | None = None
+    rel_path: str, *, ignore: "pathspec.PathSpec | None" = None
 ) -> bool:
     """Whether a repo-relative path looks like an auto-detectable result.
 
     A result is a data-like file (JSON, CSV, etc.) under a ``results``-style
     directory. Anything already detected as a figure or dataset is excluded.
     """
-    if ignore and _is_excluded_from_kind(rel_path, "result", ignore):
+    if ignore is not None and ignore.match_file(rel_path):
         return False
     return (
         _path_ext(rel_path) in RESULT_EXTENSIONS
@@ -2045,7 +2027,7 @@ def is_result_path(
 
 
 def is_presentation_path(
-    rel_path: str, *, ignore: dict[str, dict] | None = None
+    rel_path: str, *, ignore: "pathspec.PathSpec | None" = None
 ) -> bool:
     """Whether a repo-relative path looks like an auto-detectable presentation.
 
@@ -2053,7 +2035,7 @@ def is_presentation_path(
     directory, or a file with a presentation-like name (e.g. ``slides.pdf``,
     ``presentation.pdf``) anywhere. Figures are excluded.
     """
-    if ignore and _is_excluded_from_kind(rel_path, "presentation", ignore):
+    if ignore is not None and ignore.match_file(rel_path):
         return False
     if is_figure_path(rel_path, ignore=ignore):
         return False
@@ -2093,7 +2075,7 @@ PUBLICATION_NAMES = {
 
 
 def is_publication_path(
-    rel_path: str, *, ignore: dict[str, dict] | None = None
+    rel_path: str, *, ignore: "pathspec.PathSpec | None" = None
 ) -> bool:
     """Whether a repo-relative path looks like an auto-detectable publication.
 
@@ -2102,7 +2084,7 @@ def is_publication_path(
     ``manuscript.pdf``, ``main.tex``) anywhere. Figures and presentations are
     excluded.
     """
-    if ignore and _is_excluded_from_kind(rel_path, "publication", ignore):
+    if ignore is not None and ignore.match_file(rel_path):
         return False
     if is_figure_path(rel_path, ignore=ignore) or is_presentation_path(
         rel_path, ignore=ignore
@@ -2117,7 +2099,7 @@ def is_publication_path(
 
 
 def detect_artifact_kind(
-    rel_path: str, *, ignore: dict[str, dict] | None = None
+    rel_path: str, *, ignore: "pathspec.PathSpec | None" = None
 ) -> str | None:
     """Infer an artifact's release kind from its repo-relative path.
 
@@ -2172,7 +2154,7 @@ def _collapse_dataset_folders(paths: list[str]) -> list[str]:
 def detect_figures(
     candidate_paths: list[str],
     reserved_paths: list[str] | tuple[str, ...] = (),
-    ignore: dict[str, dict] | None = None,
+    ignore: "pathspec.PathSpec | None" = None,
 ) -> list[str]:
     """Auto-detected figure paths among ``candidate_paths``.
 
@@ -2195,7 +2177,7 @@ def detect_datasets(
     candidate_paths: list[str],
     reserved_paths: list[str] | tuple[str, ...] = (),
     figure_paths: list[str] | tuple[str, ...] = (),
-    ignore: dict[str, dict] | None = None,
+    ignore: "pathspec.PathSpec | None" = None,
 ) -> list[str]:
     """Auto-detected dataset paths among ``candidate_paths``.
 
@@ -2218,7 +2200,7 @@ def detect_datasets(
 def detect_results(
     candidate_paths: list[str],
     reserved_paths: list[str] | tuple[str, ...] = (),
-    ignore: dict[str, dict] | None = None,
+    ignore: "pathspec.PathSpec | None" = None,
 ) -> list[str]:
     """Auto-detected result paths among ``candidate_paths``.
 
@@ -2240,7 +2222,7 @@ def detect_results(
 def detect_presentations(
     candidate_paths: list[str],
     reserved_paths: list[str] | tuple[str, ...] = (),
-    ignore: dict[str, dict] | None = None,
+    ignore: "pathspec.PathSpec | None" = None,
 ) -> list[str]:
     """Auto-detected presentation paths among ``candidate_paths``."""
     reserved = list(reserved_paths)
@@ -2340,7 +2322,7 @@ def detect_project_artifacts(
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
-    ignore = load_detection_ignore(wdir=wdir)
+    ignore = _load_ignore_spec(wdir=wdir)
     reserved = _reserved_artifact_paths(wdir=wdir, ck_info=ck_info)
     candidates = list(
         dict.fromkeys(

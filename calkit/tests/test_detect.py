@@ -1311,31 +1311,52 @@ def test_detect_project_artifacts_includes_results_and_presentations(tmp_dir):
     assert "slides/deck.pdf" in out["presentations"]
 
 
-def test_detection_ignore_json(tmp_dir):
-    """``.calkit/ignore.json`` excludes paths from selected artifact kinds."""
+def test_detection_ignore(tmp_dir):
+    """``.calkit/ignore`` excludes paths from all artifact kinds."""
     from calkit.detect import (
+        _load_ignore_spec,
         detect_artifact_kind,
-        detect_datasets,
         detect_figures,
-        load_detection_ignore,
     )
 
-    path = "paper/figs/report.pdf"
-    ignore = {path: {"not": ["figure"]}}
-    assert detect_artifact_kind(path) == "figure"
-    assert detect_artifact_kind(path, ignore=ignore) == "publication"
-    assert path not in detect_figures([path], ignore=ignore)
-    # Excluding one kind does not block other kinds for the same path.
-    assert "data/raw.csv" in detect_datasets(["data/raw.csv"], ignore=ignore)
-    assert "data/raw.csv" not in detect_datasets(
-        ["data/raw.csv"], ignore={"data/raw.csv": {"not": ["dataset"]}}
-    )
-    # No ignore file -> unchanged detection.
-    assert load_detection_ignore() == {}
+    # (e) No ignore file -> unchanged detection.
+    assert _load_ignore_spec() is None
     assert detect_figures(["figures/a.png"]) == ["figures/a.png"]
-    # Malformed JSON -> clear error.
-    os.makedirs(".calkit")
-    with open(".calkit/ignore.json", "w") as f:
-        f.write("{not valid json")
-    with pytest.raises(ValueError, match="Invalid JSON"):
-        load_detection_ignore()
+
+    os.makedirs(".calkit", exist_ok=True)
+    with open(".calkit/ignore", "w") as f:
+        f.write(
+            "\n".join(
+                [
+                    "# this is a comment",
+                    "",
+                    "paper/figs/report.pdf",
+                    "*.ipynb",
+                    "*.csv",
+                    "notebooks/scratch/",
+                ]
+            )
+        )
+
+    ignore = _load_ignore_spec()
+
+    # (a) a path listed in .calkit/ignore is not detected as ANY artifact type
+    path = "paper/figs/report.pdf"
+    assert detect_artifact_kind(path) == "figure"
+    assert detect_artifact_kind(path, ignore=ignore) is None
+    assert path not in detect_figures([path], ignore=ignore)
+
+    # (b) comments and blank lines are ignored (implied by parsing succeeding)
+    assert ignore is not None
+    assert not ignore.match_file("# this is a comment")
+
+    # (c) a glob pattern excludes matching files
+    globbed = "data/raw.csv"
+    assert detect_artifact_kind(globbed) == "dataset"
+    assert detect_artifact_kind(globbed, ignore=ignore) is None
+    assert ignore.match_file("analysis.ipynb") is True
+
+    # (d) a directory pattern excludes files under it
+    in_dir = "notebooks/scratch/data/raw.parquet"
+    assert detect_artifact_kind(in_dir) == "dataset"
+    assert detect_artifact_kind(in_dir, ignore=ignore) is None

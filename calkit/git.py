@@ -351,7 +351,6 @@ def ensure_dvc_pointer_is_not_ignored(repo, path: str) -> None:
     """
     path = path.replace("\\", "/").rstrip("/")
     pointer = path + ".dvc"
-
     # git check-ignore exits 0 if IGNORED, 1 if NOT ignored, 2 on error.
     result = subprocess.run(
         ["git", "check-ignore", pointer],
@@ -361,19 +360,15 @@ def ensure_dvc_pointer_is_not_ignored(repo, path: str) -> None:
     )
     if result.returncode != 0:
         return  # not ignored (1) or error (2) -> nothing to do
-
     pointer_dir = os.path.dirname(pointer)
     gitignore_path = os.path.join(repo.working_dir, pointer_dir, ".gitignore")
     exception = "!*.dvc"
-
     existing_lines = []
     if os.path.isfile(gitignore_path):
         with open(gitignore_path, "r", encoding="utf-8") as f:
             existing_lines = f.read().splitlines()
-
     if exception in existing_lines:
         return  # already present
-
     os.makedirs(os.path.dirname(gitignore_path), exist_ok=True)
     with open(gitignore_path, "a", encoding="utf-8") as f:
         if existing_lines and existing_lines[-1] != "":

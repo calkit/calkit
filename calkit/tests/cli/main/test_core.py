@@ -1845,25 +1845,19 @@ def test_add_dvc_pointer_unignored(tmp_dir):
     os.makedirs("pubs/defense/ppt")
     with open("pubs/defense/ppt/.gitignore", "w") as f:
         f.write("*.pdf*\n")
-
     pdf_path = "pubs/defense/ppt/McCabe.pdf"
     with open(pdf_path, "w") as f:
         f.write("dummy pdf content")
-
     subprocess.check_call(["calkit", "add", "--to=dvc", pdf_path])
-
     # Assert pointer exists
     dvc_file = f"{pdf_path}.dvc"
     assert os.path.exists(dvc_file)
-
     # Assert pointer is NOT ignored (should return 1)
     res = subprocess.run(["git", "check-ignore", "-q", dvc_file])
     assert res.returncode == 1
-
     # Assert data file IS still ignored
     res_data = subprocess.run(["git", "check-ignore", "-q", pdf_path])
     assert res_data.returncode == 0
-
     # Assert it was staged
     staged = calkit.git.get_staged_files()
     assert dvc_file in staged
@@ -1876,22 +1870,16 @@ def test_add_dvc_pointer_unignored_idempotent(tmp_dir):
     os.makedirs("data")
     with open("data/.gitignore", "w") as f:
         f.write("*.pdf*\n")
-
     pdf_path = "data/doc.pdf"
     with open(pdf_path, "w") as f:
         f.write("doc")
-
     subprocess.check_call(["calkit", "add", "--to=dvc", pdf_path])
-
     with open("data/.gitignore") as f:
         content1 = f.read()
-
     # Second add should not duplicate
     subprocess.check_call(["calkit", "add", "--to=dvc", pdf_path])
-
     with open("data/.gitignore") as f:
         content2 = f.read()
-
     assert content1 == content2
     assert content1.count("!*.dvc") == 1
 

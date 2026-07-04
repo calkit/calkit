@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from os import PathLike
 from pathlib import Path
 
@@ -351,15 +350,8 @@ def ensure_dvc_pointer_is_not_ignored(repo, path: str) -> None:
     """
     path = path.replace("\\", "/").rstrip("/")
     pointer = path + ".dvc"
-    # git check-ignore exits 0 if IGNORED, 1 if NOT ignored, 2 on error.
-    result = subprocess.run(
-        ["git", "check-ignore", pointer],
-        cwd=repo.working_dir,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return  # not ignored (1) or error (2) -> nothing to do
+    if pointer not in repo.ignored(pointer):
+        return
     pointer_dir = os.path.dirname(pointer)
     gitignore_path = os.path.join(repo.working_dir, pointer_dir, ".gitignore")
     exception = "!*.dvc"
@@ -368,7 +360,7 @@ def ensure_dvc_pointer_is_not_ignored(repo, path: str) -> None:
         with open(gitignore_path, "r", encoding="utf-8") as f:
             existing_lines = f.read().splitlines()
     if exception in existing_lines:
-        return  # already present
+        return  # Already present
     os.makedirs(os.path.dirname(gitignore_path), exist_ok=True)
     with open(gitignore_path, "a", encoding="utf-8") as f:
         if existing_lines and existing_lines[-1] != "":

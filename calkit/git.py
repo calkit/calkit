@@ -337,3 +337,32 @@ def ensure_path_is_not_ignored(
     if target_repo.ignored(target_path) and _depth < 10:
         ensure_path_is_not_ignored(target_repo, target_path, _depth + 1)
     return True
+
+
+def ensure_dvc_pointer_is_not_ignored(repo, path: str) -> None:
+    """Ensure the .dvc pointer for ``path`` will not be Git-ignored.
+
+    A broad pattern in a ``.gitignore`` (e.g. ``*.pdf*``) can also match the
+    ``<path>.dvc`` pointer DVC commits to Git, causing ``dvc add`` to fail with
+    "bad DVC file name ... is git-ignored". This appends a ``!*.dvc`` negation
+    to the ``.gitignore`` in the pointer's own directory (which wins under Git
+    precedence) so pointers stay tracked. Idempotent.
+    """
+    path = path.replace("\\", "/").rstrip("/")
+    pointer = path + ".dvc"
+    if pointer not in repo.ignored(pointer):
+        return
+    pointer_dir = os.path.dirname(pointer)
+    gitignore_path = os.path.join(repo.working_dir, pointer_dir, ".gitignore")
+    exception = "!*.dvc"
+    existing_lines = []
+    if os.path.isfile(gitignore_path):
+        with open(gitignore_path, "r", encoding="utf-8") as f:
+            existing_lines = f.read().splitlines()
+    if exception in existing_lines:
+        return  # Already present
+    os.makedirs(os.path.dirname(gitignore_path), exist_ok=True)
+    with open(gitignore_path, "a", encoding="utf-8") as f:
+        if existing_lines and existing_lines[-1] != "":
+            f.write("\n")
+        f.write(exception + "\n")

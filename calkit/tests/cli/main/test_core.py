@@ -1891,11 +1891,9 @@ def test_call_dvc_passthrough_hint(tmp_dir):
     os.makedirs("data")
     with open("data/.gitignore", "w") as f:
         f.write("*.pdf*\n")
-
     pdf_path = "data/doc.pdf"
     with open(pdf_path, "w") as f:
         f.write("doc")
-
     # Run the passthrough dvc add which will fail because it's ignored
     res = subprocess.run(
         ["calkit", "dvc", "add", pdf_path], capture_output=True, text=True

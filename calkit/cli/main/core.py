@@ -1863,8 +1863,14 @@ def run(
         calkit.echo("💻 Getting system information")
     # Get system information
     system_info = calkit.get_system_info()
+    # Save the system to .calkit/local/systems unconditionally
+    local_sysinfo_fpath = os.path.join(
+        calkit.ensure_local_dir(), "systems", system_info["id"] + ".json"
+    )
+    os.makedirs(os.path.dirname(local_sysinfo_fpath), exist_ok=True)
+    with open(local_sysinfo_fpath, "w") as f:
+        json.dump(system_info, f, indent=2)
     if save_logs:
-        # Save the system to .calkit/systems
         if verbose:
             typer.echo("Saving system information:")
             typer.echo(system_info)
@@ -1872,8 +1878,7 @@ def run(
             ".calkit", "systems", system_info["id"] + ".json"
         )
         os.makedirs(os.path.dirname(sysinfo_fpath), exist_ok=True)
-        with open(sysinfo_fpath, "w") as f:
-            json.dump(system_info, f, indent=2)
+        shutil.copy2(local_sysinfo_fpath, sysinfo_fpath)
     # First check any system-level dependencies exist
     if not quiet:
         calkit.echo("🔗 Checking system-level dependencies")
@@ -2001,23 +2006,26 @@ def run(
                         targets.append(dvc_stage_name)
         if not targets:
             raise_error("No stages found to run")
-    if save_logs:
-        # Get status of Git repo before running
-        repo = calkit.git.get_repo()
+    # Get status of Git repo before running
+    repo = calkit.git.get_repo()
+    try:
         git_rev = repo.head.commit.hexsha
-        try:
-            git_branch = repo.active_branch.name
-        except TypeError:
-            # If no branch is checked out, we are in a detached HEAD state
-            git_branch = None
-        git_changed_files_before = calkit.git.get_changed_files(repo=repo)
-        git_staged_files_before = calkit.git.get_staged_files(repo=repo)
-        git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
-        # Get status of DVC repo before running
-        dvc_repo = calkit.dvc.get_dvc_repo()
-        dvc_status_before = dvc_repo.status()
-        dvc_data_status_before = dvc_repo.data_status()
-        dvc_data_status_before.pop("git", None)  # Remove git status
+    except ValueError:
+        # If no commits exist yet
+        git_rev = None
+    try:
+        git_branch = repo.active_branch.name
+    except TypeError:
+        # If no branch is checked out, we are in a detached HEAD state
+        git_branch = None
+    git_changed_files_before = calkit.git.get_changed_files(repo=repo)
+    git_staged_files_before = calkit.git.get_staged_files(repo=repo)
+    git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
+    # Get status of DVC repo before running
+    dvc_repo = calkit.dvc.get_dvc_repo()
+    dvc_status_before = dvc_repo.status()
+    dvc_data_status_before = dvc_repo.data_status()
+    dvc_data_status_before.pop("git", None)  # Remove git status
     if targets is None:
         targets = []
     args, isolated_sp_targets = calkit.pipeline.translate_run_targets(
@@ -2148,6 +2156,80 @@ def run(
     # otherwise it skips jobs it sees as already done.
     if force:
         os.environ["CALKIT_FORCE"] = "1"
+    import dvc.stage.run
+
+    orig_cmd_run = dvc.stage.run.cmd_run
+
+    def _patched_cmd_run(stage, dry=False, run_env=None):
+        if dry:
+            return orig_cmd_run(stage, dry=dry, run_env=run_env)
+
+        stage_name = stage.name
+        stage_log_fname = (
+            start_time_no_tz.isoformat(timespec="seconds").replace(":", "-")
+            + "-"
+            + run_id
+            + "-"
+            + stage_name
+            + ".log"
+        )
+        stage_log_path = os.path.join(local_logs_dir, stage_log_fname)
+
+        orig_run = dvc.stage.run._run
+
+        def _patched_run(executable, cmd, **kwargs):
+            import signal
+            import sys
+            import threading
+
+            kwargs["stdout"] = subprocess.PIPE
+            kwargs["stderr"] = subprocess.STDOUT
+            kwargs["universal_newlines"] = True
+            kwargs["bufsize"] = 1
+
+            exec_cmd = dvc.stage.run._make_cmd(executable, cmd)
+            main_thread = isinstance(
+                threading.current_thread(),
+                threading._MainThread,
+            )
+            old_handler = None
+
+            with open(stage_log_path, "a", encoding="utf-8") as stage_log_f:
+                try:
+                    p = subprocess.Popen(exec_cmd, **kwargs)
+                    if main_thread:
+                        old_handler = signal.signal(
+                            signal.SIGINT, signal.SIG_IGN
+                        )
+
+                    for line in p.stdout:
+                        sys.stdout.write(line)
+                        sys.stdout.flush()
+                        stage_log_f.write(line)
+                        stage_log_f.flush()
+
+                    p.wait()
+                    if p.returncode != 0:
+                        raise dvc.stage.run.StageCmdFailedError(
+                            cmd, p.returncode
+                        )
+                finally:
+                    if old_handler:
+                        signal.signal(signal.SIGINT, old_handler)
+
+        dvc.stage.run._run = _patched_run
+        try:
+            return orig_cmd_run(stage, dry=dry, run_env=run_env)
+        finally:
+            dvc.stage.run._run = orig_run
+            if save_logs:
+                saved_stage_log_fpath = os.path.join(
+                    ".calkit", "logs", stage_log_fname
+                )
+                shutil.copy2(stage_log_path, saved_stage_log_fpath)
+
+    dvc.stage.run.cmd_run = _patched_cmd_run
+
     try:
         # Wait generously for the repo lock instead of failing after DVC's 3s
         # default. Brief contention is common and benign: a background
@@ -2160,6 +2242,7 @@ def run(
             res = dvc_cli_main(["repro"] + args)
     finally:
         os.environ.pop("CALKIT_FORCE", None)
+        dvc.stage.run.cmd_run = orig_cmd_run
     failed = failed or res != 0
     # Parse log to get timing and which stages ran
     with open(log_fpath, "r") as f:
@@ -2196,52 +2279,57 @@ def run(
     # Close logger file handler to prevent permissions issues if deleting
     dvc.log.logger.removeHandler(file_handler)
     file_handler.close()
+    # Get Git status after running
+    git_changed_files_after = calkit.git.get_changed_files(repo=repo)
+    git_staged_files_after = calkit.git.get_staged_files(repo=repo)
+    git_untracked_files_after = calkit.git.get_untracked_files(repo=repo)
+    # Get DVC status after running
+    dvc_status_after = dvc_repo.status()
+    dvc_data_status_after = dvc_repo.data_status()
+    dvc_data_status_after.pop("git", None)  # Remove git status
+    # Save run information to a file
+    if verbose:
+        typer.echo("Saving run info")
+    run_info = {
+        "id": run_id,
+        "system_id": system_info["id"],
+        "start_time": start_time.isoformat(),
+        "end_time": calkit.utcnow(remove_tz=False).isoformat(),
+        "targets": targets,
+        "force": force,
+        "dvc_args": args,
+        "status": "failed" if failed else "completed",
+        "stages": stage_run_info,
+        "git_rev": git_rev,
+        "git_branch": git_branch,
+        "git_changed_files_before": git_changed_files_before,
+        "git_staged_files_before": git_staged_files_before,
+        "git_untracked_files_before": git_untracked_files_before,
+        "git_changed_files_after": git_changed_files_after,
+        "git_staged_files_after": git_staged_files_after,
+        "git_untracked_files_after": git_untracked_files_after,
+        "dvc_status_before": dvc_status_before,
+        "dvc_data_status_before": dvc_data_status_before,
+        "dvc_status_after": dvc_status_after,
+        "dvc_data_status_after": dvc_data_status_after,
+    }
+    run_info_fname = (
+        start_time_no_tz.isoformat(timespec="seconds").replace(":", "-")
+        + "-"
+        + run_id
+        + ".json"
+    )
+    local_run_info_fpath = os.path.join(
+        calkit.ensure_local_dir(), "runs", run_info_fname
+    )
+    os.makedirs(os.path.dirname(local_run_info_fpath), exist_ok=True)
+    with open(local_run_info_fpath, "w") as f:
+        json.dump(run_info, f, indent=2)
+
     if save_logs:
-        # Get Git status after running
-        git_changed_files_after = calkit.git.get_changed_files(repo=repo)
-        git_staged_files_after = calkit.git.get_staged_files(repo=repo)
-        git_untracked_files_after = calkit.git.get_untracked_files(repo=repo)
-        # Get DVC status after running
-        dvc_status_after = dvc_repo.status()
-        dvc_data_status_after = dvc_repo.data_status()
-        dvc_data_status_after.pop("git", None)  # Remove git status
-        # Save run information to a file
-        if verbose:
-            typer.echo("Saving run info")
-        run_info = {
-            "id": run_id,
-            "system_id": system_info["id"],
-            "start_time": start_time.isoformat(),
-            "end_time": calkit.utcnow(remove_tz=False).isoformat(),
-            "targets": targets,
-            "force": force,
-            "dvc_args": args,
-            "status": "failed" if failed else "completed",
-            "stages": stage_run_info,
-            "git_rev": git_rev,
-            "git_branch": git_branch,
-            "git_changed_files_before": git_changed_files_before,
-            "git_staged_files_before": git_staged_files_before,
-            "git_untracked_files_before": git_untracked_files_before,
-            "git_changed_files_after": git_changed_files_after,
-            "git_staged_files_after": git_staged_files_after,
-            "git_untracked_files_after": git_untracked_files_after,
-            "dvc_status_before": dvc_status_before,
-            "dvc_data_status_before": dvc_data_status_before,
-            "dvc_status_after": dvc_status_after,
-            "dvc_data_status_after": dvc_data_status_after,
-        }
-        run_info_fpath = os.path.join(
-            ".calkit",
-            "runs",
-            start_time_no_tz.isoformat(timespec="seconds").replace(":", "-")
-            + "-"
-            + run_id
-            + ".json",
-        )
+        run_info_fpath = os.path.join(".calkit", "runs", run_info_fname)
         os.makedirs(os.path.dirname(run_info_fpath), exist_ok=True)
-        with open(run_info_fpath, "w") as f:
-            json.dump(run_info, f, indent=2)
+        shutil.copy2(local_run_info_fpath, run_info_fpath)
         # Also keep the raw log in the tracked .calkit/logs directory
         saved_log_fpath = os.path.join(".calkit", "logs", log_fname)
         os.makedirs(os.path.dirname(saved_log_fpath), exist_ok=True)

@@ -1243,17 +1243,22 @@ def test_run_writes_private_logs(tmp_dir):
     subprocess.check_call(["calkit", "run"])
     local_logs = os.path.join(".calkit", "local", "logs")
     private = [f for f in os.listdir(local_logs) if f.endswith(".log")]
-    assert len(private) == 1
+    # One main run log and one stage log
+    assert len(private) == 2
     assert os.path.isfile(os.path.join(".calkit", "local", ".gitignore"))
     tracked_dir = os.path.join(".calkit", "logs")
     assert not os.path.isdir(tracked_dir) or not [
         f for f in os.listdir(tracked_dir) if f.endswith(".log")
     ]
+    # Without --log, run info and systems are also saved privately to .calkit/local
+    assert os.path.isdir(os.path.join(".calkit", "local", "runs"))
+    assert os.path.isdir(os.path.join(".calkit", "local", "systems"))
     # With --log, the log is also saved to the tracked directory plus run info
     subprocess.check_call(["calkit", "run", "--log", "--force"])
     tracked = [f for f in os.listdir(tracked_dir) if f.endswith(".log")]
-    assert len(tracked) == 1
+    assert len(tracked) == 2
     assert os.path.isdir(os.path.join(".calkit", "runs"))
+    assert os.path.isdir(os.path.join(".calkit", "systems"))
 
 
 def test_prune_run_logs(tmp_dir):
@@ -1903,3 +1908,112 @@ def test_call_dvc_passthrough_hint(tmp_dir):
         "Hint: If DVC failed because a .dvc pointer file is git-ignored"
         in res.stderr
     )
+
+
+def test_run_captures_stage_logs(tmp_dir, capsys):
+    """Test that stage stdout and stderr are captured and teed to the terminal."""
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["calkit", "init"])
+    # Create a Python script that prints to stdout and stderr
+    script = (
+        "import sys\n"
+        "sys.stdout.write('OUT_MARKER\\n')\n"
+        "sys.stderr.write('ERR_MARKER\\n')\n"
+    )
+    with open("stage_script.py", "w") as f:
+        f.write(script)
+    # Add a stage manually via dvc.yaml
+    dvc_yaml = {
+        "stages": {
+            "test_stage": {
+                "cmd": "python stage_script.py",
+            }
+        }
+    }
+    with open("dvc.yaml", "w") as f:
+        import yaml
+        yaml.dump(dvc_yaml, f)
+    
+    # Run pipeline and capture output at terminal
+    res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    assert res.returncode == 0
+    # Both markers should be in the terminal output
+    assert "OUT_MARKER" in res.stdout
+    assert "ERR_MARKER" in res.stdout  # dvc cmd runner outputs stderr to stdout usually, or we tee stderr to stdout
+    
+    # Verify the log file was created in .calkit/local/logs
+    local_logs = os.path.join(".calkit", "local", "logs")
+    log_files = [f for f in os.listdir(local_logs) if "test_stage.log" in f]
+    assert len(log_files) == 1
+    with open(os.path.join(local_logs, log_files[0])) as f:
+        log_content = f.read()
+    assert "OUT_MARKER" in log_content
+    assert "ERR_MARKER" in log_content
+
+
+def test_run_captures_stage_logs_failure(tmp_dir):
+    """Test that stage output is captured even if the stage fails."""
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["calkit", "init"])
+    # Create a Python script that fails
+    script = (
+        "import sys\n"
+        "sys.stdout.write('FAIL_OUT_MARKER\\n')\n"
+        "sys.exit(1)\n"
+    )
+    with open("stage_fail.py", "w") as f:
+        f.write(script)
+    dvc_yaml = {
+        "stages": {
+            "fail_stage": {
+                "cmd": "python stage_fail.py",
+            }
+        }
+    }
+    with open("dvc.yaml", "w") as f:
+        import yaml
+        yaml.dump(dvc_yaml, f)
+    
+    res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    assert res.returncode != 0
+    
+    local_logs = os.path.join(".calkit", "local", "logs")
+    log_files = [f for f in os.listdir(local_logs) if "fail_stage.log" in f]
+    assert len(log_files) == 1
+    with open(os.path.join(local_logs, log_files[0])) as f:
+        log_content = f.read()
+    assert "FAIL_OUT_MARKER" in log_content
+
+
+def test_run_log_flag_copies_stage_logs(tmp_dir):
+    """Test that --log copies stage logs to the tracked directory."""
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["calkit", "init"])
+    script = (
+        "import sys\n"
+        "sys.stdout.write('OUT_MARKER\\n')\n"
+    )
+    with open("stage_script.py", "w") as f:
+        f.write(script)
+    dvc_yaml = {
+        "stages": {
+            "test_stage_log": {
+                "cmd": "python stage_script.py",
+            }
+        }
+    }
+    with open("dvc.yaml", "w") as f:
+        import yaml
+        yaml.dump(dvc_yaml, f)
+    
+    res = subprocess.run(["calkit", "run", "--log"])
+    assert res.returncode == 0
+    
+    tracked_logs = os.path.join(".calkit", "logs")
+    log_files = [
+        f for f in os.listdir(tracked_logs) if "test_stage_log.log" in f
+    ]
+    assert len(log_files) == 1
+    with open(os.path.join(tracked_logs, log_files[0])) as f:
+        log_content = f.read()
+    assert "OUT_MARKER" in log_content

@@ -1,5 +1,6 @@
 """Tests for the sync CLI commands."""
 
+import subprocess
 from unittest.mock import patch
 
 from typer.testing import CliRunner
@@ -82,3 +83,12 @@ def test_sync_overleaf_is_accessible():
     result = runner.invoke(app, ["sync", "overleaf", "--help"])
     assert result.exit_code == 0
     assert "Sync folders with Overleaf" in result.output
+
+
+def test_sync_all_skips_git_without_remote(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    res = subprocess.run(
+        ["calkit", "sync", "all"], capture_output=True, text=True
+    )
+    assert res.returncode == 0
+    assert "Skipping git: not configured." in res.stdout

@@ -1294,8 +1294,8 @@ def push(
 
 def _is_git_configured() -> bool:
     try:
-        calkit.git.get_repo()
-        return True
+        repo = calkit.git.get_repo()
+        return len(repo.remotes) > 0
     except Exception:
         return False
 

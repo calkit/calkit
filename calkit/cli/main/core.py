@@ -59,6 +59,7 @@ from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
 from calkit.cli.overleaf import overleaf_app
 from calkit.cli.scheduler import scheduler_app
+from calkit.cli.sync import register_sync_target, sync_app
 from calkit.cli.update import update_app
 
 app = typer.Typer(
@@ -89,6 +90,7 @@ app.add_typer(
     help="Work with a job scheduler (SLURM or PBS).",
 )
 app.add_typer(dev_app, name="dev", help="Developer tools.", hidden=True)
+app.add_typer(sync_app, name="sync", help="Sync with disparate systems.")
 
 
 def _to_shell_cmd(cmd: list[str]) -> str:
@@ -1157,6 +1159,8 @@ def save(
 @app.command(name="pull")
 def pull(
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
+    no_dvc: Annotated[bool, typer.Option("--no-dvc")] = False,
+    no_git: Annotated[bool, typer.Option("--no-git")] = False,
     git_args: Annotated[
         list[str],
         typer.Option("--git-arg", help="Additional Git args."),
@@ -1181,58 +1185,62 @@ def pull(
     ] = False,
 ):
     """Pull with both Git and DVC."""
-    typer.echo("Git pulling")
-    if force:
-        if "-f" not in git_args and "--force" not in git_args:
-            git_args.append("-f")
-        if "-f" not in dvc_args and "--force" not in dvc_args:
-            dvc_args.append("-f")
-    try:
-        git_cmd = ["git", "pull"]
-        if not no_recursive and "--recurse-submodules" not in git_args:
-            git_cmd.append("--recurse-submodules")
-        subprocess.check_call(git_cmd + git_args)
-    except subprocess.CalledProcessError:
-        raise_error("Git pull failed")
-    typer.echo("DVC pulling")
-    if not no_check_auth:
-        # Check that our dvc remotes all have our DVC token set for them
-        remotes = calkit.dvc.get_remotes()
-        for name, url in remotes.items():
-            if calkit.dvc.detect_calkit_remote_type(name, url) == "http":
-                typer.echo(f"Checking authentication for DVC remote: {name}")
-                calkit.dvc.set_remote_auth(remote_name=name)
-    if (
-        not no_recursive
-        and "--recursive" not in dvc_args
-        and "-R" not in dvc_args
-    ):
-        dvc_args.append("--recursive")
-    result = calkit.dvc.run_dvc_command(
-        ["pull"] + dvc_args,
-        lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
-    )
-    if result != 0:
-        raise_error("DVC pull failed")
-    calkit.dvc.zip.sync_all(direction="to-workspace")
-    if not no_recursive:
-        # Pull DVC in isolated subprojects (those with their own .dvc folder)
-        ck_info = calkit.load_calkit_info()
-        for sp in ck_info.get("subprojects", []):
-            if not isinstance(sp, dict) or not sp.get("path"):
-                continue
-            sp_path = sp["path"]
-            if not os.path.isdir(os.path.join(sp_path, ".dvc")):
-                continue
-            typer.echo(f"DVC pulling subproject: {sp_path}")
-            sp_result = calkit.dvc.run_dvc_command(
-                ["pull"] + dvc_args,
-                cwd=sp_path,
-                lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
-            )
-            if sp_result != 0:
-                raise_error(f"DVC pull failed for subproject: {sp_path}")
-            calkit.dvc.zip.sync_all(direction="to-workspace", wdir=sp_path)
+    if not no_git:
+        typer.echo("Git pulling")
+        if force:
+            if "-f" not in git_args and "--force" not in git_args:
+                git_args.append("-f")
+            if "-f" not in dvc_args and "--force" not in dvc_args:
+                dvc_args.append("-f")
+        try:
+            git_cmd = ["git", "pull"]
+            if not no_recursive and "--recurse-submodules" not in git_args:
+                git_cmd.append("--recurse-submodules")
+            subprocess.check_call(git_cmd + git_args)
+        except subprocess.CalledProcessError:
+            raise_error("Git pull failed")
+    if not no_dvc:
+        typer.echo("DVC pulling")
+        if not no_check_auth:
+            # Check that our dvc remotes all have our DVC token set for them
+            remotes = calkit.dvc.get_remotes()
+            for name, url in remotes.items():
+                if calkit.dvc.detect_calkit_remote_type(name, url) == "http":
+                    typer.echo(
+                        f"Checking authentication for DVC remote: {name}"
+                    )
+                    calkit.dvc.set_remote_auth(remote_name=name)
+        if (
+            not no_recursive
+            and "--recursive" not in dvc_args
+            and "-R" not in dvc_args
+        ):
+            dvc_args.append("--recursive")
+        result = calkit.dvc.run_dvc_command(
+            ["pull"] + dvc_args,
+            lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
+        )
+        if result != 0:
+            raise_error("DVC pull failed")
+        calkit.dvc.zip.sync_all(direction="to-workspace")
+        if not no_recursive:
+            # Pull DVC in isolated subprojects (those with their own .dvc folder)
+            ck_info = calkit.load_calkit_info()
+            for sp in ck_info.get("subprojects", []):
+                if not isinstance(sp, dict) or not sp.get("path"):
+                    continue
+                sp_path = sp["path"]
+                if not os.path.isdir(os.path.join(sp_path, ".dvc")):
+                    continue
+                typer.echo(f"DVC pulling subproject: {sp_path}")
+                sp_result = calkit.dvc.run_dvc_command(
+                    ["pull"] + dvc_args,
+                    cwd=sp_path,
+                    lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
+                )
+                if sp_result != 0:
+                    raise_error(f"DVC pull failed in subproject: {sp_path}")
+                calkit.dvc.zip.sync_all(direction="to-workspace", wdir=sp_path)
 
 
 @app.command(name="push")
@@ -1284,14 +1292,44 @@ def push(
             raise_error("Git push failed")
 
 
-@app.command(name="sync")
-def sync(
+def _is_git_configured() -> bool:
+    try:
+        calkit.git.get_repo()
+        return True
+    except Exception:
+        return False
+
+
+@sync_app.command(name="git")
+def sync_git(
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
-):
-    """Sync the project repo by pulling and then pushing."""
-    # TODO: Walk users through merge conflicts if they arise
-    pull(no_check_auth=no_check_auth)
-    push(no_check_auth=no_check_auth)
+) -> None:
+    """Sync the Git repository by pulling and then pushing."""
+    pull(no_dvc=True, no_check_auth=no_check_auth)
+    push(no_dvc=True, no_check_auth=no_check_auth)
+
+
+register_sync_target("git", sync_git, _is_git_configured)
+
+
+def _is_dvc_configured() -> bool:
+    try:
+        calkit.dvc.get_dvc_repo()
+        return True
+    except Exception:
+        return False
+
+
+@sync_app.command(name="dvc")
+def sync_dvc(
+    no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
+) -> None:
+    """Sync the DVC repository by pulling and then pushing."""
+    pull(no_git=True, no_check_auth=no_check_auth)
+    push(no_git=True, no_check_auth=no_check_auth)
+
+
+register_sync_target("dvc", sync_dvc, _is_dvc_configured)
 
 
 @app.command(name="ignore")

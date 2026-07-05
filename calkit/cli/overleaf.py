@@ -13,6 +13,7 @@ from typing_extensions import Annotated
 
 import calkit
 from calkit.cli import AliasGroup, raise_error, warn
+from calkit.cli.sync import register_sync_target, sync_app
 
 overleaf_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
@@ -353,6 +354,15 @@ def import_publication(
     sync(paths=[dest_dir], no_commit=no_commit, push_only=push_only)
 
 
+def _is_overleaf_configured() -> bool:
+    try:
+        overleaf_info = calkit.overleaf.get_sync_info(fix_legacy=False)
+        return bool(overleaf_info)
+    except Exception:
+        return False
+
+
+@sync_app.command(name="overleaf")
 @overleaf_app.command(name="sync")
 def sync(
     paths: Annotated[
@@ -566,6 +576,9 @@ def sync(
             typer.echo("Pushing changes to project Git remote")
             repo.git.push()
     # TODO: Add option to run the pipeline after?
+
+
+register_sync_target("overleaf", sync, _is_overleaf_configured)
 
 
 def compare_folders_recursively(

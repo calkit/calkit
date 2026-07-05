@@ -18,7 +18,6 @@
 | [`save\|sv`](#top-command-save-sv)               | Save paths by committing and pushing.                                                                        |
 | [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                                                                  |
 | [`push`](#top-command-push)                      | Push with both Git and DVC.                                                                                  |
-| [`sync`](#top-command-sync)                      | Sync the project repo by pulling and then pushing.                                                           |
 | [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                         |
 | [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                                                                  |
 | [`run`](#top-command-run)                        | Check dependencies and run the pipeline.                                                                     |
@@ -50,6 +49,7 @@
 | [`cloud`](#command-group-cloud)                  | Interact with a Calkit Cloud.                                                                                |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
 | [`dev`](#command-group-dev)                      | Developer tools.                                                                                             |
+| [`sync`](#command-group-sync)                    | Sync with disparate systems.                                                                                 |
 
 ## Top-level command details
 
@@ -67,9 +67,9 @@ calkit init [OPTIONS]
 
 Options:
 
-| Option          | Type    | Required | Default | Description                                      |
-| --------------- | ------- | -------- | ------- | ------------------------------------------------ |
-| `--force`, `-f` | boolean | no       | False   | Force reinitializing DVC if already initialized. |
+| Option          | Type    | Required | Default | Description                                               |
+| --------------- | ------- | -------- | ------- | --------------------------------------------------------- |
+| `--force`, `-f` | boolean | no       | False   | Re-initialize even if the project is already initialized. |
 
 <a id="top-command-clone"></a>
 
@@ -275,24 +275,6 @@ Options:
 | `--git-arg`       | text    | no       |         | Additional Git args.       |
 | `--dvc-arg`       | text    | no       |         | Additional DVC args.       |
 | `--no-recursive`  | boolean | no       | False   | Do not push to submodules. |
-
-<a id="top-command-sync"></a>
-
-### `calkit sync`
-
-Sync the project repo by pulling and then pushing.
-
-Usage:
-
-```text
-calkit sync [OPTIONS]
-```
-
-Options:
-
-| Option            | Type    | Required | Default | Description |
-| ----------------- | ------- | -------- | ------- | ----------- |
-| `--no-check-auth` | boolean | no       | False   |             |
 
 <a id="top-command-ignore"></a>
 
@@ -3369,3 +3351,93 @@ Usage:
 ```text
 calkit dev ipython [OPTIONS]
 ```
+
+<a id="command-group-sync"></a>
+
+### `calkit sync`
+
+Sync with disparate systems.
+
+| Command                                 | Description                                          |
+| --------------------------------------- | ---------------------------------------------------- |
+| [`all`](#subcommand-sync-all)           | Sync all configured systems.                         |
+| [`overleaf`](#subcommand-sync-overleaf) | Sync folders with Overleaf.                          |
+| [`git`](#subcommand-sync-git)           | Sync the Git repository by pulling and then pushing. |
+| [`dvc`](#subcommand-sync-dvc)           | Sync the DVC repository by pulling and then pushing. |
+
+<a id="subcommand-sync-all"></a>
+
+#### `calkit sync all`
+
+Sync all configured systems.
+
+Usage:
+
+```text
+calkit sync all
+```
+
+<a id="subcommand-sync-overleaf"></a>
+
+#### `calkit sync overleaf`
+
+Sync folders with Overleaf.
+
+Usage:
+
+```text
+calkit sync overleaf [OPTIONS] [PATHS...]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                                      |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
+| `paths`  | text | no       |         | Paths to sync with Overleaf, e.g., 'paper/paper.pdf'. If not provided, all Overleaf publications will be synced. |
+
+Options:
+
+| Option                | Type    | Required | Default | Description                                                                                                                                                                                                                              |
+| --------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-commit`         | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
+| `--auto-commit`, `-a` | boolean | no       | False   | Automatically commit changes to the project repo if a synced folder has changes.                                                                                                                                                         |
+| `--no-push`           | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
+| `--verbose`           | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
+| `--resolve`, `-r`     | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
+| `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
+
+<a id="subcommand-sync-git"></a>
+
+#### `calkit sync git`
+
+Sync the Git repository by pulling and then pushing.
+
+Usage:
+
+```text
+calkit sync git [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description |
+| ----------------- | ------- | -------- | ------- | ----------- |
+| `--no-check-auth` | boolean | no       | False   |             |
+
+<a id="subcommand-sync-dvc"></a>
+
+#### `calkit sync dvc`
+
+Sync the DVC repository by pulling and then pushing.
+
+Usage:
+
+```text
+calkit sync dvc [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description |
+| ----------------- | ------- | -------- | ------- | ----------- |
+| `--no-check-auth` | boolean | no       | False   |             |

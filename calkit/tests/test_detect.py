@@ -1321,7 +1321,6 @@ def test_detection_ignore(tmp_dir):
     # (e) No ignore file -> unchanged detection.
     assert load_detection_ignore() is None
     assert detect_figures(["figures/a.png"]) == ["figures/a.png"]
-
     os.makedirs(".calkit", exist_ok=True)
     with open(".calkit/ignore", "w") as f:
         f.write(
@@ -1336,25 +1335,20 @@ def test_detection_ignore(tmp_dir):
                 ]
             )
         )
-
     ignore = load_detection_ignore()
-
     # (a) a path listed in .calkit/ignore is not detected as ANY artifact type
     path = "paper/figs/report.pdf"
     assert detect_artifact_kind(path) == "figure"
     assert detect_artifact_kind(path, ignore=ignore) is None
     assert path not in detect_figures([path], ignore=ignore)
-
     # (b) comments and blank lines are ignored (implied by parsing succeeding)
     assert ignore is not None
     assert not ignore.match_file("# this is a comment")
-
     # (c) a glob pattern excludes matching files
     globbed = "data/raw.csv"
     assert detect_artifact_kind(globbed) == "dataset"
     assert detect_artifact_kind(globbed, ignore=ignore) is None
     assert ignore.match_file("analysis.ipynb") is True
-
     # (d) a directory pattern excludes files under it
     in_dir = "notebooks/scratch/data/raw.parquet"
     assert detect_artifact_kind(in_dir) == "dataset"

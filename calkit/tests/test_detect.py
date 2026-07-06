@@ -1312,15 +1312,14 @@ def test_detect_project_artifacts_includes_results_and_presentations(tmp_dir):
 
 
 def test_detection_ignore(tmp_dir):
-    """``.calkit/ignore`` excludes paths from all artifact kinds."""
     from calkit.detect import (
-        _load_ignore_spec,
         detect_artifact_kind,
         detect_figures,
+        load_detection_ignore,
     )
 
     # (e) No ignore file -> unchanged detection.
-    assert _load_ignore_spec() is None
+    assert load_detection_ignore() is None
     assert detect_figures(["figures/a.png"]) == ["figures/a.png"]
 
     os.makedirs(".calkit", exist_ok=True)
@@ -1338,7 +1337,7 @@ def test_detection_ignore(tmp_dir):
             )
         )
 
-    ignore = _load_ignore_spec()
+    ignore = load_detection_ignore()
 
     # (a) a path listed in .calkit/ignore is not detected as ANY artifact type
     path = "paper/figs/report.pdf"

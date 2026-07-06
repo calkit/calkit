@@ -11,10 +11,9 @@ import re
 import shlex
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
-if TYPE_CHECKING:
-    import pathspec
+import pathspec
 
 NotebookLanguage = Literal["python", "julia", "r"]
 
@@ -1955,7 +1954,7 @@ PRESENTATION_NAMES = {
 DETECTION_IGNORE_FPATH = os.path.join(".calkit", "ignore")
 
 
-def _load_ignore_spec(wdir: str | None = None) -> "pathspec.PathSpec | None":
+def load_detection_ignore(wdir: str | None = None) -> pathspec.PathSpec | None:
     """Load ``.calkit/ignore`` artifact detection exclusions."""
     import pathspec
 
@@ -1979,7 +1978,7 @@ def _path_ext(rel_path: str) -> str:
 
 
 def is_figure_path(
-    rel_path: str, *, ignore: "pathspec.PathSpec | None" = None
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
 ) -> bool:
     """Whether a repo-relative path looks like an auto-detectable figure."""
     if ignore is not None and ignore.match_file(rel_path):
@@ -1996,7 +1995,7 @@ def is_figure_path(
 
 
 def is_dataset_path(
-    rel_path: str, *, ignore: "pathspec.PathSpec | None" = None
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
 ) -> bool:
     """Whether a repo-relative path looks like an auto-detectable dataset."""
     if ignore is not None and ignore.match_file(rel_path):
@@ -2009,7 +2008,7 @@ def is_dataset_path(
 
 
 def is_result_path(
-    rel_path: str, *, ignore: "pathspec.PathSpec | None" = None
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
 ) -> bool:
     """Whether a repo-relative path looks like an auto-detectable result.
 
@@ -2027,7 +2026,7 @@ def is_result_path(
 
 
 def is_presentation_path(
-    rel_path: str, *, ignore: "pathspec.PathSpec | None" = None
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
 ) -> bool:
     """Whether a repo-relative path looks like an auto-detectable presentation.
 
@@ -2075,7 +2074,7 @@ PUBLICATION_NAMES = {
 
 
 def is_publication_path(
-    rel_path: str, *, ignore: "pathspec.PathSpec | None" = None
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
 ) -> bool:
     """Whether a repo-relative path looks like an auto-detectable publication.
 
@@ -2099,7 +2098,7 @@ def is_publication_path(
 
 
 def detect_artifact_kind(
-    rel_path: str, *, ignore: "pathspec.PathSpec | None" = None
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
 ) -> str | None:
     """Infer an artifact's release kind from its repo-relative path.
 
@@ -2154,7 +2153,7 @@ def _collapse_dataset_folders(paths: list[str]) -> list[str]:
 def detect_figures(
     candidate_paths: list[str],
     reserved_paths: list[str] | tuple[str, ...] = (),
-    ignore: "pathspec.PathSpec | None" = None,
+    ignore: pathspec.PathSpec | None = None,
 ) -> list[str]:
     """Auto-detected figure paths among ``candidate_paths``.
 
@@ -2177,7 +2176,7 @@ def detect_datasets(
     candidate_paths: list[str],
     reserved_paths: list[str] | tuple[str, ...] = (),
     figure_paths: list[str] | tuple[str, ...] = (),
-    ignore: "pathspec.PathSpec | None" = None,
+    ignore: pathspec.PathSpec | None = None,
 ) -> list[str]:
     """Auto-detected dataset paths among ``candidate_paths``.
 
@@ -2200,7 +2199,7 @@ def detect_datasets(
 def detect_results(
     candidate_paths: list[str],
     reserved_paths: list[str] | tuple[str, ...] = (),
-    ignore: "pathspec.PathSpec | None" = None,
+    ignore: pathspec.PathSpec | None = None,
 ) -> list[str]:
     """Auto-detected result paths among ``candidate_paths``.
 
@@ -2222,7 +2221,7 @@ def detect_results(
 def detect_presentations(
     candidate_paths: list[str],
     reserved_paths: list[str] | tuple[str, ...] = (),
-    ignore: "pathspec.PathSpec | None" = None,
+    ignore: pathspec.PathSpec | None = None,
 ) -> list[str]:
     """Auto-detected presentation paths among ``candidate_paths``."""
     reserved = list(reserved_paths)
@@ -2322,7 +2321,7 @@ def detect_project_artifacts(
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
-    ignore = _load_ignore_spec(wdir=wdir)
+    ignore = load_detection_ignore(wdir=wdir)
     reserved = _reserved_artifact_paths(wdir=wdir, ck_info=ck_info)
     candidates = list(
         dict.fromkeys(

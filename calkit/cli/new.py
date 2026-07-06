@@ -3258,16 +3258,12 @@ def new_release(
         # stored as-is (renamed); folders and whole-project releases are
         # zipped.
         project_name = calkit.detect_project_name(prepend_owner=False)
-        if path == ".":
+        if path == "." or os.path.isdir(path):
             stored_filename = f"{project_name}-{name}.zip"
             is_zip = True
-        elif os.path.isdir(path):
-            folder_name = os.path.basename(os.path.normpath(path))
-            stored_filename = f"{project_name}-{folder_name}-{name}.zip"
-            is_zip = True
         elif os.path.isfile(path):
-            stem, ext = os.path.splitext(os.path.basename(path))
-            stored_filename = f"{project_name}-{stem}-{name}{ext}"
+            _, ext = os.path.splitext(os.path.basename(path))
+            stored_filename = f"{project_name}-{name}{ext}"
             is_zip = False
         else:
             raise_error(f"Release path '{path}' does not exist")

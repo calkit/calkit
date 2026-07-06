@@ -67,9 +67,9 @@ calkit init [OPTIONS]
 
 Options:
 
-| Option          | Type    | Required | Default | Description                                      |
-| --------------- | ------- | -------- | ------- | ------------------------------------------------ |
-| `--force`, `-f` | boolean | no       | False   | Force reinitializing DVC if already initialized. |
+| Option          | Type    | Required | Default | Description                                               |
+| --------------- | ------- | -------- | ------- | --------------------------------------------------------- |
+| `--force`, `-f` | boolean | no       | False   | Re-initialize even if the project is already initialized. |
 
 <a id="top-command-clone"></a>
 

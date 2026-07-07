@@ -104,6 +104,11 @@ def test_list_questions(tmp_dir):
                     "path": "results/metrics.json",
                     "key": "accuracy",
                 },
+                {
+                    "kind": "publication",
+                    "path": "paper/paper.pdf",
+                    "explanation": "See the results section.",
+                },
             ],
         }
     )
@@ -116,6 +121,8 @@ def test_list_questions(tmp_dir):
     assert questions[0] == "Does it work?"
     assert questions[1]["question"] == "What is the effect?"
     assert questions[1]["hypothesis"] == "It improves performance."
+    assert questions[1]["evidence"][2]["kind"] == "publication"
+    assert questions[1]["evidence"][2]["path"] == "paper/paper.pdf"
     out = subprocess.check_output(["calkit", "list", "questions"], text=True)
     assert "1. Does it work?" in out
     assert "2. question: What is the effect?" in out
@@ -127,6 +134,9 @@ def test_list_questions(tmp_dir):
     assert "- kind: result" in out
     assert "path: results/metrics.json" in out
     assert "key: accuracy" in out
+    assert "- kind: publication" in out
+    assert "path: paper/paper.pdf" in out
+    assert "explanation: See the results section." in out
 
 
 def test_list_remotes(tmp_dir):

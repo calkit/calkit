@@ -13,6 +13,8 @@ import sys
 from pathlib import Path
 from typing import Literal
 
+import pathspec
+
 NotebookLanguage = Literal["python", "julia", "r"]
 
 
@@ -1949,6 +1951,21 @@ PRESENTATION_NAMES = {
     "talk.pdf",
 }
 
+DETECTION_IGNORE_FPATH = os.path.join(".calkit", "ignore")
+
+
+def load_detection_ignore(wdir: str | None = None) -> pathspec.PathSpec | None:
+    """Load ``.calkit/ignore`` artifact detection exclusions."""
+    import pathspec
+
+    fpath = DETECTION_IGNORE_FPATH
+    if wdir is not None:
+        fpath = os.path.join(wdir, fpath)
+    if not os.path.isfile(fpath):
+        return None
+    with open(fpath, encoding="utf-8") as f:
+        return pathspec.PathSpec.from_lines("gitwildmatch", f)
+
 
 def _ancestor_dir_names(rel_path: str) -> set[str]:
     """Lower-cased names of the ancestor directories of a "/"-separated path."""
@@ -1960,8 +1977,12 @@ def _path_ext(rel_path: str) -> str:
     return ("." + name.rsplit(".", 1)[-1].lower()) if "." in name else ""
 
 
-def is_figure_path(rel_path: str) -> bool:
+def is_figure_path(
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
+) -> bool:
     """Whether a repo-relative path looks like an auto-detectable figure."""
+    if ignore is not None and ignore.match_file(rel_path):
+        return False
     ancestors = _ancestor_dir_names(rel_path)
     ext = _path_ext(rel_path)
     if ext in FIGURE_EXTENSIONS and ancestors & FIGURE_DIRS:
@@ -1973,37 +1994,49 @@ def is_figure_path(rel_path: str) -> bool:
     return False
 
 
-def is_dataset_path(rel_path: str) -> bool:
+def is_dataset_path(
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
+) -> bool:
     """Whether a repo-relative path looks like an auto-detectable dataset."""
+    if ignore is not None and ignore.match_file(rel_path):
+        return False
     return (
         _path_ext(rel_path) in DATASET_EXTENSIONS
         and bool(_ancestor_dir_names(rel_path) & DATA_DIRS)
-        and not is_figure_path(rel_path)
+        and not is_figure_path(rel_path, ignore=ignore)
     )
 
 
-def is_result_path(rel_path: str) -> bool:
+def is_result_path(
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
+) -> bool:
     """Whether a repo-relative path looks like an auto-detectable result.
 
     A result is a data-like file (JSON, CSV, etc.) under a ``results``-style
     directory. Anything already detected as a figure or dataset is excluded.
     """
+    if ignore is not None and ignore.match_file(rel_path):
+        return False
     return (
         _path_ext(rel_path) in RESULT_EXTENSIONS
         and bool(_ancestor_dir_names(rel_path) & RESULT_DIRS)
-        and not is_figure_path(rel_path)
-        and not is_dataset_path(rel_path)
+        and not is_figure_path(rel_path, ignore=ignore)
+        and not is_dataset_path(rel_path, ignore=ignore)
     )
 
 
-def is_presentation_path(rel_path: str) -> bool:
+def is_presentation_path(
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
+) -> bool:
     """Whether a repo-relative path looks like an auto-detectable presentation.
 
     Either a slide-deck file (PDF/PPTX/KEY) under a ``slides``/``presentations``
     directory, or a file with a presentation-like name (e.g. ``slides.pdf``,
     ``presentation.pdf``) anywhere. Figures are excluded.
     """
-    if is_figure_path(rel_path):
+    if ignore is not None and ignore.match_file(rel_path):
+        return False
+    if is_figure_path(rel_path, ignore=ignore):
         return False
     name = rel_path.rsplit("/", 1)[-1].lower()
     if name in PRESENTATION_NAMES:
@@ -2040,7 +2073,9 @@ PUBLICATION_NAMES = {
 }
 
 
-def is_publication_path(rel_path: str) -> bool:
+def is_publication_path(
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
+) -> bool:
     """Whether a repo-relative path looks like an auto-detectable publication.
 
     Either a document (PDF/TeX/DOCX) under a ``paper``/``publication``/
@@ -2048,7 +2083,11 @@ def is_publication_path(rel_path: str) -> bool:
     ``manuscript.pdf``, ``main.tex``) anywhere. Figures and presentations are
     excluded.
     """
-    if is_figure_path(rel_path) or is_presentation_path(rel_path):
+    if ignore is not None and ignore.match_file(rel_path):
+        return False
+    if is_figure_path(rel_path, ignore=ignore) or is_presentation_path(
+        rel_path, ignore=ignore
+    ):
         return False
     name = rel_path.rsplit("/", 1)[-1].lower()
     if name in PUBLICATION_NAMES:
@@ -2058,19 +2097,21 @@ def is_publication_path(rel_path: str) -> bool:
     )
 
 
-def detect_artifact_kind(rel_path: str) -> str | None:
+def detect_artifact_kind(
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
+) -> str | None:
     """Infer an artifact's release kind from its repo-relative path.
 
     Returns one of ``"figure"``, ``"presentation"``, ``"publication"``, or
     ``"dataset"``, or ``None`` if the path doesn't look like any of these.
     """
-    if is_figure_path(rel_path):
+    if is_figure_path(rel_path, ignore=ignore):
         return "figure"
-    if is_presentation_path(rel_path):
+    if is_presentation_path(rel_path, ignore=ignore):
         return "presentation"
-    if is_publication_path(rel_path):
+    if is_publication_path(rel_path, ignore=ignore):
         return "publication"
-    if is_dataset_path(rel_path):
+    if is_dataset_path(rel_path, ignore=ignore):
         return "dataset"
     return None
 
@@ -2112,6 +2153,7 @@ def _collapse_dataset_folders(paths: list[str]) -> list[str]:
 def detect_figures(
     candidate_paths: list[str],
     reserved_paths: list[str] | tuple[str, ...] = (),
+    ignore: pathspec.PathSpec | None = None,
 ) -> list[str]:
     """Auto-detected figure paths among ``candidate_paths``.
 
@@ -2125,7 +2167,7 @@ def detect_figures(
             for p in candidate_paths
             if not _is_hidden_path(p)
             and not _is_under_any_dir(p, reserved)
-            and is_figure_path(p)
+            and is_figure_path(p, ignore=ignore)
         }
     )
 
@@ -2134,6 +2176,7 @@ def detect_datasets(
     candidate_paths: list[str],
     reserved_paths: list[str] | tuple[str, ...] = (),
     figure_paths: list[str] | tuple[str, ...] = (),
+    ignore: pathspec.PathSpec | None = None,
 ) -> list[str]:
     """Auto-detected dataset paths among ``candidate_paths``.
 
@@ -2148,7 +2191,7 @@ def detect_datasets(
         if not _is_hidden_path(p)
         and not _is_under_any_dir(p, reserved)
         and p not in figset
-        and is_dataset_path(p)
+        and is_dataset_path(p, ignore=ignore)
     }
     return _collapse_dataset_folders(sorted(files))
 
@@ -2156,6 +2199,7 @@ def detect_datasets(
 def detect_results(
     candidate_paths: list[str],
     reserved_paths: list[str] | tuple[str, ...] = (),
+    ignore: pathspec.PathSpec | None = None,
 ) -> list[str]:
     """Auto-detected result paths among ``candidate_paths``.
 
@@ -2169,7 +2213,7 @@ def detect_results(
             for p in candidate_paths
             if not _is_hidden_path(p)
             and not _is_under_any_dir(p, reserved)
-            and is_result_path(p)
+            and is_result_path(p, ignore=ignore)
         }
     )
 
@@ -2177,6 +2221,7 @@ def detect_results(
 def detect_presentations(
     candidate_paths: list[str],
     reserved_paths: list[str] | tuple[str, ...] = (),
+    ignore: pathspec.PathSpec | None = None,
 ) -> list[str]:
     """Auto-detected presentation paths among ``candidate_paths``."""
     reserved = list(reserved_paths)
@@ -2186,7 +2231,7 @@ def detect_presentations(
             for p in candidate_paths
             if not _is_hidden_path(p)
             and not _is_under_any_dir(p, reserved)
-            and is_presentation_path(p)
+            and is_presentation_path(p, ignore=ignore)
         }
     )
 
@@ -2276,18 +2321,28 @@ def detect_project_artifacts(
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
+    ignore = load_detection_ignore(wdir=wdir)
     reserved = _reserved_artifact_paths(wdir=wdir, ck_info=ck_info)
     candidates = list(
         dict.fromkeys(
             [*list_repo_files(wdir=wdir), *list_dvc_tracked_files(wdir=wdir)]
         )
     )
-    figures = detect_figures(candidates, reserved_paths=reserved)
-    datasets = detect_datasets(
-        candidates, reserved_paths=reserved, figure_paths=figures
+    figures = detect_figures(
+        candidates, reserved_paths=reserved, ignore=ignore
     )
-    results = detect_results(candidates, reserved_paths=reserved)
-    presentations = detect_presentations(candidates, reserved_paths=reserved)
+    datasets = detect_datasets(
+        candidates,
+        reserved_paths=reserved,
+        figure_paths=figures,
+        ignore=ignore,
+    )
+    results = detect_results(
+        candidates, reserved_paths=reserved, ignore=ignore
+    )
+    presentations = detect_presentations(
+        candidates, reserved_paths=reserved, ignore=ignore
+    )
     return {
         "figures": figures,
         "datasets": datasets,

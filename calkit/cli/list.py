@@ -174,6 +174,40 @@ def list_presentations(
     _list_artifacts("presentations", json_output, declared_only)
 
 
+def _echo_question(n: int, question: str | dict) -> None:
+    """Print a single question in the human-readable YAML-ish listing format.
+
+    String questions are shown as a numbered line. Rich (dict) questions are
+    shown with their text on the first line followed by hypothesis, answer,
+    evidence, and any other fields in YAML-like indented form.
+    """
+    if isinstance(question, str):
+        typer.echo(f"{n}. {question}")
+        return
+    # Copy so popping 'question' doesn't mutate the caller's dict.
+    question = dict(question)
+    text = question.pop("question", "")
+    typer.echo(f"{n}. question: {text}")
+    for k, v in question.items():
+        if isinstance(v, dict):
+            typer.echo(f"    {k}:")
+            for k1, v1 in v.items():
+                typer.echo(f"      {k1}: {v1}")
+        elif isinstance(v, list):
+            typer.echo(f"    {k}:")
+            for item in v:
+                if isinstance(item, dict):
+                    for n1, (k1, v1) in enumerate(item.items()):
+                        if n1 == 0:
+                            typer.echo(f"      - {k1}: {v1}")
+                        else:
+                            typer.echo(f"        {k1}: {v1}")
+                else:
+                    typer.echo(f"        - {item}")
+        else:
+            typer.echo(f"    {k}: {v}")
+
+
 @list_app.command(name="questions")
 def list_questions(
     json_output: Annotated[
@@ -186,7 +220,7 @@ def list_questions(
         typer.echo(json.dumps(questions))
         return
     for n, question in enumerate(questions, start=1):
-        typer.echo(f"{n}. {question}")
+        _echo_question(n, question)
 
 
 @list_app.command(name="publications|pubs")

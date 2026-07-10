@@ -19,15 +19,16 @@
 
 <!-- INCLUDE: docs/index.md -->
 
-It's six months since you submitted your paper,
-do you know exactly how your figures and results were generated?
-
-You will if they're part of a Calkit project.
+Typical research workflows are horizontally-siloed, i.e.,
+various stages--data collection, analysis, writing--are performed in
+disconnected systems,
+turning research into a slow, error-prone, and tedious
+[waterfall](https://en.wikipedia.org/wiki/Waterfall_model) process.
 
 Calkit helps you integrate code, data, figures, results, publications,
 and more into a cohesive, traceable, and portable _knowledge creation system_,
-so every output can be traced back to its source and reproduced with a
-single command.
+so every output can be traced back to its source (provenance)
+and reproduced with a single command.
 
 With industry standard tools combined into a unified and simplified experience
 tailored for research,

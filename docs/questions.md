@@ -27,3 +27,5 @@ which can be seen in its declared outputs.
 This allows us to trace back all the way back to the primary
 artifacts, e.g., raw data and code, to verify with zero ambiguity
 (so long as the pipeline is not stale).
+This also helps tie everything together and give a structured summary
+of the project's findings.

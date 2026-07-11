@@ -39,6 +39,7 @@ nav:
   - Quickstart: quickstart.md
   - Cloud integration: cloud-integration.md
   - Use with AI tools: ai-tools.md
+  - Questions, hypotheses, answers, and evidence: questions.md
   - Version control: version-control.md
   - The calkit.yaml file: calkit-yaml.md
   - Dependencies, configuration, and secrets: dependencies.md

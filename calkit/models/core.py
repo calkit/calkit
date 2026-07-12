@@ -351,13 +351,23 @@ class ResultsEvidence(BaseModel):
     explanation: str | None = None
 
 
+class PublicationEvidence(BaseModel):
+    """Evidence in the form of a publication."""
+
+    kind: Literal["publication"] = "publication"
+    path: str
+    explanation: str | None = None
+
+
 class Question(BaseModel):
     """A question the project hopes to answer."""
 
     question: str
     hypothesis: str | None = None
     answer: str | None = None
-    evidence: list[FigureEvidence | ResultsEvidence] | None = None
+    evidence: (
+        list[FigureEvidence | ResultsEvidence | PublicationEvidence] | None
+    ) = None
 
 
 class Dependency(BaseModel):

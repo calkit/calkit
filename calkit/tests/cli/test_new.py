@@ -760,7 +760,7 @@ def test_new_nix_env_stages_flake(tmp_dir):
     )
     assert os.path.isfile("flake.nix")
     repo = git.Repo(".")
-    head_files = [item.path for item in repo.head.commit.tree.traverse()]
+    head_files = [item.path for item in repo.head.commit.tree.traverse()]  # type: ignore
     assert "flake.nix" in head_files
     assert "calkit.yaml" in head_files
 
@@ -991,26 +991,26 @@ def test_new_internal_release(tmp_dir):
             "--to",
             "none",
             "--name",
-            "v0",
+            "slides-v0",
             "--desc",
-            "First version sent to Mo for review.",
+            "First version sent for review.",
             "--no-push",
         ]
     )
     ck_info = calkit.load_calkit_info()
-    assert "v0" in ck_info["releases"]
-    release = ck_info["releases"]["v0"]
+    assert "slides-v0" in ck_info["releases"]
+    release = ck_info["releases"]["slides-v0"]
     assert release["internal"] is True
     assert release["kind"] == "presentation"
     assert release["doi"] is None
     assert release["calkit_version"] == calkit.__version__
-    assert release["description"] == "First version sent to Mo for review."
+    assert release["description"] == "First version sent for review."
     assert (
         release["stored_path"]
-        == ".calkit/releases/v0/test-project-slides-v0.pdf"
+        == ".calkit/releases/slides-v0/test-project-slides-v0.pdf"
     )
     assert os.path.isfile(release["stored_path"])
-    assert "v0" in [t.name for t in git.Repo().tags]
+    assert "slides-v0" in [t.name for t in git.Repo().tags]
     # Internal release of a folder: zipped with a self-describing name
     subprocess.check_call(
         [
@@ -1020,14 +1020,15 @@ def test_new_internal_release(tmp_dir):
             "data/raw",
             "--internal",
             "--name",
-            "v1",
+            "raw-data-v1",
             "--no-push",
         ]
     )
-    release = calkit.load_calkit_info()["releases"]["v1"]
+    release = calkit.load_calkit_info()["releases"]["raw-data-v1"]
     assert release["kind"] == "dataset"
     assert (
-        release["stored_path"] == ".calkit/releases/v1/test-project-raw-v1.zip"
+        release["stored_path"]
+        == ".calkit/releases/raw-data-v1/test-project-raw-data-v1.zip"
     )
     assert os.path.isfile(release["stored_path"])
     # Internal release of the whole project: zipped archive
@@ -1068,10 +1069,7 @@ def test_new_internal_release(tmp_dir):
     )
     release = calkit.load_calkit_info()["releases"]["v3"]
     assert release["kind"] == "figure"
-    assert (
-        release["stored_path"]
-        == ".calkit/releases/v3/test-project-plot-v3.png"
-    )
+    assert release["stored_path"] == ".calkit/releases/v3/test-project-v3.png"
     # A path that isn't a defined artifact should fail kind detection
     with open("notes.txt", "w") as f:
         f.write("hello\n")
@@ -1110,10 +1108,7 @@ def test_new_internal_release(tmp_dir):
     )
     release = calkit.load_calkit_info()["releases"]["v5"]
     assert release["kind"] == "dataset"
-    assert (
-        release["stored_path"]
-        == ".calkit/releases/v5/test-project-notes-v5.txt"
-    )
+    assert release["stored_path"] == ".calkit/releases/v5/test-project-v5.txt"
     # Listing releases must not warn about publication status for internal
     # releases, which have no publisher or record ID
     result = subprocess.run(

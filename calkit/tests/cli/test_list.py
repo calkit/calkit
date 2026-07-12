@@ -91,12 +91,52 @@ def test_list_presentations(tmp_dir):
 def test_list_questions(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(["calkit", "new", "question", "Does it work?"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["questions"].append(
+        {
+            "question": "What is the effect?",
+            "hypothesis": "It improves performance.",
+            "answer": "It improves performance by 10%.",
+            "evidence": [
+                {"kind": "figure", "path": "figures/performance.png"},
+                {
+                    "kind": "result",
+                    "path": "results/metrics.json",
+                    "key": "accuracy",
+                },
+                {
+                    "kind": "publication",
+                    "path": "paper/paper.pdf",
+                    "explanation": "See the results section.",
+                },
+            ],
+        }
+    )
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
     out = subprocess.check_output(
         ["calkit", "list", "questions", "--json"], text=True
     )
-    assert json.loads(out) == ["Does it work?"]
+    questions = json.loads(out)
+    assert questions[0] == "Does it work?"
+    assert questions[1]["question"] == "What is the effect?"
+    assert questions[1]["hypothesis"] == "It improves performance."
+    assert questions[1]["evidence"][2]["kind"] == "publication"
+    assert questions[1]["evidence"][2]["path"] == "paper/paper.pdf"
     out = subprocess.check_output(["calkit", "list", "questions"], text=True)
     assert "1. Does it work?" in out
+    assert "2. question: What is the effect?" in out
+    assert "hypothesis: It improves performance." in out
+    assert "answer: It improves performance by 10%." in out
+    assert "evidence:" in out
+    assert "- kind: figure" in out
+    assert "path: figures/performance.png" in out
+    assert "- kind: result" in out
+    assert "path: results/metrics.json" in out
+    assert "key: accuracy" in out
+    assert "- kind: publication" in out
+    assert "path: paper/paper.pdf" in out
+    assert "explanation: See the results section." in out
 
 
 def test_list_remotes(tmp_dir):

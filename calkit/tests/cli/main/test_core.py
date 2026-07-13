@@ -22,6 +22,7 @@ from calkit.cli.core import complete_stage_names
 from calkit.cli.main.core import (
     _get_running_pipeline_status,
     _prune_run_logs,
+    _run_dvc_repro,
     _stage_run_info_from_log_content,
     _stage_target_from_cmd,
     _to_shell_cmd,
@@ -913,6 +914,25 @@ def test_run(tmp_dir):
     res = calkit.cli.main.run()
     assert "dvc_stages" in res
     assert "stage_run_info" in res
+
+
+def test_run_dvc_repro_tolerates_teardown_failure(monkeypatch, capsys):
+    import dvc.cli
+
+    # Normal invocation returns DVC's exit code unchanged
+    monkeypatch.setattr(dvc.cli, "main", lambda argv: 7)
+    assert _run_dvc_repro(["repro", "my-stage"]) == 7
+
+    # A teardown failure after the command runs (e.g. DVC importing
+    # ``dvc.daemon``/``dvc.repo.open_repo`` for analytics/cleanup on a broken
+    # install, per issue #1018) is swallowed and reported as ``None`` instead
+    # of crashing the run with a traceback.
+    def raise_teardown_error(argv):
+        raise ModuleNotFoundError("No module named 'dvc.repo.open_repo'")
+
+    monkeypatch.setattr(dvc.cli, "main", raise_teardown_error)
+    assert _run_dvc_repro(["repro"]) is None
+    assert "teardown failed" in capsys.readouterr().out
 
 
 def test_run_ignore_errors(tmp_dir):

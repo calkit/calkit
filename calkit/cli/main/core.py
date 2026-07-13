@@ -1419,6 +1419,35 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
     return res
 
 
+def _run_dvc_repro(argv: list[str]) -> int | None:
+    """Run ``dvc repro`` via the DVC CLI, tolerating teardown failures.
+
+    Returns DVC's exit code, or ``None`` if the command ran but DVC's
+    post-command teardown raised. After ``do_run`` finishes, ``dvc.cli.main``
+    reports anonymous analytics and cleans up cached repos, importing
+    ``dvc.daemon`` and ``dvc.repo.open_repo`` only at that point. In some broken
+    or mixed installs those submodules can't be imported, so the teardown
+    raises a ``ModuleNotFoundError`` that escapes DVC entirely and crashes the
+    run with a confusing traceback once the pipeline has already finished (see
+    issue #1018). Those failures don't affect the pipeline result, so swallow
+    them and signal ``None`` so the caller derives success/failure from the run
+    log instead of a lost exit code.
+    """
+    from dvc.cli import main as dvc_cli_main
+
+    try:
+        return int(dvc_cli_main(argv))
+    except Exception as e:
+        # ``do_run`` catches its own exceptions and turns them into an exit
+        # code, so anything escaping here comes from the analytics/cleanup
+        # teardown that runs after the command completed.
+        typer.echo(
+            "Warning: DVC post-run teardown failed and was ignored "
+            f"({type(e).__name__}: {e})"
+        )
+        return None
+
+
 def _prune_run_logs(
     logs_dir: str, keep: int = 10, protect: str | None = None
 ) -> None:
@@ -1828,7 +1857,6 @@ def run(
     import dvc.repo
     import dvc.repo.reproduce
     import dvc.ui
-    from dvc.cli import main as dvc_cli_main
     from git.exc import InvalidGitRepositoryError
 
     import calkit.dvc.zip
@@ -2080,10 +2108,12 @@ def run(
                 with calkit.dvc.dvc_lock_timeout(
                     calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT
                 ):
-                    sp_res = dvc_cli_main(["repro"] + sp_args)
+                    sp_res = _run_dvc_repro(["repro"] + sp_args)
             finally:
                 os.chdir(original_dir)
-            if sp_res != 0:
+            # ``None`` means the stage ran but DVC's teardown failed; treat that
+            # as success since the exit code is unrecoverable here.
+            if sp_res is not None and sp_res != 0:
                 failed = True
         if not args or all(a.startswith("--") for a in args):
             # Only isolated subproject stage targets were given; skip parent run
@@ -2157,14 +2187,21 @@ def run(
         # the instant it finishes) can all hold it momentarily. Without this,
         # such a collision aborts the whole run with "Unable to acquire lock".
         with calkit.dvc.dvc_lock_timeout(calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT):
-            res = dvc_cli_main(["repro"] + args)
+            res = _run_dvc_repro(["repro"] + args)
     finally:
         os.environ.pop("CALKIT_FORCE", None)
-    failed = failed or res != 0
     # Parse log to get timing and which stages ran
     with open(log_fpath, "r") as f:
         log_content = f.read()
         stage_run_info = _stage_run_info_from_log_content(log_content)
+    if res is None:
+        # DVC's exit code was lost to a teardown failure; fall back to the log,
+        # which records any stage that failed to reproduce.
+        failed = failed or any(
+            info.get("status") == "failed" for info in stage_run_info.values()
+        )
+    else:
+        failed = failed or res != 0
     # Zip dvc-zip outputs for stages that actually ran
     if stage_run_info:
         from calkit.models.io import PathOutput

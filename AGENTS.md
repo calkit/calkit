@@ -34,6 +34,9 @@ a feature in one function over many different test functions.
 
 Do not write docstrings in test functions.
 
+Do not put blank lines inside function bodies; separate logical sections with
+comments instead.
+
 For prose, only use one space after punctuation.
 
 Don't overzealously split up functions just because they're long.

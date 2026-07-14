@@ -932,13 +932,29 @@ def test_run_dvc_repro_tolerates_teardown_failure(monkeypatch, capsys):
             dvc.cli,
             "main",
             Mock(
-                side_effect=ModuleNotFoundError(f"No module named {missing!r}")
+                side_effect=ModuleNotFoundError(
+                    f"No module named {missing!r}", name=missing
+                )
             ),
         )
         assert _run_dvc_repro(["repro"]) is None
         assert "teardown failed" in capsys.readouterr().out
-    # Anything that isn't an import error is unexpected -- ``do_run`` turns real
-    # command failures into an exit code -- so it must propagate, not be masked.
+    # A module DVC imports *before* running the command (dvc._debug, dvc.config,
+    # dvc.logger) failing means the pipeline never ran at all. Swallowing that
+    # would leave an empty log and report success, so it must propagate.
+    monkeypatch.setattr(
+        dvc.cli,
+        "main",
+        Mock(
+            side_effect=ModuleNotFoundError(
+                "No module named 'dvc._debug'", name="dvc._debug"
+            )
+        ),
+    )
+    with pytest.raises(ModuleNotFoundError, match="dvc._debug"):
+        _run_dvc_repro(["repro"])
+    # Non-import errors are unexpected too -- DVC turns real command failures
+    # into an exit code -- so they must propagate rather than be masked.
     monkeypatch.setattr(
         dvc.cli, "main", Mock(side_effect=RuntimeError("boom"))
     )

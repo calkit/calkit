@@ -1431,15 +1431,23 @@ def _run_dvc_repro(argv: list[str]) -> int | None:
     crashes the run with a confusing traceback once the pipeline has already
     finished (see issue #1018). That doesn't affect the pipeline result, so
     swallow it and signal ``None`` so the caller derives success/failure from
-    the run log instead of a lost exit code. Only ``ImportError`` is tolerated;
-    ``do_run`` turns real command failures into an exit code, so anything else
-    escaping is unexpected and propagates.
+    the run log instead of a lost exit code.
+
+    Only those two modules are tolerated, and deliberately so. ``dvc.cli.main``
+    runs the command inside a broad ``except Exception`` that turns any failure
+    into an exit code, so nothing from the command itself reaches here; but it
+    also imports ``dvc._debug``/``dvc.config``/``dvc.logger`` *before* that
+    block, and a broken install can fail there too. Swallowing those would leave
+    an empty run log and report a pipeline that never ran as successful, so
+    anything but a teardown module must propagate and fail loudly.
     """
     from dvc.cli import main as dvc_cli_main
 
     try:
         return int(dvc_cli_main(argv))
-    except ImportError as e:
+    except ModuleNotFoundError as e:
+        if e.name not in ("dvc.daemon", "dvc.repo.open_repo"):
+            raise
         warn(f"DVC post-run teardown failed and was ignored ({e})")
         return None
 

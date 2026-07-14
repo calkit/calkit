@@ -1423,28 +1423,24 @@ def _run_dvc_repro(argv: list[str]) -> int | None:
     """Run ``dvc repro`` via the DVC CLI, tolerating teardown failures.
 
     Returns DVC's exit code, or ``None`` if the command ran but DVC's
-    post-command teardown raised. After ``do_run`` finishes, ``dvc.cli.main``
-    reports anonymous analytics and cleans up cached repos, importing
-    ``dvc.daemon`` and ``dvc.repo.open_repo`` only at that point. In some broken
-    or mixed installs those submodules can't be imported, so the teardown
-    raises a ``ModuleNotFoundError`` that escapes DVC entirely and crashes the
-    run with a confusing traceback once the pipeline has already finished (see
-    issue #1018). Those failures don't affect the pipeline result, so swallow
-    them and signal ``None`` so the caller derives success/failure from the run
-    log instead of a lost exit code.
+    post-command teardown failed to import a module. After ``do_run`` finishes,
+    ``dvc.cli.main`` reports anonymous analytics and cleans up cached repos,
+    importing ``dvc.daemon`` and ``dvc.repo.open_repo`` only at that point. In
+    some broken or mixed installs those submodules can't be imported, so the
+    teardown raises a ``ModuleNotFoundError`` that escapes DVC entirely and
+    crashes the run with a confusing traceback once the pipeline has already
+    finished (see issue #1018). That doesn't affect the pipeline result, so
+    swallow it and signal ``None`` so the caller derives success/failure from
+    the run log instead of a lost exit code. Only ``ImportError`` is tolerated;
+    ``do_run`` turns real command failures into an exit code, so anything else
+    escaping is unexpected and propagates.
     """
     from dvc.cli import main as dvc_cli_main
 
     try:
         return int(dvc_cli_main(argv))
-    except Exception as e:
-        # ``do_run`` catches its own exceptions and turns them into an exit
-        # code, so anything escaping here comes from the analytics/cleanup
-        # teardown that runs after the command completed.
-        typer.echo(
-            "Warning: DVC post-run teardown failed and was ignored "
-            f"({type(e).__name__}: {e})"
-        )
+    except ImportError as e:
+        warn(f"DVC post-run teardown failed and was ignored ({e})")
         return None
 
 
@@ -2116,7 +2112,13 @@ def run(
             if sp_res is not None and sp_res != 0:
                 failed = True
         if not args or all(a.startswith("--") for a in args):
-            # Only isolated subproject stage targets were given; skip parent run
+            # Only isolated subproject stage targets were given; skip the parent
+            # run, but still report failure the way the parent path does below,
+            # else a failing subproject stage would exit zero.
+            os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+            if failed:
+                raise_error("Pipeline failed")
+            calkit.echo("Pipeline completed successfully ✅")
             return {}
     if pipeline is not None:
         args += ["--pipeline", pipeline]

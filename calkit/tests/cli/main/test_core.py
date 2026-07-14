@@ -8,6 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from pprint import pprint
+from unittest.mock import Mock
 
 import dvc.repo
 import git
@@ -920,19 +921,61 @@ def test_run_dvc_repro_tolerates_teardown_failure(monkeypatch, capsys):
     import dvc.cli
 
     # Normal invocation returns DVC's exit code unchanged
-    monkeypatch.setattr(dvc.cli, "main", lambda argv: 7)
+    monkeypatch.setattr(dvc.cli, "main", Mock(return_value=7))
     assert _run_dvc_repro(["repro", "my-stage"]) == 7
+    # DVC lazily imports ``dvc.daemon`` and ``dvc.repo.open_repo`` for
+    # analytics/cleanup only after the command has already run. On a broken
+    # install those imports fail (issue #1018), crashing the run once the
+    # pipeline has finished, so tolerate them and report ``None`` instead.
+    for missing in ["dvc.daemon", "dvc.repo.open_repo"]:
+        monkeypatch.setattr(
+            dvc.cli,
+            "main",
+            Mock(
+                side_effect=ModuleNotFoundError(f"No module named {missing!r}")
+            ),
+        )
+        assert _run_dvc_repro(["repro"]) is None
+        assert "teardown failed" in capsys.readouterr().out
+    # Anything that isn't an import error is unexpected -- ``do_run`` turns real
+    # command failures into an exit code -- so it must propagate, not be masked.
+    monkeypatch.setattr(
+        dvc.cli, "main", Mock(side_effect=RuntimeError("boom"))
+    )
+    with pytest.raises(RuntimeError, match="boom"):
+        _run_dvc_repro(["repro"])
 
-    # A teardown failure after the command runs (e.g. DVC importing
-    # ``dvc.daemon``/``dvc.repo.open_repo`` for analytics/cleanup on a broken
-    # install, per issue #1018) is swallowed and reported as ``None`` instead
-    # of crashing the run with a traceback.
-    def raise_teardown_error(argv):
-        raise ModuleNotFoundError("No module named 'dvc.repo.open_repo'")
 
-    monkeypatch.setattr(dvc.cli, "main", raise_teardown_error)
-    assert _run_dvc_repro(["repro"]) is None
-    assert "teardown failed" in capsys.readouterr().out
+def test_run_isolated_subproject_stage_exit_code(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # An isolated subproject is its own Git/DVC repo, so its stage targets run
+    # directly inside it rather than through the parent pipeline
+    os.makedirs("isolated-sp", exist_ok=True)
+    subprocess.check_call(["git", "init"], cwd="isolated-sp")
+    subprocess.check_call(["calkit", "init"], cwd="isolated-sp")
+    ck_info = calkit.load_calkit_info()
+    ck_info["subprojects"] = [{"path": "isolated-sp"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # A failing subproject stage must exit nonzero; the isolated-target path
+    # returns before the parent pipeline runs, and used to skip raising
+    with open("isolated-sp/dvc.yaml", "w") as f:
+        yaml.dump(
+            {
+                "stages": {
+                    "stage-b": {"cmd": 'python -c "import sys; sys.exit(1)"'}
+                }
+            },
+            f,
+        )
+    result = subprocess.run(["calkit", "run", "isolated-sp:stage-b"])
+    assert result.returncode != 0
+    # A passing one still exits zero
+    with open("isolated-sp/dvc.yaml", "w") as f:
+        yaml.dump(
+            {"stages": {"stage-b": {"cmd": "python -c \"print('ok')\""}}}, f
+        )
+    subprocess.check_call(["calkit", "run", "isolated-sp:stage-b"])
 
 
 def test_run_ignore_errors(tmp_dir):

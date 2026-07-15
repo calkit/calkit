@@ -2205,7 +2205,7 @@ def run(
         if dry:
             return orig_cmd_run(stage, dry=dry, run_env=run_env)
 
-        stage_name = stage.name
+        stage_name = re.sub(r"[^A-Za-z0-9._-]", "_", stage.name)
         stage_log_fname = (
             start_time_no_tz.isoformat(timespec="seconds").replace(":", "-")
             + "-"
@@ -2255,7 +2255,7 @@ def run(
                             cmd, p.returncode
                         )
                 finally:
-                    if old_handler:
+                    if old_handler is not None:
                         signal.signal(signal.SIGINT, old_handler)
 
         dvc.stage.run._run = _patched_run
@@ -2283,11 +2283,8 @@ def run(
             res = _run_dvc_repro(["repro"] + args)
     finally:
         os.environ.pop("CALKIT_FORCE", None)
-<<<<<<< HEAD
         dvc.stage.run.cmd_run = orig_cmd_run
     failed = failed or res != 0
-=======
->>>>>>> origin/main
     # Parse log to get timing and which stages ran
     with open(log_fpath, "r") as f:
         log_content = f.read()

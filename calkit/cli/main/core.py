@@ -9,6 +9,7 @@ import logging
 import os
 import platform as _platform
 import posixpath
+import re
 import shutil
 import subprocess
 import sys

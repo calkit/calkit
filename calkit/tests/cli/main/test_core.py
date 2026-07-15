@@ -1932,15 +1932,18 @@ def test_run_captures_stage_logs(tmp_dir, capsys):
     }
     with open("dvc.yaml", "w") as f:
         import yaml
+
         yaml.dump(dvc_yaml, f)
-    
+
     # Run pipeline and capture output at terminal
     res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
     assert res.returncode == 0
     # Both markers should be in the terminal output
     assert "OUT_MARKER" in res.stdout
-    assert "ERR_MARKER" in res.stdout  # dvc cmd runner outputs stderr to stdout usually, or we tee stderr to stdout
-    
+    assert (
+        "ERR_MARKER" in res.stdout
+    )  # dvc cmd runner outputs stderr to stdout usually, or we tee stderr to stdout
+
     # Verify the log file was created in .calkit/local/logs
     local_logs = os.path.join(".calkit", "local", "logs")
     log_files = [f for f in os.listdir(local_logs) if "test_stage.log" in f]
@@ -1972,11 +1975,12 @@ def test_run_captures_stage_logs_failure(tmp_dir):
     }
     with open("dvc.yaml", "w") as f:
         import yaml
+
         yaml.dump(dvc_yaml, f)
-    
+
     res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
     assert res.returncode != 0
-    
+
     local_logs = os.path.join(".calkit", "local", "logs")
     log_files = [f for f in os.listdir(local_logs) if "fail_stage.log" in f]
     assert len(log_files) == 1
@@ -1989,10 +1993,7 @@ def test_run_log_flag_copies_stage_logs(tmp_dir):
     """Test that --log copies stage logs to the tracked directory."""
     subprocess.check_call(["git", "init"])
     subprocess.check_call(["calkit", "init"])
-    script = (
-        "import sys\n"
-        "sys.stdout.write('OUT_MARKER\\n')\n"
-    )
+    script = "import sys\n" "sys.stdout.write('OUT_MARKER\\n')\n"
     with open("stage_script.py", "w") as f:
         f.write(script)
     dvc_yaml = {
@@ -2004,11 +2005,12 @@ def test_run_log_flag_copies_stage_logs(tmp_dir):
     }
     with open("dvc.yaml", "w") as f:
         import yaml
+
         yaml.dump(dvc_yaml, f)
-    
+
     res = subprocess.run(["calkit", "run", "--log"])
     assert res.returncode == 0
-    
+
     tracked_logs = os.path.join(".calkit", "logs")
     log_files = [
         f for f in os.listdir(tracked_logs) if "test_stage_log.log" in f

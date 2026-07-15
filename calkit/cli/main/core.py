@@ -1871,13 +1871,14 @@ def run(
     with open(local_sysinfo_fpath, "w") as f:
         json.dump(system_info, f, indent=2)
     if save_logs:
+        for subdir in ("logs", "runs", "systems"):
+            os.makedirs(os.path.join(".calkit", subdir), exist_ok=True)
         if verbose:
             typer.echo("Saving system information:")
             typer.echo(system_info)
         sysinfo_fpath = os.path.join(
             ".calkit", "systems", system_info["id"] + ".json"
         )
-        os.makedirs(os.path.dirname(sysinfo_fpath), exist_ok=True)
         shutil.copy2(local_sysinfo_fpath, sysinfo_fpath)
     # First check any system-level dependencies exist
     if not quiet:
@@ -2328,11 +2329,9 @@ def run(
 
     if save_logs:
         run_info_fpath = os.path.join(".calkit", "runs", run_info_fname)
-        os.makedirs(os.path.dirname(run_info_fpath), exist_ok=True)
         shutil.copy2(local_run_info_fpath, run_info_fpath)
         # Also keep the raw log in the tracked .calkit/logs directory
         saved_log_fpath = os.path.join(".calkit", "logs", log_fname)
-        os.makedirs(os.path.dirname(saved_log_fpath), exist_ok=True)
         shutil.copy2(log_fpath, saved_log_fpath)
     # The private log under .calkit/local/logs is retained either way so the
     # last run's status stays inspectable; it is gitignored.

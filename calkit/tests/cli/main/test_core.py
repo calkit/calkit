@@ -8,6 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from pprint import pprint
+from unittest.mock import Mock
 
 import dvc.repo
 import git
@@ -22,6 +23,7 @@ from calkit.cli.core import complete_stage_names
 from calkit.cli.main.core import (
     _get_running_pipeline_status,
     _prune_run_logs,
+    _run_dvc_repro,
     _stage_run_info_from_log_content,
     _stage_target_from_cmd,
     _to_shell_cmd,
@@ -913,6 +915,83 @@ def test_run(tmp_dir):
     res = calkit.cli.main.run()
     assert "dvc_stages" in res
     assert "stage_run_info" in res
+
+
+def test_run_dvc_repro_tolerates_teardown_failure(monkeypatch, capsys):
+    import dvc.cli
+
+    # Normal invocation returns DVC's exit code unchanged
+    monkeypatch.setattr(dvc.cli, "main", Mock(return_value=7))
+    assert _run_dvc_repro(["repro", "my-stage"]) == 7
+    # DVC lazily imports ``dvc.daemon`` and ``dvc.repo.open_repo`` for
+    # analytics/cleanup only after the command has already run. On a broken
+    # install those imports fail (issue #1018), crashing the run once the
+    # pipeline has finished, so tolerate them and report ``None`` instead.
+    for missing in ["dvc.daemon", "dvc.repo.open_repo"]:
+        monkeypatch.setattr(
+            dvc.cli,
+            "main",
+            Mock(
+                side_effect=ModuleNotFoundError(
+                    f"No module named {missing!r}", name=missing
+                )
+            ),
+        )
+        assert _run_dvc_repro(["repro"]) is None
+        assert "teardown failed" in capsys.readouterr().out
+    # A module DVC imports *before* running the command (dvc._debug, dvc.config,
+    # dvc.logger) failing means the pipeline never ran at all. Swallowing that
+    # would leave an empty log and report success, so it must propagate.
+    monkeypatch.setattr(
+        dvc.cli,
+        "main",
+        Mock(
+            side_effect=ModuleNotFoundError(
+                "No module named 'dvc._debug'", name="dvc._debug"
+            )
+        ),
+    )
+    with pytest.raises(ModuleNotFoundError, match="dvc._debug"):
+        _run_dvc_repro(["repro"])
+    # Non-import errors are unexpected too -- DVC turns real command failures
+    # into an exit code -- so they must propagate rather than be masked.
+    monkeypatch.setattr(
+        dvc.cli, "main", Mock(side_effect=RuntimeError("boom"))
+    )
+    with pytest.raises(RuntimeError, match="boom"):
+        _run_dvc_repro(["repro"])
+
+
+def test_run_isolated_subproject_stage_exit_code(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # An isolated subproject is its own Git/DVC repo, so its stage targets run
+    # directly inside it rather than through the parent pipeline
+    os.makedirs("isolated-sp", exist_ok=True)
+    subprocess.check_call(["git", "init"], cwd="isolated-sp")
+    subprocess.check_call(["calkit", "init"], cwd="isolated-sp")
+    ck_info = calkit.load_calkit_info()
+    ck_info["subprojects"] = [{"path": "isolated-sp"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # A failing subproject stage must exit nonzero; the isolated-target path
+    # returns before the parent pipeline runs, and used to skip raising
+    with open("isolated-sp/dvc.yaml", "w") as f:
+        yaml.dump(
+            {
+                "stages": {
+                    "stage-b": {"cmd": 'python -c "import sys; sys.exit(1)"'}
+                }
+            },
+            f,
+        )
+    result = subprocess.run(["calkit", "run", "isolated-sp:stage-b"])
+    assert result.returncode != 0
+    # A passing one still exits zero
+    with open("isolated-sp/dvc.yaml", "w") as f:
+        yaml.dump(
+            {"stages": {"stage-b": {"cmd": "python -c \"print('ok')\""}}}, f
+        )
+    subprocess.check_call(["calkit", "run", "isolated-sp:stage-b"])
 
 
 def test_run_ignore_errors(tmp_dir):

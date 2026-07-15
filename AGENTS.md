@@ -34,6 +34,12 @@ a feature in one function over many different test functions.
 
 Do not write docstrings in test functions.
 
+Do not put blank lines inside function bodies; separate logical sections with
+comments instead. This only applies to blank lines we write, not ones the
+formatter inserts, e.g., ruff-format adds one after an in-function import
+block. Don't hoist imports to module scope just to avoid those; imports are
+kept inside functions to keep CLI startup fast.
+
 For prose, only use one space after punctuation.
 
 Don't overzealously split up functions just because they're long.

@@ -30,6 +30,69 @@ def get_git_remote_url(project_id: str, token: str) -> str:
     return f"https://git:{token}@git.overleaf.com/{project_id}"
 
 
+# Git config options that force authentication to use only the token embedded
+# in the Overleaf remote URL, never a credential saved in the operating
+# system's credential store (macOS Keychain, Windows Credential Manager, etc.).
+# An expired token can linger in that store and shadow a freshly set one, which
+# otherwise makes it impossible to recover a project after a token expires.
+_CREDENTIAL_CLONE_OPTIONS = [
+    "-c credential.helper=",
+    "-c credential.interactive=false",
+]
+
+
+def _disable_credential_store(repo: git.Repo) -> None:
+    """Configure a cloned Overleaf repo so git authenticates only with the
+    token embedded in its remote URL, ignoring the OS credential store.
+
+    Setting an empty ``credential.helper`` in the repo's local config resets
+    the list of helpers inherited from the system and global config, so no
+    stale token can be read from (or written to) the credential store.
+    """
+    repo.git.config("credential.helper", "")
+    repo.git.config("credential.interactive", "false")
+
+
+def get_project_dir(project_id: str) -> str:
+    """Return the local directory into which an Overleaf project is cloned,
+    relative to the Calkit project working directory.
+    """
+    return os.path.join(".calkit", "overleaf", project_id)
+
+
+def clone(project_id: str, token: str) -> git.Repo:
+    """Clone an Overleaf project, authenticating only with ``token``."""
+    repo = git.Repo.clone_from(
+        get_git_remote_url(project_id=project_id, token=token),
+        get_project_dir(project_id),
+        multi_options=_CREDENTIAL_CLONE_OPTIONS,
+        allow_unsafe_options=True,
+    )
+    _disable_credential_store(repo)
+    return repo
+
+
+def get_repo(project_id: str, token: str) -> git.Repo:
+    """Return the Overleaf repo for ``project_id``, cloning it if it does not
+    yet exist.
+
+    When the repo already exists, its remote URL is refreshed so a freshly set
+    token takes effect, and credential handling is reset so a stale token from
+    the OS credential store is never used.
+    """
+    dest = get_project_dir(project_id)
+    if not os.path.isdir(dest):
+        return clone(project_id, token)
+    repo = calkit.git.get_repo(dest)
+    repo.git.remote(
+        "set-url",
+        "origin",
+        get_git_remote_url(project_id=project_id, token=token),
+    )
+    _disable_credential_store(repo)
+    return repo
+
+
 def project_id_to_url(project_id: str) -> str:
     return f"https://www.overleaf.com/project/{project_id}"
 

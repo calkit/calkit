@@ -1185,13 +1185,13 @@ def pull(
     ] = False,
 ):
     """Pull with both Git and DVC."""
+    if force:
+        if "-f" not in git_args and "--force" not in git_args:
+            git_args.append("-f")
+        if "-f" not in dvc_args and "--force" not in dvc_args:
+            dvc_args.append("-f")
     if not no_git:
         typer.echo("Git pulling")
-        if force:
-            if "-f" not in git_args and "--force" not in git_args:
-                git_args.append("-f")
-            if "-f" not in dvc_args and "--force" not in dvc_args:
-                dvc_args.append("-f")
         try:
             git_cmd = ["git", "pull"]
             if not no_recursive and "--recurse-submodules" not in git_args:

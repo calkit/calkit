@@ -214,16 +214,13 @@ def import_publication(
     overleaf_dir = os.path.join(".calkit", "overleaf")
     os.makedirs(overleaf_dir, exist_ok=True)
     git_ignore(overleaf_dir, no_commit=no_commit)
-    overleaf_project_dir = os.path.join(overleaf_dir, overleaf_project_id)
-    git_clone_url = calkit.overleaf.get_git_remote_url(
-        project_id=overleaf_project_id, token=overleaf_token
-    )
+    overleaf_project_dir = calkit.overleaf.get_project_dir(overleaf_project_id)
     if os.path.isdir(overleaf_project_dir):
         warn("This Overleaf project has already been cloned; removing")
         shutil.rmtree(overleaf_project_dir)
     # Clone the Overleaf project
     typer.echo("Cloning Overleaf project")
-    calkit.overleaf.clone(git_clone_url, overleaf_project_dir)
+    calkit.overleaf.clone(overleaf_project_id, overleaf_token)
     # Detect target path if not specified
     if target_path is None:
         ol_contents = os.listdir(
@@ -514,14 +511,8 @@ def sync(
                     "or use --auto-commit/-a to automatically commit them."
                 )
         # Ensure we've cloned the Overleaf project
-        overleaf_project_dir = os.path.join(
-            ".calkit", "overleaf", overleaf_project_id
-        )
-        overleaf_remote_url = calkit.overleaf.get_git_remote_url(
-            project_id=overleaf_project_id, token=str(overleaf_token)
-        )
-        overleaf_repo = calkit.overleaf.clone_or_open(
-            overleaf_remote_url, overleaf_project_dir
+        overleaf_repo = calkit.overleaf.get_repo(
+            overleaf_project_id, str(overleaf_token)
         )
         # Pull the latest version in the Overleaf project
         typer.echo("Pulling the latest version from Overleaf")
@@ -639,14 +630,11 @@ def get_status(
         )
         wdir = path_in_project
         # Ensure we've cloned the Overleaf project
-        overleaf_project_dir = os.path.join(
-            ".calkit", "overleaf", overleaf_project_id
+        overleaf_project_dir = calkit.overleaf.get_project_dir(
+            overleaf_project_id
         )
-        overleaf_remote_url = calkit.overleaf.get_git_remote_url(
-            project_id=overleaf_project_id, token=str(overleaf_token)
-        )
-        overleaf_repo = calkit.overleaf.clone_or_open(
-            overleaf_remote_url, overleaf_project_dir
+        overleaf_repo = calkit.overleaf.get_repo(
+            overleaf_project_id, str(overleaf_token)
         )
         # Pull the latest version in the Overleaf project
         typer.echo("Pulling the latest version from Overleaf")

@@ -53,13 +53,18 @@ def _disable_credential_store(repo: git.Repo) -> None:
     repo.git.config("credential.interactive", "false")
 
 
-def clone(remote_url: str, dest: str | PathLike) -> git.Repo:
-    """Clone an Overleaf project, authenticating only with the token embedded
-    in ``remote_url``.
+def get_project_dir(project_id: str) -> str:
+    """Return the local directory into which an Overleaf project is cloned,
+    relative to the Calkit project working directory.
     """
+    return os.path.join(".calkit", "overleaf", project_id)
+
+
+def clone(project_id: str, token: str) -> git.Repo:
+    """Clone an Overleaf project, authenticating only with ``token``."""
     repo = git.Repo.clone_from(
-        remote_url,
-        dest,
+        get_git_remote_url(project_id=project_id, token=token),
+        get_project_dir(project_id),
         multi_options=_CREDENTIAL_CLONE_OPTIONS,
         allow_unsafe_options=True,
     )
@@ -67,18 +72,23 @@ def clone(remote_url: str, dest: str | PathLike) -> git.Repo:
     return repo
 
 
-def clone_or_open(remote_url: str, dest: str | PathLike) -> git.Repo:
-    """Return the Overleaf repo at ``dest``, cloning it from ``remote_url`` if
-    it does not yet exist.
+def get_repo(project_id: str, token: str) -> git.Repo:
+    """Return the Overleaf repo for ``project_id``, cloning it if it does not
+    yet exist.
 
     When the repo already exists, its remote URL is refreshed so a freshly set
     token takes effect, and credential handling is reset so a stale token from
     the OS credential store is never used.
     """
+    dest = get_project_dir(project_id)
     if not os.path.isdir(dest):
-        return clone(remote_url, dest)
-    repo = calkit.git.get_repo(str(dest))
-    repo.git.remote("set-url", "origin", remote_url)
+        return clone(project_id, token)
+    repo = calkit.git.get_repo(dest)
+    repo.git.remote(
+        "set-url",
+        "origin",
+        get_git_remote_url(project_id=project_id, token=token),
+    )
     _disable_credential_store(repo)
     return repo
 

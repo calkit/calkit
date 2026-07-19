@@ -17,6 +17,20 @@ from calkit.cli.sync import register_sync_target, sync_app
 
 overleaf_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
+# Shown when a pull from Overleaf fails, most commonly due to an invalid or
+# expired token. Calkit authenticates only with the token in its config, but a
+# stale token cached by the OS credential manager from an earlier version can
+# still interfere, so we point users there as a fallback.
+PULL_FAILED_MESSAGE = (
+    "Failed to pull from Overleaf; "
+    "check that your Overleaf token is valid\n"
+    "Run 'calkit config get overleaf_token' and ensure that it matches one in "
+    "your Overleaf account settings (https://overleaf.com/user/settings).\n"
+    "If it looks correct but pulling still fails, delete any saved "
+    "'git.overleaf.com' credential from your OS credential manager (Windows "
+    "Credential Manager, macOS Keychain, or your Linux keyring) and try again."
+)
+
 
 def _extract_title_from_tex(tex_file_path: str) -> str | None:
     """Extract the title from a LaTeX file."""
@@ -170,8 +184,6 @@ def import_publication(
     ] = False,
 ):
     """Import a publication from an Overleaf project."""
-    import git
-
     from calkit.cli.main import ignore as git_ignore
     from calkit.cli.new import new_latex_stage
 
@@ -203,16 +215,13 @@ def import_publication(
     overleaf_dir = os.path.join(".calkit", "overleaf")
     os.makedirs(overleaf_dir, exist_ok=True)
     git_ignore(overleaf_dir, no_commit=no_commit)
-    overleaf_project_dir = os.path.join(overleaf_dir, overleaf_project_id)
-    git_clone_url = calkit.overleaf.get_git_remote_url(
-        project_id=overleaf_project_id, token=overleaf_token
-    )
+    overleaf_project_dir = calkit.overleaf.get_project_dir(overleaf_project_id)
     if os.path.isdir(overleaf_project_dir):
         warn("This Overleaf project has already been cloned; removing")
         shutil.rmtree(overleaf_project_dir)
     # Clone the Overleaf project
     typer.echo("Cloning Overleaf project")
-    git.Repo.clone_from(git_clone_url, overleaf_project_dir)
+    calkit.overleaf.clone(overleaf_project_id, overleaf_token)
     # Detect target path if not specified
     if target_path is None:
         ol_contents = os.listdir(
@@ -438,8 +447,6 @@ def sync(
     ] = False,
 ):
     """Sync folders with Overleaf."""
-    import git
-
     # TODO: We should probably ensure the pipeline isn't stale
     # Read all synced folders, fixing legacy schema if applicable
     overleaf_info = calkit.overleaf.get_sync_info(fix_legacy=True)
@@ -514,32 +521,15 @@ def sync(
                     "or use --auto-commit/-a to automatically commit them."
                 )
         # Ensure we've cloned the Overleaf project
-        overleaf_project_dir = os.path.join(
-            ".calkit", "overleaf", overleaf_project_id
+        overleaf_repo = calkit.overleaf.get_repo(
+            overleaf_project_id, str(overleaf_token)
         )
-        overleaf_remote_url = calkit.overleaf.get_git_remote_url(
-            project_id=overleaf_project_id, token=str(overleaf_token)
-        )
-        if not os.path.isdir(overleaf_project_dir):
-            overleaf_repo = git.Repo.clone_from(
-                overleaf_remote_url, to_path=overleaf_project_dir
-            )
-        else:
-            overleaf_repo = calkit.git.get_repo(overleaf_project_dir)
         # Pull the latest version in the Overleaf project
         typer.echo("Pulling the latest version from Overleaf")
-        # Ensure that our current Overleaf remote URL is correct
-        overleaf_repo.git.remote("set-url", "origin", overleaf_remote_url)
         try:
             overleaf_repo.git.pull()
         except Exception:
-            raise_error(
-                "Failed to pull from Overleaf; "
-                "check that your Overleaf token is valid\n"
-                "Run 'calkit config get overleaf_token' and ensure that "
-                "it matches one in your Overleaf account settings "
-                "(https://overleaf.com/user/settings)"
-            )
+            raise_error(PULL_FAILED_MESSAGE)
         if resolve:
             last_sync_commit = resolving_info["last_overleaf_commit"]
         else:
@@ -621,8 +611,6 @@ def get_status(
     ] = None,
 ):
     """Check the status of folders synced with Overleaf in a project."""
-    import git
-
     # Read all synced folders, fixing legacy schema if applicable
     overleaf_info = calkit.overleaf.get_sync_info(fix_legacy=False)
     if not overleaf_info:
@@ -655,32 +643,18 @@ def get_status(
         )
         wdir = path_in_project
         # Ensure we've cloned the Overleaf project
-        overleaf_project_dir = os.path.join(
-            ".calkit", "overleaf", overleaf_project_id
+        overleaf_project_dir = calkit.overleaf.get_project_dir(
+            overleaf_project_id
         )
-        overleaf_remote_url = calkit.overleaf.get_git_remote_url(
-            project_id=overleaf_project_id, token=str(overleaf_token)
+        overleaf_repo = calkit.overleaf.get_repo(
+            overleaf_project_id, str(overleaf_token)
         )
-        if not os.path.isdir(overleaf_project_dir):
-            overleaf_repo = git.Repo.clone_from(
-                overleaf_remote_url, to_path=overleaf_project_dir
-            )
-        else:
-            overleaf_repo = calkit.git.get_repo(overleaf_project_dir)
         # Pull the latest version in the Overleaf project
         typer.echo("Pulling the latest version from Overleaf")
-        # Ensure that our current Overleaf remote URL is correct
-        overleaf_repo.git.remote("set-url", "origin", overleaf_remote_url)
         try:
             overleaf_repo.git.pull()
         except Exception:
-            raise_error(
-                "Failed to pull from Overleaf; "
-                "check that your Overleaf token is valid\n"
-                "Run 'calkit config get overleaf_token' and ensure that "
-                "it matches one in your Overleaf account settings "
-                "(https://overleaf.com/user/settings)"
-            )
+            raise_error(PULL_FAILED_MESSAGE)
         last_sync_commit = sync_data.get("last_sync_commit")
         if last_sync_commit:
             commits_since = calkit.overleaf.get_commits_since_last_sync(

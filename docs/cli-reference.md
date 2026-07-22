@@ -2721,9 +2721,10 @@ calkit check repro [OPTIONS]
 
 Options:
 
-| Option   | Type | Required | Default | Description                |
-| -------- | ---- | -------- | ------- | -------------------------- |
-| `--wdir` | text | no       | .       | Project working directory. |
+| Option   | Type    | Required | Default | Description                |
+| -------- | ------- | -------- | ------- | -------------------------- |
+| `--wdir` | text    | no       | .       | Project working directory. |
+| `--json` | boolean | no       | False   | Output result as JSON.     |
 
 <a id="subcommand-check-environment"></a>
 

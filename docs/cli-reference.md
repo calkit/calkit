@@ -248,6 +248,8 @@ Options:
 | Option            | Type    | Required | Default | Description                                        |
 | ----------------- | ------- | -------- | ------- | -------------------------------------------------- |
 | `--no-check-auth` | boolean | no       | False   |                                                    |
+| `--no-dvc`        | boolean | no       | False   |                                                    |
+| `--no-git`        | boolean | no       | False   |                                                    |
 | `--git-arg`       | text    | no       |         | Additional Git args.                               |
 | `--dvc-arg`       | text    | no       |         | Additional DVC args.                               |
 | `--force`, `-f`   | boolean | no       | False   | Force pull, potentially overwriting local changes. |

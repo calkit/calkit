@@ -9,9 +9,7 @@ import typer
 
 from calkit.cli import AliasGroup
 
-sync_app = typer.Typer(
-    cls=AliasGroup, no_args_is_help=True, help="Sync with external systems."
-)
+sync_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
 SYNC_TARGETS: dict[str, dict[str, Callable]] = {}
 

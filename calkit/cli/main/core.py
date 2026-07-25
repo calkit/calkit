@@ -90,7 +90,7 @@ app.add_typer(
     help="Work with a job scheduler (SLURM or PBS).",
 )
 app.add_typer(dev_app, name="dev", help="Developer tools.", hidden=True)
-app.add_typer(sync_app, name="sync", help="Sync with disparate systems.")
+app.add_typer(sync_app, name="sync", help="Sync with external systems.")
 
 
 def _to_shell_cmd(cmd: list[str]) -> str:

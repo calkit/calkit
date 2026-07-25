@@ -13,7 +13,7 @@ runner = CliRunner()
 def test_sync_help():
     result = runner.invoke(app, ["sync", "--help"])
     assert result.exit_code == 0
-    assert "Sync with disparate systems" in result.output
+    assert "Sync with external systems" in result.output
     assert "git" in result.output
     assert "dvc" in result.output
     assert "overleaf" in result.output

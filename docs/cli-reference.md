@@ -49,7 +49,7 @@
 | [`cloud`](#command-group-cloud)                  | Interact with a Calkit Cloud.                                                                                |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
 | [`dev`](#command-group-dev)                      | Developer tools.                                                                                             |
-| [`sync`](#command-group-sync)                    | Sync with disparate systems.                                                                                 |
+| [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                  |
 
 ## Top-level command details
 
@@ -3358,7 +3358,7 @@ calkit dev ipython [OPTIONS]
 
 ### `calkit sync`
 
-Sync with disparate systems.
+Sync with external systems.
 
 | Command                                 | Description                                          |
 | --------------------------------------- | ---------------------------------------------------- |

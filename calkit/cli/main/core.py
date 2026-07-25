@@ -1159,8 +1159,12 @@ def save(
 @app.command(name="pull")
 def pull(
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
-    no_dvc: Annotated[bool, typer.Option("--no-dvc")] = False,
-    no_git: Annotated[bool, typer.Option("--no-git")] = False,
+    no_dvc: Annotated[
+        bool, typer.Option("--no-dvc", help="Do not pull from DVC.")
+    ] = False,
+    no_git: Annotated[
+        bool, typer.Option("--no-git", help="Do not pull from Git.")
+    ] = False,
     git_args: Annotated[
         list[str],
         typer.Option("--git-arg", help="Additional Git args."),
@@ -1313,9 +1317,14 @@ register_sync_target("git", sync_git, _is_git_configured)
 
 
 def _is_dvc_configured() -> bool:
+    """Check whether DVC is configured for syncing.
+
+    A DVC repo alone is not enough to sync: pulling or pushing requires at
+    least one remote. We therefore check both that a DVC repo exists and that
+    it has remotes configured.
+    """
     try:
-        calkit.dvc.get_dvc_repo()
-        return True
+        return len(calkit.dvc.get_remotes()) > 0
     except Exception:
         return False
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from typing import Callable
 
 import typer
@@ -51,4 +50,4 @@ def sync_all() -> None:
             typer.echo(f"Skipping {target}: not configured.")
     # Exit with an error if any target failed so callers can react.
     if failures:
-        sys.exit(1)
+        raise typer.Exit(1)

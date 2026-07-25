@@ -31,14 +31,14 @@ def sync_all() -> None:
     """Sync all configured systems."""
     order = ["git", "dvc", "overleaf"]
     targets_to_run = []
-
+    # Put known targets first in a stable order, then append any others.
     for t in order:
         if t in SYNC_TARGETS:
             targets_to_run.append(t)
     for t in SYNC_TARGETS:
         if t not in targets_to_run:
             targets_to_run.append(t)
-
+    # Run each configured target, reporting and collecting any failures.
     failures = []
     for target in targets_to_run:
         target_info = SYNC_TARGETS[target]
@@ -51,6 +51,6 @@ def sync_all() -> None:
                 failures.append(target)
         else:
             typer.echo(f"Skipping {target}: not configured.")
-
+    # Exit with an error if any target failed so callers can react.
     if failures:
         sys.exit(1)

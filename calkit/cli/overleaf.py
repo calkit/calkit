@@ -13,6 +13,7 @@ from typing_extensions import Annotated
 
 import calkit
 from calkit.cli import AliasGroup, raise_error, warn
+from calkit.cli.sync import sync_app
 
 overleaf_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
@@ -362,6 +363,7 @@ def import_publication(
     sync(paths=[dest_dir], no_commit=no_commit, push_only=push_only)
 
 
+@sync_app.command(name="overleaf")
 @overleaf_app.command(name="sync")
 def sync(
     paths: Annotated[

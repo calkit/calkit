@@ -56,7 +56,7 @@ def sync_dvc(
 @sync_app.command(name="all")
 def sync_all() -> None:
     """Sync all registered systems."""
-    from calkit.cli.overleaf import sync as sync_overleaf
+    from calkit.cli.overleaf import sync as overleaf_sync
 
     # Run each known target in a stable order, reporting and collecting any
     # failures. Each target is responsible for raising a clear error if it is
@@ -65,7 +65,7 @@ def sync_all() -> None:
     sync_funcs: list[tuple[str, Callable[[], None]]] = [
         ("git", sync_git),
         ("dvc", sync_dvc),
-        ("overleaf", sync_overleaf),
+        ("overleaf", overleaf_sync),
     ]
     failures = []
     for target_name, sync_func in sync_funcs:

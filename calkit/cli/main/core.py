@@ -59,7 +59,7 @@ from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
 from calkit.cli.overleaf import overleaf_app
 from calkit.cli.scheduler import scheduler_app
-from calkit.cli.sync import register_sync_target, sync_app
+from calkit.cli.sync import sync_app
 from calkit.cli.update import update_app
 
 app = typer.Typer(
@@ -1294,51 +1294,6 @@ def push(
             subprocess.check_call(git_cmd + git_args)
         except subprocess.CalledProcessError:
             raise_error("Git push failed")
-
-
-def _is_git_configured() -> bool:
-    try:
-        repo = calkit.git.get_repo()
-        return len(repo.remotes) > 0
-    except Exception:
-        return False
-
-
-@sync_app.command(name="git")
-def sync_git(
-    no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
-) -> None:
-    """Sync the Git repository by pulling and then pushing."""
-    pull(no_dvc=True, no_check_auth=no_check_auth)
-    push(no_dvc=True, no_check_auth=no_check_auth)
-
-
-register_sync_target("git", sync_git, _is_git_configured)
-
-
-def _is_dvc_configured() -> bool:
-    """Check whether DVC is configured for syncing.
-
-    A DVC repo alone is not enough to sync: pulling or pushing requires at
-    least one remote. We therefore check both that a DVC repo exists and that
-    it has remotes configured.
-    """
-    try:
-        return len(calkit.dvc.get_remotes()) > 0
-    except Exception:
-        return False
-
-
-@sync_app.command(name="dvc")
-def sync_dvc(
-    no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
-) -> None:
-    """Sync the DVC repository by pulling and then pushing."""
-    pull(no_git=True, no_check_auth=no_check_auth)
-    push(no_git=True, no_check_auth=no_check_auth)
-
-
-register_sync_target("dvc", sync_dvc, _is_dvc_configured)
 
 
 @app.command(name="ignore")

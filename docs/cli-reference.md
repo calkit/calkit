@@ -3363,9 +3363,9 @@ Sync with external systems.
 | Command                                 | Description                                          |
 | --------------------------------------- | ---------------------------------------------------- |
 | [`all`](#subcommand-sync-all)           | Sync all configured systems.                         |
-| [`overleaf`](#subcommand-sync-overleaf) | Sync folders with Overleaf.                          |
 | [`git`](#subcommand-sync-git)           | Sync the Git repository by pulling and then pushing. |
 | [`dvc`](#subcommand-sync-dvc)           | Sync the DVC repository by pulling and then pushing. |
+| [`overleaf`](#subcommand-sync-overleaf) | Sync folders with Overleaf.                          |
 
 <a id="subcommand-sync-all"></a>
 
@@ -3378,35 +3378,6 @@ Usage:
 ```text
 calkit sync all
 ```
-
-<a id="subcommand-sync-overleaf"></a>
-
-#### `calkit sync overleaf`
-
-Sync folders with Overleaf.
-
-Usage:
-
-```text
-calkit sync overleaf [OPTIONS] [PATHS...]
-```
-
-Arguments:
-
-| Argument | Type | Required | Default | Description                                                                                                      |
-| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
-| `paths`  | text | no       |         | Paths to sync with Overleaf, e.g., 'paper/paper.pdf'. If not provided, all Overleaf publications will be synced. |
-
-Options:
-
-| Option                | Type    | Required | Default | Description                                                                                                                                                                                                                              |
-| --------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--no-commit`         | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
-| `--auto-commit`, `-a` | boolean | no       | False   | Automatically commit changes to the project repo if a synced folder has changes.                                                                                                                                                         |
-| `--no-push`           | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
-| `--verbose`           | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
-| `--resolve`, `-r`     | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
-| `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
 
 <a id="subcommand-sync-git"></a>
 
@@ -3443,3 +3414,32 @@ Options:
 | Option            | Type    | Required | Default | Description |
 | ----------------- | ------- | -------- | ------- | ----------- |
 | `--no-check-auth` | boolean | no       | False   |             |
+
+<a id="subcommand-sync-overleaf"></a>
+
+#### `calkit sync overleaf`
+
+Sync folders with Overleaf.
+
+Usage:
+
+```text
+calkit sync overleaf [OPTIONS] [PATHS...]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                                      |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
+| `paths`  | text | no       |         | Paths to sync with Overleaf, e.g., 'paper/paper.pdf'. If not provided, all Overleaf publications will be synced. |
+
+Options:
+
+| Option                | Type    | Required | Default | Description                                                                                                                                                                                                                              |
+| --------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-commit`         | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
+| `--auto-commit`, `-a` | boolean | no       | False   | Automatically commit changes to the project repo if a synced folder has changes.                                                                                                                                                         |
+| `--no-push`           | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
+| `--verbose`           | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
+| `--resolve`, `-r`     | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
+| `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |

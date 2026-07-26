@@ -176,8 +176,8 @@ The available targets are:
 - `calkit sync git`: sync files stored in Git by pulling and then pushing.
 - `calkit sync dvc`: sync files stored in DVC by pulling and then pushing.
 - `calkit sync overleaf`: sync folders linked to Overleaf projects.
-- `calkit sync all`: sync all configured systems,
-  skipping any that are not set up.
+- `calkit sync all`: sync all registered systems,
+  reporting any that are not set up.
 
 For example, to sync the Git repository only:
 

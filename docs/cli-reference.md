@@ -3362,22 +3362,10 @@ Sync with external systems.
 
 | Command                                 | Description                                          |
 | --------------------------------------- | ---------------------------------------------------- |
-| [`all`](#subcommand-sync-all)           | Sync all configured systems.                         |
 | [`git`](#subcommand-sync-git)           | Sync the Git repository by pulling and then pushing. |
 | [`dvc`](#subcommand-sync-dvc)           | Sync the DVC repository by pulling and then pushing. |
+| [`all`](#subcommand-sync-all)           | Sync all registered systems.                         |
 | [`overleaf`](#subcommand-sync-overleaf) | Sync folders with Overleaf.                          |
-
-<a id="subcommand-sync-all"></a>
-
-#### `calkit sync all`
-
-Sync all configured systems.
-
-Usage:
-
-```text
-calkit sync all
-```
 
 <a id="subcommand-sync-git"></a>
 
@@ -3414,6 +3402,18 @@ Options:
 | Option            | Type    | Required | Default | Description |
 | ----------------- | ------- | -------- | ------- | ----------- |
 | `--no-check-auth` | boolean | no       | False   |             |
+
+<a id="subcommand-sync-all"></a>
+
+#### `calkit sync all`
+
+Sync all registered systems.
+
+Usage:
+
+```text
+calkit sync all
+```
 
 <a id="subcommand-sync-overleaf"></a>
 

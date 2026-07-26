@@ -1151,9 +1151,9 @@ def save(
             no_recursive=no_recursive,
         )
     if sync_overleaf:
-        from calkit.cli.overleaf import sync as overleaf_sync
+        from calkit.cli.overleaf import sync as sync_overleaf
 
-        overleaf_sync(verbose=verbose, no_push=no_push)
+        sync_overleaf(verbose=verbose, no_push=no_push)
 
 
 @app.command(name="pull")
@@ -1868,7 +1868,7 @@ def run(
     import calkit.dvc.zip
     import calkit.environments
     import calkit.pipeline
-    from calkit.cli.overleaf import sync as overleaf_sync
+    from calkit.cli.overleaf import sync as sync_overleaf
 
     if (target_inputs or target_outputs) and targets:
         raise_error("Cannot specify both targets and inputs")
@@ -1974,7 +1974,7 @@ def run(
                 os.chdir(prev_cwd)
     # If specified, perform initial Overleaf sync
     if sync_overleaf:
-        overleaf_sync(no_commit=False, no_push=True, verbose=verbose)
+        sync_overleaf(no_commit=False, no_push=True, verbose=verbose)
     # Compile the DVC pipeline (and subproject pipelines)
     dvc_stages = None
     if ck_info.get("pipeline", {}) or ck_info.get("subprojects"):
@@ -2310,7 +2310,7 @@ def run(
         save(save_all=True, message=save_message, no_push=no_push)
     # If specified, perform final Overleaf sync
     if sync_overleaf:
-        overleaf_sync(
+        sync_overleaf(
             verbose=verbose,
             no_commit=False,
             no_push=not save_after_run,

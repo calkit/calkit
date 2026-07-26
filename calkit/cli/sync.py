@@ -13,13 +13,6 @@ from calkit.cli import AliasGroup, raise_error
 sync_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
 
-def sync_overleaf() -> None:
-    """Sync folders with Overleaf."""
-    from calkit.cli.overleaf import sync as overleaf_sync
-
-    overleaf_sync()
-
-
 @sync_app.command(name="git")
 def sync_git(
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
@@ -63,6 +56,8 @@ def sync_dvc(
 @sync_app.command(name="all")
 def sync_all() -> None:
     """Sync all registered systems."""
+    from calkit.cli.overleaf import sync as overleaf_sync
+
     # Run each known target in a stable order, reporting and collecting any
     # failures. Each target is responsible for raising a clear error if it is
     # not configured, so users calling 'calkit sync <target>' directly get a
@@ -70,7 +65,7 @@ def sync_all() -> None:
     sync_funcs: list[tuple[str, Callable[[], None]]] = [
         ("git", sync_git),
         ("dvc", sync_dvc),
-        ("overleaf", sync_overleaf),
+        ("overleaf", overleaf_sync),
     ]
     failures = []
     for target_name, sync_func in sync_funcs:

@@ -78,7 +78,7 @@ def test_sync_all_runs_all_targets():
 
     with patch("calkit.cli.sync.sync_git", mock_sync_git):
         with patch("calkit.cli.sync.sync_dvc", mock_sync_dvc):
-            with patch("calkit.cli.sync.sync_overleaf", mock_sync_overleaf):
+            with patch("calkit.cli.overleaf.sync", mock_sync_overleaf):
                 result = runner.invoke(app, ["sync", "all"])
                 assert result.exit_code == 0
                 assert "Syncing git..." in result.output
@@ -98,7 +98,7 @@ def test_sync_all_reports_target_failures():
 
     with patch("calkit.cli.sync.sync_git", mock_sync_git):
         with patch("calkit.cli.sync.sync_dvc", mock_sync_dvc):
-            with patch("calkit.cli.sync.sync_overleaf"):
+            with patch("calkit.cli.overleaf.sync"):
                 result = runner.invoke(app, ["sync", "all"])
                 assert result.exit_code == 1
                 assert "Syncing git..." in result.output

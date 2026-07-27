@@ -1688,13 +1688,17 @@ def _concurrent_scheduler_prepass(
 
 
 def _get_subproject_targets_for_run(
-    subproject_path: str, targets: list[str] | None
+    subproject_path: str,
+    targets: list[str] | None,
+    include_dvc_yaml_targets: bool = False,
 ) -> tuple[bool, list[str] | None]:
     """Return whether and which subproject stages a run target selects."""
     if not targets:
         return True, None
     sp = Path(subproject_path).as_posix()
     target_prefixes = {sp, Path(sp).name}
+    if include_dvc_yaml_targets:
+        target_prefixes.add(f"{sp}/dvc.yaml")
     selected_stages = []
     for target in targets:
         target_prefix, separator, stage_name = target.partition(":")
@@ -1965,7 +1969,11 @@ def run(
                 continue
             if single_item:
                 sp_selected, sp_targets = _get_subproject_targets_for_run(
-                    subproject_path=sp, targets=targets
+                    subproject_path=sp,
+                    targets=targets,
+                    include_dvc_yaml_targets=not os.path.isdir(
+                        os.path.join(sp, ".dvc")
+                    ),
                 )
                 if not sp_selected:
                     continue

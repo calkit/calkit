@@ -160,6 +160,36 @@ def test_single_item_skips_unrelated_subproject_preparation(tmp_dir):
         selected_subproject.stdout
     )
 
+    write_ck_info(
+        "sub1/calkit.yaml",
+        {
+            "pipeline": {
+                "stages": {
+                    "subproject-only": make_stage(
+                        'echo "dvc target" > subproject.txt'
+                    )
+                }
+            }
+        },
+    )
+    calkit.pipeline.to_dvc(write=True, manage_gitignore=False)
+    selected_inline_dvc_target = subprocess.run(
+        [
+            "calkit",
+            "run",
+            "--single-item",
+            "sub1/dvc.yaml:subproject-only",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    with open("sub1/subproject.txt") as f:
+        assert f.read().strip() == "dvc target"
+    assert "Checking environments for subproject: sub1" in (
+        selected_inline_dvc_target.stdout
+    )
+
 
 def init_isolated_subproject(path, stages):
     os.makedirs(path, exist_ok=True)

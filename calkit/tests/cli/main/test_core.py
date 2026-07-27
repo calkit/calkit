@@ -47,18 +47,48 @@ skipif_windows_mock_scheduler = pytest.mark.skipif(
 
 
 @pytest.mark.parametrize(
-    ("subproject_path", "targets", "expected"),
+    ("subproject_path", "targets", "include_dvc_yaml_targets", "expected"),
     [
-        ("sub1", None, (True, None)),
-        ("sub1", ["parent-stage"], (False, None)),
-        ("sub1", ["sub1"], (True, None)),
-        ("nested/sub1", ["sub1:build"], (True, ["build"])),
-        ("nested/sub1", ["nested/sub1:build"], (True, ["build"])),
+        ("sub1", None, False, (True, None)),
+        ("sub1", ["parent-stage"], False, (False, None)),
+        ("sub1", ["sub1"], False, (True, None)),
+        ("nested/sub1", ["sub1:build"], False, (True, ["build"])),
+        (
+            "nested/sub1",
+            ["nested/sub1:build"],
+            False,
+            (True, ["build"]),
+        ),
+        (
+            "nested/sub1",
+            ["nested/sub1/dvc.yaml"],
+            True,
+            (True, None),
+        ),
+        (
+            "nested/sub1",
+            ["nested/sub1/dvc.yaml:build"],
+            True,
+            (True, ["build"]),
+        ),
+        (
+            "nested/sub1",
+            ["nested/sub1/dvc.yaml:build"],
+            False,
+            (False, None),
+        ),
     ],
 )
-def test_get_subproject_targets_for_run(subproject_path, targets, expected):
+def test_get_subproject_targets_for_run(
+    subproject_path, targets, include_dvc_yaml_targets, expected
+):
     assert (
-        _get_subproject_targets_for_run(subproject_path, targets) == expected
+        _get_subproject_targets_for_run(
+            subproject_path,
+            targets,
+            include_dvc_yaml_targets=include_dvc_yaml_targets,
+        )
+        == expected
     )
 
 

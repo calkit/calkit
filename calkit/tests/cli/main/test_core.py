@@ -22,6 +22,7 @@ import calkit.cli.main
 from calkit.cli.core import complete_stage_names
 from calkit.cli.main.core import (
     _get_running_pipeline_status,
+    _get_subproject_targets_for_run,
     _prune_run_logs,
     _run_dvc_repro,
     _stage_run_info_from_log_content,
@@ -43,6 +44,22 @@ skipif_windows_mock_scheduler = pytest.mark.skipif(
     sys.platform == "win32",
     reason="TODO: mock scheduler is not yet Windows-compatible",
 )
+
+
+@pytest.mark.parametrize(
+    ("subproject_path", "targets", "expected"),
+    [
+        ("sub1", None, (True, None)),
+        ("sub1", ["parent-stage"], (False, None)),
+        ("sub1", ["sub1"], (True, None)),
+        ("nested/sub1", ["sub1:build"], (True, ["build"])),
+        ("nested/sub1", ["nested/sub1:build"], (True, ["build"])),
+    ],
+)
+def test_get_subproject_targets_for_run(subproject_path, targets, expected):
+    assert (
+        _get_subproject_targets_for_run(subproject_path, targets) == expected
+    )
 
 
 def _repo_test_file(name: str) -> Path:

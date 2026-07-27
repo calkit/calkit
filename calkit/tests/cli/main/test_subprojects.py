@@ -115,6 +115,52 @@ def test_inline_subproject(tmp_dir):
         assert "v2" in f.read()
 
 
+def test_single_item_skips_unrelated_subproject_preparation(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("sub1")
+    write_ck_info(
+        "sub1/calkit.yaml",
+        {
+            "pipeline": {
+                "stages": {
+                    "subproject-only": make_stage(
+                        'echo "subproject" > subproject.txt'
+                    )
+                }
+            }
+        },
+    )
+    write_ck_info(
+        "calkit.yaml",
+        {
+            "subprojects": [{"path": "sub1"}],
+            "pipeline": {
+                "stages": {
+                    "parent-only": make_stage('echo "parent" > parent.txt')
+                }
+            },
+        },
+    )
+    result = subprocess.run(
+        ["calkit", "run", "--single-item", "parent-only"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert os.path.isfile("parent.txt")
+    assert "Checking environments for subproject" not in result.stdout
+    selected_subproject = subprocess.run(
+        ["calkit", "run", "--single-item", "sub1:subproject-only"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert os.path.isfile("sub1/subproject.txt")
+    assert "Checking environments for subproject: sub1" in (
+        selected_subproject.stdout
+    )
+
+
 def init_isolated_subproject(path, stages):
     os.makedirs(path, exist_ok=True)
     subprocess.check_call(["git", "init"], cwd=path)

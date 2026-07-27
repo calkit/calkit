@@ -1687,6 +1687,29 @@ def _concurrent_scheduler_prepass(
                 )
 
 
+def _get_subproject_targets_for_run(
+    subproject_path: str,
+    targets: list[str] | None,
+    include_dvc_yaml_targets: bool = False,
+) -> tuple[bool, list[str] | None]:
+    """Return whether and which subproject stages a run target selects."""
+    if not targets:
+        return True, None
+    sp = Path(subproject_path).as_posix()
+    target_prefixes = {sp, Path(sp).name}
+    if include_dvc_yaml_targets:
+        target_prefixes.add(f"{sp}/dvc.yaml")
+    selected_stages = []
+    for target in targets:
+        target_prefix, separator, stage_name = target.partition(":")
+        if target_prefix not in target_prefixes:
+            continue
+        if not separator or not stage_name:
+            return True, None
+        selected_stages.append(stage_name)
+    return bool(selected_stages), selected_stages or None
+
+
 @app.command(name="run")
 def run(
     targets: Annotated[
@@ -1944,6 +1967,18 @@ def run(
             sp = Path(subproject["path"]).as_posix()
             if not os.path.isdir(sp):
                 continue
+            if single_item:
+                sp_selected, sp_targets = _get_subproject_targets_for_run(
+                    subproject_path=sp,
+                    targets=targets,
+                    include_dvc_yaml_targets=not os.path.isdir(
+                        os.path.join(sp, ".dvc")
+                    ),
+                )
+                if not sp_selected:
+                    continue
+            else:
+                sp_targets = None
             os.chdir(sp)
             try:
                 sp_ck_info = calkit.load_calkit_info()
@@ -1952,7 +1987,7 @@ def run(
                         f"📦 Checking environments for subproject: {sp}"
                     )
                 sp_env_results = calkit.environments.check_all_in_pipeline(
-                    ck_info=sp_ck_info, force=force
+                    ck_info=sp_ck_info, targets=sp_targets, force=force
                 )
                 for env_name, sp_result in sp_env_results.items():
                     if verbose:

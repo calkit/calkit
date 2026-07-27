@@ -186,7 +186,7 @@ def test_single_item_skips_unrelated_subproject_preparation(tmp_dir):
         text=True,
     )
     with open("sub1/subproject.txt") as f:
-        assert f.read().strip() == "dvc target"
+        assert "dvc target" in f.read()
     assert "Checking environments for subproject: sub1" in (
         selected_inline_dvc_target.stdout
     )

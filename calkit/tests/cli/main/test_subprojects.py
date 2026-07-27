@@ -160,6 +160,7 @@ def test_single_item_skips_unrelated_subproject_preparation(tmp_dir):
         selected_subproject.stdout
     )
 
+    # A DVC-style inline target should still prepare the selected subproject.
     write_ck_info(
         "sub1/calkit.yaml",
         {

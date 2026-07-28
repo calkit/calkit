@@ -406,18 +406,19 @@ export default function CommentsPanel({
                 rows={3}
                 mb={2}
               />
-              <Flex align="center" gap={3} mb={2}>
-                {showCreateIssueCheckbox && (
-                  <Checkbox
-                    size="sm"
-                    isChecked={createIssue}
-                    onChange={(e) => setCreateIssue(e.target.checked)}
-                  >
-                    Create GitHub issue
-                  </Checkbox>
-                )}
+              {showCreateIssueCheckbox && (
+                <Checkbox
+                  size="sm"
+                  mb={3}
+                  isChecked={createIssue}
+                  onChange={(e) => setCreateIssue(e.target.checked)}
+                >
+                  Create GitHub issue
+                </Checkbox>
+              )}
+              <Flex align="center" gap={2} mb={2}>
                 <Button
-                  size="xs"
+                  size="sm"
                   variant="primary"
                   isDisabled={!newDraft.trim()}
                   isLoading={postingComment}
@@ -426,7 +427,7 @@ export default function CommentsPanel({
                   {postLabel}
                 </Button>
                 <Button
-                  size="xs"
+                  size="sm"
                   variant="ghost"
                   onClick={() => {
                     setAddingComment(false)

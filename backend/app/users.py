@@ -660,6 +660,26 @@ def get_zotero_api_key(session: Session, user: User) -> str:
     return payload["api_key"]
 
 
+def get_zotero_api_key_and_user_id(
+    session: Session, user: User
+) -> tuple[str, str]:
+    """Get a user's Zotero API key together with their Zotero user ID.
+
+    The user ID (Zotero's ``userID``, stored as ``provider_account_id``) is the
+    library ID for their personal library and is needed to list their groups.
+    """
+    credential = get_external_credential(
+        session=session,
+        user=user,
+        provider="zotero",
+        label="default",
+    )
+    if credential is None or credential.provider_account_id is None:
+        raise HTTPException(401, "User needs to authenticate with Zotero")
+    payload = json.loads(decrypt_secret(credential.secret_payload))
+    return payload["api_key"], credential.provider_account_id
+
+
 def save_zotero_api_key(
     session: Session, user: User, zotero_resp: dict[str, str]
 ) -> None:

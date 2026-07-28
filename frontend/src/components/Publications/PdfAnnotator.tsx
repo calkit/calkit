@@ -356,15 +356,16 @@ export default function PdfAnnotator({
   })
 
   const comments: ProjectComment[] = commentsQuery.data ?? []
-  const visibleComments = comments.filter((c) => showResolved || !c.resolved)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Derive highlights straight from the query data so the array only changes
+  // when the comments (or the resolved filter) actually change, not on every
+  // parent render.
   const highlights: AnnotationHighlight[] = useMemo(
     () =>
-      visibleComments
+      comments
+        .filter((c) => showResolved || !c.resolved)
         .map(commentToHighlight)
         .filter((h): h is AnnotationHighlight => h !== null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [visibleComments],
+    [comments, showResolved],
   )
 
   const handleAddHighlight = useCallback(

@@ -34,15 +34,17 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
+    Response,
     UploadFile,
 )
+from fastapi.responses import StreamingResponse
 from git.exc import GitCommandError
 from pydantic import BaseModel, ValidationError
 from sqlmodel import Session, and_, func, not_, or_, select
 from TexSoup import TexSoup
 
 import app.projects
-from app import github, messaging, mixpanel, orgs, users
+from app import github, messaging, mixpanel, orgs, users, zotero
 from app.api.deps import (
     CurrentUser,
     CurrentUserOptional,
@@ -2312,6 +2314,7 @@ def _make_comment_artifact_link(
         "publication": "publications",
         "presentation": "presentations",
         "notebook": "notebooks",
+        "references": "references",
         "file": "files",
     }
     route = route_map.get(artifact_type or "", "files")
@@ -4971,11 +4974,25 @@ class ReferenceEntry(BaseModel):
     file_path: str | None = None
     url: str | None = None
     attrs: dict
+    # Zotero linkage (populated for Zotero-linked collections).
+    zotero_item_key: str | None = None
+    has_pdf: bool = False
+    note_count: int = 0
 
 
 class ReferenceFile(BaseModel):
     path: str
     key: str
+
+
+class ReferenceZoteroLink(BaseModel):
+    library_type: Literal["user", "group"]
+    library_id: str
+    collection_key: str
+    collection_name: str | None = None
+    # Populated from .calkit/zotero/sync.json at read time, not calkit.yaml.
+    last_sync_version: int | None = None
+    last_synced: str | None = None
 
 
 class References(BaseModel):
@@ -4984,6 +5001,9 @@ class References(BaseModel):
     entries: list[ReferenceEntry] | None = None
     imported_from: ImportInfo | None = None
     raw_text: str | None = None
+    zotero: ReferenceZoteroLink | None = None
+    # Names of pipeline stages that consume this .bib as a dependency/input.
+    stages: list[str] | None = None
 
 
 @router.get("/projects/{owner_name}/{project_name}/references")
@@ -5009,8 +5029,11 @@ def get_project_references(
         ref=ref,
     )
     ck_info = get_ck_info_from_repo(repo)
-    ref_collections = ck_info.get("references", [])
-    declared_paths = {rc["path"] for rc in ref_collections}
+    # An empty "references:" key in calkit.yaml parses to None.
+    ref_collections = ck_info.get("references") or []
+    declared_paths = {
+        rc.get("path") for rc in ref_collections if isinstance(rc, dict)
+    }
     # Auto-detect undeclared .bib files in the repo tree
     try:
         commit = repo.commit(ref) if ref else repo.head.commit
@@ -5028,10 +5051,101 @@ def get_project_references(
             ref_collections.append({"path": path})
     except Exception as e:
         logger.warning(f"Failed to scan for undeclared references: {e}")
+    # Map each pipeline dependency path to the stages that consume it, so we can
+    # tell whether a .bib is actually used by the pipeline. Reads both
+    # calkit.yaml's ``pipeline.stages`` (uses ``inputs``) and the generated
+    # dvc.yaml (uses ``deps``), since either may be absent or stale.
+    dep_path_to_stages: dict[str, list[str]] = {}
+
+    def _register_deps(stages: dict, key: str) -> None:
+        for stage_name, stage_def in (stages or {}).items():
+            if not isinstance(stage_def, dict):
+                continue
+            for dep in stage_def.get(key, []) or []:
+                dep_path = dep.get("path") if isinstance(dep, dict) else dep
+                if not isinstance(dep_path, str) or "{" in dep_path:
+                    continue
+                norm = os.path.normpath(dep_path)
+                dep_path_to_stages.setdefault(norm, [])
+                if stage_name not in dep_path_to_stages[norm]:
+                    dep_path_to_stages[norm].append(stage_name)
+
+    try:
+        dvc_pipeline = app.projects.get_dvc_pipeline_for_ref(repo, ref)
+        _register_deps(
+            (ck_info.get("pipeline") or {}).get("stages") or {}, "inputs"
+        )
+        _register_deps(dvc_pipeline.get("stages") or {}, "deps")
+    except Exception as e:
+        logger.warning(f"Failed to read pipeline deps for references: {e}")
+    # Local Zotero state (sync version/timestamp, item map), merged into the
+    # durable link read from calkit.yaml. Notes live in each entry's comment
+    # field, not here.
+    zotero_sync_info = zotero.read_sync_info(repo.working_dir)
+    zotero_items_info = zotero.read_items_info(repo.working_dir)
+    # For older links whose name wasn't cached, resolve it from Zotero once for
+    # the signed-in owner so the panel shows a name, not the raw key. Best-effort
+    # and not persisted here (a sync caches it for everyone).
+    zotero_api_key: str | None = None
+    zotero_key_tried = False
     resp = []
     for ref_collection in ref_collections:
+        # Skip malformed YAML entries rather than 500ing on them.
+        if (
+            not isinstance(ref_collection, dict)
+            or "path" not in ref_collection
+        ):
+            continue
         # Read entries
         path = ref_collection["path"]
+        # The Zotero link is private (.calkit/zotero/sync.json), not in
+        # calkit.yaml, which just lists the collection paths.
+        state = zotero_sync_info.get(path)
+        if isinstance(state, dict) and state.get("collection_key"):
+            collection_name = state.get("collection_name")
+            if not collection_name and current_user is not None:
+                if not zotero_key_tried:
+                    zotero_key_tried = True
+                    try:
+                        zotero_api_key, _ = (
+                            users.get_zotero_api_key_and_user_id(
+                                session=session, user=current_user
+                            )
+                        )
+                    except HTTPException:
+                        zotero_api_key = None
+                if zotero_api_key:
+                    try:
+                        collection_name = zotero.get_collection_name(
+                            api_key=zotero_api_key,
+                            library_type=state["library_type"],
+                            library_id=state["library_id"],
+                            collection_key=state["collection_key"],
+                        )
+                    except HTTPException:
+                        collection_name = None
+            ref_collection["zotero"] = {
+                "library_type": state.get("library_type"),
+                "library_id": state.get("library_id"),
+                "collection_key": state.get("collection_key"),
+                "collection_name": collection_name,
+                "last_sync_version": state.get("last_sync_version"),
+                "last_synced": state.get("last_synced"),
+            }
+        else:
+            ref_collection.pop("zotero", None)
+        # Which pipeline stages use this .bib, matching the path itself or any
+        # ancestor directory a stage may depend on.
+        norm_path = os.path.normpath(path)
+        stage_names: list[str] = []
+        candidate = norm_path
+        while candidate not in (".", "/", ""):
+            for stage_name in dep_path_to_stages.get(candidate, []):
+                if stage_name not in stage_names:
+                    stage_names.append(stage_name)
+            candidate = os.path.dirname(candidate)
+        ref_collection["stages"] = sorted(stage_names)
+        items_map = zotero_items_info.get(path, {})
         if os.path.isfile(os.path.join(repo.working_dir, path)):
             with open(os.path.join(repo.working_dir, path)) as f:
                 raw_text = f.read()
@@ -5051,6 +5165,11 @@ def get_project_references(
                 reftype = entry.pop("ENTRYTYPE")
                 file_path = file_paths.get(key)
                 url = None
+                item = items_map.get(key, {})
+                # Notes live in the comment field; surface as a count, not a
+                # raw attribute.
+                comment = entry.pop(BIB_NOTE_FIELD, None)
+                note_count = len(zotero.parse_notes_markdown(comment or ""))
                 # If a file path is defined, read it and get the presigned URL
                 if file_path is not None:
                     logger.info(f"Looking for reference file: {file_path}")
@@ -5074,12 +5193,1284 @@ def get_project_references(
                             attrs=entry,
                             file_path=file_path,
                             url=url,
+                            zotero_item_key=item.get("item_key"),
+                            has_pdf=bool(item.get("pdf_attachment_keys")),
+                            note_count=note_count,
                         )
                     )
                 )
             ref_collection["entries"] = final_entries
         resp.append(References.model_validate(ref_collection))
     return resp
+
+
+class ReferencesPost(BaseModel):
+    path: str
+    # When True, register an existing ``.bib`` file rather than creating a new,
+    # empty one. The file must already exist in the repo.
+    label_existing: bool = False
+
+
+@router.post("/projects/{owner_name}/{project_name}/references")
+def post_project_references(
+    owner_name: str,
+    project_name: str,
+    req: ReferencesPost,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> References:
+    """Register a references collection (a ``.bib`` file) in ``calkit.yaml``.
+
+    Creates a new, empty file by default, or labels an existing one when
+    ``label_existing`` is set.
+    """
+    if not req.path.lower().endswith(".bib"):
+        raise HTTPException(422, "Path must end with '.bib'")
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(project=project, user=current_user, session=session)
+    ck_info = get_ck_info_from_repo(repo)
+    # An empty "references:" key in calkit.yaml parses to None, so coerce to a
+    # list before iterating.
+    references = ck_info.get("references") or []
+    if any(
+        isinstance(rc, dict) and rc.get("path") == req.path
+        for rc in references
+    ):
+        raise HTTPException(
+            409, "A references collection with that path exists"
+        )
+    bib_full_path = os.path.join(repo.working_dir, req.path)
+    if req.label_existing:
+        if not os.path.isfile(bib_full_path):
+            raise HTTPException(404, f"'{req.path}' not found in the repo")
+    else:
+        if os.path.exists(bib_full_path):
+            raise HTTPException(
+                409, f"'{req.path}' already exists in the repo"
+            )
+        os.makedirs(os.path.dirname(bib_full_path) or ".", exist_ok=True)
+        with open(bib_full_path, "w") as f:
+            f.write("")
+    references.append({"path": req.path})
+    ck_info["references"] = references
+    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
+        ryaml.dump(ck_info, f)
+    repo.git.add(req.path)
+    repo.git.add("calkit.yaml")
+    verb = "Label" if req.label_existing else "Add"
+    repo.git.commit(["-m", f"{verb} references collection '{req.path}'"])
+    repo.git.push(["origin", repo.active_branch.name])
+    mixpanel.track(
+        user=current_user,
+        event_name="Created references collection",
+        add_event_info={
+            "path": req.path,
+            "label_existing": req.label_existing,
+        },
+    )
+    return References.model_validate({"path": req.path})
+
+
+@router.delete("/projects/{owner_name}/{project_name}/references")
+def delete_project_references(
+    owner_name: str,
+    project_name: str,
+    path: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> Message:
+    """Delete a references collection.
+
+    Removes its calkit.yaml entry, the ``.bib`` file, and all of its Zotero
+    state under .calkit/zotero/ (sync link, item map, note anchors). The
+    collection is only unlinked locally; the Zotero collection itself is left
+    untouched.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(project=project, user=current_user, session=session)
+    ck_info = get_ck_info_from_repo(repo)
+    references = ck_info.get("references") or []
+    kept = [
+        rc
+        for rc in references
+        if not (isinstance(rc, dict) and rc.get("path") == path)
+    ]
+    bib_full_path = os.path.join(repo.working_dir, path)
+    if len(kept) == len(references) and not os.path.isfile(bib_full_path):
+        raise HTTPException(404, "References collection not found")
+    ck_info["references"] = kept
+    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
+        ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
+    if os.path.isfile(bib_full_path):
+        os.remove(bib_full_path)
+        repo.git.add(path)
+    # Scrub the collection's Zotero state.
+    all_items = zotero.read_items_info(repo.working_dir)
+    item_map = all_items.pop(path, None)
+    if item_map is not None:
+        zotero.write_items_info(repo.working_dir, all_items)
+        repo.git.add(["-f", zotero.ITEMS_REL_PATH])
+        note_keys = {
+            nk
+            for info in item_map.values()
+            for nk in (info.get("note_keys") or [])
+        }
+        if note_keys:
+            anchors = zotero.read_note_anchors(repo.working_dir)
+            if any(nk in anchors for nk in note_keys):
+                for nk in note_keys:
+                    anchors.pop(nk, None)
+                zotero.write_note_anchors(repo.working_dir, anchors)
+                repo.git.add(["-f", zotero.ANCHORS_REL_PATH])
+    sync_info = zotero.read_sync_info(repo.working_dir)
+    if sync_info.pop(path, None) is not None:
+        zotero.write_sync_info(repo.working_dir, sync_info)
+        repo.git.add(["-f", zotero.SYNC_INFO_REL_PATH])
+    if repo.git.diff("--cached", "--name-only").strip():
+        repo.git.commit(["-m", f"Delete references collection '{path}'"])
+        repo.git.push(["origin", repo.active_branch.name])
+    mixpanel.track(
+        user=current_user,
+        event_name="Deleted references collection",
+        add_event_info={"path": path},
+    )
+    return Message(message="References collection deleted")
+
+
+class ReferenceItemPost(BaseModel):
+    path: str
+    type: str = "article"
+    key: str
+    fields: dict[str, str] = {}
+
+
+def _load_bib_db(repo, path: str):
+    full_path = os.path.join(repo.working_dir, path)
+    if not os.path.isfile(full_path):
+        raise HTTPException(404, "References file not found")
+    with open(full_path) as f:
+        return bibtexparser.loads(f.read()), full_path
+
+
+@router.post("/projects/{owner_name}/{project_name}/references/items")
+def post_project_reference_item(
+    owner_name: str,
+    project_name: str,
+    req: ReferenceItemPost,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> Message:
+    """Add a new entry to a references (.bib) collection.
+
+    The entry is written to the ``.bib`` and committed. For a Zotero-linked
+    collection it reaches Zotero on the next sync (which pushes local changes
+    before pulling).
+    """
+    if not req.key.strip():
+        raise HTTPException(422, "A citation key is required")
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(project=project, user=current_user, session=session)
+    db, full_path = _load_bib_db(repo, req.path)
+    if any(e.get("ID") == req.key for e in db.entries):
+        raise HTTPException(409, f"An entry '{req.key}' already exists")
+    entry = {"ENTRYTYPE": req.type, "ID": req.key}
+    for field, value in req.fields.items():
+        if value.strip():
+            entry[field] = value.strip()
+    db.entries.append(entry)
+    # For a linked collection, create the item in Zotero first (records its
+    # item mapping); a failure aborts before the local write so the two stay
+    # consistent.
+    link = _find_reference_link(repo, req.path)
+    if link:
+        api_key, _ = users.get_zotero_api_key_and_user_id(
+            session=session, user=current_user
+        )
+        _push_added_reference(repo, api_key, link, req.path, req)
+    with open(full_path, "w") as f:
+        f.write(zotero.format_bib(bibtexparser.dumps(db)))
+    repo.git.add(req.path)
+    if repo.git.diff("--cached", "--name-only").strip():
+        repo.git.commit(["-m", f"Add reference '{req.key}'"])
+        repo.git.push(["origin", repo.active_branch.name])
+    mixpanel.track(
+        user=current_user,
+        event_name="Added reference item",
+        add_event_info={"path": req.path},
+    )
+    return Message(message="Reference added")
+
+
+class ReferenceItemPut(BaseModel):
+    path: str
+    type: str
+    key: str
+    fields: dict[str, str] = {}
+
+
+@router.put("/projects/{owner_name}/{project_name}/references/items/{bib_key}")
+def put_project_reference_item(
+    owner_name: str,
+    project_name: str,
+    bib_key: str,
+    req: ReferenceItemPut,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> Message:
+    """Edit an entry's type, key, and fields, preserving its notes.
+
+    Provided fields are merged in (an empty value clears that field); fields not
+    included are left as they are, so notes and other data survive the edit.
+    """
+    if not req.key.strip():
+        raise HTTPException(422, "A citation key is required")
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(project=project, user=current_user, session=session)
+    db, full_path = _load_bib_db(repo, req.path)
+    entry = next((e for e in db.entries if e.get("ID") == bib_key), None)
+    if entry is None:
+        raise HTTPException(404, "Reference entry not found")
+    if req.key != bib_key and any(e.get("ID") == req.key for e in db.entries):
+        raise HTTPException(409, f"An entry '{req.key}' already exists")
+    before = dict(entry)
+    entry["ENTRYTYPE"] = req.type
+    entry["ID"] = req.key
+    for field, value in req.fields.items():
+        if value.strip():
+            entry[field] = value.strip()
+        else:
+            entry.pop(field, None)
+    # Push the edit to Zotero first for a linked collection (this also follows a
+    # key rename in the item map); a failure aborts before the local write.
+    # Skip the push when nothing actually changed, so a redundant save doesn't
+    # bump the Zotero version.
+    link = _find_reference_link(repo, req.path)
+    if link and entry != before:
+        api_key, _ = users.get_zotero_api_key_and_user_id(
+            session=session, user=current_user
+        )
+        _push_edited_reference(repo, api_key, link, req.path, bib_key, req)
+    with open(full_path, "w") as f:
+        f.write(zotero.format_bib(bibtexparser.dumps(db)))
+    repo.git.add(req.path)
+    # An edit that changes nothing leaves the working tree clean; skip the
+    # commit rather than letting git error on an empty commit.
+    if repo.git.diff("--cached", "--name-only").strip():
+        repo.git.commit(["-m", f"Edit reference '{req.key}'"])
+        repo.git.push(["origin", repo.active_branch.name])
+    mixpanel.track(
+        user=current_user,
+        event_name="Edited reference item",
+        add_event_info={"path": req.path},
+    )
+    return Message(message="Reference updated")
+
+
+@router.delete(
+    "/projects/{owner_name}/{project_name}/references/items/{bib_key}"
+)
+def delete_project_reference_item(
+    owner_name: str,
+    project_name: str,
+    bib_key: str,
+    path: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> Message:
+    """Delete an entry from a references (.bib) collection.
+
+    The entry is removed from the ``.bib`` and committed. For a Zotero-linked
+    collection the item is deleted from Zotero too.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(project=project, user=current_user, session=session)
+    db, full_path = _load_bib_db(repo, path)
+    if not any(e.get("ID") == bib_key for e in db.entries):
+        raise HTTPException(404, "Reference entry not found")
+    db.entries = [e for e in db.entries if e.get("ID") != bib_key]
+    # Delete from Zotero first for a linked collection; a failure aborts before
+    # the local write so the two stay consistent.
+    link = _find_reference_link(repo, path)
+    if link:
+        api_key, _ = users.get_zotero_api_key_and_user_id(
+            session=session, user=current_user
+        )
+        _push_deleted_reference(repo, api_key, link, path, bib_key)
+    with open(full_path, "w") as f:
+        f.write(zotero.format_bib(bibtexparser.dumps(db)))
+    repo.git.add(path)
+    if repo.git.diff("--cached", "--name-only").strip():
+        repo.git.commit(["-m", f"Delete reference '{bib_key}'"])
+        repo.git.push(["origin", repo.active_branch.name])
+    mixpanel.track(
+        user=current_user,
+        event_name="Deleted reference item",
+        add_event_info={"path": path},
+    )
+    return Message(message="Reference deleted")
+
+
+class ZoteroLibrary(BaseModel):
+    library_type: Literal["user", "group"]
+    library_id: str
+    name: str
+
+
+@router.get("/projects/{owner_name}/{project_name}/zotero/libraries")
+def get_project_zotero_libraries(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> list[ZoteroLibrary]:
+    """List the Zotero libraries the current user can import from."""
+    app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    api_key, user_id = users.get_zotero_api_key_and_user_id(
+        session=session, user=current_user
+    )
+    libraries = [
+        ZoteroLibrary(
+            library_type="user", library_id=user_id, name="My Library"
+        )
+    ]
+    for group in zotero.get_groups(api_key=api_key, user_id=user_id):
+        libraries.append(ZoteroLibrary.model_validate(group))
+    return libraries
+
+
+class ZoteroCollection(BaseModel):
+    collection_key: str
+    collection_name: str | None = None
+    parent_collection: str | None = None
+
+
+@router.get("/projects/{owner_name}/{project_name}/zotero/collections")
+def get_project_zotero_collections(
+    owner_name: str,
+    project_name: str,
+    library_type: Literal["user", "group"],
+    library_id: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> list[ZoteroCollection]:
+    """List a Zotero library's collections for the import picker."""
+    app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    api_key, _ = users.get_zotero_api_key_and_user_id(
+        session=session, user=current_user
+    )
+    collections = zotero.get_collections(
+        api_key=api_key, library_type=library_type, library_id=library_id
+    )
+    return [ZoteroCollection.model_validate(c) for c in collections]
+
+
+class ZoteroItem(BaseModel):
+    item_key: str
+    title: str | None = None
+    item_type: str | None = None
+    year: str | None = None
+    first_author: str | None = None
+
+
+@router.get("/projects/{owner_name}/{project_name}/zotero/items")
+def get_project_zotero_items(
+    owner_name: str,
+    project_name: str,
+    library_type: Literal["user", "group"],
+    library_id: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+    q: str | None = None,
+    collection_key: str | None = None,
+) -> list[ZoteroItem]:
+    """Search a Zotero library's items for the subset import picker."""
+    app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    api_key, _ = users.get_zotero_api_key_and_user_id(
+        session=session, user=current_user
+    )
+    items = zotero.search_items(
+        api_key=api_key,
+        library_type=library_type,
+        library_id=library_id,
+        q=q,
+        collection_key=collection_key,
+    )
+    return [ZoteroItem.model_validate(i) for i in items]
+
+
+class ZoteroImportPost(BaseModel):
+    library_type: Literal["user", "group"]
+    library_id: str
+    # Whole-collection mode: link this existing collection directly.
+    collection_key: str | None = None
+    # Subset mode: create a dedicated collection seeded with these items.
+    item_keys: list[str] | None = None
+    bib_path: str = "references.bib"
+    # Replace an existing .bib at bib_path instead of failing with 409.
+    overwrite: bool = False
+
+
+@router.post("/projects/{owner_name}/{project_name}/zotero/imports")
+def post_project_zotero_import(
+    owner_name: str,
+    project_name: str,
+    req: ZoteroImportPost,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> References:
+    """Import a Zotero collection into a project's references.
+
+    Whole-collection mode links an existing collection; subset mode creates a
+    dedicated "Calkit: {owner}/{project}" collection, seeds it with the chosen
+    items, and links that. Either way the collection is pulled into a ``.bib``
+    file and recorded in ``calkit.yaml`` for later sync.
+    """
+    if not req.bib_path.lower().endswith(".bib"):
+        raise HTTPException(422, "bib_path must end with '.bib'")
+    if bool(req.collection_key) == bool(req.item_keys):
+        raise HTTPException(
+            422, "Provide either collection_key or item_keys, not both"
+        )
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    api_key, zotero_user_id = users.get_zotero_api_key_and_user_id(
+        session=session, user=current_user
+    )
+    repo = get_repo(project=project, user=current_user, session=session)
+    ck_info = get_ck_info_from_repo(repo)
+    # Guard before any writes to Zotero, so a rejected import never leaves an
+    # orphan collection behind. A .bib already on disk or declared in
+    # calkit.yaml is only replaced when overwrite is set.
+    references = ck_info.get("references") or []
+    already_declared = any(
+        isinstance(rc, dict) and rc.get("path") == req.bib_path
+        for rc in references
+    )
+    bib_full_path = os.path.join(repo.working_dir, req.bib_path)
+    if not req.overwrite and (
+        already_declared or os.path.exists(bib_full_path)
+    ):
+        raise HTTPException(
+            409,
+            f"'{req.bib_path}' already exists; enable overwrite to replace",
+        )
+    if req.collection_key is not None:
+        collection_key = req.collection_key
+        collection_name = zotero.get_collection_name(
+            api_key=api_key,
+            library_type=req.library_type,
+            library_id=req.library_id,
+            collection_key=collection_key,
+        )
+    else:
+        collection_name = f"Calkit: {owner_name}/{project_name}"
+        collection_key = zotero.create_collection(
+            api_key=api_key,
+            library_type=req.library_type,
+            library_id=req.library_id,
+            name=collection_name,
+        )
+        zotero.add_items_to_collection(
+            api_key=api_key,
+            library_type=req.library_type,
+            library_id=req.library_id,
+            collection_key=collection_key,
+            item_keys=req.item_keys or [],
+        )
+    library_version = _pull_zotero_collection(
+        repo=repo,
+        api_key=api_key,
+        bib_path=req.bib_path,
+        bib_full_path=bib_full_path,
+        library_type=req.library_type,
+        library_id=req.library_id,
+        collection_key=collection_key,
+    )
+    # calkit.yaml just lists the collection path; the entire Zotero link is
+    # private, kept in .calkit/zotero/sync.json.
+    zotero_link = {
+        "library_type": req.library_type,
+        "library_id": req.library_id,
+        "collection_key": collection_key,
+    }
+    for ref_collection in references:
+        if (
+            isinstance(ref_collection, dict)
+            and ref_collection.get("path") == req.bib_path
+        ):
+            # Drop any link left in calkit.yaml by an older version.
+            ref_collection.pop("zotero", None)
+            break
+    else:
+        references.append({"path": req.bib_path})
+    ck_info["references"] = references
+    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
+        ryaml.dump(ck_info, f)
+    last_synced = _record_zotero_sync_info(
+        repo=repo,
+        bib_path=req.bib_path,
+        zotero_link=zotero_link,
+        user_id=zotero_user_id,
+        library_version=library_version,
+        collection_name=collection_name,
+    )
+    repo.git.add(req.bib_path)
+    repo.git.add("calkit.yaml")
+    repo.git.commit(["-m", f"Import Zotero collection into '{req.bib_path}'"])
+    repo.git.push(["origin", repo.active_branch.name])
+    mixpanel.track(
+        user=current_user,
+        event_name="Imported Zotero collection",
+        add_event_info={
+            "path": req.bib_path,
+            "mode": "collection" if req.collection_key else "items",
+        },
+    )
+    return References.model_validate(
+        {
+            "path": req.bib_path,
+            "zotero": {
+                **zotero_link,
+                "collection_name": collection_name,
+                "last_sync_version": library_version,
+                "last_synced": last_synced,
+            },
+        }
+    )
+
+
+def _pull_zotero_collection(
+    repo,
+    api_key: str,
+    bib_path: str,
+    bib_full_path: str,
+    library_type: str,
+    library_id: str,
+    collection_key: str,
+) -> int:
+    """Pull a Zotero collection into a formatted .bib and refresh the item map.
+
+    Each item's Zotero notes are written into its BibTeX ``comment`` field as
+    Markdown, so notes live in the .bib (the source of truth); the citekey->item
+    map under .calkit/zotero/ resolves PDFs and the Zotero item key per entry.
+    Returns the library version.
+    """
+    items, library_version = zotero.get_collection_items(
+        api_key=api_key,
+        library_type=library_type,
+        library_id=library_id,
+        collection_key=collection_key,
+    )
+    items_map, notes_map = zotero.build_item_maps(
+        api_key=api_key,
+        library_type=library_type,
+        library_id=library_id,
+        items=items,
+    )
+    # Inject each item's Zotero notes into its BibTeX comment field.
+    db = bibtexparser.loads(
+        "\n\n".join(i["bibtex"] for i in items if i["bibtex"]) + "\n"
+    )
+    for entry in db.entries:
+        item_notes = notes_map.get(entry.get("ID"))
+        if item_notes:
+            markdown = zotero.serialize_notes_markdown(
+                [
+                    {"text": zotero.note_html_to_text(n["html"])}
+                    for n in item_notes
+                ]
+            )
+            if markdown:
+                entry[BIB_NOTE_FIELD] = markdown
+    bibtex = zotero.format_bib(bibtexparser.dumps(db))
+    os.makedirs(os.path.dirname(bib_full_path) or ".", exist_ok=True)
+    with open(bib_full_path, "w") as f:
+        f.write(bibtex)
+    # Keyed by .bib path, so multiple linked collections coexist. items.json is
+    # committed (the reference->Zotero-item map is needed for PDFs and travels
+    # with the repo); force-add in case an older clone gitignored the whole
+    # .calkit/zotero/ directory.
+    all_items = zotero.read_items_info(repo.working_dir)
+    all_items[bib_path] = items_map
+    zotero.write_items_info(repo.working_dir, all_items)
+    repo.git.add(["-f", zotero.ITEMS_REL_PATH])
+    return library_version
+
+
+def _record_zotero_sync_info(
+    repo,
+    bib_path: str,
+    zotero_link: dict,
+    user_id: str,
+    library_version: int,
+    collection_name: str | None = None,
+) -> str:
+    """Persist Zotero sync state for a .bib and stage it for commit.
+
+    Like Overleaf, sync state is stateful and travels with the repo, so it's
+    committed (force-added in case an older clone gitignored .calkit/zotero/).
+    The collection name is cached here (fetched from Zotero), not in
+    calkit.yaml, since it's derived data. Returns the ISO ``last_synced``.
+    """
+    now_iso = utcnow().isoformat()
+    sync_info = zotero.read_sync_info(repo.working_dir)
+    sync_info[bib_path] = {
+        "library_type": zotero_link["library_type"],
+        "library_id": zotero_link["library_id"],
+        "collection_key": zotero_link["collection_key"],
+        "collection_name": collection_name,
+        "user_id": user_id,
+        "last_sync_version": library_version,
+        "last_synced": now_iso,
+    }
+    zotero.write_sync_info(repo.working_dir, sync_info)
+    repo.git.add(["-f", zotero.SYNC_INFO_REL_PATH])
+    return now_iso
+
+
+def _set_item_mapping(repo, path: str, bib_key: str, item_key: str) -> None:
+    """Record a reference->Zotero-item mapping in items.json and stage it."""
+    all_items = zotero.read_items_info(repo.working_dir)
+    all_items.setdefault(path, {})[bib_key] = {
+        "item_key": item_key,
+        "pdf_attachment_keys": [],
+        "note_keys": [],
+    }
+    zotero.write_items_info(repo.working_dir, all_items)
+    repo.git.add(["-f", zotero.ITEMS_REL_PATH])
+
+
+def _push_added_reference(
+    repo, api_key: str, link: dict, path: str, req: "ReferenceItemPost"
+) -> None:
+    """Create a newly added reference in Zotero and record its item mapping."""
+    item_key = zotero.create_item(
+        api_key=api_key,
+        library_type=link["library_type"],
+        library_id=link["library_id"],
+        item_type=req.type,
+        fields=req.fields,
+        collection_key=link["collection_key"],
+    )
+    _set_item_mapping(repo, path, req.key, item_key)
+
+
+def _push_edited_reference(
+    repo,
+    api_key: str,
+    link: dict,
+    path: str,
+    old_key: str,
+    req: "ReferenceItemPut",
+) -> None:
+    """Update an edited reference in Zotero (or create it if not yet linked)."""
+    all_items = zotero.read_items_info(repo.working_dir)
+    item_map = all_items.get(path, {})
+    info = item_map.get(old_key)
+    if info and info.get("item_key"):
+        zotero.update_item(
+            api_key=api_key,
+            library_type=link["library_type"],
+            library_id=link["library_id"],
+            item_key=info["item_key"],
+            item_type=req.type,
+            fields=req.fields,
+        )
+        if req.key != old_key:
+            item_map[req.key] = item_map.pop(old_key)
+            zotero.write_items_info(repo.working_dir, all_items)
+            repo.git.add(["-f", zotero.ITEMS_REL_PATH])
+    else:
+        item_key = zotero.create_item(
+            api_key=api_key,
+            library_type=link["library_type"],
+            library_id=link["library_id"],
+            item_type=req.type,
+            fields=req.fields,
+            collection_key=link["collection_key"],
+        )
+        _set_item_mapping(repo, path, req.key, item_key)
+
+
+def _push_deleted_reference(
+    repo, api_key: str, link: dict, path: str, bib_key: str
+) -> None:
+    """Delete a removed reference from Zotero and drop its item mapping."""
+    all_items = zotero.read_items_info(repo.working_dir)
+    item_map = all_items.get(path, {})
+    info = item_map.pop(bib_key, None)
+    if info and info.get("item_key"):
+        zotero.delete_item(
+            api_key=api_key,
+            library_type=link["library_type"],
+            library_id=link["library_id"],
+            item_key=info["item_key"],
+        )
+    zotero.write_items_info(repo.working_dir, all_items)
+    repo.git.add(["-f", zotero.ITEMS_REL_PATH])
+
+
+class ZoteroSyncPost(BaseModel):
+    path: str
+
+
+class ZoteroSyncResponse(BaseModel):
+    path: str
+    last_sync_version: int
+    last_synced: str
+    committed: bool
+
+
+def _apply_notes_to_entry(entry: dict, notes: list, anchors: dict) -> None:
+    """Set (or clear) a reference entry's ``comment`` from Zotero notes,
+    re-attaching any highlight anchors stored by note key.
+    """
+    local_notes = zotero.zotero_notes_to_local(notes, anchors)
+    markdown = (
+        zotero.serialize_notes_markdown(local_notes) if local_notes else ""
+    )
+    if markdown:
+        entry[BIB_NOTE_FIELD] = markdown
+    else:
+        entry.pop(BIB_NOTE_FIELD, None)
+
+
+def _merge_zotero_changes_into_bib(
+    repo, api_key: str, link: dict, path: str, since_version: int
+) -> int:
+    """Incrementally merge Zotero changes since ``since_version`` into the .bib.
+
+    Items changed on Zotero are updated in place (preserving the local citation
+    key) or added; items deleted on Zotero are removed. Note/attachment children
+    are included too, so a note-only edit (which doesn't bump its parent item's
+    version) still refreshes its parent's notes. Entries untouched on Zotero,
+    including local-only ones added on Calkit, are left alone. Returns the new
+    library version.
+    """
+    lt, lid = link["library_type"], link["library_id"]
+    changed_items, new_version = zotero.get_collection_items(
+        api_key=api_key,
+        library_type=lt,
+        library_id=lid,
+        collection_key=link["collection_key"],
+        since=since_version,
+        include_children=True,
+    )
+    deleted_keys = set(
+        zotero.get_deleted_item_keys(
+            api_key=api_key,
+            library_type=lt,
+            library_id=lid,
+            since=since_version,
+        )
+    )
+    full_path = os.path.join(repo.working_dir, path)
+    text = ""
+    if os.path.isfile(full_path):
+        with open(full_path) as f:
+            text = f.read()
+    db = bibtexparser.loads(text)
+    all_items = zotero.read_items_info(repo.working_dir)
+    item_map = all_items.get(path, {})
+    itemkey_to_bibkey = {
+        info["item_key"]: bk
+        for bk, info in item_map.items()
+        if info.get("item_key")
+    }
+    notekey_to_bibkey = {
+        nk: bk
+        for bk, info in item_map.items()
+        for nk in info.get("note_keys", [])
+    }
+    anchors = zotero.read_note_anchors(repo.working_dir)
+    entries_by_id = {e["ID"]: e for e in db.entries}
+    # Item keys of changed top-level items (whose notes are refreshed inline),
+    # and parent keys whose only change was to a child (note/attachment).
+    changed_top_keys = set()
+    parents_to_refresh = set()
+    for it in changed_items:
+        if (it.get("data") or {}).get("parentItem"):
+            parents_to_refresh.add(it["data"]["parentItem"])
+            continue
+        changed_top_keys.add(it["item_key"])
+        if not it["bibtex"]:
+            continue
+        parsed = bibtexparser.loads(it["bibtex"]).entries
+        if not parsed:
+            continue
+        new_entry = parsed[0]
+        info, notes = zotero.build_item_info(api_key, lt, lid, it)
+        _apply_notes_to_entry(new_entry, notes, anchors)
+        local_bibkey = itemkey_to_bibkey.get(it["item_key"])
+        if local_bibkey and local_bibkey in entries_by_id:
+            # Update in place, keeping the local citation key. Overwrite/add the
+            # fields Zotero exports but keep local-only ones (e.g. a manual
+            # ``file``) that its export doesn't include.
+            target = entries_by_id[local_bibkey]
+            for k, v in new_entry.items():
+                if k != "ID":
+                    target[k] = v
+            # Notes are re-derived from Zotero each pull, so clear them when it
+            # has none rather than leaving stale local notes.
+            if BIB_NOTE_FIELD not in new_entry:
+                target.pop(BIB_NOTE_FIELD, None)
+            item_map[local_bibkey] = info
+        else:
+            # A Zotero-side addition: bring it in under its Zotero citekey,
+            # disambiguating if that key already exists locally.
+            key = new_entry.get("ID") or it["item_key"]
+            if key in entries_by_id:
+                key = f"{key}_{it['item_key']}"
+                new_entry["ID"] = key
+            db.entries.append(new_entry)
+            entries_by_id[key] = new_entry
+            item_map[key] = info
+    # Deletions: a deleted top-level item drops its entry; a deleted note child
+    # just refreshes its parent's notes.
+    drop = set()
+    for k in deleted_keys:
+        if k in itemkey_to_bibkey:
+            drop.add(itemkey_to_bibkey[k])
+        elif k in notekey_to_bibkey:
+            info = item_map.get(notekey_to_bibkey[k]) or {}
+            if info.get("item_key"):
+                parents_to_refresh.add(info["item_key"])
+    if drop:
+        db.entries = [e for e in db.entries if e.get("ID") not in drop]
+        for bib_key in drop:
+            item_map.pop(bib_key, None)
+    # Refresh notes for parents whose only change was a child, unless the parent
+    # was already updated as a top-level change or was just deleted.
+    for parent_key in parents_to_refresh:
+        if parent_key in changed_top_keys:
+            continue
+        bibkey = itemkey_to_bibkey.get(parent_key)
+        if not bibkey or bibkey in drop or bibkey not in entries_by_id:
+            continue
+        info, notes = zotero.build_item_info(
+            api_key, lt, lid, {"item_key": parent_key, "num_children": 1}
+        )
+        _apply_notes_to_entry(entries_by_id[bibkey], notes, anchors)
+        item_map[bibkey] = info
+    os.makedirs(os.path.dirname(full_path) or ".", exist_ok=True)
+    with open(full_path, "w") as f:
+        f.write(zotero.format_bib(bibtexparser.dumps(db)))
+    all_items[path] = item_map
+    zotero.write_items_info(repo.working_dir, all_items)
+    repo.git.add(["-f", zotero.ITEMS_REL_PATH])
+    return new_version
+
+
+@router.post("/projects/{owner_name}/{project_name}/zotero/syncs")
+def post_project_zotero_sync(
+    owner_name: str,
+    project_name: str,
+    req: ZoteroSyncPost,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> ZoteroSyncResponse:
+    """Pull Zotero changes into a linked collection's ``.bib``, per item.
+
+    Local edits already reach Zotero when they are made (add/edit/delete push
+    immediately), so sync only pulls: it fetches the items changed on Zotero
+    since the last sync and merges them into the ``.bib`` one at a time,
+    updating changed entries in place, adding new ones, and removing deleted
+    ones, while leaving untouched (including local-only) entries alone.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    api_key, zotero_user_id = users.get_zotero_api_key_and_user_id(
+        session=session, user=current_user
+    )
+    repo = get_repo(project=project, user=current_user, session=session)
+    link = _find_reference_link(repo, req.path)
+    if not link:
+        raise HTTPException(404, "No Zotero-linked collection at that path")
+    # Merge incrementally. With no recorded version yet, since=0 pulls every
+    # item but still merges per item (preserving local-only entries and local
+    # citation keys), rather than regenerating the whole .bib.
+    since = (
+        zotero.read_sync_info(repo.working_dir)
+        .get(req.path, {})
+        .get("last_sync_version")
+        or 0
+    )
+    library_version = _merge_zotero_changes_into_bib(
+        repo=repo,
+        api_key=api_key,
+        link=link,
+        path=req.path,
+        since_version=since,
+    )
+    # Refresh the cached collection name from Zotero (it may have been renamed).
+    collection_name = zotero.get_collection_name(
+        api_key=api_key,
+        library_type=link["library_type"],
+        library_id=link["library_id"],
+        collection_key=link["collection_key"],
+    )
+    last_synced = _record_zotero_sync_info(
+        repo=repo,
+        bib_path=req.path,
+        zotero_link=link,
+        user_id=zotero_user_id,
+        library_version=library_version,
+        collection_name=collection_name,
+    )
+    repo.git.add(req.path)
+    committed = bool(repo.git.diff("--cached", "--name-only").strip())
+    if committed:
+        repo.git.commit(["-m", f"Sync Zotero collection into '{req.path}'"])
+        repo.git.push(["origin", repo.active_branch.name])
+    mixpanel.track(
+        user=current_user,
+        event_name="Synced Zotero collection",
+        add_event_info={"path": req.path, "committed": committed},
+    )
+    return ZoteroSyncResponse(
+        path=req.path,
+        last_sync_version=library_version,
+        last_synced=last_synced,
+        committed=committed,
+    )
+
+
+def _resolve_zotero_item(repo, path: str, bib_key: str) -> tuple[dict, dict]:
+    """Return ``(link, item)`` for a reference entry, or raise 404.
+
+    ``link`` is the collection's Zotero link from .calkit/zotero/sync.json;
+    ``item`` is the entry's record from .calkit/zotero/items.json.
+    """
+    link = _find_reference_link(repo, path)
+    if not link:
+        raise HTTPException(404, "No Zotero-linked collection at that path")
+    item = zotero.read_items_info(repo.working_dir).get(path, {}).get(bib_key)
+    if not item:
+        raise HTTPException(404, "Reference item is not linked to Zotero")
+    return link, item
+
+
+@router.get("/projects/{owner_name}/{project_name}/zotero/items/{bib_key}/pdf")
+def get_project_zotero_item_pdf(
+    owner_name: str,
+    project_name: str,
+    bib_key: str,
+    path: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+    index: int = Query(0, ge=0),
+) -> Response:
+    """Stream a reference item's Zotero PDF attachment."""
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    api_key, _ = users.get_zotero_api_key_and_user_id(
+        session=session, user=current_user
+    )
+    repo = get_repo(project=project, user=current_user, session=session)
+    link, item = _resolve_zotero_item(repo, path, bib_key)
+    attachment_keys = item.get("pdf_attachment_keys") or []
+    if index >= len(attachment_keys):
+        raise HTTPException(404, "No PDF for this reference item")
+    stream, content_type, content_length = zotero.stream_attachment(
+        api_key=api_key,
+        library_type=link["library_type"],
+        library_id=link["library_id"],
+        attachment_key=attachment_keys[index],
+    )
+    headers = {"Content-Length": content_length} if content_length else {}
+    return StreamingResponse(stream, media_type=content_type, headers=headers)
+
+
+class ReferenceNoteHighlight(BaseModel):
+    # react-pdf-highlighter ScaledPosition, stored verbatim.
+    position: dict
+    quote: str = ""
+
+
+# A reference note. Notes for every reference live in the BibTeX ``comment``
+# field, ``---``-separated (see ``zotero.parse_notes_markdown``); a note may be
+# anchored to a PDF highlight. Zotero-linked references additionally sync the
+# note text to Zotero as note child items.
+class ReferenceNote(BaseModel):
+    text: str
+    highlight: ReferenceNoteHighlight | None = None
+
+
+class ReferenceNotesResponse(BaseModel):
+    notes: list[ReferenceNote]
+
+
+BIB_NOTE_FIELD = zotero.NOTE_FIELD
+
+
+def _find_reference_link(repo, path: str) -> dict | None:
+    """Return the Zotero link for the collection at ``path``, if any.
+
+    The link is private, kept in .calkit/zotero/sync.json rather than
+    calkit.yaml (which just lists collection paths).
+    """
+    info = zotero.read_sync_info(repo.working_dir).get(path)
+    if isinstance(info, dict) and info.get("collection_key"):
+        return info
+    return None
+
+
+def _read_bib_comment(repo, path: str, bib_key: str) -> str:
+    """Read a reference entry's ``comment`` field from the .bib."""
+    full_path = os.path.join(repo.working_dir, path)
+    if not os.path.isfile(full_path):
+        raise HTTPException(404, "References file not found")
+    with open(full_path) as f:
+        db = bibtexparser.loads(f.read())
+    for entry in db.entries:
+        if entry.get("ID") == bib_key:
+            return entry.get(BIB_NOTE_FIELD, "")
+    raise HTTPException(404, "Reference entry not found")
+
+
+def _write_bib_comment(repo, path: str, bib_key: str, text: str) -> bool:
+    """Set (or clear) a reference entry's ``comment`` field, returning whether
+    the file changed.
+    """
+    full_path = os.path.join(repo.working_dir, path)
+    if not os.path.isfile(full_path):
+        raise HTTPException(404, "References file not found")
+    with open(full_path) as f:
+        db = bibtexparser.loads(f.read())
+    found = False
+    for entry in db.entries:
+        if entry.get("ID") == bib_key:
+            found = True
+            if text.strip():
+                entry[BIB_NOTE_FIELD] = text.strip()
+            else:
+                entry.pop(BIB_NOTE_FIELD, None)
+    if not found:
+        raise HTTPException(404, "Reference entry not found")
+    new_text = zotero.format_bib(bibtexparser.dumps(db))
+    with open(full_path) as f:
+        if f.read() == new_text:
+            return False
+    with open(full_path, "w") as f:
+        f.write(new_text)
+    return True
+
+
+def _sync_notes_to_zotero(
+    repo, api_key: str, path: str, bib_key: str, link: dict, item_key: str
+) -> None:
+    """Push the notes stored in the .bib comment to Zotero note child items.
+
+    Notes are mapped to Zotero notes by position: the Nth note updates the Nth
+    existing child note (creating or deleting to match the count), so the .bib
+    stays the source of truth. Note keys are recorded in items.json only for
+    reference.
+    """
+    notes = zotero.parse_notes_markdown(_read_bib_comment(repo, path, bib_key))
+    existing = [
+        child
+        for child in zotero.get_item_children(
+            api_key=api_key,
+            library_type=link["library_type"],
+            library_id=link["library_id"],
+            item_key=item_key,
+        )
+        if child.get("data", {}).get("itemType") == "note"
+    ]
+    # Zotero can't hold a highlight anchor, so track each note's anchor by its
+    # Zotero note key here, to re-attach it when the note is pulled back.
+    anchors = zotero.read_note_anchors(repo.working_dir)
+    for i, note in enumerate(notes):
+        html = zotero.note_zotero_html(note)
+        if i < len(existing):
+            note_key = existing[i]["key"]
+            zotero.update_note(
+                api_key=api_key,
+                library_type=link["library_type"],
+                library_id=link["library_id"],
+                note_key=note_key,
+                version=existing[i]["version"],
+                html=html,
+            )
+        else:
+            note_key = zotero.create_note(
+                api_key=api_key,
+                library_type=link["library_type"],
+                library_id=link["library_id"],
+                parent_item_key=item_key,
+                html=html,
+            )["key"]
+        if note.get("highlight"):
+            anchors[note_key] = note["highlight"]
+        else:
+            anchors.pop(note_key, None)
+    for child in existing[len(notes) :]:
+        zotero.delete_note(
+            api_key=api_key,
+            library_type=link["library_type"],
+            library_id=link["library_id"],
+            note_key=child["key"],
+            version=child["version"],
+        )
+        anchors.pop(child["key"], None)
+    zotero.write_note_anchors(repo.working_dir, anchors)
+    repo.git.add(["-f", zotero.ANCHORS_REL_PATH])
+
+
+@router.get(
+    "/projects/{owner_name}/{project_name}/references/items/{bib_key}/notes"
+)
+def get_project_reference_notes(
+    owner_name: str,
+    project_name: str,
+    bib_key: str,
+    path: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> ReferenceNotesResponse:
+    """Get a reference item's notes from its BibTeX ``comment`` field.
+
+    The .bib is the source of truth for note content (Zotero-linked references
+    have their Zotero notes written into it on sync), so reading is the same for
+    every reference.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    repo = get_repo(project=project, user=current_user, session=session)
+    notes = zotero.parse_notes_markdown(_read_bib_comment(repo, path, bib_key))
+    return ReferenceNotesResponse(
+        notes=[ReferenceNote.model_validate(n) for n in notes]
+    )
+
+
+class ReferenceNotesPut(BaseModel):
+    path: str
+    notes: list[ReferenceNote]
+
+
+@router.put(
+    "/projects/{owner_name}/{project_name}/references/items/{bib_key}/notes"
+)
+def put_project_reference_notes(
+    owner_name: str,
+    project_name: str,
+    bib_key: str,
+    req: ReferenceNotesPut,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> ReferenceNotesResponse:
+    """Set a reference item's notes in the BibTeX ``comment`` field.
+
+    Notes are serialized to Markdown (untitled sections separated by ``---``,
+    each optionally carrying a highlight anchor) and committed. For a
+    Zotero-linked reference, the notes are also pushed to Zotero.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(project=project, user=current_user, session=session)
+    markdown = zotero.serialize_notes_markdown(
+        [n.model_dump() for n in req.notes]
+    )
+    changed = _write_bib_comment(repo, req.path, bib_key, markdown)
+    link = _find_reference_link(repo, req.path)
+    item = (
+        zotero.read_items_info(repo.working_dir).get(req.path, {}).get(bib_key)
+    )
+    # Only push to Zotero when the notes actually changed, so a redundant save
+    # doesn't churn Zotero note versions.
+    if changed and link and item:
+        api_key, _ = users.get_zotero_api_key_and_user_id(
+            session=session, user=current_user
+        )
+        _sync_notes_to_zotero(
+            repo, api_key, req.path, bib_key, link, item["item_key"]
+        )
+    if changed:
+        repo.git.add(req.path)
+        repo.git.commit(["-m", f"Edit notes on '{bib_key}'"])
+        repo.git.push(["origin", repo.active_branch.name])
+    mixpanel.track(
+        user=current_user,
+        event_name="Edited reference note",
+        add_event_info={"path": req.path, "linked": bool(link and item)},
+    )
+    return ReferenceNotesResponse(
+        notes=[ReferenceNote.model_validate(n) for n in req.notes]
+    )
 
 
 class Environment(BaseModel):

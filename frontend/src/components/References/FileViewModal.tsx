@@ -1,14 +1,14 @@
 import {
+  Box,
   Modal,
   ModalBody,
   ModalCloseButton,
   ModalContent,
-  Box,
   ModalHeader,
   ModalOverlay,
 } from "@chakra-ui/react"
 
-import { type ReferenceEntry } from "../../client"
+import type { ReferenceEntry } from "../../client"
 
 interface FileViewProps {
   isOpen: boolean

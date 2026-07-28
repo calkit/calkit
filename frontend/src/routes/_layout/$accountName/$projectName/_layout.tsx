@@ -1,66 +1,71 @@
+import { ExternalLinkIcon } from "@chakra-ui/icons"
 import {
-  Container,
-  Flex,
-  Spinner,
-  Heading,
-  Link,
-  Icon,
-  Drawer,
-  IconButton,
-  useDisclosure,
-  DrawerOverlay,
-  DrawerContent,
-  DrawerCloseButton,
-  DrawerHeader,
-  DrawerBody,
-  Text,
   Badge,
+  Box,
+  Code,
+  Container,
+  Drawer,
+  DrawerBody,
+  DrawerCloseButton,
+  DrawerContent,
+  DrawerHeader,
+  DrawerOverlay,
+  Flex,
+  Heading,
+  Icon,
+  IconButton,
+  Input,
+  Link,
   Menu,
   MenuButton,
-  MenuList,
-  MenuItem,
   MenuDivider,
-  Portal,
-  Box,
+  MenuItem,
+  MenuList,
   Modal,
-  ModalOverlay,
+  ModalBody,
+  ModalCloseButton,
   ModalContent,
   ModalHeader,
-  ModalCloseButton,
-  ModalBody,
-  Input,
+  ModalOverlay,
+  Portal,
+  Spinner,
+  Text,
   VStack,
-  Code,
+  useDisclosure,
 } from "@chakra-ui/react"
+import { useQuery } from "@tanstack/react-query"
 import {
-  createFileRoute,
   Outlet,
+  createFileRoute,
   notFound,
   useNavigate,
 } from "@tanstack/react-router"
-import { useQuery } from "@tanstack/react-query"
-import { z } from "zod"
+import mixpanel from "mixpanel-browser"
 import { useEffect, useState } from "react"
+import { BsThreeDots } from "react-icons/bs"
 import { FaCodeBranch } from "react-icons/fa"
-import { ExternalLinkIcon } from "@chakra-ui/icons"
 import { FaGithub, FaQuestion, FaRegClone } from "react-icons/fa"
 import { LuCopyPlus } from "react-icons/lu"
 import { MdEdit } from "react-icons/md"
-import { BsThreeDots } from "react-icons/bs"
-import mixpanel from "mixpanel-browser"
+import { z } from "zod"
 
+import {
+  type GitRef,
+  type ProjectPublic,
+  ProjectsService,
+} from "../../../../client"
 import LoadingSpinner from "../../../../components/Common/LoadingSpinner"
+import ProjectCommandPalette from "../../../../components/Common/ProjectCommandPalette"
 import Sidebar from "../../../../components/Common/Sidebar"
-import { ProjectPublic, ProjectsService, type GitRef } from "../../../../client"
+import CloneProject from "../../../../components/Projects/CloneProject"
 import EditProject from "../../../../components/Projects/EditProject"
+import HelpContent from "../../../../components/Projects/HelpContent"
+import MakeProjectPublic from "../../../../components/Projects/MakeProjectPublic"
+import NewProject from "../../../../components/Projects/NewProject"
+import ProjectStatus from "../../../../components/Projects/ProjectStatus"
+import useAuth from "../../../../hooks/useAuth"
 import useProject from "../../../../hooks/useProject"
 import { isAuthenticationError } from "../../../../lib/auth"
-import NewProject from "../../../../components/Projects/NewProject"
-import useAuth from "../../../../hooks/useAuth"
-import HelpContent from "../../../../components/Projects/HelpContent"
-import CloneProject from "../../../../components/Projects/CloneProject"
-import ProjectStatus from "../../../../components/Projects/ProjectStatus"
-import MakeProjectPublic from "../../../../components/Projects/MakeProjectPublic"
 
 interface CommitHistory {
   hash: string
@@ -418,6 +423,7 @@ function ProjectLayout() {
         <LoadingSpinner height="100vh" />
       ) : (
         <Flex>
+          <ProjectCommandPalette />
           <Sidebar basePath={`/${accountName}/${projectName}`} />
           <Container
             maxW="full"

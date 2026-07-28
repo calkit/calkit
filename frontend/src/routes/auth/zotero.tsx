@@ -11,6 +11,9 @@ import { handleError } from "../../lib/errors"
 // Zotero uses OAuth 1.0a, so it sends back a verifier rather than a code, and
 // the request token it was issued against stands in for a state parameter.
 // Zotero omits the verifier when the user declines.
+// Kept in sync with the references page, which stashes where to return.
+const ZOTERO_RETURN_KEY = "zoteroAuthReturnTo"
+
 const authParamsSchema = z.object({
   oauth_token: z.string(),
   oauth_verifier: z.string().optional(),
@@ -44,19 +47,30 @@ function ZoteroAuth() {
       queryClient.invalidateQueries({
         queryKey: ["user", "connected-accounts"],
       })
-      navigate({ to: "/settings", search: { tab: "profile" } })
+      returnToOrigin(true)
     },
     onError: (err: ApiError) => {
       handleError(err, showToast)
       // Still navigate back after showing error
-      setTimeout(() => {
-        navigate({ to: "/settings", search: { tab: "profile" } })
-      }, 2000)
+      setTimeout(() => returnToOrigin(false), 2000)
     },
   })
   const { oauth_token: oauthToken, oauth_verifier: oauthVerifier } =
     Route.useSearch()
   const isMounted = useRef(false)
+  // Return to wherever the connect flow was started (e.g. the references import
+  // modal), reopening the import modal on success. Falls back to settings.
+  const returnToOrigin = (success: boolean) => {
+    const origin = sessionStorage.getItem(ZOTERO_RETURN_KEY)
+    sessionStorage.removeItem(ZOTERO_RETURN_KEY)
+    if (origin) {
+      const url = new URL(origin, window.location.origin)
+      if (success) url.searchParams.set("import_zotero_open", "true")
+      window.location.assign(url.pathname + url.search)
+    } else {
+      navigate({ to: "/settings", search: { tab: "profile" } })
+    }
+  }
 
   useEffect(() => {
     if (!isMounted.current) {
@@ -73,7 +87,7 @@ function ZoteroAuth() {
           "Zotero access was not granted. Please try again.",
           "error",
         )
-        navigate({ to: "/settings", search: { tab: "profile" } })
+        returnToOrigin(false)
       }
     }
   }, [])

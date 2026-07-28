@@ -179,6 +179,32 @@ import type {
   PatchProjectIssueResponse,
   GetProjectReferencesData,
   GetProjectReferencesResponse,
+  PostProjectReferencesData,
+  PostProjectReferencesResponse,
+  DeleteProjectReferencesData,
+  DeleteProjectReferencesResponse,
+  PostProjectReferenceItemData,
+  PostProjectReferenceItemResponse,
+  PutProjectReferenceItemData,
+  PutProjectReferenceItemResponse,
+  DeleteProjectReferenceItemData,
+  DeleteProjectReferenceItemResponse,
+  GetProjectZoteroLibrariesData,
+  GetProjectZoteroLibrariesResponse,
+  GetProjectZoteroCollectionsData,
+  GetProjectZoteroCollectionsResponse,
+  GetProjectZoteroItemsData,
+  GetProjectZoteroItemsResponse,
+  PostProjectZoteroImportData,
+  PostProjectZoteroImportResponse,
+  PostProjectZoteroSyncData,
+  PostProjectZoteroSyncResponse,
+  GetProjectZoteroItemPdfData,
+  GetProjectZoteroItemPdfResponse,
+  GetProjectReferenceNotesData,
+  GetProjectReferenceNotesResponse,
+  PutProjectReferenceNotesData,
+  PutProjectReferenceNotesResponse,
   GetProjectEnvironmentsData,
   GetProjectEnvironmentsResponse,
   PostProjectEnvironmentData,
@@ -2729,6 +2755,430 @@ export class ProjectsService {
       query: {
         ref: data.ref,
       },
+      errors: {
+        422: "Validation Error",
+      },
+    })
+  }
+
+  /**
+   * Post Project References
+   * Register a references collection (a ``.bib`` file) in ``calkit.yaml``.
+   *
+   * Creates a new, empty file by default, or labels an existing one when
+   * ``label_existing`` is set.
+   * @param data The data for the request.
+   * @param data.ownerName
+   * @param data.projectName
+   * @param data.requestBody
+   * @returns References Successful Response
+   * @throws ApiError
+   */
+  public static postProjectReferences(
+    data: PostProjectReferencesData,
+  ): CancelablePromise<PostProjectReferencesResponse> {
+    return __request(OpenAPI, {
+      method: "POST",
+      url: "/projects/{owner_name}/{project_name}/references",
+      path: {
+        owner_name: data.ownerName,
+        project_name: data.projectName,
+      },
+      body: data.requestBody,
+      mediaType: "application/json",
+      errors: {
+        422: "Validation Error",
+      },
+    })
+  }
+
+  /**
+   * Delete Project References
+   * Delete a references collection.
+   *
+   * Removes its calkit.yaml entry, the ``.bib`` file, and all of its Zotero
+   * state under .calkit/zotero/ (sync link, item map, note anchors). The
+   * collection is only unlinked locally; the Zotero collection itself is left
+   * untouched.
+   * @param data The data for the request.
+   * @param data.ownerName
+   * @param data.projectName
+   * @param data.path
+   * @returns Message Successful Response
+   * @throws ApiError
+   */
+  public static deleteProjectReferences(
+    data: DeleteProjectReferencesData,
+  ): CancelablePromise<DeleteProjectReferencesResponse> {
+    return __request(OpenAPI, {
+      method: "DELETE",
+      url: "/projects/{owner_name}/{project_name}/references",
+      path: {
+        owner_name: data.ownerName,
+        project_name: data.projectName,
+      },
+      query: {
+        path: data.path,
+      },
+      errors: {
+        422: "Validation Error",
+      },
+    })
+  }
+
+  /**
+   * Post Project Reference Item
+   * Add a new entry to a references (.bib) collection.
+   *
+   * The entry is written to the ``.bib`` and committed. For a Zotero-linked
+   * collection it reaches Zotero on the next sync (which pushes local changes
+   * before pulling).
+   * @param data The data for the request.
+   * @param data.ownerName
+   * @param data.projectName
+   * @param data.requestBody
+   * @returns Message Successful Response
+   * @throws ApiError
+   */
+  public static postProjectReferenceItem(
+    data: PostProjectReferenceItemData,
+  ): CancelablePromise<PostProjectReferenceItemResponse> {
+    return __request(OpenAPI, {
+      method: "POST",
+      url: "/projects/{owner_name}/{project_name}/references/items",
+      path: {
+        owner_name: data.ownerName,
+        project_name: data.projectName,
+      },
+      body: data.requestBody,
+      mediaType: "application/json",
+      errors: {
+        422: "Validation Error",
+      },
+    })
+  }
+
+  /**
+   * Put Project Reference Item
+   * Edit an entry's type, key, and fields, preserving its notes.
+   *
+   * Provided fields are merged in (an empty value clears that field); fields not
+   * included are left as they are, so notes and other data survive the edit.
+   * @param data The data for the request.
+   * @param data.ownerName
+   * @param data.projectName
+   * @param data.bibKey
+   * @param data.requestBody
+   * @returns Message Successful Response
+   * @throws ApiError
+   */
+  public static putProjectReferenceItem(
+    data: PutProjectReferenceItemData,
+  ): CancelablePromise<PutProjectReferenceItemResponse> {
+    return __request(OpenAPI, {
+      method: "PUT",
+      url: "/projects/{owner_name}/{project_name}/references/items/{bib_key}",
+      path: {
+        owner_name: data.ownerName,
+        project_name: data.projectName,
+        bib_key: data.bibKey,
+      },
+      body: data.requestBody,
+      mediaType: "application/json",
+      errors: {
+        422: "Validation Error",
+      },
+    })
+  }
+
+  /**
+   * Delete Project Reference Item
+   * Delete an entry from a references (.bib) collection.
+   *
+   * The entry is removed from the ``.bib`` and committed. For a Zotero-linked
+   * collection the item is deleted from Zotero too.
+   * @param data The data for the request.
+   * @param data.ownerName
+   * @param data.projectName
+   * @param data.bibKey
+   * @param data.path
+   * @returns Message Successful Response
+   * @throws ApiError
+   */
+  public static deleteProjectReferenceItem(
+    data: DeleteProjectReferenceItemData,
+  ): CancelablePromise<DeleteProjectReferenceItemResponse> {
+    return __request(OpenAPI, {
+      method: "DELETE",
+      url: "/projects/{owner_name}/{project_name}/references/items/{bib_key}",
+      path: {
+        owner_name: data.ownerName,
+        project_name: data.projectName,
+        bib_key: data.bibKey,
+      },
+      query: {
+        path: data.path,
+      },
+      errors: {
+        422: "Validation Error",
+      },
+    })
+  }
+
+  /**
+   * Get Project Zotero Libraries
+   * List the Zotero libraries the current user can import from.
+   * @param data The data for the request.
+   * @param data.ownerName
+   * @param data.projectName
+   * @returns ZoteroLibrary Successful Response
+   * @throws ApiError
+   */
+  public static getProjectZoteroLibraries(
+    data: GetProjectZoteroLibrariesData,
+  ): CancelablePromise<GetProjectZoteroLibrariesResponse> {
+    return __request(OpenAPI, {
+      method: "GET",
+      url: "/projects/{owner_name}/{project_name}/zotero/libraries",
+      path: {
+        owner_name: data.ownerName,
+        project_name: data.projectName,
+      },
+      errors: {
+        422: "Validation Error",
+      },
+    })
+  }
+
+  /**
+   * Get Project Zotero Collections
+   * List a Zotero library's collections for the import picker.
+   * @param data The data for the request.
+   * @param data.ownerName
+   * @param data.projectName
+   * @param data.libraryType
+   * @param data.libraryId
+   * @returns ZoteroCollection Successful Response
+   * @throws ApiError
+   */
+  public static getProjectZoteroCollections(
+    data: GetProjectZoteroCollectionsData,
+  ): CancelablePromise<GetProjectZoteroCollectionsResponse> {
+    return __request(OpenAPI, {
+      method: "GET",
+      url: "/projects/{owner_name}/{project_name}/zotero/collections",
+      path: {
+        owner_name: data.ownerName,
+        project_name: data.projectName,
+      },
+      query: {
+        library_type: data.libraryType,
+        library_id: data.libraryId,
+      },
+      errors: {
+        422: "Validation Error",
+      },
+    })
+  }
+
+  /**
+   * Get Project Zotero Items
+   * Search a Zotero library's items for the subset import picker.
+   * @param data The data for the request.
+   * @param data.ownerName
+   * @param data.projectName
+   * @param data.libraryType
+   * @param data.libraryId
+   * @param data.q
+   * @param data.collectionKey
+   * @returns ZoteroItem Successful Response
+   * @throws ApiError
+   */
+  public static getProjectZoteroItems(
+    data: GetProjectZoteroItemsData,
+  ): CancelablePromise<GetProjectZoteroItemsResponse> {
+    return __request(OpenAPI, {
+      method: "GET",
+      url: "/projects/{owner_name}/{project_name}/zotero/items",
+      path: {
+        owner_name: data.ownerName,
+        project_name: data.projectName,
+      },
+      query: {
+        library_type: data.libraryType,
+        library_id: data.libraryId,
+        q: data.q,
+        collection_key: data.collectionKey,
+      },
+      errors: {
+        422: "Validation Error",
+      },
+    })
+  }
+
+  /**
+   * Post Project Zotero Import
+   * Import a Zotero collection into a project's references.
+   *
+   * Whole-collection mode links an existing collection; subset mode creates a
+   * dedicated "Calkit: {owner}/{project}" collection, seeds it with the chosen
+   * items, and links that. Either way the collection is pulled into a ``.bib``
+   * file and recorded in ``calkit.yaml`` for later sync.
+   * @param data The data for the request.
+   * @param data.ownerName
+   * @param data.projectName
+   * @param data.requestBody
+   * @returns References Successful Response
+   * @throws ApiError
+   */
+  public static postProjectZoteroImport(
+    data: PostProjectZoteroImportData,
+  ): CancelablePromise<PostProjectZoteroImportResponse> {
+    return __request(OpenAPI, {
+      method: "POST",
+      url: "/projects/{owner_name}/{project_name}/zotero/imports",
+      path: {
+        owner_name: data.ownerName,
+        project_name: data.projectName,
+      },
+      body: data.requestBody,
+      mediaType: "application/json",
+      errors: {
+        422: "Validation Error",
+      },
+    })
+  }
+
+  /**
+   * Post Project Zotero Sync
+   * Pull Zotero changes into a linked collection's ``.bib``, per item.
+   *
+   * Local edits already reach Zotero when they are made (add/edit/delete push
+   * immediately), so sync only pulls: it fetches the items changed on Zotero
+   * since the last sync and merges them into the ``.bib`` one at a time,
+   * updating changed entries in place, adding new ones, and removing deleted
+   * ones, while leaving untouched (including local-only) entries alone.
+   * @param data The data for the request.
+   * @param data.ownerName
+   * @param data.projectName
+   * @param data.requestBody
+   * @returns ZoteroSyncResponse Successful Response
+   * @throws ApiError
+   */
+  public static postProjectZoteroSync(
+    data: PostProjectZoteroSyncData,
+  ): CancelablePromise<PostProjectZoteroSyncResponse> {
+    return __request(OpenAPI, {
+      method: "POST",
+      url: "/projects/{owner_name}/{project_name}/zotero/syncs",
+      path: {
+        owner_name: data.ownerName,
+        project_name: data.projectName,
+      },
+      body: data.requestBody,
+      mediaType: "application/json",
+      errors: {
+        422: "Validation Error",
+      },
+    })
+  }
+
+  /**
+   * Get Project Zotero Item Pdf
+   * Stream a reference item's Zotero PDF attachment.
+   * @param data The data for the request.
+   * @param data.ownerName
+   * @param data.projectName
+   * @param data.bibKey
+   * @param data.path
+   * @param data.index
+   * @returns unknown Successful Response
+   * @throws ApiError
+   */
+  public static getProjectZoteroItemPdf(
+    data: GetProjectZoteroItemPdfData,
+  ): CancelablePromise<GetProjectZoteroItemPdfResponse> {
+    return __request(OpenAPI, {
+      method: "GET",
+      url: "/projects/{owner_name}/{project_name}/zotero/items/{bib_key}/pdf",
+      path: {
+        owner_name: data.ownerName,
+        project_name: data.projectName,
+        bib_key: data.bibKey,
+      },
+      query: {
+        path: data.path,
+        index: data.index,
+      },
+      errors: {
+        422: "Validation Error",
+      },
+    })
+  }
+
+  /**
+   * Get Project Reference Notes
+   * Get a reference item's notes from its BibTeX ``comment`` field.
+   *
+   * The .bib is the source of truth for note content (Zotero-linked references
+   * have their Zotero notes written into it on sync), so reading is the same for
+   * every reference.
+   * @param data The data for the request.
+   * @param data.ownerName
+   * @param data.projectName
+   * @param data.bibKey
+   * @param data.path
+   * @returns ReferenceNotesResponse Successful Response
+   * @throws ApiError
+   */
+  public static getProjectReferenceNotes(
+    data: GetProjectReferenceNotesData,
+  ): CancelablePromise<GetProjectReferenceNotesResponse> {
+    return __request(OpenAPI, {
+      method: "GET",
+      url: "/projects/{owner_name}/{project_name}/references/items/{bib_key}/notes",
+      path: {
+        owner_name: data.ownerName,
+        project_name: data.projectName,
+        bib_key: data.bibKey,
+      },
+      query: {
+        path: data.path,
+      },
+      errors: {
+        422: "Validation Error",
+      },
+    })
+  }
+
+  /**
+   * Put Project Reference Notes
+   * Set a reference item's notes in the BibTeX ``comment`` field.
+   *
+   * Notes are serialized to Markdown (untitled sections separated by ``---``,
+   * each optionally carrying a highlight anchor) and committed. For a
+   * Zotero-linked reference, the notes are also pushed to Zotero.
+   * @param data The data for the request.
+   * @param data.ownerName
+   * @param data.projectName
+   * @param data.bibKey
+   * @param data.requestBody
+   * @returns ReferenceNotesResponse Successful Response
+   * @throws ApiError
+   */
+  public static putProjectReferenceNotes(
+    data: PutProjectReferenceNotesData,
+  ): CancelablePromise<PutProjectReferenceNotesResponse> {
+    return __request(OpenAPI, {
+      method: "PUT",
+      url: "/projects/{owner_name}/{project_name}/references/items/{bib_key}/notes",
+      path: {
+        owner_name: data.ownerName,
+        project_name: data.projectName,
+        bib_key: data.bibKey,
+      },
+      body: data.requestBody,
+      mediaType: "application/json",
       errors: {
         422: "Validation Error",
       },

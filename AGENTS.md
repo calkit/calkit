@@ -51,6 +51,31 @@ Key points:
 These use an isolated test database inside containers. Don't try to run tests
 out on the system.
 
+## Troubleshooting
+
+### A frontend request "500s" but the backend looks fine
+
+In dev (`make dev`), the frontend is the Vite dev server with `frontend/` mounted
+in, and `frontend/src/client` (the OpenAPI SDK) plus `routeTree.gen.ts` are
+generated files. After changing a backend route or running
+`make frontend-client`, a stale dev server or a cached browser bundle can call
+the old contract and surface as a confusing error that looks like a 500 but
+isn't coming from the backend.
+
+Before assuming a real server bug, confirm where it comes from:
+
+1. Check the browser Network tab for the actual status code, and read the
+   backend logs (`docker compose logs -f backend`). A real 500 shows a Python
+   traceback there; a stale frontend does not.
+2. If the backend log is clean, refresh the stale frontend:
+   - Regenerate the client if the API changed: `make frontend-client`.
+   - Restart the dev server: `docker compose restart frontend`.
+   - Hard-refresh the browser (clear cache) to drop the old bundle.
+
+If instead you are running the built image (plain `docker compose up`, not
+`make dev`), the frontend is a static Nginx build and will keep serving old code
+until you rebuild it: `docker compose build frontend`.
+
 ## Common Patterns
 
 ### Modifying API Contracts

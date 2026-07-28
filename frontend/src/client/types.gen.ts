@@ -1088,11 +1088,53 @@ export type ReferenceEntry = {
   attrs: {
     [key: string]: unknown
   }
+  zotero_item_key?: string | null
+  has_pdf?: boolean
+  note_count?: number
 }
 
 export type ReferenceFile = {
   path: string
   key: string
+}
+
+export type ReferenceItemPost = {
+  path: string
+  type?: string
+  key: string
+  fields?: {
+    [key: string]: string
+  }
+}
+
+export type ReferenceItemPut = {
+  path: string
+  type: string
+  key: string
+  fields?: {
+    [key: string]: string
+  }
+}
+
+export type ReferenceNote = {
+  text: string
+  highlight?: ReferenceNoteHighlight | null
+}
+
+export type ReferenceNoteHighlight = {
+  position: {
+    [key: string]: unknown
+  }
+  quote?: string
+}
+
+export type ReferenceNotesPut = {
+  path: string
+  notes: Array<ReferenceNote>
+}
+
+export type ReferenceNotesResponse = {
+  notes: Array<ReferenceNote>
 }
 
 export type References = {
@@ -1101,7 +1143,25 @@ export type References = {
   entries?: Array<ReferenceEntry> | null
   imported_from?: ImportInfo | null
   raw_text?: string | null
+  zotero?: ReferenceZoteroLink | null
+  stages?: Array<string> | null
 }
+
+export type ReferencesPost = {
+  path: string
+  label_existing?: boolean
+}
+
+export type ReferenceZoteroLink = {
+  library_type: "user" | "group"
+  library_id: string
+  collection_key: string
+  collection_name?: string | null
+  last_sync_version?: number | null
+  last_synced?: string | null
+}
+
+export type library_type = "user" | "group"
 
 export type RefreshTokenRequest = {
   refresh_token: string
@@ -1604,6 +1664,46 @@ export type ZoteroAuthFinish = {
 
 export type ZoteroAuthStart = {
   authorize_url: string
+}
+
+export type ZoteroCollection = {
+  collection_key: string
+  collection_name?: string | null
+  parent_collection?: string | null
+}
+
+export type ZoteroImportPost = {
+  library_type: "user" | "group"
+  library_id: string
+  collection_key?: string | null
+  item_keys?: Array<string> | null
+  bib_path?: string
+  overwrite?: boolean
+}
+
+export type ZoteroItem = {
+  item_key: string
+  title?: string | null
+  item_type?: string | null
+  year?: string | null
+  first_author?: string | null
+}
+
+export type ZoteroLibrary = {
+  library_type: "user" | "group"
+  library_id: string
+  name: string
+}
+
+export type ZoteroSyncPost = {
+  path: string
+}
+
+export type ZoteroSyncResponse = {
+  path: string
+  last_sync_version: number
+  last_synced: string
+  committed: boolean
 }
 
 export type GetAccountData = {
@@ -2301,6 +2401,119 @@ export type GetProjectReferencesData = {
 }
 
 export type GetProjectReferencesResponse = Array<References>
+
+export type PostProjectReferencesData = {
+  ownerName: string
+  projectName: string
+  requestBody: ReferencesPost
+}
+
+export type PostProjectReferencesResponse = References
+
+export type DeleteProjectReferencesData = {
+  ownerName: string
+  path: string
+  projectName: string
+}
+
+export type DeleteProjectReferencesResponse = Message
+
+export type PostProjectReferenceItemData = {
+  ownerName: string
+  projectName: string
+  requestBody: ReferenceItemPost
+}
+
+export type PostProjectReferenceItemResponse = Message
+
+export type PutProjectReferenceItemData = {
+  bibKey: string
+  ownerName: string
+  projectName: string
+  requestBody: ReferenceItemPut
+}
+
+export type PutProjectReferenceItemResponse = Message
+
+export type DeleteProjectReferenceItemData = {
+  bibKey: string
+  ownerName: string
+  path: string
+  projectName: string
+}
+
+export type DeleteProjectReferenceItemResponse = Message
+
+export type GetProjectZoteroLibrariesData = {
+  ownerName: string
+  projectName: string
+}
+
+export type GetProjectZoteroLibrariesResponse = Array<ZoteroLibrary>
+
+export type GetProjectZoteroCollectionsData = {
+  libraryId: string
+  libraryType: "user" | "group"
+  ownerName: string
+  projectName: string
+}
+
+export type GetProjectZoteroCollectionsResponse = Array<ZoteroCollection>
+
+export type GetProjectZoteroItemsData = {
+  collectionKey?: string | null
+  libraryId: string
+  libraryType: "user" | "group"
+  ownerName: string
+  projectName: string
+  q?: string | null
+}
+
+export type GetProjectZoteroItemsResponse = Array<ZoteroItem>
+
+export type PostProjectZoteroImportData = {
+  ownerName: string
+  projectName: string
+  requestBody: ZoteroImportPost
+}
+
+export type PostProjectZoteroImportResponse = References
+
+export type PostProjectZoteroSyncData = {
+  ownerName: string
+  projectName: string
+  requestBody: ZoteroSyncPost
+}
+
+export type PostProjectZoteroSyncResponse = ZoteroSyncResponse
+
+export type GetProjectZoteroItemPdfData = {
+  bibKey: string
+  index?: number
+  ownerName: string
+  path: string
+  projectName: string
+}
+
+export type GetProjectZoteroItemPdfResponse = unknown
+
+export type GetProjectReferenceNotesData = {
+  bibKey: string
+  ownerName: string
+  path: string
+  projectName: string
+}
+
+export type GetProjectReferenceNotesResponse = ReferenceNotesResponse
+
+export type PutProjectReferenceNotesData = {
+  bibKey: string
+  ownerName: string
+  projectName: string
+  requestBody: ReferenceNotesPut
+}
+
+export type PutProjectReferenceNotesResponse = ReferenceNotesResponse
 
 export type GetProjectEnvironmentsData = {
   ownerName: string

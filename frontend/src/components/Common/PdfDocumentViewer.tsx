@@ -248,6 +248,10 @@ export default function PdfDocumentViewer({
   // Gate rendering until the next animation frame. In React StrictMode dev,
   // the throwaway mount is torn down before RAF, so PdfLoader/PdfHighlighter
   // initialize only once on the real mount and avoid duplicate page nodes.
+  // Re-gating on `url` fully tears down and rebuilds the PDF subtree when the
+  // document changes (e.g. switching publications), so it re-initializes
+  // exactly like a first load instead of reusing stale viewer state — otherwise
+  // highlights only rendered on the first document.
   const [pdfReady, setPdfReady] = useState(false)
   useLayoutEffect(() => {
     const rafId = requestAnimationFrame(() => setPdfReady(true))
@@ -255,7 +259,7 @@ export default function PdfDocumentViewer({
       cancelAnimationFrame(rafId)
       setPdfReady(false)
     }
-  }, [])
+  }, [url])
 
   return (
     <Box
@@ -523,6 +527,49 @@ function PdfViewerInner({
     observer.observe(root, { childList: true, subtree: true })
     return () => observer.disconnect()
   }, [containerRef])
+
+  // Highlights only sit at the right place once a page is at its final rendered
+  // size. Page geometry settles asynchronously (initial render, then a debounced
+  // re-scale, plus zoom) and the exact timing is racy, which is why highlights
+  // showed up only sometimes. Observe the first page's size directly and force a
+  // highlight re-render whenever it changes, so they render against the current
+  // viewport regardless of when it settles. Bumping doesn't resize the page, so
+  // this can't loop.
+  useEffect(() => {
+    if (pagedNav) return
+    const root = containerRef.current
+    if (!root) return
+    let observedPage: HTMLElement | null = null
+    let raf: number | null = null
+    const bump = () => {
+      raf = null
+      setHighlightsKey((k) => k + 1)
+    }
+    const schedule = () => {
+      if (raf === null) raf = requestAnimationFrame(bump)
+    }
+    const ro = new ResizeObserver(schedule)
+    const attach = () => {
+      // The first page div is recreated on re-scale, so re-observe the current
+      // one whenever it changes.
+      const page = root.querySelector<HTMLElement>(
+        ".pdfViewer .page[data-page-number]",
+      )
+      if (page && page !== observedPage) {
+        if (observedPage) ro.unobserve(observedPage)
+        observedPage = page
+        ro.observe(page)
+      }
+    }
+    attach()
+    const mo = new MutationObserver(attach)
+    mo.observe(root, { childList: true, subtree: true })
+    return () => {
+      mo.disconnect()
+      ro.disconnect()
+      if (raf !== null) cancelAnimationFrame(raf)
+    }
+  }, [pagedNav, containerRef])
 
   // Track the current page from scroll position, and (in paged mode) clamp the
   // viewport to a single page so only one slide shows at a time.

@@ -445,6 +445,7 @@ def check_system_deps(
     system_info: dict | None = None,
     interactive: bool | None = None,
     use_cache: bool = True,
+    targets: list[str] | None = None,
 ) -> None:
     """Check that the dependencies declared in a project's ``calkit.yaml`` file
     exist.
@@ -458,6 +459,22 @@ def check_system_deps(
     if ck_info is None:
         ck_info = load_calkit_info(wdir=wdir)
     deps = list(ck_info.get("dependencies", []))
+
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    if targets:
+        # Split targets by "@" to handle sub-stages from iterations
+        base_targets = [t.split("@")[0] for t in targets]
+        stages_to_check = {
+            name: stage
+            for name, stage in stages.items()
+            if name in base_targets
+        }
+    else:
+        stages_to_check = stages
+
+    for name, stage in stages_to_check.items():
+        deps.extend(stage.get("dependencies", []))
+
     if "git" not in deps:
         deps.append("git")
     # Resolve TTY interactivity once so a single per-call answer drives

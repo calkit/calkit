@@ -188,6 +188,7 @@ class Stage(BaseModel):
     # TODO: Support other input types
     inputs: list[str | InputsFromStageOutputs] = []
     outputs: list[str | PathOutput] = []  # TODO: Support database outputs
+    dependencies: list[str | dict[str, str] | dict] = []
     always_run: bool = False
     iterate_over: list[StageIteration] | None = None
     description: str | None = None

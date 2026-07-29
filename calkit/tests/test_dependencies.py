@@ -275,3 +275,37 @@ def test_check_system_deps_setup_kind(tmp_dir):
     ck_info["dependencies"][1]["check_command"] = "false"
     with pytest.raises(ValueError, match="auth-thing"):
         calkit.check_system_deps(ck_info=ck_info, interactive=False)
+
+
+def test_check_system_deps_stage_scoped(tmp_dir):
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "s1": {
+                    "kind": "command",
+                    "command": "echo 1",
+                    "dependencies": [{"name": "fakeapp999", "kind": "app"}],
+                },
+                "s2": {
+                    "kind": "command",
+                    "command": "echo 2",
+                    "dependencies": [],
+                },
+            }
+        }
+    }
+
+    # If we check everything, it fails because fakeapp999 doesn't exist
+    with pytest.raises(ValueError, match="fakeapp999"):
+        calkit.check_system_deps(ck_info=ck_info, interactive=False)
+
+    # If we only check s2, it should succeed
+    calkit.check_system_deps(
+        ck_info=ck_info, targets=["s2"], interactive=False
+    )
+
+    # If we check s1, it fails
+    with pytest.raises(ValueError, match="fakeapp999"):
+        calkit.check_system_deps(
+            ck_info=ck_info, targets=["s1"], interactive=False
+        )

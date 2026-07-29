@@ -1935,7 +1935,9 @@ def run(
     if not quiet:
         calkit.echo("🔗 Checking system-level dependencies")
     try:
-        calkit.check_system_deps(ck_info=ck_info, system_info=system_info)
+        calkit.check_system_deps(
+            ck_info=ck_info, system_info=system_info, targets=targets
+        )
     except Exception as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(str(e))

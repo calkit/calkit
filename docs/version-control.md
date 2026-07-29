@@ -170,8 +170,26 @@ Options:
 
 ### `sync`
 
-`calkit sync` will pull from then push to the cloud,
-ensuring both copies are in sync.
+`calkit sync` is a group of commands for syncing with different systems.
+The available targets are:
+
+- `calkit sync git`: sync files stored in Git by pulling and then pushing.
+- `calkit sync dvc`: sync files stored in DVC by pulling and then pushing.
+- `calkit sync overleaf`: sync folders linked to Overleaf projects.
+- `calkit sync all`: sync all registered systems,
+  reporting any that are not set up.
+
+For example, to sync the Git repository only:
+
+```sh
+calkit sync git
+```
+
+To sync every configured system at once:
+
+```sh
+calkit sync all
+```
 
 ### `add`
 

@@ -2218,7 +2218,7 @@ def run(
     file_handler.setFormatter(formatter)
     dvc.log.logger.addHandler(file_handler)
     # Remove newline logging in dvc.repo.reproduce
-    dvc.repo.reproduce.logger.setLevel(logging.ERROR)
+    dvc.repo.reproduce.logger.setLevel(logging.WARNING)
     # Disable other misc DVC output
     dvc.ui.ui.write = lambda *args, **kwargs: None
     # Tell `calkit scheduler batch` to resubmit completed jobs under --force;

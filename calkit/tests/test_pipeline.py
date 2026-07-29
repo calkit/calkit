@@ -2394,3 +2394,45 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
     assert not os.path.exists(os.path.join("doc", ".gitignore"))
     with open(os.path.join("sub", "doc", ".gitignore")) as f:
         assert "*.aux" in f.read()
+
+
+def test_get_status_warns_gitignored_directory_dependency(tmp_dir, caplog):
+    import subprocess
+
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("data")
+    with open("data/ignored.txt", "w") as f:
+        f.write("ignored")
+    with open("data/.gitignore", "w") as f:
+        f.write("ignored.txt\n")
+    # Git add the .gitignore
+    subprocess.check_call(["git", "add", "data/.gitignore"])
+    subprocess.check_call(["git", "commit", "-m", "init"])
+
+    ck_info = {
+        "environments": {
+            "py": {
+                "kind": "uv-venv",
+                "path": "requirements.txt",
+            }
+        },
+        "pipeline": {
+            "stages": {
+                "process-data": {
+                    "kind": "command",
+                    "command": "echo ok",
+                    "environment": "py",
+                    "inputs": ["data"],
+                }
+            }
+        },
+    }
+    with open("requirements.txt", "w") as f:
+        f.write("requests\n")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+
+    # Run status which should trigger compilation and staleness check
+    calkit.pipeline.get_status()
+
+    assert "contains git-ignored files" in caplog.text

@@ -962,6 +962,46 @@ def get_status(
                     for target in targets
                 )
             }
+
+        import logging
+        import subprocess
+
+        log = logging.getLogger(__name__)
+
+        # Check all directory inputs across the pipeline for git-ignored files
+        pipeline_stages = ck_info.get("pipeline", {}).get("stages", {})
+        for name, stage_cfg in pipeline_stages.items():
+            inputs = stage_cfg.get("inputs", [])
+            for dep in inputs:
+                dep_path = (
+                    dep.get("path", dep) if isinstance(dep, dict) else str(dep)
+                )
+                if os.path.isdir(dep_path):
+                    try:
+                        res = subprocess.run(
+                            [
+                                "git",
+                                "ls-files",
+                                "--ignored",
+                                "--exclude-standard",
+                                "--others",
+                                dep_path,
+                            ],
+                            capture_output=True,
+                            text=True,
+                        )
+                        ignored_files = res.stdout.strip().splitlines()
+                        if ignored_files:
+                            log.warning(
+                                f"Stage '{name}' has a directory dependency '{dep_path}' "
+                                f"that contains git-ignored files (e.g., '{ignored_files[0]}'). "
+                                "This can cause the stage to unexpectedly re-run because the "
+                                "git-ignored files change the directory's DVC hash. "
+                                "Consider removing them or making the dependency more specific."
+                            )
+                    except Exception:
+                        pass
+
         result["stale_stages"] = ordered_stale_stages
         return PipelineStatus(
             has_pipeline=result["has_pipeline"],

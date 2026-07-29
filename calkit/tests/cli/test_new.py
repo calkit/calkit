@@ -718,8 +718,11 @@ def test_new_matlab_script_stage(tmp_dir):
 )
 def test_new_julia_env(tmp_dir):
     subprocess.check_call(["calkit", "init"])
+    # Note we use Example, the registry's trivial test package, since nothing
+    # here depends on which package is installed, and heavier ones cost tens
+    # of seconds each to download and precompile
     subprocess.check_call(
-        ["calkit", "new", "julia-env", "--name", "j1", "WaterLily"]
+        ["calkit", "new", "julia-env", "--name", "j1", "Example"]
     )
     assert os.path.isfile("Project.toml")
     assert os.path.isfile("Manifest.toml")
@@ -732,7 +735,7 @@ def test_new_julia_env(tmp_dir):
             "j2",
             "--julia",
             "1.10",
-            "Revise",
+            "Example",
             "--path",
             "envs/my-env/Project.toml",
         ]

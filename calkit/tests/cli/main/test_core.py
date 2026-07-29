@@ -388,7 +388,10 @@ def test_run_in_julia_env(tmp_dir):
             "my-julia",
             "--julia=1.11",
             "--no-commit",
-            "Revise",
+            # Example is the registry's trivial test package; nothing here
+            # depends on which packages are installed, and heavier ones cost
+            # tens of seconds each to download and precompile
+            "Example",
             "PkgVersion",
         ]
     )
@@ -402,20 +405,21 @@ def test_run_in_julia_env(tmp_dir):
                 "--",
                 "-e",
                 (
-                    "using Revise; using PkgVersion; "
-                    "println(PkgVersion.Version(Revise))"
+                    "using Example; using PkgVersion; "
+                    "println(PkgVersion.Version(Example))"
                 ),
             ]
         )
         .decode()
         .strip()
     )
+    assert out.splitlines()[-1].split(".")[0].isdigit()
     # Check that we can run a script with arguments
     with open("julia_script.jl", "w") as f:
         f.write(
             "import PkgVersion; "
-            " using Revise; "
-            'println("PkgVersion: ", PkgVersion.Version(Revise)); '
+            " using Example; "
+            'println("PkgVersion: ", PkgVersion.Version(Example)); '
             'println("Arg1: ", ARGS[1]); '
             'println("Arg2: ", ARGS[2])'
         )
@@ -942,7 +946,7 @@ def test_run(tmp_dir):
             "j1",
             "--path",
             "something/Project.toml",
-            "PkgVersion",
+            "Example",
         ]
     )
     subprocess.check_call(

@@ -2,11 +2,11 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 
 import pytest
-from pypdf import PdfReader
 
 skipif_windows_docker = pytest.mark.skipif(
     sys.platform == "win32",
@@ -17,25 +17,20 @@ skipif_windows_docker = pytest.mark.skipif(
 )
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="TODO: LaTeX (texlive) not installed on windows-latest GHA runners",
-)
 def test_from_json(tmp_dir):
-    os.makedirs("paper")
-    tex_doc_content = r"""
-\documentclass[11pt]{article}
-\input{results.tex}
-\begin{document}
-This is the document.
-The result is \theresults[result1].
-The other result is \theresults[lol].
-Another is \theresults[sup].
-Result 3 is \theresults[result3].
-\end{document}
-"""
-    with open("paper/main.tex", "w") as f:
-        f.write(tex_doc_content)
+    # Extract the value defined for a given key in a generated .tex file,
+    # i.e., what LaTeX would print for \<command>[<key>]
+    def get_value(tex: str, key: str) -> str:
+        match = re.search(
+            r"\\pdfstrcmp\{#1\}\{"
+            + re.escape(key)
+            + r"\}=0%\s*\\def\\\w+@out\{%\s*(.*?)\}%",
+            tex,
+            flags=re.DOTALL,
+        )
+        assert match is not None, f"No definition found for '{key}'"
+        return match.group(1).strip()
+
     data = {"sup": 5.555, "lol": 3}
     with open("test.json", "w") as f:
         json.dump(data, f)
@@ -47,6 +42,8 @@ Result 3 is \theresults[result3].
         "result3": "{sup**3 * 1e12:.1e}",
         "lol": "{lol}",
     }
+    # Note the output directory does not exist yet, so this also checks it
+    # gets created
     subprocess.run(
         [
             "calkit",
@@ -65,21 +62,19 @@ Result 3 is \theresults[result3].
         ],
         check=True,
     )
-    subprocess.run(["calkit", "latex", "build", "paper/main.tex"], check=True)
-    # Read the results of main.log
-    with open("paper/main.log") as f:
-        print(f.read())
-    assert os.path.isfile("paper/results2.tex")
-    # Read the generated PDF and check that the values are correct
-    reader = PdfReader("paper/main.pdf")
-    text = ""
-    for page in reader.pages:
-        text += page.extract_text()
-    assert "This is the document." in text
-    assert "The result is 185188.7." in text
-    assert "The other result is 3." in text
-    assert "Another is 5.555." in text
-    assert "Result 3 is 1.7e+14." in text
+    # Check the generated LaTeX defines the command and the correct values
+    with open("paper/results.tex") as f:
+        tex = f.read()
+    assert r"\newcommand\theresults" in tex
+    assert get_value(tex, "sup") == "5.555"
+    assert get_value(tex, "hehe") == "77"
+    assert get_value(tex, "result1") == "185188.7"
+    assert get_value(tex, "result2") == "sup is 5.555 and lol is 3"
+    assert get_value(tex, "result3") == "1.7e+14"
+    assert get_value(tex, "lol") == "3"
+    # Both output files should have been written with the same content
+    with open("paper/results2.tex") as f:
+        assert f.read() == tex
     # Now test some input validation
     with open("bad.json", "w") as f:
         f.write("not valid json")
@@ -115,6 +110,12 @@ Result 3 is \theresults[result3].
         ],
         check=True,
     )
+    with open("paper/results.tex") as f:
+        tex = f.read()
+    # Without --command, the command name comes from the output file name
+    assert r"\newcommand\results" in tex
+    assert get_value(tex, "result4") == "hello"
+    assert get_value(tex, "sup") == "5.555"
 
 
 @skipif_windows_docker

@@ -2431,7 +2431,6 @@ def test_get_status_warns_gitignored_directory_dependency(tmp_dir, caplog):
         f.write("requests\n")
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-
     # Run status which should trigger compilation and staleness check
     calkit.pipeline.get_status()
     assert "contains git-ignored files" in caplog.text

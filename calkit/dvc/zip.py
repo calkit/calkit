@@ -548,6 +548,12 @@ def _sync_one(
     if zip_deleted and direction == "to-zip":
         typer.echo(f"Rezipping '{workspace_path}' (zip was deleted)")
         zip_(workspace_path=workspace_path, zip_path=zip_path)
+        try:
+            repo = calkit.git.get_repo(wdir)
+        except calkit.git.InvalidGitRepositoryError:
+            pass
+        else:
+            calkit.git.ensure_dvc_pointer_is_not_ignored(repo, zip_path)
         run_dvc_command(["add", zip_path], cwd=wdir)
         zip_hash = get_hash(zip_path, wdir=wdir)
     # Workspace was deleted but zip exists and direction is to-workspace:
@@ -570,6 +576,12 @@ def _sync_one(
     if workspace_changed and (direction in ["to-zip", "both"]):
         typer.echo(f"Zipping '{workspace_path}' (workspace has changed)")
         zip_(workspace_path=workspace_path, zip_path=zip_path)
+        try:
+            repo = calkit.git.get_repo(wdir)
+        except calkit.git.InvalidGitRepositoryError:
+            pass
+        else:
+            calkit.git.ensure_dvc_pointer_is_not_ignored(repo, zip_path)
         run_dvc_command(["add", zip_path], cwd=wdir)
         zip_hash = get_hash(zip_path, wdir=wdir)
     # If we unzip, we need to update the hash

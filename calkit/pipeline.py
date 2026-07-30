@@ -1026,7 +1026,6 @@ def get_status(
                             )
                     except Exception:
                         pass
-
         result["stale_stages"] = ordered_stale_stages
         return PipelineStatus(
             has_pipeline=result["has_pipeline"],

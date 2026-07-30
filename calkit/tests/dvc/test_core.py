@@ -1,17 +1,20 @@
 """Tests for the ``dvc`` module."""
 
+import logging
 import os
 import subprocess
 
 import dvc.repo
 import git
 import pytest
+import zc.lockfile
 from configobj import ConfigObj
 from dvc.config_schema import SCHEMA, Invalid
 from dvc_objects.fs import known_implementations
 
 import calkit
 from calkit.dvc import register_ck_scheme
+from calkit.dvc.core import _tolerate_lock_release_failures
 
 
 def test_get_remotes(tmp_dir):
@@ -111,12 +114,6 @@ def test_stale_rwlock_warning_is_suppressed(caplog):
 
 
 def test_tolerate_lock_release_failures(tmp_dir, caplog):
-    import logging
-
-    import zc.lockfile
-
-    from calkit.dvc.core import _tolerate_lock_release_failures
-
     # Stand in for Windows' msvcrt unlock, which can fail while another
     # process contends for the same lock. It's applied at import time there,
     # so install it over a failing unlock here to test on any platform.

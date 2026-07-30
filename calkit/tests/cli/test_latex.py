@@ -31,6 +31,7 @@ def test_from_json(tmp_dir):
         assert match is not None, f"No definition found for '{key}'"
         return match.group(1).strip()
 
+    # Test setup
     data = {"sup": 5.555, "lol": 3}
     with open("test.json", "w") as f:
         json.dump(data, f)

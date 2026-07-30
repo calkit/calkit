@@ -984,7 +984,6 @@ def get_status(
                     pass
         except Exception:
             pass
-
         # Check all directory inputs across the pipeline for git-ignored files
         pipeline_stages = ck_info.get("pipeline", {}).get("stages", {})
         for name, stage_cfg in pipeline_stages.items():

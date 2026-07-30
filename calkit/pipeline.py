@@ -1,8 +1,10 @@
 """Pipeline-related functionality."""
 
 import itertools
+import logging
 import os
 import re
+import subprocess
 import warnings
 from collections.abc import Callable
 from pathlib import Path
@@ -962,9 +964,6 @@ def get_status(
                     for target in targets
                 )
             }
-
-        import logging
-        import subprocess
 
         log = logging.getLogger(__name__)
 

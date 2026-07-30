@@ -2434,5 +2434,21 @@ def test_get_status_warns_gitignored_directory_dependency(tmp_dir, caplog):
 
     # Run status which should trigger compilation and staleness check
     calkit.pipeline.get_status()
-
     assert "contains git-ignored files" in caplog.text
+    # A DVC-tracked file that is git-ignored should NOT trigger the warning,
+    # since DVC already accounts for it and it won't cause phantom staleness.
+    caplog.clear()
+    os.makedirs("tracked_data")
+    with open("tracked_data/model.bin", "w") as f:
+        f.write("weights")
+    subprocess.check_call(["dvc", "add", "tracked_data/model.bin"])
+    ck_info["pipeline"]["stages"]["process-tracked"] = {
+        "kind": "command",
+        "command": "echo ok",
+        "environment": "py",
+        "inputs": ["tracked_data"],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    calkit.pipeline.get_status()
+    assert "tracked_data" not in caplog.text

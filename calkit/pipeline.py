@@ -968,6 +968,23 @@ def get_status(
 
         log = logging.getLogger(__name__)
 
+        # Collect DVC-tracked file paths so we don't warn about files DVC
+        # already accounts for (DVC git-ignores its own tracked outputs).
+        dvc_tracked_paths: set[str] = set()
+        try:
+            _dvc_repo = calkit.dvc.get_dvc_repo()
+            for out in _dvc_repo.index.outs:
+                try:
+                    dvc_tracked_paths.add(
+                        Path(out.fs_path)
+                        .relative_to(_dvc_repo.root_dir)
+                        .as_posix()
+                    )
+                except (ValueError, AttributeError):
+                    pass
+        except Exception:
+            pass
+
         # Check all directory inputs across the pipeline for git-ignored files
         pipeline_stages = ck_info.get("pipeline", {}).get("stages", {})
         for name, stage_cfg in pipeline_stages.items():
@@ -991,10 +1008,18 @@ def get_status(
                             text=True,
                         )
                         ignored_files = res.stdout.strip().splitlines()
-                        if ignored_files:
+                        # DVC deliberately git-ignores the files it tracks, so
+                        # those are expected. Only warn about ignored files DVC
+                        # isn't tracking (those won't show up as stale).
+                        stray_ignored = [
+                            f
+                            for f in ignored_files
+                            if Path(f).as_posix() not in dvc_tracked_paths
+                        ]
+                        if stray_ignored:
                             log.warning(
                                 f"Stage '{name}' has a directory dependency '{dep_path}' "
-                                f"that contains git-ignored files (e.g., '{ignored_files[0]}'). "
+                                f"that contains git-ignored files (e.g., '{stray_ignored[0]}'). "
                                 "This can cause the stage to unexpectedly re-run because the "
                                 "git-ignored files change the directory's DVC hash. "
                                 "Consider removing them or making the dependency more specific."

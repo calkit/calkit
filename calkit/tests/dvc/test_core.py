@@ -1,16 +1,20 @@
 """Tests for the ``dvc`` module."""
 
+import logging
 import os
 import subprocess
 
 import dvc.repo
 import git
+import pytest
+import zc.lockfile
 from configobj import ConfigObj
 from dvc.config_schema import SCHEMA, Invalid
 from dvc_objects.fs import known_implementations
 
 import calkit
 from calkit.dvc import register_ck_scheme
+from calkit.dvc.core import _tolerate_lock_release_failures
 
 
 def test_get_remotes(tmp_dir):
@@ -107,6 +111,40 @@ def test_stale_rwlock_warning_is_suppressed(caplog):
     messages = [r.getMessage() for r in caplog.records]
     assert not any("Auto removed it from the lock file" in m for m in messages)
     assert any("must pass through" in m for m in messages)
+
+
+def test_tolerate_lock_release_failures(tmp_dir, caplog):
+    # Stand in for Windows' msvcrt unlock, which can fail while another
+    # process contends for the same lock. It's applied at import time there,
+    # so install it over a failing unlock here to test on any platform.
+    def failing_unlock(file):
+        raise zc.lockfile.LockError(f"Couldn't unlock {file.name!r}")
+
+    original = zc.lockfile._unlock_file
+    zc.lockfile._unlock_file = failing_unlock
+    try:
+        # Without the fix, closing raises and leaks the still-locked handle
+        lock = zc.lockfile.LockFile("untolerated.lock")
+        fp = lock._fp
+        with pytest.raises(zc.lockfile.LockError):
+            lock.close()
+        assert not fp.closed
+        fp.close()
+        # With it, closing succeeds and the handle is closed, which is what
+        # actually releases the lock
+        _tolerate_lock_release_failures()
+        lock = zc.lockfile.LockFile("tolerated.lock")
+        fp = lock._fp
+        with caplog.at_level(logging.WARNING, logger="calkit.dvc"):
+            lock.close()
+        assert fp.closed
+        assert lock._fp is None
+        assert any(
+            "Ignoring failure to release DVC lock" in r.getMessage()
+            for r in caplog.records
+        )
+    finally:
+        zc.lockfile._unlock_file = original
 
 
 def test_register_ck_scheme_updates_schema_and_registry():

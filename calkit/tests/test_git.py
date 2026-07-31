@@ -399,3 +399,23 @@ def test_ensure_path_is_ignored_stale_negation_after_direct_rule(tmp_dir):
         lines = f.read().splitlines()
     assert "!results/output.json" not in lines
     assert "results/output.json" in lines
+
+
+def test_ensure_dvc_pointer_replaces_last_duplicate_directory_rule(tmp_dir):
+    repo = git.Repo.init()
+    pointer = "nested/test-results/archive.zip.dvc"
+    os.makedirs(os.path.dirname(pointer), exist_ok=True)
+    with open(".gitignore", "w") as f:
+        f.write("test-results/\n# Duplicate rule\ntest-results/\n")
+    assert repo.ignored(pointer)
+    calkit.git.ensure_dvc_pointer_is_not_ignored(
+        repo, path=pointer.removesuffix(".dvc")
+    )
+    with open(".gitignore") as f:
+        lines = f.read().splitlines()
+    assert lines[:3] == [
+        "test-results/",
+        "# Duplicate rule",
+        "**/test-results/*",
+    ]
+    assert not repo.ignored(pointer)

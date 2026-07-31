@@ -370,7 +370,8 @@ def ensure_dvc_pointer_is_not_ignored(repo: git.Repo, path: str) -> None:
             replacement = f"**/{directory_pattern}/*"
         else:
             replacement = directory_pattern + "/*"
-        lines[lines.index(matched_pattern)] = replacement
+        matched_index = len(lines) - 1 - lines[::-1].index(matched_pattern)
+        lines[matched_index] = replacement
         with open(matching_gitignore_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
             if gitignore_txt.endswith("\n"):

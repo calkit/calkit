@@ -2397,8 +2397,6 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
 
 
 def test_get_status_warns_gitignored_directory_dependency(tmp_dir, caplog):
-    import subprocess
-
     subprocess.check_call(["calkit", "init"])
     os.makedirs("data")
     with open("data/ignored.txt", "w") as f:

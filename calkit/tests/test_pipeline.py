@@ -2408,7 +2408,6 @@ def test_get_status_warns_gitignored_directory_dependency(tmp_dir, caplog):
     # Git add the .gitignore
     subprocess.check_call(["git", "add", "data/.gitignore"])
     subprocess.check_call(["git", "commit", "-m", "init"])
-
     ck_info = {
         "environments": {
             "py": {

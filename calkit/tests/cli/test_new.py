@@ -382,6 +382,10 @@ def test_new_project_existing_files(tmp_dir):
 
 
 def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
+    # Respond to unexpected requests with a 404 instead of the default 500,
+    # since the cloud client retries 5xx responses with exponential backoff,
+    # which would make a missing expectation take minutes to fail
+    httpserver.no_handler_status_code = 404
     monkeypatch.setenv(
         "CALKIT_CLOUD_BASE_URL", httpserver.url_for("").rstrip("/")
     )
@@ -475,6 +479,11 @@ def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
     # Test that a non-'origin' remote name is handled correctly
     httpserver.expect_ordered_request(
         "/projects", method="POST"
+    ).respond_with_json(project_resp)
+    # Configuring the DVC remote looks up the project in the cloud, since
+    # there's no remote named 'origin' from which to detect the Git repo URL
+    httpserver.expect_ordered_request(
+        "/projects/test-user/my-project", method="GET"
     ).respond_with_json(project_resp)
     subprocess.check_call(["git", "remote", "rename", "origin", "upstream"])
     subprocess.check_call(
@@ -709,8 +718,11 @@ def test_new_matlab_script_stage(tmp_dir):
 )
 def test_new_julia_env(tmp_dir):
     subprocess.check_call(["calkit", "init"])
+    # Note we use Example, the registry's trivial test package, since nothing
+    # here depends on which package is installed, and heavier ones cost tens
+    # of seconds each to download and precompile
     subprocess.check_call(
-        ["calkit", "new", "julia-env", "--name", "j1", "WaterLily"]
+        ["calkit", "new", "julia-env", "--name", "j1", "Example"]
     )
     assert os.path.isfile("Project.toml")
     assert os.path.isfile("Manifest.toml")
@@ -723,7 +735,7 @@ def test_new_julia_env(tmp_dir):
             "j2",
             "--julia",
             "1.10",
-            "Revise",
+            "Example",
             "--path",
             "envs/my-env/Project.toml",
         ]

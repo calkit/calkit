@@ -964,9 +964,7 @@ def get_status(
                     for target in targets
                 )
             }
-
         log = logging.getLogger(__name__)
-
         # Collect DVC-tracked file paths so we don't warn about files DVC
         # already accounts for (DVC git-ignores its own tracked outputs).
         dvc_tracked_paths: set[str] = set()

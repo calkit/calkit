@@ -637,7 +637,17 @@ def get_status(
                 if stale_stage.modified_inputs:
                     typer.echo("          modified inputs:")
                     for input_path in stale_stage.modified_inputs:
-                        typer.echo(f"            {input_path}")
+                        ignored = stale_stage.ignored_stale_deps.get(
+                            input_path
+                        )
+                        if ignored:
+                            ignored_str = ", ".join(ignored)
+                            warn(
+                                f"            {input_path} (ignored files causing staleness: {ignored_str})",
+                                prefix="",
+                            )
+                        else:
+                            typer.echo(f"            {input_path}")
             if pipeline_status.always_run_stage_names:
                 typer.echo("Always-run stages:")
                 for stage_name in pipeline_status.always_run_stage_names:
@@ -648,6 +658,15 @@ def get_status(
                 typer.echo("Always-run stages:")
                 for stage_name in pipeline_status.always_run_stage_names:
                     typer.echo(f"        {typer.style(stage_name, fg='cyan')}")
+        if pipeline_status and pipeline_status.ignored_dep_hazards:
+            warn(
+                "Ignored files in stage deps (not stale now, may cause staleness on CI):",
+                prefix="",
+            )
+            for sname, dep_map in pipeline_status.ignored_dep_hazards.items():
+                for dpath, files in dep_map.items():
+                    warn(f"        {sname} / {dpath}:", prefix="")
+                    warn(f"            {', '.join(files)}", prefix="")
 
 
 @app.command(name="diff")

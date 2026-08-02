@@ -2396,7 +2396,7 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
         assert "*.aux" in f.read()
 
 
-def test_get_status_warns_gitignored_directory_dependency(tmp_dir, caplog):
+def test_get_status_warns_gitignored_directory_dependency(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     os.makedirs("data")
     with open("data/ignored.txt", "w") as f:
@@ -2417,9 +2417,10 @@ def test_get_status_warns_gitignored_directory_dependency(tmp_dir, caplog):
             "stages": {
                 "process-data": {
                     "kind": "command",
-                    "command": "echo ok",
+                    "command": "echo ok > out.txt",
                     "environment": "py",
                     "inputs": ["data"],
+                    "outputs": ["out.txt"],
                 }
             }
         },
@@ -2428,12 +2429,51 @@ def test_get_status_warns_gitignored_directory_dependency(tmp_dir, caplog):
         f.write("requests\n")
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    # Run status which should trigger compilation and staleness check
-    calkit.pipeline.get_status()
-    assert "contains git-ignored files" in caplog.text
+
+    # Initially, the stage has never been run, so it's stale. DVC considers the input modified.
+    # Since there are no other git-tracked changes in `data/`, the ignored file is attributed as the cause.
+    status = calkit.pipeline.get_status()
+    assert "process-data" in status.stale_stages
+    stale_stage = status.stale_stages["process-data"]
+    assert "data/ignored.txt" in stale_stage.ignored_stale_deps.get("data", [])
+
+    # Run the stage to commit it to DVC cache
+    subprocess.check_call(["calkit", "run", "process-data"])
+    subprocess.check_call(
+        ["git", "add", "calkit.yaml", "dvc.yaml", "dvc.lock"]
+    )
+    subprocess.check_call(["git", "commit", "-m", "run stage"])
+
+    # Now it is up-to-date. Hazard should now be populated instead.
+    status = calkit.pipeline.get_status()
+    assert "process-data" not in status.stale_stages
+    hazards = status.ignored_dep_hazards.get("process-data", {})
+    assert "data/ignored.txt" in hazards.get("data", [])
+
+    # Modify the ignored file (silently invalidates DVC hash).
+    # Since nothing else changed, it is attributed as the cause.
+    with open("data/ignored.txt", "a") as f:
+        f.write("more")
+    status = calkit.pipeline.get_status()
+    assert "process-data" in status.stale_stages
+    stale_stage = status.stale_stages["process-data"]
+    assert "data/ignored.txt" in stale_stage.ignored_stale_deps.get("data", [])
+    assert "data" not in status.ignored_dep_hazards.get("process-data", {})
+
+    # False-positive guard: change a tracked file too.
+    # Now `git status` shows a tracked change, so we don't pin it *only* on the ignored file.
+    with open("data/tracked.txt", "w") as f:
+        f.write("tracked")
+    subprocess.check_call(["git", "add", "data/tracked.txt"])
+    status = calkit.pipeline.get_status()
+    # Pinning should be removed; it falls back to hazard
+    stale_stage = status.stale_stages["process-data"]
+    assert "data" not in stale_stage.ignored_stale_deps
+    hazards = status.ignored_dep_hazards.get("process-data", {})
+    assert "data/ignored.txt" in hazards.get("data", [])
+
     # A DVC-tracked file that is git-ignored should NOT trigger the warning,
     # since DVC already accounts for it and it won't cause phantom staleness.
-    caplog.clear()
     os.makedirs("tracked_data")
     with open("tracked_data/model.bin", "w") as f:
         f.write("weights")
@@ -2446,5 +2486,11 @@ def test_get_status_warns_gitignored_directory_dependency(tmp_dir, caplog):
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    calkit.pipeline.get_status()
-    assert "tracked_data" not in caplog.text
+    status = calkit.pipeline.get_status()
+    # It shouldn't appear in hazards or stale deps
+    assert "process-tracked" not in status.ignored_dep_hazards
+    if "process-tracked" in status.stale_stages:
+        assert (
+            "tracked_data"
+            not in status.stale_stages["process-tracked"].ignored_stale_deps
+        )

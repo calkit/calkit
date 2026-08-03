@@ -637,7 +637,7 @@ def get_status(
                 if stale_stage.modified_inputs:
                     typer.echo("          modified inputs:")
                     for input_path in stale_stage.modified_inputs:
-                        ignored = stale_stage.ignored_stale_deps.get(
+                        ignored = stale_stage.ignored_modified_inputs.get(
                             input_path
                         )
                         if ignored:

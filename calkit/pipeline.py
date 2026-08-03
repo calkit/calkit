@@ -165,7 +165,7 @@ class StaleStage(BaseModel):
     # calkit#1041) to stray git-ignored files inside them:
     # {dep_path: [ignored_file, ...]}. DVC hashes a directory as one md5, so
     # this is a folder-level verdict — we can't say which file changed.
-    ignored_stale_deps: dict[str, list[str]] = Field(default_factory=dict)
+    ignored_modified_inputs: dict[str, list[str]] = Field(default_factory=dict)
     # True for stages that originate from a subproject (either an individual
     # "{sp}:{stage}" stage or a kept "{sp} (subproject)" wrapper). Subproject
     # wrapper stages are marked always-changed purely as a delegation
@@ -1078,7 +1078,7 @@ def get_status(
                 ]
                 if stale_for_dep and not _folder_has_other_changes(dep_path):
                     for s in stale_for_dep:
-                        s.ignored_stale_deps[dep_posix] = stray
+                        s.ignored_modified_inputs[dep_posix] = stray
                 else:
                     ignored_dep_hazards.setdefault(name, {})[dep_posix] = stray
         result["stale_stages"] = ordered_stale_stages

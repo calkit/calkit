@@ -2435,7 +2435,9 @@ def test_get_status_warns_gitignored_directory_dependency(tmp_dir):
     status = calkit.pipeline.get_status()
     assert "process-data" in status.stale_stages
     stale_stage = status.stale_stages["process-data"]
-    assert "data/ignored.txt" in stale_stage.ignored_stale_deps.get("data", [])
+    assert "data/ignored.txt" in stale_stage.ignored_modified_inputs.get(
+        "data", []
+    )
 
     # Run the stage to commit it to DVC cache
     subprocess.check_call(["calkit", "run", "process-data"])
@@ -2457,7 +2459,9 @@ def test_get_status_warns_gitignored_directory_dependency(tmp_dir):
     status = calkit.pipeline.get_status()
     assert "process-data" in status.stale_stages
     stale_stage = status.stale_stages["process-data"]
-    assert "data/ignored.txt" in stale_stage.ignored_stale_deps.get("data", [])
+    assert "data/ignored.txt" in stale_stage.ignored_modified_inputs.get(
+        "data", []
+    )
     assert "data" not in status.ignored_dep_hazards.get("process-data", {})
 
     # False-positive guard: change a tracked file too.
@@ -2468,7 +2472,7 @@ def test_get_status_warns_gitignored_directory_dependency(tmp_dir):
     status = calkit.pipeline.get_status()
     # Pinning should be removed; it falls back to hazard
     stale_stage = status.stale_stages["process-data"]
-    assert "data" not in stale_stage.ignored_stale_deps
+    assert "data" not in stale_stage.ignored_modified_inputs
     hazards = status.ignored_dep_hazards.get("process-data", {})
     assert "data/ignored.txt" in hazards.get("data", [])
 
@@ -2492,5 +2496,7 @@ def test_get_status_warns_gitignored_directory_dependency(tmp_dir):
     if "process-tracked" in status.stale_stages:
         assert (
             "tracked_data"
-            not in status.stale_stages["process-tracked"].ignored_stale_deps
+            not in status.stale_stages[
+                "process-tracked"
+            ].ignored_modified_inputs
         )

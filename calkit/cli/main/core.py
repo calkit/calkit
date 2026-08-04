@@ -1230,7 +1230,7 @@ def pull(
             ck_info = calkit.load_calkit_info()
             sp_results = {}
             sp_paths = {}
-            for sp, idx in ck_info.get("subprojects", []):
+            for sp, idx in enumerate(ck_info.get("subprojects", [])):
                 if not isinstance(sp, dict) or not sp.get("path"):
                     continue
                 sp_path = sp["path"]

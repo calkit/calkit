@@ -15,6 +15,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Needed so the example project in examples/basic is checked
+          # against the calkit.yaml JSON schema
+          submodules: true
       - name: Configure Git Credentials
         run: |
           git config --global user.name github-actions[bot]

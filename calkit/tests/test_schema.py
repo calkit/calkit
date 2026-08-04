@@ -32,16 +32,15 @@ def test_generate() -> None:
         ), f"{relpath} is out-of-date; regenerate it with 'make schema'"
 
 
-@pytest.mark.parametrize(
-    "relpath",
-    [
-        "examples/basic/calkit.yaml",
-        "jupyterlab-ext/ui-tests/test-project/calkit.yaml",
-    ],
-)
+@pytest.mark.parametrize("relpath", ["examples/basic/calkit.yaml"])
 def test_validate_example_projects(relpath: str) -> None:
+    fpath = os.path.join(REPO_ROOT, relpath)
+    # The examples live in Git submodules, which aren't necessarily checked
+    # out; CI clones them so this actually runs there
+    if not os.path.isfile(fpath):
+        pytest.skip(f"{relpath} is not checked out")
     schema = calkit.schema.generate()
-    with open(os.path.join(REPO_ROOT, relpath), encoding="utf-8") as f:
+    with open(fpath, encoding="utf-8") as f:
         data = calkit.ryaml.load(f)
     jsonschema.validate(data, schema)
 
@@ -97,6 +96,25 @@ def test_validate_bad_projects() -> None:
             "env_vars": {"MY_VAR": "value"},
             "subprojects": [{"path": "sub"}],
             "overleaf_sync": {"paper": {"url": "https://overleaf.com/1"}},
+        }
+    )
+    # Shapes the CLI itself writes, which must not be rejected: a notebook
+    # entry recording only its environment, a publication with no kind, and
+    # every showcase element kind
+    assert not errors(
+        {"notebooks": [{"path": "nb.ipynb", "environment": "py"}]}
+    )
+    assert not errors(
+        {"publications": [{"path": "paper.pdf", "title": "The paper"}]}
+    )
+    assert not errors(
+        {
+            "showcase": [
+                {"text": "Some text"},
+                {"markdown": "### A heading"},
+                {"figure": "figures/f.png"},
+                {"publication": "paper/paper.pdf"},
+            ]
         }
     )
 

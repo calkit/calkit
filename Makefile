@@ -36,8 +36,14 @@ test-cov: ## Test the code coverage with pytest.
 test-docs: sync-docs ## Test if documentation can be built without warnings or errors.
 	@uv run mkdocs build -s
 
+.PHONY: schema
+schema: ## Generate the published JSON schema for calkit.yaml.
+	@echo "🚀 Generating calkit.yaml JSON schema"
+	@uv run calkit schema -o docs/schemas/calkit.json
+	@cp docs/schemas/calkit.json vscode-ext/schemas/calkit.json
+
 .PHONY: sync-docs
-sync-docs: ## Sync documentation content from docs/*.md into README.md.
+sync-docs: schema ## Sync documentation content from docs/*.md into README.md.
 	@echo "🚀 Generating docs references"
 	@uv run python scripts/generate-docs-references.py
 	@echo "🚀 Syncing documentation"

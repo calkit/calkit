@@ -76,6 +76,7 @@ _SUBMODULES = {
     "install",
     "magics",
     "ops",
+    "schema",
     "server",
 }
 

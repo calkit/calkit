@@ -218,8 +218,7 @@ def init(
         repo.git.commit("-m", "Initialize DVC")
     # Create an empty calkit.yaml if one doesn't already exist
     if not os.path.isfile("calkit.yaml"):
-        with open("calkit.yaml", "w"):
-            pass
+        calkit.schema.ensure_modeline("calkit.yaml")
         repo.git.add("calkit.yaml")
         if calkit.git.get_staged_files(repo=repo):
             repo.git.commit("-m", "Initialize Calkit")
@@ -1323,6 +1322,32 @@ def ignore(
         repo.git.add(".gitignore")
         if calkit.git.get_staged_files():
             repo.git.commit(["-m", f"Ignore {path}"])
+
+
+@app.command(name="schema")
+def print_schema(
+    output: Annotated[
+        str | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Path at which to write the schema instead of printing it.",
+        ),
+    ] = None,
+) -> None:
+    """Print the JSON schema for calkit.yaml.
+
+    Editors can use this to validate and autocomplete the file. See
+    https://docs.calkit.org/calkit-yaml for how to set that up.
+    """
+    txt = calkit.schema.generate_json()
+    if output is None:
+        typer.echo(txt, nl=False)
+        return
+    os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
+    with open(output, "w", encoding="utf-8") as f:
+        f.write(txt)
+    typer.echo(f"Wrote schema to {output}")
 
 
 @app.command(name="local-server")

@@ -1,0 +1,6231 @@
+{
+  "$defs": {
+    "CommandStage": {
+      "additionalProperties": false,
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "command": {
+          "description": "Command to run in the environment.",
+          "title": "Command",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "description": "Name of the environment in which to run this stage.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InputsFromStageOutputs"
+              }
+            ]
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "command",
+          "default": "command",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Paths this stage produces.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PathOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "environment",
+        "command"
+      ],
+      "title": "CommandStage",
+      "type": "object"
+    },
+    "CondaEnvironment": {
+      "additionalProperties": false,
+      "properties": {
+        "_include": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
+          "title": "Include"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of the environment.",
+          "title": "Description"
+        },
+        "kind": {
+          "const": "conda",
+          "default": "conda",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "description": "Path to the Conda environment YAML file.",
+          "title": "Path",
+          "type": "string"
+        },
+        "prefix": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path at which to create the environment.",
+          "title": "Prefix"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "CondaEnvironment",
+      "type": "object"
+    },
+    "CopyFileToDir": {
+      "properties": {
+        "dest": {
+          "title": "Dest",
+          "type": "string"
+        },
+        "kind": {
+          "const": "file-to-dir",
+          "default": "file-to-dir",
+          "title": "Kind",
+          "type": "string"
+        },
+        "src": {
+          "title": "Src",
+          "type": "string"
+        }
+      },
+      "required": [
+        "src",
+        "dest"
+      ],
+      "title": "CopyFileToDir",
+      "type": "object"
+    },
+    "CopyFileToFile": {
+      "properties": {
+        "dest": {
+          "title": "Dest",
+          "type": "string"
+        },
+        "kind": {
+          "const": "file-to-file",
+          "default": "file-to-file",
+          "title": "Kind",
+          "type": "string"
+        },
+        "src": {
+          "title": "Src",
+          "type": "string"
+        }
+      },
+      "required": [
+        "src",
+        "dest"
+      ],
+      "title": "CopyFileToFile",
+      "type": "object"
+    },
+    "Dataset": {
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A longer description.",
+          "title": "Description"
+        },
+        "path": {
+          "description": "Path to the file, relative to the project root.",
+          "title": "Path",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the pipeline stage that produces this.",
+          "title": "Stage"
+        },
+        "title": {
+          "description": "A human-readable title.",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "title"
+      ],
+      "title": "Dataset",
+      "type": "object"
+    },
+    "Dependency": {
+      "description": "A system-level dependency.\n\nThree kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``.\n- ``env-var``: an environmental variable that must be defined.\n- ``setup``: a per-machine precondition that isn't a file -- e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` dep declares ``check_command`` (a shell command whose\n  exit code determines whether the dep is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --`` explicitly\n  rather than relying on an implicit wrap. A future ``cache_ttl``\n  field can extend this to skip re-probing for slow checks.",
+      "properties": {
+        "cache_ttl": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Ttl"
+        },
+        "check_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Check Command"
+        },
+        "default": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "kind": {
+          "default": "app",
+          "enum": [
+            "app",
+            "env-var",
+            "setup"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "setup_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Setup Command"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Dependency",
+      "type": "object"
+    },
+    "DerivedFromProject": {
+      "properties": {
+        "git_repo_url": {
+          "title": "Git Repo Url",
+          "type": "string"
+        },
+        "git_rev": {
+          "title": "Git Rev",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "git_repo_url",
+        "git_rev"
+      ],
+      "title": "DerivedFromProject",
+      "type": "object"
+    },
+    "DirToDirMerge": {
+      "properties": {
+        "dest": {
+          "title": "Dest",
+          "type": "string"
+        },
+        "kind": {
+          "const": "dir-to-dir-merge",
+          "default": "dir-to-dir-merge",
+          "title": "Kind",
+          "type": "string"
+        },
+        "src": {
+          "title": "Src",
+          "type": "string"
+        }
+      },
+      "required": [
+        "src",
+        "dest"
+      ],
+      "title": "DirToDirMerge",
+      "type": "object"
+    },
+    "DirToDirReplace": {
+      "properties": {
+        "dest": {
+          "title": "Dest",
+          "type": "string"
+        },
+        "kind": {
+          "const": "dir-to-dir-replace",
+          "default": "dir-to-dir-replace",
+          "title": "Kind",
+          "type": "string"
+        },
+        "src": {
+          "title": "Src",
+          "type": "string"
+        }
+      },
+      "required": [
+        "src",
+        "dest"
+      ],
+      "title": "DirToDirReplace",
+      "type": "object"
+    },
+    "DockerCommandStage": {
+      "additionalProperties": false,
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "command": {
+          "description": "Full command to run, including the 'docker run' call.",
+          "title": "Command",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "description": "Name of the environment in which to run this stage.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InputsFromStageOutputs"
+              }
+            ]
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "docker-command",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Paths this stage produces.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PathOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "kind",
+        "environment",
+        "command"
+      ],
+      "title": "DockerCommandStage",
+      "type": "object"
+    },
+    "DockerEnvironment": {
+      "additionalProperties": false,
+      "properties": {
+        "_include": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
+          "title": "Include"
+        },
+        "args": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Extra arguments passed to 'docker run'.",
+          "title": "Args"
+        },
+        "command_mode": {
+          "default": "shell",
+          "description": "Whether commands run through a shell or the image's entrypoint.",
+          "enum": [
+            "shell",
+            "entrypoint"
+          ],
+          "title": "Command Mode",
+          "type": "string"
+        },
+        "deps": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files added to the container as dependencies.",
+          "title": "Deps"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of the environment.",
+          "title": "Description"
+        },
+        "env_vars": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Environmental variables to set in the container.",
+          "title": "Env Vars"
+        },
+        "gpus": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "GPUs to make available, passed to 'docker run --gpus'.",
+          "title": "Gpus"
+        },
+        "image": {
+          "description": "Name of the Docker image.",
+          "title": "Image",
+          "type": "string"
+        },
+        "jupyter_kernel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the Jupyter kernel inside the image, used when executing notebooks with 'calkit nb execute'. Defaults to 'python3', or 'ir' for R images.",
+          "title": "Jupyter Kernel"
+        },
+        "kind": {
+          "const": "docker",
+          "default": "docker",
+          "title": "Kind",
+          "type": "string"
+        },
+        "layers": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Predefined layers to add to the generated Dockerfile.",
+          "title": "Layers"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to the Dockerfile. Optional, since Docker environments can be defined purely by an image.",
+          "title": "Path"
+        },
+        "platform": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Platform to run as, e.g., 'linux/amd64'.",
+          "title": "Platform"
+        },
+        "ports": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ports to expose, e.g., '8080:80'.",
+          "title": "Ports"
+        },
+        "shell": {
+          "default": "sh",
+          "description": "Shell used to run commands in the image.",
+          "enum": [
+            "bash",
+            "sh"
+          ],
+          "title": "Shell",
+          "type": "string"
+        },
+        "user": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "User to run the container as. Defaults to the host user.",
+          "title": "User"
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory inside the container. Defaults to '/work'.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "image"
+      ],
+      "title": "DockerEnvironment",
+      "type": "object"
+    },
+    "Figure": {
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A longer description.",
+          "title": "Description"
+        },
+        "path": {
+          "description": "Path to the file, relative to the project root.",
+          "title": "Path",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the pipeline stage that produces this.",
+          "title": "Stage"
+        },
+        "title": {
+          "description": "A human-readable title.",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "title"
+      ],
+      "title": "Figure",
+      "type": "object"
+    },
+    "FigureEvidence": {
+      "description": "Evidence to back up the answer to a question.",
+      "properties": {
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation"
+        },
+        "kind": {
+          "const": "figure",
+          "default": "figure",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "FigureEvidence",
+      "type": "object"
+    },
+    "Formula": {
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Input"
+              },
+              "type": "array"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "title": "Inputs"
+        },
+        "kind": {
+          "const": "formula",
+          "default": "formula",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Output"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Output"
+        },
+        "params": {
+          "$ref": "#/$defs/FormulaParams"
+        }
+      },
+      "required": [
+        "params",
+        "inputs",
+        "output"
+      ],
+      "title": "Formula",
+      "type": "object"
+    },
+    "FormulaParams": {
+      "properties": {
+        "formula": {
+          "title": "Formula",
+          "type": "string"
+        }
+      },
+      "required": [
+        "formula"
+      ],
+      "title": "FormulaParams",
+      "type": "object"
+    },
+    "IncludedEnvironment": {
+      "additionalProperties": false,
+      "description": "An environment whose specification lives in another file.\n\nThis variant covers entries that carry only an ``_include`` key, i.e.,\nwith no ``kind`` declared inline.",
+      "properties": {
+        "_include": {
+          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
+          "title": "Include",
+          "type": "string"
+        }
+      },
+      "required": [
+        "_include"
+      ],
+      "title": "IncludedEnvironment",
+      "type": "object"
+    },
+    "Input": {
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "dtype": {
+          "default": "float",
+          "enum": [
+            "int",
+            "float",
+            "str"
+          ],
+          "title": "Dtype",
+          "type": "string"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Input",
+      "type": "object"
+    },
+    "InputsFromStageOutputs": {
+      "properties": {
+        "from_stage_outputs": {
+          "description": "Name of a stage whose outputs are inputs to this one.",
+          "title": "From Stage Outputs",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from_stage_outputs"
+      ],
+      "title": "InputsFromStageOutputs",
+      "type": "object"
+    },
+    "JsonToLatexStage": {
+      "additionalProperties": false,
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "command_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the LaTeX command to define for each value.",
+          "title": "Command Name"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "default": "_system",
+          "title": "Environment",
+          "type": "string"
+        },
+        "format": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Format strings for values, keyed by their JSON key.",
+          "title": "Format"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InputsFromStageOutputs"
+              }
+            ]
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "json-to-latex",
+          "default": "json-to-latex",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Paths this stage produces.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PathOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "title": "JsonToLatexStage",
+      "type": "object"
+    },
+    "JuliaCommandStage": {
+      "additionalProperties": false,
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "command": {
+          "description": "Julia command to run.",
+          "title": "Command",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "description": "Name of the environment in which to run this stage.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InputsFromStageOutputs"
+              }
+            ]
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "julia-command",
+          "default": "julia-command",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Paths this stage produces.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PathOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "environment",
+        "command"
+      ],
+      "title": "JuliaCommandStage",
+      "type": "object"
+    },
+    "JuliaEnvironment": {
+      "additionalProperties": false,
+      "properties": {
+        "_include": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
+          "title": "Include"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of the environment.",
+          "title": "Description"
+        },
+        "julia": {
+          "description": "Julia version to use.",
+          "title": "Julia",
+          "type": "string"
+        },
+        "kind": {
+          "const": "julia",
+          "default": "julia",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "description": "Path to the Julia project's Project.toml.",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "julia"
+      ],
+      "title": "JuliaEnvironment",
+      "type": "object"
+    },
+    "JuliaScriptStage": {
+      "additionalProperties": false,
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "args": {
+          "default": [],
+          "description": "Arguments passed to the script.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "description": "Name of the environment in which to run this stage.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InputsFromStageOutputs"
+              }
+            ]
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "julia-script",
+          "default": "julia-script",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Paths this stage produces.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PathOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "script_path": {
+          "description": "Path to the Julia script to run.",
+          "title": "Script Path",
+          "type": "string"
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "environment",
+        "script_path"
+      ],
+      "title": "JuliaScriptStage",
+      "type": "object"
+    },
+    "JupyterNotebookStage": {
+      "additionalProperties": false,
+      "description": "A stage that runs a Jupyter notebook.\n\nNotebooks need to be cleaned of outputs so they can be used as DVC\ndependencies. The ``status`` and ``run`` commands handle this\nautomatically.",
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "cleaned_ipynb_storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "dvc"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where to store the output-stripped notebook.",
+          "title": "Cleaned Ipynb Storage"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "description": "Name of the environment in which to run this stage.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "executed_ipynb_storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "dvc"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "dvc",
+          "description": "Where to store the executed notebook.",
+          "title": "Executed Ipynb Storage"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "html_storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "dvc"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "dvc",
+          "description": "Where to store the executed notebook as HTML.",
+          "title": "Html Storage"
+        },
+        "inputs": {
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InputsFromStageOutputs"
+              }
+            ]
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "jupyter-notebook",
+          "default": "jupyter-notebook",
+          "title": "Kind",
+          "type": "string"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "enum": [
+                "python",
+                "matlab",
+                "julia"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The notebook's language. Detected automatically if unset.",
+          "title": "Language"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "notebook_path": {
+          "description": "Path to the notebook to execute.",
+          "title": "Notebook Path",
+          "type": "string"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Paths this stage produces.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PathOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "default": {},
+          "description": "Parameters injected into the notebook. A value like '{name}' is filled in from the project-level parameters.",
+          "title": "Parameters",
+          "type": "object"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "environment",
+        "notebook_path"
+      ],
+      "title": "JupyterNotebookStage",
+      "type": "object"
+    },
+    "LatexStage": {
+      "additionalProperties": false,
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "aux_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Directory for latexmk auxiliary files.",
+          "title": "Aux Dir"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "description": "Name of the environment in which to run this stage.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "force": {
+          "default": false,
+          "description": "Keep compiling despite errors (latexmk -f).",
+          "title": "Force",
+          "type": "boolean"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InputsFromStageOutputs"
+              }
+            ]
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "latex",
+          "default": "latex",
+          "title": "Kind",
+          "type": "string"
+        },
+        "latexmk_args": {
+          "default": [],
+          "description": "Extra arguments passed straight through to latexmk, for control Calkit does not model.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Latexmk Args",
+          "type": "array"
+        },
+        "latexmkrc_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a latexmkrc file to use.",
+          "title": "Latexmkrc Path"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "output_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Directory for latexmk output. Defaults to compiling in place, alongside the target.",
+          "title": "Output Dir"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Paths this stage produces.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PathOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "pdf_storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "dvc"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "dvc",
+          "description": "Where to store the resulting PDF.",
+          "title": "Pdf Storage"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "synctex": {
+          "default": true,
+          "description": "Generate SyncTeX data for editor/PDF navigation.",
+          "title": "Synctex",
+          "type": "boolean"
+        },
+        "target_path": {
+          "description": "Path to the .tex file to compile.",
+          "title": "Target Path",
+          "type": "string"
+        },
+        "verbose": {
+          "default": false,
+          "description": "Show full latexmk output.",
+          "title": "Verbose",
+          "type": "boolean"
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "environment",
+        "target_path"
+      ],
+      "title": "LatexStage",
+      "type": "object"
+    },
+    "Linear": {
+      "description": "Calculation for a simple linear relationship.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Input"
+              },
+              "type": "array"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "title": "Inputs"
+        },
+        "kind": {
+          "const": "linear",
+          "default": "linear",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Output"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Output"
+        },
+        "params": {
+          "$ref": "#/$defs/LinearParams"
+        }
+      },
+      "required": [
+        "params",
+        "inputs",
+        "output"
+      ],
+      "title": "Linear",
+      "type": "object"
+    },
+    "LinearParams": {
+      "properties": {
+        "coeffs": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Coeffs",
+          "type": "object"
+        },
+        "offset": {
+          "default": 0.0,
+          "title": "Offset",
+          "type": "number"
+        }
+      },
+      "required": [
+        "coeffs"
+      ],
+      "title": "LinearParams",
+      "type": "object"
+    },
+    "LookupTable": {
+      "description": "A 1-D lookup table.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Input"
+              },
+              "type": "array"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "title": "Inputs"
+        },
+        "kind": {
+          "const": "lookup-table",
+          "default": "lookup-table",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Output"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Output"
+        },
+        "params": {
+          "$ref": "#/$defs/LookupTableParams"
+        }
+      },
+      "required": [
+        "params",
+        "inputs",
+        "output"
+      ],
+      "title": "LookupTable",
+      "type": "object"
+    },
+    "LookupTableParams": {
+      "properties": {
+        "method": {
+          "default": "interpolate",
+          "enum": [
+            "floor",
+            "ceil",
+            "round",
+            "interpolate"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "x_values": {
+          "items": {
+            "type": "number"
+          },
+          "title": "X Values",
+          "type": "array"
+        },
+        "y_values": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Y Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "x_values",
+        "y_values"
+      ],
+      "title": "LookupTableParams",
+      "type": "object"
+    },
+    "MapPathsStage": {
+      "additionalProperties": false,
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "default": "_system",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InputsFromStageOutputs"
+              }
+            ]
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "map-paths",
+          "default": "map-paths",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Paths this stage produces.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PathOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "paths": {
+          "description": "Copy operations to perform.",
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "dir-to-dir-merge": "#/$defs/DirToDirMerge",
+                "dir-to-dir-replace": "#/$defs/DirToDirReplace",
+                "file-to-dir": "#/$defs/CopyFileToDir",
+                "file-to-file": "#/$defs/CopyFileToFile"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/CopyFileToFile"
+              },
+              {
+                "$ref": "#/$defs/CopyFileToDir"
+              },
+              {
+                "$ref": "#/$defs/DirToDirMerge"
+              },
+              {
+                "$ref": "#/$defs/DirToDirReplace"
+              }
+            ]
+          },
+          "title": "Paths",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "title": "MapPathsStage",
+      "type": "object"
+    },
+    "MatlabCommandStage": {
+      "additionalProperties": false,
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "command": {
+          "description": "MATLAB command to run.",
+          "title": "Command",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "description": "Name of the environment in which to run this stage.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InputsFromStageOutputs"
+              }
+            ]
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "matlab-command",
+          "default": "matlab-command",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Paths this stage produces.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PathOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "environment",
+        "command"
+      ],
+      "title": "MatlabCommandStage",
+      "type": "object"
+    },
+    "MatlabEnvironment": {
+      "additionalProperties": false,
+      "properties": {
+        "_include": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
+          "title": "Include"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of the environment.",
+          "title": "Description"
+        },
+        "kind": {
+          "const": "matlab",
+          "default": "matlab",
+          "title": "Kind",
+          "type": "string"
+        },
+        "products": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "MATLAB products (toolboxes) required.",
+          "title": "Products"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "MATLAB version to use.",
+          "title": "Version"
+        }
+      },
+      "title": "MatlabEnvironment",
+      "type": "object"
+    },
+    "MatlabScriptStage": {
+      "additionalProperties": false,
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "description": "Name of the environment in which to run this stage.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InputsFromStageOutputs"
+              }
+            ]
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "matlab-script",
+          "title": "Kind",
+          "type": "string"
+        },
+        "matlab_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Directory added to the MATLAB path, recursively.",
+          "title": "Matlab Path"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Paths this stage produces.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PathOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "script_path": {
+          "description": "Path to the MATLAB script to run.",
+          "title": "Script Path",
+          "type": "string"
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "kind",
+        "environment",
+        "script_path"
+      ],
+      "title": "MatlabScriptStage",
+      "type": "object"
+    },
+    "Metric": {
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "read_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ValueInFile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "Metric",
+      "type": "object"
+    },
+    "NixEnvironment": {
+      "additionalProperties": false,
+      "properties": {
+        "_include": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
+          "title": "Include"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of the environment.",
+          "title": "Description"
+        },
+        "kind": {
+          "const": "nix",
+          "default": "nix",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "description": "Path to the project's flake.nix. The flake.lock alongside it is the reproducibility-anchoring lock file tracked as a DVC dependency.",
+          "title": "Path",
+          "type": "string"
+        },
+        "shell": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the dev shell to enter, passed as #<shell> to 'nix develop'. Defaults to the flake's default dev shell.",
+          "title": "Shell"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "NixEnvironment",
+      "type": "object"
+    },
+    "Notebook": {
+      "description": "A Jupyter notebook.\n\nUnlike the other objects, a notebook entry can be created just to record\nwhich environment it runs in (by ``calkit update notebook-env``), so\n``title`` is optional here.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the environment in which to run this notebook, if it is not part of the pipeline.",
+          "title": "Environment"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "Notebook",
+      "type": "object"
+    },
+    "Output": {
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "dtype": {
+          "default": "float",
+          "enum": [
+            "int",
+            "float",
+            "str"
+          ],
+          "title": "Dtype",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "template": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Template"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Output",
+      "type": "object"
+    },
+    "OverleafSync": {
+      "description": "Configuration for syncing a directory with an Overleaf project.",
+      "properties": {
+        "push_paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Paths only pushed to Overleaf, never pulled back.",
+          "title": "Push Paths"
+        },
+        "sync_paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Paths synced in both directions with Overleaf.",
+          "title": "Sync Paths"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "URL of the Overleaf project.",
+          "title": "Url"
+        }
+      },
+      "title": "OverleafSync",
+      "type": "object"
+    },
+    "PBSEnvironment": {
+      "additionalProperties": false,
+      "properties": {
+        "_include": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
+          "title": "Include"
+        },
+        "default_options": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options passed to qsub by default.",
+          "title": "Default Options"
+        },
+        "default_setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run at the start of every job script.",
+          "title": "Default Setup"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of the environment.",
+          "title": "Description"
+        },
+        "host": {
+          "default": "localhost",
+          "description": "Host on which to submit jobs, over SSH if not localhost.",
+          "title": "Host",
+          "type": "string"
+        },
+        "kind": {
+          "const": "pbs",
+          "default": "pbs",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "PBSEnvironment",
+      "type": "object"
+    },
+    "ParameterIteration": {
+      "properties": {
+        "parameter": {
+          "title": "Parameter",
+          "type": "string"
+        }
+      },
+      "required": [
+        "parameter"
+      ],
+      "title": "ParameterIteration",
+      "type": "object"
+    },
+    "PathOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "delete_before_run": {
+          "default": true,
+          "description": "Delete this output before the stage runs.",
+          "title": "Delete Before Run",
+          "type": "boolean"
+        },
+        "path": {
+          "description": "Path to the output file or directory.",
+          "title": "Path",
+          "type": "string"
+        },
+        "storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "dvc",
+                "dvc-zip"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "dvc",
+          "description": "Where to store this output. Use null to leave it untracked.",
+          "title": "Storage"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "PathOutput",
+      "type": "object"
+    },
+    "Pipeline": {
+      "additionalProperties": false,
+      "description": "The project's reproducible pipeline.",
+      "properties": {
+        "stages": {
+          "additionalProperties": {
+            "discriminator": {
+              "mapping": {
+                "command": "#/$defs/CommandStage",
+                "docker-command": "#/$defs/DockerCommandStage",
+                "json-to-latex": "#/$defs/JsonToLatexStage",
+                "julia-command": "#/$defs/JuliaCommandStage",
+                "julia-script": "#/$defs/JuliaScriptStage",
+                "jupyter-notebook": "#/$defs/JupyterNotebookStage",
+                "latex": "#/$defs/LatexStage",
+                "map-paths": "#/$defs/MapPathsStage",
+                "matlab-command": "#/$defs/MatlabCommandStage",
+                "matlab-script": "#/$defs/MatlabScriptStage",
+                "python-script": "#/$defs/PythonScriptStage",
+                "quarto": "#/$defs/QuartoStage",
+                "r-script": "#/$defs/RScriptStage",
+                "sbatch": "#/$defs/SBatchStage",
+                "shell-command": "#/$defs/ShellCommandStage",
+                "shell-script": "#/$defs/ShellScriptStage",
+                "word-to-pdf": "#/$defs/WordToPdfStage"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/PythonScriptStage"
+              },
+              {
+                "$ref": "#/$defs/LatexStage"
+              },
+              {
+                "$ref": "#/$defs/QuartoStage"
+              },
+              {
+                "$ref": "#/$defs/JsonToLatexStage"
+              },
+              {
+                "$ref": "#/$defs/MatlabScriptStage"
+              },
+              {
+                "$ref": "#/$defs/MatlabCommandStage"
+              },
+              {
+                "$ref": "#/$defs/ShellCommandStage"
+              },
+              {
+                "$ref": "#/$defs/ShellScriptStage"
+              },
+              {
+                "$ref": "#/$defs/DockerCommandStage"
+              },
+              {
+                "$ref": "#/$defs/CommandStage"
+              },
+              {
+                "$ref": "#/$defs/RScriptStage"
+              },
+              {
+                "$ref": "#/$defs/WordToPdfStage"
+              },
+              {
+                "$ref": "#/$defs/JupyterNotebookStage"
+              },
+              {
+                "$ref": "#/$defs/JuliaScriptStage"
+              },
+              {
+                "$ref": "#/$defs/JuliaCommandStage"
+              },
+              {
+                "$ref": "#/$defs/SBatchStage"
+              },
+              {
+                "$ref": "#/$defs/MapPathsStage"
+              }
+            ]
+          },
+          "title": "Stages",
+          "type": "object"
+        }
+      },
+      "required": [
+        "stages"
+      ],
+      "title": "Pipeline",
+      "type": "object"
+    },
+    "PixiEnvironment": {
+      "additionalProperties": false,
+      "properties": {
+        "_include": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
+          "title": "Include"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of the environment.",
+          "title": "Description"
+        },
+        "kind": {
+          "const": "pixi",
+          "default": "pixi",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the environment within the Pixi manifest.",
+          "title": "Name"
+        },
+        "path": {
+          "description": "Path to the Pixi manifest file.",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "PixiEnvironment",
+      "type": "object"
+    },
+    "Presentation": {
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A longer description.",
+          "title": "Description"
+        },
+        "path": {
+          "description": "Path to the file, relative to the project root.",
+          "title": "Path",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the pipeline stage that produces this.",
+          "title": "Stage"
+        },
+        "title": {
+          "description": "A human-readable title.",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "title"
+      ],
+      "title": "Presentation",
+      "type": "object"
+    },
+    "Procedure": {
+      "description": "A procedure, typically executed by a human.",
+      "properties": {
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "imported_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Imported From"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/ProcedureStep"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "description",
+        "steps"
+      ],
+      "title": "Procedure",
+      "type": "object"
+    },
+    "ProcedureInput": {
+      "description": "An input that might be entered while running a procedure.\n\nAttributes\n----------\nname : str\n    The name of the input. This will be displayed to the user at the\n    prompt like 'Enter {name}:'. Note the column name for the log is the\n    key used to identify this input, and they can be different.\ndtype : 'int', 'bool', 'str', or 'float'\n    The datatype of the input.\nunits : str\n    Units of the input value.\ndescription : str\n    Optional longer description of the input.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "dtype": {
+          "anyOf": [
+            {
+              "enum": [
+                "int",
+                "bool",
+                "str",
+                "float"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dtype"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "units": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Units"
+        }
+      },
+      "title": "ProcedureInput",
+      "type": "object"
+    },
+    "ProcedureStep": {
+      "properties": {
+        "cmd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cmd"
+        },
+        "details": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Details"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/ProcedureInput"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inputs"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "wait_after_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wait After S"
+        },
+        "wait_before_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wait Before S"
+        }
+      },
+      "required": [
+        "summary"
+      ],
+      "title": "ProcedureStep",
+      "type": "object"
+    },
+    "Publication": {
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A longer description.",
+          "title": "Description"
+        },
+        "doi": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Doi"
+        },
+        "is_published": {
+          "default": false,
+          "title": "Is Published",
+          "type": "boolean"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "journal-article",
+                "conference-paper",
+                "proposal",
+                "poster",
+                "report",
+                "blog"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kind"
+        },
+        "path": {
+          "description": "Path to the file, relative to the project root.",
+          "title": "Path",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the pipeline stage that produces this.",
+          "title": "Stage"
+        },
+        "title": {
+          "description": "A human-readable title.",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "title"
+      ],
+      "title": "Publication",
+      "type": "object"
+    },
+    "PublicationEvidence": {
+      "description": "Evidence in the form of a publication.",
+      "properties": {
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation"
+        },
+        "kind": {
+          "const": "publication",
+          "default": "publication",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "PublicationEvidence",
+      "type": "object"
+    },
+    "PythonScriptStage": {
+      "additionalProperties": false,
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "args": {
+          "default": [],
+          "description": "Arguments passed to the script.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "description": "Name of the environment in which to run this stage.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InputsFromStageOutputs"
+              }
+            ]
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "python-script",
+          "default": "python-script",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Paths this stage produces.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PathOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "script_path": {
+          "description": "Path to the Python script to run.",
+          "title": "Script Path",
+          "type": "string"
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "environment",
+        "script_path"
+      ],
+      "title": "PythonScriptStage",
+      "type": "object"
+    },
+    "QuartoStage": {
+      "additionalProperties": false,
+      "description": "A stage that renders a Quarto document.\n\nCalkit controls only what belongs on the CLI: which environment to\nrender in, the target document, and (optionally) the output format and\nextra ``quarto render`` arguments. The output format(s) and any other\nrendering behavior are left to the document/``_quarto.yml`` metadata, so\nthere is no redundancy between the pipeline definition and the doc.\n\nOutputs are declared explicitly via ``outputs`` rather than parsed out\nof the Quarto document, since a document can emit multiple formats to\narbitrary paths. As with other stages, plain string outputs are\nDVC-cached by default; use a ``PathOutput`` to store an output with Git\ninstead.",
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "args": {
+          "default": [],
+          "description": "Extra arguments passed to 'quarto render'.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "description": "Name of the environment in which to run this stage.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InputsFromStageOutputs"
+              }
+            ]
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "quarto",
+          "default": "quarto",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Paths this stage produces.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PathOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "target_path": {
+          "description": "Path to the Quarto document to render.",
+          "title": "Target Path",
+          "type": "string"
+        },
+        "to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Output format, passed to 'quarto render --to'. Defaults to what the document's metadata specifies.",
+          "title": "To"
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "environment",
+        "target_path"
+      ],
+      "title": "QuartoStage",
+      "type": "object"
+    },
+    "Question": {
+      "description": "A question the project hopes to answer.",
+      "properties": {
+        "answer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Answer"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/FigureEvidence"
+                  },
+                  {
+                    "$ref": "#/$defs/ResultsEvidence"
+                  },
+                  {
+                    "$ref": "#/$defs/PublicationEvidence"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence"
+        },
+        "hypothesis": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hypothesis"
+        },
+        "question": {
+          "title": "Question",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ],
+      "title": "Question",
+      "type": "object"
+    },
+    "REnvironment": {
+      "additionalProperties": false,
+      "properties": {
+        "_include": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
+          "title": "Include"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of the environment.",
+          "title": "Description"
+        },
+        "kind": {
+          "const": "renv",
+          "default": "renv",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "description": "Path to the renv lock file.",
+          "title": "Path",
+          "type": "string"
+        },
+        "prefix": {
+          "description": "Path at which to create the environment.",
+          "title": "Prefix",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "prefix"
+      ],
+      "title": "REnvironment",
+      "type": "object"
+    },
+    "RScriptStage": {
+      "additionalProperties": false,
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "args": {
+          "default": [],
+          "description": "Arguments passed to the script.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "description": "Name of the environment in which to run this stage.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InputsFromStageOutputs"
+              }
+            ]
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "r-script",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Paths this stage produces.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PathOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "script_path": {
+          "description": "Path to the R script to run.",
+          "title": "Script Path",
+          "type": "string"
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "kind",
+        "environment",
+        "script_path"
+      ],
+      "title": "RScriptStage",
+      "type": "object"
+    },
+    "RangeIteration": {
+      "properties": {
+        "range": {
+          "$ref": "#/$defs/RangeIterationParams"
+        }
+      },
+      "required": [
+        "range"
+      ],
+      "title": "RangeIteration",
+      "type": "object"
+    },
+    "RangeIterationParams": {
+      "properties": {
+        "start": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Start"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "default": 1,
+          "title": "Step"
+        },
+        "stop": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Stop"
+        }
+      },
+      "required": [
+        "start",
+        "stop"
+      ],
+      "title": "RangeIterationParams",
+      "type": "object"
+    },
+    "ReferenceCollection": {
+      "properties": {
+        "files": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ReferenceFile"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ReferenceCollection",
+      "type": "object"
+    },
+    "ReferenceFile": {
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "key"
+      ],
+      "title": "ReferenceFile",
+      "type": "object"
+    },
+    "Release": {
+      "properties": {
+        "calkit_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Calkit Version"
+        },
+        "date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Date"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "doi": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Doi"
+        },
+        "git_rev": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Git Rev"
+        },
+        "internal": {
+          "default": false,
+          "title": "Internal",
+          "type": "boolean"
+        },
+        "kind": {
+          "enum": [
+            "project",
+            "publication",
+            "dataset",
+            "figure",
+            "presentation",
+            "software",
+            "model"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "publisher": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Publisher"
+        },
+        "record_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Record Id"
+        },
+        "stored_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stored Path"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Release",
+      "type": "object"
+    },
+    "Result": {
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A longer description.",
+          "title": "Description"
+        },
+        "path": {
+          "description": "Path to the file, relative to the project root.",
+          "title": "Path",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the pipeline stage that produces this.",
+          "title": "Stage"
+        },
+        "title": {
+          "description": "A human-readable title.",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "title"
+      ],
+      "title": "Result",
+      "type": "object"
+    },
+    "ResultsEvidence": {
+      "description": "Evidence in the form of a result.",
+      "properties": {
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation"
+        },
+        "key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Key"
+        },
+        "kind": {
+          "const": "result",
+          "default": "result",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ResultsEvidence",
+      "type": "object"
+    },
+    "SBatchStage": {
+      "additionalProperties": false,
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "args": {
+          "default": [],
+          "description": "Arguments passed to the script.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "description": "Name of the environment in which to run this stage.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InputsFromStageOutputs"
+              }
+            ]
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "sbatch",
+          "default": "sbatch",
+          "title": "Kind",
+          "type": "string"
+        },
+        "log_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path at which to write the job log.",
+          "title": "Log Path"
+        },
+        "log_storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "dvc"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "git",
+          "description": "Where to store the job log.",
+          "title": "Log Storage"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Paths this stage produces.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PathOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "sbatch_options": {
+          "default": [],
+          "description": "Options passed to sbatch.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Sbatch Options",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "script_path": {
+          "description": "Path to the script to submit.",
+          "title": "Script Path",
+          "type": "string"
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "environment",
+        "script_path"
+      ],
+      "title": "SBatchStage",
+      "type": "object"
+    },
+    "SSHEnvironment": {
+      "additionalProperties": false,
+      "properties": {
+        "_include": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
+          "title": "Include"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of the environment.",
+          "title": "Description"
+        },
+        "get_paths": {
+          "default": [
+            "*"
+          ],
+          "description": "Paths fetched back from the remote host.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Get Paths",
+          "type": "array"
+        },
+        "host": {
+          "description": "Host to connect to.",
+          "title": "Host",
+          "type": "string"
+        },
+        "key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to the SSH private key to use.",
+          "title": "Key"
+        },
+        "kind": {
+          "const": "ssh",
+          "default": "ssh",
+          "title": "Kind",
+          "type": "string"
+        },
+        "send_paths": {
+          "default": [
+            "./*"
+          ],
+          "description": "Paths sent to the remote host.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Send Paths",
+          "type": "array"
+        },
+        "user": {
+          "description": "User to connect as.",
+          "title": "User",
+          "type": "string"
+        },
+        "wdir": {
+          "description": "Working directory on the remote host.",
+          "title": "Wdir",
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "user",
+        "wdir"
+      ],
+      "title": "SSHEnvironment",
+      "type": "object"
+    },
+    "ShellCommandStage": {
+      "additionalProperties": false,
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "command": {
+          "description": "Shell command to run.",
+          "title": "Command",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "description": "Name of the environment in which to run this stage.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InputsFromStageOutputs"
+              }
+            ]
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "shell-command",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Paths this stage produces.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PathOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "shell": {
+          "default": "bash",
+          "description": "Shell in which to run the command.",
+          "enum": [
+            "sh",
+            "bash",
+            "zsh"
+          ],
+          "title": "Shell",
+          "type": "string"
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "kind",
+        "environment",
+        "command"
+      ],
+      "title": "ShellCommandStage",
+      "type": "object"
+    },
+    "ShellScriptStage": {
+      "additionalProperties": false,
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "args": {
+          "default": [],
+          "description": "Arguments passed to the script.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "description": "Name of the environment in which to run this stage.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InputsFromStageOutputs"
+              }
+            ]
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "shell-script",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Paths this stage produces.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PathOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "script_path": {
+          "description": "Path to the shell script to run.",
+          "title": "Script Path",
+          "type": "string"
+        },
+        "shell": {
+          "default": "bash",
+          "description": "Shell in which to run the script.",
+          "enum": [
+            "sh",
+            "bash",
+            "zsh"
+          ],
+          "title": "Shell",
+          "type": "string"
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "kind",
+        "environment",
+        "script_path"
+      ],
+      "title": "ShellScriptStage",
+      "type": "object"
+    },
+    "ShowcaseFigure": {
+      "properties": {
+        "figure": {
+          "title": "Figure",
+          "type": "string"
+        }
+      },
+      "required": [
+        "figure"
+      ],
+      "title": "ShowcaseFigure",
+      "type": "object"
+    },
+    "ShowcaseMarkdown": {
+      "properties": {
+        "markdown": {
+          "title": "Markdown",
+          "type": "string"
+        }
+      },
+      "required": [
+        "markdown"
+      ],
+      "title": "ShowcaseMarkdown",
+      "type": "object"
+    },
+    "ShowcasePublication": {
+      "properties": {
+        "publication": {
+          "title": "Publication",
+          "type": "string"
+        }
+      },
+      "required": [
+        "publication"
+      ],
+      "title": "ShowcasePublication",
+      "type": "object"
+    },
+    "ShowcaseText": {
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "ShowcaseText",
+      "type": "object"
+    },
+    "SlurmEnvironment": {
+      "additionalProperties": false,
+      "properties": {
+        "_include": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
+          "title": "Include"
+        },
+        "default_options": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options passed to sbatch by default.",
+          "title": "Default Options"
+        },
+        "default_setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run at the start of every job script.",
+          "title": "Default Setup"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of the environment.",
+          "title": "Description"
+        },
+        "host": {
+          "default": "localhost",
+          "description": "Host on which to submit jobs, over SSH if not localhost.",
+          "title": "Host",
+          "type": "string"
+        },
+        "kind": {
+          "const": "slurm",
+          "default": "slurm",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "SlurmEnvironment",
+      "type": "object"
+    },
+    "Software": {
+      "properties": {
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "path",
+        "description"
+      ],
+      "title": "Software",
+      "type": "object"
+    },
+    "StageIteration": {
+      "description": "A model for the ``iterate_over`` key in a stage definition.\n\nIf ``arg_name`` is a list, ``values`` also must be a list of lists with\neach sublist the length of ``arg_name``.",
+      "properties": {
+        "arg_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ],
+          "title": "Arg Name"
+        },
+        "values": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/RangeIteration"
+              },
+              {
+                "$ref": "#/$defs/ParameterIteration"
+              },
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "arg_name",
+        "values"
+      ],
+      "title": "StageIteration",
+      "type": "object"
+    },
+    "StageSchedulerOptions": {
+      "description": "Parameters for running a stage on a job scheduler (SLURM or PBS).\n\nThe environment-level ``default_options`` / ``default_setup`` are\napplied by ``calkit scheduler batch`` at submission time.\nThe mode for each list is controlled independently by\n``env_default_options`` and ``env_default_setup``:\n\n- ``replace`` (default): if the stage provides values, those are used\n  and env defaults are skipped; if the stage's list is empty, env\n  defaults fill in.\n- ``merge``: env defaults are prepended to whatever the stage\n  provides (the scheduler's last-occurrence-wins behavior keeps stage\n  values on top of any conflicts).\n- ``ignore``: env defaults are never applied, regardless of whether\n  the stage provided any values.",
+      "properties": {
+        "env_default_options": {
+          "default": "replace",
+          "description": "How to combine 'options' with the environment's default_options.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Options",
+          "type": "string"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's default_setup.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
+        "log_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path at which to write the job log.",
+          "title": "Log Path"
+        },
+        "log_storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "dvc"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "git",
+          "description": "Where to store the job log.",
+          "title": "Log Storage"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options passed to the scheduler at submission.",
+          "title": "Options"
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run at the start of the job script.",
+          "title": "Setup"
+        }
+      },
+      "title": "StageSchedulerOptions",
+      "type": "object"
+    },
+    "Subproject": {
+      "description": "A smaller project executed as part of this one.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "path": {
+          "description": "Path to the subproject directory, relative to this project's root.",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "Subproject",
+      "type": "object"
+    },
+    "UvEnvironment": {
+      "additionalProperties": false,
+      "properties": {
+        "_include": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
+          "title": "Include"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of the environment.",
+          "title": "Description"
+        },
+        "kind": {
+          "const": "uv",
+          "default": "uv",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "description": "Path to the uv project's pyproject.toml.",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "UvEnvironment",
+      "type": "object"
+    },
+    "UvVenvEnvironment": {
+      "additionalProperties": false,
+      "properties": {
+        "_include": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
+          "title": "Include"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of the environment.",
+          "title": "Description"
+        },
+        "kind": {
+          "const": "uv-venv",
+          "default": "uv-venv",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "description": "Path to the requirements file, e.g., requirements.txt.",
+          "title": "Path",
+          "type": "string"
+        },
+        "prefix": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict.",
+          "title": "Prefix"
+        },
+        "python": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Python version to use when creating the environment.",
+          "title": "Python"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "UvVenvEnvironment",
+      "type": "object"
+    },
+    "ValueInFile": {
+      "description": "A value in a file.\n\nIf ``key`` is None, we assume the value is all that's written in the file.",
+      "properties": {
+        "key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Key"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ValueInFile",
+      "type": "object"
+    },
+    "VenvEnvironment": {
+      "additionalProperties": false,
+      "properties": {
+        "_include": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
+          "title": "Include"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of the environment.",
+          "title": "Description"
+        },
+        "kind": {
+          "const": "venv",
+          "default": "venv",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "description": "Path to the requirements file, e.g., requirements.txt.",
+          "title": "Path",
+          "type": "string"
+        },
+        "prefix": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict.",
+          "title": "Prefix"
+        },
+        "python": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Python version to use when creating the environment.",
+          "title": "Python"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "VenvEnvironment",
+      "type": "object"
+    },
+    "WordToPdfStage": {
+      "additionalProperties": false,
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "default": "_system",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InputsFromStageOutputs"
+              }
+            ]
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "word-to-pdf",
+          "default": "word-to-pdf",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "default": [],
+          "description": "Paths this stage produces.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PathOutput"
+              }
+            ]
+          },
+          "title": "Outputs",
+          "type": "array"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        },
+        "word_doc_path": {
+          "description": "Path to the Word document to convert.",
+          "title": "Word Doc Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "word_doc_path"
+      ],
+      "title": "WordToPdfStage",
+      "type": "object"
+    }
+  },
+  "$id": "https://docs.calkit.org/schemas/calkit.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Metadata for a Calkit project, describing its environments, pipeline, and artifacts. See https://docs.calkit.org/calkit-yaml",
+  "properties": {
+    "$schema": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "URL of the JSON schema describing this file.",
+      "title": "$Schema"
+    },
+    "calculations": {
+      "additionalProperties": {
+        "discriminator": {
+          "mapping": {
+            "formula": "#/$defs/Formula",
+            "linear": "#/$defs/Linear",
+            "lookup-table": "#/$defs/LookupTable"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/Formula"
+          },
+          {
+            "$ref": "#/$defs/Linear"
+          },
+          {
+            "$ref": "#/$defs/LookupTable"
+          }
+        ]
+      },
+      "default": {},
+      "description": "Calculations that can be run with 'calkit calc run'.",
+      "title": "Calculations",
+      "type": "object"
+    },
+    "datasets": {
+      "default": [],
+      "description": "The project's datasets.",
+      "items": {
+        "$ref": "#/$defs/Dataset"
+      },
+      "title": "Datasets",
+      "type": "array"
+    },
+    "dependencies": {
+      "default": [],
+      "description": "System-level dependencies: applications that must be on PATH, environmental variables, or per-machine setup steps.",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          {
+            "$ref": "#/$defs/Dependency"
+          }
+        ]
+      },
+      "title": "Dependencies",
+      "type": "array"
+    },
+    "derived_from": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DerivedFromProject"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The project this one was created as a copy of."
+    },
+    "description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "A short description of the project.",
+      "title": "Description"
+    },
+    "env_vars": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {},
+      "description": "Environmental variables set when running project commands.",
+      "title": "Env Vars",
+      "type": "object"
+    },
+    "environments": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CondaEnvironment"
+          },
+          {
+            "$ref": "#/$defs/DockerEnvironment"
+          },
+          {
+            "$ref": "#/$defs/JuliaEnvironment"
+          },
+          {
+            "$ref": "#/$defs/MatlabEnvironment"
+          },
+          {
+            "$ref": "#/$defs/PixiEnvironment"
+          },
+          {
+            "$ref": "#/$defs/REnvironment"
+          },
+          {
+            "$ref": "#/$defs/SlurmEnvironment"
+          },
+          {
+            "$ref": "#/$defs/PBSEnvironment"
+          },
+          {
+            "$ref": "#/$defs/VenvEnvironment"
+          },
+          {
+            "$ref": "#/$defs/UvEnvironment"
+          },
+          {
+            "$ref": "#/$defs/UvVenvEnvironment"
+          },
+          {
+            "$ref": "#/$defs/NixEnvironment"
+          },
+          {
+            "$ref": "#/$defs/SSHEnvironment"
+          },
+          {
+            "$ref": "#/$defs/IncludedEnvironment"
+          }
+        ]
+      },
+      "default": {},
+      "description": "Environments in which pipeline stages are run, keyed by name.",
+      "title": "Environments",
+      "type": "object"
+    },
+    "figures": {
+      "default": [],
+      "description": "The project's figures.",
+      "items": {
+        "$ref": "#/$defs/Figure"
+      },
+      "title": "Figures",
+      "type": "array"
+    },
+    "git_repo_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "URL of the project's Git repository.",
+      "title": "Git Repo Url"
+    },
+    "metrics": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/Metric"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Metrics the project tracks.",
+      "title": "Metrics"
+    },
+    "name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The project's name on Calkit Cloud, e.g., 'my-project'.",
+      "title": "Name"
+    },
+    "notebooks": {
+      "default": [],
+      "description": "The project's Jupyter notebooks.",
+      "items": {
+        "$ref": "#/$defs/Notebook"
+      },
+      "title": "Notebooks",
+      "type": "array"
+    },
+    "overleaf_sync": {
+      "additionalProperties": {
+        "$ref": "#/$defs/OverleafSync"
+      },
+      "default": {},
+      "description": "Overleaf sync configuration, keyed by the path of the synced directory.",
+      "title": "Overleaf Sync",
+      "type": "object"
+    },
+    "owner": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The account name that owns the project on Calkit Cloud.",
+      "title": "Owner"
+    },
+    "parameters": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/$defs/RangeIteration"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Project-level parameters, which can be referenced from pipeline stages.",
+      "title": "Parameters"
+    },
+    "pipeline": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Pipeline"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The project's reproducible pipeline."
+    },
+    "presentations": {
+      "default": [],
+      "description": "The project's slides and posters.",
+      "items": {
+        "$ref": "#/$defs/Presentation"
+      },
+      "title": "Presentations",
+      "type": "array"
+    },
+    "procedures": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Procedure"
+      },
+      "default": {},
+      "description": "Procedures, typically executed by a human, keyed by name.",
+      "title": "Procedures",
+      "type": "object"
+    },
+    "publications": {
+      "default": [],
+      "description": "The project's papers, posters, reports, and proposals.",
+      "items": {
+        "$ref": "#/$defs/Publication"
+      },
+      "title": "Publications",
+      "type": "array"
+    },
+    "questions": {
+      "default": [],
+      "description": "Questions the project seeks to answer.",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "$ref": "#/$defs/Question"
+          }
+        ]
+      },
+      "title": "Questions",
+      "type": "array"
+    },
+    "references": {
+      "default": [],
+      "description": "The project's bibliographies.",
+      "items": {
+        "$ref": "#/$defs/ReferenceCollection"
+      },
+      "title": "References",
+      "type": "array"
+    },
+    "releases": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Release"
+      },
+      "default": {},
+      "description": "Published or archived snapshots, keyed by name.",
+      "title": "Releases",
+      "type": "object"
+    },
+    "results": {
+      "default": [],
+      "description": "Files holding the project's important values.",
+      "items": {
+        "$ref": "#/$defs/Result"
+      },
+      "title": "Results",
+      "type": "array"
+    },
+    "showcase": {
+      "anyOf": [
+        {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ShowcaseFigure"
+              },
+              {
+                "$ref": "#/$defs/ShowcaseText"
+              },
+              {
+                "$ref": "#/$defs/ShowcaseMarkdown"
+              },
+              {
+                "$ref": "#/$defs/ShowcasePublication"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Elements that best represent the project, shown on its Calkit Cloud homepage.",
+      "title": "Showcase"
+    },
+    "software": {
+      "default": [],
+      "description": "Software created as part of the project.",
+      "items": {
+        "$ref": "#/$defs/Software"
+      },
+      "title": "Software",
+      "type": "array"
+    },
+    "subprojects": {
+      "default": [],
+      "description": "Smaller projects executed as part of this one.",
+      "items": {
+        "$ref": "#/$defs/Subproject"
+      },
+      "title": "Subprojects",
+      "type": "array"
+    },
+    "title": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "A human-readable title for the project.",
+      "title": "Title"
+    }
+  },
+  "title": "Calkit project information",
+  "type": "object"
+}

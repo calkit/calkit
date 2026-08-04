@@ -19,6 +19,7 @@
 | [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                                                                  |
 | [`push`](#top-command-push)                      | Push with both Git and DVC.                                                                                  |
 | [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                         |
+| [`schema`](#top-command-schema)                  | Print the JSON schema for calkit.yaml.                                                                       |
 | [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                                                                  |
 | [`run`](#top-command-run)                        | Check dependencies and run the pipeline.                                                                     |
 | [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                       |
@@ -301,6 +302,26 @@ Options:
 | Option        | Type    | Required | Default | Description                          |
 | ------------- | ------- | -------- | ------- | ------------------------------------ |
 | `--no-commit` | boolean | no       | False   | Do not commit changes to .gitignore. |
+
+<a id="top-command-schema"></a>
+
+### `calkit schema`
+
+Print the JSON schema for calkit.yaml.
+
+Editors can use this to validate and autocomplete the file. See https://docs.calkit.org/calkit-yaml for how to set that up.
+
+Usage:
+
+```text
+calkit schema [OPTIONS]
+```
+
+Options:
+
+| Option           | Type | Required | Default | Description                                               |
+| ---------------- | ---- | -------- | ------- | --------------------------------------------------------- |
+| `--output`, `-o` | text | no       |         | Path at which to write the schema instead of printing it. |
 
 <a id="top-command-local-server"></a>
 

@@ -14,6 +14,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Discriminator,
+    Field,
     PrivateAttr,
     ValidationError,
     field_validator,
@@ -154,18 +155,39 @@ class StageSchedulerOptions(BaseModel):
       the stage provided any values.
     """
 
-    options: list[str] | None = None
-    setup: list[str] | None = None
-    env_default_options: EnvDefaultsMode = "replace"
-    env_default_setup: EnvDefaultsMode = "replace"
-    log_path: str | None = None
-    log_storage: Literal["git", "dvc"] | None = "git"
+    options: list[str] | None = Field(
+        default=None,
+        description="Options passed to the scheduler at submission.",
+    )
+    setup: list[str] | None = Field(
+        default=None,
+        description="Commands run at the start of the job script.",
+    )
+    env_default_options: EnvDefaultsMode = Field(
+        default="replace",
+        description="How to combine 'options' with the environment's "
+        "default_options.",
+    )
+    env_default_setup: EnvDefaultsMode = Field(
+        default="replace",
+        description="How to combine 'setup' with the environment's "
+        "default_setup.",
+    )
+    log_path: str | None = Field(
+        default=None, description="Path at which to write the job log."
+    )
+    log_storage: Literal["git", "dvc"] | None = Field(
+        default="git", description="Where to store the job log."
+    )
 
 
 class Stage(BaseModel):
     """A stage in the pipeline."""
 
-    name: str | None = None
+    name: str | None = Field(
+        default=None,
+        description="The stage's name, which must match its key if set.",
+    )
     kind: Literal[
         "python-script",
         "latex",
@@ -182,17 +204,48 @@ class Stage(BaseModel):
         "julia-command",
         "word-to-pdf",
         "map-paths",
-    ]
-    environment: str
-    wdir: str | None = None
+    ] = Field(description="What kind of stage this is.")
+    environment: str = Field(
+        description="Name of the environment in which to run this stage."
+    )
+    wdir: str | None = Field(
+        default=None,
+        description="Working directory in which to run, relative to the "
+        "project root. Note that all other paths in the stage are relative "
+        "to this.",
+    )
     # TODO: Support other input types
-    inputs: list[str | InputsFromStageOutputs] = []
-    outputs: list[str | PathOutput] = []  # TODO: Support database outputs
-    always_run: bool = False
-    iterate_over: list[StageIteration] | None = None
-    description: str | None = None
-    frozen: bool = False
-    scheduler: StageSchedulerOptions | None = None
+    inputs: list[str | InputsFromStageOutputs] = Field(
+        default=[],
+        description="Paths this stage depends on, which trigger a rerun when "
+        "they change.",
+    )
+    # TODO: Support database outputs
+    outputs: list[str | PathOutput] = Field(
+        default=[], description="Paths this stage produces."
+    )
+    always_run: bool = Field(
+        default=False,
+        description="Run this stage every time the pipeline is run, even if "
+        "nothing has changed.",
+    )
+    iterate_over: list[StageIteration] | None = Field(
+        default=None,
+        description="Arguments over which to run this stage multiple times.",
+    )
+    description: str | None = Field(
+        default=None, description="A description of what this stage does."
+    )
+    frozen: bool = Field(
+        default=False,
+        description="Never rerun this stage, treating its outputs as "
+        "up-to-date.",
+    )
+    scheduler: StageSchedulerOptions | None = Field(
+        default=None,
+        description="Options for running this stage on a job scheduler "
+        "(SLURM or PBS).",
+    )
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
     # Resolved at pipeline-compilation time by set_stage_scheduler_options;
@@ -444,8 +497,12 @@ class Stage(BaseModel):
 
 class PythonScriptStage(Stage):
     kind: Literal["python-script"] = "python-script"
-    script_path: RelativeChildPathString
-    args: list[str] = []
+    script_path: RelativeChildPathString = Field(
+        description="Path to the Python script to run."
+    )
+    args: list[str] = Field(
+        default=[], description="Arguments passed to the script."
+    )
 
     @property
     def dvc_cmd(self) -> str:
@@ -519,7 +576,7 @@ class MapPathsStage(Stage):
             (CopyFileToFile | CopyFileToDir | DirToDirMerge | DirToDirReplace),
             Discriminator("kind"),
         ]
-    ]
+    ] = Field(description="Copy operations to perform.")
 
     @property
     def dvc_cmd(self) -> str:
@@ -546,17 +603,38 @@ class MapPathsStage(Stage):
 
 class LatexStage(Stage):
     kind: Literal["latex"] = "latex"
-    target_path: str
-    output_dir: str | None = None
-    aux_dir: str | None = None
-    latexmkrc_path: str | None = None
-    pdf_storage: Literal["git", "dvc"] | None = "dvc"
-    verbose: bool = False
-    force: bool = False
-    synctex: bool = True
-    # Extra arguments passed straight through to latexmk, for control Calkit
-    # does not model.
-    latexmk_args: list[str] = []
+    target_path: str = Field(description="Path to the .tex file to compile.")
+    output_dir: str | None = Field(
+        default=None,
+        description="Directory for latexmk output. Defaults to compiling in "
+        "place, alongside the target.",
+    )
+    aux_dir: str | None = Field(
+        default=None,
+        description="Directory for latexmk auxiliary files.",
+    )
+    latexmkrc_path: str | None = Field(
+        default=None, description="Path to a latexmkrc file to use."
+    )
+    pdf_storage: Literal["git", "dvc"] | None = Field(
+        default="dvc", description="Where to store the resulting PDF."
+    )
+    verbose: bool = Field(
+        default=False, description="Show full latexmk output."
+    )
+    force: bool = Field(
+        default=False,
+        description="Keep compiling despite errors (latexmk -f).",
+    )
+    synctex: bool = Field(
+        default=True,
+        description="Generate SyncTeX data for editor/PDF navigation.",
+    )
+    latexmk_args: list[str] = Field(
+        default=[],
+        description="Extra arguments passed straight through to latexmk, for "
+        "control Calkit does not model.",
+    )
 
     @model_validator(mode="after")
     def _check_args_dont_set_managed_dirs(self) -> "LatexStage":
@@ -679,9 +757,17 @@ class QuartoStage(Stage):
     """
 
     kind: Literal["quarto"] = "quarto"
-    target_path: str
-    to: str | None = None
-    args: list[str] = []
+    target_path: str = Field(
+        description="Path to the Quarto document to render."
+    )
+    to: str | None = Field(
+        default=None,
+        description="Output format, passed to 'quarto render --to'. Defaults "
+        "to what the document's metadata specifies.",
+    )
+    args: list[str] = Field(
+        default=[], description="Extra arguments passed to 'quarto render'."
+    )
 
     @property
     def dvc_cmd(self) -> str:
@@ -700,8 +786,14 @@ class QuartoStage(Stage):
 class JsonToLatexStage(Stage):
     kind: Literal["json-to-latex"] = "json-to-latex"
     environment: str = "_system"
-    command_name: str | None = None
-    format: dict[str, str] | None = None
+    command_name: str | None = Field(
+        default=None,
+        description="Name of the LaTeX command to define for each value.",
+    )
+    format: dict[str, str] | None = Field(
+        default=None,
+        description="Format strings for values, keyed by their JSON key.",
+    )
 
     @property
     def dvc_cmd(self) -> str:
@@ -742,8 +834,13 @@ class JsonToLatexStage(Stage):
 
 class MatlabScriptStage(Stage):
     kind: Literal["matlab-script"]
-    script_path: RelativeChildPathString
-    matlab_path: RelativeChildPathString | None = None
+    script_path: RelativeChildPathString = Field(
+        description="Path to the MATLAB script to run."
+    )
+    matlab_path: RelativeChildPathString | None = Field(
+        default=None,
+        description="Directory added to the MATLAB path, recursively.",
+    )
 
     @property
     def dvc_deps(self) -> list[str]:
@@ -764,7 +861,7 @@ class MatlabScriptStage(Stage):
 
 class MatlabCommandStage(Stage):
     kind: Literal["matlab-command"] = "matlab-command"
-    command: str
+    command: str = Field(description="MATLAB command to run.")
 
     @property
     def dvc_cmd(self) -> str:
@@ -779,8 +876,10 @@ class MatlabCommandStage(Stage):
 
 class ShellCommandStage(Stage):
     kind: Literal["shell-command"]
-    command: str
-    shell: Literal["sh", "bash", "zsh"] = "bash"
+    command: str = Field(description="Shell command to run.")
+    shell: Literal["sh", "bash", "zsh"] = Field(
+        default="bash", description="Shell in which to run the command."
+    )
 
     @property
     def dvc_cmd(self) -> str:
@@ -796,9 +895,15 @@ class ShellCommandStage(Stage):
 
 class ShellScriptStage(Stage):
     kind: Literal["shell-script"]
-    script_path: RelativeChildPathString
-    args: list[str] = []
-    shell: Literal["sh", "bash", "zsh"] = "bash"
+    script_path: RelativeChildPathString = Field(
+        description="Path to the shell script to run."
+    )
+    args: list[str] = Field(
+        default=[], description="Arguments passed to the script."
+    )
+    shell: Literal["sh", "bash", "zsh"] = Field(
+        default="bash", description="Shell in which to run the script."
+    )
 
     @property
     def dvc_deps(self) -> list[str]:
@@ -835,7 +940,9 @@ class ShellScriptStage(Stage):
 
 class DockerCommandStage(Stage):
     kind: Literal["docker-command"]
-    command: str
+    command: str = Field(
+        description="Full command to run, including the 'docker run' call."
+    )
 
     @property
     def dvc_cmd(self) -> str:
@@ -844,7 +951,7 @@ class DockerCommandStage(Stage):
 
 class CommandStage(Stage):
     kind: Literal["command"] = "command"
-    command: str
+    command: str = Field(description="Command to run in the environment.")
 
     @property
     def dvc_cmd(self) -> str:
@@ -853,8 +960,12 @@ class CommandStage(Stage):
 
 class RScriptStage(Stage):
     kind: Literal["r-script"]
-    script_path: RelativeChildPathString
-    args: list[str] = []
+    script_path: RelativeChildPathString = Field(
+        description="Path to the R script to run."
+    )
+    args: list[str] = Field(
+        default=[], description="Arguments passed to the script."
+    )
 
     @property
     def dvc_deps(self) -> list[str]:
@@ -870,8 +981,12 @@ class RScriptStage(Stage):
 
 class JuliaScriptStage(Stage):
     kind: Literal["julia-script"] = "julia-script"
-    script_path: RelativeChildPathString
-    args: list[str] = []
+    script_path: RelativeChildPathString = Field(
+        description="Path to the Julia script to run."
+    )
+    args: list[str] = Field(
+        default=[], description="Arguments passed to the script."
+    )
 
     @property
     def dvc_cmd(self) -> str:
@@ -887,7 +1002,7 @@ class JuliaScriptStage(Stage):
 
 class JuliaCommandStage(Stage):
     kind: Literal["julia-command"] = "julia-command"
-    command: str
+    command: str = Field(description="Julia command to run.")
 
     @property
     def dvc_cmd(self) -> str:
@@ -904,11 +1019,21 @@ class JuliaCommandStage(Stage):
 # ``convert_sbatch_stages`` to remove the legacy complexity.
 class SBatchStage(Stage):
     kind: Literal["sbatch"] = "sbatch"
-    script_path: RelativeChildPathString
-    args: list[str] = []
-    sbatch_options: list[str] = []
-    log_path: str | None = None
-    log_storage: Literal["git", "dvc"] | None = "git"
+    script_path: RelativeChildPathString = Field(
+        description="Path to the script to submit."
+    )
+    args: list[str] = Field(
+        default=[], description="Arguments passed to the script."
+    )
+    sbatch_options: list[str] = Field(
+        default=[], description="Options passed to sbatch."
+    )
+    log_path: str | None = Field(
+        default=None, description="Path at which to write the job log."
+    )
+    log_storage: Literal["git", "dvc"] | None = Field(
+        default="git", description="Where to store the job log."
+    )
 
     @property
     def log_output(self) -> PathOutput:
@@ -993,12 +1118,28 @@ class JupyterNotebookStage(Stage):
     """
 
     kind: Literal["jupyter-notebook"] = "jupyter-notebook"
-    notebook_path: str
-    cleaned_ipynb_storage: Literal["git", "dvc"] | None = None
-    executed_ipynb_storage: Literal["git", "dvc"] | None = "dvc"
-    html_storage: Literal["git", "dvc"] | None = "dvc"
-    parameters: dict[str, Any] = {}
-    language: Literal["python", "matlab", "julia"] | None = None
+    notebook_path: str = Field(description="Path to the notebook to execute.")
+    cleaned_ipynb_storage: Literal["git", "dvc"] | None = Field(
+        default=None,
+        description="Where to store the output-stripped notebook.",
+    )
+    executed_ipynb_storage: Literal["git", "dvc"] | None = Field(
+        default="dvc", description="Where to store the executed notebook."
+    )
+    html_storage: Literal["git", "dvc"] | None = Field(
+        default="dvc",
+        description="Where to store the executed notebook as HTML.",
+    )
+    parameters: dict[str, Any] = Field(
+        default={},
+        description="Parameters injected into the notebook. A value like "
+        "'{name}' is filled in from the project-level parameters.",
+    )
+    language: Literal["python", "matlab", "julia"] | None = Field(
+        default=None,
+        description="The notebook's language. Detected automatically if "
+        "unset.",
+    )
 
     def update_parameters(self, params: dict) -> None:
         """If we have any templated parameters, update those, e.g., from
@@ -1119,7 +1260,9 @@ class JupyterNotebookStage(Stage):
 
 class WordToPdfStage(Stage):
     kind: Literal["word-to-pdf"] = "word-to-pdf"
-    word_doc_path: str
+    word_doc_path: str = Field(
+        description="Path to the Word document to convert."
+    )
     environment: str = "_system"
 
     @property
@@ -1149,6 +1292,8 @@ class WordToPdfStage(Stage):
 
 
 class Pipeline(BaseModel):
+    """The project's reproducible pipeline."""
+
     stages: dict[
         str,
         Annotated[

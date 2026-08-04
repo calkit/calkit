@@ -69,6 +69,8 @@ xet = ["xet>=0.0.1"]  # For fast large file transfers with XeT protocol
 dev = [
   "deptry>=0.22.0",
   "ipykernel",
+  "jsonschema",
+  "types-jsonschema",
   "kaleido==0.2.1",
   "numpy",
   "pandas>=2.2.3",
@@ -175,6 +177,12 @@ show_error_codes = true
 # Third-party modules that ship no type stubs.
 [[tool.mypy.overrides]]
 module = ["sqlitedict", "networkx"]
+ignore_missing_imports = true
+
+# jsonschema's stubs come from the types-jsonschema dev dependency, which
+# mypy doesn't always resolve from the virtual environment.
+[[tool.mypy.overrides]]
+module = ["jsonschema"]
 ignore_missing_imports = true
 
 [tool.ruff]

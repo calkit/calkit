@@ -19,6 +19,7 @@ from git.exc import InvalidGitRepositoryError
 
 import calkit
 import calkit.cli.main
+import calkit.schema
 from calkit.cli.core import complete_stage_names
 from calkit.cli.main.core import (
     _get_running_pipeline_status,
@@ -104,11 +105,14 @@ def _repo_test_file(name: str) -> Path:
 
 
 def test_init(tmp_dir):
-    # With no calkit.yaml present, init creates an empty one
+    # With no calkit.yaml present, init creates one holding only the schema
+    # modeline, so editors validate and autocomplete it
     assert not os.path.isfile("calkit.yaml")
     subprocess.check_call(["calkit", "init"])
     assert os.path.isfile("calkit.yaml")
     assert calkit.load_calkit_info() == {}
+    with open("calkit.yaml") as f:
+        assert f.read() == calkit.schema.MODELINE + "\n"
     # Already initialized: init without --force fails and does not clobber
     result = subprocess.run(
         ["calkit", "init"],

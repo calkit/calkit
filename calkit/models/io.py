@@ -2,11 +2,13 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class InputsFromStageOutputs(BaseModel):
-    from_stage_outputs: str
+    from_stage_outputs: str = Field(
+        description="Name of a stage whose outputs are inputs to this one."
+    )
 
 
 class Input(BaseModel):
@@ -39,9 +41,16 @@ class DatabaseTableInput(Input):
 
 
 class PathOutput(BaseModel):
-    path: str
-    storage: Literal["git", "dvc", "dvc-zip"] | None = "dvc"
-    delete_before_run: bool = True
+    path: str = Field(description="Path to the output file or directory.")
+    storage: Literal["git", "dvc", "dvc-zip"] | None = Field(
+        default="dvc",
+        description="Where to store this output. Use null to leave it "
+        "untracked.",
+    )
+    delete_before_run: bool = Field(
+        default=True,
+        description="Delete this output before the stage runs.",
+    )
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
 

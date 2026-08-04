@@ -32,10 +32,17 @@
     "onStartupFinished"
   ],
   "extensionDependencies": [
-    "ms-toolsai.jupyter"
+    "ms-toolsai.jupyter",
+    "redhat.vscode-yaml"
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "yamlValidation": [
+      {
+        "fileMatch": "calkit.yaml",
+        "url": "./schemas/calkit.json"
+      }
+    ],
     "viewsContainers": {
       "activitybar": [
         {

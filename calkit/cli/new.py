@@ -271,6 +271,7 @@ def new_project(
                         ),
                         f,
                     )
+                calkit.schema.ensure_modeline(calkit_fpath)
                 repo.git.add("calkit.yaml")
                 if not no_commit:
                     repo.git.commit(
@@ -379,6 +380,7 @@ def new_project(
         # Write Calkit info
         with open(os.path.join(abs_path, "calkit.yaml"), "w") as f:
             ryaml.dump(ck_info, f)
+        calkit.schema.ensure_modeline(os.path.join(abs_path, "calkit.yaml"))
         # Update README
         readme_fpath = os.path.join(abs_path, "README.md")
         typer.echo("Generating README.md")
@@ -439,6 +441,7 @@ def new_project(
     ck_info = dict(name=name, title=title, description=description) | ck_info
     with open(os.path.join(abs_path, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
+    calkit.schema.ensure_modeline(os.path.join(abs_path, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     # Create dev container spec
     update_devcontainer(wdir=abs_path)

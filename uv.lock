@@ -943,6 +943,7 @@ xet = [
 dev = [
     { name = "deptry" },
     { name = "ipykernel" },
+    { name = "jsonschema" },
     { name = "kaleido" },
     { name = "mkdocs" },
     { name = "mkdocs-glightbox" },
@@ -966,6 +967,7 @@ dev = [
     { name = "pytest-xdist" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "types-jsonschema" },
 ]
 
 [package.metadata]
@@ -1008,6 +1010,7 @@ provides-extras = ["data", "xet"]
 dev = [
     { name = "deptry", specifier = ">=0.22.0" },
     { name = "ipykernel" },
+    { name = "jsonschema" },
     { name = "kaleido", specifier = "==0.2.1" },
     { name = "mkdocs" },
     { name = "mkdocs-glightbox", specifier = ">=0.5.2" },
@@ -1028,6 +1031,7 @@ dev = [
     { name = "pytest-test-utils" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "scipy", specifier = ">=1.15.3" },
+    { name = "types-jsonschema" },
 ]
 
 [[package]]
@@ -7520,6 +7524,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e4/51/9aed62104cea109b820bbd6c14245af756112017d309da813ef107d42e7e/typer-0.25.1.tar.gz", hash = "sha256:9616eb8853a09ffeabab1698952f33c6f29ffdbceb4eaeecf571880e8d7664cc", size = 122276, upload-time = "2026-04-30T19:32:16.964Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3f/f9/2b3ff4e56e5fa7debfaf9eb135d0da96f3e9a1d5b27222223c7296336e5f/typer-0.25.1-py3-none-any.whl", hash = "sha256:75caa44ed46a03fb2dab8808753ffacdbfea88495e74c85a28c5eefcf5f39c89", size = 58409, upload-time = "2026-04-30T19:32:18.271Z" },
+]
+
+[[package]]
+name = "types-jsonschema"
+version = "4.26.0.20260518"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "referencing" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/dd/46/73b6a5d61a61015c4248030a8cb07e5bdddb4041430fae9e585a68692578/types_jsonschema-4.26.0.20260518.tar.gz", hash = "sha256:e1dd53dc97a64f5eccdd6fa9839666e09bb500a8ebba2db6fdaf1789faea81a6", size = 16638, upload-time = "2026-05-18T06:06:44.106Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/d5/134f8a147dcecda10db7f60cfc6af0578a25a5c53c87b3907a64385e0184/types_jsonschema-4.26.0.20260518-py3-none-any.whl", hash = "sha256:30b30a518c7fe335df85c919fcbcc631b69c03d4a4b5b632fa916bea03065307", size = 16072, upload-time = "2026-05-18T06:06:43.264Z" },
 ]
 
 [[package]]

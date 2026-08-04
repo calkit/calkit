@@ -1249,7 +1249,10 @@ def pull(
         if not no_recursive:
             sp_failed_idx = [idx for idx, rc in sp_results.items() if rc != 0]
             if any(sp_failed_idx):
-                raise_error(f"DVC pull failed in subproject(s): {[sp_paths[idx] for idx in failed]}")
+                raise_error(
+                    f"DVC pull failed in subproject(s): {[sp_paths[idx] for idx in sp_failed_idx]}"
+                )
+
 
 @app.command(name="push")
 def push(

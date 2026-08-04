@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { after } from "node:test";
 
 // Create minimal vscode stub
 const vscodeStub = {
@@ -47,6 +47,11 @@ const originalRequire = (Module as any).prototype.require;
   }
   return originalRequire.apply(this, arguments);
 };
+
+// Restore the real require so the patch does not leak into other test files.
+after(() => {
+  (Module as any).prototype.require = originalRequire;
+});
 
 import { CalkitSidebarProvider, SidebarItem } from "../sidebar";
 

@@ -23,9 +23,17 @@ import {
 // artifact-style sections (figures, datasets, results, publications,
 // presentations), which share the same item machinery.
 type ArtifactKind =
-  "figure" | "dataset" | "result" | "publication" | "presentation";
+  | "figure"
+  | "dataset"
+  | "result"
+  | "publication"
+  | "presentation";
 type ArtifactCollection =
-  "figures" | "datasets" | "results" | "publications" | "presentations";
+  | "figures"
+  | "datasets"
+  | "results"
+  | "publications"
+  | "presentations";
 
 // The displayed text of a question, which may be a plain string or a structured
 // entry carrying a hypothesis/answer/evidence alongside the question itself.
@@ -54,7 +62,9 @@ export class SidebarItem extends vscode.TreeItem {
   }
 }
 
-export class CalkitSidebarProvider implements vscode.TreeDataProvider<SidebarItem> {
+export class CalkitSidebarProvider
+  implements vscode.TreeDataProvider<SidebarItem>
+{
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
     SidebarItem | undefined | null | void
   >();
@@ -1038,20 +1048,20 @@ export class CalkitSidebarProvider implements vscode.TreeDataProvider<SidebarIte
       item.iconPath = isRunning
         ? new vscode.ThemeIcon("loading~spin")
         : isStale
-          ? new vscode.ThemeIcon(
-              "warning",
-              new vscode.ThemeColor("list.warningForeground"),
-            )
-          : new vscode.ThemeIcon(
-              "check",
-              new vscode.ThemeColor("testing.iconPassed"),
-            );
+        ? new vscode.ThemeIcon(
+            "warning",
+            new vscode.ThemeColor("list.warningForeground"),
+          )
+        : new vscode.ThemeIcon(
+            "check",
+            new vscode.ThemeColor("testing.iconPassed"),
+          );
       item.contextValue = "stage";
       item.tooltip = isRunning
         ? `${stageName} — running`
         : isStale
-          ? `${stageName} — stage is stale`
-          : `${stageName} — up to date`;
+        ? `${stageName} — stage is stale`
+        : `${stageName} — up to date`;
       this.stageItemCache.set(stageName, item);
       return item;
     });
@@ -1119,8 +1129,8 @@ export class CalkitSidebarProvider implements vscode.TreeDataProvider<SidebarIte
       cls?.modifiedOutputs.has(p)
         ? "modified"
         : cls?.staleOutputs.has(p)
-          ? "stale"
-          : undefined;
+        ? "stale"
+        : undefined;
 
     const prop = (
       label: string,
@@ -1239,10 +1249,10 @@ export class CalkitSidebarProvider implements vscode.TreeDataProvider<SidebarIte
             (p) => !p.startsWith(".calkit/scheduler/logs/"),
           )
         : Array.isArray(calkitStage.outputs)
-          ? (calkitStage.outputs as (string | { path: string })[]).map(
-              outputEntryPath,
-            )
-          : [];
+        ? (calkitStage.outputs as (string | { path: string })[]).map(
+            outputEntryPath,
+          )
+        : [];
       for (const output of explicitOutputs) {
         prop("Output", output, "arrow-right", output, outputStaleKind(output));
       }

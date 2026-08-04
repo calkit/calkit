@@ -53,7 +53,10 @@ after(() => {
   (Module as any).prototype.require = originalRequire;
 });
 
-import { CalkitSidebarProvider, SidebarItem } from "../sidebar";
+// Loaded via runtime require (not a static import) so it resolves AFTER the
+// require patch above, regardless of TS import-hoisting.
+const { CalkitSidebarProvider, SidebarItem } =
+  require("../sidebar") as typeof import("../sidebar");
 
 test("sidebar provider does not throw on object-form inputs in getStageProps", () => {
   const provider = new CalkitSidebarProvider();

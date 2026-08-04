@@ -2418,16 +2418,16 @@ def run(
     os.makedirs(os.path.dirname(local_run_info_fpath), exist_ok=True)
     with open(local_run_info_fpath, "w") as f:
         json.dump(run_info, f, indent=2)
+    _prune_run_logs(
+        os.path.dirname(local_run_info_fpath),
+        keep=run_history_length,
+        protect=os.path.basename(local_run_info_fpath),
+        suffix=".json",
+    )
 
     if save_logs:
         run_info_fpath = os.path.join(".calkit", "runs", run_info_fname)
         shutil.copy2(local_run_info_fpath, run_info_fpath)
-        _prune_run_logs(
-            os.path.dirname(run_info_fpath),
-            keep=run_history_length,
-            protect=os.path.basename(run_info_fpath),
-            suffix=".json",
-        )
         # Also keep the raw log in the tracked .calkit/logs directory
         saved_log_fpath = os.path.join(".calkit", "logs", log_fname)
         shutil.copy2(log_fpath, saved_log_fpath)

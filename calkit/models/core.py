@@ -54,18 +54,21 @@ class Result(_CalkitObject):
 
 
 class Presentation(_CalkitObject):
-    pass
+    kind: Literal["slides", "poster"] | None = Field(
+        default=None, description="What kind of presentation this is."
+    )
 
 
 class Publication(_CalkitObject):
-    # Optional since publications can be created without one, e.g., by
-    # ``calkit overleaf sync``, whose ``--kind`` option has no default
+    # Note posters are presentations, not publications, since they are
+    # presented rather than published, and carry no DOI or venue of record.
+    # Optional since publications can be created without a kind, e.g., by
+    # ``calkit overleaf sync``, whose ``--kind`` option has no default.
     kind: (
         Literal[
             "journal-article",
             "conference-paper",
             "proposal",
-            "poster",
             "report",
             "blog",
         ]
@@ -655,7 +658,7 @@ class ProjectInfo(BaseModel):
     )
     publications: list[Publication] = Field(
         default=[],
-        description="The project's papers, posters, reports, and proposals.",
+        description="The project's papers, reports, and proposals.",
     )
     presentations: list[Presentation] = Field(
         default=[], description="The project's slides and posters."

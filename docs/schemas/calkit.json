@@ -3288,6 +3288,23 @@
           "description": "A longer description.",
           "title": "Description"
         },
+        "kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "slides",
+                "poster"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What kind of presentation this is.",
+          "title": "Kind"
+        },
         "path": {
           "description": "Path to the file, relative to the project root.",
           "title": "Path",
@@ -3534,7 +3551,6 @@
                 "journal-article",
                 "conference-paper",
                 "proposal",
-                "poster",
                 "report",
                 "blog"
               ],
@@ -6115,7 +6131,7 @@
     },
     "publications": {
       "default": [],
-      "description": "The project's papers, posters, reports, and proposals.",
+      "description": "The project's papers, reports, and proposals.",
       "items": {
         "$ref": "#/$defs/Publication"
       },

@@ -50,11 +50,15 @@ def generate_json() -> str:
 
 
 def ensure_modeline(fpath: str = "calkit.yaml") -> None:
-    """Ensure a ``calkit.yaml`` file starts with the schema modeline.
+    """Add the schema modeline to a ``calkit.yaml`` file if it lacks one.
 
     This is what makes editors validate and autocomplete the file without any
     per-user configuration. It's only added to newly created files, since
     ``ruamel.yaml`` preserves it on subsequent reads and writes.
+
+    A file that already declares a schema anywhere is left alone rather than
+    given a second, conflicting modeline, so this prepends only when there is
+    none at all.
     """
     if os.path.isfile(fpath):
         with open(fpath, encoding="utf-8") as f:

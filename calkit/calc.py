@@ -201,7 +201,7 @@ class HttpRequest(Calculation):
         if self.params.inputs_as_params:
             kws = {"params": inputs}
         else:
-            kws = {"json", inputs}
+            kws = {"json": inputs}
         resp: requests.Response = func(url=self.params.url, **kws)
         resp.raise_for_status()
         if self.params.as_json:

@@ -963,6 +963,7 @@ Options:
 | ------------------- | ------- | -------- | ------- | ------------------------------------------------------------ |
 | `--title`           | text    | yes      |         |                                                              |
 | `--description`     | text    | no       |         |                                                              |
+| `--kind`            | text    | no       |         | Kind of presentation, either 'slides' or 'poster'.           |
 | `--stage`           | text    | no       |         | Name of the pipeline stage that generates this presentation. |
 | `--no-commit`       | boolean | no       | False   |                                                              |
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite existing presentation if one exists.               |

@@ -603,6 +603,7 @@ def _new_simple_artifact(
     stage_name: str | None,
     no_commit: bool,
     overwrite: bool,
+    obj_kind: str | None = None,
 ) -> None:
     """Declare a simple artifact (path/title/description/stage) in calkit.yaml."""
     singular = kind.rstrip("s")
@@ -614,6 +615,8 @@ def _new_simple_artifact(
     if overwrite and path in paths:
         objects = [o for o in objects if o.get("path") != path]
     obj = dict(path=path, title=title)
+    if obj_kind is not None:
+        obj["kind"] = obj_kind
     if description is not None:
         obj["description"] = description
     if stage_name is not None:
@@ -662,6 +665,13 @@ def new_presentation(
     path: str,
     title: Annotated[str, typer.Option("--title")],
     description: Annotated[str | None, typer.Option("--description")] = None,
+    kind: Annotated[
+        str | None,
+        typer.Option(
+            "--kind",
+            help="Kind of presentation, either 'slides' or 'poster'.",
+        ),
+    ] = None,
     stage_name: Annotated[
         str | None,
         typer.Option(
@@ -680,6 +690,8 @@ def new_presentation(
     ] = False,
 ):
     """Declare a new presentation."""
+    if kind is not None and kind not in ["slides", "poster"]:
+        raise_error("Presentation kind must be either 'slides' or 'poster'")
     _new_simple_artifact(
         "presentations",
         path,
@@ -688,6 +700,7 @@ def new_presentation(
         stage_name,
         no_commit,
         overwrite,
+        obj_kind=kind,
     )
 
 
@@ -3519,15 +3532,18 @@ def new_release(
             pubtype = artifact.get("kind")  # type: ignore
             if pubtype == "journal-article":
                 resource_type = "publication-article"
-            elif pubtype == "presentation":
-                resource_type = "presentation"
-            elif pubtype == "poster":
-                resource_type = "poster"
             else:
                 resource_type = "publication-other"
+        elif release_kind == "presentation":
+            # Posters are presentations here, but InvenioRDM has a distinct
+            # resource type for them
+            if artifact.get("kind") == "poster":  # type: ignore
+                resource_type = "poster"
+            else:
+                resource_type = "presentation"
         elif release_kind == "figure":
             resource_type = "image-figure"
-        elif release_kind in ["dataset", "software", "poster", "presentation"]:
+        elif release_kind in ["dataset", "software"]:
             resource_type = release_kind
         else:
             # Default for "project" and other unknown types

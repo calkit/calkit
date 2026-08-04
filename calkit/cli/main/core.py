@@ -1456,19 +1456,22 @@ def _run_dvc_repro(argv: list[str]) -> int | None:
 
 
 def _prune_run_logs(
-    logs_dir: str, keep: int = 10, protect: str | None = None
+    logs_dir: str,
+    keep: int = 10,
+    protect: str | None = None,
+    suffix: str = ".log",
 ) -> None:
-    """Keep only the most recent ``keep`` run logs in ``logs_dir``.
+    """Keep only the most recent ``keep`` files in ``logs_dir``.
 
-    Run logs are named by their start timestamp, so sorting by name orders
-    them by time; the oldest beyond ``keep`` are removed so the private log
-    directory doesn't grow without bound. ``protect`` (the active run's log
-    filename) is never deleted, guarding against clock skew or odd names that
-    could otherwise sort the live log into the prune set.
+    Files are named by their start timestamp, so sorting by name orders
+    them by time; the oldest beyond ``keep`` are removed so the directory
+    doesn't grow without bound. ``protect`` (the active run's filename) is
+    never deleted, guarding against clock skew or odd names that could
+    otherwise sort the live file into the prune set.
     """
     if not os.path.isdir(logs_dir):
         return
-    logs = sorted(f for f in os.listdir(logs_dir) if f.endswith(".log"))
+    logs = sorted(f for f in os.listdir(logs_dir) if f.endswith(suffix))
     for fname in logs[:-keep]:
         if fname == protect:
             continue
@@ -2219,9 +2222,12 @@ def run(
         typer.echo(f"Saving logs to {log_fpath}")
     # Create a file handler for dvc.stage.run logger
     file_handler = logging.FileHandler(log_fpath, mode="w")
+    run_history_length = calkit.config.read().run_history_length
     # Keep the private log directory bounded; the new log counts toward the
     # cap and is protected so it can never be pruned out from under this run.
-    _prune_run_logs(local_logs_dir, keep=10, protect=log_fname)
+    _prune_run_logs(
+        local_logs_dir, keep=run_history_length, protect=log_fname
+    )
     file_handler.setLevel(logging.DEBUG)
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     formatter.converter = time.gmtime  # Use UTC time for asctime
@@ -2416,6 +2422,12 @@ def run(
     if save_logs:
         run_info_fpath = os.path.join(".calkit", "runs", run_info_fname)
         shutil.copy2(local_run_info_fpath, run_info_fpath)
+        _prune_run_logs(
+            os.path.dirname(run_info_fpath),
+            keep=run_history_length,
+            protect=os.path.basename(run_info_fpath),
+            suffix=".json",
+        )
         # Also keep the raw log in the tracked .calkit/logs directory
         saved_log_fpath = os.path.join(".calkit", "logs", log_fname)
         shutil.copy2(log_fpath, saved_log_fpath)

@@ -1056,7 +1056,7 @@ def test_run_ignore_errors(tmp_dir):
         }
     }
     with open("dvc.yaml", "w") as f:
-        yaml.dump(dvc_yaml, f)
+        calkit.ryaml.dump(dvc_yaml, f)
     subprocess.check_call(
         ["calkit", "save", "-am", "Create pipeline", "--no-push"]
     )
@@ -1363,7 +1363,7 @@ def test_run_writes_private_logs(tmp_dir):
         }
     }
     with open("dvc.yaml", "w") as f:
-        yaml.dump(dvc_yaml, f)
+        calkit.ryaml.dump(dvc_yaml, f)
     # Without --log, the log is retained privately under .calkit/local/logs
     # (gitignored) and not saved to the tracked .calkit/logs directory
     subprocess.check_call(["calkit", "run"])
@@ -1413,6 +1413,26 @@ def test_prune_run_logs(tmp_dir):
         f.write("x")
     _prune_run_logs(logs_dir, keep=10, protect=old_active)
     assert os.path.isfile(os.path.join(logs_dir, old_active))
+
+
+def test_prune_run_logs_json_suffix(tmp_dir):
+    runs_dir = "runs"
+    os.makedirs(runs_dir)
+    for i in range(15):
+        name = f"2025-01-01T00-00-{i:02d}-{i:02d}.json"
+        with open(os.path.join(runs_dir, name), "w") as f:
+            f.write("{}")
+    _prune_run_logs(runs_dir, keep=10, suffix=".json")
+    remaining = sorted(os.listdir(runs_dir))
+    assert len(remaining) == 10
+    # Oldest by name are removed; newest 10 kept
+    assert remaining[0] == "2025-01-01T00-00-05-05.json"
+    assert remaining[-1] == "2025-01-01T00-00-14-14.json"
+    # A .log file in the same dir must be untouched by a .json prune
+    with open(os.path.join(runs_dir, "keep.log"), "w") as f:
+        f.write("x")
+    _prune_run_logs(runs_dir, keep=10, suffix=".json")
+    assert os.path.isfile(os.path.join(runs_dir, "keep.log"))
 
 
 def test_map_paths(tmp_dir):

@@ -1228,8 +1228,8 @@ def pull(
         if not no_recursive:
             # Pull DVC in isolated subprojects (those with their own .dvc folder)
             ck_info = calkit.load_calkit_info()
-            sp_results = []
-            sp_paths = []
+            sp_results = {}
+            sp_paths = {}
             for sp, idx in ck_info.get("subprojects", []):
                 if not isinstance(sp, dict) or not sp.get("path"):
                     continue
@@ -1247,9 +1247,9 @@ def pull(
         if result != 0:
             raise_error("DVC pull failed")
         if not no_recursive:
-            sp_failed_idx = sp_results != 0
+            sp_failed_idx = [idx for idx, rc in sp_results.items() if rc != 0]
             if any(sp_failed_idx):
-                raise_error(f"DVC pull failed in subproject(s): {sp_paths[sp_failed_idx]}")
+                raise_error(f"DVC pull failed in subproject(s): {[sp_paths[idx] for idx in failed]}")
 
 @app.command(name="push")
 def push(

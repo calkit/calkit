@@ -129,6 +129,9 @@ which is handy for other tools that need to locate these files:
 calkit describe env --name {env-name} --json
 ```
 
+The output is a single line, shown formatted here for readability
+(pipe it through something like `jq` to format it yourself):
+
 ```json
 {
   "kind": "uv-venv",

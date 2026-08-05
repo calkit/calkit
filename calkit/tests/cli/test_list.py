@@ -20,6 +20,28 @@ def test_list_environments(tmp_dir):
     assert json.loads(out) == envs
 
 
+def test_list_releases(tmp_dir):
+    # Internal releases are never published, so no lookup is attempted, but
+    # a stray 'published' key must not override the status we determined
+    releases = {
+        "v1": {"kind": "project", "internal": True, "published": "bogus"},
+        "v2": {"kind": "project", "internal": True, "path": "paper.pdf"},
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"releases": releases}, f)
+    out = subprocess.check_output(
+        ["calkit", "list", "releases", "--json"], text=True
+    )
+    parsed = json.loads(out)
+    assert parsed["v1"]["published"] is None
+    assert parsed["v2"]["published"] is None
+    assert parsed["v2"]["path"] == "paper.pdf"
+    out = subprocess.check_output(["calkit", "list", "releases"], text=True)
+    assert "v1:" in out
+    assert "    kind: project" in out
+    assert "bogus" not in out
+
+
 def test_list_templates():
     subprocess.check_call("calkit list templates", shell=True)
     out = subprocess.check_output(

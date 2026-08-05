@@ -376,7 +376,11 @@ def list_releases(
                         f"Cannot tell if release {name} is published: {e}",
                         err=json_output,
                     )
-        result[name] = {"published": published} | dict(obj)
+        # The looked-up status wins over any stray 'published' key in
+        # calkit.yaml, which isn't part of the release schema
+        result[name] = {"published": published} | {
+            k: v for k, v in obj.items() if k != "published"
+        }
     if json_output:
         echo_json(result)
         return

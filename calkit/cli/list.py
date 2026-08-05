@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from typing import Annotated, Literal
 
 import typer
 
 import calkit
-from calkit.cli import AliasGroup, raise_error, warn
+from calkit.cli import AliasGroup, echo_json, raise_error, warn
 
 list_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 
@@ -47,10 +46,15 @@ def _list_objects(
         "references",
         "publications",
     ],
+    json_output: bool = False,
 ):
     """List objects."""
     ck_info = calkit.load_calkit_info()
-    for obj in ck_info.get(kind, []) or []:
+    objs = ck_info.get(kind, []) or []
+    if json_output:
+        echo_json(objs)
+        return
+    for obj in objs:
         _echo_object(obj)
 
 
@@ -80,7 +84,7 @@ def _list_artifacts(
             {**o, "detected": False} for o in declared if isinstance(o, dict)
         ]
         result += [{**o, "detected": True} for o in detected]
-        typer.echo(json.dumps(result))
+        echo_json(result)
         return
     for obj in declared:
         _echo_object(obj)
@@ -89,9 +93,13 @@ def _list_artifacts(
 
 
 @list_app.command(name="notebooks|nb")
-def list_notebooks():
+def list_notebooks(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+):
     """List notebooks in the project."""
-    _list_objects("notebooks")
+    _list_objects("notebooks", json_output)
 
 
 @list_app.command(name="figures|figs")
@@ -217,28 +225,43 @@ def list_questions(
     """List the project's questions (1-indexed)."""
     questions = calkit.load_calkit_info().get("questions", []) or []
     if json_output:
-        typer.echo(json.dumps(questions))
+        echo_json(questions)
         return
     for n, question in enumerate(questions, start=1):
         _echo_question(n, question)
 
 
 @list_app.command(name="publications|pubs")
-def list_publications():
+def list_publications(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+):
     """List publications in the project."""
-    _list_objects("publications")
+    _list_objects("publications", json_output)
 
 
 @list_app.command(name="references|refs")
-def list_references():
+def list_references(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+):
     """List reference collections in the project."""
-    _list_objects("references")
+    _list_objects("references", json_output)
 
 
 @list_app.command(name="environments|envs")
-def list_environments():
+def list_environments(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+):
     """List environments in the project."""
     envs = calkit.load_calkit_info().get("environments", {})
+    if json_output:
+        echo_json(envs)
+        return
     for name, env in envs.items():
         typer.echo(name + ":")
         for k, v in env.items():
@@ -246,15 +269,30 @@ def list_environments():
 
 
 @list_app.command(name="templates")
-def list_templates():
+def list_templates(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+):
     """List all available Calkit templates."""
-    for kind, tpl_dict in calkit.templates.TEMPLATES.items():
-        for name in tpl_dict:
-            typer.echo(f"{kind}/{name}")
+    names = [
+        f"{kind}/{name}"
+        for kind, tpl_dict in calkit.templates.TEMPLATES.items()
+        for name in tpl_dict
+    ]
+    if json_output:
+        echo_json(names)
+        return
+    for name in names:
+        typer.echo(name)
 
 
 @list_app.command(name="installers")
-def list_installers():
+def list_installers(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+):
     """List apps with a registered native installer.
 
     These can be declared as ``kind: app`` dependencies in ``calkit.yaml``
@@ -267,34 +305,57 @@ def list_installers():
     groups: dict[int, list[str]] = {}
     for name, entry in calkit.install.INSTALLERS.items():
         groups.setdefault(id(entry), []).append(name)
+    result: list[dict] = []
     for names in groups.values():
         names.sort()
-        canonical = names[0]
-        entry = calkit.install.INSTALLERS[canonical]
-        aliases = ", ".join(names[1:])
-        header = canonical + (f"  (aliases: {aliases})" if aliases else "")
-        typer.echo(header)
+        entry = calkit.install.INSTALLERS[names[0]]
+        scripts = {}
         for platform in ("unix", "windows"):
-            ins = entry.get(platform)  # type: ignore[arg-type]
-            if ins is None:
-                continue
-            typer.echo(f"  {platform}: {ins['script']}")
+            ins = entry.get(platform)  # type: ignore[call-overload]
+            if ins is not None:
+                scripts[platform] = ins["script"]
+        result.append(
+            {"name": names[0], "aliases": names[1:], "scripts": scripts}
+        )
+    if json_output:
+        echo_json(result)
+        return
+    for installer in result:
+        aliases = ", ".join(installer["aliases"])
+        header = installer["name"] + (
+            f"  (aliases: {aliases})" if aliases else ""
+        )
+        typer.echo(header)
+        for platform, script in installer["scripts"].items():
+            typer.echo(f"  {platform}: {script}")
 
 
 @list_app.command(name="procedures")
-def list_procedures():
+def list_procedures(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+):
     """List procedures in the current project."""
     ck_info = calkit.load_calkit_info()
-    for p in ck_info.get("procedures", {}):
-        typer.echo(p)
+    names = list(ck_info.get("procedures", {}))
+    if json_output:
+        echo_json(names)
+        return
+    for name in names:
+        typer.echo(name)
 
 
 @list_app.command(name="releases")
-def list_releases():
+def list_releases(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+):
     """List releases."""
     objs = calkit.load_calkit_info().get("releases", {})
+    result = {}
     for name, obj in objs.items():
-        typer.echo(name + ":")
         # Figure out if the release is published. Internal releases are never
         # uploaded to an archival service, so skip the lookup for them.
         published = None
@@ -311,10 +372,24 @@ def list_releases():
                         service=obj.get("publisher"),
                     )["is_published"]
                 except Exception as e:
-                    warn(f"Cannot tell if release {name} is published: {e}")
-        if published is not None:
-            typer.echo(f"    published: {published}")
+                    warn(
+                        f"Cannot tell if release {name} is published: {e}",
+                        err=json_output,
+                    )
+        # The looked-up status wins over any stray 'published' key in
+        # calkit.yaml, which isn't part of the release schema
+        result[name] = {"published": published} | {
+            k: v for k, v in obj.items() if k != "published"
+        }
+    if json_output:
+        echo_json(result)
+        return
+    for name, obj in result.items():
+        typer.echo(name + ":")
         for k, v in obj.items():
+            # 'published' is only known when the lookup above succeeded
+            if k == "published" and v is None:
+                continue
             typer.echo(f"    {k}: {v}")
 
 
@@ -326,6 +401,9 @@ def list_stages(
     ] = None,
     stale_only: Annotated[
         bool, typer.Option("--stale", help="Show only stale stages.")
+    ] = False,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
     ] = False,
 ):
     """List pipeline stages."""
@@ -341,27 +419,43 @@ def list_stages(
                 "Failed to determine stale stages: " + "; ".join(status.errors)
             )
         stale_stage_names = status.stale_stage_names
+    result = {}
     for name, stage in stages.items():
         if kinds is not None and stage.get("kind") not in kinds:
             continue
         if stale_only and name not in stale_stage_names:
             continue
+        result[name] = stage
+    if json_output:
+        echo_json(result)
+        return
+    for name in result:
         typer.echo(name)
 
 
 @list_app.command(name="remotes")
-def list_remotes():
+def list_remotes(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+):
     """List Git and DVC remotes."""
+    result: dict[str, dict] = {"git": {}, "dvc": {}}
     try:
         repo = calkit.git.get_repo()
         for remote in repo.remotes:
-            typer.echo(f"(Git) {remote.name}: {remote.url}")
+            result["git"][remote.name] = remote.url
     except Exception as e:
-        warn(f"Could not list Git remotes: {e}")
+        warn(f"Could not list Git remotes: {e}", err=json_output)
     # Now DVC remotes
     try:
-        dvc_remotes = calkit.dvc.get_remotes()
-        for name, url in dvc_remotes.items():
-            typer.echo(f"(DVC) {name}: {url}")
+        result["dvc"] = calkit.dvc.get_remotes()
     except Exception as e:
-        warn(f"Could not list DVC remotes: {e}")
+        warn(f"Could not list DVC remotes: {e}", err=json_output)
+    if json_output:
+        echo_json(result)
+        return
+    for name, url in result["git"].items():
+        typer.echo(f"(Git) {name}: {url}")
+    for name, url in result["dvc"].items():
+        typer.echo(f"(DVC) {name}: {url}")

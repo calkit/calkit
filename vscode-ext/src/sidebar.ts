@@ -16,6 +16,7 @@ import {
   classifyStaleStage,
   dvcStageOutputPaths,
   type StaleClassification,
+  outputEntryPath,
 } from "./pipeline/core";
 
 // Singular node kinds and the matching calkit.yaml collection keys for the
@@ -33,12 +34,6 @@ type ArtifactCollection =
   | "results"
   | "publications"
   | "presentations";
-
-function outputEntryPath(
-  output: string | { path: string; [key: string]: unknown },
-): string {
-  return typeof output === "string" ? output : output.path;
-}
 
 // The displayed text of a question, which may be a plain string or a structured
 // entry carrying a hypothesis/answer/evidence alongside the question itself.
@@ -752,9 +747,8 @@ export class CalkitSidebarProvider
         arguments: [stageItem],
       };
       items.push(stageItem);
-      for (const input of Array.isArray(stage.inputs)
-        ? (stage.inputs as string[])
-        : []) {
+      for (const rawInput of Array.isArray(stage.inputs) ? stage.inputs : []) {
+        const input = outputEntryPath(rawInput as string | { path: string });
         const inputItem = new SidebarItem(
           "Input",
           vscode.TreeItemCollapsibleState.None,
@@ -1119,7 +1113,9 @@ export class CalkitSidebarProvider
                 ? calkitStage.target_path
                 : undefined,
             configuredInputs: Array.isArray(calkitStage.inputs)
-              ? (calkitStage.inputs as string[])
+              ? (calkitStage.inputs as (string | { path: string })[]).map(
+                  outputEntryPath,
+                )
               : [],
             envFilePaths:
               typeof calkitStage.environment === "string"
@@ -1226,9 +1222,10 @@ export class CalkitSidebarProvider
           this.makeEnvPropItem(calkitStage.environment, cls?.envStale),
         );
       }
-      for (const input of Array.isArray(calkitStage.inputs)
-        ? (calkitStage.inputs as string[])
+      for (const rawInput of Array.isArray(calkitStage.inputs)
+        ? (calkitStage.inputs as (string | { path: string })[])
         : []) {
+        const input = outputEntryPath(rawInput);
         prop(
           "Input",
           input,

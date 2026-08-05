@@ -1813,8 +1813,14 @@ List notebooks in the project.
 Usage:
 
 ```text
-calkit list|ls notebooks|nb
+calkit list|ls notebooks|nb [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-figures-figs"></a>
 
@@ -1919,8 +1925,14 @@ List publications in the project.
 Usage:
 
 ```text
-calkit list|ls publications|pubs
+calkit list|ls publications|pubs [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-references-refs"></a>
 
@@ -1931,8 +1943,14 @@ List reference collections in the project.
 Usage:
 
 ```text
-calkit list|ls references|refs
+calkit list|ls references|refs [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-environments-envs"></a>
 
@@ -1943,8 +1961,14 @@ List environments in the project.
 Usage:
 
 ```text
-calkit list|ls environments|envs
+calkit list|ls environments|envs [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-templates"></a>
 
@@ -1955,8 +1979,14 @@ List all available Calkit templates.
 Usage:
 
 ```text
-calkit list|ls templates
+calkit list|ls templates [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-installers"></a>
 
@@ -1969,8 +1999,14 @@ These can be declared as `kind: app` dependencies in `calkit.yaml` and Calkit wi
 Usage:
 
 ```text
-calkit list|ls installers
+calkit list|ls installers [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-procedures"></a>
 
@@ -1981,8 +2017,14 @@ List procedures in the current project.
 Usage:
 
 ```text
-calkit list|ls procedures
+calkit list|ls procedures [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-releases"></a>
 
@@ -1993,8 +2035,14 @@ List releases.
 Usage:
 
 ```text
-calkit list|ls releases
+calkit list|ls releases [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-stages"></a>
 
@@ -2014,6 +2062,7 @@ Options:
 | -------------- | ------- | -------- | ------- | ----------------------- |
 | `--kind`, `-k` | text    | no       |         | Filter stages by kind.  |
 | `--stale`      | boolean | no       | False   | Show only stale stages. |
+| `--json`       | boolean | no       | False   | Output result as JSON.  |
 
 <a id="subcommand-list-ls-remotes"></a>
 
@@ -2024,8 +2073,14 @@ List Git and DVC remotes.
 Usage:
 
 ```text
-calkit list|ls remotes
+calkit list|ls remotes [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="command-group-describe-desc"></a>
 
@@ -2033,11 +2088,11 @@ calkit list|ls remotes
 
 Describe things.
 
-| Command                                      | Description                                                        |
-| -------------------------------------------- | ------------------------------------------------------------------ |
-| [`system`](#subcommand-describe-desc-system) | Describe the system.                                               |
-| [`env`](#subcommand-describe-desc-env)       | Describe a single environment, including spec and lock file paths. |
-| [`envs`](#subcommand-describe-desc-envs)     | Describe all environments, including spec and lock file paths.     |
+| Command                                                             | Description                                                        |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| [`system`](#subcommand-describe-desc-system)                        | Describe the system.                                               |
+| [`environment\|env`](#subcommand-describe-desc-environment-env)     | Describe a single environment, including spec and lock file paths. |
+| [`environments\|envs`](#subcommand-describe-desc-environments-envs) | Describe all environments, including spec and lock file paths.     |
 
 <a id="subcommand-describe-desc-system"></a>
 
@@ -2048,38 +2103,51 @@ Describe the system.
 Usage:
 
 ```text
-calkit describe|desc system
+calkit describe|desc system [OPTIONS]
 ```
 
-<a id="subcommand-describe-desc-env"></a>
+Options:
 
-#### `calkit describe|desc env`
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-describe-desc-environment-env"></a>
+
+#### `calkit describe|desc environment|env`
 
 Describe a single environment, including spec and lock file paths.
 
 Usage:
 
 ```text
-calkit describe|desc env [OPTIONS]
+calkit describe|desc environment|env [OPTIONS]
 ```
 
 Options:
 
-| Option         | Type | Required | Default | Description       |
-| -------------- | ---- | -------- | ------- | ----------------- |
-| `--name`, `-n` | text | yes      |         | Environment name. |
+| Option         | Type    | Required | Default | Description            |
+| -------------- | ------- | -------- | ------- | ---------------------- |
+| `--name`, `-n` | text    | yes      |         | Environment name.      |
+| `--json`       | boolean | no       | False   | Output result as JSON. |
 
-<a id="subcommand-describe-desc-envs"></a>
+<a id="subcommand-describe-desc-environments-envs"></a>
 
-#### `calkit describe|desc envs`
+#### `calkit describe|desc environments|envs`
 
 Describe all environments, including spec and lock file paths.
 
 Usage:
 
 ```text
-calkit describe|desc envs
+calkit describe|desc environments|envs [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="command-group-import"></a>
 

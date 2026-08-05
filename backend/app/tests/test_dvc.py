@@ -3,7 +3,30 @@
 import os
 from copy import deepcopy
 
-from app.dvc import make_mermaid_diagram, output_from_pipeline
+from app.dvc import make_mermaid_diagram, output_from_pipeline, run_dvc_command
+
+
+def test_ck_remote_scheme_is_registered(tmp_path):
+    """New projects get a ck:// DVC remote, so both the in-process schema and
+    the DVC CLI we shell out to must accept one.
+
+    DVC memoizes its compiled config schema the first time any config is read,
+    which is why importing ``app.dvc`` registers the scheme.
+    """
+    from dvc.config import get_compiled_schema
+
+    make_mermaid_diagram({"stages": {"a": {"cmd": "echo hi", "outs": ["x"]}}})
+    get_compiled_schema()({"remote": {"calkit": {"url": "ck://owner/proj"}}})
+    wdir = str(tmp_path)
+    assert run_dvc_command(["init", "--no-scm", "-q"], wdir=wdir) == 0
+    assert (
+        run_dvc_command(
+            ["remote", "add", "-d", "-f", "calkit", "ck://owner/proj"],
+            wdir=wdir,
+        )
+        == 0
+    )
+    assert run_dvc_command(["status"], wdir=wdir) == 0
 
 
 def test_make_mermaid_diagram():

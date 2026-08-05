@@ -88,6 +88,12 @@ if settings.BACKEND_CORS_ORIGINS:
         allow_headers=["*"],
     )
 
+# The library's default buckets for the per-handler latency histogram stop at
+# 1s, which silently pins every quantile in Grafana to 1s or less. Plenty of
+# handlers here clone or fetch Git repos and legitimately run longer, so extend
+# the buckets far enough to see the real tail.
+LATENCY_BUCKETS = (0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60, 120)
+
 Instrumentator(
     # A hung request never records a duration (that only happens on
     # completion), so without this gauge a stuck endpoint is invisible in
@@ -96,7 +102,7 @@ Instrumentator(
     should_instrument_requests_inprogress=True,
     inprogress_name="http_requests_inprogress",
     inprogress_labels=True,
-).instrument(app).expose(app)
+).instrument(app, latency_lowr_buckets=LATENCY_BUCKETS).expose(app)
 
 
 # High-frequency endpoints that would otherwise dominate log volume (and

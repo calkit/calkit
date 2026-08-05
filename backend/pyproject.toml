@@ -34,7 +34,7 @@ dependencies = [
   "mixpanel==4.10.1",
   "gcsfs==2026.4.0",
   "texsoup>=0.3.1",
-  "calkit-python==0.41.19",
+  "calkit-python==0.41.24",
   "boto3>=1.40.70",
   "cachetools>=5.3.3",
   "prometheus-fastapi-instrumentator>=7.0.0",

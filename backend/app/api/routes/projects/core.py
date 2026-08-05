@@ -7,7 +7,6 @@ import logging
 import os
 import shutil
 import subprocess
-import sys
 import uuid
 import zipfile
 from copy import deepcopy
@@ -64,6 +63,7 @@ from app.dvc import (
     expand_dvc_lock_outs,
     make_mermaid_diagram,
     output_from_pipeline,
+    run_dvc_command,
 )
 from app.pipeline import (
     color_mermaid_by_status,
@@ -463,7 +463,9 @@ def post_project(
         body = {
             "name": repo_name,
             "description": project_in.description,
-            "homepage": f"https://calkit.io/{owner_name}/{project_in.name}",
+            "homepage": (
+                f"{settings.frontend_host}/{owner_name}/{project_in.name}"
+            ),
             "private": not project_in.is_public,
             "has_discussions": True,
             "has_issues": True,
@@ -514,88 +516,125 @@ def post_project(
         session.add(project)
         session.commit()
         session.refresh(project)
-        # Clone the repo and set up the Calkit DVC remote
-        repo = get_repo(
-            project=project,
-            session=session,
-            user=current_user,
-            fresh=True,
-        )
-        # If we have a template, set as upstream and pull from it
-        if project_in.template is not None:
-            template_git_repo_url = template_project.git_repo_url
-            repo.git.remote(["add", "upstream", template_git_repo_url])
-            repo.git.pull(["upstream", repo.active_branch.name])
-            # Remove upstream remote so we don't have any confusion later
-            repo.git.remote(["remove", "upstream"])
-            template_repo = get_repo(
-                project=template_project,
+        try:
+            # Clone the repo and set up the Calkit DVC remote
+            repo = get_repo(
+                project=project,
                 session=session,
                 user=current_user,
                 fresh=True,
             )
-            # Delete files that don't belong in a template
-            delete_files = ["dvc.lock"]
-            for f in delete_files:
-                if os.path.isfile(os.path.join(repo.working_dir, f)):
-                    repo.git.rm(f, "-f")
-        # Add a calkit.yaml file
-        # First existing info, which is empty unless we're using a template
-        ck_info = calkit.load_calkit_info(wdir=repo.working_dir)  # type: ignore
-        _ = ck_info.pop("questions", None)
-        ck_info |= {
-            "owner": owner_name,
-            "name": project.name,
-            "title": project.title,
-            "description": project.description,
-            "git_repo_url": project.git_repo_url,
-        }
-        if project_in.template is not None:
-            ck_info["derived_from"] = dict(
-                project=project_in.template,
-                git_repo_url=template_git_repo_url,
-                git_rev=template_repo.git.rev_parse("HEAD"),
+            # If we have a template, set as upstream and pull from it
+            if project_in.template is not None:
+                template_git_repo_url = template_project.git_repo_url
+                repo.git.remote(["add", "upstream", template_git_repo_url])
+                repo.git.pull(["upstream", repo.active_branch.name])
+                # Remove upstream remote so we don't have any confusion later
+                repo.git.remote(["remove", "upstream"])
+                template_repo = get_repo(
+                    project=template_project,
+                    session=session,
+                    user=current_user,
+                    fresh=True,
+                )
+                # Delete files that don't belong in a template
+                delete_files = ["dvc.lock"]
+                for f in delete_files:
+                    if os.path.isfile(os.path.join(repo.working_dir, f)):
+                        repo.git.rm(f, "-f")
+            # Add a calkit.yaml file
+            # First existing info, which is empty unless we're using a template
+            ck_info = calkit.load_calkit_info(wdir=repo.working_dir)  # type: ignore
+            _ = ck_info.pop("questions", None)
+            ck_info |= {
+                "owner": owner_name,
+                "name": project.name,
+                "title": project.title,
+                "description": project.description,
+                "git_repo_url": project.git_repo_url,
+            }
+            if project_in.template is not None:
+                ck_info["derived_from"] = dict(
+                    project=project_in.template,
+                    git_repo_url=template_git_repo_url,
+                    git_rev=template_repo.git.rev_parse("HEAD"),
+                )
+            with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
+                ryaml.dump(ck_info, f)
+            repo.git.add("calkit.yaml")
+            if project_in.template is None:
+                # Create devcontainer spec
+                dc_url = (
+                    "https://raw.githubusercontent.com/calkit/devcontainer/"
+                    "refs/heads/main/devcontainer.json"
+                )
+                # A dev container spec is a nice-to-have, and can be added
+                # later with the dev container endpoint, so don't fail project
+                # creation if GitHub is slow or the file has moved. Writing a
+                # non-200 body would put an error page in devcontainer.json.
+                try:
+                    dc_resp = requests.get(dc_url, timeout=15)
+                    dc_resp.raise_for_status()
+                except requests.RequestException as e:
+                    logger.warning(f"Failed to fetch dev container spec: {e}")
+                    dc_resp = None
+                if dc_resp is not None:
+                    dc_dir = os.path.join(repo.working_dir, ".devcontainer")
+                    os.makedirs(dc_dir, exist_ok=True)
+                    dc_fpath = os.path.join(dc_dir, "devcontainer.json")
+                    with open(dc_fpath, "w") as f:
+                        f.write(dc_resp.text)
+                    repo.git.add(".devcontainer")
+            # Create the README
+            logger.info("Creating README.md")
+            with open(os.path.join(repo.working_dir, "README.md"), "w") as f:
+                txt = f"# {project_in.title}\n\n"
+                if project_in.description is not None:
+                    txt += f"\n{project_in.description}\n"
+                f.write(txt)
+            repo.git.add("README.md")
+            # Setup the DVC remote
+            logger.info("Running DVC init")
+            run_dvc_command(
+                ["init", "--force", "-q"],
+                wdir=str(repo.working_dir),
+                check=True,
             )
-        with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
-            ryaml.dump(ck_info, f)
-        repo.git.add("calkit.yaml")
-        if project_in.template is None:
-            # Create devcontainer spec
-            dc_url = (
-                "https://raw.githubusercontent.com/calkit/devcontainer/"
-                "refs/heads/main/devcontainer.json"
+            logger.info("Enabling DVC autostage")
+            run_dvc_command(
+                ["config", "core.autostage", "true"],
+                wdir=str(repo.working_dir),
+                check=True,
             )
-            dc_resp = requests.get(dc_url)
-            dc_dir = os.path.join(repo.working_dir, ".devcontainer")
-            os.makedirs(dc_dir, exist_ok=True)
-            dc_fpath = os.path.join(dc_dir, "devcontainer.json")
-            with open(dc_fpath, "w") as f:
-                f.write(dc_resp.text)
-            repo.git.add(".devcontainer")
-        # Create the README
-        logger.info("Creating README.md")
-        with open(os.path.join(repo.working_dir, "README.md"), "w") as f:
-            txt = f"# {project_in.title}\n\n"
-            if project_in.description is not None:
-                txt += f"\n{project_in.description}\n"
-            f.write(txt)
-        repo.git.add("README.md")
-        # Setup the DVC remote
-        logger.info("Running DVC init")
-        subprocess.call(["dvc", "init", "--force", "-q"], cwd=repo.working_dir)
-        logger.info("Enabling DVC autostage")
-        subprocess.call(
-            ["dvc", "config", "core.autostage", "true"], cwd=repo.working_dir
-        )
-        logger.info("Setting up default DVC remote")
-        calkit.dvc.configure_remote(wdir=str(repo.working_dir), use_ck=True)
-        repo.git.add(".dvc")
-        if project_in.template is not None:
-            commit_msg = f"Create new project from {project_in.template}"
-        else:
-            commit_msg = "Create README.md, DVC config, and calkit.yaml"
-        repo.git.commit(["-m", commit_msg])
-        repo.git.push(["origin", repo.active_branch.name])
+            logger.info("Setting up default DVC remote")
+            calkit.dvc.configure_remote(
+                wdir=str(repo.working_dir), use_ck=True
+            )
+            repo.git.add(".dvc")
+            if project_in.template is not None:
+                commit_msg = f"Create new project from {project_in.template}"
+            else:
+                commit_msg = "Create README.md, DVC config, and calkit.yaml"
+            repo.git.commit(["-m", commit_msg])
+            repo.git.push(["origin", repo.active_branch.name])
+        except Exception as e:
+            # The project row is already committed, and it would block a retry
+            # since a Git repo can only back one project, so remove it and let
+            # the user try again with the repo that was created on GitHub.
+            logger.exception(f"Failed to set up repo for new project: {e}")
+            session.rollback()
+            session.delete(project)
+            session.commit()
+            if isinstance(e, (HTTPException, GitCommandError)):
+                raise
+            raise HTTPException(
+                500,
+                (
+                    "Failed to set up the project repo. The GitHub repo was "
+                    "created, so try creating the project again as an "
+                    "existing repo."
+                ),
+            )
     # Repo exists on GitHub
     elif resp.status_code == 200:
         logger.info(f"Repo exists on GitHub as {owner_name}/{repo_name}")
@@ -2198,14 +2237,9 @@ def post_project_figure(
         # Initialize DVC if it's never been
         if not os.path.isdir(os.path.join(repo.working_dir, ".dvc")):
             logger.info("Calling dvc init since .dvc directory is missing")
-            subprocess.call(
-                [sys.executable, "-m", "dvc", "init"], cwd=repo.working_dir
-            )
+            run_dvc_command(["init"], wdir=str(repo.working_dir), check=True)
         logger.info(f"Running dvc add {path}")
-        subprocess.check_call(
-            [sys.executable, "-m", "dvc", "add", path],
-            cwd=repo.working_dir,
-        )
+        run_dvc_command(["add", path], wdir=str(repo.working_dir), check=True)
         files_to_stage = [path + ".dvc"]
         gitignore = os.path.join(os.path.dirname(path), ".gitignore")
         if os.path.isfile(os.path.join(repo.working_dir, gitignore)):
@@ -3252,12 +3286,9 @@ def post_project_dataset_upload(
     # Initialize DVC if it's never been
     if not os.path.isdir(os.path.join(repo.working_dir, ".dvc")):
         logger.info("Calling dvc init since .dvc directory is missing")
-        subprocess.call(["dvc", "init"], cwd=repo.working_dir)
+        run_dvc_command(["init"], wdir=str(repo.working_dir), check=True)
     logger.info(f"Running dvc add {path}")
-    subprocess.check_call(
-        [sys.executable, "-m", "dvc", "add", path],
-        cwd=str(repo.working_dir),
-    )
+    run_dvc_command(["add", path], wdir=str(repo.working_dir), check=True)
     files_to_stage = [path + ".dvc"]
     gitignore = os.path.join(os.path.dirname(path), ".gitignore")
     if os.path.isfile(os.path.join(repo.working_dir, gitignore)):
@@ -3678,14 +3709,9 @@ def post_project_publication(
         # Initialize DVC if it's never been
         if not os.path.isdir(os.path.join(repo.working_dir, ".dvc")):
             logger.info("Calling dvc init since .dvc directory is missing")
-            subprocess.call(
-                [sys.executable, "-m", "dvc", "init"], cwd=repo.working_dir
-            )
+            run_dvc_command(["init"], wdir=str(repo.working_dir), check=True)
         logger.info(f"Running dvc add {path}")
-        subprocess.check_call(
-            [sys.executable, "-m", "dvc", "add", path],
-            cwd=repo.working_dir,
-        )
+        run_dvc_command(["add", path], wdir=str(repo.working_dir), check=True)
         files_to_stage = [path + ".dvc"]
         gitignore = os.path.join(os.path.dirname(path), ".gitignore")
         if os.path.isfile(os.path.join(repo.working_dir, gitignore)):

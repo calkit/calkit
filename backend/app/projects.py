@@ -16,6 +16,7 @@ import sqlalchemy
 import yaml
 from calkit.notebooks import get_executed_notebook_path
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 import app.users
@@ -101,8 +102,6 @@ def _resolve_github_collaborator_access(
     querying GitHub and caching the result on a miss. Sets
     ``project.current_user_access`` (left None if it can't be determined).
     """
-    # TODO: There may be a race here with concurrent requests, though it does
-    # not appear to cause a real problem despite the failed writes.
     access_query = (
         select(UserProjectAccess)
         .where(UserProjectAccess.project_id == project.id)
@@ -142,6 +141,10 @@ def _resolve_github_collaborator_access(
             f"Failed to fetch permissions from GitHub ({resp.status_code})"
         )
     project.current_user_access = permissions
+    # SELECT ... FOR UPDATE locks nothing when the row doesn't exist yet, so
+    # concurrent requests for the same user and project can both get here and
+    # try to insert. Losing that race is harmless (the winner cached the same
+    # permission), but the unique violation would otherwise 500 the request.
     session.add(
         UserProjectAccess(
             project_id=project.id,
@@ -149,7 +152,14 @@ def _resolve_github_collaborator_access(
             github_access=permissions,
         )
     )
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        logger.info(
+            f"Access record for user {current_user.id} and project "
+            f"{project.id} was written concurrently; ignoring"
+        )
+        session.rollback()
 
 
 def get_project(

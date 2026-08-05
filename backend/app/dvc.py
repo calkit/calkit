@@ -5,9 +5,12 @@ import glob
 import json
 import logging
 import os
+import subprocess
+import sys
 import tempfile
 from functools import lru_cache
 
+import calkit.dvc
 import ruamel.yaml
 from dvc.commands import dag
 from dvc.repo import Repo
@@ -18,6 +21,29 @@ logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
 yaml = ruamel.yaml.YAML()
+
+# Teach DVC about the ck:// remote scheme, which projects use by default.
+# This must happen before anything in this process validates a DVC config,
+# since DVC memoizes its compiled config schema (dvc.config.
+# get_compiled_schema) on first use. Without it, once something here has
+# touched a DVC config (e.g. make_mermaid_diagram), every later ck:// config
+# read in the same worker fails with "Unsupported URL type ck://", which is
+# how project creation ended up 500ing after the project row was written.
+calkit.dvc.register_ck_scheme()
+
+
+def run_dvc_command(args: list[str], wdir: str, check: bool = False) -> int:
+    """Run a DVC CLI command in a subprocess with ck:// support registered.
+
+    Goes through ``calkit dvc`` rather than ``dvc`` directly so the child
+    process registers the ck:// scheme; a plain ``dvc`` call fails in any
+    project whose remote is ck://.
+    """
+    cmd = [sys.executable, "-m", "calkit", "dvc"] + args
+    logger.info(f"Running {' '.join(cmd)} in {wdir}")
+    if check:
+        return subprocess.check_call(cmd, cwd=wdir)
+    return subprocess.call(cmd, cwd=wdir)
 
 
 @lru_cache(maxsize=512)

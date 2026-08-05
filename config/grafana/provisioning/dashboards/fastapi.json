@@ -2,16 +2,27 @@
   "title": "FastAPI",
   "uid": "fastapi-overview",
   "schemaVersion": 38,
-  "version": 3,
+  "version": 4,
   "refresh": "30s",
-  "time": { "from": "now-1h", "to": "now" },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "panels": [
     {
       "id": 1,
       "title": "Request Rate (req/s)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "expr": "sum by (handler) (rate(http_requests_total{job=~\"backend|backend-dvc\"}[2m]))",
@@ -23,8 +34,16 @@
       "id": 2,
       "title": "P95 Latency by Handler (ms)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "expr": "histogram_quantile(0.95, sum by (handler, le) (rate(http_request_duration_seconds_bucket{job=~\"backend|backend-dvc\"}[5m]))) * 1000",
@@ -32,15 +51,25 @@
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "ms" }
+        "defaults": {
+          "unit": "ms"
+        }
       }
     },
     {
       "id": 3,
       "title": "Top Slow Endpoints (P95, last 30m)",
       "type": "table",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "expr": "topk(20, histogram_quantile(0.95, sum by (handler, le) (rate(http_request_duration_seconds_bucket{job=~\"backend|backend-dvc\"}[30m]))) * 1000)",
@@ -50,22 +79,47 @@
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "ms" },
+        "defaults": {
+          "unit": "ms"
+        },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Value" },
-            "properties": [{ "id": "displayName", "value": "P95 latency (ms)" }]
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "P95 latency (ms)"
+              }
+            ]
           }
         ]
       },
-      "options": { "sortBy": [{ "displayName": "P95 latency (ms)", "desc": true }] }
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "P95 latency (ms)",
+            "desc": true
+          }
+        ]
+      }
     },
     {
       "id": 4,
       "title": "Error Rate (4xx/5xx)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "expr": "sum by (handler, status) (rate(http_requests_total{job=~\"backend|backend-dvc\", status=~\"4xx|5xx\"}[2m]))",
@@ -77,8 +131,16 @@
       "id": 6,
       "title": "Requests In Progress (hung requests stay > 0 here)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "description": "A request that never completes records no latency or status, but its handler stays non-zero here. If e.g. the git/refs handler sits at 1+ with no traffic, it is hung.",
       "targets": [
         {
@@ -91,8 +153,16 @@
       "id": 7,
       "title": "Git Operation Timings (start/done, duration_ms)",
       "type": "logs",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
-      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
       "description": "Structured git_op logs from get_repo. A 'git op start' with no matching 'git op done' is a hanging git subprocess (clone/fetch/token).",
       "targets": [
         {
@@ -108,11 +178,53 @@
       }
     },
     {
+      "id": 8,
+      "title": "Backend 500s (tracebacks and 5xx responses)",
+      "type": "logs",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "Query A is the unhandled-exception tracebacks, which never reach the request log since the middleware only logs completed responses. Query B is the structured request lines for handled 5xx responses.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service=~\"backend|backend-dvc\"} |~ \"Exception in ASGI application|Traceback \\\\(most recent call last\\\\)|ExceptionGroup\"",
+          "legendFormat": ""
+        },
+        {
+          "refId": "B",
+          "expr": "{service=~\"backend|backend-dvc\"} | json | status_code >= 500",
+          "legendFormat": ""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending"
+      }
+    },
+    {
       "id": 5,
       "title": "Application Logs",
       "type": "logs",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 24 },
-      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
       "targets": [
         {
           "expr": "{service=~\"backend|backend-dvc\"}",

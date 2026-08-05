@@ -114,6 +114,39 @@ All project environments can be checked at once with:
 calkit check envs
 ```
 
+## Inspecting environment paths
+
+To see where an environment's specification and lock file live, use:
+
+```sh
+calkit describe env --name {env-name}
+```
+
+Adding `--json` prints the same information as machine-readable JSON,
+which is handy for other tools that need to locate these files:
+
+```sh
+calkit describe env --name {env-name} --json
+```
+
+The output is a single line, shown formatted here for readability
+(pipe it through something like `jq` to format it yourself):
+
+```json
+{
+  "kind": "uv-venv",
+  "spec_path": "requirements.txt",
+  "lock_path": ".calkit/env-locks/my-env/linux-64.txt",
+  "prefix": null,
+  "python": "3.13"
+}
+```
+
+All keys are always present, so a null value means the field doesn't apply
+to that kind of environment.
+To describe every environment at once, keyed by name, use
+`calkit describe envs [--json]`.
+
 ## Choosing an environment type
 
 So which type of environment should you use?

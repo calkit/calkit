@@ -171,3 +171,13 @@ export function classifyStaleStage(
     extraModifiedInputs,
   };
 }
+
+// Normalize a stage dep/out entry to its path string. Calkit writes these
+// as either a plain string or an object carrying a `path` (e.g. an out with
+// `cache: false`); the sidebar routes every input/output row through this
+// before building a filesystem path. Kept vscode-free so it can be tested.
+export function outputEntryPath(
+  output: string | { path: string; [key: string]: unknown },
+): string {
+  return typeof output === "string" ? output : output.path;
+}

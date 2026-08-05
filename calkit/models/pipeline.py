@@ -64,7 +64,10 @@ class StageIteration(BaseModel):
     each sublist the length of ``arg_name``.
     """
 
-    arg_name: str | list[str]
+    arg_name: str | list[str] = Field(
+        description="Name(s) of the argument(s) to substitute into the "
+        "stage's command and paths."
+    )
     values: list[
         int
         | float
@@ -72,7 +75,7 @@ class StageIteration(BaseModel):
         | RangeIteration
         | ParameterIteration
         | list[int | float | str]
-    ]
+    ] = Field(description="Values over which to iterate.")
 
     @field_validator("values")
     @classmethod
@@ -518,9 +521,14 @@ class PythonScriptStage(Stage):
 
 class MapPathsStage(Stage):
     class CopyFileToFile(BaseModel):
-        kind: Literal["file-to-file"] = "file-to-file"
-        src: str
-        dest: str
+        """Copy a single file to a single destination path."""
+
+        kind: Literal["file-to-file"] = Field(
+            default="file-to-file",
+            description="Copy one file to one destination path.",
+        )
+        src: str = Field(description="Path to the file to copy.")
+        dest: str = Field(description="Path to which the file is copied.")
 
         @property
         def arg(self) -> str:
@@ -531,9 +539,16 @@ class MapPathsStage(Stage):
             return self.dest
 
     class CopyFileToDir(BaseModel):
-        kind: Literal["file-to-dir"] = "file-to-dir"
-        src: str
-        dest: str
+        """Copy a single file into a directory, keeping its name."""
+
+        kind: Literal["file-to-dir"] = Field(
+            default="file-to-dir",
+            description="Copy one file into a destination directory.",
+        )
+        src: str = Field(description="Path to the file to copy.")
+        dest: str = Field(
+            description="Path to the directory into which the file is copied."
+        )
 
         @property
         def arg(self) -> str:
@@ -544,9 +559,14 @@ class MapPathsStage(Stage):
             return Path(self.dest, Path(self.src).name).as_posix()
 
     class DirToDirMerge(BaseModel):
-        kind: Literal["dir-to-dir-merge"] = "dir-to-dir-merge"
-        src: str
-        dest: str
+        """Copy a directory's contents into another, keeping what's there."""
+
+        kind: Literal["dir-to-dir-merge"] = Field(
+            default="dir-to-dir-merge",
+            description="Merge one directory's contents into another.",
+        )
+        src: str = Field(description="Path to the directory to copy from.")
+        dest: str = Field(description="Path to the directory to copy into.")
 
         @property
         def arg(self) -> str:
@@ -557,9 +577,17 @@ class MapPathsStage(Stage):
             return self.dest
 
     class DirToDirReplace(BaseModel):
-        kind: Literal["dir-to-dir-replace"] = "dir-to-dir-replace"
-        src: str
-        dest: str
+        """Replace a directory with the contents of another."""
+
+        kind: Literal["dir-to-dir-replace"] = Field(
+            default="dir-to-dir-replace",
+            description="Replace the destination directory entirely.",
+        )
+        src: str = Field(description="Path to the directory to copy from.")
+        dest: str = Field(
+            description="Path to the directory to replace, which is deleted "
+            "first."
+        )
 
         @property
         def arg(self) -> str:

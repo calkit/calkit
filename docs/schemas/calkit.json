@@ -199,18 +199,22 @@
       "type": "object"
     },
     "CopyFileToDir": {
+      "description": "Copy a single file into a directory, keeping its name.",
       "properties": {
         "dest": {
+          "description": "Path to the directory into which the file is copied.",
           "title": "Dest",
           "type": "string"
         },
         "kind": {
           "const": "file-to-dir",
           "default": "file-to-dir",
+          "description": "Copy one file into a destination directory.",
           "title": "Kind",
           "type": "string"
         },
         "src": {
+          "description": "Path to the file to copy.",
           "title": "Src",
           "type": "string"
         }
@@ -223,18 +227,22 @@
       "type": "object"
     },
     "CopyFileToFile": {
+      "description": "Copy a single file to a single destination path.",
       "properties": {
         "dest": {
+          "description": "Path to which the file is copied.",
           "title": "Dest",
           "type": "string"
         },
         "kind": {
           "const": "file-to-file",
           "default": "file-to-file",
+          "description": "Copy one file to one destination path.",
           "title": "Kind",
           "type": "string"
         },
         "src": {
+          "description": "Path to the file to copy.",
           "title": "Src",
           "type": "string"
         }
@@ -403,18 +411,22 @@
       "type": "object"
     },
     "DirToDirMerge": {
+      "description": "Copy a directory's contents into another, keeping what's there.",
       "properties": {
         "dest": {
+          "description": "Path to the directory to copy into.",
           "title": "Dest",
           "type": "string"
         },
         "kind": {
           "const": "dir-to-dir-merge",
           "default": "dir-to-dir-merge",
+          "description": "Merge one directory's contents into another.",
           "title": "Kind",
           "type": "string"
         },
         "src": {
+          "description": "Path to the directory to copy from.",
           "title": "Src",
           "type": "string"
         }
@@ -427,18 +439,22 @@
       "type": "object"
     },
     "DirToDirReplace": {
+      "description": "Replace a directory with the contents of another.",
       "properties": {
         "dest": {
+          "description": "Path to the directory to replace, which is deleted first.",
           "title": "Dest",
           "type": "string"
         },
         "kind": {
           "const": "dir-to-dir-replace",
           "default": "dir-to-dir-replace",
+          "description": "Replace the destination directory entirely.",
           "title": "Kind",
           "type": "string"
         },
         "src": {
+          "description": "Path to the directory to copy from.",
           "title": "Src",
           "type": "string"
         }
@@ -3072,6 +3088,7 @@
     "ParameterIteration": {
       "properties": {
         "parameter": {
+          "description": "Name of a project parameter whose list of values to iterate over.",
           "title": "Parameter",
           "type": "string"
         }
@@ -4200,7 +4217,8 @@
     "RangeIteration": {
       "properties": {
         "range": {
-          "$ref": "#/$defs/RangeIterationParams"
+          "$ref": "#/$defs/RangeIterationParams",
+          "description": "Bounds of the range over which to iterate."
         }
       },
       "required": [
@@ -4220,6 +4238,7 @@
               "type": "number"
             }
           ],
+          "description": "First value in the range, which is included.",
           "title": "Start"
         },
         "step": {
@@ -4232,6 +4251,7 @@
             }
           ],
           "default": 1,
+          "description": "Amount by which to increment each value.",
           "title": "Step"
         },
         "stop": {
@@ -4243,6 +4263,7 @@
               "type": "number"
             }
           ],
+          "description": "Value at which to stop, which is not included.",
           "title": "Stop"
         }
       },
@@ -5286,9 +5307,11 @@
               "type": "array"
             }
           ],
+          "description": "Name(s) of the argument(s) to substitute into the stage's command and paths.",
           "title": "Arg Name"
         },
         "values": {
+          "description": "Values over which to iterate.",
           "items": {
             "anyOf": [
               {

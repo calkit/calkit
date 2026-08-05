@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RangeIterationParams(BaseModel):
-    start: int | float
-    stop: int | float
-    step: int | float = 1
+    start: int | float = Field(
+        description="First value in the range, which is included."
+    )
+    stop: int | float = Field(
+        description="Value at which to stop, which is not included."
+    )
+    step: int | float = Field(
+        default=1, description="Amount by which to increment each value."
+    )
 
 
 class RangeIteration(BaseModel):
-    range: RangeIterationParams
+    range: RangeIterationParams = Field(
+        description="Bounds of the range over which to iterate."
+    )
 
     @property
     def values(self) -> list[int | float]:
@@ -64,7 +72,10 @@ ExpandedParametersType = dict[str, int | float | str | list[int | float | str]]
 
 
 class ParameterIteration(BaseModel):
-    parameter: str
+    parameter: str = Field(
+        description="Name of a project parameter whose list of values to "
+        "iterate over."
+    )
 
     def values_from_params(
         self, params: ParametersType | ExpandedParametersType

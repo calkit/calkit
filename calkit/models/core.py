@@ -129,7 +129,7 @@ class Environment(BaseModel):
         "venv",
         "uv-venv",
         "renv",
-    ]
+    ] = Field(description="What kind of environment this is.")
     # Note: ``path`` is declared on the specific subclasses that need it (most
     # of them, required; optional for Docker) rather than here, so subclasses
     # without a spec file (e.g. Matlab/Slurm/PBS) don't carry an unused field

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import inspect
 import re
 import types
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any, Union, get_args, get_origin
 
 import click
 import typer
+from pydantic import BaseModel
 from pydantic.fields import PydanticUndefined
 
 from calkit.cli.main.core import app
@@ -443,6 +445,14 @@ def _default_to_text(default: Any) -> str:
     return repr(default)
 
 
+def _description_to_text(field: Any) -> str:
+    """Render a field's description as a single-line table cell."""
+    description = getattr(field, "description", None)
+    if not description:
+        return ""
+    return " ".join(description.split())
+
+
 def _is_required(field: Any) -> bool:
     is_required = getattr(field, "is_required", None)
     if callable(is_required):
@@ -454,7 +464,10 @@ def _docstring_text(obj: Any) -> str:
     doc = getattr(obj, "__doc__", None)
     if not doc:
         return ""
-    lines = [line.strip() for line in doc.strip().splitlines()]
+    # cleandoc removes the uniform indentation Python docstrings carry while
+    # keeping any relative indentation, which markdown needs for things like
+    # wrapped list items
+    lines = inspect.cleandoc(doc).splitlines()
     cleaned: list[str] = []
     prev_blank = False
     for line in lines:
@@ -530,7 +543,7 @@ def _render_field_type(ann: Any) -> str:
 _ENV_META_FIELDS = ("description",)
 
 
-def _env_rows_from_model(cls: type[Any]) -> list[tuple[str, str, str]]:
+def _env_rows_from_model(cls: type[Any]) -> list[tuple[str, ...]]:
     """Derive doc table rows directly from a Pydantic environment model."""
     fields = cls.model_fields
     kind_specific = [
@@ -556,6 +569,10 @@ def _env_rows_from_model(cls: type[Any]) -> list[tuple[str, str, str]]:
                 param,
                 _render_field_type(field.annotation),
                 "required" if required else "optional",
+                # Subclasses narrow ``kind`` without restating what it means,
+                # so fall back to the base environment's description
+                _description_to_text(field)
+                or _description_to_text(Environment.model_fields.get(name)),
             )
         )
     return rows
@@ -583,7 +600,7 @@ def generate_environment_kinds_markdown() -> str:
         if _kind_for_model_class(cls)
     }
 
-    env_kinds: dict[str, list[tuple[str, str, str]]] = {
+    env_kinds: dict[str, list[tuple[str, ...]]] = {
         kind: _env_rows_from_model(cls)
         for kind, cls in env_classes_by_kind.items()
     }
@@ -602,17 +619,99 @@ def generate_environment_kinds_markdown() -> str:
                 param,
                 typ,
                 "yes" if requirement.strip().lower() == "required" else "no",
+                description,
             )
-            for param, typ, requirement in rows
+            for param, typ, requirement, description in rows
         ]
         lines.append(
             make_table(
                 normalized_rows,
-                ["Parameter", "Type", "Required"],
+                ["Parameter", "Type", "Required", "Description"],
             ).rstrip()
         )
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _models_in_annotation(annotation: Any) -> list[type[BaseModel]]:
+    """Find the Pydantic models a field annotation refers to.
+
+    Containers, unions, and ``Annotated`` are all unwrapped, so
+    ``list[str | PathOutput] | None`` yields ``PathOutput``.
+    """
+    found: list[type[BaseModel]] = []
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        found.append(annotation)
+    for arg in get_args(annotation):
+        found.extend(_models_in_annotation(arg))
+    return found
+
+
+def _collect_nested_models(
+    classes: list[type[BaseModel]],
+) -> list[type[BaseModel]]:
+    """Walk out from some models to every model reachable from their fields.
+
+    Breadth-first, so the models named directly in the parameter tables come
+    before the ones only reachable through them.
+    """
+    queue = [
+        model
+        for cls in classes
+        for field in cls.model_fields.values()
+        for model in _models_in_annotation(field.annotation)
+    ]
+    ordered: list[type[BaseModel]] = []
+    seen = set(classes)
+    while queue:
+        cls = queue.pop(0)
+        if cls in seen:
+            continue
+        seen.add(cls)
+        ordered.append(cls)
+        for field in cls.model_fields.values():
+            queue.extend(_models_in_annotation(field.annotation))
+    return ordered
+
+
+def _nested_type_markdown(classes: list[type[BaseModel]]) -> list[str]:
+    """Document the models that stage parameters are built out of.
+
+    The parameter tables can only name a type like ``PathOutput``; this is
+    where a reader finds out what actually goes inside one.
+    """
+    lines = [
+        "### Nested parameter types",
+        "",
+        "Some parameters above take objects rather than plain values. The "
+        "properties of each are described below.",
+        "",
+    ]
+    for cls in _collect_nested_models(classes):
+        lines.append(f"#### `{cls.__name__}`")
+        lines.append("")
+        docstring = _docstring_text(cls)
+        if docstring:
+            lines.append(docstring)
+            lines.append("")
+        rows = [
+            (
+                f"`{field.alias or name}`",
+                _annotation_to_text(field.annotation),
+                "yes" if _is_required(field) else "no",
+                _default_to_text(field.default),
+                _description_to_text(field),
+            )
+            for name, field in cls.model_fields.items()
+        ]
+        lines.append(
+            make_table(
+                rows,
+                ["Parameter", "Type", "Required", "Default", "Description"],
+            ).rstrip()
+        )
+        lines.append("")
+    return lines
 
 
 def generate_stage_kinds_markdown() -> str:
@@ -632,7 +731,7 @@ def generate_stage_kinds_markdown() -> str:
         "",
     ]
 
-    common_rows: list[tuple[str, str, str]] = []
+    common_rows: list[tuple[str, ...]] = []
     for name, field in base_fields.items():
         if name in {"kind", "name"}:
             continue
@@ -642,13 +741,20 @@ def generate_stage_kinds_markdown() -> str:
                 _annotation_to_text(field.annotation),
                 "yes" if _is_required(field) else "no",
                 _default_to_text(field.default),
-            )  # type: ignore
+                _description_to_text(field),
+            )
         )
     lines.append(
         make_table(
             common_rows,
-            ["Parameter", "Type", "Required", "Default"],
+            ["Parameter", "Type", "Required", "Default", "Description"],
         ).rstrip()
+    )
+    lines.append("")
+    lines.append(
+        "Parameters whose type is a named object, like `PathOutput`, are "
+        "described under "
+        "[nested parameter types](#nested-parameter-types)."
     )
     lines.append("")
 
@@ -657,7 +763,7 @@ def generate_stage_kinds_markdown() -> str:
         lines.append(f"### `{kind}`")
         lines.append("")
         lines.extend(_class_doc_lines(cls))
-        extra_rows: list[tuple[str, str, str]] = []
+        extra_rows: list[tuple[str, ...]] = []
         for name, field in cls.model_fields.items():
             if name == "kind":
                 continue
@@ -678,7 +784,12 @@ def generate_stage_kinds_markdown() -> str:
                     _annotation_to_text(field.annotation),
                     "yes" if _is_required(field) else "no",
                     _default_to_text(field.default),
-                )  # type: ignore
+                    # A subclass that overrides a field only to change its
+                    # default doesn't restate the description, so fall back to
+                    # the base stage's
+                    _description_to_text(field)
+                    or _description_to_text(base_field),
+                )
             )
         if extra_rows:
             lines.append(
@@ -689,12 +800,14 @@ def generate_stage_kinds_markdown() -> str:
                         "Type",
                         "Required",
                         "Default",
+                        "Description",
                     ],
                 ).rstrip()
             )
         else:
             lines.append("No additional kind-specific parameters.")
         lines.append("")
+    lines.extend(_nested_type_markdown([Stage] + stage_classes))
     return "\n".join(lines).rstrip() + "\n"
 
 

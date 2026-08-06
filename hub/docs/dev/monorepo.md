@@ -187,12 +187,13 @@ Migration cost is low and mostly in calkit-python:
   (`frontend/src/routes/_layout/index.tsx:265`) and one in the backend.
 - calkit-python has ~35 strings in the package and about ten docs pages,
   including `ProjectInfo` field descriptions that read "on Calkit Cloud."
-- `calkit cloud` has exactly two commands, `get` and `login`. A top-level
-  `calkit login` conflicts with nothing. Use the existing alias convention
-  (`name="new|create"`, `name="list|ls"`) so `calkit cloud login` keeps working
-  indefinitely.
-- Leave `calkit/cloud.py` and `calkit.cloud.get_base_url()` alone at first.
-  Module paths are internal and churning them conflicts every open branch.
+- **Done:** the CLI group is `calkit hub` with `cloud` kept as an alias via
+  the existing `name="hub|cloud"` convention, and the ~30 "Calkit Cloud"
+  strings in the package now say "Calkit" or "the hub". The docs pages still
+  need their pass.
+- **Done:** `calkit/cloud.py` moved to `calkit/hub.py`, with a module alias
+  left at the old path (it assigns ``sys.modules`` so both names are the
+  same module object).
 
 **Open, and a product decision hiding in a naming decision:** whether a Calkit
 project implies a hub. Today a project is fully functional offline (init,
@@ -219,18 +220,22 @@ against a known instance instead of whatever `CALKIT_ENV` the shell has. Two
 hubs would mean two different blobs behind the same URL and two answers to who
 can read it.
 
-**Blocking constraint:** `ProjectInfo` sets `extra="forbid"` and is the source
-of truth for the published JSON schema. If the backend writes `hub:` before
-calkit-python declares the field, every newly created project fails
-`calkit check` and gets flagged in editors. The field must land and release in
-calkit-python first. This is exactly the cross-repo lockstep the monorepo
-dissolves.
+**Sequencing constraint (softer than earlier versions of this doc
+claimed):** `ProjectInfo` does not set `extra="forbid"` — verified
+empirically, unknown keys validate fine — so old CLIs silently ignore a
+`hub:` key rather than failing `calkit check`. The field should still land
+and release in calkit-python before the backend writes it, so that up-to-date
+CLIs can actually use it, but nothing breaks in the interim. The field now
+exists on the `merge-hub` branch.
 
 ### How the CLI should use it
 
-- **Now:** provenance plus a mismatch warning. If `hub` says calkit.io and the
-  resolved API URL points at staging, warn. Existing env-based resolution stays
-  the source of truth, so nothing breaks.
+- **Done:** provenance plus a mismatch warning. `calkit push` and `calkit
+  pull` warn when the project declares a hub other than the one env-based
+  resolution is targeting; the env stays the source of truth, so nothing
+  breaks. `calkit hub` subcommands additionally default to the wdir
+  project's declared hub when `CALKIT_ENV` is unset, and accept `--hub`
+  for the built-in instances.
 - **Later:** discovery, so `hub` is actionable for arbitrary instances. Note
   the web and API URLs are not related by a derivable convention: production is
   calkit.io and api.calkit.io (a prefix), but dev is localhost:5173 and

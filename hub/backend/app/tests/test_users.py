@@ -1,9 +1,11 @@
 """Tests for ``app.users``."""
 
+import pytest
 from app import users
 from app.models import User, UserCreate, UserUpdate
 from app.security import verify_password
 from app.tests import random_email, random_lower_string
+from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 from sqlmodel import Session
 
@@ -15,6 +17,20 @@ def test_create_user(db: Session) -> None:
     user = users.create_user(session=db, user_create=user_in)
     assert user.email == email
     assert hasattr(user, "hashed_password")
+
+
+def test_create_user_reserved_account_names(db: Session) -> None:
+    # Route segments and product vocabulary can't be account names, in any
+    # casing, since account names live at the URL root
+    for name in ["hub", "cloud", "calkit", "Hub", "CLOUD", "settings"]:
+        user_in = UserCreate(
+            email=random_email(),
+            password=random_lower_string(),
+            account_name=name,
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            users.create_user(session=db, user_create=user_in)
+        assert exc_info.value.status_code == 422
 
 
 def test_authenticate_user(db: Session) -> None:

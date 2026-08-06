@@ -87,6 +87,9 @@ dev = [
   "pytest-env>=1.1.5",
   "pytest-httpserver>=1.0.0",
   "pytest-xdist>=3.8.0",
+  # For the hub backend format hook, which runs ruff via uv from the
+  # default workspace environment
+  "ruff",
   "mkdocs-glightbox>=0.5.2",
   "scipy>=1.15.3",
 ]

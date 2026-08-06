@@ -46,8 +46,8 @@ with psycopg.connect(
 		)
 PY
 
-python /app/scripts/backend-pre-start.py
+python scripts/backend-pre-start.py
 alembic upgrade head
-python /app/scripts/create-initial-data.py
+python scripts/create-initial-data.py
 
 bash ./scripts/test.sh "$@"

@@ -1,27 +1,34 @@
-name: Deploy to staging
+name: Deploy hub to production
 
-concurrency: staging
+concurrency: production
 
 on:
-  push:
-    branches:
-      - main
+  release:
+    types:
+      - published
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version to deploy (tag, branch, or commit SHA)"
+      tag:
+        description: "Published release tag to deploy, e.g. hub/v1.2.3. Use this to roll back by redeploying a previous release."
         required: true
-        default: "main"
         type: string
 
 jobs:
   deploy:
-    environment: staging
+    # Only hub releases deploy here; other release tags in the monorepo
+    # (e.g., v1.2.3 for the package) must not trigger a production deploy
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'hub/v')
+    environment: production
     runs-on:
       - self-hosted
-      - staging
+      - production
+    defaults:
+      run:
+        working-directory: hub
     env:
-      ENVIRONMENT: staging
+      ENVIRONMENT: production
       PROJECT_NAME: ${{ vars.PROJECT_NAME }}
       DOMAIN: ${{ vars.DOMAIN }}
       BACKEND_CORS_ORIGINS: "https://${{ vars.DOMAIN }}"
@@ -58,9 +65,29 @@ jobs:
       ZOTERO_CLIENT_SECRET: ${{ secrets.ZOTERO_CLIENT_SECRET }}
       GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
     steps:
+      - name: Resolve and validate release tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          echo "Validating release tag: $TAG"
+          status=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG")
+          if [ "$status" != "200" ]; then
+            echo "::error::'$TAG' is not a published release (HTTP $status); only tagged releases can be deployed."
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.inputs.version || github.ref }}
+          ref: ${{ steps.tag.outputs.tag }}
       - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} build
       - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} up -d

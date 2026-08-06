@@ -13,5 +13,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+      # The hub frontend format hook runs its pinned Biome via npx
+      - name: Install hub frontend dependencies
+        run: npm ci
+        working-directory: hub/frontend
       - name: Check format
         run: make format
+      - name: Fail if any files were reformatted
+        if: always()
+        run: git diff --exit-code

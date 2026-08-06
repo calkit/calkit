@@ -61,6 +61,12 @@ calkit-python = { workspace = true }
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.pytest.ini_options]
+# Anchor pytest's rootdir/config here; without this section pytest ascends
+# to the workspace root pyproject, whose addopts assume the calkit dev
+# environment (xdist, pytest-jupyter)
+testpaths = ["app/tests"]
+
 [tool.mypy]
 strict = true
 exclude = ["venv", ".venv", "alembic"]

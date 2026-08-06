@@ -1,25 +1,53 @@
+# Formatting is split by ownership: the root hooks cover the calkit package
+# and repo-wide files, while hub code is formatted by the hub projects' OWN
+# tools (uv-managed ruff for the backend, the pinned Biome for the frontend)
+# so the rules/versions match hub/backend/pyproject.toml and
+# hub/frontend/biome.json exactly -- no second, drifting copy to keep in sync.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: "v4.4.0"
     hooks:
+      - id: check-added-large-files
       - id: check-case-conflict
       - id: check-merge-conflict
         exclude: ^docs/overleaf\.md$
+      - id: check-toml
       - id: end-of-file-fixer
+        exclude: ^hub/frontend/src/client/
       - id: trailing-whitespace
+        exclude: ^hub/frontend/src/client/
       - id: check-yaml
         args: ["--unsafe"]
       - id: check-json
+        # The hub has JSONC files (tsconfig.json, .vscode/launch.json)
+        exclude: ^hub/
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: "v0.6.3"
     hooks:
       - id: ruff
         args: [--exit-non-zero-on-fix]
+        exclude: ^hub/
       - id: ruff-format
+        exclude: ^hub/
 
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: "v3.0.3"
     hooks:
       - id: prettier
-        exclude: calkit
+        exclude: calkit|^hub/
+
+  - repo: local
+    hooks:
+      - id: ruff-format-hub-backend
+        name: ruff format (hub backend)
+        language: system
+        entry: bash -c 'cd hub/backend && uv run ruff format'
+        pass_filenames: false
+        files: ^hub/backend/.*\.py$
+      - id: biome-format-hub-frontend
+        name: biome format (hub frontend)
+        language: system
+        entry: bash -c 'cd hub/frontend && npx biome format --write ./src'
+        pass_filenames: false
+        files: ^hub/frontend/src/.*\.(jsx?|tsx?|jsonc?|css)$

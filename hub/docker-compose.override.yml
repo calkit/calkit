@@ -61,11 +61,14 @@ services:
       - .env
     ports:
       - "8000:8000"
+    # Mount the repo root so edits to both the backend and the calkit
+    # package on the host are live in the container
     volumes:
-      - ./backend/:/app
+      - ../:/app
       - /app/.venv
     build:
-      context: ./backend
+      context: ..
+      dockerfile: hub/backend/Dockerfile
       args:
         INSTALL_DEV: ${INSTALL_DEV-true}
     command:
@@ -85,11 +88,14 @@ services:
       - .env
     ports:
       - "8001:8000"
+    # Mount the repo root so edits to both the backend and the calkit
+    # package on the host are live in the container
     volumes:
-      - ./backend/:/app
+      - ../:/app
       - /app/.venv
     build:
-      context: ./backend
+      context: ..
+      dockerfile: hub/backend/Dockerfile
       args:
         INSTALL_DEV: ${INSTALL_DEV-true}
     command:

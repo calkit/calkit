@@ -46,7 +46,8 @@ services:
     image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
     pull_policy: never # We build locally on deploy
     build:
-      context: ./backend
+      context: ..
+      dockerfile: hub/backend/Dockerfile
     networks:
       - traefik-public
       - default
@@ -141,7 +142,8 @@ services:
     # don't double-count, then recreate the dir before workers start.
     command: ["sh", "-c", "rm -rf /tmp/prometheus_multiproc && mkdir -p /tmp/prometheus_multiproc && exec fastapi run --workers 8 app/main.py"]
     build:
-      context: ./backend
+      context: ..
+      dockerfile: hub/backend/Dockerfile
       args:
         INSTALL_DEV: ${INSTALL_DEV-false}
     labels:

@@ -89,6 +89,8 @@ There is a main `docker-compose.yml` file with all the configurations that apply
 
 And there's also a `docker-compose.override.yml` with overrides for development, for example to mount the source code as a volume. It is used automatically by `docker compose` to apply overrides on top of `docker-compose.yml`.
 
+The backend dev containers mount the repo root at `/app`, so edits to both the backend and the `calkit` package are live in the container (the backend installs calkit-python from the uv workspace, not from PyPI). The container's environment lives in an anonymous volume at `/app/.venv`, which masks dependency changes: after editing either the root or backend `pyproject.toml`, recreate it with `docker compose up -d --build --renew-anon-volumes backend`.
+
 These Docker Compose files use the `.env` file containing configurations to be injected as environment variables in the containers.
 
 They also use some additional configurations taken from environment variables set in the scripts before calling the `docker compose` command.

@@ -292,9 +292,18 @@ chart. Hold the chart until someone asks.
 2. ~~Settle the directory name and add the release tag guards.~~ Done:
    directory `hub/`, tags `hub/v*`, production deploy guarded, staging needs
    no guard.
-3. Subtree merge (`git subtree add --prefix=hub`), move workflows with a
-   `changes` gating job, move GitHub environments, secrets, and self-hosted
-   runner registration.
+3. ~~Subtree merge (`git subtree add --prefix=hub`), move workflows with a
+   `changes` gating job~~, move GitHub environments, secrets, and self-hosted
+   runner registration. The merge and the code side landed on the
+   `merge-hub` branch: the backend is a uv workspace member building calkit
+   from the working tree (the backend image builds with the repo root as
+   context, pretending a version for hatch-vcs and disabling the JupyterLab
+   extension build hooks), hub workflows moved to the root gated by a
+   `changes` job, and the two pre-commit configs merged into one at the root
+   with hub code still formatted by hub's own tools. What remains of this
+   step is the GitHub settings half: move environments, secrets, and
+   variables, register the self-hosted runners against calkit/calkit,
+   transfer issues, and archive calkit-cloud.
 4. Add `hub` to `ProjectInfo`, release calkit-python, then write the key from
    the backend on project creation.
 5. Generalize the CLI config key from env to hub.

@@ -51,16 +51,19 @@ By default, the dependencies are managed with
 [uv](https://docs.astral.sh/uv/),
 go there and install it.
 
-From `./backend/` you can install all the dependencies with:
+The backend is a member of the repo's uv workspace, which installs
+calkit-python from the working tree.
+From this directory you can install all the dependencies with:
 
 ```console
 $ uv sync
 ```
 
-Then you can start a shell session with the new environment with:
+Then you can start a shell session with the new environment (which lives at
+the repo root) with:
 
 ```console
-$ source .venv/bin/activate
+$ source ../../.venv/bin/activate
 ```
 
 Make sure your editor is using the correct Python virtual environment.

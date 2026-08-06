@@ -1,4 +1,4 @@
-"""Unit tests for calkit.cloud token management."""
+"""Unit tests for calkit.hub token management."""
 
 from __future__ import annotations
 
@@ -9,18 +9,32 @@ import time
 
 import pytest
 
-import calkit.cloud as cloud
+import calkit.hub as hub
 
 
 def test_get_base_url_env_override(monkeypatch):
     monkeypatch.setenv("CALKIT_CLOUD_BASE_URL", "http://localhost:9999")
-    assert cloud.get_base_url() == "http://localhost:9999"
+    assert hub.get_base_url() == "http://localhost:9999"
 
 
 def test_get_base_url_no_override(monkeypatch):
     monkeypatch.delenv("CALKIT_CLOUD_BASE_URL", raising=False)
     # CALKIT_ENV=test is set by pytest config → should return the test-env URL
-    assert cloud.get_base_url() == "http://api.localhost"
+    assert hub.get_base_url() == "http://api.localhost"
+
+
+def test_hub_urls(monkeypatch):
+    # CALKIT_ENV=test is set by pytest config → the local dev web app URL
+    assert hub.get_hub_url() == "http://localhost:5173"
+    monkeypatch.setenv("CALKIT_ENV", "production")
+    assert hub.get_hub_url() == "https://calkit.io"
+    # Known hub URLs map back to their environment names, tolerating a
+    # trailing slash; arbitrary hubs are not yet resolvable
+    assert hub.env_for_hub("https://calkit.io") == "production"
+    assert hub.env_for_hub("https://calkit.io/") == "production"
+    assert hub.env_for_hub("https://staging.calkit.io") == "staging"
+    assert hub.env_for_hub("http://localhost:5173") == "local"
+    assert hub.env_for_hub("https://other-calkit.io") is None
 
 
 def _make_jwt(exp: float) -> str:
@@ -37,45 +51,45 @@ def _make_jwt(exp: float) -> str:
 def test_jwt_exp_extracts_claim():
     exp = time.time() + 3600
     token = _make_jwt(exp)
-    assert cloud._jwt_exp(token) == pytest.approx(exp, abs=1)
+    assert hub._jwt_exp(token) == pytest.approx(exp, abs=1)
 
 
 def test_jwt_exp_returns_none_for_opaque_token():
-    assert cloud._jwt_exp("ckp_someopaquesecret") is None
+    assert hub._jwt_exp("ckp_someopaquesecret") is None
 
 
 def test_jwt_exp_returns_none_for_malformed():
     # Too many segments — payload is not valid JSON
-    assert cloud._jwt_exp("not.a.jwt.at.all.with.too.many.parts") is None
+    assert hub._jwt_exp("not.a.jwt.at.all.with.too.many.parts") is None
     # No dots at all — split(".")[1] raises IndexError, caught → None
-    assert cloud._jwt_exp("notajwt") is None
+    assert hub._jwt_exp("notajwt") is None
 
 
 def test_token_is_expiring_false_when_far_in_future():
     token = _make_jwt(time.time() + 3600)
-    assert cloud._token_is_expiring(token) is False
+    assert hub._token_is_expiring(token) is False
 
 
 def test_token_is_expiring_true_when_within_buffer():
-    token = _make_jwt(time.time() + cloud._REFRESH_BUFFER_SECONDS - 1)
-    assert cloud._token_is_expiring(token) is True
+    token = _make_jwt(time.time() + hub._REFRESH_BUFFER_SECONDS - 1)
+    assert hub._token_is_expiring(token) is True
 
 
 def test_token_is_expiring_false_for_pat():
     # Opaque PATs have no exp claim — should never be considered expiring
-    assert cloud._token_is_expiring("ckp_someopaquesecret") is False
+    assert hub._token_is_expiring("ckp_someopaquesecret") is False
 
 
 def test_get_token_returns_cached_pat(monkeypatch):
-    base_url = cloud.get_base_url()
-    monkeypatch.setitem(cloud._tokens, base_url, "pat-token")
-    assert cloud.get_token() == "pat-token"
+    base_url = hub.get_base_url()
+    monkeypatch.setitem(hub._tokens, base_url, "pat-token")
+    assert hub.get_token() == "pat-token"
 
 
 def test_get_token_proactively_refreshes_expiring_jwt(monkeypatch):
-    base_url = cloud.get_base_url()
+    base_url = hub.get_base_url()
     expiring = _make_jwt(time.time() + 10)  # within buffer
-    monkeypatch.setitem(cloud._tokens, base_url, expiring)
+    monkeypatch.setitem(hub._tokens, base_url, expiring)
 
     class DummyCfg:
         token = None
@@ -88,19 +102,19 @@ def test_get_token_proactively_refreshes_expiring_jwt(monkeypatch):
     fresh = _make_jwt(time.time() + 3600)
 
     def _fake_do_refresh():
-        cloud._tokens[base_url] = fresh
+        hub._tokens[base_url] = fresh
         return fresh
 
-    monkeypatch.setattr(cloud, "_do_refresh", _fake_do_refresh)
-    monkeypatch.setattr(cloud.config, "read", lambda: DummyCfg())
-    assert cloud.get_token() == fresh
+    monkeypatch.setattr(hub, "_do_refresh", _fake_do_refresh)
+    monkeypatch.setattr(hub.config, "read", lambda: DummyCfg())
+    assert hub.get_token() == fresh
 
 
 def test_get_token_falls_back_to_pat_in_config(monkeypatch):
-    base_url = cloud.get_base_url()
-    monkeypatch.setitem(cloud._tokens, base_url, None)
+    base_url = hub.get_base_url()
+    monkeypatch.setitem(hub._tokens, base_url, None)
     # Ensure the None entry is actually absent so the cache miss path runs
-    del cloud._tokens[base_url]
+    del hub._tokens[base_url]
 
     class DummyCfg:
         token = "my-pat"
@@ -110,14 +124,14 @@ def test_get_token_falls_back_to_pat_in_config(monkeypatch):
         def write(self):
             pass
 
-    monkeypatch.setattr(cloud.config, "read", lambda: DummyCfg())
-    assert cloud.get_token() == "my-pat"
-    assert cloud._tokens[base_url] == "my-pat"
+    monkeypatch.setattr(hub.config, "read", lambda: DummyCfg())
+    assert hub.get_token() == "my-pat"
+    assert hub._tokens[base_url] == "my-pat"
 
 
 def test_get_token_raises_when_no_credentials(monkeypatch):
-    base_url = cloud.get_base_url()
-    cloud._tokens.pop(base_url, None)
+    base_url = hub.get_base_url()
+    hub._tokens.pop(base_url, None)
 
     class DummyCfg:
         token = None
@@ -127,13 +141,13 @@ def test_get_token_raises_when_no_credentials(monkeypatch):
         def write(self):
             pass
 
-    monkeypatch.setattr(cloud.config, "read", lambda: DummyCfg())
-    with pytest.raises(ValueError, match="calkit cloud login"):
-        cloud.get_token()
+    monkeypatch.setattr(hub.config, "read", lambda: DummyCfg())
+    with pytest.raises(ValueError, match="calkit hub login"):
+        hub.get_token()
 
 
 def test_do_refresh_returns_new_token(monkeypatch):
-    base_url = cloud.get_base_url()
+    base_url = hub.get_base_url()
 
     class DummyCfg:
         refresh_token = "old-refresh"
@@ -153,12 +167,12 @@ def test_do_refresh_returns_new_token(monkeypatch):
         def json(self):
             return {"access_token": fresh, "refresh_token": "new-refresh"}
 
-    monkeypatch.setattr(cloud.config, "read", lambda: DummyCfg())
-    monkeypatch.setattr(cloud.requests, "post", lambda *_a, **_kw: DummyResp())
-    with cloud._refresh_lock:
-        result = cloud._do_refresh()
+    monkeypatch.setattr(hub.config, "read", lambda: DummyCfg())
+    monkeypatch.setattr(hub.requests, "post", lambda *_a, **_kw: DummyResp())
+    with hub._refresh_lock:
+        result = hub._do_refresh()
     assert result == fresh
-    assert cloud._tokens[base_url] == fresh
+    assert hub._tokens[base_url] == fresh
 
 
 def test_do_refresh_returns_none_on_http_error(monkeypatch):
@@ -178,10 +192,10 @@ def test_do_refresh_returns_none_on_http_error(monkeypatch):
         def json(self):
             return {}
 
-    monkeypatch.setattr(cloud.config, "read", lambda: DummyCfg())
-    monkeypatch.setattr(cloud.requests, "post", lambda *_a, **_kw: FailResp())
-    with cloud._refresh_lock:
-        result = cloud._do_refresh()
+    monkeypatch.setattr(hub.config, "read", lambda: DummyCfg())
+    monkeypatch.setattr(hub.requests, "post", lambda *_a, **_kw: FailResp())
+    with hub._refresh_lock:
+        result = hub._do_refresh()
     assert result is None
 
 
@@ -193,14 +207,14 @@ def test_do_refresh_returns_none_when_no_refresh_token(monkeypatch):
         def write(self):
             pass
 
-    monkeypatch.setattr(cloud.config, "read", lambda: DummyCfg())
-    with cloud._refresh_lock:
-        result = cloud._do_refresh()
+    monkeypatch.setattr(hub.config, "read", lambda: DummyCfg())
+    with hub._refresh_lock:
+        result = hub._do_refresh()
     assert result is None
 
 
 def test_request_retries_on_401_with_refresh(monkeypatch):
-    base_url = cloud.get_base_url()
+    base_url = hub.get_base_url()
     fresh = _make_jwt(time.time() + 3600)
     call_count = {"n": 0}
 
@@ -230,10 +244,10 @@ def test_request_retries_on_401_with_refresh(monkeypatch):
             return Resp401()
         return Resp200()
 
-    monkeypatch.setattr(cloud.requests, "get", _fake_get)
-    monkeypatch.setitem(cloud._tokens, base_url, fresh)
-    monkeypatch.setattr(cloud, "_try_refresh", lambda: fresh)
-    result = cloud._request("get", "/test", base_url=base_url)
+    monkeypatch.setattr(hub.requests, "get", _fake_get)
+    monkeypatch.setitem(hub._tokens, base_url, fresh)
+    monkeypatch.setattr(hub, "_try_refresh", lambda: fresh)
+    result = hub._request("get", "/test", base_url=base_url)
     assert result == {"ok": True}
     assert call_count["n"] == 2
 
@@ -241,7 +255,7 @@ def test_request_retries_on_401_with_refresh(monkeypatch):
 def test_request_invalid_credentials_403_triggers_refresh(monkeypatch):
     """A 403 whose detail says credentials are invalid should be treated
     like a 401 — refresh attempted, request retried."""
-    base_url = cloud.get_base_url()
+    base_url = hub.get_base_url()
     fresh = _make_jwt(time.time() + 3600)
     call_count = {"n": 0}
 
@@ -269,10 +283,10 @@ def test_request_invalid_credentials_403_triggers_refresh(monkeypatch):
         call_count["n"] += 1
         return Resp403() if call_count["n"] == 1 else Resp200()
 
-    monkeypatch.setattr(cloud.requests, "get", _fake_get)
-    monkeypatch.setitem(cloud._tokens, base_url, fresh)
-    monkeypatch.setattr(cloud, "_try_refresh", lambda: fresh)
-    result = cloud._request("get", "/test", base_url=base_url)
+    monkeypatch.setattr(hub.requests, "get", _fake_get)
+    monkeypatch.setitem(hub._tokens, base_url, fresh)
+    monkeypatch.setattr(hub, "_try_refresh", lambda: fresh)
+    result = hub._request("get", "/test", base_url=base_url)
     assert result == {"ok": True}
     assert call_count["n"] == 2
 
@@ -281,7 +295,7 @@ def test_request_permission_403_does_not_trigger_refresh(monkeypatch):
     """A 403 that's a real permission denial (e.g. user not allowed to
     create a project under an org) must surface as an HTTPError, not
     silently trigger refresh/device login."""
-    base_url = cloud.get_base_url()
+    base_url = hub.get_base_url()
     fresh = _make_jwt(time.time() + 3600)
     call_count = {"n": 0}
     refresh_calls = {"n": 0}
@@ -305,11 +319,11 @@ def test_request_permission_403_does_not_trigger_refresh(monkeypatch):
         refresh_calls["n"] += 1
         return fresh
 
-    monkeypatch.setattr(cloud.requests, "post", _fake_post)
-    monkeypatch.setitem(cloud._tokens, base_url, fresh)
-    monkeypatch.setattr(cloud, "_try_refresh", _fake_refresh)
+    monkeypatch.setattr(hub.requests, "post", _fake_post)
+    monkeypatch.setitem(hub._tokens, base_url, fresh)
+    monkeypatch.setattr(hub, "_try_refresh", _fake_refresh)
     with pytest.raises(Exception):
-        cloud._request("post", "/projects", base_url=base_url)
+        hub._request("post", "/projects", base_url=base_url)
     assert call_count["n"] == 1
     assert refresh_calls["n"] == 0
 
@@ -319,11 +333,11 @@ def test_request_retries_on_transient_5xx(monkeypatch):
     eventually exhausts retries and surfaces as an HTTPError."""
     from requests.exceptions import HTTPError
 
-    base_url = cloud.get_base_url()
+    base_url = hub.get_base_url()
     fresh = _make_jwt(time.time() + 3600)
-    monkeypatch.setitem(cloud._tokens, base_url, fresh)
+    monkeypatch.setitem(hub._tokens, base_url, fresh)
     # Avoid real sleeping during backoff.
-    monkeypatch.setattr(cloud.time, "sleep", lambda *_a, **_kw: None)
+    monkeypatch.setattr(hub.time, "sleep", lambda *_a, **_kw: None)
 
     class Resp:
         def __init__(self, status_code):
@@ -346,8 +360,8 @@ def test_request_retries_on_transient_5xx(monkeypatch):
             calls["n"] += 1
             return Resp(status)
 
-        monkeypatch.setattr(cloud.requests, "get", _fake_get)
-        result = cloud._request("get", "/test", base_url=base_url)
+        monkeypatch.setattr(hub.requests, "get", _fake_get)
+        result = hub._request("get", "/test", base_url=base_url)
         assert result == {"ok": True}
         assert calls["n"] == 2
     # Case 2: a persistent 500 exhausts all retries and raises HTTPError.
@@ -357,9 +371,9 @@ def test_request_retries_on_transient_5xx(monkeypatch):
         persistent["n"] += 1
         return Resp(500)
 
-    monkeypatch.setattr(cloud.requests, "get", _fake_get_500)
+    monkeypatch.setattr(hub.requests, "get", _fake_get_500)
     with pytest.raises(HTTPError):
-        cloud._request("get", "/test", base_url=base_url)
+        hub._request("get", "/test", base_url=base_url)
     # Initial attempt plus max_retries follow-ups.
     assert persistent["n"] == 11
 
@@ -370,10 +384,10 @@ def test_request_retries_on_network_error(monkeypatch):
     from requests.exceptions import ConnectionError as ReqConnErr
     from requests.exceptions import Timeout
 
-    base_url = cloud.get_base_url()
+    base_url = hub.get_base_url()
     fresh = _make_jwt(time.time() + 3600)
-    monkeypatch.setitem(cloud._tokens, base_url, fresh)
-    monkeypatch.setattr(cloud.time, "sleep", lambda *_a, **_kw: None)
+    monkeypatch.setitem(hub._tokens, base_url, fresh)
+    monkeypatch.setattr(hub.time, "sleep", lambda *_a, **_kw: None)
 
     class Resp200:
         status_code = 200
@@ -394,8 +408,8 @@ def test_request_retries_on_network_error(monkeypatch):
             raise errors[calls["n"] - 1]
         return Resp200()
 
-    monkeypatch.setattr(cloud.requests, "get", _fake_get)
-    assert cloud._request("get", "/test", base_url=base_url) == {"ok": True}
+    monkeypatch.setattr(hub.requests, "get", _fake_get)
+    assert hub._request("get", "/test", base_url=base_url) == {"ok": True}
     assert calls["n"] == 3
     # Case 2: a persistent network error exhausts retries and propagates.
     persistent = {"n": 0}
@@ -404,25 +418,25 @@ def test_request_retries_on_network_error(monkeypatch):
         persistent["n"] += 1
         raise Timeout("read timeout")
 
-    monkeypatch.setattr(cloud.requests, "get", _always_timeout)
+    monkeypatch.setattr(hub.requests, "get", _always_timeout)
     with pytest.raises(Timeout):
-        cloud._request("get", "/test", base_url=base_url)
+        hub._request("get", "/test", base_url=base_url)
     assert persistent["n"] == 11
 
 
 def test_concurrent_refresh_fires_only_once(monkeypatch):
     """Many threads calling get_token() on an expiring JWT should trigger
     exactly one refresh request, not one per thread."""
-    base_url = cloud.get_base_url()
+    base_url = hub.get_base_url()
     expiring = _make_jwt(time.time() + 10)
-    cloud._tokens[base_url] = expiring
+    hub._tokens[base_url] = expiring
     refresh_call_count = {"n": 0}
     fresh = _make_jwt(time.time() + 3600)
 
     def _fake_do_refresh():
         refresh_call_count["n"] += 1
         time.sleep(0.02)  # simulate network latency
-        cloud._tokens[base_url] = fresh
+        hub._tokens[base_url] = fresh
         return fresh
 
     class DummyCfg:
@@ -433,12 +447,12 @@ def test_concurrent_refresh_fires_only_once(monkeypatch):
         def write(self):
             pass
 
-    monkeypatch.setattr(cloud, "_do_refresh", _fake_do_refresh)
-    monkeypatch.setattr(cloud.config, "read", lambda: DummyCfg())
+    monkeypatch.setattr(hub, "_do_refresh", _fake_do_refresh)
+    monkeypatch.setattr(hub.config, "read", lambda: DummyCfg())
     results = []
 
     def _worker():
-        results.append(cloud.get_token())
+        results.append(hub.get_token())
 
     threads = [threading.Thread(target=_worker) for _ in range(20)]
     for t in threads:

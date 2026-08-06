@@ -282,7 +282,7 @@ def _calkit_cloud_available(
     """Check if Calkit Cloud is available."""
     with patch.dict(os.environ, {"CALKIT_ENV": env}):
         try:
-            calkit.cloud.get_current_user()
+            calkit.hub.get_current_user()
             return True
         except Exception:
             return False

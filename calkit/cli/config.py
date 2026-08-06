@@ -330,7 +330,7 @@ def config_github_codespace():
         typer.echo("No GitHub token found; exiting")
         raise typer.Exit()
     try:
-        resp = calkit.cloud.post(
+        resp = calkit.hub.post(
             "/login/github-token",
             headers={"Authorization": f"Bearer {github_token}"},
             auth=False,

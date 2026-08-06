@@ -13,17 +13,17 @@ Path format:
     - project: Project name
     - path/to/file: File path within the project (optional)
 
-Supported storage backends (via Calkit Cloud API):
+Supported storage backends (via the Calkit hub API):
     - Google Cloud Storage (GCS) - presigned URLs
     - Amazon S3 - presigned URLs
     - Google Drive - OAuth + API
     - Box - OAuth + API
-    - Other storage providers as configured in Calkit Cloud
+    - Other storage providers as configured in the hub
 
 Multi-cloud support:
-    By default, the filesystem routes to the Calkit Cloud API endpoint
+    By default, the filesystem routes to the Calkit hub API endpoint
     configured by CALKIT_ENV (production, staging, etc.). To use a different
-    Calkit Cloud instance:
+    Calkit hub:
 
     - DVC config: dvc remote modify myremote endpointurl https://api.other.com
     - URI query: ck://owner/project/file?endpoint_url=https://api.other.com
@@ -136,7 +136,7 @@ class CalkitFileSystem(AbstractFileSystem):
     information, then uses the appropriate method to interact with the
     underlying storage backend.
 
-    The Calkit Cloud API acts as a compatibility layer that:
+    The Calkit hub API acts as a compatibility layer that:
 
     - Determines which storage backend is configured for each project
     - Returns appropriate access credentials (presigned URLs, OAuth tokens,
@@ -172,7 +172,7 @@ class CalkitFileSystem(AbstractFileSystem):
     protocol : str
         The protocol scheme for this filesystem ("ck")
     base_url : str
-        The Calkit Cloud API endpoint URL, configured via endpointurl in DVC
+        The Calkit hub API endpoint URL, configured via endpointurl in DVC
         config, endpoint_url in URI query, or CALKIT_ENV environment variable.
         Defaults to production (https://api.calkit.io) when unspecified.
     """
@@ -187,8 +187,8 @@ class CalkitFileSystem(AbstractFileSystem):
 
     @property
     def base_url(self) -> str:
-        """Get the base URL for the Calkit Cloud API."""
-        return self._base_url or calkit.cloud.get_base_url()
+        """Get the base URL for the Calkit hub API."""
+        return self._base_url or calkit.hub.get_base_url()
 
     @staticmethod
     def _normalize_info(
@@ -222,7 +222,7 @@ class CalkitFileSystem(AbstractFileSystem):
             request_body["content_length"] = content_length
         if content_type is not None:
             request_body["content_type"] = content_type
-        resp = calkit.cloud.post(
+        resp = calkit.hub.post(
             endpoint, json=request_body, base_url=self.base_url
         )
         # Validate response has required fields
@@ -250,7 +250,7 @@ class CalkitFileSystem(AbstractFileSystem):
         }
         if include:
             request_body["include"] = include
-        resp = calkit.cloud.post(
+        resp = calkit.hub.post(
             endpoint, json=request_body, base_url=self.base_url
         )
         if "backend" not in resp:
@@ -1092,7 +1092,7 @@ class CalkitFile(AbstractBufferedFile):
                 self.owner, self.project, self.file_path, "get"
             )
         # Add Range header for partial content
-        # For backends where range is unsupported, the Calkit Cloud API can
+        # For backends where range is unsupported, the Calkit hub API can
         # choose to ignore this header or return a backend-specific request
         # configuration
         headers = {"Range": f"bytes={start}-{end - 1}"}

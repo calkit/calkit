@@ -60,7 +60,7 @@ def _get_overleaf_token() -> str:
         if calkit_config.token is not None:
             try:
                 typer.echo("Getting Overleaf token from cloud")
-                resp = calkit.cloud.get("/user/overleaf-token")
+                resp = calkit.hub.get("/user/overleaf-token")
                 overleaf_token = resp["access_token"]
                 calkit_config.overleaf_token = overleaf_token
                 calkit_config.write()

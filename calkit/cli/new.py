@@ -153,7 +153,7 @@ def new_project(
             )
         # We don't have a project name but do have a Git repo URL, the
         # project name will be the Git repo name lowercased, since that's
-        # how the Calkit Cloud will create the project name by default
+        # how the hub will create the project name by default
         if name is None and git_repo_url is not None:
             name = git_repo_url.split("/")[-1].lower()
         # If this isn't a DVC repo, run `dvc init`
@@ -200,7 +200,7 @@ def new_project(
     typer.echo(f"Using title: {title}")
     if cloud:
         # Cloud should allow None, which will allow us to post just the name
-        # NOTE: This will fail if the user hasn't logged into the Calkit Cloud
+        # NOTE: This will fail if the user hasn't logged into the hub
         # in 6 months, since their GitHub refresh token stored is expired
         # Strip control characters (e.g., stray newlines) the API rejects
         if description is not None:
@@ -211,9 +211,9 @@ def new_project(
                 ).strip()
                 or None
             )
-        typer.echo("Creating project in Calkit Cloud")
+        typer.echo("Creating project on the hub")
         try:
-            resp = calkit.cloud.post(
+            resp = calkit.hub.post(
                 "/projects",
                 json=dict(
                     name=name,
@@ -236,7 +236,7 @@ def new_project(
                     msg += (
                         f"\n\nThe owner '{detected_owner}' was detected from "
                         "your Git remote. If this is a GitHub organization, "
-                        "make sure the organization exists in Calkit Cloud "
+                        "make sure the organization exists on the hub "
                         "and that you have write access to it."
                     )
             raise_error(msg)
@@ -337,8 +337,8 @@ def new_project(
     # If using a template, clone it first
     if template:
         # TODO: If the template is not a Git repo URL, make a request to the
-        # Calkit Cloud to get it?
-        # For now, assume consistency between Calkit Cloud projects and
+        # the hub to get it?
+        # For now, assume consistency between hub projects and
         # GitHub repo URLs
         if "github.com" in template:
             template_git_url = template
@@ -462,14 +462,14 @@ def new_project(
         repo.git.remote(["add", "origin", git_repo_url])
     elif not git_repo_url and not repo.remotes:
         warn("No Git remotes are configured")
-    # Setup Calkit Cloud DVC remote
+    # Setup Calkit DVC remote
     if repo.remotes:
-        typer.echo("Setting up Calkit Cloud DVC remote")
+        typer.echo("Setting up Calkit DVC remote")
         try:
             calkit.dvc.configure_remote(wdir=abs_path)
             calkit.dvc.set_remote_auth(wdir=abs_path)
         except Exception as e:
-            warn(f"Failed to set up Calkit Cloud DVC remote: {e}")
+            warn(f"Failed to set up Calkit DVC remote: {e}")
     if repo.git.diff("--staged") and not no_commit:
         repo.git.commit(["-m", "Initialize Calkit project"])
     typer.echo(success_message)
@@ -3833,7 +3833,7 @@ def new_release(
                 release_body += doi_md + "\n\n"
             if release_description is not None:
                 release_body += release_description
-            resp = calkit.cloud.post(
+            resp = calkit.hub.post(
                 f"/projects/{project_name}/github-releases",
                 json=dict(
                     tag_name=name,

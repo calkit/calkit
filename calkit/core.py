@@ -603,11 +603,11 @@ def read_file(path: str, as_bytes: bool | None = None) -> str | bytes:
             ".docx",
         ]
     if project is not None:
-        import calkit.cloud
+        import calkit.hub
 
         if len(project.split("/")) != 2:
             raise ValueError("Invalid project identifier (too many slashes)")
-        resp = calkit.cloud.get(f"/projects/{project}/contents/{path}")
+        resp = calkit.hub.get(f"/projects/{project}/contents/{path}")
         # If the response has a content key, that is a base64 encoded string
         if (content := resp.get("content")) is not None:
             # Load the content appropriately

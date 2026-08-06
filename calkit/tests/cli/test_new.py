@@ -475,7 +475,7 @@ def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
     )
     assert result.returncode != 0
     assert "some-org" in result.stderr
-    assert "organization exists in Calkit Cloud" in result.stderr
+    assert "organization exists on the hub" in result.stderr
     # Test that a non-'origin' remote name is handled correctly
     httpserver.expect_ordered_request(
         "/projects", method="POST"

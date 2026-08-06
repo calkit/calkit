@@ -22,7 +22,7 @@ def get_token(service: ServiceName = DEFAULT_SERVICE) -> str:
         if token is None:
             token = os.getenv("ZENODO_TOKEN")
         if token is None:
-            token = calkit.cloud.get("/user/zenodo-token")["access_token"]
+            token = calkit.hub.get("/user/zenodo-token")["access_token"]
         return token
     elif service == "caltechdata":
         token = config.caltechdata_token

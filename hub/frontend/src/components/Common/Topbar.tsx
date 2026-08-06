@@ -133,14 +133,14 @@ export default function Topbar() {
             />
             <Link
               isExternal
-              href="https://github.com/calkit/calkit-cloud"
+              href="https://github.com/calkit/calkit"
               aria-label="View GitHub repo."
             >
               <Flex alignItems={"center"} pt={0.5} pb={0.5}>
                 <Icon fontSize="2xl" mr={1}>
                   <FaGithub />
                 </Icon>
-                <Text fontSize="xs">calkit/calkit-cloud</Text>
+                <Text fontSize="xs">calkit/calkit</Text>
               </Flex>
             </Link>
             {user && <NotificationBell />}

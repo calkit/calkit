@@ -46,7 +46,7 @@
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
-| [`cloud`](#command-group-cloud)                  | Interact with a Calkit Cloud.                                                                                |
+| [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
 | [`dev`](#command-group-dev)                      | Developer tools.                                                                                             |
 | [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                  |
@@ -3233,27 +3233,27 @@ Arguments:
 | -------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------- |
 | `paths`  | text | no       |         | Paths synced with Overleaf, e.g., 'paper'. If not provided, all Overleaf syncs will be checked. |
 
-<a id="command-group-cloud"></a>
+<a id="command-group-hub-cloud"></a>
 
-### `calkit cloud`
+### `calkit hub|cloud`
 
-Interact with a Calkit Cloud.
+Interact with a Calkit hub.
 
-| Command                            | Description                        |
-| ---------------------------------- | ---------------------------------- |
-| [`get`](#subcommand-cloud-get)     | Get a resource from the Cloud API. |
-| [`login`](#subcommand-cloud-login) | Login to the Calkit Cloud.         |
+| Command                                | Description                      |
+| -------------------------------------- | -------------------------------- |
+| [`get`](#subcommand-hub-cloud-get)     | Get a resource from the hub API. |
+| [`login`](#subcommand-hub-cloud-login) | Log in to a Calkit hub.          |
 
-<a id="subcommand-cloud-get"></a>
+<a id="subcommand-hub-cloud-get"></a>
 
-#### `calkit cloud get`
+#### `calkit hub|cloud get`
 
-Get a resource from the Cloud API.
+Get a resource from the hub API.
 
 Usage:
 
 ```text
-calkit cloud get ENDPOINT
+calkit hub|cloud get [OPTIONS] ENDPOINT
 ```
 
 Arguments:
@@ -3262,25 +3262,32 @@ Arguments:
 | ---------- | ---- | -------- | ------- | ------------ |
 | `endpoint` | text | yes      |         | API endpoint |
 
-<a id="subcommand-cloud-login"></a>
+Options:
 
-#### `calkit cloud login`
+| Option  | Type | Required | Default | Description                                                                                                                                                                                 |
+| ------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | text | no       |         | Hub to target: an environment name (production, staging, local) or a known hub URL, e.g., https://calkit.io. Defaults to the working directory project's hub, if declared, else production. |
 
-Login to the Calkit Cloud.
+<a id="subcommand-hub-cloud-login"></a>
+
+#### `calkit hub|cloud login`
+
+Log in to a Calkit hub.
 
 First try a GET request to the /user endpoint to check if the user is already logged in. If not, perform OAuth device flow.
 
 Usage:
 
 ```text
-calkit cloud login [OPTIONS]
+calkit hub|cloud login [OPTIONS]
 ```
 
 Options:
 
-| Option          | Type    | Required | Default | Description                                                                                        |
-| --------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------- |
-| `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config. |
+| Option          | Type    | Required | Default | Description                                                                                                                                                                                 |
+| --------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub`         | text    | no       |         | Hub to target: an environment name (production, staging, local) or a known hub URL, e.g., https://calkit.io. Defaults to the working directory project's hub, if declared, else production. |
+| `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config.                                                                                          |
 
 <a id="command-group-scheduler-sch"></a>
 

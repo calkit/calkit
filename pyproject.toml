@@ -193,4 +193,6 @@ members = ["hub/backend"]
 
 [tool.pytest.ini_options]
 env = ["CALKIT_ENV=test", "CALKIT_TEST_OVERLEAF_TOKEN=none"]
-addopts = "-n auto -p pytest_jupyter.jupyter_server"
+# The hub backend's tests need the compose stack and its own environment;
+# they run via test-hub.yml, not from the workspace root
+addopts = "-n auto -p pytest_jupyter.jupyter_server --ignore=hub"

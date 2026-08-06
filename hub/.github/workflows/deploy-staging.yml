@@ -1,0 +1,66 @@
+name: Deploy to staging
+
+concurrency: staging
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to deploy (tag, branch, or commit SHA)"
+        required: true
+        default: "main"
+        type: string
+
+jobs:
+  deploy:
+    environment: staging
+    runs-on:
+      - self-hosted
+      - staging
+    env:
+      ENVIRONMENT: staging
+      PROJECT_NAME: ${{ vars.PROJECT_NAME }}
+      DOMAIN: ${{ vars.DOMAIN }}
+      BACKEND_CORS_ORIGINS: "https://${{ vars.DOMAIN }}"
+      STACK_NAME: ${{ vars.STACK_NAME }}
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      FERNET_KEY: "${{ secrets.FERNET_KEY }}"
+      FIRST_SUPERUSER: ${{ vars.FIRST_SUPERUSER }}
+      FIRST_SUPERUSER_PASSWORD: ${{ secrets.FIRST_SUPERUSER_PASSWORD }}
+      FIRST_SUPERUSER_GITHUB_USERNAME: ${{ vars.FIRST_SUPERUSER_GITHUB_USERNAME }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      EMAILS_FROM_EMAIL: ${{ vars.EMAILS_FROM_EMAIL }}
+      POSTGRES_USER: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: app
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+      DOCKER_IMAGE_BACKEND: "backend-${{ vars.STACK_NAME }}"
+      DOCKER_IMAGE_FRONTEND: "frontend-${{ vars.STACK_NAME }}"
+      GH_CLIENT_ID: ${{ secrets.GH_CLIENT_ID }}
+      GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
+      GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+      MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+      MIXPANEL_TOKEN: ${{ secrets.MIXPANEL_TOKEN }}
+      GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+      ZENODO_CLIENT_ID: ${{ secrets.ZENODO_CLIENT_ID }}
+      ZENODO_CLIENT_SECRET: ${{ secrets.ZENODO_CLIENT_SECRET }}
+      GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      ZOTERO_CLIENT_KEY: ${{ secrets.ZOTERO_CLIENT_KEY }}
+      ZOTERO_CLIENT_SECRET: ${{ secrets.ZOTERO_CLIENT_SECRET }}
+      GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.version || github.ref }}
+      - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} build
+      - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} up -d

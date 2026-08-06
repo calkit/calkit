@@ -1,0 +1,11 @@
+.vscode
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+.env
+.DS_Store
+TODO.md
+AGENTS_files/
+CLAUDE.md

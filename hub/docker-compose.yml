@@ -1,0 +1,409 @@
+services:
+  db:
+    image: postgres:16
+    restart: always
+    # Raise the default max_connections (100) to accommodate per-worker
+    # connection pools across all backend processes. See backend/app/db.py.
+    command: ["postgres", "-c", "max_connections=300"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      timeout: 10s
+    volumes:
+      - app-db-data:/var/lib/postgresql/data/pgdata
+    environment:
+      - PGDATA=/var/lib/postgresql/data/pgdata
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
+      - POSTGRES_USER=${POSTGRES_USER?Variable not set}
+      - POSTGRES_DB=${POSTGRES_DB?Variable not set}
+
+  adminer:
+    image: adminer
+    restart: always
+    networks:
+      - traefik-public
+      - default
+    depends_on:
+      - db
+    environment:
+      - ADMINER_DESIGN=pepa-linha-dark
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik-public
+      - traefik.constraint-label=traefik-public
+      - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-http.rule=Host(`adminer.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-http.entrypoints=http
+      - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-http.middlewares=https-redirect
+      - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-https.rule=Host(`adminer.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-https.entrypoints=https
+      - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-https.tls=true
+      - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-https.tls.certresolver=le
+      - traefik.http.services.${STACK_NAME?Variable not set}-adminer.loadbalancer.server.port=8080
+
+  prestart:
+    image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
+    pull_policy: never # We build locally on deploy
+    build:
+      context: ./backend
+    networks:
+      - traefik-public
+      - default
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+    command: bash prestart.sh
+    environment:
+      - PROJECT_NAME=${PROJECT_NAME}
+      - DOMAIN=${DOMAIN}
+      - ENVIRONMENT=${ENVIRONMENT}
+      - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS}
+      - SECRET_KEY=${SECRET_KEY?Variable not set}
+      - FERNET_KEY=${FERNET_KEY?Variable not set}
+      - FIRST_SUPERUSER=${FIRST_SUPERUSER?Variable not set}
+      - FIRST_SUPERUSER_PASSWORD=${FIRST_SUPERUSER_PASSWORD?Variable not set}
+      - FIRST_SUPERUSER_GITHUB_USERNAME=${FIRST_SUPERUSER_GITHUB_USERNAME}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - EMAILS_FROM_EMAIL=${EMAILS_FROM_EMAIL}
+      - POSTGRES_SERVER=db
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER?Variable not set}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
+      - SENTRY_DSN=${SENTRY_DSN}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD?Variable not set}
+      - GH_CLIENT_ID=${GH_CLIENT_ID?Variable not set}
+      - GH_CLIENT_SECRET=${GH_CLIENT_SECRET?Variable not set}
+      - GH_APP_PRIVATE_KEY=${GH_APP_PRIVATE_KEY:-}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - MIXPANEL_TOKEN=${MIXPANEL_TOKEN?Variable not set}
+      - ZENODO_CLIENT_ID=${ZENODO_CLIENT_ID?Variable not set}
+      - ZENODO_CLIENT_SECRET=${ZENODO_CLIENT_SECRET?Variable not set}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID?Variable not set}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET?Variable not set}
+      - ZOTERO_CLIENT_KEY=${ZOTERO_CLIENT_KEY?Variable not set}
+      - ZOTERO_CLIENT_SECRET=${ZOTERO_CLIENT_SECRET?Variable not set}
+
+  backend:
+    image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
+    restart: always
+    pull_policy: never # We build locally on deploy
+    networks:
+      - traefik-public
+      - default
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+      prestart:
+        condition: service_completed_successfully
+    environment:
+      - PROJECT_NAME=${PROJECT_NAME}
+      - DOMAIN=${DOMAIN}
+      - ENVIRONMENT=${ENVIRONMENT}
+      - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS}
+      - SECRET_KEY=${SECRET_KEY?Variable not set}
+      - FERNET_KEY=${FERNET_KEY?Variable not set}
+      - FIRST_SUPERUSER=${FIRST_SUPERUSER?Variable not set}
+      - FIRST_SUPERUSER_PASSWORD=${FIRST_SUPERUSER_PASSWORD?Variable not set}
+      - FIRST_SUPERUSER_GITHUB_USERNAME=${FIRST_SUPERUSER_GITHUB_USERNAME}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - EMAILS_FROM_EMAIL=${EMAILS_FROM_EMAIL}
+      - POSTGRES_SERVER=db
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER?Variable not set}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
+      - SENTRY_DSN=${SENTRY_DSN}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD?Variable not set}
+      - GH_CLIENT_ID=${GH_CLIENT_ID?Variable not set}
+      - GH_CLIENT_SECRET=${GH_CLIENT_SECRET?Variable not set}
+      - GH_APP_PRIVATE_KEY=${GH_APP_PRIVATE_KEY:-}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - MIXPANEL_TOKEN=${MIXPANEL_TOKEN?Variable not set}
+      - ZENODO_CLIENT_ID=${ZENODO_CLIENT_ID?Variable not set}
+      - ZENODO_CLIENT_SECRET=${ZENODO_CLIENT_SECRET?Variable not set}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID?Variable not set}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET?Variable not set}
+      - ZOTERO_CLIENT_KEY=${ZOTERO_CLIENT_KEY?Variable not set}
+      - ZOTERO_CLIENT_SECRET=${ZOTERO_CLIENT_SECRET?Variable not set}
+      - GOOGLE_CREDENTIALS=${GOOGLE_CREDENTIALS-}
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
+    # Wipe stale per-worker metric files from a previous run so restarts
+    # don't double-count, then recreate the dir before workers start.
+    command: ["sh", "-c", "rm -rf /tmp/prometheus_multiproc && mkdir -p /tmp/prometheus_multiproc && exec fastapi run --workers 8 app/main.py"]
+    build:
+      context: ./backend
+      args:
+        INSTALL_DEV: ${INSTALL_DEV-false}
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik-public
+      - traefik.constraint-label=traefik-public
+      - traefik.http.services.${STACK_NAME?Variable not set}-backend.loadbalancer.server.port=8000
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-http.rule=Host(`api.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-http.entrypoints=http
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-https.rule=Host(`api.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-https.entrypoints=https
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-https.tls=true
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-https.tls.certresolver=le
+      # Prometheus scrapes backend:8000 directly over the Docker network, so
+      # /metrics has no legitimate public consumer. A dedicated higher-priority
+      # router restricts it to private networks to avoid leaking internal
+      # route/latency info publicly.
+      - traefik.http.middlewares.${STACK_NAME?Variable not set}-metrics-internal.ipallowlist.sourcerange=127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-metrics-https.rule=Host(`api.${DOMAIN?Variable not set}`) && PathPrefix(`/metrics`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-metrics-https.entrypoints=https
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-metrics-https.priority=100
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-metrics-https.tls=true
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-metrics-https.tls.certresolver=le
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-metrics-https.middlewares=${STACK_NAME?Variable not set}-metrics-internal
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-metrics-https.service=${STACK_NAME?Variable not set}-backend
+      # Define Traefik Middleware to handle domain with and without "www" to redirect to only one
+      - traefik.http.middlewares.${STACK_NAME?Variable not set}-www-redirect.redirectregex.regex=^http(s)?://www.(${DOMAIN?Variable not set})/(.*)
+      # Redirect a domain with www to non-www
+      - traefik.http.middlewares.${STACK_NAME?Variable not set}-www-redirect.redirectregex.replacement=http$${1}://${DOMAIN?Variable not set}/$${3}
+      # Enable www redirection for HTTP and HTTPS
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-http.middlewares=https-redirect,${STACK_NAME?Variable not set}-www-redirect
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-https.middlewares=${STACK_NAME?Variable not set}-www-redirect
+
+  backend-dvc:
+    image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
+    restart: always
+    pull_policy: never # We build locally on deploy
+    networks:
+      - traefik-public
+      - default
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+      prestart:
+        condition: service_completed_successfully
+    environment:
+      - PROJECT_NAME=${PROJECT_NAME}
+      - DOMAIN=${DOMAIN}
+      - ENVIRONMENT=${ENVIRONMENT}
+      - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS}
+      - SECRET_KEY=${SECRET_KEY?Variable not set}
+      - FERNET_KEY=${FERNET_KEY?Variable not set}
+      - FIRST_SUPERUSER=${FIRST_SUPERUSER?Variable not set}
+      - FIRST_SUPERUSER_PASSWORD=${FIRST_SUPERUSER_PASSWORD?Variable not set}
+      - FIRST_SUPERUSER_GITHUB_USERNAME=${FIRST_SUPERUSER_GITHUB_USERNAME}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - EMAILS_FROM_EMAIL=${EMAILS_FROM_EMAIL}
+      - POSTGRES_SERVER=db
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER?Variable not set}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
+      - SENTRY_DSN=${SENTRY_DSN}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD?Variable not set}
+      - GH_CLIENT_ID=${GH_CLIENT_ID?Variable not set}
+      - GH_CLIENT_SECRET=${GH_CLIENT_SECRET?Variable not set}
+      - GH_APP_PRIVATE_KEY=${GH_APP_PRIVATE_KEY:-}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - MIXPANEL_TOKEN=${MIXPANEL_TOKEN?Variable not set}
+      - ZENODO_CLIENT_ID=${ZENODO_CLIENT_ID?Variable not set}
+      - ZENODO_CLIENT_SECRET=${ZENODO_CLIENT_SECRET?Variable not set}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID?Variable not set}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET?Variable not set}
+      - ZOTERO_CLIENT_KEY=${ZOTERO_CLIENT_KEY?Variable not set}
+      - ZOTERO_CLIENT_SECRET=${ZOTERO_CLIENT_SECRET?Variable not set}
+      - GOOGLE_CREDENTIALS=${GOOGLE_CREDENTIALS-}
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
+    # Wipe stale per-worker metric files from a previous run so restarts
+    # don't double-count, then recreate the dir before workers start.
+    command: ["sh", "-c", "rm -rf /tmp/prometheus_multiproc && mkdir -p /tmp/prometheus_multiproc && exec fastapi run --workers 4 app/main.py"]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik-public
+      - traefik.constraint-label=traefik-public
+      - traefik.http.services.${STACK_NAME?Variable not set}-backend-dvc.loadbalancer.server.port=8000
+      # More specific rule (Host + PathRegexp) wins over the plain Host rule on backend
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-dvc-http.rule=Host(`api.${DOMAIN?Variable not set}`) && PathRegexp(`/dvc/files/md5`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-dvc-http.entrypoints=http
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-dvc-http.middlewares=https-redirect
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-dvc-https.rule=Host(`api.${DOMAIN?Variable not set}`) && PathRegexp(`/dvc/files/md5`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-dvc-https.entrypoints=https
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-dvc-https.tls=true
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-dvc-https.tls.certresolver=le
+
+  texmf-proxy:
+    image: '${DOCKER_IMAGE_TEXMF_PROXY-texmf-proxy}:${TAG-latest}'
+    restart: always
+    pull_policy: never # We build locally on deploy
+    networks:
+      - traefik-public
+      - default
+    build:
+      context: ./texmf-proxy
+    environment:
+      - TEXMF_PROXY_ALLOW_ORIGIN=https://${DOMAIN?Variable not set}
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik-public
+      - traefik.constraint-label=traefik-public
+      - traefik.http.services.${STACK_NAME?Variable not set}-texmf-proxy.loadbalancer.server.port=8771
+      # CORS is restricted to the site origin by TEXMF_PROXY_ALLOW_ORIGIN above.
+      - traefik.http.routers.${STACK_NAME?Variable not set}-texmf-proxy-http.rule=Host(`texmf.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-texmf-proxy-http.entrypoints=http
+      - traefik.http.routers.${STACK_NAME?Variable not set}-texmf-proxy-http.middlewares=https-redirect
+      - traefik.http.routers.${STACK_NAME?Variable not set}-texmf-proxy-https.rule=Host(`texmf.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-texmf-proxy-https.entrypoints=https
+      - traefik.http.routers.${STACK_NAME?Variable not set}-texmf-proxy-https.tls=true
+      - traefik.http.routers.${STACK_NAME?Variable not set}-texmf-proxy-https.tls.certresolver=le
+
+  frontend:
+    image: '${DOCKER_IMAGE_FRONTEND?Variable not set}:${TAG-latest}'
+    restart: always
+    pull_policy: never # We build locally on deploy
+    networks:
+      - traefik-public
+      - default
+    build:
+      context: ./frontend
+      args:
+        - VITE_API_URL=https://api.${DOMAIN?Variable not set}
+        - VITE_STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY?Variable not set}
+        - VITE_MIXPANEL_TOKEN=${MIXPANEL_TOKEN?Variable not set}
+        - VITE_GH_CLIENT_ID=${GH_CLIENT_ID?Variable not set}
+        - VITE_ZENODO_CLIENT_ID=${ZENODO_CLIENT_ID?Variable not set}
+        - VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID?Variable not set}
+        - VITE_TEXMF_PROXY=https://texmf.${DOMAIN?Variable not set}
+        - NODE_ENV=production
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik-public
+      - traefik.constraint-label=traefik-public
+      - traefik.http.services.${STACK_NAME?Variable not set}-frontend.loadbalancer.server.port=80
+      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.rule=Host(`${DOMAIN?Variable not set}`) || Host(`www.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.entrypoints=http
+      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.rule=Host(`${DOMAIN?Variable not set}`) || Host(`www.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.entrypoints=https
+      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.tls=true
+      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.tls.certresolver=le
+      # Enable www redirection for HTTP and HTTPS
+      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.middlewares=${STACK_NAME?Variable not set}-www-redirect
+      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.middlewares=https-redirect,${STACK_NAME?Variable not set}-www-redirect
+
+  minio:
+    image: minio/minio:RELEASE.2025-05-24T17-08-30Z
+    command: server /data --console-address ":9001"
+    restart: always
+    networks:
+      - traefik-public
+      - default
+    volumes:
+      - 'minio-data:/data'
+    environment:
+      - MINIO_ROOT_USER=root
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD?Variable not set}
+      - MINIO_DEFAULT_BUCKETS=data
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik-public
+      - traefik.constraint-label=traefik-public
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-http.rule=Host(`objects.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-http.entrypoints=http
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-http.middlewares=https-redirect
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-http.service=${STACK_NAME?Variable not set}-minio
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-https.rule=Host(`objects.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-https.entrypoints=https
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-https.tls=true
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-https.tls.certresolver=le
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-https.service=${STACK_NAME?Variable not set}-minio
+      - traefik.http.services.${STACK_NAME?Variable not set}-minio.loadbalancer.server.port=9000
+      # Labels for admin console
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-admin-http.rule=Host(`console.objects.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-admin-http.entrypoints=http
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-admin-http.middlewares=https-redirect
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-admin-http.service=${STACK_NAME?Variable not set}-minio-admin
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-admin-https.rule=Host(`console.objects.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-admin-https.entrypoints=https
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-admin-https.tls=true
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-admin-https.tls.certresolver=le
+      - traefik.http.routers.${STACK_NAME?Variable not set}-minio-admin-https.service=${STACK_NAME?Variable not set}-minio-admin
+      - traefik.http.services.${STACK_NAME?Variable not set}-minio-admin.loadbalancer.server.port=9001
+
+  prometheus:
+    image: prom/prometheus:v3.3.1
+    restart: always
+    volumes:
+      - ./config/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+
+  loki:
+    image: grafana/loki:3.5.0
+    restart: always
+    volumes:
+      - ./config/loki:/etc/loki:ro
+      - loki-data:/loki
+    command: -config.file=/etc/loki/loki.yml
+
+  alloy:
+    image: grafana/alloy:v1.8.3
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config/alloy:/etc/alloy:ro
+      - alloy-data:/var/lib/alloy/data
+    command: run --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
+
+  grafana:
+    image: grafana/grafana:12.0.0
+    restart: always
+    networks:
+      - traefik-public
+      - default
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD?Variable not set}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SERVER_ROOT_URL=https://grafana.${DOMAIN?Variable not set}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik-public
+      - traefik.constraint-label=traefik-public
+      - traefik.http.routers.${STACK_NAME?Variable not set}-grafana-http.rule=Host(`grafana.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-grafana-http.entrypoints=http
+      - traefik.http.routers.${STACK_NAME?Variable not set}-grafana-http.middlewares=https-redirect
+      - traefik.http.routers.${STACK_NAME?Variable not set}-grafana-https.rule=Host(`grafana.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-grafana-https.entrypoints=https
+      - traefik.http.routers.${STACK_NAME?Variable not set}-grafana-https.tls=true
+      - traefik.http.routers.${STACK_NAME?Variable not set}-grafana-https.tls.certresolver=le
+      - traefik.http.services.${STACK_NAME?Variable not set}-grafana.loadbalancer.server.port=3000
+
+volumes:
+  app-db-data:
+  minio-data:
+    driver: local
+  prometheus-data:
+  loki-data:
+  grafana-data:
+  alloy-data:
+
+networks:
+  traefik-public:
+    # Allow setting it to false for testing
+    external: true

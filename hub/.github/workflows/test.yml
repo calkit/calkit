@@ -1,0 +1,123 @@
+name: Test
+
+on:
+  pull_request:
+
+env:
+  POSTGRES_PASSWORD: test-password-for-ci
+  MINIO_ROOT_PASSWORD: test-password-for-ci
+  GH_CLIENT_ID: test-github-client-id-for-ci
+  GH_CLIENT_SECRET: test-github-client-secret-for-ci
+  STRIPE_PUBLISHABLE_KEY: test-stripe-publishable-key-for-ci
+  STRIPE_SECRET_KEY: test-stripe-secret-key-for-ci
+  MIXPANEL_TOKEN: test-mixpanel-token-for-ci
+  ZENODO_CLIENT_ID: test-zenodo-client-id-for-ci
+  ZENODO_CLIENT_SECRET: test-zenodo-client-secret-for-ci
+  GOOGLE_CLIENT_ID: test-google-client-id-for-ci
+  GOOGLE_CLIENT_SECRET: test-google-client-secret-for-ci
+  ZOTERO_CLIENT_KEY: test-zotero-client-key-for-ci
+  ZOTERO_CLIENT_SECRET: test-zotero-client-secret-for-ci
+  FIRST_SUPERUSER: test-user-for-ci@example.com
+  FIRST_SUPERUSER_GITHUB_USERNAME: test-user-for-ci
+  FIRST_SUPERUSER_PASSWORD: test-password-for-ci
+  SECRET_KEY: test-secret-key-for-ci
+  # Must be 32 url-safe base64-encoded bytes, i.e. a real Fernet key, since
+  # tests encrypt credentials. This one decodes to a throwaway string.
+  FERNET_KEY: Y2Fsa2l0LXRlc3QtZmVybmV0LWtleS1mb3ItY2khISE=
+  FERNET_KEYS: Y2Fsa2l0LXRlc3QtZmVybmV0LWtleS1mb3ItY2khISE=
+  GRAFANA_ADMIN_PASSWORD: test-grafana-admin-password-for-ci
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - run: cp .env.example .env
+      - run: docker compose build backend
+      - run: docker compose down -v --remove-orphans
+      - run: docker compose up -d
+      - name: Run tests
+        run: docker compose exec -T backend bash /app/tests-start.sh
+      - name: Tear down
+        if: always()
+        run: docker compose down -v --remove-orphans
+      - name: Store coverage files
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-html
+          path: backend/htmlcov
+
+  frontend-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20.19.5"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+      - name: Run unit tests
+        run: npm run test:unit
+        working-directory: frontend
+
+  end-to-end:
+    needs: [frontend-unit]
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20.19.5"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('frontend/package-lock.json') }}
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: cp .env.example .env
+      - run: docker compose build
+      - run: docker compose down -v --remove-orphans
+      - run: docker compose up -d
+      - name: Wait for services
+        run: |
+          echo "127.0.0.1 api.localhost" | sudo tee -a /etc/hosts
+          echo "Waiting for backend..."
+          timeout 180 bash -c 'until curl -sf http://api.localhost/openapi.json > /dev/null 2>&1; do sleep 3; done'
+          echo "Waiting for frontend..."
+          timeout 300 bash -c 'until curl -sf http://localhost:5173 > /dev/null 2>&1; do sleep 3; done'
+          echo "All services ready"
+      - name: Run Playwright tests
+        run: npx playwright test
+        working-directory: frontend
+      - name: Tear down
+        if: always()
+        run: docker compose down -v --remove-orphans
+      - name: Store Playwright report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 30
+      - name: Store Playwright test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-test-results
+          path: frontend/test-results/
+          retention-days: 7

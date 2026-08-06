@@ -1,0 +1,39 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+#
+# This is the single source of truth for formatting. `make format` runs
+# `prek run --all-files` over these hooks (prek is a drop-in for pre-commit),
+# so formatting is identical whether run by hand, on commit, or in CI.
+#
+# Python/JS formatting use the projects' OWN tools (uv-managed ruff, the
+# pinned Biome) so the rules/versions match backend/pyproject.toml and
+# frontend/biome.json exactly -- no second, drifting copy to keep in sync.
+# These are run via prek (locally with `make format`, and in the format CI
+# workflow); pre-commit.ci is not used.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-toml
+      - id: check-yaml
+        args:
+          - --unsafe
+      - id: end-of-file-fixer
+        exclude: ^frontend/src/client/.*
+      - id: trailing-whitespace
+        exclude: ^frontend/src/client/.*
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format (backend)
+        language: system
+        entry: bash -c 'cd backend && uv run ruff format'
+        pass_filenames: false
+        files: ^backend/.*\.py$
+      - id: biome-format
+        name: biome format (frontend)
+        language: system
+        entry: bash -c 'cd frontend && npx biome format --write ./src'
+        pass_filenames: false
+        files: ^frontend/src/.*\.(jsx?|tsx?|jsonc?|css)$

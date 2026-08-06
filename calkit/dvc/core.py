@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Any, Literal
 
@@ -59,6 +60,41 @@ _frozen_stage_warning_filter = _FrozenStageWarningFilter()
 for _name in ("dvc.repo.reproduce", "dvc.repo.status"):
     logging.getLogger(_name).addFilter(_frozen_stage_warning_filter)
 logging.getLogger("dvc.rwlock").addFilter(_StaleRWLockWarningFilter())
+
+
+def _tolerate_lock_release_failures() -> None:
+    """Stop a failed lock *release* from failing a DVC command on Windows.
+
+    ``zc.lockfile``, DVC's default repo-lock backend, locks a single byte of
+    ``.dvc/tmp/lock`` with ``msvcrt.locking`` and unlocks it when closing the
+    lock. On Windows that unlock intermittently fails while another process
+    contends for the same lock, and zc.lockfile turns the ``OSError`` into
+    ``LockError("Couldn't unlock ...")``, which escapes DVC as an "unexpected
+    error" and fails a command that otherwise did nothing wrong---e.g. one of
+    two concurrent ``calkit run`` processes reproducing separate stages.
+
+    Ignoring it is safe, and strictly better than letting it propagate:
+    ``zc.lockfile.SimpleLockFile.close`` unlocks *before* closing the file, so
+    an unlock that raises also leaves the handle open with the byte still
+    locked, holding the repo lock for the rest of the process. Once the
+    exception is out of the way the handle is closed, and closing it releases
+    the lock anyway.
+    """
+    import zc.lockfile  # type: ignore[import-untyped]
+
+    original = zc.lockfile._unlock_file
+
+    def unlock_file(file: Any) -> None:
+        try:
+            original(file)
+        except (OSError, zc.lockfile.LockError) as e:
+            logger.warning(f"Ignoring failure to release DVC lock: {e}")
+
+    zc.lockfile._unlock_file = unlock_file
+
+
+if sys.platform == "win32":
+    _tolerate_lock_release_failures()
 
 
 # Default seconds to wait for DVC's repo-level lock during a pipeline run.

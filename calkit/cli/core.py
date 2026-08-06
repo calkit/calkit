@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import typer
 from typer.core import TyperGroup
@@ -96,10 +96,23 @@ def run_cmd(cmd: list[str]):
         pty.spawn(cmd, lambda fd: os.read(fd, 1024))
 
 
+def echo_json(obj: Any) -> None:
+    """Print an object as a single line of JSON.
+
+    Values that aren't JSON-native are stringified, since YAML parsing can
+    produce things like dates from ``calkit.yaml``.
+    """
+    import json
+
+    typer.echo(json.dumps(obj, default=str))
+
+
 def raise_error(txt: str) -> NoReturn:
     typer.echo(typer.style("Error: " + str(txt), fg="red"), err=True)
     raise typer.Exit(1)
 
 
-def warn(txt: str, prefix: str = "Warning: "):
-    typer.echo(typer.style(prefix + str(txt), fg="yellow"))
+def warn(txt: str, prefix: str = "Warning: ", err: bool = False):
+    # Callers emitting machine-readable output on stdout should set err=True
+    # so warnings don't corrupt it
+    typer.echo(typer.style(prefix + str(txt), fg="yellow"), err=err)

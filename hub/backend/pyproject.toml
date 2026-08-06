@@ -34,7 +34,7 @@ dependencies = [
   "mixpanel==4.10.1",
   "gcsfs==2026.4.0",
   "texsoup>=0.3.1",
-  "calkit-python==0.41.24",
+  "calkit-python",
   "boto3>=1.40.70",
   "cachetools>=5.3.3",
   "prometheus-fastapi-instrumentator>=7.0.0",
@@ -45,7 +45,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-  "pytest<8.0.0,>=7.4.3",
+  "pytest>=7.4.3",
   "mypy<2.0.0,>=1.8.0",
   "ruff<1.0.0,>=0.2.2",
   "pre-commit<4.0.0,>=3.6.2",
@@ -53,6 +53,9 @@ dev = [
   "types-passlib<2.0.0.0,>=1.7.7.20240106",
   "coverage<8.0.0,>=7.4.3",
 ]
+
+[tool.uv.sources]
+calkit-python = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

@@ -185,6 +185,9 @@ fix = true
 [tool.ruff.lint]
 extend-select = ["I"]  # Import sorting (isort compatibility)
 
+[tool.uv.workspace]
+members = ["hub/backend"]
+
 [tool.pytest.ini_options]
 env = ["CALKIT_ENV=test", "CALKIT_TEST_OVERLEAF_TOKEN=none"]
 addopts = "-n auto -p pytest_jupyter.jupyter_server"

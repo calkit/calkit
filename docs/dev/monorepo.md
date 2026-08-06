@@ -30,15 +30,15 @@ get tested together, and client/server contract changes become atomic.
 
 ## Layout and tags
 
-- **Decided:** tag prefixes reuse the existing scheme, e.g., `cloud/v0.1.5` or
-  `hub/v0.1.5` alongside `v0.42.0` for the package and `vscode-ext/v0.1.5`.
-- **Open:** directory name. `web/` and `hub/` are both reasonable. Avoid
-  making the directory name and the tag prefix identical, since git needs `--`
-  to disambiguate a ref from a path in some commands. Do not name it `cloud/`
-  if "cloud" is being retired as vocabulary.
-
-Pick the directory name before the subtree merge. Renaming it afterward muddies
-history for every file underneath.
+- **Decided:** tag prefixes reuse the existing scheme: `hub/v0.1.5` alongside
+  `v0.42.0` for the package and `vscode-ext/v0.1.5`.
+- **Decided:** directory name is `hub/`. The earlier worry about the directory
+  name matching the tag prefix turned out to be theoretical: calkit-python
+  already has both a `vscode-ext/` directory and `vscode-ext/v*` tags, and
+  `git log`/`git checkout` on those tags resolve fine without `--`. Git only
+  raises the ambiguity error when an argument matches both a ref and an
+  existing path, and a tag name always ends in `/vX.Y.Z`, which never exists
+  as a path.
 
 Use `git subtree add --prefix=<dir>` to preserve history and blame. Open PRs
 will not survive the move and need re-creating; issues transfer individually.
@@ -51,10 +51,12 @@ any new prefix is automatically excluded from PyPI without touching that
 workflow. `publish-vscode-ext.yml` opts in with
 `startsWith(..., 'vscode-ext/v')`.
 
-**Must land at merge time:** both deploy workflows in this repo currently fire
-on any published release. They need
-`if: startsWith(github.event.release.tag_name, 'cloud/v')`, or a plain
-`v0.42.0` CLI release deploys production.
+**Done:** `deploy-production.yml` now guards with
+`startsWith(github.event.release.tag_name, 'hub/v')` (workflow_dispatch is
+still allowed through for rollbacks). `deploy-staging.yml` needs no guard: it
+fires on push to main, not on releases, and in the workspace monorepo a
+CLI-only push genuinely changes the backend, so redeploying staging on every
+main push is correct rather than wasteful.
 
 Slashes in tags are safe here. `deploy-production.yml` uses the tag only for
 release validation and as the `actions/checkout` ref. Compose images resolve
@@ -70,9 +72,9 @@ repo's "Latest release" badge unless "Set as the latest release" is unchecked.
 - Use a `changes` job that always runs and gates the real jobs, rather than
   `paths:` filters on workflows that are required checks. A required check that
   never runs sits pending forever and blocks merges.
-- `docs.yml` runs `mkdocs gh-deploy` on every push to main with no path filter.
-  Post-merge it needs `paths: [docs/**, mkdocs.yml]`. This one is safe to
-  filter since it is a push-triggered deploy, not a required PR check.
+- **Done:** `docs.yml` now has `paths: [docs/**, mkdocs.yml]` (on the
+  `merge-hub` branch in calkit-python). Safe to filter since it is a
+  push-triggered deploy, not a required PR check.
 - Both repos are public. Deploys currently only run on `release`, so fork PRs
   cannot reach the self-hosted production runner. That invariant gets easier to
   break once the package's contributor traffic lands in the same repo. Never
@@ -283,13 +285,16 @@ chart. Hold the chart until someone asks.
 
 ## Suggested sequencing
 
-1. Add the cross-version CI job (calkit from git main, cloud backend tests).
-   Stands alone, no merge required, and catches the `ck://` class of bug
-   before any of the rest of this happens.
-2. Settle the directory name and add the release tag guards to both deploy
-   workflows.
-3. Subtree merge, move workflows with a `changes` gating job, move GitHub
-   environments, secrets, and self-hosted runner registration.
+1. ~~Add the cross-version CI job (calkit from git main, cloud backend
+   tests).~~ Skipped as a standalone step: it only paid off in the
+   window before the merge, and the merge is happening now. Its purpose is
+   served by the post-merge CI running backend tests against the workspace.
+2. ~~Settle the directory name and add the release tag guards.~~ Done:
+   directory `hub/`, tags `hub/v*`, production deploy guarded, staging needs
+   no guard.
+3. Subtree merge (`git subtree add --prefix=hub`), move workflows with a
+   `changes` gating job, move GitHub environments, secrets, and self-hosted
+   runner registration.
 4. Add `hub` to `ProjectInfo`, release calkit-python, then write the key from
    the backend on project creation.
 5. Generalize the CLI config key from env to hub.

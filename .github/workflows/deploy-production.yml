@@ -9,12 +9,17 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Published release tag to deploy, e.g. v1.2.3. Use this to roll back by redeploying a previous release."
+        description: "Published release tag to deploy, e.g. hub/v1.2.3. Use this to roll back by redeploying a previous release."
         required: true
         type: string
 
 jobs:
   deploy:
+    # Only hub releases deploy here; other release tags in the monorepo
+    # (e.g., v1.2.3 for the package) must not trigger a production deploy
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'hub/v')
     environment: production
     runs-on:
       - self-hosted

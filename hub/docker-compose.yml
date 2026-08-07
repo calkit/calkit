@@ -76,7 +76,10 @@ services:
       - POSTGRES_USER=${POSTGRES_USER?Variable not set}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
       - SENTRY_DSN=${SENTRY_DSN}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD?Variable not set}
+      - OBJECT_STORAGE_PREFIX=${OBJECT_STORAGE_PREFIX:-s3://data}
+      - OBJECT_STORAGE_ENDPOINT_URL=${OBJECT_STORAGE_ENDPOINT_URL:-}
+      - OBJECT_STORAGE_KEY=${OBJECT_STORAGE_KEY:-}
+      - OBJECT_STORAGE_SECRET=${OBJECT_STORAGE_SECRET:-}
       - GH_CLIENT_ID=${GH_CLIENT_ID?Variable not set}
       - GH_CLIENT_SECRET=${GH_CLIENT_SECRET?Variable not set}
       - GH_APP_PRIVATE_KEY=${GH_APP_PRIVATE_KEY:-}
@@ -123,7 +126,10 @@ services:
       - POSTGRES_USER=${POSTGRES_USER?Variable not set}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
       - SENTRY_DSN=${SENTRY_DSN}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD?Variable not set}
+      - OBJECT_STORAGE_PREFIX=${OBJECT_STORAGE_PREFIX:-s3://data}
+      - OBJECT_STORAGE_ENDPOINT_URL=${OBJECT_STORAGE_ENDPOINT_URL:-}
+      - OBJECT_STORAGE_KEY=${OBJECT_STORAGE_KEY:-}
+      - OBJECT_STORAGE_SECRET=${OBJECT_STORAGE_SECRET:-}
       - GH_CLIENT_ID=${GH_CLIENT_ID?Variable not set}
       - GH_CLIENT_SECRET=${GH_CLIENT_SECRET?Variable not set}
       - GH_APP_PRIVATE_KEY=${GH_APP_PRIVATE_KEY:-}
@@ -210,7 +216,10 @@ services:
       - POSTGRES_USER=${POSTGRES_USER?Variable not set}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
       - SENTRY_DSN=${SENTRY_DSN}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD?Variable not set}
+      - OBJECT_STORAGE_PREFIX=${OBJECT_STORAGE_PREFIX:-s3://data}
+      - OBJECT_STORAGE_ENDPOINT_URL=${OBJECT_STORAGE_ENDPOINT_URL:-}
+      - OBJECT_STORAGE_KEY=${OBJECT_STORAGE_KEY:-}
+      - OBJECT_STORAGE_SECRET=${OBJECT_STORAGE_SECRET:-}
       - GH_CLIENT_ID=${GH_CLIENT_ID?Variable not set}
       - GH_CLIENT_SECRET=${GH_CLIENT_SECRET?Variable not set}
       - GH_APP_PRIVATE_KEY=${GH_APP_PRIVATE_KEY:-}
@@ -300,18 +309,28 @@ services:
       - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-https.middlewares=${STACK_NAME?Variable not set}-www-redirect
       - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.middlewares=https-redirect,${STACK_NAME?Variable not set}-www-redirect
 
+  # Object storage hosted by this stack, for dev and for deployments
+  # that don't point at an external service. Runs only when
+  # COMPOSE_PROFILES includes 'objects'; either way the app reaches it
+  # through OBJECT_STORAGE_ENDPOINT_URL.
   minio:
     image: minio/minio:RELEASE.2025-05-24T17-08-30Z
     command: server /data --console-address ":9001"
     restart: always
+    profiles:
+      - objects
     networks:
       - traefik-public
       - default
     volumes:
       - 'minio-data:/data'
     environment:
-      - MINIO_ROOT_USER=root
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD?Variable not set}
+      # Configured from the same credentials the app authenticates
+      # with, since hosting the storage means both sides are ours
+      - MINIO_ROOT_USER=${OBJECT_STORAGE_KEY:-root}
+      # Interpolation happens before profile filtering, so this can't
+      # be a required variable or external-storage stacks wouldn't start
+      - MINIO_ROOT_PASSWORD=${OBJECT_STORAGE_SECRET:-}
       - MINIO_DEFAULT_BUCKETS=data
     labels:
       - traefik.enable=true

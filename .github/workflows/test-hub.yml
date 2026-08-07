@@ -9,7 +9,7 @@ on:
 
 env:
   POSTGRES_PASSWORD: test-password-for-ci
-  MINIO_ROOT_PASSWORD: test-password-for-ci
+  OBJECT_STORAGE_SECRET: test-password-for-ci
   GH_CLIENT_ID: test-github-client-id-for-ci
   GH_CLIENT_SECRET: test-github-client-secret-for-ci
   STRIPE_PUBLISHABLE_KEY: test-stripe-publishable-key-for-ci
@@ -73,7 +73,7 @@ jobs:
       - run: cp .env.example .env
       - run: docker compose build backend
       - run: docker compose down -v --remove-orphans
-      - run: docker compose up -d
+      - run: docker compose --profile objects up -d
       - name: Run tests
         run: docker compose exec -T backend bash /app/hub/backend/tests-start.sh
       - name: Tear down
@@ -140,7 +140,7 @@ jobs:
       - run: cp .env.example .env
       - run: docker compose build
       - run: docker compose down -v --remove-orphans
-      - run: docker compose up -d
+      - run: docker compose --profile objects up -d
       - name: Wait for services
         run: |
           echo "127.0.0.1 api.localhost" | sudo tee -a /etc/hosts

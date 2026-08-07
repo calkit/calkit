@@ -22,16 +22,24 @@ S3_MAX_PARTS = 10000  # S3 multipart upload limit
 STORAGE_USAGE_CACHE_TTL_SECONDS = 300
 STORAGE_USAGE_CACHE_MAXSIZE = 2048
 
-# In-process cache for owner-level storage usage reads
-_storage_usage_cache: cachetools.TTLCache[str, float] = cachetools.TTLCache(
+# In-process cache for owner-level storage usage reads. The type arguments
+# are repeated on the constructor because it takes no argument they could
+# be inferred from, which leaves them unsolved and unassignable.
+_storage_usage_cache: cachetools.TTLCache[str, float] = cachetools.TTLCache[
+    str, float
+](
     maxsize=STORAGE_USAGE_CACHE_MAXSIZE,
     ttl=STORAGE_USAGE_CACHE_TTL_SECONDS,
 )
 
 
 def get_backend() -> Literal["s3", "gcs"]:
-    """Get the configured storage backend for the current environment."""
-    return "s3" if settings.ENVIRONMENT == "local" else "gcs"
+    """Get the configured storage backend for the current environment.
+
+    For GCS, this is not the scheme of the prefix (gs://) but the backend type
+    (gcs) used in code to interact with GCS.
+    """
+    return settings.object_storage_type
 
 
 def upload_should_be_chunked(content_length: int | None) -> bool:
@@ -74,29 +82,38 @@ def get_gcs_client() -> gcs.Client:
     return gcs.Client()
 
 
+def get_bucket_name() -> str:
+    """Get the bucket name from the configured storage prefix."""
+    prefix = get_data_prefix()
+    for scheme in ["gs://", "s3://"]:
+        prefix = prefix.removeprefix(scheme)
+    return prefix.split("/")[0]
+
+
 def remove_gcs_content_type(fpath):
     client = get_gcs_client()
-    bucket = client.bucket(f"calkit-{settings.ENVIRONMENT}")
-    blob = bucket.blob(fpath.removeprefix(f"gcs://{bucket.name}/"))
+    # Derived from the configured prefix rather than the environment name,
+    # so a self-hosted instance can use a bucket of its own naming
+    bucket = client.bucket(get_bucket_name())
+    blob = bucket.blob(fpath.removeprefix(f"gs://{bucket.name}/"))
     blob.content_type = None
     blob.patch()
 
 
 def get_object_fs() -> s3fs.S3FileSystem | gcsfs.GCSFileSystem:
-    if settings.ENVIRONMENT == "local":
+    if settings.object_storage_type == "s3":
+        # An unset endpoint URL means AWS S3 itself; unset credentials let
+        # s3fs fall back to the standard AWS credential chain
         return s3fs.S3FileSystem(
-            endpoint_url="http://minio:9000",
-            key="root",
-            secret=os.getenv("MINIO_ROOT_PASSWORD"),
+            endpoint_url=settings.OBJECT_STORAGE_ENDPOINT_URL,
+            key=settings.OBJECT_STORAGE_KEY,
+            secret=settings.OBJECT_STORAGE_SECRET,
         )
     return gcsfs.GCSFileSystem(token=get_gcs_credentials())
 
 
 def get_data_prefix() -> str:
-    if settings.ENVIRONMENT == "local":
-        return "s3://data"
-    else:
-        return f"gcs://calkit-{settings.ENVIRONMENT}/data"
+    return settings.OBJECT_STORAGE_PREFIX.rstrip("/")
 
 
 def get_data_prefix_for_owner(owner_name: str, lowercase: bool = True) -> str:
@@ -128,10 +145,12 @@ def make_data_fpath(
 
 
 def _replace_local_object_host(url: str) -> str:
-    if settings.ENVIRONMENT == "local":
-        return url.replace(
-            "http://minio:9000", f"http://objects.{settings.DOMAIN}"
-        )
+    """Replace the local object storage host in a presigned URL with the
+    externally reachable host for local development.
+    """
+    endpoint = settings.OBJECT_STORAGE_ENDPOINT_URL
+    if settings.ENVIRONMENT == "local" and endpoint:
+        return url.replace(endpoint, f"http://objects.{settings.DOMAIN}")
     return url
 
 

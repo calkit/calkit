@@ -10,6 +10,7 @@ from pydantic import (
     HttpUrl,
     PostgresDsn,
     computed_field,
+    field_validator,
     model_validator,
 )
 from pydantic_core import MultiHostUrl
@@ -92,6 +93,45 @@ class Settings(BaseSettings):
             path=self.POSTGRES_DB,
         )  # type: ignore
 
+    # Object storage configuration
+    # All hub instances plug into object storage, mostly for the DVC remote
+    # functionality. The prefix's scheme picks the backend: s3:// for AWS
+    # S3 and everything S3-compatible (the bundled MinIO, Cloudflare R2,
+    # DigitalOcean Spaces, a self-run server), which are distinguished by
+    # endpoint URL rather than by scheme, and gs:// for Google (the
+    # gcs:// alias is rejected so there's only one spelling).
+    OBJECT_STORAGE_PREFIX: str = "s3://data"
+    # Unset means AWS S3 itself; set it for any other S3-compatible service,
+    # including the MinIO container this stack can run
+    OBJECT_STORAGE_ENDPOINT_URL: str | None = None
+    OBJECT_STORAGE_KEY: str | None = None
+    OBJECT_STORAGE_SECRET: str | None = None
+
+    @field_validator("OBJECT_STORAGE_PREFIX")
+    @classmethod
+    def _check_storage_prefix(cls, v: str) -> str:
+        # gcs:// is a gcsfs alias for gs://; rejecting it keeps one
+        # spelling everywhere rather than two that must both be handled
+        scheme = v.split("://")[0]
+        if scheme == "gcs":
+            raise ValueError(
+                "OBJECT_STORAGE_PREFIX uses the gcs:// scheme; use gs:// "
+                f"instead (got {v!r})"
+            )
+        if scheme not in ["s3", "gs"]:
+            raise ValueError(
+                "OBJECT_STORAGE_PREFIX must start with s3:// or gs:// "
+                f"(got {v!r})"
+            )
+        return v
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def object_storage_type(self) -> Literal["s3", "gcs"]:
+        scheme = self.OBJECT_STORAGE_PREFIX.split("://")[0]
+        return "gcs" if scheme == "gs" else "s3"
+
+    # Email configuration
     SMTP_TLS: bool = True
     SMTP_SSL: bool = False
     SMTP_PORT: int = 587

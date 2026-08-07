@@ -367,6 +367,38 @@ deploy. Delete this doc when the list is done.
       secrets have no equivalent of environment protection rules, so
       nothing else belongs at repo level.
 
+### Object storage
+
+**Do this before the first deploy, or the stacks come up misconfigured.**
+The MinIO container now runs only when Compose is invoked with
+`--profile objects` (or `COMPOSE_PROFILES=objects`), and the deploys
+pass the object storage settings through, so each environment has to
+say where its storage actually is. Unset means
+`s3` with no endpoint, i.e. AWS with no credentials. calkit.io and
+staging point at external storage and leave the profile off; a
+self-hosted instance can keep hosting its own by setting the profile.
+
+- [ ] `OBJECT_STORAGE_PREFIX` as an environment variable on both
+      `calkit.io` and `staging.calkit.io`, e.g.
+      `gs://calkit-production` and `gs://calkit-staging`. Its scheme
+      picks the backend (`gs://` Google, `s3://` anything
+      S3-compatible) and its first segment is the bucket, so there is
+      no separate type setting to keep in sync.
+- [ ] For an S3-compatible service, also set `OBJECT_STORAGE_ENDPOINT_URL`
+      (leave unset for AWS itself) and `OBJECT_STORAGE_KEY`, plus the
+      `OBJECT_STORAGE_SECRET` environment secret. These are one pair of
+      credentials whichever side you're on: when the stack hosts its
+      own storage they also configure the MinIO container, so the old
+      `MINIO_ROOT_PASSWORD` secret becomes `OBJECT_STORAGE_SECRET`
+      (same value). GCS keeps using `GOOGLE_CREDENTIALS`.
+- [ ] Migrate any objects still living in the deployed MinIO volumes
+      before the first deploy that drops those containers, and only then
+      delete the now-unused `MINIO_ROOT_PASSWORD` secret from both
+      environments.
+      (Or, to keep hosting storage on a runner, add `--profile objects`
+      to that deploy's Compose commands and point
+      `OBJECT_STORAGE_ENDPOINT_URL` at it instead.)
+
 ### Self-hosted runners
 
 On each runner machine (production, staging), from the runner directory:

@@ -3,6 +3,7 @@
 import base64
 import logging
 import os
+import re
 from datetime import datetime
 from typing import Annotated, Literal
 
@@ -133,10 +134,10 @@ class FsOpRequest(BaseModel):
 
 
 def _strip_data_prefix(path: str, data_prefix: str) -> str:
+    bare = re.sub(r"^[a-z0-9]+://", "", data_prefix.rstrip("/"))
     data_prefix_candidates = [
         f"{data_prefix.rstrip('/')}/",
-        f"{data_prefix.removeprefix('s3://').rstrip('/')}/",
-        f"{data_prefix.removeprefix('gcs://').rstrip('/')}/",
+        f"{bare}/",
     ]
     for prefix in data_prefix_candidates:
         if path.startswith(prefix):

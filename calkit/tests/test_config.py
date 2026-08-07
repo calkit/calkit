@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+import yaml
 
 import calkit.config as config
 
@@ -81,27 +82,78 @@ def test_get_hub(monkeypatch, tmp_dir):
     assert config.get_hub() == "production"
 
 
-def test_per_hub_config_naming(monkeypatch):
-    # Built-in aliases keep their existing filenames and service names
+def test_config_naming(monkeypatch):
+    # The test environment gets an isolated config file and keyring
+    # service so tests never touch real credentials
     monkeypatch.delenv("CALKIT_HUB", raising=False)
     assert config.get_env_suffix() == "-test"
     assert config.get_app_name() == "calkit-test"
+    assert config.get_config_yaml_fpath().endswith("config-test.yaml")
+    # All real hubs share one config file and keyring service
     monkeypatch.setenv("CALKIT_ENV", "production")
     assert config.get_env_suffix() == ""
     assert config.get_app_name() == "calkit"
-    monkeypatch.setenv("CALKIT_HUB", "http://localhost:5173")
-    assert config.get_env_suffix() == "-local"
-    # Arbitrary hubs get a slugified key that is Windows-filename and
-    # keyring safe
+    monkeypatch.setenv("CALKIT_ENV", "staging")
+    assert config.get_env_suffix() == ""
+    monkeypatch.delenv("CALKIT_ENV", raising=False)
     monkeypatch.setenv("CALKIT_HUB", "https://hub.example.edu")
-    assert config.get_env_suffix() == "-hub.example.edu"
-    assert config.get_app_name() == "calkit-hub.example.edu"
-    assert config.get_config_yaml_fpath().endswith(
-        "config-hub.example.edu.yaml"
-    )
-    monkeypatch.setenv("CALKIT_HUB", "https://myhub.org:8443")
-    suffix = config.get_env_suffix()
-    assert suffix == "-myhub.org-8443"
-    assert ":" not in suffix and "/" not in suffix
-    # Env var prefixes can't contain dots or dashes
-    assert config.get_env_suffix(sep="_") == "_myhub_org_8443"
+    assert config.get_env_suffix() == ""
+    assert config.get_config_yaml_fpath().endswith("config.yaml")
+
+
+def test_hub_storage_key(monkeypatch):
+    # The test environment's own hub and production store credentials
+    # flat, with plain keyring usernames
+    monkeypatch.delenv("CALKIT_HUB", raising=False)
+    assert config._hub_storage_key() is None
+    assert config._keyring_username("token") == "token"
+    monkeypatch.setenv("CALKIT_ENV", "production")
+    assert config._hub_storage_key() is None
+    # Other hubs key their own sub-maps and keyring entries by URL
+    monkeypatch.setenv("CALKIT_ENV", "staging")
+    assert config._hub_storage_key() == "https://staging.calkit.io"
+    monkeypatch.setenv("CALKIT_HUB", "hub.example.edu")
+    assert config._hub_storage_key() == "https://hub.example.edu"
+    assert config._keyring_username("token") == "token@https://hub.example.edu"
+    # Only hub credentials are namespaced; shared settings are not
+    assert config._keyring_username("zenodo_token") == "zenodo_token"
+
+
+def test_hub_scoped_settings(monkeypatch, tmp_path):
+    # Force file-based storage so the round trip is observable, in an
+    # isolated file so this can't race CLI tests using the real one
+    fpath = str(tmp_path / "config-test.yaml")
+    monkeypatch.setattr(config, "get_config_yaml_fpath", lambda: fpath)
+    monkeypatch.setattr(config, "KEYRING_SUPPORTED", False)
+    monkeypatch.delenv("CALKIT_HUB", raising=False)
+    # The default hub stores credentials flat
+    cfg = config.read()
+    cfg.email = "unify@example.com"
+    cfg.token = "default-hub-token"
+    cfg.write()
+    # Another hub sees shared settings but not the default hub's token
+    monkeypatch.setenv("CALKIT_HUB", "https://hub.example.edu")
+    cfg = config.read()
+    assert cfg.email == "unify@example.com"
+    assert cfg.token is None
+    cfg.token = "other-hub-token"
+    cfg.write()
+    with open(fpath) as f:
+        raw = yaml.safe_load(f)
+    assert raw["token"] == "default-hub-token"
+    assert raw["hubs"]["https://hub.example.edu"]["token"] == "other-hub-token"
+    cfg = config.read()
+    assert cfg.token == "other-hub-token"
+    # Back on the default hub, the flat token is intact
+    monkeypatch.delenv("CALKIT_HUB")
+    cfg = config.read()
+    assert cfg.token == "default-hub-token"
+    # A token env var (CALKIT_TOKEN outside the test environment)
+    # overrides the stored credential for any hub
+    monkeypatch.setenv("CALKIT_TEST_TOKEN", "env-token")
+    monkeypatch.setenv("CALKIT_HUB", "https://hub.example.edu")
+    cfg = config.read()
+    assert cfg.token == "env-token"
+    monkeypatch.delenv("CALKIT_HUB")
+    cfg = config.read()
+    assert cfg.token == "env-token"

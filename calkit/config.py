@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import platform
-import re
 import warnings
 from typing import Any, Literal
 from typing import get_args as get_type_args
@@ -18,7 +17,6 @@ from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
-    YamlConfigSettingsSource,
 )
 
 
@@ -176,28 +174,46 @@ def get_hub() -> str:
     return hub
 
 
-def slugify_hub(hub: str, sep: str = "-") -> str:
-    """Make a hub key safe for filenames, keyring service names, and
-    environment variable prefixes.
-
-    For example, ``http://localhost:5173`` cannot appear in a Windows
-    filename, and calkit-python's CI runs on Windows.
-    """
-    slug = hub.lower().removeprefix("https://").removeprefix("http://")
-    slug = re.sub(r"[^a-z0-9.]+", sep, slug).strip(sep)
-    # Environment variable names can't contain dots either
-    if sep == "_":
-        slug = slug.replace(".", "_")
-    return slug
-
-
 def get_env_suffix(sep: str = "-") -> str:
+    """Suffix for the config file name, keyring service, and env var
+    prefix.
+
+    All real hubs share a single config file and keyring service, with
+    hub credentials scoped inside them (see ``_hub_storage_key``); only
+    the test environment gets its own isolated config, so tests never
+    touch real credentials.
+    """
+    if os.getenv("CALKIT_ENV") == "test":
+        return sep + "test"
+    return ""
+
+
+# The fields that are per-hub credentials; everything else in the config
+# is shared across hubs
+HUB_SCOPED_FIELDS = ["token", "access_token", "refresh_token", "dvc_token"]
+
+
+def _hub_storage_key() -> str | None:
+    """Return where the active hub's credentials live: ``None`` means the
+    flat top level of the config (the default hub -- calkit.io, or the
+    test environment's own instance), otherwise the hub URL keying a
+    ``hubs`` sub-map and namespaced keyring entries.
+    """
     hub = get_hub()
-    if hub == "production":
-        return ""
-    if hub in ["test", "local", "staging"]:
-        return sep + hub
-    return sep + slugify_hub(hub, sep=sep)
+    if hub in ["production", "test"]:
+        return None
+    from calkit.hub import HUB_URLS
+
+    return HUB_URLS.get(hub, hub)
+
+
+def _keyring_username(key: str) -> str:
+    """Return the keyring username for a config key, namespaced by hub
+    for hub-scoped credentials of non-default hubs."""
+    hub = _hub_storage_key()
+    if hub is None or key not in HUB_SCOPED_FIELDS:
+        return key
+    return f"{key}@{hub}"
 
 
 def get_app_name() -> str:
@@ -219,17 +235,18 @@ def get_config_yaml_fpath() -> str:
 def set_secret(key: str, value: str) -> None:
     """Sets a secret using keyring, handling byte conversion for Linux."""
     service_name = get_app_name()
+    username = _keyring_username(key)
     if platform.system() == "Linux":
         value_bytes = value.encode("utf-8")
-        keyring.set_password(service_name, key, value_bytes)  # type: ignore
+        keyring.set_password(service_name, username, value_bytes)  # type: ignore
     else:
-        keyring.set_password(service_name, key, value)
+        keyring.set_password(service_name, username, value)
 
 
 def get_secret(key: str) -> str | None:
     """Gets a secret using keyring, handling byte conversion for Linux."""
     service_name = get_app_name()
-    password = keyring.get_password(service_name, key)
+    password = keyring.get_password(service_name, _keyring_username(key))
     if platform.system() == "Linux" and isinstance(password, bytes):
         return password.decode("utf-8")
     return password
@@ -237,7 +254,7 @@ def get_secret(key: str) -> str | None:
 
 def delete_secret(key: str) -> None:
     """Delete a secret using keyring."""
-    keyring.delete_password(get_app_name(), key)
+    keyring.delete_password(get_app_name(), _keyring_username(key))
 
 
 class KeyringOptionalSecret(str):
@@ -256,6 +273,44 @@ class KeyringOptionalSecret(str):
         if not isinstance(value, str):
             raise TypeError("Expected a string")
         return cls(value)
+
+
+class CalkitYamlSource(PydanticBaseSettingsSource):
+    """Loads settings from the config YAML file, resolving hub-scoped
+    credential fields from the active hub's ``hubs`` sub-map when the
+    active hub isn't the config's default.
+    """
+
+    def get_field_value(
+        self, field: FieldInfo, field_name: str
+    ) -> tuple[Any, str, bool]:
+        # Loading happens wholesale in __call__
+        return (None, field_name, False)
+
+    def __call__(self) -> dict[str, Any]:
+        import yaml
+
+        fpath = self.settings_cls.model_config["yaml_file"]
+        try:
+            with open(fpath) as f:  # type: ignore[arg-type]
+                data = yaml.safe_load(f) or {}
+        except (FileNotFoundError, yaml.YAMLError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        hubs = data.pop("hubs", None) or {}
+        fields = self.settings_cls.model_fields
+        out = {k: v for k, v in data.items() if k in fields}
+        hub = _hub_storage_key()
+        if hub is not None:
+            # The flat credential entries belong to the default hub;
+            # the active hub's live in its sub-map (possibly absent)
+            for key in HUB_SCOPED_FIELDS:
+                out.pop(key, None)
+            sub = hubs.get(hub)
+            if isinstance(sub, dict):
+                out |= {k: v for k, v in sub.items() if k in HUB_SCOPED_FIELDS}
+        return out
 
 
 class KeyringSecretsSource(PydanticBaseSettingsSource):
@@ -326,17 +381,19 @@ class Settings(BaseSettings):
             init_settings,
             env_settings,
             dotenv_settings,
-            YamlConfigSettingsSource(settings_cls),
+            CalkitYamlSource(settings_cls),
             KeyringSecretsSource(settings_cls),
         )  # type: ignore
 
     def write(self) -> None:
         import yaml
 
-        base_dir = os.path.dirname(self.model_config["yaml_file"])  # type: ignore
+        fpath = self.model_config["yaml_file"]
+        base_dir = os.path.dirname(fpath)  # type: ignore[arg-type]
         os.makedirs(base_dir, exist_ok=True)
         cfg = self.model_dump()
-        # Remove anything that should be in the keyring
+        # Remove anything that should be in the keyring; hub-scoped
+        # credentials get hub-namespaced usernames via set/delete_secret
         if KEYRING_SUPPORTED:
             for key, value in Settings.model_fields.items():
                 if (
@@ -351,10 +408,41 @@ class Settings(BaseSettings):
                         except keyring.errors.KeyringError:
                             # Ignore errors when deleting secrets
                             pass
-        with open(self.model_config["yaml_file"], "w") as f:  # type: ignore
+        # Preserve other hubs' credential sub-maps from the existing file
+        try:
+            with open(fpath) as f:  # type: ignore[arg-type]
+                existing = yaml.safe_load(f) or {}
+        except (FileNotFoundError, yaml.YAMLError):
+            existing = {}
+        hubs = existing.get("hubs") if isinstance(existing, dict) else None
+        hubs = hubs if isinstance(hubs, dict) else {}
+        hub = _hub_storage_key()
+        if hub is not None:
+            # This model's credential values belong to the active hub's
+            # sub-map, not the flat top level (which is the default
+            # hub's); drop absent values rather than writing nulls
+            sub = {
+                k: cfg.pop(k)
+                for k in HUB_SCOPED_FIELDS
+                if k in cfg and cfg[k] is not None
+            }
+            for k in HUB_SCOPED_FIELDS:
+                cfg.pop(k, None)
+            if sub:
+                hubs[hub] = sub
+            else:
+                hubs.pop(hub, None)
+            # The flat credentials in the file (the default hub's) were
+            # not loaded into this model, so restore them from the file
+            for k in HUB_SCOPED_FIELDS:
+                if isinstance(existing, dict) and k in existing:
+                    cfg[k] = existing[k]
+        if hubs:
+            cfg["hubs"] = hubs
+        with open(fpath, "w") as f:  # type: ignore[arg-type]
             yaml.safe_dump(cfg, f)
         # Ensure permissions are user read/write only
-        os.chmod(self.model_config["yaml_file"], 0o600)  # type: ignore
+        os.chmod(fpath, 0o600)  # type: ignore[arg-type]
 
 
 def read() -> Settings:

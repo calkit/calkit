@@ -17,41 +17,59 @@ from calkit.cli.core import raise_error
 config_app = typer.Typer(no_args_is_help=True)
 
 
-@config_app.callback()
-def config_main(
-    hub: Annotated[
-        str | None,
-        typer.Option(
-            "--hub",
-            help=(
-                "URL of the hub whose config to operate on, e.g., "
-                "other-calkit.io. Config is kept separately per hub. "
-                "Defaults to the active hub."
-            ),
-        ),
-    ] = None,
-) -> None:
-    """Work with the local user configuration."""
-    # The active hub drives the config file path, keyring service name,
-    # and env var prefix; see calkit.config.get_hub
-    if hub is not None:
-        if hub in ["test", "local", "staging", "production"]:
-            raise_error(
-                "--hub takes a hub URL, e.g., https://staging.calkit.io"
-            )
-        os.environ["CALKIT_HUB"] = hub
+hub_config_app = typer.Typer(no_args_is_help=True)
+config_app.add_typer(
+    hub_config_app,
+    name="hub",
+    help="Work with per-hub credentials (tokens).",
+)
+
+_HUB_OPTION = typer.Option(
+    "--hub",
+    help=(
+        "URL of the hub, e.g., https://staging.calkit.io. Defaults to "
+        "the active hub."
+    ),
+)
 
 
-@config_app.command(name="set")
-def set_config_value(key: str, value: str):
-    """Set a value in the config."""
+def _select_hub(hub: str | None) -> None:
+    if hub is None:
+        return
+    if hub in ["test", "local", "staging", "production"]:
+        raise_error("--hub takes a hub URL, e.g., https://staging.calkit.io")
+    os.environ["CALKIT_HUB"] = hub
+
+
+def _check_shared_key(key: str) -> None:
     from calkit import config
 
-    keys = config.Settings.model_fields.keys()
-    if key not in keys:
+    keys = [
+        k
+        for k in config.Settings.model_fields
+        if k not in config.HUB_SCOPED_FIELDS
+    ]
+    if key in config.HUB_SCOPED_FIELDS:
         raise_error(
-            f"Invalid config key: '{key}'; Valid keys are: {list(keys)}"
+            f"'{key}' is stored per hub; use 'calkit config hub' commands"
         )
+    if key not in keys:
+        raise_error(f"Invalid config key: '{key}'; Valid keys are: {keys}")
+
+
+def _check_hub_key(key: str) -> None:
+    from calkit import config
+
+    if key not in config.HUB_SCOPED_FIELDS:
+        raise_error(
+            f"'{key}' is not a per-hub credential; valid keys are: "
+            f"{config.HUB_SCOPED_FIELDS}"
+        )
+
+
+def _set_config_value(key: str, value: str) -> None:
+    from calkit import config
+
     try:
         cfg = config.read()
         cfg = config.Settings.model_validate(cfg.model_dump() | {key: value})
@@ -60,40 +78,80 @@ def set_config_value(key: str, value: str):
     cfg.write()
 
 
-@config_app.command(name="get")
-def get_config_value(key: str) -> None:
-    """Get and print a value from the config."""
+def _get_config_value(key: str) -> None:
     from calkit import config
 
-    cfg = config.read().model_dump()
-    if key not in cfg:
-        raise_error(
-            f"Invalid config key: '{key}'; Valid keys are: {list(cfg.keys())}"
-        )
-    val = cfg[key]
+    val = config.read().model_dump()[key]
     if val is not None:
         print(val)
     else:
         print()
 
 
-@config_app.command(name="unset")
-def unset_config_value(key: str):
-    """Unset a value in the config, returning it to default."""
+def _unset_config_value(key: str) -> None:
     from calkit import config
 
-    model_fields = config.Settings.model_fields
-    if key not in model_fields:
-        raise_error(
-            f"Invalid config key: '{key}'; "
-            f"Valid keys: {list(model_fields.keys())}"
-        )
     try:
         cfg = config.read()
-        setattr(cfg, key, model_fields[key].default)
+        setattr(cfg, key, config.Settings.model_fields[key].default)
     except Exception as e:
         raise_error(f"Failed to unset {key} in config: {e}")
     cfg.write()
+
+
+@config_app.command(name="set")
+def set_config_value(key: str, value: str) -> None:
+    """Set a value in the config."""
+    _check_shared_key(key)
+    _set_config_value(key, value)
+
+
+@config_app.command(name="get")
+def get_config_value(key: str) -> None:
+    """Get and print a value from the config."""
+    _check_shared_key(key)
+    _get_config_value(key)
+
+
+@config_app.command(name="unset")
+def unset_config_value(key: str) -> None:
+    """Unset a value in the config, returning it to default."""
+    _check_shared_key(key)
+    _unset_config_value(key)
+
+
+@hub_config_app.command(name="set")
+def set_hub_config_value(
+    key: str,
+    value: str,
+    hub: Annotated[str | None, _HUB_OPTION] = None,
+) -> None:
+    """Set a credential for the active or given hub."""
+    _select_hub(hub)
+    _check_hub_key(key)
+    _set_config_value(key, value)
+
+
+@hub_config_app.command(name="get")
+def get_hub_config_value(
+    key: str,
+    hub: Annotated[str | None, _HUB_OPTION] = None,
+) -> None:
+    """Get and print a credential for the active or given hub."""
+    _select_hub(hub)
+    _check_hub_key(key)
+    _get_config_value(key)
+
+
+@hub_config_app.command(name="unset")
+def unset_hub_config_value(
+    key: str,
+    hub: Annotated[str | None, _HUB_OPTION] = None,
+) -> None:
+    """Unset a credential for the active or given hub."""
+    _select_hub(hub)
+    _check_hub_key(key)
+    _unset_config_value(key)
 
 
 @config_app.command(name="setup-remote", help="Alias for 'remote'.")
@@ -171,7 +229,10 @@ def list_config_keys():
 
     cfg = config.read()
     for key in cfg.model_dump():
-        typer.echo(key)
+        if key in config.HUB_SCOPED_FIELDS:
+            typer.echo(f"{key} (per hub; see 'calkit config hub')")
+        else:
+            typer.echo(key)
 
 
 @config_app.command(name="github-ssh")

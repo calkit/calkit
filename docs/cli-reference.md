@@ -662,6 +662,7 @@ Configure Calkit.
 | [`list`](#subcommand-config-list)                         | List keys in the config.                                                                |
 | [`github-ssh`](#subcommand-config-github-ssh)             | Walk through the process of adding an SSH key to GitHub.                                |
 | [`github-codespace`](#subcommand-config-github-codespace) | Configure a GitHub Codespace.                                                           |
+| [`hub`](#subcommand-config-hub)                           | Work with per-hub credentials (tokens).                                                 |
 
 <a id="subcommand-config-set"></a>
 
@@ -787,6 +788,18 @@ Usage:
 
 ```text
 calkit config github-codespace
+```
+
+<a id="subcommand-config-hub"></a>
+
+#### `calkit config hub`
+
+Work with per-hub credentials (tokens).
+
+Usage:
+
+```text
+calkit config hub COMMAND [ARGS]...
 ```
 
 <a id="command-group-new-create"></a>

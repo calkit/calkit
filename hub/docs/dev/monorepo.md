@@ -254,8 +254,13 @@ exists on the `merge-hub` branch.
 deployment-internal vocabulary the CLI's hub surfaces don't accept) falling
 back to `CALKIT_ENV`, then the `default_hub` config value, and
 `get_env_suffix()` keys off it, so `CALKIT_ENV=staging` and existing config
-files keep working while `calkit config --hub other-calkit.io set token` is
-the general form. Hub
+files keep working while `calkit config hub set token ... --hub
+other-calkit.io` is the general form. Config later unified into a single
+file and keyring service (plus an isolated test-environment one), with
+only the credential fields (token, access_token, refresh_token,
+dvc_token) scoped per hub, nested under a `hubs` key or hub-namespaced
+keyring usernames; shared settings like email and integration tokens are
+no longer forked per instance. Hub
 keys are slugified before becoming filenames, keyring service names, or env
 var prefixes (`localhost:5173` cannot appear in a Windows filename, and CI
 runs windows-latest). DVC remote naming was left alone per the original

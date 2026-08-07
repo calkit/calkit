@@ -38,10 +38,11 @@ and continuous deployment, live with the code in
 
 ## Connecting the CLI
 
-The CLI keeps its configuration, including tokens, separately per hub.
-`calkit config --hub your-hub.example.edu set token ...` operates on a
-specific hub's config, and the `CALKIT_HUB` environment variable selects
-the active hub for other commands.
+The CLI shares one configuration across hubs, with credentials (tokens)
+scoped per hub. `calkit config hub set token ... --hub
+your-hub.example.edu` operates on a specific hub's credentials, and the
+`CALKIT_HUB` environment variable selects the active hub for other
+commands.
 
 What doesn't exist yet is API URL discovery: the CLI cannot derive a
 hub's API URL from its web URL, so for now it must be supplied manually

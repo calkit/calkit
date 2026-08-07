@@ -1156,18 +1156,23 @@ def save(
 
 def _warn_on_hub_mismatch() -> None:
     """Warn if the project declares a hub other than the one commands are
-    currently targeting, e.g., when ``CALKIT_ENV`` points at staging but the
-    project belongs to calkit.io. Env-based resolution remains the source of
-    truth; this is provenance only.
+    currently targeting.
+
+    The declared hub is respected by default, so this only fires when an
+    explicit override (``CALKIT_HUB``, ``CALKIT_ENV``, or ``--hub``)
+    points somewhere else, e.g., when pushing a copy of a project to
+    staging during development.
     """
+    from calkit import config
+
     try:
         declared = calkit.load_calkit_info().get("hub")
     except Exception:
         return
-    if not declared:
+    if not declared or not isinstance(declared, str):
         return
     active = calkit.hub.get_hub_url()
-    if declared.rstrip("/") != active.rstrip("/"):
+    if config.normalize_hub_url(declared) != active.rstrip("/"):
         warn(
             f"This project declares hub {declared}, but commands are "
             f"currently targeting {active}"

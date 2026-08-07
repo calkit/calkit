@@ -7,7 +7,24 @@ import pytest
 import calkit.config as config
 
 
-def test_get_hub(monkeypatch):
+def test_normalize_hub_url():
+    assert config.normalize_hub_url("calkit.io") == "https://calkit.io"
+    assert (
+        config.normalize_hub_url("https://calkit.io/") == "https://calkit.io"
+    )
+    assert (
+        config.normalize_hub_url("localhost:5173") == "http://localhost:5173"
+    )
+    assert (
+        config.normalize_hub_url("127.0.0.1:8000") == "http://127.0.0.1:8000"
+    )
+    assert (
+        config.normalize_hub_url("hub.example.edu/sub/")
+        == "https://hub.example.edu/sub"
+    )
+
+
+def test_get_hub(monkeypatch, tmp_dir):
     monkeypatch.delenv("CALKIT_HUB", raising=False)
     # CALKIT_ENV=test is set by pytest config
     assert config.get_hub() == "test"
@@ -47,6 +64,21 @@ def test_get_hub(monkeypatch):
     )
     monkeypatch.setenv("CALKIT_ENV", "local")
     assert config.get_hub() == "local"
+    # The working directory project's declared hub is respected, beating
+    # default_hub; the scheme is optional, with localhost getting http
+    monkeypatch.delenv("CALKIT_ENV", raising=False)
+    monkeypatch.setattr(
+        config, "_get_default_hub", lambda: "https://hub.example.edu"
+    )
+    with open("calkit.yaml", "w") as f:
+        f.write("hub: staging.calkit.io\n")
+    assert config.get_hub() == "staging"
+    with open("calkit.yaml", "w") as f:
+        f.write("hub: localhost:5173\n")
+    assert config.get_hub() == "local"
+    # An explicit environment still overrides the project's hub
+    monkeypatch.setenv("CALKIT_ENV", "production")
+    assert config.get_hub() == "production"
 
 
 def test_per_hub_config_naming(monkeypatch):

@@ -73,6 +73,49 @@ def set_env(name: Literal["local", "staging", "production"]) -> None:
     os.environ["CALKIT_ENV"] = name
 
 
+def normalize_hub_url(hub: str) -> str:
+    """Normalize a hub URL, adding a scheme if missing: https, unless the
+    host is local (localhost or a loopback address, which won't have
+    certificates).
+    """
+    if not hub.startswith(("http://", "https://")):
+        host = hub.split("/")[0]
+        if host.startswith(("localhost", "127.")):
+            hub = "http://" + hub
+        else:
+            hub = "https://" + hub
+    return hub.rstrip("/")
+
+
+# The project hub lookup result, keyed by (path, mtime, size) so edits to
+# calkit.yaml invalidate it; get_hub is called several times per command
+# and shouldn't re-parse the file each time
+_project_hub_cache: dict[tuple[str, int, int], str | None] = {}
+
+
+def _get_project_hub() -> str | None:
+    """Read the working directory project's declared ``hub``."""
+    import yaml
+
+    fpath = os.path.join(os.getcwd(), "calkit.yaml")
+    try:
+        st = os.stat(fpath)
+    except OSError:
+        return None
+    key = (fpath, st.st_mtime_ns, st.st_size)
+    if key in _project_hub_cache:
+        return _project_hub_cache[key]
+    try:
+        with open(fpath) as f:
+            data = yaml.safe_load(f) or {}
+        val = data.get("hub")
+    except Exception:
+        val = None
+    hub = val if isinstance(val, str) and val else None
+    _project_hub_cache[key] = hub
+    return hub
+
+
 def _get_default_hub() -> str | None:
     """Read ``default_hub`` from the base (unsuffixed) config file.
 
@@ -100,13 +143,17 @@ def get_hub() -> str:
     ``CALKIT_HUB`` takes precedence and must be a hub URL (with or
     without scheme), e.g., ``https://staging.calkit.io``; environment
     names belong to ``CALKIT_ENV``. Then an explicitly set environment;
-    then the ``default_hub`` config value (also a URL); then production
+    then the working directory project's declared ``hub``; then the
+    ``default_hub`` config value (also a URL); then production
     (calkit.io).
     """
     hub = os.getenv("CALKIT_HUB")
     source = "CALKIT_HUB"
     if not hub and os.getenv("CALKIT_ENV"):
         return get_env()
+    if not hub:
+        hub = _get_project_hub()
+        source = "the project's hub"
     if not hub:
         hub = _get_default_hub()
         source = "default_hub"
@@ -122,10 +169,11 @@ def get_hub() -> str:
     # config with the env-based spellings
     from calkit.hub import env_for_hub
 
-    env = env_for_hub(hub) or env_for_hub("https://" + hub)
+    hub = normalize_hub_url(hub)
+    env = env_for_hub(hub)
     if env is not None:
         return env
-    return hub.rstrip("/")
+    return hub
 
 
 def slugify_hub(hub: str, sep: str = "-") -> str:

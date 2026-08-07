@@ -230,12 +230,15 @@ exists on the `merge-hub` branch.
 
 ### How the CLI should use it
 
-- **Done:** provenance plus a mismatch warning. `calkit push` and `calkit
-  pull` warn when the project declares a hub other than the one env-based
-  resolution is targeting; the env stays the source of truth, so nothing
-  breaks. `calkit hub` subcommands additionally default to the wdir
-  project's declared hub when `CALKIT_ENV` is unset, and accept `--hub`
-  for the built-in instances.
+- **Done, and further than originally planned:** the declared hub is
+  respected, not just warned about. Hub resolution is `--hub`/`CALKIT_HUB`,
+  then an explicit `CALKIT_ENV`, then the project's declared `hub`, then
+  the `default_hub` config value, then calkit.io — so inside a project
+  declaring `http://localhost:5173`, commands target the local instance
+  with no environment set. Schemes are optional (https assumed, http for
+  localhost). `calkit push` and `calkit pull` still warn when an explicit
+  override diverges from the declared hub, which keeps the
+  push-a-copy-to-staging workflow intact and visible.
 - **Later:** discovery, so `hub` is actionable for arbitrary instances. Note
   the web and API URLs are not related by a derivable convention: production is
   calkit.io and api.calkit.io (a prefix), but dev is localhost:5173 and

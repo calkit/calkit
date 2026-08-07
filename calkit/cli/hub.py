@@ -31,9 +31,7 @@ def _use_hub(hub: str | None) -> None:
             raise_error(
                 "--hub takes a hub URL, e.g., https://staging.calkit.io"
             )
-        env = calkit.hub.env_for_hub(hub) or calkit.hub.env_for_hub(
-            "https://" + hub
-        )
+        env = calkit.hub.env_for_hub(hub)
         if env is None:
             raise_error(
                 f"Unknown hub '{hub}'; arbitrary hub URLs are not yet "

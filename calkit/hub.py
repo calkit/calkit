@@ -196,10 +196,10 @@ def get_hub_url() -> str:
 def env_for_hub(hub_url: str) -> str | None:
     """Return the built-in environment name serving ``hub_url``, if any.
 
-    Arbitrary (e.g., self-hosted) hub URLs return ``None``, since the CLI
-    cannot yet discover their API URLs.
+    The URL may omit its scheme. Arbitrary (e.g., self-hosted) hub URLs
+    return ``None``, since the CLI cannot yet discover their API URLs.
     """
-    hub_url = hub_url.rstrip("/")
+    hub_url = config.normalize_hub_url(hub_url)
     for env in ["production", "staging", "local"]:
         if hub_url == HUB_URLS[env]:
             return env

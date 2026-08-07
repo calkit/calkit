@@ -1,4 +1,4 @@
-# Agent Guidelines for calkit-cloud
+# Agent guidelines for the Calkit hub
 
 This document provides guidance for agents working on this repository.
 

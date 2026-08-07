@@ -1,13 +1,15 @@
-# Calkit Cloud
+# The Calkit hub
 
-The Calkit Cloud serves as an index for projects and their artifacts
+A hub is where Calkit projects are shared, backed up, and collaborated
+on. It serves as an index for projects and their artifacts
 such as datasets, figures, publications, computational environments, etc.
 It also serves as a [DVC](https://dvc.org) remote,
-neatly integrated with the
-[Calkit CLI](https://github.com/calkit/calkit),
+neatly integrated with the Calkit CLI
+(which lives at the root of this repo),
 so users can easily
 back up their data and artifacts in the same repository as their code,
 documentation, other text files, etc.
+The main hub is [calkit.io](https://calkit.io).
 
 The goal is that this can serve as a platform for working
 efficiently and reproducibly, collaborating, and sharing all in one.
@@ -27,12 +29,14 @@ We welcome all kinds of contributions.
 - Join our [**Discord**](https://discord.gg/ubb7gAXc) for real-time collaboration.
 - Follow our updates on [**LinkedIn**](https://linkedin.com/company/calkit).
 
-## Deploying your own instance
+## Deploying your own hub
 
-A future goal of this project is to make it easy for teams or institutions to
-deploy their own Calkit cloud instances in a federated network, where users on
-any instance can search for projects, datasets, etc., on any other instance.
-This is currently not easy, but if you'd like to help make it so, please
+A future goal of this project is to make it easy for teams or institutions
+to deploy their own hubs in a federated network, where users on
+any hub can search for projects, datasets, etc., on any other hub.
+This is currently not easy
+(see [Running your own hub](https://docs.calkit.org/hub/self-hosting/)
+for the current state), but if you'd like to help make it so, please
 join the discussion in
 [this issue](https://github.com/calkit/calkit-cloud/issues/190).
 

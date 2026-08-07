@@ -1,4 +1,4 @@
-# Calkit Cloud backend
+# Calkit hub backend
 
 ## Requirements
 

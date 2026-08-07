@@ -318,7 +318,14 @@ export const Body_projects_post_project_publicationSchema = {
       title: "Title",
     },
     description: {
-      type: "string",
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Description",
     },
     stage: {
@@ -368,7 +375,7 @@ export const Body_projects_post_project_publicationSchema = {
     },
   },
   type: "object",
-  required: ["path", "kind", "title", "description"],
+  required: ["path", "kind", "title"],
   title: "Body_projects-post_project_publication",
 } as const
 

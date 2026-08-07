@@ -15,6 +15,7 @@ import {
   Textarea,
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useEffect } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 import { getRouteApi } from "@tanstack/react-router"
 
@@ -32,7 +33,7 @@ interface NewPublicationProps {
 interface PublicationPostWithFile {
   path: string
   title: string
-  description: string
+  description?: string
   kind:
     | "journal-article"
     | "conference-paper"
@@ -56,7 +57,9 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
     register,
     handleSubmit,
     reset,
-    formState: { errors, isSubmitting },
+    watch,
+    setValue,
+    formState: { errors, isSubmitting, dirtyFields },
   } = useForm<PublicationPostWithFile>({
     mode: "onBlur",
     criteriaMode: "all",
@@ -64,15 +67,23 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
       path: "",
       title: "",
       description: "",
+      environment: variant === "template" ? "tex" : undefined,
     },
   })
+  // Prefill the stage name from the path until the user edits it directly
+  const path = watch("path")
+  useEffect(() => {
+    if (variant === "template" && !dirtyFields.stage) {
+      setValue("stage", path)
+    }
+  }, [variant, path, dirtyFields.stage, setValue])
   const mutation = useMutation({
     mutationFn: (data: PublicationPostWithFile) =>
       ProjectsService.postProjectPublication({
         formData: {
           title: data.title,
           path: data.path,
-          description: data.description,
+          description: data.description || undefined,
           kind: data.kind,
           template: data.template,
           stage: data.stage,
@@ -192,14 +203,12 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
                 <FormErrorMessage>{errors.title.message}</FormErrorMessage>
               )}
             </FormControl>
-            <FormControl mt={4} isRequired isInvalid={!!errors.description}>
+            <FormControl mt={4} isInvalid={!!errors.description}>
               <FormLabel htmlFor="description">Description</FormLabel>
               <Textarea
                 id="description"
-                {...register("description", {
-                  required: "Description is required",
-                })}
-                placeholder="Description"
+                {...register("description")}
+                placeholder="Description (optional)"
               />
               {errors.description && (
                 <FormErrorMessage>
@@ -216,7 +225,7 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
                 <Input
                   id="environment"
                   {...register("environment")}
-                  placeholder="Ex: latex"
+                  placeholder="Ex: tex"
                   type="text"
                 />
                 {errors.environment && (

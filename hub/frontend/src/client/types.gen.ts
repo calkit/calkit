@@ -90,7 +90,7 @@ export type Body_projects_post_project_publication = {
     | "report"
     | "book"
   title: string
-  description: string
+  description?: string | null
   stage?: string | null
   template?: string | null
   environment?: string | null

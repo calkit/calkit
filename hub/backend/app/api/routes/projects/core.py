@@ -3652,7 +3652,7 @@ def post_project_publication(
         Form(),
     ],
     title: Annotated[str, Form()],
-    description: Annotated[str, Form()],
+    description: Optional[Annotated[str, Form()]] = Form(None),
     stage: Optional[Annotated[str, Form()]] = Form(None),
     template: Optional[Annotated[str, Form()]] = Form(None),
     environment: Optional[Annotated[str, Form()]] = Form(None),
@@ -3732,16 +3732,31 @@ def post_project_publication(
             kind,
             "--title",
             title,
-            "--description",
-            description,
             "--template",
             template,
         ]
+        if description is not None:
+            cmd += ["--description", description]
         if stage is not None:
             cmd += ["--stage", stage]
         if environment is not None:
             cmd += ["--environment", environment]
-        subprocess.check_call(cmd, cwd=repo.working_dir)
+        result = subprocess.run(
+            cmd, cwd=repo.working_dir, capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            # The CLI validates things like duplicate publication paths;
+            # surface its message rather than a 500. Its errors go to
+            # stderr as a final "Error: ..." line.
+            lines = [
+                line.strip()
+                for line in result.stderr.splitlines()
+                if line.strip()
+            ]
+            detail = lines[-1] if lines else "Failed to create publication"
+            detail = detail.removeprefix("Error: ")
+            logger.warning(f"calkit new publication failed: {detail}")
+            raise HTTPException(400, detail)
     elif not os.path.isfile(os.path.join(repo.working_dir, path)):
         raise HTTPException(
             400, "File must exist in repo if not being uploaded"

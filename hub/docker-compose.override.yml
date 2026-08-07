@@ -1,7 +1,8 @@
-# Keep the pre-monorepo Compose project name so existing local dev volumes
-# (DB, MinIO, Grafana, etc.) reattach instead of starting empty. Production
-# and staging pass --project-name explicitly, so this only affects dev.
-name: calkit-cloud
+# Name the dev stack for the product rather than the directory it lives
+# in, since Compose project names are global on the machine and 'hub'
+# is ambiguous. Production and staging pass --project-name explicitly,
+# so this only affects dev.
+name: calkit
 
 services:
   proxy:

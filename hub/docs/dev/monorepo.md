@@ -379,11 +379,14 @@ staging point at external storage and leave the profile off; a
 self-hosted instance can keep hosting its own by setting the profile.
 
 - [ ] `OBJECT_STORAGE_PREFIX` as an environment variable on both
-      `calkit.io` and `staging.calkit.io`, e.g.
-      `gs://calkit-production` and `gs://calkit-staging`. Its scheme
-      picks the backend (`gs://` Google, `s3://` anything
-      S3-compatible) and its first segment is the bucket, so there is
-      no separate type setting to keep in sync.
+      `calkit.io` and `staging.calkit.io`: `gs://calkit-production`
+      and `gs://calkit-staging`. This is the root the hub stores
+      objects under, normally just the bucket; project DVC data goes
+      in a `data/` folder within it, which reproduces the hardcoded
+      `gcs://calkit-{ENVIRONMENT}/data` the code used before storage
+      became configurable, so no objects move. The scheme picks the
+      backend (`gs://` Google, `s3://` anything S3-compatible), so
+      there is no separate type setting to keep in sync.
 - [ ] For an S3-compatible service, also set `OBJECT_STORAGE_ENDPOINT_URL`
       (leave unset for AWS itself) and `OBJECT_STORAGE_KEY`, plus the
       `OBJECT_STORAGE_SECRET` environment secret. These are one pair of

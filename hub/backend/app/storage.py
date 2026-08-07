@@ -19,6 +19,10 @@ MULTIPART_THRESHOLD_BYTES = 64 * 1024 * 1024  # 64 MB
 MULTIPART_PART_SIZE_BYTES = 16 * 1024 * 1024  # 16 MB
 CHUNKED_CHUNK_SIZE_BYTES = 16 * 1024 * 1024  # 16 MB
 S3_MAX_PARTS = 10000  # S3 multipart upload limit
+# Project DVC data is one kind of object this hub stores, kept under
+# its own folder within the storage root so other kinds can be added
+# alongside it without touching every deployment's config
+DVC_DATA_DIR = "data"
 STORAGE_USAGE_CACHE_TTL_SECONDS = 300
 STORAGE_USAGE_CACHE_MAXSIZE = 2048
 
@@ -82,12 +86,17 @@ def get_gcs_client() -> gcs.Client:
     return gcs.Client()
 
 
+def get_storage_root() -> str:
+    """Get the root under which this hub stores all of its objects."""
+    return settings.OBJECT_STORAGE_PREFIX.rstrip("/")
+
+
 def get_bucket_name() -> str:
-    """Get the bucket name from the configured storage prefix."""
-    prefix = get_data_prefix()
+    """Get the bucket name from the configured storage root."""
+    root = get_storage_root()
     for scheme in ["gs://", "s3://"]:
-        prefix = prefix.removeprefix(scheme)
-    return prefix.split("/")[0]
+        root = root.removeprefix(scheme)
+    return root.split("/")[0]
 
 
 def remove_gcs_content_type(fpath):
@@ -113,7 +122,8 @@ def get_object_fs() -> s3fs.S3FileSystem | gcsfs.GCSFileSystem:
 
 
 def get_data_prefix() -> str:
-    return settings.OBJECT_STORAGE_PREFIX.rstrip("/")
+    """Get the prefix under which project DVC data is stored."""
+    return f"{get_storage_root()}/{DVC_DATA_DIR}"
 
 
 def get_data_prefix_for_owner(owner_name: str, lowercase: bool = True) -> str:

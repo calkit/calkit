@@ -94,13 +94,14 @@ class Settings(BaseSettings):
         )  # type: ignore
 
     # Object storage configuration
-    # All hub instances plug into object storage, mostly for the DVC remote
-    # functionality. The prefix's scheme picks the backend: s3:// for AWS
+    # The root under which this hub stores all of its objects, usually
+    # just a bucket; project DVC data lives in a folder within it (see
+    # storage.DVC_DATA_DIR). The scheme picks the backend: s3:// for AWS
     # S3 and everything S3-compatible (the bundled MinIO, Cloudflare R2,
     # DigitalOcean Spaces, a self-run server), which are distinguished by
     # endpoint URL rather than by scheme, and gs:// for Google (the
     # gcs:// alias is rejected so there's only one spelling).
-    OBJECT_STORAGE_PREFIX: str = "s3://data"
+    OBJECT_STORAGE_PREFIX: str = "s3://calkit"
     # Unset means AWS S3 itself; set it for any other S3-compatible service,
     # including the MinIO container this stack can run
     OBJECT_STORAGE_ENDPOINT_URL: str | None = None
@@ -122,6 +123,13 @@ class Settings(BaseSettings):
             raise ValueError(
                 "OBJECT_STORAGE_PREFIX must start with s3:// or gs:// "
                 f"(got {v!r})"
+            )
+        # Object storage has no location without a bucket, and a bare
+        # scheme would otherwise yield paths like 's3:/data'
+        if not v.split("://", 1)[1].strip("/"):
+            raise ValueError(
+                "OBJECT_STORAGE_PREFIX must include a bucket, e.g. "
+                f"s3://calkit (got {v!r})"
             )
         return v
 

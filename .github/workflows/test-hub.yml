@@ -1,5 +1,9 @@
 name: Test hub
 
+# The default token needs no write access; jobs elevate as needed
+permissions:
+  contents: read
+
 on:
   pull_request:
 
@@ -39,7 +43,7 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
     steps:
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         id: filter
         with:
           # The backend image builds calkit-python from the workspace, so

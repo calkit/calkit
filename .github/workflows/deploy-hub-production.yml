@@ -4,6 +4,10 @@ concurrency: production
 
 # To roll back, dispatch manually and pick the release tag to redeploy
 # from the ref selector
+# The default token needs no write access; jobs elevate as needed
+permissions:
+  contents: read
+
 on:
   release:
     types:

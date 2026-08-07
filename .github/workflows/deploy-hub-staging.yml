@@ -4,6 +4,10 @@ concurrency: staging
 
 # To deploy something other than main, dispatch manually and pick the
 # branch or tag from the ref selector
+# The default token needs no write access; jobs elevate as needed
+permissions:
+  contents: read
+
 on:
   push:
     branches:
